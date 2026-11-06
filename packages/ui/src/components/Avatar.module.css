@@ -1,0 +1,52 @@
+.root {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  overflow: hidden;
+  user-select: none;
+  border-radius: var(--radius-pill);
+  background-color: var(--avatar-bg, var(--color-accent));
+  color: var(--color-text-inverse);
+  font-family: var(--font-sans);
+  font-weight: var(--font-weight-semibold);
+  flex-shrink: 0;
+  border: var(--size-border) solid var(--color-border);
+}
+
+.sm {
+  width: var(--size-avatar-sm);
+  height: var(--size-avatar-sm);
+  font-size: var(--font-size-xs);
+}
+
+.md {
+  width: var(--size-avatar-md);
+  height: var(--size-avatar-md);
+  font-size: var(--font-size-sm);
+}
+
+.lg {
+  width: var(--size-avatar-lg);
+  height: var(--size-avatar-lg);
+  font-size: var(--font-size-md);
+}
+
+.image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--avatar-bg, var(--color-accent));
+  color: var(--color-text-inverse);
+  line-height: var(--line-height-tight);
+}

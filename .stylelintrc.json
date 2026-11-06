@@ -1,0 +1,33 @@
+{
+  "ignoreFiles": [
+    "**/tokens.css",
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/target/**"
+  ],
+  "rules": {
+    "color-no-hex": true,
+    "color-named": "never",
+    "function-disallowed-list": [
+      "rgb",
+      "rgba",
+      "hsl",
+      "hsla",
+      "hwb",
+      "lab",
+      "lch",
+      "oklab",
+      "oklch"
+    ],
+    "unit-disallowed-list": [
+      "px",
+      "pt",
+      "pc",
+      "in",
+      "cm",
+      "mm",
+      "rem",
+      "em"
+    ]
+  }
+}

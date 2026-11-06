@@ -9,3 +9,9 @@ rust-version.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+globset.workspace = true
+protocol = { path = "../protocol", version = "0.1.0" }
+serde.workspace = true
+thiserror.workspace = true

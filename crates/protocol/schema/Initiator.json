@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Initiator",
+  "description": "The entity that initiated an agent run, including the specific identifier.",
+  "oneOf": [
+    {
+      "description": "A human user initiated the run interactively.",
+      "type": "object",
+      "required": [
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "human"
+          ]
+        }
+      }
+    },
+    {
+      "description": "A scheduled or recurring task initiated the run.",
+      "type": "object",
+      "required": [
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "routine"
+          ]
+        }
+      }
+    },
+    {
+      "description": "An external messaging channel (e.g. Telegram, e-mail) triggered the run.",
+      "type": "object",
+      "required": [
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "channel"
+          ]
+        }
+      }
+    },
+    {
+      "description": "A parent agent run spawned this as a sub-agent.",
+      "type": "object",
+      "required": [
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "subagent"
+          ]
+        }
+      }
+    }
+  ]
+}

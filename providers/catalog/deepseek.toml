@@ -1,0 +1,16 @@
+# DeepSeek — OpenAI-compatible API; strong coding and reasoning models.
+# Source: https://platform.deepseek.com/api-docs
+id = "deepseek"
+kind = "open_ai_compatible"
+base_url = "https://api.deepseek.com/v1"
+auth = { ApiKeyEnv = "DEEPSEEK_API_KEY" }
+models_endpoint = "https://api.deepseek.com/v1/models"
+
+[capabilities]
+tools = true
+vision = false
+streaming = true
+json_mode = true
+
+[compat_flags]
+strip_system_role = false

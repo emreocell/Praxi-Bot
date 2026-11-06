@@ -1,0 +1,29 @@
+{
+  "name": "light",
+  "mode": "light",
+  "tokens": {
+    "--color-background": "#f8fafc",
+    "--color-surface": "#ffffff",
+    "--color-surface-elevated": "#f1f5f9",
+    "--color-surface-active": "#e2e8f0",
+    "--color-surface-overlay": "rgba(255, 255, 255, 0.84)",
+    "--color-text": "#0f172a",
+    "--color-text-muted": "#64748b",
+    "--color-text-inverse": "#ffffff",
+    "--color-accent": "#2563eb",
+    "--color-accent-hover": "#1d4ed8",
+    "--color-accent-subtle": "rgba(37, 99, 235, 0.12)",
+    "--color-border": "#e2e8f0",
+    "--color-border-strong": "#cbd5e1",
+    "--color-danger": "#dc2626",
+    "--color-success": "#16a34a",
+    "--color-backdrop-dim": "#000000",
+    "--shadow-sm": "0 1px 2px 0 rgba(15, 23, 42, 0.06)",
+    "--shadow-card": "0 4px 12px -2px rgba(15, 23, 42, 0.08)"
+  },
+  "background": {
+    "url": "",
+    "blur": "0px",
+    "dim": "0"
+  }
+}

@@ -1,0 +1,40 @@
+.card {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  transition:
+    background-color var(--motion-duration-normal) var(--motion-easing-standard),
+    border-color var(--motion-duration-normal) var(--motion-easing-standard),
+    box-shadow var(--motion-duration-normal) var(--motion-easing-standard);
+}
+
+:global(:root[data-has-background="true"]) .card {
+  background-color: var(--color-surface-overlay);
+  backdrop-filter: blur(var(--space-3));
+}
+
+.elevated {
+  background-color: var(--color-surface-elevated);
+}
+
+.accented {
+  border-left: var(--size-border-thick) solid var(--card-accent, var(--color-accent));
+}
+
+.padding-none {
+  padding: var(--space-0);
+}
+
+.padding-sm {
+  padding: var(--space-3);
+}
+
+.padding-md {
+  padding: var(--space-5);
+}
+
+.padding-lg {
+  padding: var(--space-6);
+}

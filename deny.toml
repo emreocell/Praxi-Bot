@@ -26,8 +26,17 @@ multiple-versions = "warn"
 wildcards = "deny"
 
 [advisories]
-# Deny crates with known security vulnerabilities.
-ignore = []
+# Vulnerabilities in any crate fail the check. Unmaintained-crate notices are
+# only enforced for our direct dependencies: Tauri's Linux GTK stack pulls in
+# several unmaintained-but-stable crates we cannot replace.
+unmaintained = "workspace"
+ignore = [
+    # quick-xml < 0.41 (DoS on malicious XML). Only reached via plist ->
+    # tauri-utils, which parses our own build-time Info.plist; no untrusted
+    # input. Remove once tauri-utils upgrades plist/quick-xml.
+    { id = "RUSTSEC-2026-0194", reason = "build-time plist parsing of trusted files only (tauri-utils)" },
+    { id = "RUSTSEC-2026-0195", reason = "build-time plist parsing of trusted files only (tauri-utils)" },
+]
 
 [sources]
 # Only allow crates from crates.io.
