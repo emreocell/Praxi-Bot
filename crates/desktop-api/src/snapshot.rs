@@ -166,7 +166,8 @@ pub struct WindowInfo {
 /// A captured image (screenshot).
 #[derive(Debug, Clone)]
 pub struct Image {
-    /// Raw pixel data in RGBA order.
+    /// Encoded image bytes in the format named by `mime_type`
+    /// (JPEG for lossy qualities, PNG for `Lossless`).
     pub data: Vec<u8>,
     pub width: u32,
     pub height: u32,

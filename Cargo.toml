@@ -45,10 +45,13 @@ async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
 futures = "0.3"
 globset = "0.4"
+jpeg-encoder = "0.7"
 parking_lot = "0.12"
+png = "0.18"
 schemars = { version = "0.8", features = ["uuid1"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 toml = "0.8"
+windows = "0.62"
 uuid = { version = "1", features = ["v7", "serde"] }
