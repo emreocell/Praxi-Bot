@@ -1,0 +1,4 @@
+{"nodes":[
+{"nodeId":"1","ignored":false,"role":{"type":"role","value":"RootWebArea"},"name":{"type":"computedString","value":"Checkout"},"childIds":["2"],"backendDOMNodeId":1},
+{"nodeId":"2","ignored":false,"role":{"type":"role","value":"button"},"name":{"type":"computedString","value":"Pay"},"childIds":[],"backendDOMNodeId":5}
+]}
