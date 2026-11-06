@@ -7,5 +7,26 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[features]
+default = []
+windows-ocr = ["dep:windows"]
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+ocrs = { version = "0.13", default-features = false, features = ["onnx", "rten"] }
+rten = { version = "0.26", default-features = false, features = ["onnx_format", "rten_format"] }
+rten-imageproc = "0.26"
+thiserror = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", optional = true, features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Graphics_Imaging",
+    "Media_Ocr",
+    "Security_Cryptography",
+    "Storage_Streams",
+] }
+
 [lints]
 workspace = true
