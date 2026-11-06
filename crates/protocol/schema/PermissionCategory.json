@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PermissionCategory",
+  "description": "Broad permission category for a tool or action.\n\nEach category is independently controllable in a policy.",
+  "oneOf": [
+    {
+      "description": "File-system reads and writes.",
+      "type": "string",
+      "enum": [
+        "fs"
+      ]
+    },
+    {
+      "description": "Shell and command execution.",
+      "type": "string",
+      "enum": [
+        "shell"
+      ]
+    },
+    {
+      "description": "Desktop automation (windows, clicks, keyboard).",
+      "type": "string",
+      "enum": [
+        "desktop"
+      ]
+    },
+    {
+      "description": "Browser navigation, form submission, downloads.",
+      "type": "string",
+      "enum": [
+        "browser"
+      ]
+    },
+    {
+      "description": "Connector accounts (read, send, share).",
+      "type": "string",
+      "enum": [
+        "accounts"
+      ]
+    },
+    {
+      "description": "Messaging (e-mail, chat).",
+      "type": "string",
+      "enum": [
+        "messaging"
+      ]
+    },
+    {
+      "description": "Financial operations (payments, purchases, subscriptions).",
+      "type": "string",
+      "enum": [
+        "money"
+      ]
+    },
+    {
+      "description": "System settings and software installation.",
+      "type": "string",
+      "enum": [
+        "system"
+      ]
+    },
+    {
+      "description": "Remote computer access via node-agent.",
+      "type": "string",
+      "enum": [
+        "remote"
+      ]
+    },
+    {
+      "description": "Script or code execution.",
+      "type": "string",
+      "enum": [
+        "script"
+      ]
+    }
+  ]
+}

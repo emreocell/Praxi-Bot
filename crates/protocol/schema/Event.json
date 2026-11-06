@@ -1,0 +1,282 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Event",
+  "description": "All events that can appear in the client event stream.",
+  "oneOf": [
+    {
+      "description": "A run has started.",
+      "type": "object",
+      "required": [
+        "bot_id",
+        "chat_id",
+        "run_id",
+        "type"
+      ],
+      "properties": {
+        "bot_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "chat_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "run_started"
+          ]
+        }
+      }
+    },
+    {
+      "description": "A run has completed (successfully or not).",
+      "type": "object",
+      "required": [
+        "run_id",
+        "type"
+      ],
+      "properties": {
+        "error": {
+          "description": "`None` on success, an error message on failure.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "run_finished"
+          ]
+        }
+      }
+    },
+    {
+      "description": "A partial text chunk from the assistant.",
+      "type": "object",
+      "required": [
+        "run_id",
+        "text",
+        "type"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "text": {
+          "description": "Incremental text to append to the current assistant message.",
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "message_delta"
+          ]
+        }
+      }
+    },
+    {
+      "description": "The agent has requested a tool call; waiting for approval or execution.",
+      "type": "object",
+      "required": [
+        "call_id",
+        "input",
+        "run_id",
+        "tool_name",
+        "type"
+      ],
+      "properties": {
+        "call_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "input": true,
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "tool_name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool_call_requested"
+          ]
+        }
+      }
+    },
+    {
+      "description": "A human-approval gate is waiting for the user to respond.",
+      "type": "object",
+      "required": [
+        "call_id",
+        "input",
+        "run_id",
+        "summary",
+        "tool_name",
+        "type"
+      ],
+      "properties": {
+        "call_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "input": true,
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "summary": {
+          "description": "A human-readable summary of what will happen.",
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "approval_needed"
+          ]
+        }
+      }
+    },
+    {
+      "description": "The user approved a pending tool call.",
+      "type": "object",
+      "required": [
+        "approved_by",
+        "call_id",
+        "run_id",
+        "type"
+      ],
+      "properties": {
+        "approved_by": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "call_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool_call_approved"
+          ]
+        }
+      }
+    },
+    {
+      "description": "The user denied a pending tool call.",
+      "type": "object",
+      "required": [
+        "call_id",
+        "denied_by",
+        "run_id",
+        "type"
+      ],
+      "properties": {
+        "call_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "denied_by": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool_call_denied"
+          ]
+        }
+      }
+    },
+    {
+      "description": "A tool call has completed; output is available.",
+      "type": "object",
+      "required": [
+        "call_id",
+        "run_id",
+        "type"
+      ],
+      "properties": {
+        "call_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "error": {
+          "description": "`None` on success, an error message on failure.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool_call_completed"
+          ]
+        }
+      }
+    },
+    {
+      "description": "A non-fatal error occurred during the run.",
+      "type": "object",
+      "required": [
+        "message",
+        "recoverable",
+        "run_id",
+        "type"
+      ],
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "recoverable": {
+          "type": "boolean"
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "error"
+          ]
+        }
+      }
+    }
+  ]
+}
