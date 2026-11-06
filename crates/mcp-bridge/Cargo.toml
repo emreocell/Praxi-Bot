@@ -9,3 +9,41 @@ rust-version.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+async-trait.workspace = true
+globset.workspace = true
+http = "1"
+parking_lot.workspace = true
+# `reqwest-native-tls` (schannel / Secure Transport / OpenSSL) instead of the
+# `reqwest` (rustls + aws-lc) feature: it avoids the OpenSSL-licensed aws-lc
+# stack, which `deny.toml` does not allow.
+rmcp = { version = "3.9", default-features = false, features = [
+    "client",
+    "transport-child-process",
+    "which-command",
+    "transport-streamable-http-client-reqwest",
+    "reqwest-native-tls",
+] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { version = "1", features = ["io-util", "process", "rt", "sync", "time"] }
+toml.workspace = true
+tool-registry = { path = "../tool-registry", version = "0.1.0" }
+tracing = "0.1"
+
+[dev-dependencies]
+rmcp = { version = "3.9", default-features = false, features = [
+    "client",
+    "macros",
+    "server",
+    "transport-io",
+] }
+tempfile = "3"
+tokio = { version = "1", features = ["io-std", "macros", "rt-multi-thread", "time"] }
+
+# Tiny stdio MCP server used by the integration tests (built by `cargo test`).
+[[example]]
+name = "test_server"
+path = "tests/support/test_server.rs"
