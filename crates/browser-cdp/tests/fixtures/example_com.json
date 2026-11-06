@@ -1,0 +1,13 @@
+{"nodes":[
+{"nodeId":"1","ignored":false,"role":{"type":"role","value":"RootWebArea"},"name":{"type":"computedString","value":"Example Domain"},"childIds":["2"],"backendDOMNodeId":1},
+{"nodeId":"2","ignored":false,"role":{"type":"internalRole","value":"generic"},"name":{"type":"computedString","value":""},"childIds":["3","5","7","10"],"backendDOMNodeId":11},
+{"nodeId":"3","ignored":false,"role":{"type":"role","value":"heading"},"name":{"type":"computedString","value":"Example Domain"},"properties":[{"name":"level","value":{"type":"integer","value":1}}],"childIds":["4"],"backendDOMNodeId":12},
+{"nodeId":"4","ignored":false,"role":{"type":"internalRole","value":"StaticText"},"name":{"type":"computedString","value":"Example Domain"},"childIds":["40"],"backendDOMNodeId":13},
+{"nodeId":"40","ignored":false,"role":{"type":"internalRole","value":"InlineTextBox"},"name":{"type":"computedString","value":"Example Domain"},"childIds":[],"backendDOMNodeId":13},
+{"nodeId":"5","ignored":false,"role":{"type":"role","value":"paragraph"},"name":{"type":"computedString","value":""},"childIds":["6"],"backendDOMNodeId":14},
+{"nodeId":"6","ignored":false,"role":{"type":"internalRole","value":"StaticText"},"name":{"type":"computedString","value":"This domain is for use in documentation examples without needing permission."},"childIds":[],"backendDOMNodeId":15},
+{"nodeId":"7","ignored":false,"role":{"type":"role","value":"paragraph"},"name":{"type":"computedString","value":""},"childIds":["8"],"backendDOMNodeId":16},
+{"nodeId":"8","ignored":false,"role":{"type":"role","value":"link"},"name":{"type":"computedString","value":"Learn more"},"properties":[{"name":"focusable","value":{"type":"booleanOrUndefined","value":true}}],"childIds":["9"],"backendDOMNodeId":20},
+{"nodeId":"9","ignored":false,"role":{"type":"internalRole","value":"StaticText"},"name":{"type":"computedString","value":"Learn more"},"childIds":[],"backendDOMNodeId":21},
+{"nodeId":"10","ignored":false,"role":{"type":"role","value":"Iframe"},"name":{"type":"computedString","value":""},"childIds":[],"backendDOMNodeId":30}
+]}

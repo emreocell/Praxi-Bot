@@ -8,7 +8,36 @@ repository.workspace = true
 rust-version.workspace = true
 
 [lints.rust]
+# Unsafe is confined to this crate's Windows modules (each one opts in with a
+# module-level allow and documents every block with a SAFETY comment).
 unsafe_code = "warn"
 
 [lints.clippy]
 pedantic = "warn"
+undocumented_unsafe_blocks = "warn"
+
+[dependencies]
+desktop-api = { path = "../desktop-api", version = "0.1.0" }
+async-trait.workspace = true
+futures.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+jpeg-encoder.workspace = true
+png.workspace = true
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_UI_Accessibility",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[[example]]
+name = "inspect"
+path = "examples/inspect.rs"

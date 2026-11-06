@@ -48,7 +48,16 @@ pub enum MessageRole {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: MessageRole,
+    /// Either a JSON string, or an array of OpenAI-style content parts
+    /// (`{"type":"text","text":..}` / `{"type":"image_url","image_url":{"url":..}}`).
+    /// `Null` is allowed for assistant messages that only carry tool calls.
     pub content: Value,
+    /// Tool calls requested by an assistant message.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCall>,
+    /// For `Tool` messages: the id of the call this message answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 impl Message {
@@ -57,8 +66,66 @@ impl Message {
         Self {
             role,
             content: Value::String(text.into()),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
         }
     }
+
+    /// Construct a tool-result message answering `tool_call_id`.
+    pub fn tool_result(tool_call_id: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            role: MessageRole::Tool,
+            content: Value::String(text.into()),
+            tool_calls: Vec::new(),
+            tool_call_id: Some(tool_call_id.into()),
+        }
+    }
+}
+
+/// A complete tool call requested by the model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCall {
+    /// Provider-assigned call id (synthesised when the provider omits it).
+    pub id: String,
+    /// Tool name.
+    pub name: String,
+    /// Raw JSON arguments exactly as the model produced them (may be invalid
+    /// JSON; validate before use).
+    pub arguments: String,
+}
+
+/// How the model may choose among the offered tools.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolChoice {
+    /// The model decides (default).
+    Auto,
+    /// The model must not call tools.
+    None,
+    /// The model must call some tool.
+    Required,
+    /// The model must call the named tool.
+    Function(String),
+}
+
+/// Why generation stopped.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FinishReason {
+    Stop,
+    Length,
+    ToolCalls,
+    ContentFilter,
+    /// Any provider-specific value.
+    Other(String),
+}
+
+/// Token accounting for a completion.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Usage {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    /// Prompt tokens served from the provider's cache, when reported.
+    pub cached_tokens: Option<u64>,
 }
 
 /// A chat completion request.
@@ -72,8 +139,32 @@ pub struct ChatRequest {
     pub max_tokens: Option<u32>,
     /// Sampling temperature (0.0–2.0).
     pub temperature: Option<f64>,
-    /// Tool definitions available in this request.
+    /// Tool definitions available in this request, in `OpenAI` format:
+    /// `{"type":"function","function":{"name","description","parameters"}}`.
+    #[serde(default)]
     pub tools: Vec<Value>,
+    /// Tool selection policy; `None` leaves it to the provider default.
+    #[serde(default)]
+    pub tool_choice: Option<ToolChoice>,
+    /// Request JSON-object output (honoured only if the model has `json_mode`).
+    #[serde(default)]
+    pub json_mode: bool,
+}
+
+impl ChatRequest {
+    /// A request with no tools, no limits and default sampling.
+    #[must_use]
+    pub fn new(model: ModelRef, messages: Vec<Message>) -> Self {
+        Self {
+            model,
+            messages,
+            max_tokens: None,
+            temperature: None,
+            tools: Vec::new(),
+            tool_choice: None,
+            json_mode: false,
+        }
+    }
 }
 
 /// A single streaming chunk from a chat completion.
@@ -87,8 +178,13 @@ pub enum ChatChunk {
         name: Option<String>,
         input_delta: String,
     },
+    /// A complete tool call, assembled from the provider's streamed deltas.
+    /// Emitted after all text, in call-index order.
+    ToolCall(ToolCall),
+    /// Token usage, when the provider reports it (at most once, before `Done`).
+    Usage(Usage),
     /// The stream has finished.
-    Done,
+    Done { finish_reason: FinishReason },
 }
 
 /// A streaming LLM chat provider.
@@ -104,4 +200,10 @@ pub trait ChatProvider: Send + Sync {
         &self,
         req: ChatRequest,
     ) -> Result<BoxStream<'static, Result<ChatChunk, ProviderError>>, ProviderError>;
+
+    /// List the model ids the provider offers. Providers without a listing
+    /// endpoint return an empty list.
+    async fn list_models(&self) -> Result<Vec<String>, ProviderError> {
+        Ok(Vec::new())
+    }
 }
