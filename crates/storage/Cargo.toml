@@ -9,3 +9,15 @@ rust-version.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+directories.workspace = true
+protocol.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

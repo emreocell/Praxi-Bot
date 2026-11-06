@@ -4,6 +4,7 @@
 # Node.js
 node_modules/
 dist/
+apps/desktop/gen/
 
 # Environment files
 .env

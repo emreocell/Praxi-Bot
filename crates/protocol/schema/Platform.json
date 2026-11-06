@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Platform",
+  "description": "Target operating system platforms.",
+  "oneOf": [
+    {
+      "type": "string",
+      "enum": [
+        "windows",
+        "mac_os",
+        "linux"
+      ]
+    },
+    {
+      "description": "Available on all platforms (default when the field is omitted).",
+      "type": "string",
+      "enum": [
+        "all"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "InitiatorKind",
+  "description": "The kind of initiator, without the associated identifier payload.\n\nUsed in permission rules and policy resolution where only the category of initiator matters, not the specific identity.",
+  "oneOf": [
+    {
+      "description": "A human user initiated the run interactively.",
+      "type": "string",
+      "enum": [
+        "human"
+      ]
+    },
+    {
+      "description": "A scheduled or recurring task initiated the run.",
+      "type": "string",
+      "enum": [
+        "routine"
+      ]
+    },
+    {
+      "description": "An external messaging channel triggered the run.",
+      "type": "string",
+      "enum": [
+        "channel"
+      ]
+    },
+    {
+      "description": "A parent agent run spawned this as a sub-agent.",
+      "type": "string",
+      "enum": [
+        "subagent"
+      ]
+    }
+  ]
+}

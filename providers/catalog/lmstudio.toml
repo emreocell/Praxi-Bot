@@ -1,0 +1,16 @@
+# LM Studio — desktop app for running local models; OpenAI-compatible server.
+# Source: https://lmstudio.ai/docs/api
+id = "lmstudio"
+kind = "open_ai_compatible"
+base_url = "http://localhost:1234/v1"
+auth = "None"
+models_endpoint = "http://localhost:1234/v1/models"
+
+[capabilities]
+tools = true
+vision = false
+streaming = true
+json_mode = false
+
+[compat_flags]
+strip_system_role = false
