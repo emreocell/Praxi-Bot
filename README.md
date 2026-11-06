@@ -11,7 +11,7 @@ No stable API, no releases. Expect breaking changes at any time.
 
 ## Build
 
-Requirements: Rust 1.85+, MSVC build tools (Windows) or a standard C toolchain
+Requirements: Rust 1.88+, MSVC build tools (Windows) or a standard C toolchain
 (Linux/macOS).
 
 ```sh

@@ -1,0 +1,74 @@
+{
+  "sidebar": {
+    "botsSection": "Botlar",
+    "settings": "Ayarlar"
+  },
+  "main": {
+    "selectBotTitle": "Bir bot seçin",
+    "selectBotDescription": "Profilini görüntülemek için kenar çubuğundan bir bot seçin veya temayı, vurgu rengini ve arka planı özelleştirmek için ayarları açın.",
+    "selectedBotLabel": "Aktif Bot Profili",
+    "clearSelection": "Genel görünüme dön"
+  },
+  "bots": {
+    "atlas": {
+      "role": "Masaüstü Otomasyonu"
+    },
+    "nova": {
+      "role": "Tarayıcı Araştırması"
+    },
+    "pulse": {
+      "role": "Akış Koordinatörü"
+    }
+  },
+  "settings": {
+    "title": "Görünüm ve Ayarlar",
+    "subtitle": "Tema modunu, vurgu rengini, arka plan görselini ve arayüz dilini özelleştirin.",
+    "theme": {
+      "title": "Tema Modu",
+      "description": "Açık, koyu veya sistem renk şeması arasında geçiş yapın.",
+      "light": "Açık",
+      "dark": "Koyu",
+      "system": "Sistem"
+    },
+    "accent": {
+      "title": "Vurgu Rengi",
+      "description": "Etkileşimli öğeler ve aktif göstergeler için bir vurgu rengi seçin.",
+      "custom": "Özel renk",
+      "reset": "Tema varsayılanına sıfırla",
+      "presets": {
+        "blue": "Okyanus Mavisi",
+        "emerald": "Zümrüt",
+        "violet": "Mor",
+        "amber": "Kehribar",
+        "rose": "Gül"
+      }
+    },
+    "background": {
+      "title": "Arka Plan Görseli",
+      "description": "Uygulama arka planı olarak yerel bir görsel veya hareketli GIF seçin.",
+      "chooseFile": "Yerel Görsel Seç",
+      "clearFile": "Arka Planı Kaldır",
+      "noFile": "Arka plan görseli seçilmedi",
+      "blur": "Arka Plan Bulanıklığı",
+      "dim": "Arka Plan Karartma",
+      "blurLevels": {
+        "none": "Yok",
+        "soft": "Hafif",
+        "medium": "Orta",
+        "strong": "Güçlü"
+      },
+      "dimLevels": {
+        "none": "Yok",
+        "light": "Düşük",
+        "medium": "Orta",
+        "heavy": "Yüksek"
+      }
+    },
+    "language": {
+      "title": "Dil",
+      "description": "Arayüz görüntüleme dilini seçin.",
+      "en": "English",
+      "tr": "Türkçe"
+    }
+  }
+}
