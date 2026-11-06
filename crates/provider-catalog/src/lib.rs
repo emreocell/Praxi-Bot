@@ -6,11 +6,16 @@
 pub mod catalog;
 pub mod entry;
 pub mod error;
+pub mod openai_compat;
 pub mod provider;
 pub mod selector;
 
 pub use catalog::Catalog;
 pub use entry::{Auth, CompatFlags, ModelCapabilities, ProviderEntry, ProviderKind};
 pub use error::ProviderError;
-pub use provider::{ChatChunk, ChatProvider, ChatRequest, Message, MessageRole, ModelRef};
+pub use openai_compat::{OpenAiCompatConfig, OpenAiCompatProvider};
+pub use provider::{
+    ChatChunk, ChatProvider, ChatRequest, FinishReason, Message, MessageRole, ModelRef, ToolCall,
+    ToolChoice, Usage,
+};
 pub use selector::ModelSelector;

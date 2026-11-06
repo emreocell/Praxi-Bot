@@ -46,9 +46,12 @@ clap = { version = "4", features = ["derive"] }
 futures = "0.3"
 globset = "0.4"
 parking_lot = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "stream", "json"] }
 schemars = { version = "0.8", features = ["uuid1"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+tokio = { version = "1", features = ["rt", "time", "macros"] }
 toml = "0.8"
+wiremock = "0.6"
 uuid = { version = "1", features = ["v7", "serde"] }
