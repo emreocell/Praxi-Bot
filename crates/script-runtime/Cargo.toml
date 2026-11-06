@@ -9,3 +9,15 @@ rust-version.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+async-trait.workspace = true
+parking_lot.workspace = true
+rquickjs = { version = "0.14", default-features = false, features = ["futures", "parallel"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { version = "1", features = ["rt", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "time", "macros", "rt-multi-thread"] }
