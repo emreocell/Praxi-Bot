@@ -1,0 +1,15 @@
+[package]
+name = "node-agent"
+description = "Node-agent binary (bot-node) that runs on each controlled machine."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "bot-node"
+path = "src/main.rs"
+
+[lints]
+workspace = true

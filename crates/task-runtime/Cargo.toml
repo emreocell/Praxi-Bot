@@ -1,0 +1,11 @@
+[package]
+name = "task-runtime"
+description = "Scheduled task execution and background job management for the core daemon."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,11 @@
+[package]
+name = "desktop-api"
+description = "OS-agnostic Desktop trait and shared types for accessibility, input, and screenshots."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true

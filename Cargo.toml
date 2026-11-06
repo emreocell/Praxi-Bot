@@ -1,0 +1,43 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/agent-core",
+    "crates/agent-router",
+    "crates/tool-registry",
+    "crates/permission-engine",
+    "crates/protocol",
+    "crates/desktop-api",
+    "crates/desktop-windows",
+    "crates/desktop-linux",
+    "crates/desktop-macos",
+    "crates/browser-cdp",
+    "crates/vision",
+    "crates/provider-catalog",
+    "crates/mcp-bridge",
+    "crates/workflow-replay",
+    "crates/memory-store",
+    "crates/task-runtime",
+    "crates/channel-api",
+    "crates/peer-network",
+    "crates/script-runtime",
+    "crates/plugin-host",
+    "crates/storage",
+    "apps/cli",
+    "apps/node-agent",
+]
+
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/emreocell/Praxi-Bot"
+rust-version = "1.85"
+version = "0.1.0"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+pedantic = "warn"
+
+[workspace.dependencies]
+clap = { version = "4", features = ["derive"] }

@@ -1,0 +1,14 @@
+[package]
+name = "desktop-windows"
+description = "Windows OS backend: UI Automation, SendInput, and screenshot capture."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints.rust]
+unsafe_code = "warn"
+
+[lints.clippy]
+pedantic = "warn"

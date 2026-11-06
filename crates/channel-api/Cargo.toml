@@ -1,0 +1,11 @@
+[package]
+name = "channel-api"
+description = "Client channel gateway: HTTP + SSE/WebSocket adapter for all interface types."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true

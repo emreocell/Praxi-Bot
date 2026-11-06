@@ -1,0 +1,11 @@
+[package]
+name = "workflow-replay"
+description = "Workflow recording and deterministic replay: captures agent action streams for reuse."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
