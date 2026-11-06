@@ -138,10 +138,10 @@ impl fmt::Display for JsError {
             (Some(l), None) => write!(f, " (line {l})")?,
             _ => {}
         }
-        if let Some(stack) = &self.stack {
-            if !stack.trim().is_empty() {
-                write!(f, "\n{}", stack.trim_end())?;
-            }
+        if let Some(stack) = &self.stack
+            && !stack.trim().is_empty()
+        {
+            write!(f, "\n{}", stack.trim_end())?;
         }
         Ok(())
     }
