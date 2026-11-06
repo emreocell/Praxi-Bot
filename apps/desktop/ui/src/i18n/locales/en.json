@@ -1,0 +1,74 @@
+{
+  "sidebar": {
+    "botsSection": "Bots",
+    "settings": "Settings"
+  },
+  "main": {
+    "selectBotTitle": "Select a bot",
+    "selectBotDescription": "Choose a bot from the sidebar to view its profile, or open settings to customize the theme, accent color, and background.",
+    "selectedBotLabel": "Active Bot Profile",
+    "clearSelection": "Back to overview"
+  },
+  "bots": {
+    "atlas": {
+      "role": "Desktop Automation"
+    },
+    "nova": {
+      "role": "Browser Research"
+    },
+    "pulse": {
+      "role": "Workflow Coordinator"
+    }
+  },
+  "settings": {
+    "title": "Appearance & Settings",
+    "subtitle": "Customize theme mode, accent color, background media, and interface language.",
+    "theme": {
+      "title": "Theme Mode",
+      "description": "Switch between light, dark, or system color scheme.",
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    },
+    "accent": {
+      "title": "Accent Color",
+      "description": "Pick a highlight color for interactive elements and active indicators.",
+      "custom": "Custom color",
+      "reset": "Reset to theme default",
+      "presets": {
+        "blue": "Ocean Blue",
+        "emerald": "Emerald",
+        "violet": "Royal Violet",
+        "amber": "Amber",
+        "rose": "Rose"
+      }
+    },
+    "background": {
+      "title": "Background Image",
+      "description": "Choose a local image or animated GIF as the application backdrop.",
+      "chooseFile": "Choose Local Image",
+      "clearFile": "Remove Background",
+      "noFile": "No background image selected",
+      "blur": "Background Blur",
+      "dim": "Background Dim",
+      "blurLevels": {
+        "none": "None",
+        "soft": "Soft",
+        "medium": "Medium",
+        "strong": "Strong"
+      },
+      "dimLevels": {
+        "none": "None",
+        "light": "Low",
+        "medium": "Medium",
+        "heavy": "High"
+      }
+    },
+    "language": {
+      "title": "Language",
+      "description": "Select the display language for the interface.",
+      "en": "English",
+      "tr": "Türkçe"
+    }
+  }
+}
