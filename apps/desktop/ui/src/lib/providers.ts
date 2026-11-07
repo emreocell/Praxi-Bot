@@ -55,3 +55,21 @@ export function setDefaultProvider(
 ): Promise<CliResult> {
   return providersCli({ action: "default", id, model });
 }
+
+export async function getAutostart(): Promise<boolean> {
+  if (!isTauriRuntime()) {
+    return false;
+  }
+  try {
+    return await invoke<boolean>("get_autostart");
+  } catch {
+    return false;
+  }
+}
+
+export async function setAutostart(enabled: boolean): Promise<boolean> {
+  if (!isTauriRuntime()) {
+    return enabled;
+  }
+  return invoke<boolean>("set_autostart", { enabled });
+}

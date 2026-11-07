@@ -1,2 +1,4 @@
 ui/
 gen/
+binaries/
+nsis/
