@@ -145,7 +145,9 @@ mod tests {
     /// Expected `(name, effect, category)` for every built-in tool.
     fn expected() -> Vec<(&'static str, Effect, PermissionCategory)> {
         use Effect::{Destructive as D, Read as R, Write as W};
-        use PermissionCategory::{Browser as B, Desktop as De, Fs, Script as Sc, Shell as Sh};
+        use PermissionCategory::{
+            Browser as B, Desktop as De, Fs, Meta as Me, Script as Sc, Shell as Sh,
+        };
         vec![
             ("desktop_list_apps", R, De),
             ("desktop_launch", W, De),
@@ -179,8 +181,8 @@ mod tests {
             ("checkpoint_restore", W, Fs),
             ("shell_run", D, Sh),
             ("script_run", W, Sc),
-            ("ask_user", R, Sc),
-            ("todo_write", W, Sc),
+            ("ask_user", R, Me),
+            ("todo_write", W, Me),
         ]
     }
 

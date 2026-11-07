@@ -11,20 +11,25 @@
 //! approvals), deepseek-harness (spill, guard) - patterns only, no code copied.
 
 mod agent;
+mod approval;
 mod config;
 mod exec;
 mod history;
+mod memory;
 mod profile;
 mod shared;
-mod todo;
 
 #[cfg(test)]
 mod tests;
 
 pub use agent::AgentLoop;
-pub use config::{Guards, LoopConfig, ModelPrice};
+pub use config::{Guards, LoopConfig, MemoryConfig, ModelPrice};
 pub use profile::{BotProfile, ModelsConfig, PermissionsConfig, ProfileError, ToolFilter};
-pub use shared::{ApprovalScope, Delivery, LoopError, MessageMode, Providers, StreamItem};
+pub use shared::{
+    ApprovalScope, Delivery, Grant, GrantTarget, LoopError, MessageMode, Providers, StreamItem,
+};
 
-/// Audit-log action recording an "always allow this tool for this bot" grant.
+/// Audit-log action recording an "always allow" grant rule for a bot.
 pub(crate) const AUDIT_GRANT_ALWAYS: &str = "grant.always";
+/// Audit-log action recording the removal of such a rule.
+pub(crate) const AUDIT_GRANT_REVOKED: &str = "grant.revoked";

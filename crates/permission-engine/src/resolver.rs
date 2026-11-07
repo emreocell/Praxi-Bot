@@ -93,6 +93,11 @@ impl PermissionResolver {
         subagent: Option<&Policy>,
         req: &ActionRequest,
     ) -> Decision {
+        // Agent-internal tools without external effect are always allowed.
+        if req.category == PermissionCategory::Meta {
+            return Decision::Allow;
+        }
+
         // Step 1 — compute the effective level for this category and
         // initiator kind (data-driven via `Rule::by_initiator`).
         let level = Self::effective_level(global, bot, subagent, req);
@@ -275,6 +280,27 @@ mod tests {
             &req_human(PermissionCategory::Shell),
         );
         assert_eq!(decision, Decision::Deny);
+    }
+
+    // ── Meta category ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn meta_is_always_allowed() {
+        let resolver = PermissionResolver::new();
+        for global in [Policy::read_only(), Policy::approve_destructive()] {
+            let d = resolver.resolve(&global, None, None, &req_human(PermissionCategory::Meta));
+            assert_eq!(d, Decision::Allow);
+        }
+        let mut bot = Policy::default();
+        bot.categories
+            .insert(PermissionCategory::Meta, Rule::new(Level::Deny));
+        let d = resolver.resolve(
+            &Policy::read_only(),
+            Some(&bot),
+            None,
+            &req_routine(PermissionCategory::Meta),
+        );
+        assert_eq!(d, Decision::Allow);
     }
 
     // ── Rule 3a: Money absolute floor ─────────────────────────────────────────

@@ -31,6 +31,9 @@ pub enum PermissionCategory {
     Remote,
     /// Script or code execution.
     Script,
+    /// Agent-internal tools with no external effect (`ask_user`, `todo_write`,
+    /// tool discovery). Always allowed by the resolver.
+    Meta,
 }
 
 /// Target operating system platforms.

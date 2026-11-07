@@ -1,0 +1,1425 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Praxi-Bot daemon API",
+    "description": "Local HTTP API of the bot daemon. Bind: 127.0.0.1 only. Host must be loopback; a browser Origin must be an allowed desktop-app origin; all routes except GET /v1/health need `Authorization: Bearer <token>`.",
+    "license": {
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
+    },
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/v1/approvals": {
+      "get": {
+        "tags": [
+          "approvals"
+        ],
+        "summary": "List approvals.",
+        "operationId": "list_approvals",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Only this run's approvals (pending and decided).  Without it: pending\napprovals of all runs.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ApprovalDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/approvals/{call_id}": {
+      "post": {
+        "tags": [
+          "approvals"
+        ],
+        "summary": "Approve or deny a pending tool call.",
+        "operationId": "decide_approval",
+        "parameters": [
+          {
+            "name": "call_id",
+            "in": "path",
+            "description": "Tool call id from the approval_needed event",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideApproval"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/bots": {
+      "get": {
+        "tags": [
+          "bots"
+        ],
+        "summary": "List bots.",
+        "operationId": "list_bots",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BotDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "bots"
+        ],
+        "summary": "Create a bot from a JSON profile or TOML text.",
+        "operationId": "create_bot",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/bots/{id}": {
+      "get": {
+        "tags": [
+          "bots"
+        ],
+        "summary": "Get one bot.",
+        "operationId": "get_bot",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bot id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "bots"
+        ],
+        "summary": "Replace a bot's name and profile.",
+        "operationId": "update_bot",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bot id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "bots"
+        ],
+        "summary": "Delete a bot that has no chats or runs.",
+        "operationId": "delete_bot",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bot id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/chats": {
+      "get": {
+        "tags": [
+          "chats"
+        ],
+        "summary": "List chats.",
+        "operationId": "list_chats",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ChatDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "chats"
+        ],
+        "summary": "Create a chat with a bot.",
+        "operationId": "create_chat",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateChat"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/chats/{id}/messages": {
+      "get": {
+        "tags": [
+          "chats"
+        ],
+        "summary": "List a chat's messages, oldest first.",
+        "operationId": "list_messages",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Chat id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MessageDto"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "chats"
+        ],
+        "summary": "Send a user message.  Starts a turn when the chat is idle (returns its run\nid); otherwise `mode` decides between steering and queueing.",
+        "operationId": "send_message",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Chat id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessage"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/events": {
+      "get": {
+        "tags": [
+          "events"
+        ],
+        "summary": "Documentation stub for the SSE route (the handler lives in `sse.rs`).",
+        "description": "Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the\nSSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local\n`seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log; without\nit the `id` is `<run_id>:<seq>` and the same form resumes that run.",
+        "operationId": "events_doc",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "query",
+            "description": "Follow only this run; the stream ends after run_finished",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "description": "Resume cursor (`<seq>` with run_id, else `<run_id>:<seq>`)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "text/event-stream of protocol::Envelope",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/health": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Liveness probe (no auth; still Host / Origin checked).",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "List runs, newest last.",
+        "operationId": "list_runs",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RunDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/runs/{id}": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get a run.",
+        "operationId": "get_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Run id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/runs/{id}/cancel": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Cancel a run.",
+        "operationId": "cancel_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Run id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/runs/{id}/resume": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Resume a paused run (e.g. after a daemon restart).",
+        "operationId": "resume_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Run id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/usage": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "Token usage summed over the model steps of all runs.",
+        "operationId": "usage",
+        "parameters": [
+          {
+            "name": "since_ms",
+            "in": "path",
+            "description": "Only runs created at or after this time.",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageSummary"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApprovalDto": {
+        "type": "object",
+        "description": "A pending or decided tool-call approval.",
+        "required": [
+          "call_id",
+          "run_id",
+          "tool_name",
+          "summary",
+          "requested_at_ms"
+        ],
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Tool call id (what `POST /v1/approvals/{call_id}` takes)."
+          },
+          "decided_at_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Decision time."
+          },
+          "decision": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`null` while pending, else `approved` / `denied` / `expired`."
+          },
+          "requested_at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Request time."
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Run awaiting it."
+          },
+          "summary": {
+            "type": "string",
+            "description": "Human-readable summary."
+          },
+          "tool_name": {
+            "type": "string",
+            "description": "Tool the model wants to call."
+          }
+        }
+      },
+      "BotDto": {
+        "type": "object",
+        "description": "A bot.",
+        "required": [
+          "id",
+          "name",
+          "config",
+          "created_at_ms"
+        ],
+        "properties": {
+          "config": {
+            "description": "Bot profile (ADR-0011) as JSON."
+          },
+          "created_at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Creation time."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Bot id."
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name."
+          }
+        }
+      },
+      "BotInput": {
+        "type": "object",
+        "description": "Create (`POST /v1/bots`) or replace (`PUT /v1/bots/{id}`) a bot.  Exactly\none of `config` / `profile_toml` is required.",
+        "properties": {
+          "config": {
+            "description": "Profile as a JSON object."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name (defaults to the profile's `[bot].name`)."
+          },
+          "profile_toml": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Profile as TOML text (the contents of a bot profile file)."
+          }
+        }
+      },
+      "BotUsage": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/UsageTotals",
+            "description": "Its totals."
+          },
+          {
+            "type": "object",
+            "required": [
+              "bot_id"
+            ],
+            "properties": {
+              "bot_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Bot id."
+              }
+            }
+          }
+        ],
+        "description": "Usage of one bot."
+      },
+      "ChatDto": {
+        "type": "object",
+        "description": "A chat thread.",
+        "required": [
+          "id",
+          "bot_id",
+          "title",
+          "created_at_ms"
+        ],
+        "properties": {
+          "bot_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Bot the chat talks to."
+          },
+          "created_at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Creation time."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Chat id."
+          },
+          "title": {
+            "type": "string",
+            "description": "Title."
+          }
+        }
+      },
+      "CreateChat": {
+        "type": "object",
+        "description": "`POST /v1/chats`.",
+        "required": [
+          "bot_id"
+        ],
+        "properties": {
+          "bot_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Bot to talk to."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Title (default `New chat`)."
+          }
+        }
+      },
+      "DecideApproval": {
+        "type": "object",
+        "description": "`POST /v1/approvals/{call_id}`.",
+        "required": [
+          "decision"
+        ],
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/Decision",
+            "description": "Approve or deny."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Reason shown to the model on deny."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/Scope",
+            "description": "Scope of an approval (ignored for deny)."
+          }
+        }
+      },
+      "Decision": {
+        "type": "string",
+        "description": "Decision verb.",
+        "enum": [
+          "approve",
+          "deny"
+        ]
+      },
+      "DecisionResponse": {
+        "type": "object",
+        "description": "Response of a decision.",
+        "required": [
+          "call_id",
+          "decision"
+        ],
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Tool call id."
+          },
+          "decision": {
+            "$ref": "#/components/schemas/Decision",
+            "description": "The decision taken."
+          }
+        }
+      },
+      "DeliveryKind": {
+        "type": "string",
+        "description": "How a sent message was delivered.",
+        "enum": [
+          "new_turn",
+          "steered",
+          "queued"
+        ]
+      },
+      "ErrorBody": {
+        "type": "object",
+        "description": "JSON body of an error response.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail",
+            "description": "The error."
+          }
+        }
+      },
+      "ErrorDetail": {
+        "type": "object",
+        "description": "Machine-readable code plus human-readable message.",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Stable `snake_case` code, e.g. `not_found`."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable message."
+          }
+        }
+      },
+      "Health": {
+        "type": "object",
+        "description": "`GET /v1/health`.",
+        "required": [
+          "status",
+          "version",
+          "uptime_secs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Always `ok`."
+          },
+          "uptime_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds since the daemon started.",
+            "minimum": 0
+          },
+          "version": {
+            "type": "string",
+            "description": "Daemon crate version."
+          }
+        }
+      },
+      "MessageDto": {
+        "type": "object",
+        "description": "A stored chat message.",
+        "required": [
+          "id",
+          "chat_id",
+          "role",
+          "content",
+          "created_at_ms"
+        ],
+        "properties": {
+          "chat_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Chat it belongs to."
+          },
+          "content": {
+            "type": "string",
+            "description": "Text."
+          },
+          "created_at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Creation time."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Message id."
+          },
+          "role": {
+            "type": "string",
+            "description": "`user` / `assistant` / `system` / `tool`."
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Run that produced / carried it."
+          }
+        }
+      },
+      "Mode": {
+        "type": "string",
+        "description": "What to do when the chat already has a running turn.",
+        "enum": [
+          "steer",
+          "queue"
+        ]
+      },
+      "RunDto": {
+        "type": "object",
+        "description": "A run.",
+        "required": [
+          "id",
+          "bot_id",
+          "kind",
+          "state",
+          "created_at_ms",
+          "updated_at_ms"
+        ],
+        "properties": {
+          "bot_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Bot executing it."
+          },
+          "chat_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Chat, if any."
+          },
+          "created_at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Creation time."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Failure message."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Run id."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`turn`, `turn:routine`, ..."
+          },
+          "state": {
+            "type": "string",
+            "description": "`pending` / `running` / `waiting_approval` / `paused` / `succeeded` / `failed` / `cancelled`."
+          },
+          "updated_at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Last state change."
+          }
+        }
+      },
+      "Scope": {
+        "type": "string",
+        "description": "How far an approval reaches.",
+        "enum": [
+          "once",
+          "this_chat",
+          "always"
+        ]
+      },
+      "SendMessage": {
+        "type": "object",
+        "description": "`POST /v1/chats/{id}/messages`.",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/Mode",
+            "description": "Behaviour while a turn is running."
+          },
+          "text": {
+            "type": "string",
+            "description": "Message text."
+          }
+        }
+      },
+      "SendResponse": {
+        "type": "object",
+        "description": "Response of a sent message.",
+        "required": [
+          "delivery"
+        ],
+        "properties": {
+          "delivery": {
+            "$ref": "#/components/schemas/DeliveryKind",
+            "description": "How it was delivered."
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The run to follow (`null` when queued: the turn has no run yet)."
+          }
+        }
+      },
+      "UsageSummary": {
+        "type": "object",
+        "description": "`GET /v1/usage`.",
+        "required": [
+          "runs",
+          "total",
+          "by_bot"
+        ],
+        "properties": {
+          "by_bot": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BotUsage"
+            },
+            "description": "Per bot."
+          },
+          "runs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Runs counted.",
+            "minimum": 0
+          },
+          "total": {
+            "$ref": "#/components/schemas/UsageTotals",
+            "description": "Totals over all counted runs."
+          }
+        }
+      },
+      "UsageTotals": {
+        "type": "object",
+        "description": "Token totals.",
+        "required": [
+          "prompt_tokens",
+          "completion_tokens",
+          "cached_tokens",
+          "model_calls"
+        ],
+        "properties": {
+          "cached_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Cached prompt tokens (subset of `prompt_tokens`).",
+            "minimum": 0
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Completion tokens.",
+            "minimum": 0
+          },
+          "model_calls": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of model calls.",
+            "minimum": 0
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Prompt tokens.",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Per-install token stored in `<data dir>/api-token`."
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "meta"
+    },
+    {
+      "name": "bots"
+    },
+    {
+      "name": "chats"
+    },
+    {
+      "name": "approvals"
+    },
+    {
+      "name": "runs"
+    },
+    {
+      "name": "usage"
+    },
+    {
+      "name": "events"
+    }
+  ]
+}

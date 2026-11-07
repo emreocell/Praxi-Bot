@@ -110,6 +110,34 @@ pub struct TodoUpdated {
     pub items: Vec<TodoItem>,
 }
 
+// ── Questions ─────────────────────────────────────────────────────────────────
+
+/// The model asked the user a question (`ask_user`); the run waits until the
+/// question is answered.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct QuestionAsked {
+    pub run_id: RunId,
+    /// Id to answer with.
+    pub call_id: ToolCallId,
+    pub question: String,
+    /// Suggested answers (may be empty).
+    pub options: Vec<String>,
+}
+
+// ── Model fallback ────────────────────────────────────────────────────────────
+
+/// The loop switched to a fallback model after the previous one kept failing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelFallback {
+    pub run_id: RunId,
+    /// Model that failed.
+    pub from: String,
+    /// Model tried next.
+    pub to: String,
+    /// The error that caused the switch.
+    pub reason: String,
+}
+
 // ── Errors ────────────────────────────────────────────────────────────────────
 
 /// A non-fatal error occurred during the run.
@@ -135,6 +163,8 @@ pub enum Event {
     ToolCallDenied(ToolCallDenied),
     ToolCallCompleted(ToolCallCompleted),
     TodoUpdated(TodoUpdated),
+    QuestionAsked(QuestionAsked),
+    ModelFallback(ModelFallback),
     Error(RunError),
 }
 

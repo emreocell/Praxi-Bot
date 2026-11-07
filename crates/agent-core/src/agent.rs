@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use agent_router::ToolSurface;
+use builtin_tools::BuiltinConfig;
 use futures::future::BoxFuture;
 use parking_lot::{Mutex, RwLock};
 use permission_engine::PermissionResolver;
@@ -14,16 +16,16 @@ use tokio::sync::broadcast;
 use tool_registry::ToolRegistry;
 use uuid::Uuid;
 
-use crate::AUDIT_GRANT_ALWAYS;
+use crate::approval::{LoopGate, grant_detail, grant_target};
 use crate::config::LoopConfig;
 use crate::exec::TurnExecutor;
 use crate::history::{status_of, step_output};
 use crate::profile::BotProfile;
 use crate::shared::{
-    ApprovalScope, Delivery, Grants, LoopError, MessageMode, ModelOut, Pending, Providers,
-    STEP_MODEL, Shared, StreamItem, Verdict, initiator_of, kind_for,
+    ApprovalScope, Delivery, Grant, GrantTarget, Grants, LoopError, MessageMode, ModelOut, Pending,
+    Providers, STEP_MODEL, Shared, StreamItem, Verdict, initiator_of, kind_for,
 };
-use crate::todo::TodoTool;
+use crate::{AUDIT_GRANT_ALWAYS, AUDIT_GRANT_REVOKED};
 
 type Result<T> = std::result::Result<T, LoopError>;
 
@@ -39,14 +41,13 @@ enum Start {
 /// Tokio runtime.
 #[derive(Clone)]
 pub struct AgentLoop {
-    sh: Arc<Shared>,
+    pub(crate) sh: Arc<Shared>,
     rt: Arc<Runtime>,
 }
 
 impl AgentLoop {
-    /// Build a loop.  Registers the built-in `plan.todo_write` tool into `tools`
-    /// (unless a tool with that name already exists) and reloads persisted
-    /// "always allow" grants from the audit log.
+    /// Build a loop and reload the persisted "always allow" grant rules.
+    /// Use [`Self::with_builtin_tools`] to register the built-in tool set.
     #[must_use]
     pub fn new(
         storage: Arc<Storage>,
@@ -55,8 +56,10 @@ impl AgentLoop {
         cfg: LoopConfig,
     ) -> Self {
         let (events, _) = broadcast::channel(4096);
+        let surface = ToolSurface::new(tools.clone(), cfg.discovery_threshold);
         let sh = Arc::new(Shared {
             storage: Arc::clone(&storage),
+            surface,
             tools,
             providers,
             resolver: PermissionResolver::new(),
@@ -69,9 +72,8 @@ impl AgentLoop {
             active: Mutex::new(HashMap::new()),
             queued: Mutex::new(HashMap::new()),
             tasks: Mutex::new(HashMap::new()),
+            bg: Mutex::new(Vec::new()),
         });
-        sh.tools
-            .register(Arc::new(TodoTool::new(Arc::downgrade(&sh))));
         let rt = Arc::new(Runtime::new(
             storage,
             Arc::new(TurnExecutor {
@@ -79,6 +81,20 @@ impl AgentLoop {
             }),
         ));
         Self { sh, rt }
+    }
+
+    /// Register the built-in tools (desktop, browser, files, shell, script,
+    /// `ask_user`, `todo_write`) into the loop's registry.  The config's
+    /// [`ToolGate`](builtin_tools::ToolGate) is replaced by the loop's own, so
+    /// tool calls made from `script_run` go through the same resolver and
+    /// interactive approval flow as direct calls.
+    #[must_use]
+    pub fn with_builtin_tools(self, mut cfg: BuiltinConfig) -> Self {
+        cfg.gate = Arc::new(LoopGate {
+            sh: Arc::downgrade(&self.sh),
+        });
+        let _ = builtin_tools::register_builtin_tools(&self.sh.tools, cfg);
+        self
     }
 
     /// Register the profile used by `bot_id` (otherwise the bot row's JSON
@@ -208,6 +224,90 @@ impl AgentLoop {
             .tx
             .send(Verdict::Denied { by, reason })
             .map_err(|_| LoopError::NoPendingApproval(call_id))
+    }
+
+    /// Answer a pending question card (the id from `QuestionAsked`).
+    ///
+    /// # Errors
+    /// [`LoopError::NoPendingApproval`] if no question is waiting under that id.
+    pub fn answer_question(&self, call_id: ToolCallId, answer: &str) -> Result<()> {
+        self.take_pending(call_id)?
+            .tx
+            .send(Verdict::Answered {
+                answer: answer.to_owned(),
+            })
+            .map_err(|_| LoopError::NoPendingApproval(call_id))
+    }
+
+    /// The persisted "always allow" rules of a bot.
+    #[must_use]
+    pub fn list_grants(&self, bot_id: BotId) -> Vec<Grant> {
+        self.sh
+            .grants
+            .lock()
+            .always
+            .iter()
+            .filter(|g| g.bot_id == bot_id)
+            .cloned()
+            .collect()
+    }
+
+    /// Remove one "always allow" rule (audited).  Returns whether it existed.
+    ///
+    /// # Errors
+    /// Fails if the bot is unknown or the audit entry cannot be written.
+    pub fn revoke_grant(&self, bot_id: BotId, target: &GrantTarget) -> Result<bool> {
+        let bot = self
+            .sh
+            .storage
+            .get_bot(bot_id)?
+            .ok_or_else(|| LoopError::NotFound(format!("bot {bot_id}")))?;
+        let removed = {
+            let mut g = self.sh.grants.lock();
+            let before = g.always.len();
+            g.always
+                .retain(|x| !(x.bot_id == bot_id && x.target == *target));
+            g.always.len() != before
+        };
+        if removed {
+            let probe = Grant {
+                bot_id,
+                target: target.clone(),
+                granted_at_ms: 0,
+            };
+            self.sh.storage.append_audit(
+                bot.user_id,
+                None,
+                "user",
+                AUDIT_GRANT_REVOKED,
+                &grant_detail(&probe),
+            )?;
+        }
+        Ok(removed)
+    }
+
+    /// Whether a guard (step limit, token budget, repeat detector) ended the
+    /// run through the graceful closing call.
+    ///
+    /// # Errors
+    /// Fails on storage errors.
+    pub fn stopped_by_guard(&self, run_id: RunId) -> Result<bool> {
+        Ok(self
+            .sh
+            .storage
+            .list_steps(run_id)?
+            .iter()
+            .filter(|s| s.name == STEP_MODEL)
+            .filter_map(step_output::<ModelOut>)
+            .any(|m| m.stopped_by_guard))
+    }
+
+    /// Wait for background work (memory extraction) started so far.
+    pub async fn flush_background(&self) {
+        let handles: Vec<_> = self.sh.bg.lock().drain(..).collect();
+        for h in handles {
+            let _ = h.await;
+        }
     }
 
     fn take_pending(&self, call_id: ToolCallId) -> Result<Pending> {
@@ -388,9 +488,10 @@ impl AgentLoop {
                 chat_id,
                 run_id: Some(run_id),
                 role: "assistant".to_owned(),
-                content: text,
+                content: text.clone(),
                 created_at_ms: now_ms(),
             });
+            self.enqueue_memory(run, &text);
         }
         if let Some(ctx) = &ctx {
             if let Some(message) = &error {
@@ -426,6 +527,20 @@ impl AgentLoop {
         }
     }
 
+    /// Hand the finished exchange to the memory pipeline (background task).
+    fn enqueue_memory(&self, run: &storage::Run, final_text: &str) {
+        if !self.sh.cfg.memory.as_ref().is_some_and(|m| m.enabled) {
+            return;
+        }
+        if let Some(ex) = crate::memory::Exchange::of(&self.sh, run, final_text) {
+            let sh = Arc::clone(&self.sh);
+            let handle = tokio::spawn(crate::memory::extract(sh, ex));
+            let mut bg = self.sh.bg.lock();
+            bg.retain(|h| !h.is_finished());
+            bg.push(handle);
+        }
+    }
+
     fn final_text(&self, run_id: RunId) -> Option<String> {
         let steps = self.sh.storage.list_steps(run_id).ok()?;
         let last = steps.last()?;
@@ -442,15 +557,25 @@ fn load_grants(storage: &Storage) -> Grants {
     let mut grants = Grants::default();
     for user in storage.list_users().unwrap_or_default() {
         for e in storage.list_audit(user.id).unwrap_or_default() {
-            if e.action != AUDIT_GRANT_ALWAYS {
+            if e.action != AUDIT_GRANT_ALWAYS && e.action != AUDIT_GRANT_REVOKED {
                 continue;
             }
             let bot = e.detail["bot_id"]
                 .as_str()
                 .and_then(|s| s.parse::<Uuid>().ok())
                 .map(BotId);
-            if let (Some(bot), Some(tool)) = (bot, e.detail["tool"].as_str()) {
-                grants.always.insert((bot, tool.to_owned()));
+            let (Some(bot_id), Some(target)) = (bot, grant_target(&e.detail)) else {
+                continue;
+            };
+            grants
+                .always
+                .retain(|g| !(g.bot_id == bot_id && g.target == target));
+            if e.action == AUDIT_GRANT_ALWAYS {
+                grants.always.push(Grant {
+                    bot_id,
+                    target,
+                    granted_at_ms: e.ts_ms,
+                });
             }
         }
     }

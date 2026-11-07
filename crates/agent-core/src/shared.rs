@@ -4,10 +4,13 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
+use agent_router::{SurfaceMode, ToolSurface};
 use parking_lot::{Mutex, RwLock};
 use permission_engine::{PermissionResolver, Policy};
 use protocol::event::TodoItem;
-use protocol::{BotId, ChatId, Envelope, Event, InitiatorKind, RunId, ToolCallId, UserId};
+use protocol::{
+    BotId, ChatId, Envelope, Event, InitiatorKind, PermissionCategory, RunId, ToolCallId, UserId,
+};
 use provider_catalog::{ChatProvider, ModelRef};
 use serde::{Deserialize, Serialize};
 use storage::{EventLogWriter, Run, Storage, read_event_log};
@@ -50,8 +53,34 @@ pub enum ApprovalScope {
     Once,
     /// This tool for the rest of the chat.
     ThisChat,
-    /// This tool for this bot, persisted in the audit log.
+    /// This tool for this bot: a persisted grant rule (see
+    /// [`AgentLoop::list_grants`](crate::AgentLoop::list_grants)).
     Always,
+    /// The tool's whole permission category for this bot: a persisted grant
+    /// rule.  Absolute floors (money, never-list) still win.
+    AlwaysCategory,
+}
+
+/// What a persisted "always allow" grant covers.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum GrantTarget {
+    /// One tool, by name.
+    Tool(String),
+    /// Every tool of a permission category.
+    Category(PermissionCategory),
+}
+
+/// A persisted "always allow" rule of a bot (ADR-0012), created by approving
+/// with [`ApprovalScope::Always`] / [`ApprovalScope::AlwaysCategory`] and
+/// removable with [`AgentLoop::revoke_grant`](crate::AgentLoop::revoke_grant).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Grant {
+    /// Bot the rule belongs to.
+    pub bot_id: BotId,
+    /// What it allows.
+    pub target: GrantTarget,
+    /// When it was granted (ms since the Unix epoch).
+    pub granted_at_ms: i64,
 }
 
 /// What to do with a user message arriving while a turn is running.
@@ -117,6 +146,7 @@ impl Providers {
 pub(crate) enum Verdict {
     Approved { scope: ApprovalScope, by: UserId },
     Denied { by: UserId, reason: Option<String> },
+    Answered { answer: String },
 }
 
 pub(crate) struct Pending {
@@ -126,7 +156,20 @@ pub(crate) struct Pending {
 #[derive(Default)]
 pub(crate) struct Grants {
     pub this_chat: HashSet<(ChatId, String)>,
-    pub always: HashSet<(BotId, String)>,
+    /// Persisted rules, in creation order.
+    pub always: Vec<Grant>,
+}
+
+impl Grants {
+    pub fn covers(&self, bot: BotId, tool: &str, category: PermissionCategory) -> bool {
+        self.always.iter().any(|g| {
+            g.bot_id == bot
+                && match &g.target {
+                    GrantTarget::Tool(t) => t == tool,
+                    GrantTarget::Category(c) => *c == category,
+                }
+        })
+    }
 }
 
 pub(crate) struct CtxState {
@@ -162,6 +205,9 @@ pub(crate) struct Shared {
     pub active: Mutex<HashMap<ChatId, RunId>>,
     pub queued: Mutex<HashMap<ChatId, VecDeque<String>>>,
     pub tasks: Mutex<HashMap<RunId, JoinHandle<()>>>,
+    /// Background work (memory extraction).
+    pub bg: Mutex<Vec<JoinHandle<()>>>,
+    pub surface: ToolSurface,
 }
 
 pub(crate) fn xe(e: impl std::fmt::Display) -> ExecError {
@@ -236,6 +282,7 @@ impl Shared {
 
     /// Append to the run's NDJSON log and broadcast.
     pub fn emit(&self, ctx: &RunCtx, event: Event) {
+        let event = self.redact_event(event);
         let envelope = {
             let mut st = ctx.state.lock();
             let env = Envelope::new(st.seq, event);
@@ -253,6 +300,83 @@ impl Shared {
             run_id: ctx.run_id,
             envelope,
         });
+    }
+
+    /// Mask secrets in a string when a redactor is configured.
+    pub fn redact(&self, text: String) -> String {
+        match &self.cfg.redactor {
+            Some(r) if r.contains_secret(&text) => r.redact(&text),
+            _ => text,
+        }
+    }
+
+    /// Mask secrets in every string of an event (no-op without a redactor or
+    /// when nothing matches).
+    fn redact_event(&self, event: Event) -> Event {
+        let Some(r) = &self.cfg.redactor else {
+            return event;
+        };
+        let Ok(mut v) = serde_json::to_value(&event) else {
+            return event;
+        };
+        if !redact_value(r, &mut v) {
+            return event;
+        }
+        serde_json::from_value(v).unwrap_or(event)
+    }
+
+    /// Tool specs shown to the model: the discovery meta-tools above the
+    /// threshold, otherwise every tool the bot may see (sorted by name).
+    pub fn model_specs(&self, profile: &BotProfile) -> Vec<ToolSpec> {
+        match self.surface.mode() {
+            SurfaceMode::Discovery => self.surface.specs(),
+            SurfaceMode::Direct => self.visible_specs(profile),
+        }
+    }
+
+    /// Resolve a model-requested call to the tool to run plus the spec and name
+    /// permissions are evaluated against (for `use_tool`: the target tool).
+    /// `None` = unknown / hidden tool.
+    pub fn resolve_call(
+        &self,
+        profile: &BotProfile,
+        name: &str,
+        input: &serde_json::Value,
+    ) -> Option<Resolved> {
+        let tool = self.surface.resolve(name)?;
+        let own = tool.spec().clone();
+        let mut eff_input = input.clone();
+        let (spec, eff_name) = if name == agent_router::USE_TOOL {
+            let target = input.get("name").and_then(serde_json::Value::as_str);
+            match (target, self.surface.effective_spec(name, input)) {
+                (Some(t), Some(s)) => {
+                    if !profile.tool_visible(t) || !platform_ok(&s.platforms) {
+                        return None;
+                    }
+                    eff_input = input
+                        .get("input")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!({}));
+                    (Some(s), t.to_owned())
+                }
+                // Malformed target: the meta-tool itself reports the error.
+                _ => (None, name.to_owned()),
+            }
+        } else if self.surface.mode() == SurfaceMode::Discovery {
+            // find_tool / get_tool_details: always available to the model.
+            (Some(own), name.to_owned())
+        } else {
+            if !profile.tool_visible(name) {
+                return None;
+            }
+            (Some(own), name.to_owned())
+        };
+        Some(Resolved {
+            tool,
+            spec,
+            input: eff_input,
+            name: eff_name,
+        })
     }
 
     /// Tool specs the bot may see, sorted by name (stable prompts cache better).
@@ -274,7 +398,36 @@ impl Shared {
     }
 }
 
-fn platform_ok(platforms: &[Platform]) -> bool {
+/// Redact all strings of `v` in place; `true` if anything changed.
+fn redact_value(r: &secret_store::Redactor, v: &mut serde_json::Value) -> bool {
+    match v {
+        serde_json::Value::String(s) => {
+            if r.contains_secret(s) {
+                *s = r.redact(s);
+                true
+            } else {
+                false
+            }
+        }
+        serde_json::Value::Array(a) => a.iter_mut().fold(false, |c, x| redact_value(r, x) | c),
+        serde_json::Value::Object(o) => o.values_mut().fold(false, |c, x| redact_value(r, x) | c),
+        _ => false,
+    }
+}
+
+/// Result of [`Shared::resolve_call`].
+pub(crate) struct Resolved {
+    pub tool: Arc<dyn tool_registry::Tool>,
+    /// Spec to evaluate permissions against; `None` for a malformed `use_tool`
+    /// (it executes nothing and just reports the error).
+    pub spec: Option<ToolSpec>,
+    /// Input permissions are evaluated against (`use_tool`: the target's input).
+    pub input: serde_json::Value,
+    /// Name permissions / grants are keyed by.
+    pub name: String,
+}
+
+pub(crate) fn platform_ok(platforms: &[Platform]) -> bool {
     let here = if cfg!(windows) {
         Platform::Windows
     } else if cfg!(target_os = "macos") {
@@ -292,6 +445,15 @@ pub(crate) struct ModelOut {
     pub tool_calls: Vec<provider_catalog::ToolCall>,
     pub usage: Option<provider_catalog::Usage>,
     pub finish: String,
+    /// Model that actually answered (differs from the planned one after a fallback).
+    #[serde(default)]
+    pub model: String,
+    /// This was the tool-less closing call after a guard stopped the turn.
+    #[serde(default)]
+    pub stopped_by_guard: bool,
+    /// Which guard stopped the turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guard_reason: Option<String>,
 }
 
 /// One call inside a persisted tool step's input.

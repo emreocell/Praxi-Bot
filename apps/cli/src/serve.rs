@@ -1,0 +1,147 @@
+//! `bot serve`: assemble storage, providers, tools and the agent loop, then
+//! run the daemon API (`daemon-api`) until Ctrl-C.
+
+use std::net::{Ipv4Addr, SocketAddr};
+use std::path::Path;
+use std::sync::Arc;
+
+use agent_core::{AgentLoop, LoopConfig, Providers};
+use builtin_tools::{BuiltinConfig, ResolverGate, register_builtin_tools};
+use daemon_api::{AppState, DaemonConfig, load_or_create_token, token_path};
+use permission_engine::{PermissionResolver, Policy};
+use protocol::InitiatorKind;
+use provider_catalog::{
+    Catalog, ChatProvider, OpenAiCompatConfig, ProviderConfig, ProviderEntry, ProviderSettings,
+    config_path,
+};
+use secret_store::SecretStore;
+use storage::Storage;
+use tool_registry::ToolRegistry;
+
+use crate::Result;
+
+/// Providers from `providers.toml`: every enabled one that can be built, the
+/// effective default first.
+///
+/// # Errors
+/// No usable provider.
+pub fn build_providers(
+    data_dir: &Path,
+    catalog: &Catalog,
+    store: &dyn SecretStore,
+    warn: &mut dyn FnMut(&str),
+) -> Result<Providers> {
+    let cfg = ProviderConfig::load(&config_path(data_dir))?;
+    let default_id = cfg.effective_default().map(|d| d.id.clone());
+    let mut built: Vec<(String, Arc<dyn ChatProvider>)> = Vec::new();
+    for s in cfg.providers.iter().filter(|p| p.enabled) {
+        match build_one(s, catalog, store) {
+            Ok(p) => built.push((s.id.clone(), p)),
+            Err(e) => warn(&format!("provider {} skipped: {e}", s.id)),
+        }
+    }
+    let pos = built
+        .iter()
+        .position(|(id, _)| Some(id) == default_id.as_ref())
+        .unwrap_or(0);
+    if built.is_empty() {
+        return Err("no usable provider; run `bot setup` or `bot providers add`".into());
+    }
+    let (_, first) = built.remove(pos);
+    let mut providers = Providers::single(first);
+    for (_, p) in built {
+        providers = providers.with(p);
+    }
+    Ok(providers)
+}
+
+fn build_one(
+    s: &ProviderSettings,
+    catalog: &Catalog,
+    store: &dyn SecretStore,
+) -> Result<Arc<dyn ChatProvider>> {
+    let entry: ProviderEntry = match &s.custom {
+        Some(c) => c.clone(),
+        None => catalog
+            .get(&s.id)
+            .cloned()
+            .ok_or_else(|| format!("{:?} is not in the catalog", s.id))?,
+    };
+    Ok(Arc::new(s.build_provider(
+        &entry,
+        store,
+        OpenAiCompatConfig::default(),
+    )?))
+}
+
+/// Assemble the loop (tools + providers) over `storage`.
+pub fn build_agent(storage: &Arc<Storage>, providers: Providers, data_dir: &Path) -> AgentLoop {
+    let tools = ToolRegistry::new();
+    // Tool calls made from scripts cannot wait for a human: `Ask` is refused.
+    let gate = ResolverGate::new(
+        PermissionResolver::new(),
+        Policy::approve_destructive(),
+        None,
+        InitiatorKind::Human,
+    );
+    let _ = register_builtin_tools(
+        &tools,
+        BuiltinConfig::new(data_dir.to_path_buf(), Arc::new(gate)),
+    );
+    AgentLoop::new(Arc::clone(storage), tools, providers, LoopConfig::default())
+}
+
+/// Run the daemon until Ctrl-C.
+///
+/// # Errors
+/// Storage, token, bind or server errors.
+pub fn serve(data_dir: &Path, port: u16, providers: Providers, json: bool) -> Result<()> {
+    let storage = Arc::new(Storage::open(data_dir)?);
+    let agent = build_agent(&storage, providers, data_dir);
+    let recovered = agent.recover()?;
+    let token = load_or_create_token(data_dir)?;
+    if !token.restricted {
+        eprintln!(
+            "warning: could not restrict {} to the current user",
+            token_path(data_dir).display()
+        );
+    }
+    let state = AppState::new(agent, storage, DaemonConfig::new(token.token))?;
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    rt.block_on(async {
+        // Loopback only: never bind another interface.
+        let listener =
+            tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).await?;
+        let addr = listener.local_addr()?;
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "listening": format!("http://{addr}"),
+                    "token_file": token_path(data_dir),
+                    "recovered_runs": recovered.len(),
+                })
+            );
+        } else {
+            println!("listening on http://{addr}");
+            println!("token file: {}", token_path(data_dir).display());
+            if !recovered.is_empty() {
+                println!(
+                    "{} interrupted run(s) are paused; resume via POST /v1/runs/{{id}}/resume",
+                    recovered.len()
+                );
+            }
+        }
+        let paused = daemon_api::serve(listener, state, async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await?;
+        if !json {
+            println!("stopped; {} running run(s) checkpointed", paused.len());
+        }
+        Ok::<(), Box<dyn std::error::Error>>(())
+    })
+}
