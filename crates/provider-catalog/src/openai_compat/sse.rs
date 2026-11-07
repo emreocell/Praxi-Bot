@@ -12,13 +12,13 @@ use crate::{
 /// Incremental server-sent-events decoder. Yields the `data` payload of each
 /// complete event; comments (`: keepalive`) and other fields are ignored.
 #[derive(Debug, Default)]
-pub(super) struct SseDecoder {
+pub(crate) struct SseDecoder {
     buf: Vec<u8>,
     data: Vec<String>,
 }
 
 impl SseDecoder {
-    pub(super) fn push(&mut self, bytes: &[u8]) -> Vec<String> {
+    pub(crate) fn push(&mut self, bytes: &[u8]) -> Vec<String> {
         self.buf.extend_from_slice(bytes);
         let mut events = Vec::new();
         while let Some(pos) = self.buf.iter().position(|&b| b == b'\n') {
@@ -38,7 +38,7 @@ impl SseDecoder {
     }
 
     /// Flush a trailing event that was not terminated by a blank line.
-    pub(super) fn finish(&mut self) -> Option<String> {
+    pub(crate) fn finish(&mut self) -> Option<String> {
         if !self.buf.is_empty() {
             let rest = std::mem::take(&mut self.buf);
             let line = String::from_utf8_lossy(&rest);
@@ -95,6 +95,7 @@ fn parse_usage(u: &Value) -> Option<Usage> {
         prompt_tokens: get("prompt_tokens").unwrap_or(0),
         completion_tokens: get("completion_tokens").unwrap_or(0),
         cached_tokens: cached,
+        cache_write_tokens: None,
     })
 }
 

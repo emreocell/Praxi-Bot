@@ -253,8 +253,10 @@ enum ProvidersCmd {
 }
 
 const BUILTIN_CATALOG: &[&str] = &[
+    include_str!("../../../providers/catalog/anthropic.toml"),
     include_str!("../../../providers/catalog/deepseek.toml"),
     include_str!("../../../providers/catalog/gemini-openai-compat.toml"),
+    include_str!("../../../providers/catalog/gemini.toml"),
     include_str!("../../../providers/catalog/lmstudio.toml"),
     include_str!("../../../providers/catalog/ollama.toml"),
     include_str!("../../../providers/catalog/openrouter.toml"),
@@ -406,6 +408,8 @@ fn run() -> Result<()> {
 }
 
 fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result<()> {
+    use std::sync::Arc;
+
     let grace = match command {
         Command::Serve { shutdown_grace, .. } => std::time::Duration::from_secs(*shutdown_grace),
         _ => daemon_api::DEFAULT_SHUTDOWN_GRACE,
@@ -416,9 +420,19 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
         ..
     } = command
     {
-        let providers =
-            agent_core::Providers::single(std::sync::Arc::new(daemon_api::fake::FakeProvider));
-        return serve::serve(data_dir, cli.port, providers, cli.json, grace);
+        // Demos: the echo provider and a scripted in-memory desktop.
+        let providers = agent_core::Providers::single(Arc::new(daemon_api::fake::FakeProvider));
+        let desktop: Arc<dyn desktop_api::DesktopBackend> =
+            Arc::new(daemon_api::fake::FakeDesktop::default());
+        return serve::serve(
+            data_dir,
+            cli.port,
+            providers,
+            None,
+            Some(desktop),
+            cli.json,
+            grace,
+        );
     }
     let (store, kind) = open_store(cli.secrets_backend, data_dir, &ask_passphrase)?;
     eprintln!("(secret backend: {kind:?})");
@@ -426,7 +440,28 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
     let providers = serve::build_providers(data_dir, &catalog, store.as_ref(), &mut |w| {
         eprintln!("warning: {w}");
     })?;
-    serve::serve(data_dir, cli.port, providers, cli.json, grace)
+    // `POST /v1/providers/reload` rebuilds the providers the same way.
+    let store: Arc<dyn secret_store::SecretStore> = Arc::from(store);
+    let host = daemon_api::ProviderHost {
+        catalog: catalog.clone(),
+        reload: {
+            let (dir, catalog) = (data_dir.to_path_buf(), catalog);
+            Box::new(move || {
+                serve::build_providers(&dir, &catalog, store.as_ref(), &mut |_| {})
+                    .map_err(|e| e.to_string())
+            })
+        },
+    };
+    let desktop = serve::local_desktop(&mut |w| eprintln!("warning: {w}"));
+    serve::serve(
+        data_dir,
+        cli.port,
+        providers,
+        Some(host),
+        desktop,
+        cli.json,
+        grace,
+    )
 }
 
 fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result<()> {

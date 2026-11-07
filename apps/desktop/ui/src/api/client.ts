@@ -4,12 +4,18 @@ import type {
   Bot,
   BotInput,
   Chat,
+  ControlModeName,
+  ControlStateDto,
+  ControlVerdict,
   Decision,
   ErrorBody,
   Grant,
   GrantTarget,
   Health,
   Message,
+  PolicyDto,
+  PolicyInput,
+  ProvidersDto,
   Run,
   Scope,
   SendMode,
@@ -176,5 +182,36 @@ export class ApiClient {
 
   usage(sinceMs?: number): Promise<UsageSummary> {
     return this.request("GET", "/usage", { query: { since_ms: sinceMs } });
+  }
+
+  /** Heartbeat of the desktop app as controller (see `controlBridge.ts`). */
+  putControlState(mode: ControlModeName): Promise<ControlStateDto> {
+    return this.request("PUT", "/control/state", { body: { mode } });
+  }
+  decideControl(
+    requestId: string,
+    decision: ControlVerdict,
+    reason?: string
+  ): Promise<{ request_id: string; decision: ControlVerdict }> {
+    return this.request("POST", `/control/${requestId}`, {
+      body: { decision, reason }
+    });
+  }
+
+  getPolicy(): Promise<PolicyDto> {
+    return this.request("GET", "/policy");
+  }
+  putPolicy(input: PolicyInput): Promise<PolicyDto> {
+    return this.request("PUT", "/policy", { body: input });
+  }
+
+  providers(): Promise<ProvidersDto> {
+    return this.request("GET", "/providers");
+  }
+  reloadProviders(): Promise<{
+    default_provider?: string | null;
+    active: string[];
+  }> {
+    return this.request("POST", "/providers/reload");
   }
 }

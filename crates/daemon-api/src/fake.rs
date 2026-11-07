@@ -20,6 +20,7 @@ fn usage() -> ChatChunk {
         prompt_tokens: 10,
         completion_tokens: 5,
         cached_tokens: None,
+        cache_write_tokens: None,
     })
 }
 
@@ -75,5 +76,109 @@ impl ChatProvider for FakeProvider {
             },
         };
         Ok(futures::stream::iter(chunks.into_iter().map(Ok)).boxed())
+    }
+}
+
+/// A scripted in-memory desktop for demos and tests (`bot serve
+/// --fake-provider`): one window "Fake App" with a row of buttons on screen;
+/// actions are counted, never performed.
+#[derive(Debug, Default)]
+pub struct FakeDesktop {
+    generation: std::sync::atomic::AtomicU64,
+    /// Actions dispatched so far.
+    pub actions: std::sync::atomic::AtomicUsize,
+}
+
+fn fake_window() -> desktop_api::WindowInfo {
+    desktop_api::WindowInfo {
+        id: 1,
+        title: "Fake App".into(),
+        pid: 4242,
+        bounds: desktop_api::snapshot::Rect {
+            x: 300.0,
+            y: 200.0,
+            width: 900.0,
+            height: 500.0,
+        },
+        focused: true,
+    }
+}
+
+#[async_trait]
+impl desktop_api::DesktopBackend for FakeDesktop {
+    async fn snapshot(
+        &self,
+        _scope: Option<u64>,
+    ) -> Result<desktop_api::Snapshot, desktop_api::DesktopError> {
+        use std::sync::atomic::Ordering;
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let nodes: Vec<desktop_api::snapshot::UiNode> = (0..6u32)
+            .map(|i| {
+                desktop_api::snapshot::UiNode::new(
+                    i,
+                    "button",
+                    format!("Button {i}"),
+                    None,
+                    Some(desktop_api::snapshot::Rect {
+                        x: 340.0 + f64::from(i) * 130.0,
+                        y: 420.0,
+                        width: 110.0,
+                        height: 44.0,
+                    }),
+                    vec![],
+                )
+            })
+            .collect();
+        let quality = desktop_api::snapshot::TreeQuality::assess(&nodes);
+        Ok(desktop_api::Snapshot {
+            window: fake_window(),
+            nodes,
+            generation,
+            quality,
+        })
+    }
+
+    async fn act(
+        &self,
+        _action: desktop_api::Action,
+    ) -> Result<desktop_api::ActionResult, desktop_api::DesktopError> {
+        self.actions
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(desktop_api::ActionResult {
+            dispatched: true,
+            verified: None,
+            new_snapshot: None,
+        })
+    }
+
+    async fn screenshot(
+        &self,
+        _region: desktop_api::Region,
+        _quality: desktop_api::Quality,
+    ) -> Result<desktop_api::snapshot::Image, desktop_api::DesktopError> {
+        Err(desktop_api::DesktopError::Unsupported(
+            "the fake desktop has no screen".into(),
+        ))
+    }
+
+    async fn windows(&self) -> Result<Vec<desktop_api::WindowInfo>, desktop_api::DesktopError> {
+        Ok(vec![fake_window()])
+    }
+
+    async fn launch(
+        &self,
+        _app: desktop_api::snapshot::AppSpec,
+    ) -> Result<desktop_api::snapshot::Pid, desktop_api::DesktopError> {
+        Ok(4242)
+    }
+
+    fn capabilities(&self) -> desktop_api::Capabilities {
+        desktop_api::Capabilities {
+            platform: "fake".into(),
+            accessibility_tree: true,
+            screenshot: false,
+            app_launch: true,
+            has_display: true,
+        }
     }
 }

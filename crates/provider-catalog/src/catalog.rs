@@ -124,6 +124,7 @@ mod tests {
             },
             compat_flags: CompatFlags::default(),
             models_endpoint: None,
+            models: Vec::new(),
         }
     }
 

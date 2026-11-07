@@ -440,15 +440,21 @@ fn is_human_driving(control: State<'_, ControlHandle>) -> bool {
 #[tauri::command]
 async fn begin_action(
     control: State<'_, ControlHandle>,
-    rect: OverlayRect,
+    rect: Option<OverlayRect>,
     label: String,
     action: Option<String>,
     text: Option<String>,
 ) -> Result<bool, String> {
     let action_kind = action.unwrap_or_else(|| "click".to_string());
-    Ok(control
-        .begin_action_with_detail(rect, label, action_kind, text)
-        .await)
+    Ok(match rect {
+        Some(rect) => {
+            control
+                .begin_action_with_detail(rect, label, action_kind, text)
+                .await
+        }
+        // No target (key press, launch): no highlight, only the step text.
+        None => control.begin_action_untargeted(label).await,
+    })
 }
 
 #[tauri::command]

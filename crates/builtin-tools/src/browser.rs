@@ -21,6 +21,7 @@ use tool_registry::{
     Effect, PermissionCategory, Tool, ToolContext, ToolError, ToolOutput, ToolSpec,
 };
 
+use crate::control::{ControlRequest, DesktopControlGate};
 use crate::util::{exec_err, finish_text, parse, save_file, spec};
 
 /// What `browser_wait` waits for.
@@ -38,6 +39,12 @@ pub enum Wait {
 /// text view of what changed.
 #[async_trait]
 pub trait BrowserDriver: Send + Sync {
+    /// Whether the browser window is visible on the user's desktop (then its
+    /// mutating actions go through the desktop control gate).  Headless and
+    /// remote browsers are not.
+    fn on_desktop(&self) -> bool {
+        false
+    }
     /// Navigate to `url` (starting the browser if needed); returns the page snapshot.
     async fn open(&self, url: &str, profile: Option<&str>) -> Result<String, String>;
     /// Current page snapshot with element refs.
@@ -198,6 +205,10 @@ impl CdpDriver {
 
 #[async_trait]
 impl BrowserDriver for CdpDriver {
+    fn on_desktop(&self) -> bool {
+        !self.settings.headless
+    }
+
     async fn open(&self, url: &str, profile: Option<&str>) -> Result<String, String> {
         let mut g = self.session.lock().await;
         let sess = self.ensure(&mut g, profile).await?;
@@ -345,6 +356,7 @@ enum Op {
 struct Shared {
     driver: Arc<dyn BrowserDriver>,
     data_dir: PathBuf,
+    control: Option<Arc<dyn DesktopControlGate>>,
 }
 
 /// One browser tool.
@@ -356,10 +368,15 @@ pub struct BrowserTool {
 
 /// Build the browser tools over `driver`.
 #[must_use]
-pub fn tools(driver: Arc<dyn BrowserDriver>, data_dir: &Path) -> Vec<Arc<dyn Tool>> {
+pub fn tools(
+    driver: Arc<dyn BrowserDriver>,
+    data_dir: &Path,
+    control: Option<Arc<dyn DesktopControlGate>>,
+) -> Vec<Arc<dyn Tool>> {
     let shared = Arc::new(Shared {
         driver,
         data_dir: data_dir.to_path_buf(),
+        control,
     });
     let b = PermissionCategory::Browser;
     let ref_prop =
@@ -596,11 +613,33 @@ struct EvalIn {
 }
 
 impl BrowserTool {
-    async fn run(&self, input: Value) -> Result<String, ToolError> {
+    /// Ask the control gate before a mutating action, when the browser is a
+    /// visible window on the user's desktop.
+    async fn gate(&self, run_id: &str, action: &str, label: String) -> Result<(), ToolError> {
+        let Some(gate) = self
+            .shared
+            .control
+            .as_ref()
+            .filter(|_| self.shared.driver.on_desktop())
+        else {
+            return Ok(());
+        };
+        gate.before_action(&ControlRequest {
+            run_id: run_id.to_owned(),
+            rect: None,
+            label,
+            action: action.to_owned(),
+        })
+        .await
+        .map_err(exec_err)
+    }
+
+    async fn run(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
         let d = &self.shared.driver;
         let text = match self.op {
             Op::Open => {
                 let i: OpenIn = parse(input)?;
+                self.gate(run_id, "open", i.url.clone()).await?;
                 d.open(&i.url, i.profile.as_deref()).await
             }
             Op::Snapshot => {
@@ -609,22 +648,28 @@ impl BrowserTool {
             }
             Op::Click => {
                 let i: RefIn = parse(input)?;
+                self.gate(run_id, "click", i.r#ref.clone()).await?;
                 d.click(&i.r#ref).await
             }
             Op::Fill => {
                 let i: FillIn = parse(input)?;
+                self.gate(run_id, "type", i.r#ref.clone()).await?;
                 d.fill(&i.r#ref, &i.text).await
             }
             Op::Select => {
                 let i: SelectIn = parse(input)?;
+                self.gate(run_id, "click", i.r#ref.clone()).await?;
                 d.select(&i.r#ref, &i.value).await
             }
             Op::Press => {
                 let i: PressIn = parse(input)?;
+                self.gate(run_id, "key", i.key.clone()).await?;
                 d.press(&i.key).await
             }
             Op::Scroll => {
                 let i: ScrollIn = parse(input)?;
+                self.gate(run_id, "scroll", i.r#ref.clone().unwrap_or_default())
+                    .await?;
                 d.scroll(i.r#ref.as_deref(), i.dx, i.dy).await
             }
             Op::Wait => {
@@ -646,7 +691,10 @@ impl BrowserTool {
                 };
                 d.wait(cond, i.timeout_secs.map(Duration::from_secs)).await
             }
-            Op::Back => d.back().await,
+            Op::Back => {
+                self.gate(run_id, "key", "back".to_owned()).await?;
+                d.back().await
+            }
             Op::Tabs => {
                 let i: TabsIn = parse(input)?;
                 d.tabs(i.switch_to).await
@@ -676,7 +724,7 @@ impl Tool for BrowserTool {
     }
 
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
-        let text = self.run(input).await?;
+        let text = self.run(&ctx.run_id, input).await?;
         Ok(finish_text(ctx, &self.shared.data_dir.join("spill"), text))
     }
 }
@@ -759,7 +807,7 @@ mod tests {
     fn build() -> (tempfile::TempDir, Arc<FakeBrowser>, Vec<Arc<dyn Tool>>) {
         let d = tempfile::tempdir().unwrap();
         let fake = Arc::new(FakeBrowser::default());
-        let t = tools(fake.clone(), d.path());
+        let t = tools(fake.clone(), d.path(), None);
         (d, fake, t)
     }
 

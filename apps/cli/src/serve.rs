@@ -7,8 +7,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agent_core::{AgentLoop, LoopConfig, Providers};
-use builtin_tools::{BuiltinConfig, ResolverGate, register_builtin_tools};
-use daemon_api::{AppState, DaemonConfig, load_or_create_token, token_path};
+use builtin_tools::{BuiltinConfig, ResolverGate};
+use daemon_api::{AppState, DaemonConfig, ProviderHost, load_or_create_token, token_path};
+use desktop_api::DesktopBackend;
 use permission_engine::{PermissionResolver, Policy};
 use protocol::InitiatorKind;
 use provider_catalog::{
@@ -68,7 +69,7 @@ fn build_one(
             .cloned()
             .ok_or_else(|| format!("{:?} is not in the catalog", s.id))?,
     };
-    Ok(Arc::new(s.build_provider(
+    Ok(Arc::from(s.build_provider(
         &entry,
         store,
         OpenAiCompatConfig::default(),
@@ -76,20 +77,53 @@ fn build_one(
 }
 
 /// Assemble the loop (tools + providers) over `storage`.
-pub fn build_agent(storage: &Arc<Storage>, providers: Providers, data_dir: &Path) -> AgentLoop {
-    let tools = ToolRegistry::new();
-    // Tool calls made from scripts cannot wait for a human: `Ask` is refused.
+///
+/// `desktop` is the backend of the desktop tools (`None` = no desktop tools).
+/// The loop installs its own permission gate for tool calls made from scripts,
+/// and the desktop control gate the daemon bridges to the app
+/// (see `daemon_api::ControlHub`).
+pub fn build_agent(
+    storage: &Arc<Storage>,
+    providers: Providers,
+    data_dir: &Path,
+    desktop: Option<Arc<dyn DesktopBackend>>,
+) -> AgentLoop {
+    // Placeholder: `with_builtin_tools` replaces it with the loop's own gate.
     let gate = ResolverGate::new(
         PermissionResolver::new(),
         Policy::approve_destructive(),
         None,
         InitiatorKind::Human,
     );
-    let _ = register_builtin_tools(
-        &tools,
-        BuiltinConfig::new(data_dir.to_path_buf(), Arc::new(gate)),
-    );
-    AgentLoop::new(Arc::clone(storage), tools, providers, LoopConfig::default())
+    let mut tools = BuiltinConfig::new(data_dir.to_path_buf(), Arc::new(gate));
+    tools.desktop = desktop;
+    AgentLoop::new(
+        Arc::clone(storage),
+        ToolRegistry::new(),
+        providers,
+        LoopConfig::default(),
+    )
+    .with_builtin_tools(tools)
+}
+
+/// The desktop backend of the real daemon: Windows UI Automation on Windows,
+/// none elsewhere (yet).  `BOT_DESKTOP=off` disables it.
+#[must_use]
+pub fn local_desktop(warn: &mut dyn FnMut(&str)) -> Option<Arc<dyn DesktopBackend>> {
+    if matches!(
+        std::env::var("BOT_DESKTOP").as_deref(),
+        Ok("off" | "0" | "false")
+    ) {
+        return None;
+    }
+    #[cfg(windows)]
+    match desktop_windows::WindowsBackend::new() {
+        Ok(b) => return Some(Arc::new(b)),
+        Err(e) => warn(&format!("desktop tools disabled: {e}")),
+    }
+    #[cfg(not(windows))]
+    let _ = warn;
+    None
 }
 
 /// Environment variable with extra allowed browser origins (comma separated).
@@ -161,11 +195,13 @@ pub fn serve(
     data_dir: &Path,
     port: u16,
     providers: Providers,
+    host: Option<ProviderHost>,
+    desktop: Option<Arc<dyn DesktopBackend>>,
     json: bool,
     grace: Duration,
 ) -> Result<()> {
     let storage = Arc::new(Storage::open(data_dir)?);
-    let agent = build_agent(&storage, providers, data_dir);
+    let agent = build_agent(&storage, providers, data_dir, desktop);
     let recovered = agent.recover()?;
     let token = load_or_create_token(data_dir)?;
     if !token.restricted {
@@ -181,6 +217,9 @@ pub fn serve(
         cfg.allowed_origins.extend(parse_origins(&extra));
     }
     let state = AppState::new(agent, storage, cfg)?;
+    if let Some(host) = host {
+        state.set_provider_host(host);
+    }
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

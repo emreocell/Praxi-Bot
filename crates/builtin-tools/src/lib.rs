@@ -17,6 +17,7 @@
 
 pub mod browser;
 pub mod checkpoint;
+pub mod control;
 pub mod desktop;
 pub mod files;
 pub mod meta;
@@ -32,6 +33,7 @@ use tool_registry::{Tool, ToolRegistry};
 
 pub use browser::{BrowserDriver, BrowserSettings, CdpDriver, Wait};
 pub use checkpoint::{Checkpoint, CheckpointEntry, CheckpointStore};
+pub use control::{ControlRequest, DesktopControlGate};
 pub use desktop::{DesktopSettings, SharedOcr};
 pub use meta::{META_TOOL_NAMES, QUESTION_CARD_KIND, TODO_LIST_KIND, TodoItem, TodoStatus};
 pub use script::{
@@ -56,6 +58,9 @@ pub struct BuiltinConfig {
     pub gate: Arc<dyn ToolGate>,
     /// Limits for `script_run`.
     pub script_limits: script_runtime::Limits,
+    /// Called before every mutating desktop / visible-browser action (see
+    /// [`DesktopControlGate`]); `None` = no gate.
+    pub control: Option<Arc<dyn DesktopControlGate>>,
 }
 
 impl BuiltinConfig {
@@ -72,6 +77,7 @@ impl BuiltinConfig {
             browser: None,
             gate,
             script_limits: script_runtime::Limits::default(),
+            control: None,
         }
     }
 
@@ -95,12 +101,13 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
             cfg.ocr,
             &cfg.data_dir,
             cfg.desktop_settings,
+            cfg.control.clone(),
         ));
     }
     let driver: Arc<dyn BrowserDriver> = cfg
         .browser
         .unwrap_or_else(|| Arc::new(CdpDriver::new(cfg.browser_settings)));
-    all.extend(browser::tools(driver, &cfg.data_dir));
+    all.extend(browser::tools(driver, &cfg.data_dir, cfg.control));
     all.extend(files::tools(&cfg.data_dir));
     all.push(shell::tool(&cfg.data_dir));
     all.push(script::tool(registry.clone(), cfg.gate, cfg.script_limits));

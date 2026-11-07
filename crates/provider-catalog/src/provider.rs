@@ -126,6 +126,10 @@ pub struct Usage {
     pub completion_tokens: u64,
     /// Prompt tokens served from the provider's cache, when reported.
     pub cached_tokens: Option<u64>,
+    /// Prompt tokens written to the provider's cache (billed at a premium by
+    /// Anthropic), when reported. `prompt_tokens` includes them.
+    #[serde(default)]
+    pub cache_write_tokens: Option<u64>,
 }
 
 /// A chat completion request.

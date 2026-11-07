@@ -27,6 +27,7 @@ import {
 } from "./config/product";
 import { HealthIndicator } from "./components/HealthIndicator";
 import { botView } from "./lib/botProfile";
+import { ControlBridgeHost } from "./state/ControlBridgeHost";
 import { DaemonProvider, useDaemon } from "./state/DaemonContext";
 import { BotFormView } from "./views/BotFormView";
 import { BotHomeView } from "./views/BotHomeView";
@@ -753,6 +754,7 @@ function AppShell() {
 export function App() {
   return (
     <DaemonProvider>
+      <ControlBridgeHost />
       <AppShell />
     </DaemonProvider>
   );

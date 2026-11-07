@@ -113,7 +113,7 @@ pub fn build_live_provider(
     let (store, _) = open_store(BackendChoice::Auto, data_dir, &|_| None)?;
     let provider = settings.build_provider(&entry, &*store, OpenAiCompatConfig::default())?;
     Ok(LiveProvider {
-        provider: Arc::new(provider),
+        provider: Arc::from(provider),
         model: model_ref.0,
     })
 }

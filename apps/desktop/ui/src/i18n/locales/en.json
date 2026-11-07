@@ -80,7 +80,7 @@
     },
     "providers": {
       "title": "Model providers",
-      "description": "API keys are stored in your OS keychain. The daemon reads providers when it starts.",
+      "description": "API keys are stored in your OS keychain. Changes are picked up by the daemon without a restart.",
       "nativeOnly": "Provider management is available in the desktop app.",
       "none": "No providers configured yet.",
       "default": "Default",
@@ -101,18 +101,26 @@
       "addAndTest": "Add and test",
       "restartHint": "Restart the daemon so it picks up the change.",
       "restartManual": "Restart the daemon yourself so it picks up the change (it was not started by this app).",
-      "restart": "Restart daemon"
+      "restart": "Restart daemon",
+      "notLoaded": "Not loaded yet",
+      "modelCount": "{{count}} model",
+      "modelCount_other": "{{count}} models"
     },
     "permissions": {
       "title": "Permissions",
       "description": "What each bot may do right now, including “Always allow” rules you granted from approval cards.",
-      "workspaceDefault": "The workspace default for bots without their own policy is “Approve destructive”.",
       "noBots": "No bots yet.",
       "noGrants": "No “Always allow” rules.",
       "viaGrant": "Allowed because of an “Always allow” rule",
       "grantCategory": "Always allow every {{name}} tool",
       "grantTool": "Always allow {{name}}",
-      "revoke": "Revoke"
+      "revoke": "Revoke",
+      "workspace": {
+        "title": "Workspace default",
+        "description": "Applies to every bot without its own rule for a category. Changes take effect on the next tool call.",
+        "preset": "Preset",
+        "saved": "Saved."
+      }
     }
   },
   "overlay": {
@@ -345,7 +353,8 @@
     "cached": "Cached",
     "total": "Total",
     "deletedBot": "Deleted bot",
-    "costNote": "Cost is not reported by the daemon yet; only token counts are shown."
+    "costNote": "Cost is shown only for models with a known price; “—” means unknown.",
+    "cost": "Cost"
   },
   "needs": {
     "title": "Needs you",
@@ -356,5 +365,8 @@
       "question": "Question"
     },
     "open": "Open chat"
+  },
+  "control": {
+    "starting": "Working…"
   }
 }

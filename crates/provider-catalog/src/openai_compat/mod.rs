@@ -10,21 +10,17 @@
 //! streamed; timeouts and other errors are not retried.
 
 mod request;
-mod sse;
+pub(crate) mod sse;
 #[cfg(test)]
 mod tests;
 
-use std::{
-    collections::VecDeque,
-    fmt,
-    hash::{BuildHasher, Hasher},
-    time::Duration,
-};
+use std::{collections::VecDeque, time::Duration};
 
 use async_trait::async_trait;
 use futures::{StreamExt, stream, stream::BoxStream};
 use serde_json::Value;
 
+use crate::util::{Secret, map_reqwest_error};
 use crate::{
     entry::{Auth, ProviderEntry},
     error::ProviderError,
@@ -57,16 +53,6 @@ impl Default for OpenAiCompatConfig {
             connect_timeout: Duration::from_secs(10),
             timeout: Duration::from_secs(120),
         }
-    }
-}
-
-/// API key that never appears in `Debug` output.
-#[derive(Clone)]
-struct Secret(String);
-
-impl fmt::Debug for Secret {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("Secret(<redacted>)")
     }
 }
 
@@ -134,19 +120,7 @@ impl OpenAiCompatProvider {
     }
 
     fn backoff(&self, attempt: u32, retry_after: Option<Duration>) -> Duration {
-        let max = self.config.max_delay;
-        if let Some(ra) = retry_after {
-            return ra.min(max);
-        }
-        let exp = self
-            .config
-            .base_delay
-            .saturating_mul(2u32.saturating_pow(attempt))
-            .min(max);
-        // Equal jitter: uniformly in [exp/2, exp].
-        let rnd = std::hash::RandomState::new().build_hasher().finish();
-        let frac = f64::from(u32::try_from(rnd >> 40).unwrap_or(0)) / f64::from(1u32 << 24);
-        exp.mul_f64(0.5 + 0.5 * frac)
+        crate::util::backoff(&self.config, attempt, retry_after)
     }
 
     /// Send with retry on 429/5xx. Returns the first successful response.
@@ -192,15 +166,6 @@ impl OpenAiCompatProvider {
             tokio::time::sleep(self.backoff(attempt, retry_after)).await;
             attempt += 1;
         }
-    }
-}
-
-fn map_reqwest_error(e: reqwest::Error) -> ProviderError {
-    if e.is_timeout() {
-        ProviderError::Timeout
-    } else {
-        // Strip the URL: it may carry credentials in unusual setups.
-        ProviderError::Connection(e.without_url().to_string())
     }
 }
 

@@ -139,7 +139,7 @@ pub fn providers_test(
         .enable_all()
         .build()?;
     let model = settings.model_ref();
-    let report = rt.block_on(test_connection(&provider, model.as_ref()))?;
+    let report = rt.block_on(test_connection(&*provider, model.as_ref()))?;
     out(&format!(
         "{}: OK ({} models listed)",
         settings.id,

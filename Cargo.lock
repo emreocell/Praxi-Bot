@@ -78,8 +78,15 @@ dependencies = [
  "async-trait",
  "futures",
  "parking_lot",
+ "regex",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "serde",
  "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
  "tool-registry",
+ "wiremock",
 ]
 
 [[package]]
@@ -1011,6 +1018,8 @@ dependencies = [
  "builtin-tools",
  "clap",
  "daemon-api",
+ "desktop-api",
+ "desktop-windows",
  "dialoguer",
  "futures-util",
  "permission-engine",
@@ -1385,9 +1394,13 @@ dependencies = [
  "agent-core",
  "async-trait",
  "axum",
+ "builtin-tools",
+ "desktop-api",
  "futures",
  "getrandom 0.3.4",
  "http-body-util",
+ "parking_lot",
+ "permission-engine",
  "protocol",
  "provider-catalog",
  "serde",
@@ -6720,6 +6733,18 @@ name = "siphasher"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
+
+[[package]]
+name = "skills"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "parking_lot",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tool-registry",
+]
 
 [[package]]
 name = "slab"
