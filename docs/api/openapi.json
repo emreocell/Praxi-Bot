@@ -1803,7 +1803,7 @@
         "tags": [
           "schedules"
         ],
-        "summary": "Fire a schedule from outside.  No bearer token: the body is authenticated\nwith `X-Signature-256: sha256=<hex HMAC-SHA256(secret, body)>` (the secret\nis the schedule's `webhook_secret`).  Host / Origin checks still apply and\nthe body may be at most 256 KB.  The body replaces `{input}` in the payload.\n`202` once accepted (the run goes on in the background).",
+        "summary": "Fire a schedule from outside.  No bearer token: the body is authenticated\nwith `X-Signature-256: sha256=<hex HMAC-SHA256(secret, body)>` (the secret\nis the schedule's `webhook_secret`).  Optional replay protection:\n`X-Webhook-Timestamp` (Unix ms; then the HMAC must cover `\"{timestamp}.{body}\"`\nand the timestamp must be within 5 minutes) and `X-Delivery-Id` /\n`X-GitHub-Delivery` (informational).  A signed request is accepted once per\n5-minute window whether or not those headers are sent, so the same body fired\ntwice in that time needs a timestamp (fresh signature) or a different body.  Host / Origin checks still\napply and the body may be at most 256 KB.  The body replaces `{input}` in the payload.\n`202` once accepted (the run goes on in the background).",
         "operationId": "webhook",
         "parameters": [
           {
@@ -2927,7 +2927,7 @@
           },
           "state": {
             "type": "string",
-            "description": "`pending` / `running` / `waiting_approval` / `paused` / `succeeded` / `failed` / `cancelled`."
+            "description": "`queued` / `running` / `waiting_approval` / `paused` / `succeeded` / `failed` / `cancelled`."
           },
           "updated_at_ms": {
             "type": "integer",
