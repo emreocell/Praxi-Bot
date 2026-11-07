@@ -16,6 +16,11 @@ futures.workspace = true
 globset.workspace = true
 http = "1"
 parking_lot.workspace = true
+permission-engine = { path = "../permission-engine", version = "0.1.0" }
+# Same crate rmcp uses to spawn children. Unix: new process group
+# (`process_group(0)`, kill the group). Windows: a job object with
+# `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` so npx/uvx wrapper trees die.
+process-wrap = { version = "10.0.1", features = ["tokio1"] }
 # `reqwest-native-tls` (schannel / Secure Transport / OpenSSL) instead of the
 # `reqwest` (rustls + aws-lc) feature: it avoids the OpenSSL-licensed aws-lc
 # stack, which `deny.toml` does not allow.
@@ -44,6 +49,9 @@ rmcp = { version = "3.9", default-features = false, features = [
 ] }
 tempfile = "3"
 tokio = { version = "1", features = ["io-std", "macros", "rt-multi-thread", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_System_Threading"] }
 
 # Tiny stdio MCP server used by the integration tests (built by `cargo test`).
 [[example]]

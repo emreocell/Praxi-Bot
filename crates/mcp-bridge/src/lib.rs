@@ -34,7 +34,7 @@
 //! [server.transport]
 //! type = "stdio"
 //! command = "npx"
-//! args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
+//! args = ["-y", "@modelcontextprotocol/server-filesystem@2.2.0", "."]
 //! [server.secret_env]
 //! API_KEY = "mcp/files-key"
 //! ```
@@ -42,12 +42,14 @@
 //! Large tool sets are meant to be fronted by `agent-router`'s discovery
 //! meta-tools rather than shown to the model directly.
 
+mod catalog;
 mod config;
 mod error;
 mod manager;
 mod tool;
 mod transport;
 
+pub use catalog::{CatalogEntry, CatalogInstall, RequiredSecret, builtin_catalog};
 pub use config::{McpConfigStore, McpServerConfig, McpTransport, TomlFileStore};
 pub use error::{McpError, Result};
 pub use manager::{Backoff, McpManager, McpPolicy, ServerSnapshot, ServerStatus};

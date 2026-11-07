@@ -238,6 +238,15 @@ impl Server {
         *self.session.lock().await = None;
     }
 
+    /// Cancel the session and wait until its stdio child (and, via the process
+    /// group or job object, its wrapper tree) has exited or the timeout hits.
+    async fn close_session(&self) {
+        let session = self.session.lock().await.take();
+        if let Some(session) = session {
+            close_session(session).await;
+        }
+    }
+
     /// Call a remote tool by its server-side name.
     pub(crate) async fn call(
         &self,
@@ -330,6 +339,35 @@ impl Server {
             consecutive_failures: st.failures,
             tools: st.tools.clone(),
             last_error: st.last_error.clone(),
+        }
+    }
+}
+
+/// How long [`McpManager::shutdown`] waits for one session to finish closing
+/// (the transport itself also bounds the child wait).
+const SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// Cancel `session` and wait for its service task, which closes the transport
+/// and reaps the child. In-flight callers are given a moment to drop their
+/// clones so the task can be awaited rather than aborted.
+async fn close_session(session: Arc<Session>) {
+    session.cancellation_token().cancel();
+    let mut held = session;
+    let give_up = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        match Arc::try_unwrap(held) {
+            Ok(mut owned) => {
+                let _ = tokio::time::timeout(SESSION_CLOSE_TIMEOUT, owned.close()).await;
+                return;
+            }
+            Err(shared) => {
+                if tokio::time::Instant::now() >= give_up {
+                    drop(shared);
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+                held = shared;
+            }
         }
     }
 }
@@ -471,16 +509,15 @@ impl McpManager {
             .remove(id)
             .ok_or_else(|| McpError::UnknownServer(id.to_owned()))?;
         server.unregister_all();
-        server.drop_session().await;
+        server.close_session().await;
         Ok(())
     }
 
-    /// Disconnect every server (tools stay registered but calls will reconnect lazily).
+    /// Cancel every session and wait for each stdio child to exit.
     pub async fn shutdown(&self) {
         let all: Vec<_> = self.servers.lock().values().cloned().collect();
-        for s in all {
-            s.drop_session().await;
-        }
+        let closes = all.iter().map(|s| s.close_session());
+        futures::future::join_all(closes).await;
     }
 
     /// Snapshot of one server.

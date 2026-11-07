@@ -6,6 +6,7 @@ mod channels_tests;
 mod client;
 mod commands;
 mod doctor;
+mod mcp_host;
 mod presets;
 mod prompt;
 mod remote;

@@ -7,6 +7,7 @@ use std::{
 };
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use permission_engine::NeverList;
 use secret_store::SecretRef;
 use serde::{Deserialize, Serialize};
 use tool_registry::PermissionCategory;
@@ -82,6 +83,11 @@ pub struct McpServerConfig {
     /// [`Self::secret_headers`].
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub secret_env: BTreeMap<String, String>,
+    /// Bots that may use this server's tools; `None` = all bots.
+    /// [`crate::tool::McpToolAdapter`] refuses a call whose bot id is missing
+    /// or not in the list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bots: Option<Vec<String>>,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)] // serde `skip_serializing_if` signature
@@ -118,6 +124,7 @@ impl McpServerConfig {
             category: None,
             secret_headers: BTreeMap::new(),
             secret_env: BTreeMap::new(),
+            bots: None,
         }
     }
 
@@ -137,6 +144,7 @@ impl McpServerConfig {
             category: None,
             secret_headers: BTreeMap::new(),
             secret_env: BTreeMap::new(),
+            bots: None,
         }
     }
 
@@ -207,15 +215,20 @@ impl McpServerConfig {
             _ => {}
         }
         match &self.transport {
-            McpTransport::Stdio { command, .. } if command.trim().is_empty() => {
-                return bad("stdio `command` is empty".into());
+            McpTransport::Stdio { command, args, .. } => {
+                if command.trim().is_empty() {
+                    return bad("stdio `command` is empty".into());
+                }
+                if let Some(why) = refused_stdio_command(command, args) {
+                    return bad(format!("server `{}`: {why}", self.id));
+                }
             }
             McpTransport::Http { url, .. }
                 if !(url.starts_with("http://") || url.starts_with("https://")) =>
             {
                 return bad(format!("http `url` must start with http(s)://: `{url}`"));
             }
-            _ => {}
+            McpTransport::Http { .. } => {}
         }
         self.tool_filter().map(|_| ())
     }
@@ -251,6 +264,51 @@ pub(crate) struct ToolFilter {
 impl ToolFilter {
     pub(crate) fn permits(&self, tool: &str) -> bool {
         (self.allow_all || self.allow.is_match(tool)) && !self.exclude.is_match(tool)
+    }
+}
+
+/// Quote one argv element so [`NeverList`] sees the same tokens the OS would.
+fn policy_token(token: &str) -> String {
+    let plain = !token.is_empty()
+        && token.chars().all(|c| {
+            c.is_ascii_alphanumeric()
+                || matches!(c, '/' | '\\' | '.' | '_' | '-' | '+' | ':' | '=' | '@')
+        });
+    if plain {
+        return token.to_owned();
+    }
+    if !token.contains('\'') {
+        format!("'{token}'")
+    } else if !token.contains('"') {
+        format!("\"{token}\"")
+    } else {
+        token.to_owned()
+    }
+}
+
+/// `command` plus `args` as one command line for the shell never-list.
+fn policy_command_line(command: &str, args: &[String]) -> String {
+    let mut parts = Vec::with_capacity(1 + args.len());
+    parts.push(policy_token(command));
+    for arg in args {
+        parts.push(policy_token(arg));
+    }
+    parts.join(" ")
+}
+
+/// `Some(reason)` when `command` + `args` matches the shell tool's never-list.
+///
+/// The same [`NeverList`] the permission engine uses for `shell_run`. A match
+/// refuses the spawn; it is not turned into an approval prompt.
+#[must_use]
+pub(crate) fn refused_stdio_command(command: &str, args: &[String]) -> Option<String> {
+    let line = policy_command_line(command, args);
+    if NeverList::default_list().matches(&line) {
+        Some(format!(
+            "refusing to start a stdio MCP server whose command is on the shell never-list: `{line}`"
+        ))
+    } else {
+        None
     }
 }
 
@@ -326,7 +384,12 @@ impl McpConfigStore for TomlFileStore {
         }
         // Write-then-rename so a crash never leaves a half-written file.
         let tmp = self.path.with_extension("toml.tmp");
-        fs::write(&tmp, text).map_err(io)?;
+        {
+            use std::io::Write;
+            let mut f = fs::File::create(&tmp).map_err(io)?;
+            f.write_all(text.as_bytes()).map_err(io)?;
+            f.sync_all().map_err(io)?;
+        }
         fs::rename(&tmp, &self.path).map_err(io)
     }
 }
@@ -370,6 +433,30 @@ mod tests {
         .unwrap();
         let s = &cfg.servers[0];
         assert!(s.enabled && s.tool_allow.is_empty() && s.tool_exclude.is_empty());
+    }
+
+    #[test]
+    fn never_list_stdio_command_is_rejected() {
+        let err = McpServerConfig::stdio("evil", "rm", ["-rf", "/"])
+            .validate()
+            .unwrap_err();
+        let McpError::Config(msg) = err else {
+            panic!("expected config error");
+        };
+        assert!(msg.contains("never-list"), "{msg}");
+        assert!(msg.contains("evil"), "{msg}");
+        // Nested shell payload, same policy as `shell_run`.
+        let err = McpServerConfig::stdio("evil", "sh", ["-c", "rm -rf /"])
+            .validate()
+            .unwrap_err();
+        assert!(err.to_string().contains("never-list"), "{err}");
+        // Ordinary package runners are not on the never-list.
+        assert!(
+            McpServerConfig::stdio("ok", "npx", ["-y", "@scope/pkg@1.2.3"])
+                .validate()
+                .is_ok()
+        );
+        assert!(refused_stdio_command("format", &[]).is_some());
     }
 
     #[test]

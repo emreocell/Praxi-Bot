@@ -288,6 +288,7 @@ async fn oversize_body_is_cut_and_spilled() {
     let ctx = ToolContext {
         run_id: "t".into(),
         max_inline_bytes: 2_000,
+        ..Default::default()
     };
     let out = call_ctx(&reg, "web_extract", json!({"url": server.uri()}), &ctx)
         .await
@@ -643,6 +644,7 @@ async fn large_sitemap_and_feed_json_respect_inline_budget_and_spill() {
     let ctx = ToolContext {
         run_id: "t".into(),
         max_inline_bytes: 4_000,
+        ..Default::default()
     };
     for (tool, file, limit) in [
         ("web_sitemap", "sitemap.xml", 3000),
