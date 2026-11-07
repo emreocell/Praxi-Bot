@@ -1,0 +1,14 @@
+name: browser-httpbin-form
+description: Fill and submit the httpbin pizza-order form and read the echoed values.
+requires: browser
+prompt: "Open https://httpbin.org/forms/post, fill the customer name with 'Eval Bot', choose the Medium pizza size and the Bacon topping, submit the order, and tell me the customer name the server echoed back."
+max_steps: 15
+timeout_s: 150
+checks:
+  - browser_text_contains: Eval Bot
+  - browser_text_contains: medium
+  - browser_text_contains: bacon
+  - final_text: { contains: [Eval Bot] }
+fake_script:
+  - tool_calls: [{ id: c1, tool: browser_open, args: { url: "https://httpbin.org/forms/post" } }]
+  - text: The server echoed Eval Bot.

@@ -1,0 +1,20 @@
+name: todo-plan-no-approval
+description: The built-in plan tool is exempt from approval even under approve-destructive and reports progress to the model.
+policy: approve_destructive
+user: plan it
+script:
+  - tool_calls:
+      - id: c1
+        tool: plan.todo_write
+        args:
+          todos:
+            - { text: a, status: done }
+            - { text: b, status: in_progress }
+  - text: planned
+expect:
+  state: succeeded
+  model_calls: 2
+  permissions:
+    - { tool: plan.todo_write, decision: allowed }
+  requests:
+    - { request: 1, tool_messages_contain: ["1/2 done"] }

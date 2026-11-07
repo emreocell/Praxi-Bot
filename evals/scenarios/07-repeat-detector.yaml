@@ -1,0 +1,21 @@
+name: repeat-detector
+description: Identical consecutive calls get a warning on the 3rd and stop the turn on the 5th, which never executes.
+policy: full
+tools:
+  - { name: t_read, effect: read, category: fs, output: same }
+user: go
+script:
+  - tool_calls: [{ id: "1", tool: t_read, args: { q: x } }]
+  - tool_calls: [{ id: "2", tool: t_read, args: { q: x } }]
+  - tool_calls: [{ id: "3", tool: t_read, args: { q: x } }]
+  - tool_calls: [{ id: "4", tool: t_read, args: { q: x } }]
+  - tool_calls: [{ id: "5", tool: t_read, args: { q: x } }]
+  - text: unreachable
+expect:
+  state: failed
+  model_calls: 5
+  tool_runs: { t_read: 4 }
+  error: { contains: [repeat detected] }
+  requests:
+    - { request: 2, tool_messages_not_contain: ["warning: this exact call"] }
+    - { request: 3, tool_messages_contain: ["warning: this exact call has now been made 3 times"] }

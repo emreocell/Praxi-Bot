@@ -1,0 +1,19 @@
+name: tool-filter-hides-tool
+description: A tool excluded by the bot profile is not offered to the model and cannot be called by name.
+policy: full
+profile_toml: |
+  [tools]
+  exclude = ["t_write"]
+tools:
+  - { name: t_read, effect: read, category: fs, output: r }
+  - { name: t_write, effect: write, category: fs, output: w }
+user: go
+script:
+  - tool_calls: [{ id: c1, tool: t_write, args: {} }]
+  - text: ok
+expect:
+  state: succeeded
+  tool_runs: { t_write: 0 }
+  requests:
+    - { request: 0, tools_offered: [t_read], tools_not_offered: [t_write] }
+    - { request: 1, tool_messages_contain: [unknown tool] }

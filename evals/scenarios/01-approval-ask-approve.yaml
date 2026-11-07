@@ -1,0 +1,21 @@
+name: approval-ask-approve
+description: A write under approve-destructive waits for approval, runs only after it, and the result reaches the model.
+policy: approve_destructive
+tools:
+  - { name: t_write, effect: write, category: fs, output: written }
+user: go
+script:
+  - tool_calls: [{ id: c1, tool: t_write, args: { p: 1 } }]
+  - text: done
+reactions:
+  - { on: approval_needed, tool: t_write, do: approve }
+expect:
+  state: succeeded
+  model_calls: 2
+  tool_calls: [t_write]
+  tool_runs: { t_write: 1 }
+  permissions:
+    - { tool: t_write, decision: approved }
+  final_text: { contains: [done] }
+  requests:
+    - { request: 1, tool_messages_contain: [written] }

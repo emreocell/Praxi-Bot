@@ -1,0 +1,18 @@
+name: browser-wikipedia-search
+description: Use Wikipedia's search box to reach an article and answer a factual question from it (deterministic checks plus a judge).
+requires: browser
+prompt: "Open https://en.wikipedia.org, use the site's search box to search for 'Rust (programming language)', open that article, and tell me in which year Rust 1.0 was released."
+max_steps: 15
+timeout_s: 150
+checks:
+  - browser_url_contains: Rust_(programming_language)
+  - final_text: { contains: ["2015"] }
+  - judge:
+      rubric: >
+        The agent must have reached the English Wikipedia article about the Rust programming
+        language by using the site search (not by guessing an unrelated page), and its final
+        answer must say that Rust 1.0 was released in 2015. The final screenshot should show
+        that article.
+fake_script:
+  - tool_calls: [{ id: c1, tool: browser_open, args: { url: "https://en.wikipedia.org/wiki/Rust_(programming_language)" } }]
+  - text: Rust 1.0 was released in 2015.

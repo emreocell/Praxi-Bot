@@ -1,0 +1,14 @@
+name: spill-large-output
+description: A 40 KiB tool output is spilled to a file; the model only sees a short preview plus the path.
+policy: full
+tools:
+  - { name: t_read, effect: read, category: fs, output_bytes: 40960 }
+user: go
+script:
+  - tool_calls: [{ id: c1, tool: t_read, args: {} }]
+  - text: ok
+expect:
+  state: succeeded
+  model_calls: 2
+  requests:
+    - { request: 1, max_tool_message_bytes: 4096, tool_messages_contain: [full output saved to, output truncated] }

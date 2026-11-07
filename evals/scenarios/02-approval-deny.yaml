@@ -1,0 +1,19 @@
+name: approval-deny
+description: A denied approval never runs the tool; the model is told why and not to retry.
+policy: approve_destructive
+tools:
+  - { name: t_write, effect: write, category: fs, output: written }
+user: go
+script:
+  - tool_calls: [{ id: c1, tool: t_write, args: {} }]
+  - text: ok, not doing it
+reactions:
+  - { on: approval_needed, tool: t_write, do: deny, text: too risky }
+expect:
+  state: succeeded
+  model_calls: 2
+  tool_runs: { t_write: 0 }
+  permissions:
+    - { tool: t_write, decision: denied_user }
+  requests:
+    - { request: 1, tool_messages_contain: [denied by the user, too risky, Do not retry] }

@@ -1,0 +1,11 @@
+name: cancel-hung-model
+description: Cancelling a run whose model call never answers ends it in the cancelled state.
+policy: full
+user: hello
+script:
+  - hang: true
+reactions:
+  - { on: run_started, do: cancel, once: true, delay_ms: 200 }
+expect:
+  state: cancelled
+  model_calls: { max: 1 }

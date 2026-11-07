@@ -1,0 +1,11 @@
+name: desktop-notepad-write-save
+description: Type text in Notepad and save it to a given path.
+requires: desktop
+platform: windows
+prompt: 'Open Notepad, type exactly: hello from bot eval   Then save the document with Ctrl+S as the file {{workdir}}\note.txt (type the full path into the file-name box, press Enter), and tell me when it is saved.'
+max_steps: 25
+timeout_s: 240
+checks:
+  - file_contains: { path: '{{workdir}}\note.txt', text: hello from bot eval }
+cleanup:
+  - kill_new: [notepad.exe]

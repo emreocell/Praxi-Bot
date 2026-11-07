@@ -1,0 +1,19 @@
+name: policy-deny-never-asks
+description: A bot-level read-only policy beats a permissive global policy; the call is denied without ever asking.
+policy: full
+profile_toml: |
+  [permissions]
+  preset = "read-only"
+tools:
+  - { name: t_write, effect: write, category: fs, output: written }
+user: go
+script:
+  - tool_calls: [{ id: c1, tool: t_write, args: {} }]
+  - text: fine
+expect:
+  state: succeeded
+  tool_runs: { t_write: 0 }
+  permissions:
+    - { tool: t_write, decision: denied_policy }
+  requests:
+    - { request: 1, tool_messages_contain: ["Permission denied: policy"] }

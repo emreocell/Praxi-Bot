@@ -1,0 +1,12 @@
+name: desktop-calculator-compute
+description: Compute 7 x 8 in Calculator and read the display (English or Turkish UI).
+requires: desktop
+platform: windows
+prompt: "Open Calculator (calc.exe), compute 7 times 8 with its buttons or the keyboard, and tell me the number shown on the display."
+max_steps: 20
+timeout_s: 180
+checks:
+  - final_text: { contains: ["56"] }
+  - desktop_node: { window_title_contains: "Calculator|Hesap Makinesi", name_contains: "56" }
+cleanup:
+  - kill_new: [CalculatorApp.exe, Calculator.exe]

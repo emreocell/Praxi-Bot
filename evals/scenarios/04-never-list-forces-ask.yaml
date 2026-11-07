@@ -1,0 +1,20 @@
+name: never-list-forces-ask
+description: A never-list command asks for approval even under the full policy; a harmless command in the same turn does not.
+policy: full
+tools:
+  - { name: shell_run, effect: destructive, category: shell, output: ran }
+user: clean up
+script:
+  - tool_calls: [{ id: c1, tool: shell_run, args: { command: "rm -rf /" } }]
+  - tool_calls: [{ id: c2, tool: shell_run, args: { command: "echo hi" } }]
+  - text: cleaned
+reactions:
+  - { on: approval_needed, tool: shell_run, do: deny, text: never }
+expect:
+  state: succeeded
+  model_calls: 3
+  tool_calls: [shell_run, shell_run]
+  tool_runs: { shell_run: 1 }
+  permissions:
+    - { tool: shell_run, decision: denied_user }
+    - { tool: shell_run, decision: allowed }

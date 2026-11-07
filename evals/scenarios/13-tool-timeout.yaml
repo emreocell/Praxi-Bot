@@ -1,0 +1,15 @@
+name: tool-timeout
+description: A tool that exceeds the tool timeout becomes an error result instead of hanging the turn.
+policy: full
+guards: { tool_timeout_ms: 50 }
+tools:
+  - { name: t_slow, effect: read, category: fs, output: late, delay_ms: 5000 }
+user: go
+script:
+  - tool_calls: [{ id: c1, tool: t_slow, args: {} }]
+  - text: gave up
+expect:
+  state: succeeded
+  model_calls: 2
+  requests:
+    - { request: 1, tool_messages_contain: [timed out] }

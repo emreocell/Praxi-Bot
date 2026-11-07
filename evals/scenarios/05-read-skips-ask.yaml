@@ -1,0 +1,21 @@
+name: read-skips-ask
+description: Under approve-destructive a read runs without asking while a write in the same turn still asks.
+policy: approve_destructive
+tools:
+  - { name: t_read, effect: read, category: fs, output: contents }
+  - { name: t_write, effect: write, category: fs, output: written }
+user: read then write
+script:
+  - tool_calls: [{ id: c1, tool: t_read, args: {} }]
+  - tool_calls: [{ id: c2, tool: t_write, args: {} }]
+  - text: done
+reactions:
+  - { on: approval_needed, do: approve }
+expect:
+  state: succeeded
+  model_calls: 3
+  tool_calls: [t_read, t_write]
+  tool_runs: { t_read: 1, t_write: 1 }
+  permissions:
+    - { tool: t_read, decision: allowed }
+    - { tool: t_write, decision: approved }
