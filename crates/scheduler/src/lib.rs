@@ -39,4 +39,7 @@ pub use model::{
 pub use nl::{parse_natural_language, parse_natural_language_with_tz, parse_nl};
 pub use protocol::{BotId, ChatId, Initiator, InitiatorKind, TaskId};
 pub use store::{ScheduleStore, Store};
-pub use webhook::{handle_webhook, sign_webhook_body, sign_webhook_hex, verify_webhook_signature};
+pub use webhook::{
+    REPLAY_WINDOW_MS, ReplayGuard, WebhookMeta, handle_webhook, sign_webhook_body,
+    sign_webhook_hex, verify_webhook_signature,
+};

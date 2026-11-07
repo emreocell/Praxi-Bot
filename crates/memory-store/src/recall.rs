@@ -84,6 +84,9 @@ fn visible(m: &Memory, user: UserId, bot: BotId, now: i64) -> bool {
         && m.valid_until_ms.is_none_or(|v| v > now)
 }
 
+/// Upper bound for the vec0 KNN `k` (sqlite-vec's own limit is 4096).
+const VEC_MAX_K: i64 = 4096;
+
 struct Fused {
     memory: Memory,
     rrf: f64,
@@ -113,32 +116,49 @@ impl MemoryStore {
                 .collect::<rusqlite::Result<_>>()?;
         }
 
+        // The vec table cannot be filtered by scope, so the global KNN may be
+        // filled with other users' / expired rows.  Re-query with a doubled `k`
+        // until enough visible hits are found or the index is exhausted.
         let mut semantic: Vec<i64> = Vec::new();
         {
-            // The vec table cannot be filtered by scope: over-fetch, then filter.
-            let mut st = conn.prepare(
-                "SELECT rowid, distance FROM memories_vec WHERE embedding MATCH ?1 AND k = ?2 \
-                 ORDER BY distance",
-            )?;
-            let hits: Vec<(i64, f64)> = st
-                .query_map(params![to_blob(&emb), cands * 4], |r| {
-                    Ok((r.get(0)?, r.get(1)?))
-                })?
-                .collect::<rusqlite::Result<_>>()?;
-            for (rowid, dist) in hits {
-                #[allow(clippy::cast_possible_truncation)]
-                let cos = 1.0 - (dist * dist / 2.0) as f32;
-                if cos < self.config.min_cosine {
-                    continue;
+            let blob = to_blob(&emb);
+            let mut k = cands.saturating_mul(4).clamp(1, VEC_MAX_K);
+            loop {
+                semantic.clear();
+                let mut st = conn.prepare(
+                    "SELECT rowid, distance FROM memories_vec WHERE embedding MATCH ?1 AND k = ?2 \
+                     ORDER BY distance",
+                )?;
+                let hits: Vec<(i64, f64)> = st
+                    .query_map(params![blob, k], |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .collect::<rusqlite::Result<_>>()?;
+                let mut below_threshold = false;
+                let exhausted = i64::try_from(hits.len()).unwrap_or(i64::MAX) < k;
+                for (rowid, dist) in hits {
+                    #[allow(clippy::cast_possible_truncation)]
+                    let cos = 1.0 - (dist * dist / 2.0) as f32;
+                    if cos < self.config.min_cosine {
+                        below_threshold = true; // sorted: nothing further qualifies
+                        break;
+                    }
+                    if let Some(m) = by_rowid(&conn, rowid)?
+                        && visible(&m, user, bot, now)
+                    {
+                        semantic.push(rowid);
+                    }
+                    if semantic.len() >= self.config.candidates {
+                        break;
+                    }
                 }
-                if let Some(m) = by_rowid(&conn, rowid)?
-                    && visible(&m, user, bot, now)
+
+                if semantic.len() >= self.config.candidates
+                    || exhausted
+                    || below_threshold
+                    || k >= VEC_MAX_K
                 {
-                    semantic.push(rowid);
-                }
-                if semantic.len() >= self.config.candidates {
                     break;
                 }
+                k = k.saturating_mul(2).min(VEC_MAX_K);
             }
         }
 

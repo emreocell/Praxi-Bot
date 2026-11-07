@@ -17,7 +17,7 @@ use tool_registry::{
     ContentPart, Effect, PermissionCategory, ToolContext, ToolError, ToolRegistry,
 };
 
-use crate::error::ReplayError;
+use crate::error::{ReplayError, WorkflowError};
 use crate::format::{
     BrowserAction, BrowserActionKind, DesktopAction, DesktopActionKind, Step, SuccessCheck,
     WaitFor, Workflow,
@@ -26,6 +26,19 @@ use crate::locator::{
     Drift, Found, Strategy, glob_match, parse_browser_snapshot, resolve_browser, resolve_desktop,
 };
 use crate::template::{self, Vars};
+
+/// Maximum nesting of workflows started from other workflows.
+pub const MAX_WORKFLOW_DEPTH: usize = 4;
+
+tokio::task_local! {
+    /// Names of the workflows currently being replayed on this task chain.
+    static WORKFLOW_STACK: Vec<String>;
+}
+
+/// Workflows currently being replayed (outermost first) on this task.
+pub(crate) fn active_workflows() -> Vec<String> {
+    WORKFLOW_STACK.try_with(Clone::clone).unwrap_or_default()
+}
 
 /// Receives replay events.
 pub type EventSink = Arc<dyn Fn(Event) + Send + Sync>;
@@ -331,6 +344,33 @@ impl Replayer {
         params: &serde_json::Map<String, Value>,
         gate: &dyn ToolGate,
     ) -> Result<ReplayReport, ReplayError> {
+        let mut stack = active_workflows();
+        if stack.iter().any(|n| n == &wf.name) {
+            return Err(WorkflowError::Invalid(format!(
+                "workflow `{}` would call itself (active: {})",
+                wf.name,
+                stack.join(" -> ")
+            ))
+            .into());
+        }
+        if stack.len() >= MAX_WORKFLOW_DEPTH {
+            return Err(WorkflowError::Invalid(format!(
+                "workflows nested deeper than {MAX_WORKFLOW_DEPTH} levels"
+            ))
+            .into());
+        }
+        stack.push(wf.name.clone());
+        WORKFLOW_STACK
+            .scope(stack, self.replay_inner(wf, params, gate))
+            .await
+    }
+
+    async fn replay_inner(
+        &self,
+        wf: &Workflow,
+        params: &serde_json::Map<String, Value>,
+        gate: &dyn ToolGate,
+    ) -> Result<ReplayReport, ReplayError> {
         wf.validate()?;
         let vars = wf.bind_params(params)?;
         let types = wf.param_types();
@@ -527,14 +567,18 @@ impl Replayer {
             }
             Step::WaitFor(w) => self.wait_for(w, gate).await,
             Step::Shell(s) => {
+                let dialect = template::ShellDialect::from_name(s.shell.as_deref());
                 let mut input = serde_json::Map::new();
                 input.insert(
                     "command".into(),
-                    Value::String(template::render(&s.command, vars).map_err(|e| tpl(&e))?),
+                    Value::String(
+                        template::render_shell(&s.command, vars, dialect).map_err(|e| tpl(&e))?,
+                    ),
                 );
                 if let Some(sh) = &s.shell {
                     input.insert("shell".into(), Value::String(sh.clone()));
                 }
+                // `cwd` is a path handed to the OS, never parsed by a shell.
                 if let Some(c) = &s.cwd {
                     input.insert(
                         "cwd".into(),
@@ -545,7 +589,31 @@ impl Replayer {
                     .await
             }
             Step::Tool(t) => {
-                let input = template::render_value(&t.input, vars, types).map_err(|e| tpl(&e))?;
+                let input = if t.tool == "shell_run"
+                    && let Value::Object(obj) = &t.input
+                    && let Some(Value::String(cmd)) = obj.get("command")
+                {
+                    // A command line: quote substituted values for the target shell.
+                    let dialect =
+                        template::ShellDialect::from_name(obj.get("shell").and_then(Value::as_str));
+                    let mut rest = obj.clone();
+                    rest.remove("command");
+                    let Value::Object(mut rendered) =
+                        template::render_value(&Value::Object(rest), vars, types)
+                            .map_err(|e| tpl(&e))?
+                    else {
+                        unreachable!("object renders to object")
+                    };
+                    rendered.insert(
+                        "command".into(),
+                        Value::String(
+                            template::render_shell(cmd, vars, dialect).map_err(|e| tpl(&e))?,
+                        ),
+                    );
+                    Value::Object(rendered)
+                } else {
+                    template::render_value(&t.input, vars, types).map_err(|e| tpl(&e))?
+                };
                 self.call_tool(&t.tool, input, gate).await
             }
             Step::Agent(a) => Err(Stop::Agent(
@@ -576,7 +644,9 @@ impl Replayer {
             .or_else(|| self.handles.tools.get(&name.replace("__", ".")))
             .ok_or_else(|| Stop::Missing(format!("tool `{name}` is not registered")))?;
         let spec = tool.spec();
-        self.authorize(gate, name, spec.category, spec.effect, input.clone())
+        // Gate on the resolved tool's real name (`mcp_srv__x` may alias
+        // `mcp_srv.x`), so profile globs and "always" grants match.
+        self.authorize(gate, &spec.name, spec.category, spec.effect, input.clone())
             .await?;
         let ctx = ToolContext {
             run_id: self.opts.run_id.clone(),

@@ -524,3 +524,52 @@ fn prompts_ship_as_files() {
     assert!(memory_store::prompts::render_extract("hello").contains("hello"));
     assert!(memory_store::prompts::render_consolidate("c", "s").contains("NEW CANDIDATE"));
 }
+
+/// Query/decoy/target vectors chosen by text so that the target is not
+/// lexically related to the query.
+struct TableEmbedder;
+
+impl Embedder for TableEmbedder {
+    fn dim(&self) -> usize {
+        8
+    }
+    fn embed(&self, texts: &[&str]) -> memory_store::Result<Vec<Vec<f32>>> {
+        Ok(texts
+            .iter()
+            .map(|t| {
+                let mut v = vec![0.0f32; 8];
+                if t.starts_with("decoy") || *t == "query" {
+                    v[0] = 1.0;
+                } else {
+                    // target: cosine ~0.8 with the query
+                    v[0] = 0.8;
+                    v[1] = 0.6;
+                }
+                v
+            })
+            .collect())
+    }
+}
+
+#[test]
+fn semantic_recall_not_crowded_out_by_other_users_rows() {
+    let s = MemoryStore::open_in_memory(Arc::new(TableEmbedder))
+        .unwrap()
+        .with_recall_config(memory_store::RecallConfig {
+            candidates: 2,
+            ..memory_store::RecallConfig::default()
+        });
+    let (u, stranger, b) = (UserId::new(), UserId::new(), BotId::new());
+    for i in 0..60 {
+        s.add(
+            &NewMemory::new(stranger, None, Kind::Profile, format!("decoy {i}")),
+            "t",
+        )
+        .unwrap();
+    }
+    let mine = s
+        .add(&NewMemory::new(u, None, Kind::Profile, "target fact"), "t")
+        .unwrap();
+    let got = s.find_similar(u, b, "query", 5).unwrap();
+    assert!(got.iter().any(|m| m.id == mine.id), "{got:?}");
+}

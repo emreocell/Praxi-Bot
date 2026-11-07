@@ -9,7 +9,7 @@ use tokio::sync::Notify;
 
 use crate::{
     FakeClock, MisfirePolicy, Payload, RUN_ALL_CAP, Result, Schedule, ScheduleExecutor,
-    ScheduleSpec, ScheduleStore, Scheduler, SchedulerError, Trigger, handle_webhook,
+    ScheduleSpec, ScheduleStore, Scheduler, SchedulerError, Trigger, WebhookMeta, handle_webhook,
     parse_natural_language, parse_natural_language_with_tz, sign_webhook_body, sign_webhook_hex,
     verify_webhook_signature,
 };
@@ -546,6 +546,211 @@ async fn webhook_hmac_sha256_verification_and_input_substitution() {
         }
     );
 
+    scheduler.shutdown().await;
+}
+
+fn webhook_fixture(
+    payload: Payload,
+) -> (
+    Arc<ScheduleStore>,
+    Arc<RecordingExecutor>,
+    Scheduler,
+    TaskId,
+) {
+    let t0 = 1_700_000_000_000_i64;
+    let store = Arc::new(ScheduleStore::open_in_memory().unwrap());
+    let exec = RecordingExecutor::new();
+    let clock = Arc::new(FakeClock::new(t0));
+    let sched = Schedule::new(
+        BotId::new(),
+        None,
+        "hook",
+        ScheduleSpec::Every { seconds: 3_600 },
+        payload,
+        MisfirePolicy::Skip,
+        t0,
+    )
+    .unwrap();
+    let id = sched.id;
+    store.insert(&sched).unwrap();
+    store
+        .set_trigger(
+            id,
+            &Trigger::Webhook {
+                secret: "s3cret".into(),
+            },
+        )
+        .unwrap();
+    let scheduler = Scheduler::start_with_clock(Arc::clone(&store), exec.clone(), clock);
+    (store, exec, scheduler, id)
+}
+
+#[test]
+fn webhook_does_not_inject_undeclared_input_param() {
+    let p = Payload::Workflow {
+        name: "w".into(),
+        params: json!({ "a": 1 }),
+    };
+    assert_eq!(
+        p.with_webhook_input("body"),
+        Payload::Workflow {
+            name: "w".into(),
+            params: json!({ "a": 1 }),
+        }
+    );
+    let n = Payload::Workflow {
+        name: "w".into(),
+        params: serde_json::Value::Null,
+    };
+    assert_eq!(
+        n.with_webhook_input("body"),
+        Payload::Workflow {
+            name: "w".into(),
+            params: serde_json::Value::Null,
+        }
+    );
+}
+
+#[tokio::test]
+async fn webhook_delivery_id_replay_is_rejected() {
+    let (_store, exec, scheduler, id) = webhook_fixture(Payload::AgentPrompt { text: "x".into() });
+    let body = "payload";
+    let sig = sign_webhook_body("s3cret", body.as_bytes());
+    let meta = WebhookMeta {
+        delivery_id: Some("d-1".into()),
+        timestamp_ms: None,
+    };
+    scheduler
+        .handle_webhook_with_meta(id, body, &sig, &meta)
+        .await
+        .unwrap();
+    assert!(matches!(
+        scheduler
+            .handle_webhook_with_meta(id, body, &sig, &meta)
+            .await,
+        Err(SchedulerError::InvalidSignature)
+    ));
+    // The delivery id is not signed: a new id on a captured request is still a replay.
+    let other = WebhookMeta {
+        delivery_id: Some("d-2".into()),
+        timestamp_ms: None,
+    };
+    assert!(matches!(
+        scheduler
+            .handle_webhook_with_meta(id, body, &sig, &other)
+            .await,
+        Err(SchedulerError::InvalidSignature)
+    ));
+    // A different (validly signed) body is a different delivery.
+    let body2 = "payload-2";
+    scheduler
+        .handle_webhook_with_meta(
+            id,
+            body2,
+            &sign_webhook_body("s3cret", body2.as_bytes()),
+            &other,
+        )
+        .await
+        .unwrap();
+    assert_eq!(exec.count(), 2);
+    scheduler.shutdown().await;
+}
+
+#[tokio::test]
+async fn replay_is_remembered_until_the_timestamp_leaves_the_window() {
+    use crate::webhook::{REPLAY_WINDOW_MS, ReplayGuard, prepare_webhook};
+    let (store, _exec, scheduler, id) = webhook_fixture(Payload::AgentPrompt { text: "x".into() });
+    let now = 1_700_000_000_000_i64;
+    let ts = now + REPLAY_WINDOW_MS - 1_000; // accepted: just inside the future skew
+    let body = "payload";
+    let sig = sign_webhook_body("s3cret", format!("{ts}.{body}").as_bytes());
+    let meta = WebhookMeta {
+        delivery_id: None,
+        timestamp_ms: Some(ts),
+    };
+    let guard = ReplayGuard::default();
+    let (_, pending) = prepare_webhook(&store, id, body, &sig, now, &meta, Some(&guard)).unwrap();
+    assert!(guard.commit(pending.unwrap(), now));
+    // Just after `now + window` the old logic had forgotten it; the timestamp is still valid.
+    let later = now + REPLAY_WINDOW_MS + 500;
+    assert!(matches!(
+        prepare_webhook(&store, id, body, &sig, later, &meta, Some(&guard)),
+        Err(SchedulerError::InvalidSignature)
+    ));
+    // Once the timestamp is out of the window the request fails on staleness anyway.
+    let much_later = ts + REPLAY_WINDOW_MS + 1;
+    assert!(matches!(
+        prepare_webhook(&store, id, body, &sig, much_later, &meta, Some(&guard)),
+        Err(SchedulerError::InvalidSignature)
+    ));
+    scheduler.shutdown().await;
+}
+
+#[tokio::test]
+async fn disabled_or_busy_delivery_can_be_retried() {
+    let (store, exec, scheduler, id) = webhook_fixture(Payload::AgentPrompt { text: "x".into() });
+    let body = "payload";
+    let sig = sign_webhook_body("s3cret", body.as_bytes());
+    let meta = WebhookMeta {
+        delivery_id: Some("gh-guid".into()),
+        timestamp_ms: None,
+    };
+    store.set_enabled(id, false, None).unwrap();
+    assert!(matches!(
+        scheduler
+            .handle_webhook_with_meta(id, body, &sig, &meta)
+            .await,
+        Err(SchedulerError::Disabled(_))
+    ));
+    store.set_enabled(id, true, Some(i64::MAX)).unwrap();
+    // Same delivery (same GUID, same body) redelivered: accepted, not 401.
+    scheduler
+        .handle_webhook_with_meta(id, body, &sig, &meta)
+        .await
+        .unwrap();
+    assert_eq!(exec.count(), 1);
+    // Now it really is a duplicate.
+    assert!(matches!(
+        scheduler
+            .handle_webhook_with_meta(id, body, &sig, &meta)
+            .await,
+        Err(SchedulerError::InvalidSignature)
+    ));
+    scheduler.shutdown().await;
+}
+
+#[tokio::test]
+async fn webhook_timestamp_window_is_enforced() {
+    let (_store, exec, scheduler, id) = webhook_fixture(Payload::AgentPrompt { text: "x".into() });
+    let now = 1_700_000_000_000_i64; // FakeClock wall time
+    let body = "payload";
+    let sign = |ts: i64| sign_webhook_body("s3cret", format!("{ts}.{body}").as_bytes());
+    let ok = WebhookMeta {
+        delivery_id: None,
+        timestamp_ms: Some(now - 60_000),
+    };
+    scheduler
+        .handle_webhook_with_meta(id, body, &sign(now - 60_000), &ok)
+        .await
+        .unwrap();
+    let stale = WebhookMeta {
+        delivery_id: None,
+        timestamp_ms: Some(now - 10 * 60_000),
+    };
+    assert!(matches!(
+        scheduler
+            .handle_webhook_with_meta(id, body, &sign(now - 10 * 60_000), &stale)
+            .await,
+        Err(SchedulerError::InvalidSignature)
+    ));
+    // Body-only signature does not validate when a timestamp is claimed.
+    assert!(matches!(
+        scheduler
+            .handle_webhook_with_meta(id, body, &sign_webhook_body("s3cret", body.as_bytes()), &ok)
+            .await,
+        Err(SchedulerError::InvalidSignature)
+    ));
+    assert_eq!(exec.count(), 1);
     scheduler.shutdown().await;
 }
 

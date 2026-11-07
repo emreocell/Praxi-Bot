@@ -717,7 +717,10 @@ fn convert(name: &str, input: &Value, cx: &mut Cx) -> Conv {
                 return Conv::Dropped("missing command".into());
             };
             Conv::Step(Step::Shell(Shell {
-                command: cx.lifter.lift("command", cmd),
+                // Never lift the whole command into a `{command}` parameter: shell
+                // steps quote parameter values as one word, so replay would run
+                // `'git status'` as a single program name.
+                command: escape_literal(cmd),
                 shell: str_of(input, "shell").map(str::to_owned),
                 cwd: str_of(input, "cwd").map(escape_literal),
             }))
@@ -841,6 +844,26 @@ mod tests {
             panic!()
         };
         assert_eq!(l.executable, "notepad.exe");
+    }
+
+    #[test]
+    fn shell_run_command_is_never_lifted_into_a_parameter() {
+        let steps = vec![
+            user_step("please run git status for me"),
+            tool_step(
+                1,
+                json!([call("s", "shell_run", &json!({"command": "git status"}))]),
+                json!([res("s", "shell_run", "clean", false)]),
+            ),
+        ];
+        let rec = Recorder::new()
+            .from_steps(&steps, &RecordOptions::default())
+            .unwrap();
+        let Step::Shell(sh) = &rec.workflow.steps[0] else {
+            panic!("{:#?}", rec.workflow.steps)
+        };
+        assert_eq!(sh.command, "git status");
+        assert!(rec.workflow.params.is_empty());
     }
 
     #[test]

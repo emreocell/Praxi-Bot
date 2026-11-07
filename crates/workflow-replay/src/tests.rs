@@ -595,3 +595,162 @@ async fn workflow_run_tool_replays_and_reports_handover_and_denial() {
         .unwrap_err();
     assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
 }
+
+#[tokio::test]
+async fn shell_step_quotes_parameter_values() {
+    let capture = CaptureTool::new("shell_run");
+    let tools = ToolRegistry::new();
+    assert!(tools.register(capture.clone()));
+    let mut wf = Workflow::new("echoer");
+    wf.params = vec![Param {
+        name: "input".into(),
+        ty: ParamType::String,
+        default: None,
+        description: String::new(),
+    }];
+    wf.steps = vec![Step::Shell(crate::format::Shell {
+        command: "echo {input}".into(),
+        shell: Some("sh".into()),
+        cwd: None,
+    })];
+    let h = Handles {
+        desktop: None,
+        browser: None,
+        tools,
+    };
+    let rp = Replayer::new(h, ReplayOptions::instant());
+    let report = rp
+        .replay(
+            &wf,
+            &params(&json!({"input": "x; curl evil"})),
+            &RecordingGate::default(),
+        )
+        .await
+        .unwrap();
+    assert!(report.is_completed(), "{report:?}");
+    assert_eq!(
+        capture.inputs.lock()[0]["command"],
+        json!("echo 'x; curl evil'")
+    );
+}
+
+#[tokio::test]
+async fn gate_sees_the_resolved_tool_name_not_the_alias() {
+    let capture = CaptureTool::new("mcp_srv.delete_repo");
+    let tools = ToolRegistry::new();
+    assert!(tools.register(capture));
+    let mut wf = Workflow::new("del");
+    wf.steps = vec![Step::Tool(ToolStep {
+        tool: "mcp_srv__delete_repo".into(),
+        input: json!({}),
+    })];
+    let h = Handles {
+        desktop: None,
+        browser: None,
+        tools,
+    };
+    let gate = RecordingGate::default();
+    let report = Replayer::new(h, ReplayOptions::instant())
+        .replay(&wf, &params(&json!({})), &gate)
+        .await
+        .unwrap();
+    assert!(report.is_completed(), "{report:?}");
+    assert_eq!(gate.tools(), ["mcp_srv.delete_repo"]);
+}
+
+#[tokio::test]
+async fn workflow_cannot_call_itself_through_workflow_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(dir.path());
+    let mut wf = Workflow::new("loopy");
+    wf.description = "calls itself".into();
+    wf.steps = vec![Step::Tool(ToolStep {
+        tool: "workflow_run".into(),
+        input: json!({"name": "loopy"}),
+    })];
+    store.save(&wf).unwrap();
+    let registry = ToolRegistry::new();
+    let h = Handles {
+        desktop: None,
+        browser: None,
+        tools: registry.clone(),
+    };
+    let gate: Arc<dyn builtin_tools::ToolGate> = Arc::new(RecordingGate::default());
+    for t in crate::tools(
+        store.clone(),
+        h.clone(),
+        gate.clone(),
+        ReplayOptions::instant(),
+    ) {
+        assert!(registry.register(t));
+    }
+    let run = registry.get("workflow_run").unwrap();
+    let out = run
+        .call(&ToolContext::default(), json!({"name": "loopy"}))
+        .await
+        .unwrap();
+    let tool_registry::ContentPart::Text { text } = &out.content[0] else {
+        panic!()
+    };
+    // The inner call is refused (step failed -> handover), not recursed.
+    assert!(text.contains("HANDOVER"), "{text}");
+    assert!(text.contains("call itself"), "{text}");
+}
+
+#[tokio::test]
+async fn non_cyclic_nesting_deeper_than_max_depth_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(dir.path());
+    let n = crate::replay::MAX_WORKFLOW_DEPTH + 2;
+    for i in 0..n {
+        let mut wf = Workflow::new(format!("level{i}"));
+        wf.description = "nested".into();
+        wf.steps = if i + 1 < n {
+            vec![Step::Tool(ToolStep {
+                tool: "workflow_run".into(),
+                input: json!({"name": format!("level{}", i + 1)}),
+            })]
+        } else {
+            vec![Step::Shell(crate::format::Shell {
+                command: "echo end".into(),
+                shell: Some("sh".into()),
+                cwd: None,
+            })]
+        };
+        store.save(&wf).unwrap();
+    }
+    let registry = ToolRegistry::new();
+    let capture = CaptureTool::new("shell_run");
+    assert!(registry.register(capture.clone()));
+    let h = Handles {
+        desktop: None,
+        browser: None,
+        tools: registry.clone(),
+    };
+    let gate: Arc<dyn builtin_tools::ToolGate> = Arc::new(RecordingGate::default());
+    for t in crate::tools(store.clone(), h, gate, ReplayOptions::instant()) {
+        assert!(registry.register(t));
+    }
+    registry
+        .get("workflow_run")
+        .unwrap()
+        .call(&ToolContext::default(), json!({"name": "level0"}))
+        .await
+        .unwrap();
+    // The chain is cut at MAX_WORKFLOW_DEPTH: the innermost shell step never runs.
+    // (A nested handover surfaces as text to its caller, so the outer report may
+    // still read "completed"; what matters is that the deepest level is refused.)
+    assert!(capture.inputs.lock().is_empty());
+    // One level shallower than the limit does run to the end.
+    let shallow = crate::replay::MAX_WORKFLOW_DEPTH - 1;
+    registry
+        .get("workflow_run")
+        .unwrap()
+        .call(
+            &ToolContext::default(),
+            json!({"name": format!("level{}", n - shallow)}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(capture.inputs.lock().len(), 1);
+}
