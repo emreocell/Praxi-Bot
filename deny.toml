@@ -19,6 +19,8 @@ allow = [
     "CC0-1.0",
     # jpeg-encoder is "(MIT OR Apache-2.0) AND IJG"; IJG is a permissive BSD-style license.
     "IJG",
+    # webpki-roots (via hf-hub, only with the optional `fastembed` feature)
+    "CDLA-Permissive-2.0",
 ]
 
 [bans]
