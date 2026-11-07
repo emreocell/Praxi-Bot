@@ -1,24 +1,19 @@
 {
   "sidebar": {
     "botsSection": "Bots",
-    "settings": "Settings"
+    "settings": "Settings",
+    "needsYou": "Needs you",
+    "needsYouCount": "{{count}} waiting for you",
+    "newBot": "New bot",
+    "usage": "Usage"
   },
   "main": {
     "selectBotTitle": "Select a bot",
     "selectBotDescription": "Choose a bot from the sidebar to view its profile, or open settings to customize the theme, accent color, and background.",
     "selectedBotLabel": "Active Bot Profile",
-    "clearSelection": "Back to overview"
-  },
-  "bots": {
-    "atlas": {
-      "role": "Desktop Automation"
-    },
-    "nova": {
-      "role": "Browser Research"
-    },
-    "pulse": {
-      "role": "Workflow Coordinator"
-    }
+    "clearSelection": "Back to overview",
+    "welcomeTitle": "Create your first bot",
+    "welcomeDescription": "A bot has a persona, models and a permission preset. Create one to start chatting."
   },
   "settings": {
     "title": "Appearance & Settings",
@@ -82,6 +77,42 @@
         "shiftEsc": "Ctrl+Shift+Esc",
         "altShiftS": "Alt+Shift+S"
       }
+    },
+    "providers": {
+      "title": "Model providers",
+      "description": "API keys are stored in your OS keychain. The daemon reads providers when it starts.",
+      "nativeOnly": "Provider management is available in the desktop app.",
+      "none": "No providers configured yet.",
+      "default": "Default",
+      "disabled": "Disabled",
+      "noModel": "no model",
+      "keyStored": "key stored",
+      "noKey": "no key",
+      "test": "Test connection",
+      "makeDefault": "Make default",
+      "add": "Add a provider",
+      "provider": "Provider",
+      "custom": "Custom (OpenAI-compatible)",
+      "customId": "Provider id",
+      "baseUrl": "Base URL",
+      "apiKey": "API key",
+      "defaultModel": "Default model",
+      "keyHint": "The key is sent to the OS keychain and never shown again.",
+      "addAndTest": "Add and test",
+      "restartHint": "Restart the daemon so it picks up the change.",
+      "restartManual": "Restart the daemon yourself so it picks up the change (it was not started by this app).",
+      "restart": "Restart daemon"
+    },
+    "permissions": {
+      "title": "Permissions",
+      "description": "What each bot may do right now, including “Always allow” rules you granted from approval cards.",
+      "workspaceDefault": "The workspace default for bots without their own policy is “Approve destructive”.",
+      "noBots": "No bots yet.",
+      "noGrants": "No “Always allow” rules.",
+      "viaGrant": "Allowed because of an “Always allow” rule",
+      "grantCategory": "Always allow every {{name}} tool",
+      "grantTool": "Always allow {{name}}",
+      "revoke": "Revoke"
     }
   },
   "overlay": {
@@ -120,5 +151,210 @@
     "sectionTitle": "Developer",
     "simulateBotRun": "Simulate bot run",
     "runningLabel": "Bot Run Active"
+  },
+  "common": {
+    "back": "Back",
+    "cancel": "Cancel",
+    "save": "Save",
+    "edit": "Edit",
+    "delete": "Delete"
+  },
+  "health": {
+    "connecting": "Starting daemon…",
+    "failed": "Daemon unavailable",
+    "offline": "Daemon offline",
+    "reconnecting": "Reconnecting…",
+    "connected": "Daemon connected",
+    "retry": "Retry",
+    "fakeProvider": "Fake provider",
+    "details": "Daemon {{version}} · up {{uptime}} s {{mode}}"
+  },
+  "bots": {
+    "notFound": "This bot no longer exists.",
+    "noModel": "No model",
+    "newChat": "New chat",
+    "confirmDelete": "Click again to delete",
+    "chats": "Chats",
+    "noChats": "No chats yet. Start one with “New chat”.",
+    "chatState": {
+      "needs": "Needs you",
+      "running": "Running"
+    }
+  },
+  "chat": {
+    "notFound": "This chat does not exist.",
+    "stop": "Stop",
+    "resume": "Resume",
+    "emptyHint": "Say something to start the conversation.",
+    "runFailed": "The run failed: {{message}}",
+    "working": "Working…",
+    "modeLabel": "While the bot is working",
+    "mode": {
+      "queue": "Queue",
+      "steer": "Steer",
+      "queueHint": "Deliver after the current turn finishes",
+      "steerHint": "Deliver now and redirect the current turn"
+    },
+    "placeholder": "Message the bot…",
+    "placeholderBusy": "The bot is working — queue or steer…",
+    "send": "Send",
+    "tool": {
+      "subagent": "Subagent",
+      "input": "Input",
+      "result": "Result",
+      "denyReason": "Reason: {{reason}}",
+      "status": {
+        "requested": "Requested",
+        "awaiting_approval": "Needs approval",
+        "running": "Running",
+        "denied": "Denied",
+        "done": "Done",
+        "error": "Failed",
+        "expired": "Expired"
+      }
+    },
+    "approval": {
+      "title": "Approval needed",
+      "sendTitle": "Send on your behalf?",
+      "countdown": "Auto-deny in {{seconds}} s",
+      "once": "Allow once",
+      "thisChat": "This chat",
+      "always": "Always",
+      "deny": "Deny",
+      "reasonPlaceholder": "Reason for denying (optional)"
+    },
+    "question": {
+      "title": "The bot asks",
+      "answered": "You answered: {{answer}}",
+      "closed": "This question is no longer open.",
+      "placeholder": "Type another answer…",
+      "answer": "Answer"
+    },
+    "todo": {
+      "title": "Plan",
+      "status": {
+        "pending": "pending",
+        "in_progress": "in progress",
+        "done": "done"
+      }
+    },
+    "notice": {
+      "modelFallback": "Switched model from {{from}} to {{to}}: {{reason}}",
+      "error": "{{message}}",
+      "workflowDrift": "Workflow {{workflow}} drifted: {{reason}}"
+    }
+  },
+  "botForm": {
+    "createTitle": "New bot",
+    "editTitle": "Edit bot",
+    "create": "Create bot",
+    "identity": "Identity",
+    "name": "Name",
+    "nameRequired": "A name is required.",
+    "avatar": "Avatar",
+    "avatarChoose": "Choose image or GIF",
+    "avatarUseInitials": "Use initials",
+    "avatarInitialsHint": "Initials are shown until you pick an image.",
+    "avatarHint": "PNG, JPEG, WebP or GIF (GIFs up to 400 KB keep their animation).",
+    "avatarTooLarge": "That image is too large.",
+    "avatarUnreadable": "That file could not be read as an image.",
+    "color": "Color",
+    "colorCustom": "Custom color",
+    "persona": "Persona",
+    "personaPlaceholder": "How should this bot behave? (system instruction)",
+    "models": "Models",
+    "modelsHint": "Pick a provider and type the model name for each role. Only the executor is required.",
+    "role": {
+      "executor": "Executor",
+      "planner": "Planner",
+      "classifier": "Classifier",
+      "fallback": "Fallback models"
+    },
+    "provider": "provider",
+    "model": "model",
+    "defaultProvider": "Default provider",
+    "modelPlaceholder": "model name",
+    "executorRequired": "The executor model is required.",
+    "fallbackPlaceholder": "provider/model, provider/model",
+    "permissions": "Permissions",
+    "preset": {
+      "read-only": {
+        "name": "Read-only",
+        "hint": "The bot can look but never change anything."
+      },
+      "approve-destructive": {
+        "name": "Approve destructive",
+        "hint": "Reads are free; anything that changes or sends asks you first."
+      },
+      "full": {
+        "name": "Full",
+        "hint": "Everything is allowed without asking."
+      },
+      "read-and-draft": {
+        "name": "Read & draft",
+        "hint": "The bot reads and drafts, but never sends or changes things."
+      },
+      "custom": {
+        "name": "Custom",
+        "hint": "Choose a level for each category."
+      }
+    },
+    "category": {
+      "fs": "Files",
+      "shell": "Shell",
+      "desktop": "Desktop",
+      "browser": "Browser",
+      "accounts": "Accounts",
+      "messaging": "Messaging",
+      "money": "Money",
+      "system": "System",
+      "remote": "Remote",
+      "script": "Scripts"
+    },
+    "level": {
+      "deny": "Deny",
+      "ask": "Ask",
+      "allow": "Allow"
+    },
+    "runtime": "Computer & browser",
+    "computer": "Computer",
+    "browser": "Browser",
+    "local": "Local (this machine)",
+    "remoteSoon": "Remote (coming soon)",
+    "runtimeHint": "Only this machine is supported for now."
+  },
+  "usage": {
+    "title": "Usage",
+    "subtitle": "Tokens used by each bot.",
+    "range": "Time range",
+    "ranges": {
+      "all": "All time",
+      "day": "Last 24 h",
+      "week": "Last 7 days",
+      "month": "Last 30 days"
+    },
+    "refresh": "Refresh",
+    "runs": "Runs",
+    "modelCalls": "Model calls",
+    "tokens": "Tokens",
+    "empty": "No usage yet.",
+    "bot": "Bot",
+    "calls": "Calls",
+    "prompt": "Prompt",
+    "completion": "Completion",
+    "cached": "Cached",
+    "total": "Total",
+    "deletedBot": "Deleted bot",
+    "costNote": "Cost is not reported by the daemon yet; only token counts are shown."
+  },
+  "needs": {
+    "title": "Needs you",
+    "subtitle": "Approvals and questions waiting across all chats.",
+    "empty": "Nothing is waiting for you.",
+    "kind": {
+      "approval": "Approval",
+      "question": "Question"
+    },
+    "open": "Open chat"
   }
 }

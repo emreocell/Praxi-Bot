@@ -25,7 +25,15 @@ import {
   HOTKEY_PRESETS,
   PRODUCT_CONFIG
 } from "./config/product";
-import { MOCK_BOTS, type MockBot } from "./data/mockBots";
+import { HealthIndicator } from "./components/HealthIndicator";
+import { botView } from "./lib/botProfile";
+import { DaemonProvider, useDaemon } from "./state/DaemonContext";
+import { BotFormView } from "./views/BotFormView";
+import { BotHomeView } from "./views/BotHomeView";
+import { ChatView } from "./views/ChatView";
+import { NeedsYouView } from "./views/NeedsYouView";
+import { PermissionsSection, ProvidersSection } from "./views/SettingsSections";
+import { UsageView } from "./views/UsageView";
 import { i18n, type SupportedLanguage } from "./i18n";
 import {
   broadcastSettingsUpdated,
@@ -50,15 +58,20 @@ import {
   saveSettings
 } from "./store/settingsStore";
 
-type ActiveView = "bots" | "settings";
+type Route =
+  | { kind: "home" }
+  | { kind: "bot"; botId: string }
+  | { kind: "botForm"; botId?: string }
+  | { kind: "chat"; chatId: string; botId: string }
+  | { kind: "needs" }
+  | { kind: "usage" }
+  | { kind: "settings" };
 
-export function App() {
+function AppShell() {
   const { t } = useTranslation();
+  const { bots, chats, needs } = useDaemon();
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
-  const [selectedBotId, setSelectedBotId] = useState<MockBot["id"] | null>(
-    null
-  );
-  const [activeView, setActiveView] = useState<ActiveView>("bots");
+  const [route, setRoute] = useState<Route>({ kind: "home" });
   const [controlState, setControlState] = useState<ControlSnapshot>(
     INITIAL_CONTROL_SNAPSHOT
   );
@@ -226,70 +239,169 @@ export function App() {
     });
   };
 
-  const selectedBot =
-    MOCK_BOTS.find((bot) => bot.id === selectedBotId) ?? null;
+  const routeBotId =
+    route.kind === "bot" || route.kind === "chat"
+      ? route.botId
+      : route.kind === "botForm"
+        ? route.botId
+        : undefined;
+  const selectedBot = bots.find((bot) => bot.id === routeBotId) ?? bots[0];
 
   const handleSimulateBotRun = () => {
-    const targetBot = selectedBot ?? MOCK_BOTS[0];
+    const view = selectedBot ? botView(selectedBot) : null;
     void simulateBotRun({
-      botId: targetBot.id,
-      botName: targetBot.name,
-      botAvatar: targetBot.avatarSrc,
-      botColor: targetBot.color,
-      botInitials: targetBot.initials
+      botId: view?.id ?? "atlas",
+      botName: view?.name ?? "Atlas",
+      botAvatar: view?.avatar,
+      botColor: view?.color ?? "#3b82f6",
+      botInitials: view?.initials ?? "AT"
     }).then(setControlState);
+  };
+
+  const openChat = (chatId: string) => {
+    const chat = chats.find((c) => c.id === chatId);
+    setRoute({ kind: "chat", chatId, botId: chat?.bot_id ?? "" });
   };
 
   const isRunActive = controlState.mode !== "idle";
   const isHumanDriving = controlState.mode === "human_driving";
   const isPaused = controlState.mode === "paused";
 
+  const runBanner = isRunActive ? (
+    <div className={styles.runBannerWrap}>
+      <div className={styles.activeRunBanner} role="status">
+        <div className={styles.activeRunHeader}>
+          <span className={styles.botName}>
+            {controlState.bot?.botName ?? t("dev.runningLabel")}
+          </span>
+          <span
+            className={[
+              styles.activeRunBadge,
+              isHumanDriving ? styles.activeRunBadgeHuman : ""
+            ]
+              .filter(Boolean)
+              .join(" ")}
+          >
+            {t(`widget.status.${controlState.mode}`)}
+          </span>
+        </div>
+        <p className={styles.activeRunStep}>
+          {isHumanDriving
+            ? t("widget.humanDrivingStep")
+            : controlState.currentStep || t("widget.idleStep")}
+        </p>
+        <div className={styles.activeRunControls}>
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => void stopBotRun().then(setControlState)}
+          >
+            {t("widget.stop")}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={isHumanDriving}
+            onClick={() => {
+              if (isPaused) {
+                void resumeBotRun().then(setControlState);
+              } else {
+                void pauseBotRun().then(setControlState);
+              }
+            }}
+          >
+            {isPaused ? t("widget.resume") : t("widget.pause")}
+          </Button>
+          <Button
+            variant={isHumanDriving ? "primary" : "secondary"}
+            size="sm"
+            onClick={() => {
+              if (isHumanDriving) {
+                void giveBackControl().then(setControlState);
+              } else {
+                void takeTheWheel().then(setControlState);
+              }
+            }}
+          >
+            {isHumanDriving ? t("widget.giveBack") : t("widget.takeTheWheel")}
+          </Button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <SidebarLayout
       sidebar={
         <Sidebar>
           <SidebarHeader>
-            <span className={styles.brandTitle}>{PRODUCT_CONFIG.appName}</span>
+            <div className={styles.brandBlock}>
+              <span className={styles.brandTitle}>{PRODUCT_CONFIG.appName}</span>
+              <HealthIndicator />
+            </div>
           </SidebarHeader>
 
           <SidebarSection label={t("sidebar.botsSection")}>
-            {MOCK_BOTS.map((bot) => {
+            {needs.length > 0 ? (
+              <SidebarItem
+                active={route.kind === "needs"}
+                onClick={() => setRoute({ kind: "needs" })}
+              >
+                <span className={styles.botName}>{t("sidebar.needsYou")}</span>
+                <span
+                  className={styles.needsBadge}
+                  data-testid="needs-you-badge"
+                  aria-label={t("sidebar.needsYouCount", {
+                    count: needs.length
+                  })}
+                >
+                  {needs.length}
+                </span>
+              </SidebarItem>
+            ) : null}
+            {bots.map((bot) => {
+              const view = botView(bot);
               const isSelected =
-                activeView === "bots" && selectedBotId === bot.id;
+                (route.kind === "bot" ||
+                  route.kind === "chat" ||
+                  route.kind === "botForm") &&
+                routeBotId === bot.id;
               return (
                 <SidebarItem
                   key={bot.id}
                   active={isSelected}
-                  accentColor={bot.color}
-                  onClick={() => {
-                    setSelectedBotId((prev) =>
-                      prev === bot.id ? null : bot.id
-                    );
-                    setActiveView("bots");
-                  }}
+                  accentColor={view.color}
+                  onClick={() => setRoute({ kind: "bot", botId: bot.id })}
                 >
                   <Avatar
-                    name={bot.name}
-                    initials={bot.initials}
-                    src={bot.avatarSrc}
-                    color={bot.color}
-                    isAnimated={bot.isAnimated}
+                    name={view.name}
+                    initials={view.initials}
+                    src={view.avatar}
+                    color={view.color}
                     size="md"
                   />
                   <div className={styles.botMeta}>
-                    <span className={styles.botName}>{bot.name}</span>
-                    <span className={styles.botRole}>{t(bot.roleKey)}</span>
+                    <span className={styles.botName}>{view.name}</span>
+                    <span className={styles.botRole}>
+                      {view.executor || t("bots.noModel")}
+                    </span>
                   </div>
                   <span
                     className={styles.botColorDot}
-                    style={
-                      { "--bot-dot-color": bot.color } as CSSProperties
-                    }
+                    style={{ "--bot-dot-color": view.color } as CSSProperties}
                     aria-hidden="true"
                   />
                 </SidebarItem>
               );
             })}
+            <Button
+              variant="secondary"
+              size="sm"
+              fullWidth
+              onClick={() => setRoute({ kind: "botForm" })}
+            >
+              {t("sidebar.newBot")}
+            </Button>
           </SidebarSection>
 
           <SidebarFooter>
@@ -304,13 +416,16 @@ export function App() {
                 </Button>
               ) : null}
               <Button
-                variant={activeView === "settings" ? "primary" : "secondary"}
+                variant={route.kind === "usage" ? "primary" : "secondary"}
                 fullWidth
-                onClick={() =>
-                  setActiveView((prev) =>
-                    prev === "settings" ? "bots" : "settings"
-                  )
-                }
+                onClick={() => setRoute({ kind: "usage" })}
+              >
+                {t("sidebar.usage")}
+              </Button>
+              <Button
+                variant={route.kind === "settings" ? "primary" : "secondary"}
+                fullWidth
+                onClick={() => setRoute({ kind: "settings" })}
               >
                 {t("sidebar.settings")}
               </Button>
@@ -319,134 +434,65 @@ export function App() {
         </Sidebar>
       }
     >
-      {activeView === "bots" ? (
-        <div className={styles.centerPane}>
-          <Card
-            padding="lg"
-            accentColor={selectedBot?.color}
-            className={styles.emptyStateCard}
-          >
-            {selectedBot ? (
-              <div className={styles.selectedBotContent}>
-                <Avatar
-                  name={selectedBot.name}
-                  initials={selectedBot.initials}
-                  src={selectedBot.avatarSrc}
-                  color={selectedBot.color}
-                  isAnimated={selectedBot.isAnimated}
-                  size="lg"
-                />
-                <span className={styles.badgeLabel}>
-                  {t("main.selectedBotLabel")}
-                </span>
-                <h1 className={styles.emptyStateTitle}>{selectedBot.name}</h1>
-                <p className={styles.emptyStateDescription}>
-                  {t(selectedBot.roleKey)}
-                </p>
-                <div className={styles.optionRow}>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setSelectedBotId(null)}
-                  >
-                    {t("main.clearSelection")}
-                  </Button>
-                  {import.meta.env.DEV ? (
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={handleSimulateBotRun}
-                    >
-                      {t("dev.simulateBotRun")}
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-            ) : (
+      <div className={styles.mainColumn}>
+        {runBanner}
+        {route.kind === "home" ? (
+          <div className={styles.centerPane}>
+            <Card padding="lg" className={styles.emptyStateCard}>
               <div className={styles.selectedBotContent}>
                 <h1 className={styles.emptyStateTitle}>
-                  {t("main.selectBotTitle")}
+                  {bots.length === 0
+                    ? t("main.welcomeTitle")
+                    : t("main.selectBotTitle")}
                 </h1>
                 <p className={styles.emptyStateDescription}>
-                  {t("main.selectBotDescription")}
+                  {bots.length === 0
+                    ? t("main.welcomeDescription")
+                    : t("main.selectBotDescription")}
                 </p>
-                {import.meta.env.DEV ? (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={handleSimulateBotRun}
-                  >
-                    {t("dev.simulateBotRun")}
-                  </Button>
-                ) : null}
+                <Button
+                  variant="primary"
+                  onClick={() => setRoute({ kind: "botForm" })}
+                >
+                  {t("sidebar.newBot")}
+                </Button>
               </div>
-            )}
-
-            {isRunActive ? (
-              <div className={styles.activeRunBanner} role="status">
-                <div className={styles.activeRunHeader}>
-                  <span className={styles.botName}>
-                    {controlState.bot?.botName ?? t("dev.runningLabel")}
-                  </span>
-                  <span
-                    className={[
-                      styles.activeRunBadge,
-                      isHumanDriving ? styles.activeRunBadgeHuman : ""
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                  >
-                    {t(`widget.status.${controlState.mode}`)}
-                  </span>
-                </div>
-                <p className={styles.activeRunStep}>
-                  {isHumanDriving
-                    ? t("widget.humanDrivingStep")
-                    : controlState.currentStep || t("widget.idleStep")}
-                </p>
-                <div className={styles.activeRunControls}>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={() => void stopBotRun().then(setControlState)}
-                  >
-                    {t("widget.stop")}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={isHumanDriving}
-                    onClick={() => {
-                      if (isPaused) {
-                        void resumeBotRun().then(setControlState);
-                      } else {
-                        void pauseBotRun().then(setControlState);
-                      }
-                    }}
-                  >
-                    {isPaused ? t("widget.resume") : t("widget.pause")}
-                  </Button>
-                  <Button
-                    variant={isHumanDriving ? "primary" : "secondary"}
-                    size="sm"
-                    onClick={() => {
-                      if (isHumanDriving) {
-                        void giveBackControl().then(setControlState);
-                      } else {
-                        void takeTheWheel().then(setControlState);
-                      }
-                    }}
-                  >
-                    {isHumanDriving
-                      ? t("widget.giveBack")
-                      : t("widget.takeTheWheel")}
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-          </Card>
-        </div>
-      ) : (
+            </Card>
+          </div>
+        ) : null}
+        {route.kind === "bot" ? (
+          <BotHomeView
+            key={route.botId}
+            botId={route.botId}
+            onOpenChat={openChat}
+            onEdit={() => setRoute({ kind: "botForm", botId: route.botId })}
+            onDeleted={() => setRoute({ kind: "home" })}
+          />
+        ) : null}
+        {route.kind === "botForm" ? (
+          <BotFormView
+            key={route.botId ?? "new"}
+            botId={route.botId}
+            onDone={(botId) => setRoute({ kind: "bot", botId })}
+            onCancel={() =>
+              setRoute(
+                route.botId
+                  ? { kind: "bot", botId: route.botId }
+                  : { kind: "home" }
+              )
+            }
+          />
+        ) : null}
+        {route.kind === "chat" ? (
+          <ChatView
+            key={route.chatId}
+            chatId={route.chatId}
+            onBack={() => setRoute({ kind: "bot", botId: route.botId })}
+          />
+        ) : null}
+        {route.kind === "needs" ? <NeedsYouView onOpenChat={openChat} /> : null}
+        {route.kind === "usage" ? <UsageView /> : null}
+        {route.kind === "settings" ? (
         <div className={styles.settingsPane}>
           <div className={styles.settingsContainer}>
             <header className={styles.settingsHeader}>
@@ -693,9 +739,21 @@ export function App() {
                 ))}
               </div>
             </Card>
+
+            <ProvidersSection />
+            <PermissionsSection />
           </div>
         </div>
-      )}
+        ) : null}
+      </div>
     </SidebarLayout>
+  );
+}
+
+export function App() {
+  return (
+    <DaemonProvider>
+      <AppShell />
+    </DaemonProvider>
   );
 }

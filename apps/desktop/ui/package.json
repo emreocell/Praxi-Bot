@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "gen:api": "openapi-typescript ../../../docs/api/openapi.json -o src/api/schema.d.ts",
+    "check:i18n": "node scripts/check-i18n.mjs",
+    "test": "node --test src/state/timeline.test.ts src/api/events.test.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.3.0",
@@ -19,9 +22,11 @@
     "ui": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "^22.20.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "openapi-typescript": "^7.13.0",
     "vite": "^6.2.0"
   }
 }

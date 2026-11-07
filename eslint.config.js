@@ -9,7 +9,8 @@ export default tseslint.config(
       "**/dist/**",
       "**/node_modules/**",
       "**/target/**",
-      "**/gen/**"
+      "**/gen/**",
+      "**/api/schema.d.ts"
     ]
   },
   js.configs.recommended,

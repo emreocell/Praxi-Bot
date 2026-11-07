@@ -1,24 +1,19 @@
 {
   "sidebar": {
     "botsSection": "Botlar",
-    "settings": "Ayarlar"
+    "settings": "Ayarlar",
+    "needsYou": "Senden bekleyenler",
+    "needsYouCount": "{{count}} öğe senden bekliyor",
+    "newBot": "Yeni bot",
+    "usage": "Kullanım"
   },
   "main": {
     "selectBotTitle": "Bir bot seçin",
     "selectBotDescription": "Profilini görüntülemek için kenar çubuğundan bir bot seçin veya temayı, vurgu rengini ve arka planı özelleştirmek için ayarları açın.",
     "selectedBotLabel": "Aktif Bot Profili",
-    "clearSelection": "Genel görünüme dön"
-  },
-  "bots": {
-    "atlas": {
-      "role": "Masaüstü Otomasyonu"
-    },
-    "nova": {
-      "role": "Tarayıcı Araştırması"
-    },
-    "pulse": {
-      "role": "Akış Koordinatörü"
-    }
+    "clearSelection": "Genel görünüme dön",
+    "welcomeTitle": "İlk botunu oluştur",
+    "welcomeDescription": "Bir botun kişiliği, modelleri ve izin ön ayarı vardır. Sohbete başlamak için bir bot oluştur."
   },
   "settings": {
     "title": "Görünüm ve Ayarlar",
@@ -82,6 +77,42 @@
         "shiftEsc": "Ctrl+Shift+Esc",
         "altShiftS": "Alt+Shift+S"
       }
+    },
+    "providers": {
+      "title": "Model sağlayıcıları",
+      "description": "API anahtarları işletim sisteminin anahtar zincirinde saklanır. Daemon sağlayıcıları başlarken okur.",
+      "nativeOnly": "Sağlayıcı yönetimi masaüstü uygulamasında kullanılabilir.",
+      "none": "Henüz sağlayıcı yapılandırılmadı.",
+      "default": "Varsayılan",
+      "disabled": "Devre dışı",
+      "noModel": "model yok",
+      "keyStored": "anahtar kayıtlı",
+      "noKey": "anahtar yok",
+      "test": "Bağlantıyı sına",
+      "makeDefault": "Varsayılan yap",
+      "add": "Sağlayıcı ekle",
+      "provider": "Sağlayıcı",
+      "custom": "Özel (OpenAI uyumlu)",
+      "customId": "Sağlayıcı kimliği",
+      "baseUrl": "Temel URL",
+      "apiKey": "API anahtarı",
+      "defaultModel": "Varsayılan model",
+      "keyHint": "Anahtar işletim sistemi anahtar zincirine gönderilir ve bir daha gösterilmez.",
+      "addAndTest": "Ekle ve sına",
+      "restartHint": "Değişikliğin geçerli olması için daemon’u yeniden başlat.",
+      "restartManual": "Değişikliğin geçerli olması için daemon’u kendin yeniden başlat (bu uygulama başlatmadı).",
+      "restart": "Daemon’u yeniden başlat"
+    },
+    "permissions": {
+      "title": "İzinler",
+      "description": "Her botun şu an neler yapabileceği; onay kartlarından verdiğin “Her zaman izin ver” kuralları dahil.",
+      "workspaceDefault": "Kendi politikası olmayan botlar için çalışma alanı varsayılanı “Yıkıcı işlemlerde onay”dır.",
+      "noBots": "Henüz bot yok.",
+      "noGrants": "“Her zaman izin ver” kuralı yok.",
+      "viaGrant": "“Her zaman izin ver” kuralı sayesinde izinli",
+      "grantCategory": "Her {{name}} aracına her zaman izin ver",
+      "grantTool": "{{name}} için her zaman izin ver",
+      "revoke": "Geri al"
     }
   },
   "overlay": {
@@ -120,5 +151,210 @@
     "sectionTitle": "Geliştirici",
     "simulateBotRun": "Bot çalışmasını simüle et",
     "runningLabel": "Bot Çalışması Aktif"
+  },
+  "common": {
+    "back": "Geri",
+    "cancel": "Vazgeç",
+    "save": "Kaydet",
+    "edit": "Düzenle",
+    "delete": "Sil"
+  },
+  "health": {
+    "connecting": "Daemon başlatılıyor…",
+    "failed": "Daemon kullanılamıyor",
+    "offline": "Daemon çevrimdışı",
+    "reconnecting": "Yeniden bağlanılıyor…",
+    "connected": "Daemon bağlı",
+    "retry": "Yeniden dene",
+    "fakeProvider": "Sahte sağlayıcı",
+    "details": "Daemon {{version}} · {{uptime}} sn çalışıyor {{mode}}"
+  },
+  "bots": {
+    "notFound": "Bu bot artık yok.",
+    "noModel": "Model yok",
+    "newChat": "Yeni sohbet",
+    "confirmDelete": "Silmek için tekrar tıkla",
+    "chats": "Sohbetler",
+    "noChats": "Henüz sohbet yok. “Yeni sohbet” ile başla.",
+    "chatState": {
+      "needs": "Senden bekliyor",
+      "running": "Çalışıyor"
+    }
+  },
+  "chat": {
+    "notFound": "Bu sohbet yok.",
+    "stop": "Durdur",
+    "resume": "Sürdür",
+    "emptyHint": "Sohbeti başlatmak için bir şey yaz.",
+    "runFailed": "Çalışma başarısız oldu: {{message}}",
+    "working": "Çalışıyor…",
+    "modeLabel": "Bot çalışırken",
+    "mode": {
+      "queue": "Sıraya al",
+      "steer": "Yönlendir",
+      "queueHint": "Mevcut tur bittikten sonra ilet",
+      "steerHint": "Hemen ilet ve mevcut turu yönlendir"
+    },
+    "placeholder": "Bota mesaj yaz…",
+    "placeholderBusy": "Bot çalışıyor — sıraya al veya yönlendir…",
+    "send": "Gönder",
+    "tool": {
+      "subagent": "Alt ajan",
+      "input": "Girdi",
+      "result": "Sonuç",
+      "denyReason": "Gerekçe: {{reason}}",
+      "status": {
+        "requested": "İstendi",
+        "awaiting_approval": "Onay bekliyor",
+        "running": "Çalışıyor",
+        "denied": "Reddedildi",
+        "done": "Bitti",
+        "error": "Başarısız",
+        "expired": "Süresi doldu"
+      }
+    },
+    "approval": {
+      "title": "Onay gerekiyor",
+      "sendTitle": "Senin adına gönderilsin mi?",
+      "countdown": "{{seconds}} sn içinde otomatik reddedilir",
+      "once": "Bir kez izin ver",
+      "thisChat": "Bu sohbet",
+      "always": "Her zaman",
+      "deny": "Reddet",
+      "reasonPlaceholder": "Reddetme gerekçesi (isteğe bağlı)"
+    },
+    "question": {
+      "title": "Bot soruyor",
+      "answered": "Yanıtın: {{answer}}",
+      "closed": "Bu soru artık açık değil.",
+      "placeholder": "Başka bir yanıt yaz…",
+      "answer": "Yanıtla"
+    },
+    "todo": {
+      "title": "Plan",
+      "status": {
+        "pending": "bekliyor",
+        "in_progress": "sürüyor",
+        "done": "bitti"
+      }
+    },
+    "notice": {
+      "modelFallback": "Model {{from}} yerine {{to}} oldu: {{reason}}",
+      "error": "{{message}}",
+      "workflowDrift": "{{workflow}} iş akışı sapma gösterdi: {{reason}}"
+    }
+  },
+  "botForm": {
+    "createTitle": "Yeni bot",
+    "editTitle": "Botu düzenle",
+    "create": "Botu oluştur",
+    "identity": "Kimlik",
+    "name": "Ad",
+    "nameRequired": "Ad gerekli.",
+    "avatar": "Avatar",
+    "avatarChoose": "Görsel veya GIF seç",
+    "avatarUseInitials": "Baş harfleri kullan",
+    "avatarInitialsHint": "Görsel seçene kadar baş harfler gösterilir.",
+    "avatarHint": "PNG, JPEG, WebP veya GIF (400 KB’a kadar GIF’ler animasyonunu korur).",
+    "avatarTooLarge": "Bu görsel çok büyük.",
+    "avatarUnreadable": "Bu dosya görsel olarak okunamadı.",
+    "color": "Renk",
+    "colorCustom": "Özel renk",
+    "persona": "Kişilik",
+    "personaPlaceholder": "Bu bot nasıl davranmalı? (sistem talimatı)",
+    "models": "Modeller",
+    "modelsHint": "Her rol için bir sağlayıcı seç ve model adını yaz. Yalnızca yürütücü zorunludur.",
+    "role": {
+      "executor": "Yürütücü",
+      "planner": "Planlayıcı",
+      "classifier": "Sınıflandırıcı",
+      "fallback": "Yedek modeller"
+    },
+    "provider": "sağlayıcı",
+    "model": "model",
+    "defaultProvider": "Varsayılan sağlayıcı",
+    "modelPlaceholder": "model adı",
+    "executorRequired": "Yürütücü model gerekli.",
+    "fallbackPlaceholder": "sağlayıcı/model, sağlayıcı/model",
+    "permissions": "İzinler",
+    "preset": {
+      "read-only": {
+        "name": "Salt okunur",
+        "hint": "Bot bakabilir ama hiçbir şeyi değiştiremez."
+      },
+      "approve-destructive": {
+        "name": "Yıkıcı işlemlerde onay",
+        "hint": "Okumalar serbest; değiştiren veya gönderen her şey önce sana sorar."
+      },
+      "full": {
+        "name": "Tam",
+        "hint": "Her şeye sormadan izin verilir."
+      },
+      "read-and-draft": {
+        "name": "Oku ve taslak hazırla",
+        "hint": "Bot okur ve taslak hazırlar, ama asla göndermez veya değiştirmez."
+      },
+      "custom": {
+        "name": "Özel",
+        "hint": "Her kategori için bir düzey seç."
+      }
+    },
+    "category": {
+      "fs": "Dosyalar",
+      "shell": "Kabuk",
+      "desktop": "Masaüstü",
+      "browser": "Tarayıcı",
+      "accounts": "Hesaplar",
+      "messaging": "Mesajlaşma",
+      "money": "Para",
+      "system": "Sistem",
+      "remote": "Uzak",
+      "script": "Betikler"
+    },
+    "level": {
+      "deny": "Reddet",
+      "ask": "Sor",
+      "allow": "İzin ver"
+    },
+    "runtime": "Bilgisayar ve tarayıcı",
+    "computer": "Bilgisayar",
+    "browser": "Tarayıcı",
+    "local": "Yerel (bu makine)",
+    "remoteSoon": "Uzak (yakında)",
+    "runtimeHint": "Şimdilik yalnızca bu makine desteklenir."
+  },
+  "usage": {
+    "title": "Kullanım",
+    "subtitle": "Her botun kullandığı token sayısı.",
+    "range": "Zaman aralığı",
+    "ranges": {
+      "all": "Tüm zamanlar",
+      "day": "Son 24 saat",
+      "week": "Son 7 gün",
+      "month": "Son 30 gün"
+    },
+    "refresh": "Yenile",
+    "runs": "Çalışmalar",
+    "modelCalls": "Model çağrıları",
+    "tokens": "Token",
+    "empty": "Henüz kullanım yok.",
+    "bot": "Bot",
+    "calls": "Çağrı",
+    "prompt": "İstem",
+    "completion": "Yanıt",
+    "cached": "Önbellekte",
+    "total": "Toplam",
+    "deletedBot": "Silinmiş bot",
+    "costNote": "Maliyet henüz daemon tarafından bildirilmiyor; yalnızca token sayıları gösterilir."
+  },
+  "needs": {
+    "title": "Senden bekleyenler",
+    "subtitle": "Tüm sohbetlerde bekleyen onaylar ve sorular.",
+    "empty": "Senden bekleyen bir şey yok.",
+    "kind": {
+      "approval": "Onay",
+      "question": "Soru"
+    },
+    "open": "Sohbeti aç"
   }
 }

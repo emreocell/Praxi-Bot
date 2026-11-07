@@ -92,6 +92,18 @@ pub fn build_agent(storage: &Arc<Storage>, providers: Providers, data_dir: &Path
     AgentLoop::new(Arc::clone(storage), tools, providers, LoopConfig::default())
 }
 
+/// Environment variable with extra allowed browser origins (comma separated).
+pub const ALLOWED_ORIGINS_ENV: &str = "BOT_ALLOWED_ORIGINS";
+
+/// Non-empty, trimmed entries of a comma separated origin list.
+fn parse_origins(list: &str) -> Vec<String> {
+    list.split(',')
+        .map(|o| o.trim().trim_end_matches('/'))
+        .filter(|o| !o.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
 /// Resolves on the first stop request: Ctrl-C everywhere, `SIGTERM` on Unix,
 /// console close / logoff / system shutdown on Windows (the OS only allows a few
 /// seconds after those, so a long grace period cannot always be honoured there).
@@ -164,6 +176,10 @@ pub fn serve(
     }
     let mut cfg = DaemonConfig::new(token.token);
     cfg.shutdown_grace = grace;
+    // Extra browser origins (e.g. the desktop app's dev server), comma separated.
+    if let Ok(extra) = std::env::var(ALLOWED_ORIGINS_ENV) {
+        cfg.allowed_origins.extend(parse_origins(&extra));
+    }
     let state = AppState::new(agent, storage, cfg)?;
 
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -204,4 +220,18 @@ pub fn serve(
         }
         Ok::<(), Box<dyn std::error::Error>>(())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_origins;
+
+    #[test]
+    fn origin_list_is_trimmed_and_filtered() {
+        assert_eq!(
+            parse_origins(" http://localhost:1420/ ,, http://a.test "),
+            vec!["http://localhost:1420", "http://a.test"]
+        );
+        assert_eq!(parse_origins("").len(), 0);
+    }
 }

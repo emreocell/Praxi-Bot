@@ -1,0 +1,128 @@
+.pane {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-8);
+  display: flex;
+  justify-content: center;
+}
+
+.container {
+  max-width: var(--size-content-max);
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.title {
+  margin: var(--space-0);
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.heading {
+  margin: var(--space-0);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.hiddenFile {
+  display: none;
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.swatch {
+  width: var(--size-swatch);
+  height: var(--size-swatch);
+  padding: var(--space-0);
+  border-radius: var(--radius-pill);
+  border: var(--size-border-thick) solid var(--color-border);
+  background-color: var(--swatch-color, var(--color-accent));
+  cursor: pointer;
+}
+
+.swatch:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.swatchActive {
+  border-color: var(--color-text);
+  box-shadow: var(--shadow-focus);
+}
+
+.colorInput {
+  width: var(--size-swatch);
+  height: var(--size-swatch);
+  padding: var(--space-0);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: transparent;
+  cursor: pointer;
+}
+
+.presets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.preset {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  border: var(--size-border) solid var(--color-border);
+  cursor: pointer;
+}
+
+.presetActive {
+  border-color: var(--color-accent);
+  background-color: var(--color-accent-subtle);
+}
+
+.presetText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.presetName {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.categories {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--size-control-lg) * 4), 1fr));
+  gap: var(--space-3);
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding-bottom: var(--space-8);
+}

@@ -288,3 +288,34 @@
   font-weight: var(--font-weight-semibold);
   color: var(--color-text);
 }
+
+.brandBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.needsBadge {
+  margin-left: auto;
+  min-width: var(--size-control-sm);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-warning);
+  color: var(--color-text-inverse);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  text-align: center;
+}
+
+.mainColumn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: var(--space-0);
+  min-width: var(--space-0);
+}
+
+.runBannerWrap {
+  padding: var(--space-3) var(--space-5) var(--space-0);
+}

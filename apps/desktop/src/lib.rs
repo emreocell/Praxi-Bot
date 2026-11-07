@@ -1,6 +1,7 @@
 //! Desktop shell library entry point for Tauri.
 
 pub mod control;
+pub mod daemon;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,10 +12,11 @@ use control::{
     OverlayWireEvent, WIRE_EVENT_CONTROL_STATE, WIRE_EVENT_OVERLAY_CLEAR, WIRE_EVENT_OVERLAY_CLICK,
     WIRE_EVENT_OVERLAY_ENVELOPE, WIRE_EVENT_OVERLAY_SHOW_TARGET, spawn_global_hotkey_listener,
 };
+use daemon::{CliOutput, Connection, DaemonHandle};
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize,
-    State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+    RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 
 const MENU_ID_SIMULATE_RUN: &str = "dev.simulate_bot_run";
@@ -539,6 +541,89 @@ fn get_monitors_geometry(app: AppHandle) -> Vec<MonitorGeometry> {
     collect_monitors_geometry(&app)
 }
 
+// ── Daemon lifecycle / provider management (task 017) ─────────────────────────
+
+/// Start the daemon if needed and return the base URL + bearer token.
+#[tauri::command]
+async fn daemon_connect(daemon: State<'_, Arc<DaemonHandle>>) -> Result<Connection, String> {
+    daemon::connect(&daemon).await
+}
+
+/// Stop a daemon this app started, then start it again (e.g. to pick up new
+/// providers).  A daemon started by someone else is left alone.
+#[tauri::command]
+async fn daemon_restart(daemon: State<'_, Arc<DaemonHandle>>) -> Result<Connection, String> {
+    daemon.stop();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    daemon::connect(&daemon).await
+}
+
+/// Arguments of `providers_cli` (typed so no free-form flag reaches the CLI).
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ProvidersAction {
+    List,
+    Add,
+    Test,
+    Default,
+}
+
+fn valid_provider_id(id: &str) -> bool {
+    !id.is_empty()
+        && !id.starts_with('-')
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+/// `bot providers list|add|test|default`; the API key (if any) travels in the
+/// child's environment, never on the command line.
+#[tauri::command]
+async fn providers_cli(
+    action: ProvidersAction,
+    id: Option<String>,
+    base_url: Option<String>,
+    model: Option<String>,
+    api_key: Option<String>,
+) -> Result<CliOutput, String> {
+    let mut args: Vec<String> = Vec::new();
+    let mut key = None;
+    if let ProvidersAction::List = action {
+        args.push("list".into());
+    } else {
+        let id = id
+            .filter(|i| valid_provider_id(i))
+            .ok_or("invalid provider id")?;
+        match action {
+            ProvidersAction::Add => {
+                args.extend(["add".into(), id]);
+                if let Some(u) = base_url.filter(|u| !u.trim().is_empty()) {
+                    if !(u.starts_with("http://") || u.starts_with("https://")) {
+                        return Err("base URL must start with http:// or https://".into());
+                    }
+                    args.extend(["--base-url".into(), u]);
+                }
+                if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
+                    args.extend(["--model".into(), m]);
+                }
+                if api_key.as_deref().is_some_and(|k| !k.is_empty()) {
+                    args.extend(["--key-env".into(), daemon::KEY_ENV.into()]);
+                    key = api_key;
+                }
+            }
+            ProvidersAction::Test => args.extend(["test".into(), id]),
+            ProvidersAction::Default => {
+                args.extend(["default".into(), id]);
+                if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
+                    args.extend(["--model".into(), m]);
+                }
+            }
+            ProvidersAction::List => {}
+        }
+    }
+    daemon::run_providers_cli(args, key).await
+}
+
 fn setup_dev_menu(app: &tauri::App, control: ControlHandle) {
     if !cfg!(debug_assertions) {
         return;
@@ -611,10 +696,13 @@ fn setup_dev_menu(app: &tauri::App, control: ControlHandle) {
 pub fn run() {
     let control = ControlHandle::new(Duration::from_millis(DEFAULT_PRE_ACTION_HIGHLIGHT_MS));
     let control_for_setup = control.clone();
+    let daemon_handle = Arc::new(DaemonHandle::default());
+    let daemon_for_exit = Arc::clone(&daemon_handle);
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(control)
+        .manage(daemon_handle)
         .setup(move |app| {
             let app_handle = app.handle().clone();
             control_for_setup.set_sink(Arc::new(TauriOverlaySink {
@@ -640,6 +728,11 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if window.label() == "main" && matches!(event, WindowEvent::Destroyed) {
+                // `exit` may end the process without running `RunEvent::Exit`,
+                // so stop a daemon this app started right here.
+                if let Some(daemon) = window.app_handle().try_state::<Arc<DaemonHandle>>() {
+                    daemon.stop();
+                }
                 window.app_handle().exit(0);
             }
         })
@@ -659,7 +752,32 @@ pub fn run() {
             overlay_clear,
             simulate_bot_run,
             get_monitors_geometry,
+            daemon_connect,
+            daemon_restart,
+            providers_cli,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(move |_app, event| {
+        if matches!(event, RunEvent::Exit) {
+            // Stop the daemon only if this app started it.
+            daemon_for_exit.stop();
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_provider_id;
+
+    #[test]
+    fn provider_ids_cannot_smuggle_flags() {
+        assert!(valid_provider_id("deepseek"));
+        assert!(valid_provider_id("my.local_llm-2"));
+        assert!(!valid_provider_id(""));
+        assert!(!valid_provider_id("--base-url"));
+        assert!(!valid_provider_id("a b"));
+        assert!(!valid_provider_id("a;b"));
+    }
 }

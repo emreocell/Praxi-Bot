@@ -23,6 +23,7 @@ tauri-build = { version = "2", features = [] }
 parking_lot.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+storage.workspace = true
 tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-store = "2"
 thiserror.workspace = true
