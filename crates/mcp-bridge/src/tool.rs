@@ -6,11 +6,10 @@ use async_trait::async_trait;
 use rmcp::model::{CallToolResult, Tool as McpTool};
 use serde_json::{Value, json};
 use tool_registry::{
-    ContentPart, Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError, ToolOutput,
-    ToolSpec,
+    ContentPart, Effect, Platform, Tool, ToolContext, ToolError, ToolOutput, ToolSpec,
 };
 
-use crate::manager::Server;
+use crate::{config::McpServerConfig, manager::Server};
 
 /// Registry name of a remote tool: `mcp:<server>/<tool>`.
 #[must_use]
@@ -18,13 +17,14 @@ pub fn qualified_name(server: &str, tool: &str) -> String {
     format!("mcp:{server}/{tool}")
 }
 
-/// Effect of a remote tool.  Per ADR-0004 the default is `Destructive`; only
-/// an explicit MCP `readOnlyHint = true` lowers it to `Read`.  (Annotations
-/// are hints from a possibly untrusted server — the permission engine still
-/// decides, `Read` merely avoids needless prompts for honest servers.)
-pub(crate) fn effect_of(tool: &McpTool) -> Effect {
+/// Effect of a remote tool.  Per ADR-0004 the default is `Destructive`.  The
+/// server's `readOnlyHint = true` lowers it to `Read` **only** when the user
+/// opted in with `trust_hints` for that server; otherwise an untrusted server
+/// could skip approval (`read_tools_skip_ask`) by declaring its own tools
+/// read-only.
+pub(crate) fn effect_of(tool: &McpTool, trust_hints: bool) -> Effect {
     match tool.annotations.as_ref().and_then(|a| a.read_only_hint) {
-        Some(true) => Effect::Read,
+        Some(true) if trust_hints => Effect::Read,
         _ => Effect::Destructive,
     }
 }
@@ -39,7 +39,8 @@ fn normalise_schema(schema: &serde_json::Map<String, Value>) -> Value {
     Value::Object(schema)
 }
 
-pub(crate) fn spec_of(server: &str, tool: &McpTool) -> ToolSpec {
+pub(crate) fn spec_of(config: &McpServerConfig, tool: &McpTool) -> ToolSpec {
+    let server = config.id.as_str();
     let description = tool
         .description
         .as_deref()
@@ -51,8 +52,8 @@ pub(crate) fn spec_of(server: &str, tool: &McpTool) -> ToolSpec {
         name: qualified_name(server, &tool.name),
         description,
         input_schema: normalise_schema(&tool.input_schema),
-        effect: effect_of(tool),
-        category: PermissionCategory::Accounts,
+        effect: effect_of(tool, config.trust_hints),
+        category: config.effective_category(),
         platforms: vec![Platform::All],
     }
 }
@@ -67,7 +68,7 @@ pub(crate) struct McpToolAdapter {
 impl McpToolAdapter {
     pub(crate) fn new(server: Arc<Server>, tool: &McpTool) -> Self {
         Self {
-            spec: spec_of(server.id(), tool),
+            spec: spec_of(server.config(), tool),
             remote_name: tool.name.to_string(),
             server,
         }
@@ -148,6 +149,7 @@ mod tests {
     use std::sync::Arc;
 
     use rmcp::model::{ContentBlock, ToolAnnotations};
+    use tool_registry::PermissionCategory;
 
     use super::*;
 
@@ -161,15 +163,32 @@ mod tests {
     }
 
     #[test]
-    fn effect_defaults_to_destructive_unless_read_only_hint() {
-        assert_eq!(effect_of(&tool(None)), Effect::Destructive);
-        assert_eq!(effect_of(&tool(Some(false))), Effect::Destructive);
-        assert_eq!(effect_of(&tool(Some(true))), Effect::Read);
+    fn effect_defaults_to_destructive_unless_trusted_read_only_hint() {
+        for trust in [false, true] {
+            assert_eq!(effect_of(&tool(None), trust), Effect::Destructive);
+            assert_eq!(effect_of(&tool(Some(false)), trust), Effect::Destructive);
+        }
+        assert_eq!(effect_of(&tool(Some(true)), false), Effect::Destructive);
+        assert_eq!(effect_of(&tool(Some(true)), true), Effect::Read);
+    }
+
+    #[test]
+    fn category_comes_from_config() {
+        let mut cfg = McpServerConfig::stdio("srv", "x", [""; 0]);
+        assert_eq!(
+            spec_of(&cfg, &tool(None)).category,
+            PermissionCategory::Accounts
+        );
+        cfg.category = Some(PermissionCategory::Fs);
+        assert_eq!(spec_of(&cfg, &tool(None)).category, PermissionCategory::Fs);
     }
 
     #[test]
     fn spec_has_qualified_name_and_normalised_schema() {
-        let spec = spec_of("srv", &tool(Some(true)));
+        let spec = spec_of(
+            &McpServerConfig::stdio("srv", "x", [""; 0]),
+            &tool(Some(true)),
+        );
         assert_eq!(spec.name, "mcp:srv/do_it");
         assert_eq!(spec.input_schema["type"], "object");
         assert!(spec.input_schema["properties"].is_object());
@@ -180,7 +199,7 @@ mod tests {
     fn missing_description_falls_back() {
         let mut t = tool(None);
         t.description = None;
-        assert!(spec_of("srv", &t).is_valid());
+        assert!(spec_of(&McpServerConfig::stdio("srv", "x", [""; 0]), &t).is_valid());
     }
 
     #[test]

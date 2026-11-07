@@ -1,7 +1,8 @@
 //! Opening a raw MCP client session over stdio or streamable HTTP.
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
+    fmt,
     process::Stdio,
     sync::Arc,
     time::Duration,
@@ -17,6 +18,7 @@ use rmcp::{
         streamable_http_client::StreamableHttpClientTransportConfig, which_command,
     },
 };
+use secret_store::{SecretRef, SecretStore, resolve};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::{
@@ -59,6 +61,61 @@ impl StderrLog {
     }
 }
 
+/// Secret values resolved for one connect attempt.  Lives only for the
+/// duration of [`open`]; `Debug` never prints the values.
+#[derive(Default)]
+pub(crate) struct ResolvedSecrets {
+    headers: BTreeMap<String, String>,
+    env: BTreeMap<String, String>,
+}
+
+impl fmt::Debug for ResolvedSecrets {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ResolvedSecrets")
+            .field("headers", &self.headers.keys().collect::<Vec<_>>())
+            .field("env", &self.env.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
+/// Resolve `secret_headers` / `secret_env` through the store.  Fails (so the
+/// server is never started) if there is no store or a secret is missing.
+/// Error messages carry the secret *name*, never a value.
+pub(crate) fn resolve_secrets(
+    config: &McpServerConfig,
+    store: Option<&dyn SecretStore>,
+) -> Result<ResolvedSecrets> {
+    let mut out = ResolvedSecrets::default();
+    if config.secret_headers.is_empty() && config.secret_env.is_empty() {
+        return Ok(out);
+    }
+    let id = &config.id;
+    let store = store.ok_or_else(|| {
+        McpError::Config(format!(
+            "server `{id}` uses secret references but the manager has no secret store"
+        ))
+    })?;
+    let fetch = |kind: &str, key: &str, name: &str| -> Result<String> {
+        let r = SecretRef::new(name)
+            .map_err(|e| McpError::Config(format!("server `{id}`: `{kind}.{key}`: {e}")))?;
+        resolve(store, &r)
+            .map(|v| v.expose().to_owned())
+            .map_err(|e| {
+                McpError::Config(format!(
+                    "server `{id}`: cannot resolve secret `{name}` for `{kind}.{key}`: {e}"
+                ))
+            })
+    };
+    for (k, name) in &config.secret_headers {
+        out.headers
+            .insert(k.clone(), fetch("secret_headers", k, name)?);
+    }
+    for (k, name) in &config.secret_env {
+        out.env.insert(k.clone(), fetch("secret_env", k, name)?);
+    }
+    Ok(out)
+}
+
 fn transport_err(server: &str, e: impl std::fmt::Display) -> McpError {
     McpError::Transport {
         server: server.to_owned(),
@@ -67,7 +124,11 @@ fn transport_err(server: &str, e: impl std::fmt::Display) -> McpError {
 }
 
 /// Build the command for a stdio server with a minimal, explicit environment.
-fn build_command(server: &str, config: &McpTransport) -> Result<tokio::process::Command> {
+fn build_command(
+    server: &str,
+    config: &McpTransport,
+    secrets: &ResolvedSecrets,
+) -> Result<tokio::process::Command> {
     let McpTransport::Stdio {
         command,
         args,
@@ -89,7 +150,10 @@ fn build_command(server: &str, config: &McpTransport) -> Result<tokio::process::
             cmd.env(key, v);
         }
     }
-    cmd.args(args).envs(env).kill_on_drop(true);
+    cmd.args(args)
+        .envs(env)
+        .envs(&secrets.env)
+        .kill_on_drop(true);
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
     }
@@ -111,10 +175,11 @@ fn forward_stderr(server: String, stderr: tokio::process::ChildStderr, log: Arc<
 fn http_config(
     server: &str,
     url: &str,
-    headers: &std::collections::BTreeMap<String, String>,
+    headers: &BTreeMap<String, String>,
+    secret_headers: &BTreeMap<String, String>,
 ) -> Result<StreamableHttpClientTransportConfig> {
     let mut map = HashMap::new();
-    for (k, v) in headers {
+    for (k, v) in headers.iter().chain(secret_headers) {
         let name = HeaderName::from_bytes(k.as_bytes())
             .map_err(|e| McpError::Config(format!("{server}: bad header name `{k}`: {e}")))?;
         let mut value = HeaderValue::from_str(v)
@@ -130,6 +195,7 @@ fn http_config(
 /// Connect and complete the MCP handshake, bounded by `timeout`.
 pub(crate) async fn open(
     config: &McpServerConfig,
+    secrets: &ResolvedSecrets,
     stderr: &Arc<StderrLog>,
     timeout: Duration,
 ) -> Result<Session> {
@@ -137,7 +203,7 @@ pub(crate) async fn open(
     let handshake = async {
         match &config.transport {
             McpTransport::Stdio { .. } => {
-                let cmd = build_command(id, &config.transport)?;
+                let cmd = build_command(id, &config.transport, secrets)?;
                 let (transport, child_stderr) = TokioChildProcess::builder(cmd)
                     .stderr(Stdio::piped())
                     .spawn()
@@ -151,8 +217,12 @@ pub(crate) async fn open(
                 ().serve(transport).await.map_err(|e| transport_err(id, e))
             }
             McpTransport::Http { url, headers } => {
-                let transport =
-                    StreamableHttpClientTransport::from_config(http_config(id, url, headers)?);
+                let transport = StreamableHttpClientTransport::from_config(http_config(
+                    id,
+                    url,
+                    headers,
+                    &secrets.headers,
+                )?);
                 ().serve(transport).await.map_err(|e| transport_err(id, e))
             }
         }
@@ -175,15 +245,75 @@ mod tests {
     fn http_headers_are_validated_and_marked_sensitive() {
         let mut h = BTreeMap::new();
         h.insert("Authorization".to_owned(), "Bearer abc".to_owned());
-        let cfg = http_config("s", "https://x/mcp", &h).unwrap();
+        let cfg = http_config("s", "https://x/mcp", &h, &BTreeMap::new()).unwrap();
         let v = cfg.custom_headers.values().next().unwrap();
         assert!(v.is_sensitive());
 
         h.insert("bad header".to_owned(), "v".to_owned());
         assert!(matches!(
-            http_config("s", "https://x", &h),
+            http_config("s", "https://x", &h, &BTreeMap::new()),
             Err(McpError::Config(_))
         ));
+    }
+
+    struct Fake(BTreeMap<String, String>);
+
+    impl SecretStore for Fake {
+        fn get(
+            &self,
+            name: &str,
+        ) -> std::result::Result<Option<secret_store::SecretValue>, secret_store::SecretError>
+        {
+            Ok(self.0.get(name).map(secret_store::SecretValue::new))
+        }
+        fn set(&self, _: &str, _: &str) -> std::result::Result<(), secret_store::SecretError> {
+            unimplemented!()
+        }
+        fn delete(&self, _: &str) -> std::result::Result<bool, secret_store::SecretError> {
+            unimplemented!()
+        }
+        fn list_names(&self) -> std::result::Result<Vec<String>, secret_store::SecretError> {
+            unimplemented!()
+        }
+    }
+
+    #[test]
+    fn secrets_resolve_at_connect_and_never_show_in_debug() {
+        let store = Fake(BTreeMap::from([(
+            "tok".to_owned(),
+            "s3cr3t-value".to_owned(),
+        )]));
+        let mut cfg = McpServerConfig::http("s", "https://x/mcp");
+        cfg.secret_headers
+            .insert("Authorization".into(), "tok".into());
+        let r = resolve_secrets(&cfg, Some(&store)).unwrap();
+        assert_eq!(r.headers["Authorization"], "s3cr3t-value");
+        assert!(!format!("{r:?}").contains("s3cr3t-value"));
+        assert!(!format!("{cfg:?}").contains("s3cr3t-value"));
+        assert!(!toml::to_string(&cfg).unwrap().contains("s3cr3t-value"));
+        // The resolved value reaches the HTTP config, marked sensitive.
+        let http = http_config("s", "https://x/mcp", &BTreeMap::new(), &r.headers).unwrap();
+        assert!(http.custom_headers.values().all(HeaderValue::is_sensitive));
+        assert!(!format!("{http:?}").contains("s3cr3t-value"));
+    }
+
+    #[test]
+    fn missing_secret_or_store_is_a_config_error() {
+        let mut cfg = McpServerConfig::stdio("s", "x", [""; 0]);
+        cfg.secret_env.insert("KEY".into(), "absent".into());
+        let empty = Fake(BTreeMap::new());
+        let err = resolve_secrets(&cfg, Some(&empty)).unwrap_err();
+        assert!(
+            matches!(err, McpError::Config(ref m) if m.contains("absent")),
+            "{err}"
+        );
+        assert!(matches!(
+            resolve_secrets(&cfg, None),
+            Err(McpError::Config(_))
+        ));
+        // No secret refs: no store needed.
+        let plain = McpServerConfig::stdio("s", "x", [""; 0]);
+        assert!(resolve_secrets(&plain, None).is_ok());
     }
 
     #[test]
@@ -200,9 +330,14 @@ mod tests {
     #[tokio::test]
     async fn missing_command_is_a_spawn_error() {
         let cfg = McpServerConfig::stdio("s", "definitely-not-a-real-binary-xyz", [""; 0]);
-        let err = open(&cfg, &Arc::default(), Duration::from_secs(2))
-            .await
-            .unwrap_err();
+        let err = open(
+            &cfg,
+            &ResolvedSecrets::default(),
+            &Arc::default(),
+            Duration::from_secs(2),
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, McpError::Spawn { .. }), "{err}");
     }
 }
