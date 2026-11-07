@@ -20,11 +20,29 @@ import styles from "./App.module.css";
 import {
   ACCENT_PRESETS,
   BLUR_PRESETS,
+  DEFAULT_STOP_HOTKEY,
   DIM_PRESETS,
+  HOTKEY_PRESETS,
   PRODUCT_CONFIG
 } from "./config/product";
 import { MOCK_BOTS, type MockBot } from "./data/mockBots";
 import { i18n, type SupportedLanguage } from "./i18n";
+import {
+  broadcastSettingsUpdated,
+  type ControlSnapshot,
+  formatKeyboardEventAsHotkey,
+  getControlState,
+  giveBackControl,
+  INITIAL_CONTROL_SNAPSHOT,
+  matchesHotkeyEvent,
+  pauseBotRun,
+  resumeBotRun,
+  setStopHotkey,
+  simulateBotRun,
+  stopBotRun,
+  subscribeOverlayEvents,
+  takeTheWheel
+} from "./overlay/events";
 import {
   type AppSettings,
   DEFAULT_SETTINGS,
@@ -41,6 +59,10 @@ export function App() {
     null
   );
   const [activeView, setActiveView] = useState<ActiveView>("bots");
+  const [controlState, setControlState] = useState<ControlSnapshot>(
+    INITIAL_CONTROL_SNAPSHOT
+  );
+  const [recordingHotkey, setRecordingHotkey] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -53,10 +75,34 @@ export function App() {
       if (loaded.language && loaded.language !== i18n.language) {
         void i18n.changeLanguage(loaded.language);
       }
+      if (loaded.stopHotkey) {
+        void setStopHotkey(loaded.stopHotkey)
+          .then((snap) => {
+            if (mounted) {
+              setControlState(snap);
+            }
+          })
+          .catch(() => {});
+      }
     });
+
+    void getControlState().then((snap) => {
+      if (mounted) {
+        setControlState(snap);
+      }
+    });
+
     return () => {
       mounted = false;
     };
+  }, []);
+
+  useEffect(() => {
+    return subscribeOverlayEvents({
+      onControlStateChanged: (snapshot) => {
+        setControlState(snapshot);
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -95,9 +141,43 @@ export function App() {
     setSettings((prev) => {
       const next: AppSettings = { ...prev, ...patch };
       void saveSettings(next);
+      void broadcastSettingsUpdated(next);
       return next;
     });
   };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (recordingHotkey) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.key === "Escape" && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
+          setRecordingHotkey(false);
+          return;
+        }
+        const recorded = formatKeyboardEventAsHotkey(event);
+        if (recorded) {
+          setRecordingHotkey(false);
+          updateSettings({ stopHotkey: recorded });
+          void setStopHotkey(recorded)
+            .then(setControlState)
+            .catch(() => {});
+        }
+        return;
+      }
+
+      const activeHotkey = controlState.stopHotkey || settings.stopHotkey;
+      if (matchesHotkeyEvent(event, activeHotkey)) {
+        event.preventDefault();
+        void stopBotRun().then(setControlState);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [recordingHotkey, controlState.stopHotkey, settings.stopHotkey]);
 
   const handleThemeChange = (themeMode: ThemeMode) => {
     updateSettings({ themeMode });
@@ -110,6 +190,14 @@ export function App() {
   const handleLanguageChange = (language: SupportedLanguage) => {
     void i18n.changeLanguage(language);
     updateSettings({ language });
+  };
+
+  const handleStopHotkeyChange = (stopHotkey: string) => {
+    setRecordingHotkey(false);
+    updateSettings({ stopHotkey });
+    void setStopHotkey(stopHotkey)
+      .then(setControlState)
+      .catch(() => {});
   };
 
   const handleBackgroundFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -140,6 +228,21 @@ export function App() {
 
   const selectedBot =
     MOCK_BOTS.find((bot) => bot.id === selectedBotId) ?? null;
+
+  const handleSimulateBotRun = () => {
+    const targetBot = selectedBot ?? MOCK_BOTS[0];
+    void simulateBotRun({
+      botId: targetBot.id,
+      botName: targetBot.name,
+      botAvatar: targetBot.avatarSrc,
+      botColor: targetBot.color,
+      botInitials: targetBot.initials
+    }).then(setControlState);
+  };
+
+  const isRunActive = controlState.mode !== "idle";
+  const isHumanDriving = controlState.mode === "human_driving";
+  const isPaused = controlState.mode === "paused";
 
   return (
     <SidebarLayout
@@ -190,17 +293,28 @@ export function App() {
           </SidebarSection>
 
           <SidebarFooter>
-            <Button
-              variant={activeView === "settings" ? "primary" : "secondary"}
-              fullWidth
-              onClick={() =>
-                setActiveView((prev) =>
-                  prev === "settings" ? "bots" : "settings"
-                )
-              }
-            >
-              {t("sidebar.settings")}
-            </Button>
+            <div className={styles.footerActions}>
+              {import.meta.env.DEV ? (
+                <Button
+                  variant="secondary"
+                  fullWidth
+                  onClick={handleSimulateBotRun}
+                >
+                  {t("dev.simulateBotRun")}
+                </Button>
+              ) : null}
+              <Button
+                variant={activeView === "settings" ? "primary" : "secondary"}
+                fullWidth
+                onClick={() =>
+                  setActiveView((prev) =>
+                    prev === "settings" ? "bots" : "settings"
+                  )
+                }
+              >
+                {t("sidebar.settings")}
+              </Button>
+            </div>
           </SidebarFooter>
         </Sidebar>
       }
@@ -229,13 +343,24 @@ export function App() {
                 <p className={styles.emptyStateDescription}>
                   {t(selectedBot.roleKey)}
                 </p>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setSelectedBotId(null)}
-                >
-                  {t("main.clearSelection")}
-                </Button>
+                <div className={styles.optionRow}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setSelectedBotId(null)}
+                  >
+                    {t("main.clearSelection")}
+                  </Button>
+                  {import.meta.env.DEV ? (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={handleSimulateBotRun}
+                    >
+                      {t("dev.simulateBotRun")}
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             ) : (
               <div className={styles.selectedBotContent}>
@@ -245,8 +370,80 @@ export function App() {
                 <p className={styles.emptyStateDescription}>
                   {t("main.selectBotDescription")}
                 </p>
+                {import.meta.env.DEV ? (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={handleSimulateBotRun}
+                  >
+                    {t("dev.simulateBotRun")}
+                  </Button>
+                ) : null}
               </div>
             )}
+
+            {isRunActive ? (
+              <div className={styles.activeRunBanner} role="status">
+                <div className={styles.activeRunHeader}>
+                  <span className={styles.botName}>
+                    {controlState.bot?.botName ?? t("dev.runningLabel")}
+                  </span>
+                  <span
+                    className={[
+                      styles.activeRunBadge,
+                      isHumanDriving ? styles.activeRunBadgeHuman : ""
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                  >
+                    {t(`widget.status.${controlState.mode}`)}
+                  </span>
+                </div>
+                <p className={styles.activeRunStep}>
+                  {isHumanDriving
+                    ? t("widget.humanDrivingStep")
+                    : controlState.currentStep || t("widget.idleStep")}
+                </p>
+                <div className={styles.activeRunControls}>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => void stopBotRun().then(setControlState)}
+                  >
+                    {t("widget.stop")}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={isHumanDriving}
+                    onClick={() => {
+                      if (isPaused) {
+                        void resumeBotRun().then(setControlState);
+                      } else {
+                        void pauseBotRun().then(setControlState);
+                      }
+                    }}
+                  >
+                    {isPaused ? t("widget.resume") : t("widget.pause")}
+                  </Button>
+                  <Button
+                    variant={isHumanDriving ? "primary" : "secondary"}
+                    size="sm"
+                    onClick={() => {
+                      if (isHumanDriving) {
+                        void giveBackControl().then(setControlState);
+                      } else {
+                        void takeTheWheel().then(setControlState);
+                      }
+                    }}
+                  >
+                    {isHumanDriving
+                      ? t("widget.giveBack")
+                      : t("widget.takeTheWheel")}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </Card>
         </div>
       ) : (
@@ -418,6 +615,59 @@ export function App() {
                     </Button>
                   ))}
                 </div>
+              </div>
+            </Card>
+
+            <Card padding="md" className={styles.settingCard}>
+              <div className={styles.settingInfo}>
+                <h2 className={styles.settingHeading}>
+                  {t("settings.hotkey.title")}
+                </h2>
+                <p className={styles.settingDescription}>
+                  {t("settings.hotkey.description")}
+                </p>
+              </div>
+              <div className={styles.optionRow}>
+                <span className={styles.subSettingLabel}>
+                  {t("settings.hotkey.currentLabel")}:
+                </span>
+                <span className={styles.hotkeyChip}>
+                  {settings.stopHotkey || DEFAULT_STOP_HOTKEY}
+                </span>
+                <Button
+                  size="sm"
+                  variant={recordingHotkey ? "primary" : "secondary"}
+                  onClick={() => setRecordingHotkey((prev) => !prev)}
+                >
+                  {recordingHotkey
+                    ? t("settings.hotkey.recording")
+                    : t("settings.hotkey.record")}
+                </Button>
+                {settings.stopHotkey !== DEFAULT_STOP_HOTKEY ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => handleStopHotkeyChange(DEFAULT_STOP_HOTKEY)}
+                  >
+                    {t("settings.hotkey.reset")}
+                  </Button>
+                ) : null}
+              </div>
+              <div className={styles.optionRow}>
+                {HOTKEY_PRESETS.map((preset) => (
+                  <Button
+                    key={preset.id}
+                    size="sm"
+                    variant="secondary"
+                    active={
+                      settings.stopHotkey.toLowerCase() ===
+                      preset.value.toLowerCase()
+                    }
+                    onClick={() => handleStopHotkeyChange(preset.value)}
+                  >
+                    {t(`settings.hotkey.presets.${preset.id}`)}
+                  </Button>
+                ))}
               </div>
             </Card>
 

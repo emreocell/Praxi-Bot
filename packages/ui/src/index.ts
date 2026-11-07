@@ -30,6 +30,7 @@ export {
   isReducedMotionPreferred,
   lightTheme,
   resolveTheme,
+  subscribeReducedMotion,
   subscribeSystemTheme,
   type Theme,
   type ThemeBackground,

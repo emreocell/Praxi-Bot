@@ -1,0 +1,151 @@
+.widgetViewport {
+  width: 100%;
+  height: 100%;
+  padding: var(--space-2);
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  background-color: transparent;
+  user-select: none;
+}
+
+.widgetCard {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-3);
+  background-color: var(--color-surface);
+  border: var(--size-border-thick) solid var(--color-border-strong);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-overlay);
+}
+
+.widgetCardHuman {
+  border-color: var(--color-warning);
+}
+
+.dragHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  cursor: move;
+}
+
+.botIdentity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: var(--space-0);
+  pointer-events: none;
+}
+
+.botTextMeta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: var(--space-0);
+}
+
+.botName {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text);
+  line-height: var(--line-height-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hotkeyHint {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  line-height: var(--line-height-tight);
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.statusDriving {
+  background-color: var(--color-accent-subtle);
+  color: var(--color-accent);
+}
+
+.statusPaused {
+  background-color: var(--color-surface-elevated);
+  color: var(--color-text-muted);
+}
+
+.statusHuman {
+  background-color: var(--color-warning-subtle);
+  color: var(--color-warning);
+}
+
+.statusDot {
+  width: var(--size-status-dot);
+  height: var(--size-status-dot);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-accent);
+}
+
+.statusDotPaused {
+  background-color: var(--color-text-muted);
+}
+
+.statusDotHuman {
+  background-color: var(--color-warning);
+}
+
+.stepContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-elevated);
+  border: var(--size-border) solid var(--color-border);
+}
+
+.stepText {
+  margin: var(--space-0);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+  line-height: var(--line-height-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.refusedInfo {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-warning);
+  line-height: var(--line-height-tight);
+}
+
+.controlsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.primaryControls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
