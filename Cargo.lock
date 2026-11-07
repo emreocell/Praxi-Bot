@@ -3910,6 +3910,7 @@ dependencies = [
  "http",
  "parking_lot",
  "rmcp",
+ "secret-store",
  "serde",
  "serde_json",
  "tempfile",

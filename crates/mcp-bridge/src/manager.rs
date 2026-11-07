@@ -8,13 +8,14 @@ use rmcp::{
     model::{CallToolRequestParams, CallToolResult, JsonObject},
     service::ServiceError,
 };
+use secret_store::SecretStore;
 use tool_registry::{Tool, ToolRegistry};
 
 use crate::{
     config::{McpServerConfig, ToolFilter},
     error::{McpError, Result},
     tool::{McpToolAdapter, qualified_name},
-    transport::{Session, StderrLog, open},
+    transport::{Session, StderrLog, open, resolve_secrets},
 };
 
 /// Exponential reconnect backoff: `initial`, `2*initial`, ... capped at `max`.
@@ -115,6 +116,7 @@ pub(crate) struct Server {
     filter: ToolFilter,
     registry: ToolRegistry,
     policy: McpPolicy,
+    secrets: Option<Arc<dyn SecretStore>>,
     stderr: Arc<StderrLog>,
     /// The session; the async mutex also serialises (re)connects.
     session: tokio::sync::Mutex<Option<Arc<Session>>>,
@@ -124,6 +126,10 @@ pub(crate) struct Server {
 impl Server {
     pub(crate) fn id(&self) -> &str {
         &self.config.id
+    }
+
+    pub(crate) fn config(&self) -> &McpServerConfig {
+        &self.config
     }
 
     fn is_alive(s: &Session) -> bool {
@@ -174,10 +180,27 @@ impl Server {
             *slot = None;
         }
         self.check_usable()?;
+        // Secrets are resolved fresh on every connect cycle and only held for
+        // the duration of the attempts.  A missing secret means nothing is
+        // spawned and nothing is retried.
+        let secrets = match resolve_secrets(&self.config, self.secrets.as_deref()) {
+            Ok(s) => s,
+            Err(e) => {
+                self.record_failure(&e);
+                return Err(e);
+            }
+        };
         let attempts = self.policy.backoff.max_attempts.max(1);
         let mut last = None;
         for attempt in 0..attempts {
-            match open(&self.config, &self.stderr, self.policy.connect_timeout).await {
+            match open(
+                &self.config,
+                &secrets,
+                &self.stderr,
+                self.policy.connect_timeout,
+            )
+            .await
+            {
                 Ok(session) => {
                     let session = Arc::new(session);
                     *slot = Some(Arc::clone(&session));
@@ -315,6 +338,7 @@ impl Server {
 pub struct McpManager {
     registry: ToolRegistry,
     policy: McpPolicy,
+    secrets: Option<Arc<dyn SecretStore>>,
     servers: Mutex<BTreeMap<String, Arc<Server>>>,
 }
 
@@ -331,8 +355,17 @@ impl McpManager {
         Self {
             registry,
             policy,
+            secrets: None,
             servers: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// Secret store used to resolve `secret_headers` / `secret_env` at connect
+    /// time.  Without one, servers that use secret references fail to start.
+    #[must_use]
+    pub fn with_secret_store(mut self, store: Arc<dyn SecretStore>) -> Self {
+        self.secrets = Some(store);
+        self
     }
 
     fn get(&self, id: &str) -> Result<Arc<Server>> {
@@ -356,6 +389,7 @@ impl McpManager {
             filter: config.tool_filter()?,
             registry: self.registry.clone(),
             policy: self.policy,
+            secrets: self.secrets.clone(),
             stderr: Arc::default(),
             session: tokio::sync::Mutex::new(None),
             state: Mutex::new(State {

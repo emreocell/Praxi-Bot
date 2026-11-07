@@ -7,7 +7,9 @@ use std::{
 };
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use secret_store::SecretRef;
 use serde::{Deserialize, Serialize};
+use tool_registry::PermissionCategory;
 
 use crate::error::{McpError, Result};
 
@@ -61,9 +63,39 @@ pub struct McpServerConfig {
     /// Glob patterns over the server-side tool name; applied after the allow list.
     #[serde(default)]
     pub tool_exclude: Vec<String>,
+    /// Trust the server's `readOnlyHint` annotation.  Default `false`: an
+    /// untrusted server must not be able to lower its own tools to `Read`
+    /// (which skips approval when `read_tools_skip_ask` is on), so every tool
+    /// is `Destructive`.  Set to `true` only for servers you trust.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub trust_hints: bool,
+    /// Permission category of every tool of this server; `None` means
+    /// `Accounts`.  Comes only from user config, never from the server.
+    /// `meta` is rejected by [`Self::validate`] (the resolver always allows it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<PermissionCategory>,
+    /// HTTP header name -> secret name.  Resolved through the secret store
+    /// only at connect time; the value is never stored, logged or serialized.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub secret_headers: BTreeMap<String, String>,
+    /// Environment variable (stdio) -> secret name.  Same rules as
+    /// [`Self::secret_headers`].
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub secret_env: BTreeMap<String, String>,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde `skip_serializing_if` signature
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 impl McpServerConfig {
+    /// The category given to this server's tools.
+    #[must_use]
+    pub fn effective_category(&self) -> PermissionCategory {
+        self.category.unwrap_or(PermissionCategory::Accounts)
+    }
+
     /// A stdio server with defaults (enabled, no filters, empty env).
     #[must_use]
     pub fn stdio(
@@ -82,6 +114,10 @@ impl McpServerConfig {
             enabled: true,
             tool_allow: Vec::new(),
             tool_exclude: Vec::new(),
+            trust_hints: false,
+            category: None,
+            secret_headers: BTreeMap::new(),
+            secret_env: BTreeMap::new(),
         }
     }
 
@@ -97,6 +133,10 @@ impl McpServerConfig {
             enabled: true,
             tool_allow: Vec::new(),
             tool_exclude: Vec::new(),
+            trust_hints: false,
+            category: None,
+            secret_headers: BTreeMap::new(),
+            secret_env: BTreeMap::new(),
         }
     }
 
@@ -116,6 +156,55 @@ impl McpServerConfig {
                 "server id `{}` must be non-empty and use only [A-Za-z0-9._-]",
                 self.id
             ));
+        }
+        if self.category == Some(PermissionCategory::Meta) {
+            return bad(format!(
+                "server `{}`: category `meta` is not allowed (it is always auto-approved)",
+                self.id
+            ));
+        }
+        for (kind, map) in [
+            ("secret_headers", &self.secret_headers),
+            ("secret_env", &self.secret_env),
+        ] {
+            for (key, name) in map {
+                if key.is_empty() {
+                    return bad(format!("server `{}`: empty key in `{kind}`", self.id));
+                }
+                SecretRef::new(name.as_str()).map_err(|_| {
+                    McpError::Config(format!(
+                        "server `{}`: `{kind}.{key}` has an invalid secret name",
+                        self.id
+                    ))
+                })?;
+            }
+        }
+        match &self.transport {
+            McpTransport::Stdio { .. } if !self.secret_headers.is_empty() => {
+                return bad(format!(
+                    "server `{}`: `secret_headers` only applies to http servers",
+                    self.id
+                ));
+            }
+            McpTransport::Http { .. } if !self.secret_env.is_empty() => {
+                return bad(format!(
+                    "server `{}`: `secret_env` only applies to stdio servers",
+                    self.id
+                ));
+            }
+            McpTransport::Stdio { env, .. } if !env.is_empty() => {
+                tracing::warn!(
+                    server = %self.id,
+                    "plain `env` is stored as text in the config; prefer `secret_env` (secret references)"
+                );
+            }
+            McpTransport::Http { headers, .. } if !headers.is_empty() => {
+                tracing::warn!(
+                    server = %self.id,
+                    "plain `headers` are stored as text in the config; prefer `secret_headers` (secret references)"
+                );
+            }
+            _ => {}
         }
         match &self.transport {
             McpTransport::Stdio { command, .. } if command.trim().is_empty() => {
@@ -305,6 +394,52 @@ mod tests {
                 .validate()
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn old_toml_without_new_fields_loads_unchanged() {
+        let cfg: FileLayout = toml::from_str(
+            "[[server]]\nid = \"a\"\n[server.transport]\ntype = \"http\"\nurl = \"https://x/mcp\"\n",
+        )
+        .unwrap();
+        let s = &cfg.servers[0];
+        assert!(!s.trust_hints && s.category.is_none());
+        assert!(s.secret_headers.is_empty() && s.secret_env.is_empty());
+        assert_eq!(s.effective_category(), PermissionCategory::Accounts);
+        // New fields are not emitted when unset.
+        let out = toml::to_string_pretty(&cfg).unwrap();
+        assert!(
+            !out.contains("trust_hints") && !out.contains("secret_") && !out.contains("category")
+        );
+    }
+
+    #[test]
+    fn new_fields_roundtrip_through_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = TomlFileStore::new(dir.path().join("m.toml"));
+        let mut h = McpServerConfig::http("web", "https://x/mcp");
+        h.trust_hints = true;
+        h.category = Some(PermissionCategory::Fs);
+        h.secret_headers
+            .insert("Authorization".into(), "mcp/web-token".into());
+        let mut s = McpServerConfig::stdio("loc", "x", NO_ARGS);
+        s.secret_env.insert("API_KEY".into(), "mcp/loc-key".into());
+        store.save(&[h.clone(), s.clone()]).unwrap();
+        assert_eq!(store.load().unwrap(), vec![h, s]);
+    }
+
+    #[test]
+    fn category_meta_and_bad_secret_refs_fail_validation() {
+        let mut c = McpServerConfig::stdio("a", "x", NO_ARGS);
+        c.category = Some(PermissionCategory::Meta);
+        assert!(c.validate().is_err());
+        c.category = Some(PermissionCategory::Fs);
+        assert!(c.validate().is_ok());
+        c.secret_env.insert("K".into(), "bad name!".into());
+        assert!(c.validate().is_err());
+        c.secret_env.clear();
+        c.secret_headers.insert("Authorization".into(), "ok".into());
+        assert!(c.validate().is_err(), "secret_headers on stdio");
     }
 
     #[test]
