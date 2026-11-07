@@ -29,6 +29,8 @@ pub const SCRIPT_TOOL_NAME: &str = "script_run";
 /// What the gate is asked to authorize.
 #[derive(Debug, Clone)]
 pub struct GateRequest {
+    /// Id of the run the script belongs to (as given in the `ToolContext`).
+    pub run_id: String,
     /// Tool name.
     pub tool: String,
     /// Permission category of the tool.
@@ -192,6 +194,7 @@ impl ScriptHost for GateHost {
             .ok_or_else(|| format!("unknown tool: {name}"))?;
         let spec = tool.spec();
         let req = GateRequest {
+            run_id: self.run_id.clone(),
             tool: name.to_string(),
             category: spec.category,
             effect: spec.effect,
@@ -425,6 +428,7 @@ mod tests {
             InitiatorKind::Human,
         );
         let req = |tool: &str, category, raw: &str| GateRequest {
+            run_id: String::new(),
             tool: tool.into(),
             category,
             effect: Effect::Write,

@@ -1,0 +1,237 @@
+//! Local daemon API: one typed HTTP API (`/v1`) plus one SSE event stream in
+//! front of the [`agent_core::AgentLoop`].
+//!
+//! The crate is a library so the desktop app can embed it; `bot serve` just
+//! builds an [`AppState`] and calls [`serve`].
+//!
+//! Security model (ADR-0009 / ADR-0013): the caller binds the listener to
+//! `127.0.0.1`; on top of that every request must carry a loopback `Host`
+//! (DNS-rebinding protection), a browser `Origin` must be one of the
+//! configured desktop-app origins, and everything except `GET /v1/health`
+//! needs `Authorization: Bearer <per-install token>` (see [`auth`]).
+
+pub mod auth;
+pub mod dto;
+pub mod error;
+#[cfg(any(test, feature = "fake-provider"))]
+pub mod fake;
+pub mod openapi;
+mod routes;
+mod sse;
+
+#[cfg(test)]
+mod tests;
+
+use std::future::Future;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Instant;
+
+use agent_core::{AgentLoop, BotProfile};
+use axum::Router;
+use axum::routing::{get, post};
+use protocol::{BotId, ChatId, RunId, UserId};
+use storage::{Bot, Chat, Run, Storage, User, now_ms};
+use tokio::net::TcpListener;
+use tokio_util::sync::CancellationToken;
+
+pub use auth::{TOKEN_FILE_NAME, TokenInfo, load_or_create_token, read_token, token_path};
+pub use error::ApiError;
+pub use openapi::openapi_json;
+
+/// Default TCP port of `bot serve`.
+pub const DEFAULT_PORT: u16 = 47821;
+
+/// Origins of the desktop app (Tauri, per platform) accepted by default.
+pub const DEFAULT_ALLOWED_ORIGINS: &[&str] = &[
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+];
+
+/// Daemon settings.
+#[derive(Debug, Clone)]
+pub struct DaemonConfig {
+    /// Bearer token clients must present.
+    pub token: String,
+    /// Browser origins that may call the API (exact match).
+    pub allowed_origins: Vec<String>,
+}
+
+impl DaemonConfig {
+    /// Config with the default desktop origins.
+    #[must_use]
+    pub fn new(token: impl Into<String>) -> Self {
+        Self {
+            token: token.into(),
+            allowed_origins: DEFAULT_ALLOWED_ORIGINS
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+        }
+    }
+}
+
+struct Inner {
+    agent: AgentLoop,
+    storage: Arc<Storage>,
+    user_id: UserId,
+    cfg: DaemonConfig,
+    started: Instant,
+    shutdown: CancellationToken,
+}
+
+/// Shared handler state (cheap to clone).
+#[derive(Clone)]
+pub struct AppState(Arc<Inner>);
+
+impl AppState {
+    /// Build the state.  The (single) local user is the first stored user and
+    /// is created when the database has none.
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub fn new(
+        agent: AgentLoop,
+        storage: Arc<Storage>,
+        cfg: DaemonConfig,
+    ) -> Result<Self, storage::StorageError> {
+        let user_id = if let Some(u) = storage.list_users()?.into_iter().next() {
+            u.id
+        } else {
+            let u = User {
+                id: UserId::new(),
+                name: "me".to_owned(),
+                created_at_ms: now_ms(),
+            };
+            storage.insert_user(&u)?;
+            u.id
+        };
+        Ok(Self(Arc::new(Inner {
+            agent,
+            storage,
+            user_id,
+            cfg,
+            started: Instant::now(),
+            shutdown: CancellationToken::new(),
+        })))
+    }
+
+    pub(crate) fn agent(&self) -> &AgentLoop {
+        &self.0.agent
+    }
+    pub(crate) fn storage(&self) -> &Storage {
+        &self.0.storage
+    }
+    pub(crate) fn user_id(&self) -> UserId {
+        self.0.user_id
+    }
+    pub(crate) fn token(&self) -> &str {
+        &self.0.cfg.token
+    }
+    pub(crate) fn origin_allowed(&self, origin: &str) -> bool {
+        self.0.cfg.allowed_origins.iter().any(|o| o == origin)
+    }
+    pub(crate) fn data_dir(&self) -> PathBuf {
+        self.0.storage.data_dir().to_path_buf()
+    }
+    pub(crate) fn shutdown_token(&self) -> CancellationToken {
+        self.0.shutdown.clone()
+    }
+    pub(crate) fn uptime_secs(&self) -> u64 {
+        self.0.started.elapsed().as_secs()
+    }
+
+    pub(crate) fn bot_of_user(&self, id: BotId) -> Result<Bot, ApiError> {
+        self.storage()
+            .get_bot(id)?
+            .filter(|b| b.user_id == self.user_id())
+            .ok_or_else(|| ApiError::not_found(format!("bot {id}")))
+    }
+    pub(crate) fn chat_of_user(&self, id: ChatId) -> Result<Chat, ApiError> {
+        self.storage()
+            .get_chat(id)?
+            .filter(|c| c.user_id == self.user_id())
+            .ok_or_else(|| ApiError::not_found(format!("chat {id}")))
+    }
+    pub(crate) fn run_of_user(&self, id: RunId) -> Result<Run, ApiError> {
+        self.storage()
+            .get_run(id)?
+            .filter(|r| r.user_id == self.user_id())
+            .ok_or_else(|| ApiError::not_found(format!("run {id}")))
+    }
+
+    /// Re-register a bot's profile in the loop after create / update (the loop
+    /// caches parsed profiles).
+    pub(crate) fn refresh_profile(&self, bot: &Bot) {
+        if let Ok(p) = serde_json::from_value::<BotProfile>(bot.config.clone()) {
+            self.0.agent.add_profile(bot.id, p);
+        }
+    }
+
+    /// Checkpoint every run that is still running (see [`serve`]).
+    fn checkpoint_runs(&self) -> Vec<RunId> {
+        self.0.agent.recover().unwrap_or_default()
+    }
+}
+
+/// The `/v1` router, guarded by Host / Origin / bearer checks.
+pub fn router(state: AppState) -> Router {
+    use routes as r;
+    Router::new()
+        .route("/v1/health", get(r::health))
+        .route("/v1/openapi.json", get(openapi::serve_openapi))
+        .route("/v1/bots", get(r::list_bots).post(r::create_bot))
+        .route(
+            "/v1/bots/{id}",
+            get(r::get_bot).put(r::update_bot).delete(r::delete_bot),
+        )
+        .route("/v1/chats", get(r::list_chats).post(r::create_chat))
+        .route(
+            "/v1/chats/{id}/messages",
+            get(r::list_messages).post(r::send_message),
+        )
+        .route("/v1/approvals", get(r::list_approvals))
+        .route("/v1/approvals/{call_id}", post(r::decide_approval))
+        .route("/v1/runs", get(r::list_runs))
+        .route("/v1/runs/{id}", get(r::get_run))
+        .route("/v1/runs/{id}/cancel", post(r::cancel_run))
+        .route("/v1/runs/{id}/resume", post(r::resume_run))
+        .route("/v1/usage", get(r::usage))
+        .route("/v1/events", get(sse::events))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::guard,
+        ))
+        .with_state(state)
+}
+
+/// Serve the API on `listener` until `shutdown` completes.
+///
+/// Graceful shutdown: new connections stop, open SSE streams are closed, and
+/// then every run that is still `Running` / `WaitingApproval` is checkpointed
+/// (its unfinished steps are marked interrupted and the run becomes `Paused`,
+/// resumable with `POST /v1/runs/{id}/resume` after the next start).  The ids
+/// of the checkpointed runs are returned.
+///
+/// The caller must bind `listener` to a loopback address.
+///
+/// # Errors
+/// I/O errors of the server.
+pub async fn serve(
+    listener: TcpListener,
+    state: AppState,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> std::io::Result<Vec<RunId>> {
+    let cancel = state.shutdown_token();
+    axum::serve(listener, router(state.clone()))
+        .with_graceful_shutdown(async move {
+            shutdown.await;
+            cancel.cancel();
+        })
+        .await?;
+    let st = state.clone();
+    Ok(tokio::task::spawn_blocking(move || st.checkpoint_runs())
+        .await
+        .unwrap_or_default())
+}

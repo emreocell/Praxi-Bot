@@ -53,12 +53,19 @@ pub(crate) fn tool_defs(specs: &[ToolSpec]) -> Vec<Value> {
         .collect()
 }
 
+/// Note appended to the closing, tool-less model call after a guard stopped the turn.
+pub(crate) const GUARD_NOTE: &str = "The turn was stopped by a safety limit ({reason}). Tools are no longer available. Summarize the progress made so far and what is left to do, in plain text.";
+
+const NOT_EXECUTED: &str = "[not executed: the turn was stopped by a safety limit]";
+
 /// Full provider conversation for the next model call of `run`.
+/// `final_note` (guard stop) is appended as a closing system message.
 pub(crate) fn build_messages(
     storage: &Storage,
     run: &Run,
     steps: &[RunStep],
     profile: &BotProfile,
+    final_note: Option<&str>,
 ) -> Result<Vec<Message>, storage::StorageError> {
     let mut out = vec![Message::text(MessageRole::System, system_prompt(profile))];
     if let Some(chat) = run.chat_id {
@@ -73,9 +80,18 @@ pub(crate) fn build_messages(
             }
         }
     }
+    // Tool calls of the latest model step that have no result yet; a stopped
+    // turn leaves some, and providers reject unanswered tool calls.
+    let mut outstanding: Vec<String> = Vec::new();
+    let flush = |out: &mut Vec<Message>, outstanding: &mut Vec<String>| {
+        for id in outstanding.drain(..) {
+            out.push(Message::tool_result(id, NOT_EXECUTED));
+        }
+    };
     for step in steps {
         match step.name.as_str() {
             STEP_USER => {
+                flush(&mut out, &mut outstanding);
                 let text = step.input["text"].as_str().unwrap_or_default();
                 out.push(Message::text(MessageRole::User, text));
             }
@@ -86,6 +102,8 @@ pub(crate) fn build_messages(
                 let Some(mo) = step_output::<ModelOut>(step) else {
                     continue;
                 };
+                flush(&mut out, &mut outstanding);
+                outstanding = mo.tool_calls.iter().map(|c| c.id.clone()).collect();
                 let content = if mo.text.is_empty() {
                     Value::Null
                 } else {
@@ -122,11 +140,16 @@ pub(crate) fn build_messages(
                         },
                         |r| r.text.clone(),
                     );
+                    outstanding.retain(|i| *i != call.id);
                     out.push(Message::tool_result(call.id, text));
                 }
             }
             _ => {}
         }
+    }
+    flush(&mut out, &mut outstanding);
+    if let Some(note) = final_note {
+        out.push(Message::text(MessageRole::System, note));
     }
     Ok(out)
 }

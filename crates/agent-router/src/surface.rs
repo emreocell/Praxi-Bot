@@ -70,7 +70,7 @@ fn meta_spec(name: &str, description: &str, effect: Effect, schema: Value) -> To
         description: description.into(),
         input_schema: schema,
         effect,
-        category: PermissionCategory::Script,
+        category: PermissionCategory::Meta,
         platforms: vec![Platform::All],
     }
 }

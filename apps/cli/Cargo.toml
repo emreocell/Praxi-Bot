@@ -11,19 +11,30 @@ rust-version.workspace = true
 name = "bot"
 path = "src/main.rs"
 
+[features]
+# `bot serve --fake-provider`: deterministic echo provider (tests, demos).
+fake-provider = ["daemon-api/fake-provider"]
+
 [dependencies]
+agent-core = { path = "../../crates/agent-core", version = "0.1.0" }
+builtin-tools = { path = "../../crates/builtin-tools", version = "0.1.0" }
 clap = { workspace = true, features = ["env"] }
+daemon-api = { path = "../../crates/daemon-api", version = "0.1.0" }
 dialoguer = { version = "0.12", default-features = false, features = ["password"] }
 permission-engine = { path = "../../crates/permission-engine", version = "0.1.0" }
+futures-util.workspace = true
 protocol.workspace = true
 provider-catalog = { path = "../../crates/provider-catalog", version = "0.1.0" }
+reqwest.workspace = true
 secret-store.workspace = true
 serde_json.workspace = true
 storage.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+tool-registry = { path = "../../crates/tool-registry", version = "0.1.0" }
 toml.workspace = true
 
 [dev-dependencies]
+daemon-api = { path = "../../crates/daemon-api", version = "0.1.0", features = ["fake-provider"] }
 tempfile.workspace = true
 
 [lints]

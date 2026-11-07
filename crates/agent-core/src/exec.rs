@@ -9,46 +9,44 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use builtin_tools::{QUESTION_CARD_KIND, TODO_LIST_KIND};
 use futures::StreamExt;
-use permission_engine::{ActionRequest, Decision, Policy};
+use permission_engine::Decision;
+use protocol::PermissionCategory;
 use protocol::event::{
-    ApprovalNeeded, MessageDelta, ToolCallApproved, ToolCallCompleted, ToolCallDenied,
-    ToolCallRequested,
+    MessageDelta, ModelFallback, TodoItem, TodoStatus, TodoUpdated, ToolCallCompleted,
+    ToolCallDenied, ToolCallRequested,
 };
-use protocol::{Event, RunId, ToolCallId};
-use provider_catalog::{ChatChunk, ChatRequest, ModelRef};
+use protocol::{Event, ToolCallId};
+use provider_catalog::{ChatChunk, ChatRequest, ModelRef, ProviderError};
 use serde_json::{Value, json};
-use storage::{Approval, Run, RunStep, now_ms};
-use task_runtime::{ExecError, RunState, StepExecutor, StepSpec, StepStatus, can_transition};
+use storage::{Run, RunStep};
+use task_runtime::{ExecError, StepExecutor, StepSpec, StepStatus};
 use tokio_util::sync::CancellationToken;
-use tool_registry::{ContentPart, Effect, Tool, ToolContext, ToolOutput};
-use uuid::Uuid;
+use tool_registry::{ContentPart, Tool, ToolContext, ToolOutput, ToolSpec};
 
-use crate::history::{build_messages, expose, status_of, step_output, tool_defs, truncate_utf8};
-use crate::shared::{
-    ApprovalScope, CallRec, ModelOut, Pending, ResultRec, RunCtx, STEP_MODEL, STEP_TOOLS,
-    STEP_USER, Shared, Verdict, xe,
+use crate::history::{
+    GUARD_NOTE, build_messages, expose, status_of, step_output, tool_defs, truncate_utf8,
 };
-use crate::todo::TOOL_NAME as TODO_TOOL;
+use crate::shared::{
+    CallRec, ModelOut, ResultRec, RunCtx, STEP_MODEL, STEP_TOOLS, STEP_USER, Shared, xe,
+};
 
 pub(crate) struct TurnExecutor {
     pub sh: Arc<Shared>,
 }
 
 enum Slot {
-    Done { text: String, is_error: bool },
-    Run { tool: Arc<dyn Tool>, input: Value },
-}
-
-struct PendingGuard {
-    sh: Arc<Shared>,
-    id: ToolCallId,
-}
-
-impl Drop for PendingGuard {
-    fn drop(&mut self) {
-        self.sh.pending.lock().remove(&self.id);
-    }
+    Done {
+        text: String,
+        is_error: bool,
+    },
+    Run {
+        tool: Arc<dyn Tool>,
+        input: Value,
+        call: ToolCallId,
+        meta: bool,
+    },
 }
 
 fn call_key(name: &str, args: &str) -> (String, Value) {
@@ -83,7 +81,7 @@ impl StepExecutor for TurnExecutor {
     ) -> Result<Value, ExecError> {
         match step.name.as_str() {
             STEP_USER => Ok(json!({ "text": step.input["text"] })),
-            STEP_MODEL => self.exec_model(run).await,
+            STEP_MODEL => self.exec_model(run, step).await,
             STEP_TOOLS => self.exec_tools(run, step).await,
             other => Err(xe(format!("unknown step kind {other:?}"))),
         }
@@ -104,10 +102,13 @@ impl TurnExecutor {
                 .into_iter()
                 .find(|m| m.run_id == Some(run.id) && m.role == "user")
                 .ok_or_else(|| xe("turn has no user message"))?;
-            return Ok(Some(user_step(&first.content)));
+            return Ok(Some(user_step(&self.with_recall(&ctx, &first.content))));
         }
-        if let Some(spec) = self.pending_tools(&ctx, history)? {
-            return Ok(Some(spec));
+        let model_steps = history.iter().filter(|s| s.name == STEP_MODEL).count();
+        match self.pending_tools(&ctx, history) {
+            Ok(Some(spec)) => return Ok(Some(spec)),
+            Ok(None) => {}
+            Err(reason) => return Ok(Some(Self::guard_step(&ctx, model_steps, &reason))),
         }
 
         let finished = history.last().is_some_and(|s| {
@@ -127,12 +128,12 @@ impl TurnExecutor {
         }
 
         let g = &self.sh.cfg.guards;
-        let model_steps = history.iter().filter(|s| s.name == STEP_MODEL).count();
         if model_steps >= g.max_steps as usize {
-            return Err(xe(format!(
+            let reason = format!(
                 "step limit reached: {} model calls in one turn",
                 g.max_steps
-            )));
+            );
+            return Ok(Some(Self::guard_step(&ctx, model_steps, &reason)));
         }
         let tokens: u64 = history
             .iter()
@@ -142,34 +143,66 @@ impl TurnExecutor {
             .map(|u| u.prompt_tokens + u.completion_tokens)
             .sum();
         if tokens >= g.max_tokens_per_turn {
-            return Err(xe(format!(
+            let reason = format!(
                 "token budget exhausted: {tokens} >= {}",
                 g.max_tokens_per_turn
-            )));
+            );
+            return Ok(Some(Self::guard_step(&ctx, model_steps, &reason)));
         }
         Ok(Some(StepSpec {
             name: STEP_MODEL.to_owned(),
             input: json!({ "model": ctx.profile.models.executor, "n": model_steps }),
             idempotent: true,
-            retry: Some(self.sh.cfg.model_retry),
+            // Retries (and fallbacks) happen inside `exec_model`, which knows
+            // which provider errors are worth retrying.
+            retry: None,
         }))
     }
 
-    fn is_read(&self, ctx: &RunCtx, name: &str) -> bool {
-        ctx.profile.tool_visible(name)
-            && self
-                .sh
-                .tools
-                .get(name)
-                .is_some_and(|t| t.spec().effect == Effect::Read)
+    /// The closing, tool-less model call that replaces a hard failure when a
+    /// guard stops the turn.
+    fn guard_step(ctx: &RunCtx, model_steps: usize, reason: &str) -> StepSpec {
+        StepSpec {
+            name: STEP_MODEL.to_owned(),
+            input: json!({
+                "model": ctx.profile.models.executor,
+                "n": model_steps,
+                "final": true,
+                "guard": reason,
+            }),
+            idempotent: true,
+            retry: None,
+        }
+    }
+
+    /// Prepend the recalled-memory block to the first user message (never to
+    /// the system prompt, so the prompt cache stays valid).
+    fn with_recall(&self, ctx: &RunCtx, text: &str) -> String {
+        let Some(m) = self.sh.cfg.memory.as_ref().filter(|m| m.enabled) else {
+            return text.to_owned();
+        };
+        match m
+            .store
+            .recall(ctx.user_id, ctx.bot_id, text, m.recall_budget_tokens)
+        {
+            Ok(mems) => memory_store::prepend_to_user_message(
+                &memory_store::render_recall_block(&mems),
+                text,
+            ),
+            Err(_) => text.to_owned(),
+        }
+    }
+
+    fn is_read(&self, ctx: &RunCtx, name: &str, args: &str) -> bool {
+        let input: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+        self.sh
+            .resolve_call(&ctx.profile, name, &input)
+            .and_then(|r| r.spec)
+            .is_some_and(|s| s.effect == tool_registry::Effect::Read)
     }
 
     /// Next batch of tool calls still owed an answer for the last model step.
-    fn pending_tools(
-        &self,
-        ctx: &RunCtx,
-        history: &[RunStep],
-    ) -> Result<Option<StepSpec>, ExecError> {
+    fn pending_tools(&self, ctx: &RunCtx, history: &[RunStep]) -> Result<Option<StepSpec>, String> {
         let Some(mi) = history.iter().rposition(|s| {
             s.name == STEP_MODEL
                 && status_of(s) == Some(StepStatus::Succeeded)
@@ -200,11 +233,11 @@ impl TurnExecutor {
             .iter()
             .map(|c| call_key(&c.name, &c.arguments))
             .collect();
-        let group_all_reads = self.is_read(ctx, &remaining[0].name);
+        let group_all_reads = self.is_read(ctx, &remaining[0].name, &remaining[0].arguments);
         let take = if group_all_reads {
             remaining
                 .iter()
-                .take_while(|c| self.is_read(ctx, &c.name))
+                .take_while(|c| self.is_read(ctx, &c.name, &c.arguments))
                 .count()
         } else {
             1
@@ -217,10 +250,10 @@ impl TurnExecutor {
             let streak = 1 + seq.iter().rev().take_while(|k| **k == key).count();
             let repeat = u32::try_from(streak).unwrap_or(u32::MAX);
             if repeat >= g.repeat_stop {
-                return Err(xe(format!(
+                return Err(format!(
                     "repeat detected: tool {} called {repeat} times in a row with identical arguments",
                     c.name
-                )));
+                ));
             }
             seq.push(key);
             calls.push(CallRec {
@@ -240,25 +273,148 @@ impl TurnExecutor {
 
     // ---- model step ----
 
-    async fn exec_model(&self, run: &Run) -> Result<Value, ExecError> {
+    async fn exec_model(&self, run: &Run, step: &StepSpec) -> Result<Value, ExecError> {
         let ctx = self.sh.ctx(run)?;
         let steps = self.sh.storage.list_steps(run.id).map_err(xe)?;
-        let specs = self.sh.visible_specs(&ctx.profile);
-        let messages = build_messages(&self.sh.storage, run, &steps, &ctx.profile).map_err(xe)?;
-        let model = ModelRef(ctx.profile.models.executor.clone());
-        let mut req = ChatRequest::new(model.clone(), messages);
+        let guard_reason = step.input["final"]
+            .as_bool()
+            .unwrap_or(false)
+            .then(|| step.input["guard"].as_str().unwrap_or("guard").to_owned());
+        let specs = if guard_reason.is_some() {
+            Vec::new()
+        } else {
+            self.sh.model_specs(&ctx.profile)
+        };
+        let note = guard_reason
+            .as_deref()
+            .map(|r| GUARD_NOTE.replace("{reason}", r));
+        let messages = build_messages(&self.sh.storage, run, &steps, &ctx.profile, note.as_deref())
+            .map_err(xe)?;
+        let primary = ctx.profile.models.executor.clone();
+        let mut req = ChatRequest::new(ModelRef(primary.clone()), messages);
         req.tools = tool_defs(&specs);
         req.max_tokens = self.sh.cfg.max_tokens;
         req.temperature = self.sh.cfg.temperature;
-        let provider = self.sh.providers.pick(&model);
-        let mut stream = provider.stream(req).await.map_err(xe)?;
 
-        let mut out = ModelOut::default();
+        let models: Vec<&String> = std::iter::once(&primary)
+            .chain(ctx.profile.models.fallback.iter())
+            .collect();
+        let mut last_err: Option<ProviderError> = None;
+        let mut result: Option<ModelOut> = None;
+        for (i, name) in models.iter().enumerate() {
+            if let Some(prev) = &last_err {
+                self.sh.emit(
+                    &ctx,
+                    Event::ModelFallback(ModelFallback {
+                        run_id: run.id,
+                        from: models[i - 1].clone(),
+                        to: (*name).clone(),
+                        reason: prev.to_string(),
+                    }),
+                );
+            }
+            req.model = ModelRef((*name).clone());
+            match self.call_with_retries(&ctx, run, &req, &specs).await {
+                Ok(out) => {
+                    result = Some(out);
+                    break;
+                }
+                Err(e) => {
+                    // Only a retryable failure of the primary model justifies
+                    // switching; a broken request / credential would fail
+                    // everywhere.
+                    let hard = i == 0 && !is_retryable(&e);
+                    last_err = Some(e);
+                    if hard {
+                        break;
+                    }
+                }
+            }
+        }
+        let Some(mut out) = result else {
+            return Err(xe(last_err.map_or_else(
+                || "no model available".to_owned(),
+                |e| e.to_string(),
+            )));
+        };
+        if let Some(reason) = guard_reason {
+            // Tools were disabled: ignore anything the model still tried to call.
+            out.tool_calls.clear();
+            out.stopped_by_guard = true;
+            self.sh.audit(
+                &ctx,
+                "bot",
+                "run.stopped_by_guard",
+                &json!({ "reason": reason }),
+            );
+            out.guard_reason = Some(reason);
+        }
+        if let Some(u) = out.usage {
+            let cost = self
+                .sh
+                .cfg
+                .prices
+                .get(&out.model)
+                .map(|p| p.cost(u.prompt_tokens, u.completion_tokens, u.cached_tokens));
+            self.sh.audit(
+                &ctx,
+                "bot",
+                "usage",
+                &json!({
+                    "model": out.model,
+                    "prompt_tokens": u.prompt_tokens,
+                    "completion_tokens": u.completion_tokens,
+                    "cached_tokens": u.cached_tokens,
+                    "cost_usd": cost,
+                }),
+            );
+        }
+        serde_json::to_value(out).map_err(xe)
+    }
+
+    /// One model, up to `model_retry.max_attempts` attempts; non-retryable
+    /// errors (bad credentials, bad request, 4xx) fail immediately.
+    async fn call_with_retries(
+        &self,
+        ctx: &RunCtx,
+        run: &Run,
+        req: &ChatRequest,
+        specs: &[ToolSpec],
+    ) -> Result<ModelOut, ProviderError> {
+        let policy = self.sh.cfg.model_retry;
+        let attempts = policy.max_attempts.max(1);
+        let mut attempt = 1;
+        loop {
+            match self.stream_once(ctx, run, req.clone(), specs).await {
+                Ok(out) => return Ok(out),
+                Err(e) if attempt < attempts && is_retryable(&e) => {
+                    tokio::time::sleep(policy.backoff(attempt)).await;
+                    attempt += 1;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    async fn stream_once(
+        &self,
+        ctx: &RunCtx,
+        run: &Run,
+        req: ChatRequest,
+        specs: &[ToolSpec],
+    ) -> Result<ModelOut, ProviderError> {
+        let model = req.model.clone();
+        let provider = self.sh.providers.pick(&model);
+        let mut stream = provider.stream(req).await?;
+        let mut out = ModelOut {
+            model: model.0,
+            ..ModelOut::default()
+        };
         while let Some(chunk) = stream.next().await {
-            match chunk.map_err(xe)? {
+            match chunk? {
                 ChatChunk::TextDelta(t) => {
                     self.sh.emit(
-                        &ctx,
+                        ctx,
                         Event::MessageDelta(MessageDelta {
                             run_id: run.id,
                             text: t.clone(),
@@ -280,27 +436,7 @@ impl TurnExecutor {
                 ChatChunk::ToolCallDelta { .. } => {}
             }
         }
-        if let Some(u) = out.usage {
-            let cost = self
-                .sh
-                .cfg
-                .prices
-                .get(&model.0)
-                .map(|p| p.cost(u.prompt_tokens, u.completion_tokens, u.cached_tokens));
-            self.sh.audit(
-                &ctx,
-                "bot",
-                "usage",
-                &json!({
-                    "model": model.0,
-                    "prompt_tokens": u.prompt_tokens,
-                    "completion_tokens": u.completion_tokens,
-                    "cached_tokens": u.cached_tokens,
-                    "cost_usd": cost,
-                }),
-            );
-        }
-        serde_json::to_value(out).map_err(xe)
+        Ok(out)
     }
 
     // ---- tool step ----
@@ -342,26 +478,33 @@ impl TurnExecutor {
                     continue;
                 }
             };
-            let tool = ctx
-                .profile
-                .tool_visible(&call.name)
-                .then(|| self.sh.tools.get(&call.name))
-                .flatten();
-            let Some(tool) = tool else {
+            let Some(resolved) = self.sh.resolve_call(&ctx.profile, &call.name, &input) else {
                 slots.push(err(format!("unknown tool {:?}", call.name)));
                 continue;
             };
-            let (effect, category) = {
-                let s = tool.spec();
-                (s.effect, s.category)
+            let meta = resolved
+                .spec
+                .as_ref()
+                .is_some_and(|s| s.category == PermissionCategory::Meta);
+            let decision = match &resolved.spec {
+                Some(spec) => self.sh.decide(
+                    &ctx,
+                    &resolved.name,
+                    spec.effect,
+                    spec.category,
+                    &resolved.input,
+                ),
+                // Malformed `use_tool`: executes nothing, only reports the error.
+                None => Decision::Allow,
             };
-            let decision = if call.name == TODO_TOOL {
-                Decision::Allow
-            } else {
-                self.decide(&ctx, &call.name, effect, category, &input)
-            };
+            let tool = resolved.tool;
             let slot = match decision {
-                Decision::Allow => Slot::Run { tool, input },
+                Decision::Allow => Slot::Run {
+                    tool,
+                    input,
+                    call: call_uuid,
+                    meta,
+                },
                 Decision::Deny => {
                     self.sh.emit(
                         &ctx,
@@ -379,28 +522,52 @@ impl TurnExecutor {
                         is_error: true,
                     }
                 }
-                Decision::Ask => match self
-                    .request_approval(&ctx, call_uuid, &call.name, &input)
-                    .await
-                {
-                    Ok(()) => Slot::Run { tool, input },
-                    Err(reason) => Slot::Done {
-                        text: format!(
-                            "Permission denied by the user{}. Do not retry this call.",
-                            reason.map_or_else(String::new, |r| format!(": {r}"))
-                        ),
-                        is_error: true,
-                    },
-                },
+                Decision::Ask => {
+                    let category = resolved
+                        .spec
+                        .as_ref()
+                        .map_or(PermissionCategory::Script, |s| s.category);
+                    match self
+                        .sh
+                        .request_approval(
+                            &ctx,
+                            call_uuid,
+                            &resolved.name,
+                            category,
+                            &resolved.input,
+                        )
+                        .await
+                    {
+                        Ok(()) => Slot::Run {
+                            tool,
+                            input,
+                            call: call_uuid,
+                            meta,
+                        },
+                        Err(reason) => Slot::Done {
+                            text: format!(
+                                "Permission denied by the user{}. Do not retry this call.",
+                                reason.map_or_else(String::new, |r| format!(": {r}"))
+                            ),
+                            is_error: true,
+                        },
+                    }
+                }
             };
             slots.push(slot);
         }
 
         // Reads batched by `pending_tools` run concurrently; everything else is a single call.
+        let ctx_ref: &RunCtx = &ctx;
         let outcomes = futures::future::join_all(slots.into_iter().map(|slot| async move {
             match slot {
                 Slot::Done { text, is_error } => (text, is_error),
-                Slot::Run { tool, input } => self.run_tool(run, &tool, input).await,
+                Slot::Run {
+                    tool,
+                    input,
+                    call,
+                    meta,
+                } => self.run_tool(run, ctx_ref, call, &tool, input, meta).await,
             }
         }))
         .await;
@@ -408,7 +575,7 @@ impl TurnExecutor {
         let g = &self.sh.cfg.guards;
         let mut results = Vec::with_capacity(calls.len());
         for ((call, call_uuid), (text, is_error)) in calls.iter().zip(uuids).zip(outcomes) {
-            let (mut text, spill_path) = self.spill(run, call_uuid, text);
+            let (mut text, spill_path) = self.spill(run, call_uuid, self.sh.redact(text));
             if call.repeat >= g.repeat_warn {
                 let _ = write!(
                     text,
@@ -437,7 +604,15 @@ impl TurnExecutor {
         Ok(json!({ "results": results }))
     }
 
-    async fn run_tool(&self, run: &Run, tool: &Arc<dyn Tool>, input: Value) -> (String, bool) {
+    async fn run_tool(
+        &self,
+        run: &Run,
+        ctx: &RunCtx,
+        call: ToolCallId,
+        tool: &Arc<dyn Tool>,
+        input: Value,
+        meta: bool,
+    ) -> (String, bool) {
         let g = &self.sh.cfg.guards;
         let tctx = ToolContext {
             run_id: run.id.to_string(),
@@ -449,7 +624,74 @@ impl TurnExecutor {
                 true,
             ),
             Ok(Err(e)) => (format!("Error: {e}"), true),
+            Ok(Ok(out)) if meta => self.meta_output(ctx, call, &out).await,
             Ok(Ok(out)) => (render_output(&out), false),
+        }
+    }
+
+    /// Turn the structured output of a `Meta` tool into events: a todo list
+    /// becomes `TodoUpdated`, a question card parks the run until answered.
+    async fn meta_output(
+        &self,
+        ctx: &RunCtx,
+        call: ToolCallId,
+        out: &ToolOutput,
+    ) -> (String, bool) {
+        let json_part = out.content.iter().find_map(|p| match p {
+            ContentPart::Json { data } => Some(data),
+            _ => None,
+        });
+        let texts = || {
+            out.content
+                .iter()
+                .filter_map(|p| match p {
+                    ContentPart::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        match json_part.and_then(|d| d["kind"].as_str().map(|k| (k, d))) {
+            Some((TODO_LIST_KIND, data)) => {
+                let items: Vec<builtin_tools::TodoItem> =
+                    serde_json::from_value(data["items"].clone()).unwrap_or_default();
+                let items: Vec<TodoItem> = items
+                    .into_iter()
+                    .map(|t| TodoItem {
+                        text: t.content,
+                        status: match t.status {
+                            builtin_tools::TodoStatus::Pending => TodoStatus::Pending,
+                            builtin_tools::TodoStatus::InProgress => TodoStatus::InProgress,
+                            builtin_tools::TodoStatus::Completed => TodoStatus::Done,
+                        },
+                    })
+                    .collect();
+                ctx.state.lock().todos.clone_from(&items);
+                self.sh.emit(
+                    ctx,
+                    Event::TodoUpdated(TodoUpdated {
+                        run_id: ctx.run_id,
+                        items,
+                    }),
+                );
+                (texts(), false)
+            }
+            Some((QUESTION_CARD_KIND, data)) => {
+                let question = data["question"].as_str().unwrap_or_default();
+                let options: Vec<String> =
+                    serde_json::from_value(data["options"].clone()).unwrap_or_default();
+                match self.sh.request_answer(ctx, call, question, options).await {
+                    Ok(answer) => (format!("The user answered: {answer}"), false),
+                    Err(reason) => (
+                        format!(
+                            "The user declined to answer{}.",
+                            reason.map_or_else(String::new, |r| format!(": {r}"))
+                        ),
+                        true,
+                    ),
+                }
+            }
+            _ => (render_output(out), false),
         }
     }
 
@@ -485,168 +727,19 @@ impl TurnExecutor {
             )
         }
     }
+}
 
-    // ---- permissions ----
-
-    fn decide(
-        &self,
-        ctx: &RunCtx,
-        name: &str,
-        effect: Effect,
-        category: protocol::PermissionCategory,
-        input: &Value,
-    ) -> Decision {
-        let req = ActionRequest {
-            category,
-            raw_command: input
-                .get("command")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
-            initiator: ctx.initiator,
-        };
-        let r = &self.sh.resolver;
-        let d = r.resolve(
-            &self.sh.cfg.global_policy,
-            ctx.bot_policy.as_ref(),
-            None,
-            &req,
-        );
-        if d != Decision::Ask {
-            return d;
-        }
-        // An `Ask` forced by an absolute floor (money, never-list) survives
-        // even a full policy; only a policy-level `Ask` can be waived.
-        let floor = r.resolve(&Policy::full(), None, None, &req) != Decision::Allow;
-        if floor {
-            return d;
-        }
-        let granted = {
-            let g = self.sh.grants.lock();
-            g.this_chat.contains(&(ctx.chat_id, name.to_owned()))
-                || g.always.contains(&(ctx.bot_id, name.to_owned()))
-        };
-        if granted || (self.sh.cfg.read_tools_skip_ask && effect == Effect::Read) {
-            Decision::Allow
-        } else {
-            d
-        }
-    }
-
-    /// Park the run in `WaitingApproval` until `approve` / `deny` is called.
-    /// `Ok(())` = approved, `Err(reason)` = denied.
-    async fn request_approval(
-        &self,
-        ctx: &RunCtx,
-        call_id: ToolCallId,
-        name: &str,
-        input: &Value,
-    ) -> Result<(), Option<String>> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.sh.pending.lock().insert(call_id, Pending { tx });
-        let _guard = PendingGuard {
-            sh: Arc::clone(&self.sh),
-            id: call_id,
-        };
-        let args = input.to_string();
-        let summary = format!("{name} {}", truncate_utf8(&args, 300));
-        let approval_id = Uuid::now_v7();
-        let _ = self.sh.storage.insert_approval(&Approval {
-            id: approval_id,
-            user_id: ctx.user_id,
-            run_id: ctx.run_id,
-            step_id: None,
-            summary: summary.clone(),
-            decision: None,
-            requested_at_ms: now_ms(),
-            decided_at_ms: None,
-        });
-        self.set_state(ctx.run_id, RunState::WaitingApproval);
-        self.sh.emit(
-            ctx,
-            Event::ApprovalNeeded(ApprovalNeeded {
-                run_id: ctx.run_id,
-                call_id,
-                tool_name: name.to_owned(),
-                input: input.clone(),
-                summary,
-            }),
-        );
-        let verdict = rx.await;
-        self.set_state(ctx.run_id, RunState::Running);
-
-        match verdict {
-            Ok(Verdict::Approved { scope, by }) => {
-                let _ = self.sh.storage.decide_approval(approval_id, "approved");
-                match scope {
-                    ApprovalScope::Once => {}
-                    ApprovalScope::ThisChat => {
-                        self.sh
-                            .grants
-                            .lock()
-                            .this_chat
-                            .insert((ctx.chat_id, name.to_owned()));
-                    }
-                    ApprovalScope::Always => {
-                        self.sh
-                            .grants
-                            .lock()
-                            .always
-                            .insert((ctx.bot_id, name.to_owned()));
-                        self.sh.audit(
-                            ctx,
-                            "user",
-                            crate::AUDIT_GRANT_ALWAYS,
-                            &json!({ "bot_id": ctx.bot_id.to_string(), "tool": name }),
-                        );
-                    }
-                }
-                self.sh.audit(
-                    ctx,
-                    "user",
-                    "approval.approved",
-                    &json!({ "tool": name, "scope": format!("{scope:?}") }),
-                );
-                self.sh.emit(
-                    ctx,
-                    Event::ToolCallApproved(ToolCallApproved {
-                        run_id: ctx.run_id,
-                        call_id,
-                        approved_by: by,
-                    }),
-                );
-                Ok(())
-            }
-            Ok(Verdict::Denied { by, reason }) => {
-                let _ = self.sh.storage.decide_approval(approval_id, "denied");
-                self.sh.audit(
-                    ctx,
-                    "user",
-                    "approval.denied",
-                    &json!({ "tool": name, "reason": reason }),
-                );
-                self.sh.emit(
-                    ctx,
-                    Event::ToolCallDenied(ToolCallDenied {
-                        run_id: ctx.run_id,
-                        call_id,
-                        denied_by: by,
-                        reason: reason.clone(),
-                    }),
-                );
-                Err(reason)
-            }
-            Err(_) => Err(Some("approval request was dropped".into())),
-        }
-    }
-
-    fn set_state(&self, run_id: RunId, to: RunState) {
-        if let Ok(Some(run)) = self.sh.storage.get_run(run_id)
-            && let Some(from) = RunState::parse(&run.state)
-            && can_transition(from, to)
-        {
-            let _ = self.sh.storage.update_run_state(run_id, to.as_str(), None);
-        }
+/// Whether a provider failure is worth retrying (transient) as opposed to a
+/// credential / request problem that would fail again.
+pub(crate) fn is_retryable(e: &ProviderError) -> bool {
+    match e {
+        ProviderError::RateLimited { .. }
+        | ProviderError::Upstream { .. }
+        | ProviderError::Timeout
+        | ProviderError::Connection(_)
+        | ProviderError::Stream(_) => true,
+        ProviderError::Api { status, .. } => matches!(*status, 408 | 429) || *status >= 500,
+        _ => false,
     }
 }
 

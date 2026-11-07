@@ -11,13 +11,17 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+agent-router = { path = "../agent-router", version = "0.1.0" }
 async-trait.workspace = true
+builtin-tools = { path = "../builtin-tools", version = "0.1.0" }
 futures.workspace = true
 globset.workspace = true
+memory-store = { path = "../memory-store", version = "0.1.0" }
 parking_lot.workspace = true
 permission-engine = { path = "../permission-engine", version = "0.1.0" }
 protocol.workspace = true
 provider-catalog = { path = "../provider-catalog", version = "0.1.0" }
+secret-store.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 storage.workspace = true

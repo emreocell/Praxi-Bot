@@ -199,6 +199,30 @@ impl Storage {
             .collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Replace a bot's name and configuration.  Returns `false` if it does not exist.
+    ///
+    /// # Errors
+    /// Fails on SQLite/JSON errors.
+    pub fn update_bot(&self, id: BotId, name: &str, config: &Value) -> Result<bool> {
+        let n = self.conn().execute(
+            "UPDATE bots SET name = ?2, config_json = ?3 WHERE id = ?1",
+            params![id.to_string(), name, serde_json::to_string(config)?],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Delete a bot.  Returns `false` if it does not exist.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors, in particular a foreign-key violation while
+    /// chats or runs still reference the bot.
+    pub fn delete_bot(&self, id: BotId) -> Result<bool> {
+        let n = self
+            .conn()
+            .execute("DELETE FROM bots WHERE id = ?1", [id.to_string()])?;
+        Ok(n > 0)
+    }
+
     // ---- chats ----
 
     /// Insert a chat.
@@ -805,6 +829,33 @@ mod tests {
             created_at_ms: 0,
         };
         assert!(f.st.insert_bot(&bad).is_err());
+    }
+
+    #[test]
+    fn update_and_delete_bot() {
+        let f = fx();
+        assert!(
+            f.st.update_bot(f.bot.id, "renamed", &json!({"a": 1}))
+                .unwrap()
+        );
+        let got = f.st.get_bot(f.bot.id).unwrap().unwrap();
+        assert_eq!(
+            (got.name.as_str(), got.config),
+            ("renamed", json!({"a": 1}))
+        );
+        assert!(!f.st.update_bot(BotId::new(), "x", &json!({})).unwrap());
+        // The fixture chat still references the bot.
+        assert!(f.st.delete_bot(f.bot.id).is_err());
+        let spare = Bot {
+            id: BotId::new(),
+            user_id: f.user.id,
+            name: "spare".into(),
+            config: json!({}),
+            created_at_ms: 3,
+        };
+        f.st.insert_bot(&spare).unwrap();
+        assert!(f.st.delete_bot(spare.id).unwrap());
+        assert!(!f.st.delete_bot(spare.id).unwrap());
     }
 
     #[test]
