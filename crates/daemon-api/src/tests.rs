@@ -226,6 +226,39 @@ async fn events(t: &T, query: &str, last_id: Option<&str>) -> Vec<(String, Strin
 // ------------------------------------------------------------ guards
 
 #[tokio::test]
+async fn unconfigured_daemon_stays_live_and_rejects_chat_until_reload() {
+    let t = setup();
+    t.agent.set_providers(Providers::unconfigured());
+    let (_, chat) = make_chat(&t).await;
+    for _ in 0..2 {
+        let health = send(&t.app, Method::GET, "/v1/health", None, &[]).await;
+        assert_eq!(health.status, StatusCode::OK);
+        assert_eq!(health.json()["status"], "setup_required");
+        let resp = call(
+            &t,
+            Method::POST,
+            &format!("/v1/chats/{chat}/messages"),
+            Some(json!({"text":"hello"})),
+        )
+        .await;
+        assert_eq!(resp.status, StatusCode::CONFLICT);
+        assert_eq!(resp.json()["error"]["code"], "setup_required");
+    }
+    t.agent
+        .set_providers(Providers::single(Arc::new(FakeProvider)));
+    let health = send(&t.app, Method::GET, "/v1/health", None, &[]).await;
+    assert_eq!(health.json()["status"], "ok");
+    let resp = call(
+        &t,
+        Method::POST,
+        &format!("/v1/chats/{chat}/messages"),
+        Some(json!({"text":"hello"})),
+    )
+    .await;
+    assert_eq!(resp.status, StatusCode::ACCEPTED);
+}
+
+#[tokio::test]
 async fn auth_required_and_health_is_public() {
     let t = setup();
     let r = send(&t.app, Method::GET, "/v1/bots", None, &[]).await;
@@ -1381,6 +1414,7 @@ fn openapi_snapshot() {
         "/v1/control/{request_id}",
         "/v1/policy",
         "/v1/providers",
+        "/v1/providers/detected",
         "/v1/providers/reload",
         "/v1/mcp/servers",
         "/v1/mcp/servers/{name}",
@@ -2028,6 +2062,80 @@ async fn providers_are_listed_with_models_and_reload_swaps_them() {
     assert_eq!(conf[0]["models"], json!(["m1", "m2"]));
     assert_eq!(conf[1]["active"], false);
     assert_eq!(p["default_provider"], "second");
+}
+
+#[tokio::test]
+async fn providers_detected_requires_auth() {
+    let t = setup();
+    let r = send(&t.app, Method::GET, "/v1/providers/detected", None, &[]).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn providers_detected_reports_six_rows() {
+    let t = setup();
+    let r = call(&t, Method::GET, "/v1/providers/detected", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let list = r.json();
+    let items = list.as_array().unwrap();
+    assert_eq!(items.len(), 6);
+    let ids: Vec<&str> = items
+        .iter()
+        .map(|item| item["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![
+            "claude",
+            "codex",
+            "cursor",
+            "opencode",
+            "gemini",
+            "chatgpt-plan"
+        ]
+    );
+    for row in items {
+        assert_eq!(row["runnable"], false);
+    }
+}
+
+#[tokio::test]
+async fn providers_detected_sentinel_token_is_never_leaked_or_read() {
+    let t = setup();
+    let temp = tempfile::tempdir().unwrap();
+
+    let opencode_dir = temp.path().join("local_app").join("opencode");
+    std::fs::create_dir_all(&opencode_dir).unwrap();
+    let sentinel = "SENTINEL_TOKEN_SECRET_NEVER_LEAK";
+    std::fs::write(opencode_dir.join("auth.json"), sentinel).unwrap();
+
+    let gemini_dir = temp.path().join("home").join(".gemini");
+    std::fs::create_dir_all(&gemini_dir).unwrap();
+    std::fs::write(gemini_dir.join("oauth_creds.json"), sentinel).unwrap();
+
+    let env = cli_provider::PathEnv::for_test(temp.path().to_path_buf())
+        .with_local_app_data(temp.path().join("local_app"))
+        .with_home(temp.path().join("home"));
+
+    t.state
+        .set_detector(Arc::new(cli_provider::Detector::with_env(env)));
+
+    let r = call(&t, Method::GET, "/v1/providers/detected?refresh=1", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+
+    let body_str = String::from_utf8(r.body.clone()).unwrap();
+    assert!(
+        !body_str.contains(sentinel),
+        "response body must never contain sentinel token from auth files"
+    );
+
+    let list = r.json();
+    let items = list.as_array().unwrap();
+    let opencode = items.iter().find(|x| x["id"] == "opencode").unwrap();
+    let gemini = items.iter().find(|x| x["id"] == "gemini").unwrap();
+
+    assert_eq!(opencode["auth"], "unknown");
+    assert_eq!(gemini["auth"], "unknown");
 }
 
 // ----------------------------------------------------------- usage cost

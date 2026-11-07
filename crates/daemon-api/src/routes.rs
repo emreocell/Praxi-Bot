@@ -26,10 +26,11 @@ use crate::dto::{
     AcceptedResponse, AnswerQuestion, AnswerResponse, ApprovalDto, BotDto, BotInput, BotUsage,
     CatalogProviderDto, CategoryDecisionDto, ChatDto, ConfiguredProviderDto, ControlDecisionInput,
     ControlDecisionResponse, ControlStateDto, ControlStateInput, CreateChat, DecideApproval,
-    Decision, DecisionResponse, DeliveryKind, EffectivePolicyDto, GrantDto, GrantTargetDto, Health,
-    MessageDto, Mode, ParseSchedule, ParsedSchedule, PolicyDto, PolicyInput, ProvidersDto,
-    ReloadResponse, RememberResponse, RevokeGrant, RunDto, ScheduleChangeKind, ScheduleDto,
-    ScheduleInput, Scope, SendMessage, SendResponse, UsageSummary, UsageTotals,
+    Decision, DecisionResponse, DeliveryKind, DetectedProviderDto, EffectivePolicyDto, GrantDto,
+    GrantTargetDto, Health, MessageDto, Mode, ParseSchedule, ParsedSchedule, PolicyDto,
+    PolicyInput, ProvidersDto, ReloadResponse, RememberResponse, RevokeGrant, RunDto,
+    ScheduleChangeKind, ScheduleDto, ScheduleInput, Scope, SendMessage, SendResponse, UsageSummary,
+    UsageTotals,
 };
 use crate::error::{ApiError, ErrorBody};
 
@@ -236,7 +237,12 @@ fn resolve_bot(input: BotInput) -> Result<(String, Value), ApiError> {
     responses((status = 200, body = Health)))]
 pub(crate) async fn health(State(s): State<AppState>) -> Json<Health> {
     Json(Health {
-        status: "ok".into(),
+        status: if s.agent().providers().setup_required() {
+            "setup_required"
+        } else {
+            "ok"
+        }
+        .into(),
         version: env!("CARGO_PKG_VERSION").into(),
         uptime_secs: s.uptime_secs(),
     })
@@ -435,6 +441,7 @@ pub(crate) async fn list_messages(
     params(("id" = Uuid, Path, description = "Chat id")),
     request_body = SendMessage,
     responses((status = 202, body = SendResponse), (status = 404, body = ErrorBody),
+              (status = 409, description = "Setup required or chat busy", body = ErrorBody),
               (status = 422, body = ErrorBody)))]
 pub(crate) async fn send_message(
     State(s): State<AppState>,
@@ -951,11 +958,35 @@ pub(crate) async fn list_providers(
         .unwrap_or_default();
     catalog.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(Json(ProvidersDto {
-        default_provider: Some(live.default_id().to_owned()),
+        default_provider: (!live.setup_required()).then(|| live.default_id().to_owned()),
         active,
         configured,
         catalog,
     }))
+}
+
+/// Query parameters for `GET /v1/providers/detected`.
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+pub(crate) struct DetectProvidersQuery {
+    /// When set to 1, bypasses the in-process 60-second cache.
+    #[param(inline)]
+    pub refresh: Option<String>,
+}
+
+/// Detect installed, signed-in coding CLIs.
+#[utoipa::path(get, path = "/v1/providers/detected", tag = "providers", security(("bearer" = [])),
+    params(DetectProvidersQuery),
+    responses((status = 200, body = Vec<DetectedProviderDto>)))]
+pub(crate) async fn detect_providers(
+    State(s): State<AppState>,
+    Query(query): Query<DetectProvidersQuery>,
+) -> Result<Json<Vec<DetectedProviderDto>>, ApiError> {
+    let refresh = query
+        .refresh
+        .as_deref()
+        .is_some_and(|r| r == "1" || r.eq_ignore_ascii_case("true"));
+    let detected = s.detector().detect(refresh).await;
+    Ok(Json(detected.into_iter().map(Into::into).collect()))
 }
 
 /// Rebuild the loop's providers from `providers.toml` and the secret store, so
@@ -982,7 +1013,7 @@ pub(crate) async fn reload_providers(
     let providers =
         built.map_err(|m| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "reload_failed", m))?;
     let out = ReloadResponse {
-        default_provider: Some(providers.default_id().to_owned()),
+        default_provider: (!providers.setup_required()).then(|| providers.default_id().to_owned()),
         active: providers.ids(),
     };
     s.agent().set_providers(providers);
