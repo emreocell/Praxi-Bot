@@ -12,10 +12,11 @@ script:
   - tool_calls: [{ id: "5", tool: t_read, args: { q: x } }]
   - text: unreachable
 expect:
-  state: failed
-  model_calls: 5
+  # Since 008b a guard stop ends with one closing model call (no tools) and
+  # the run succeeds with stopped_by_guard recorded.
+  state: succeeded
+  model_calls: 6
   tool_runs: { t_read: 4 }
-  error: { contains: [repeat detected] }
   requests:
     - { request: 2, tool_messages_not_contain: ["warning: this exact call"] }
     - { request: 3, tool_messages_contain: ["warning: this exact call has now been made 3 times"] }

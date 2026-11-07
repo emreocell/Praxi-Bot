@@ -10,6 +10,6 @@ script:
   - tool_calls: [{ id: "2", tool: t_read, args: { n: 2 } }]
   - text: never
 expect:
-  state: failed
-  model_calls: 2
-  error: { contains: [step limit] }
+  # Graceful guard stop (008b): one closing model call, run succeeds.
+  state: succeeded
+  model_calls: 3

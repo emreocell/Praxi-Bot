@@ -48,6 +48,13 @@ pub async fn run_scenario(s: &Scenario) -> Result<ScenarioResult> {
         registry.register(tool as Arc<dyn Tool>);
         counters.insert(spec.name.clone(), runs);
     }
+    // The plan scenarios use builtin-tools' `todo_write` (Meta, always allowed);
+    // only that tool is added so other scenarios see the same tool set as before.
+    for tool in builtin_tools::meta::tools() {
+        if tool.spec().name == "todo_write" {
+            registry.register(tool);
+        }
+    }
     let trace = run_turn(TurnConfig {
         model: FAKE_MODEL.into(),
         persona: "You are T.".into(),

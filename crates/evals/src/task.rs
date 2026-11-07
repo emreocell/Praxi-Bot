@@ -224,7 +224,7 @@ impl Task {
             Surface::Desktop => vec!["desktop_*".into()],
             Surface::None => vec!["fs_*".into()],
         };
-        v.push("plan.todo_write".into());
+        v.push("todo_write".into());
         v
     }
 
