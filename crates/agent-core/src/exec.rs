@@ -376,13 +376,20 @@ impl TurnExecutor {
             );
             out.guard_reason = Some(reason);
         }
-        if let Some(u) = out.usage {
+        self.audit_usage(&ctx, &out);
+        serde_json::to_value(out).map_err(xe)
+    }
+
+    /// Records a `usage` audit entry (tokens and estimated cost) for a model
+    /// step that reported usage.
+    fn audit_usage(&self, ctx: &RunCtx, out: &ModelOut) {
+        if let Some(u) = &out.usage {
             let cost = self
                 .sh
                 .price_for(&out.model)
                 .map(|p| p.cost(u.prompt_tokens, u.completion_tokens, u.cached_tokens));
             self.sh.audit(
-                &ctx,
+                ctx,
                 "bot",
                 "usage",
                 &json!({
@@ -394,7 +401,6 @@ impl TurnExecutor {
                 }),
             );
         }
-        serde_json::to_value(out).map_err(xe)
     }
 
     /// The skills index block for the system prompt: skills matching the
