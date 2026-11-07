@@ -38,8 +38,8 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::dto::ScheduleChanged;
-use crate::mcp::McpServerChanged;
 use crate::error::ApiError;
+use crate::mcp::McpServerChanged;
 
 /// Index rows replayed per batch (bounds memory of a long replay).
 const REPLAY_CHUNK: u32 = 500;

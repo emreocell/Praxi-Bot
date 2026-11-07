@@ -121,7 +121,13 @@ mod tests {
                 .collect();
             assert_eq!(declared, used, "{}", e.id);
         }
-        for want in ["filesystem", "github", "context7", "home-assistant", "playwright"] {
+        for want in [
+            "filesystem",
+            "github",
+            "context7",
+            "home-assistant",
+            "playwright",
+        ] {
             assert!(ids.contains(want), "{want}");
         }
     }

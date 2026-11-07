@@ -303,8 +303,11 @@ pub trait McpControl: Send + Sync {
     ///
     /// # Errors
     /// [`McpControlError`].
-    async fn update(&self, name: &str, input: McpServerInput)
-    -> Result<McpServerDto, McpControlError>;
+    async fn update(
+        &self,
+        name: &str,
+        input: McpServerInput,
+    ) -> Result<McpServerDto, McpControlError>;
     /// Disconnect and forget a server, then persist.
     ///
     /// # Errors

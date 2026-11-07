@@ -1,5 +1,6 @@
 //! `/v1/mcp/*` and `POST /v1/secrets/{name}` against an in-memory `McpControl`.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -142,9 +143,9 @@ impl McpControl for FakeMcp {
                 command: Some("uvx".into()),
                 args: Some(vec!["mcp-server-fetch".into()]),
                 url: None,
-                env: Default::default(),
-                secret_env: Default::default(),
-                secret_headers: Default::default(),
+                env: BTreeMap::new(),
+                secret_env: BTreeMap::new(),
+                secret_headers: BTreeMap::new(),
                 required_secrets: Vec::new(),
             },
         }]
@@ -321,7 +322,7 @@ async fn secrets_are_write_only() {
     )
     .await;
     assert_eq!(r.status, StatusCode::NO_CONTENT);
-    assert!(r.body.is_empty());
+    assert_eq!(r.body.len(), 0);
     let stored = store.get("mcp/github-token").unwrap().unwrap();
     assert_eq!(stored.expose(), "ghp_super_secret");
     // Overwrite.
@@ -333,7 +334,10 @@ async fn secrets_are_write_only() {
     )
     .await;
     assert_eq!(r.status, StatusCode::NO_CONTENT);
-    assert_eq!(store.get("mcp/github-token").unwrap().unwrap().expose(), "second");
+    assert_eq!(
+        store.get("mcp/github-token").unwrap().unwrap().expose(),
+        "second"
+    );
 
     // No way to read it back.
     for m in [Method::GET, Method::PUT, Method::DELETE] {

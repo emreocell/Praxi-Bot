@@ -1382,6 +1382,12 @@ fn openapi_snapshot() {
         "/v1/policy",
         "/v1/providers",
         "/v1/providers/reload",
+        "/v1/mcp/servers",
+        "/v1/mcp/servers/{name}",
+        "/v1/mcp/servers/{name}/reconnect",
+        "/v1/mcp/servers/{name}/tools",
+        "/v1/mcp/catalog",
+        "/v1/secrets/{name}",
     ] {
         assert!(v["paths"].get(p).is_some(), "{p}");
     }

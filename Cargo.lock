@@ -1052,6 +1052,7 @@ version = "0.1.0"
 dependencies = [
  "agent-core",
  "agent-router",
+ "async-trait",
  "browser-cdp",
  "builtin-tools",
  "channel-telegram",
@@ -1063,6 +1064,7 @@ dependencies = [
  "fs4",
  "futures-util",
  "mcp-bridge",
+ "parking_lot",
  "permission-engine",
  "protocol",
  "provider-catalog",

@@ -11,9 +11,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use daemon_api::mcp::{
-    McpCatalogEntryDto, McpCatalogInstallDto, McpRequiredSecretDto, McpServerChanged,
-    McpServerDto, McpServerInput, McpStatus, McpToolDto, McpTransportInput, McpTransportKind,
-    McpTransportObject,
+    McpCatalogEntryDto, McpCatalogInstallDto, McpRequiredSecretDto, McpServerChanged, McpServerDto,
+    McpServerInput, McpStatus, McpToolDto, McpTransportInput, McpTransportKind, McpTransportObject,
 };
 use daemon_api::{McpControl, McpControlError};
 use mcp_bridge::{
@@ -87,10 +86,10 @@ impl McpHost {
     ) -> Arc<Self> {
         let path = data_dir.join(MCP_FILE);
         let store = TomlFileStore::new(&path);
-        if !path.exists() {
-            if let Err(e) = std::fs::write(&path, FILE_HEADER) {
-                eprintln!("warning: cannot create {}: {e}", path.display());
-            }
+        if !path.exists()
+            && let Err(e) = std::fs::write(&path, FILE_HEADER)
+        {
+            eprintln!("warning: cannot create {}: {e}", path.display());
         }
         let (loaded, broken) = match store.load() {
             Ok(l) => (l, None),
@@ -127,13 +126,23 @@ impl McpHost {
             poller: Mutex::new(None),
         });
         for c in &loaded {
-            host.announced.lock().insert(c.id.clone(), host.status_of(&c.id));
+            host.announced
+                .lock()
+                .insert(c.id.clone(), host.status_of(&c.id));
         }
         // Connect in the background so a slow `npx` never delays the daemon.
+        // The ops lock keeps this from racing a management call that removes
+        // or replaces the server before the connect runs.
         for c in loaded {
             let h = Arc::clone(&host);
             tokio::spawn(async move {
                 let id = c.id.clone();
+                let _op = h.ops.lock().await;
+                let current = h.configs.lock().get(&id).cloned();
+                if current.as_ref() != Some(&c) || h.snapshot(&id).is_some() {
+                    h.connecting.lock().remove(&id);
+                    return;
+                }
                 if let Err(e) = h.manager.add_server(c).await {
                     eprintln!("warning: MCP server {id} not started: {e}");
                 }
@@ -167,9 +176,8 @@ impl McpHost {
             Some(s) => match s.status {
                 ServerStatus::Connected => McpStatus::Connected,
                 ServerStatus::Quarantined => McpStatus::Quarantined,
-                ServerStatus::Disabled => McpStatus::Disconnected,
                 ServerStatus::Disconnected if s.last_error.is_some() => McpStatus::Error,
-                ServerStatus::Disconnected => McpStatus::Disconnected,
+                ServerStatus::Disabled | ServerStatus::Disconnected => McpStatus::Disconnected,
             },
             None => McpStatus::Disconnected,
         }
@@ -437,6 +445,9 @@ impl McpControl for McpHost {
             Ok(()) | Err(McpError::UnknownServer(_)) => {}
             Err(e) => return Err(map_err(e)),
         }
+        // A config change is a refetch hint even when the status stays put
+        // (a disabled server updated in place, for example).
+        self.announced.lock().remove(name);
         self.connect_new(cfg.clone()).await;
         Ok(self.dto(&cfg))
     }
@@ -508,5 +519,253 @@ impl McpControl for McpHost {
 
     fn subscribe(&self) -> broadcast::Receiver<McpServerChanged> {
         self.events.subscribe()
+    }
+}
+
+impl Drop for McpHost {
+    fn drop(&mut self) {
+        if let Some(p) = self.poller.lock().take() {
+            p.abort();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mcp_bridge::Backoff;
+    use serde_json::json;
+
+    fn fast_policy() -> McpPolicy {
+        McpPolicy {
+            quarantine_after: 3,
+            backoff: Backoff {
+                initial: Duration::from_millis(1),
+                max: Duration::from_millis(1),
+                max_attempts: 1,
+            },
+            connect_timeout: Duration::from_millis(400),
+            call_timeout: Duration::from_millis(400),
+        }
+    }
+
+    fn open(dir: &Path) -> Arc<McpHost> {
+        McpHost::start_with_policy(dir, ToolRegistry::new(), None, fast_policy())
+    }
+
+    fn stdio(name: &str, enabled: bool) -> McpServerInput {
+        serde_json::from_value(json!({
+            "name": name,
+            "transport": "stdio",
+            "command": "definitely-missing-mcp-server",
+            "args": ["--stdio"],
+            "secret_env": {"API_KEY": "mcp/files-key"},
+            "category": "fs",
+            "enabled": enabled,
+        }))
+        .unwrap()
+    }
+
+    async fn events_of(rx: &mut broadcast::Receiver<McpServerChanged>) -> Vec<McpStatus> {
+        let mut seen = Vec::new();
+        while let Ok(Ok(ev)) = tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
+            assert_eq!(ev.kind_tag, "mcp_server_changed");
+            seen.push(ev.status);
+        }
+        seen
+    }
+
+    #[tokio::test]
+    async fn failed_connect_is_kept_and_announced() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = open(dir.path());
+        let mut rx = host.subscribe();
+
+        let dto = host.add(stdio("files", true)).await.unwrap();
+        assert_eq!(dto.name, "files");
+        assert_eq!(dto.transport, McpTransportKind::Stdio);
+        assert_eq!(dto.status, McpStatus::Error);
+        assert!(dto.error.is_some());
+        assert_eq!(dto.tool_count, 0);
+        assert_eq!(dto.category, "fs");
+        assert!(!dto.trust_hints);
+        assert!(dto.bots.is_none());
+
+        let again = host.reconnect("files").await.unwrap();
+        assert_eq!(again.status, McpStatus::Error);
+        assert!(matches!(
+            host.reconnect("missing").await.unwrap_err(),
+            McpControlError::NotFound(_)
+        ));
+        host.remove("files").await.unwrap();
+        assert!(matches!(
+            host.remove("files").await.unwrap_err(),
+            McpControlError::NotFound(_)
+        ));
+        assert_eq!(host.list().len(), 0);
+
+        assert_eq!(
+            events_of(&mut rx).await,
+            vec![
+                McpStatus::Connecting,
+                McpStatus::Error,
+                McpStatus::Connecting,
+                McpStatus::Error,
+                McpStatus::Disconnected,
+            ]
+        );
+        host.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn config_is_saved_reloaded_and_rejects_bad_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(MCP_FILE);
+        let host = open(dir.path());
+        let before = std::fs::read_to_string(&path).unwrap();
+
+        let mut meta = stdio("nope", false);
+        meta.category = Some("meta".into());
+        assert!(matches!(
+            host.add(meta).await.unwrap_err(),
+            McpControlError::Invalid(_)
+        ));
+        let nameless: McpServerInput = serde_json::from_value(json!({
+            "transport": "stdio",
+            "command": "npx",
+        }))
+        .unwrap();
+        assert!(matches!(
+            host.add(nameless).await.unwrap_err(),
+            McpControlError::Invalid(_)
+        ));
+        // A rejected body must not touch the file.
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+
+        let mut zeta = stdio("zeta", false);
+        zeta.trust_hints = true;
+        zeta.bots = Some(vec!["bot-a".into()]);
+        let dto = host.add(zeta).await.unwrap();
+        assert_eq!(dto.status, McpStatus::Disconnected);
+        assert!(dto.error.is_none());
+        assert_eq!(dto.bots, Some(vec!["bot-a".to_owned()]));
+        host.add(stdio("alpha", false)).await.unwrap();
+        assert!(matches!(
+            host.add(stdio("alpha", false)).await.unwrap_err(),
+            McpControlError::Conflict(_)
+        ));
+        assert!(matches!(
+            host.update("alpha", stdio("other", false))
+                .await
+                .unwrap_err(),
+            McpControlError::Invalid(_)
+        ));
+
+        let nested: McpServerInput = serde_json::from_value(json!({
+            "id": "web",
+            "transport": {"type": "http", "url": "https://example.com/mcp"},
+            "secret_headers": {"Authorization": "mcp/web-token"},
+            "enabled": false,
+        }))
+        .unwrap();
+        let web = host.add(nested).await.unwrap();
+        assert_eq!(web.transport, McpTransportKind::Http);
+        assert_eq!(web.url.as_deref(), Some("https://example.com/mcp"));
+        assert!(web.command.is_none());
+
+        let bad_url: McpServerInput = serde_json::from_value(json!({
+            "name": "bad",
+            "transport": "http",
+            "url": "ftp://example.com",
+            "enabled": false,
+        }))
+        .unwrap();
+        assert!(matches!(
+            host.add(bad_url).await.unwrap_err(),
+            McpControlError::Invalid(_)
+        ));
+
+        assert_eq!(host.tools("alpha").unwrap().len(), 0);
+        assert!(matches!(
+            host.tools("missing").unwrap_err(),
+            McpControlError::NotFound(_)
+        ));
+
+        let names: Vec<_> = host.list().into_iter().map(|s| s.name).collect();
+        assert_eq!(names, ["alpha", "web", "zeta"]);
+
+        let saved = TomlFileStore::new(&path).load().unwrap();
+        let alpha = saved.iter().find(|s| s.id == "alpha").unwrap();
+        let McpTransport::Stdio { command, args, .. } = &alpha.transport else {
+            panic!("stdio config became {:?}", alpha.transport);
+        };
+        assert_eq!(command, "definitely-missing-mcp-server");
+        assert_eq!(args, &["--stdio".to_owned()]);
+        assert_eq!(
+            alpha.secret_env.get("API_KEY").map(String::as_str),
+            Some("mcp/files-key")
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("mcp/files-key"));
+        assert!(text.contains("mcp/web-token"));
+        assert!(!text.contains("super-secret-value"));
+
+        let mut rx = host.subscribe();
+        let mut upd = stdio("zeta", false);
+        upd.trust_hints = true;
+        upd.bots = Some(vec!["bot-a".into()]);
+        let updated = host.update("zeta", upd).await.unwrap();
+        assert!(updated.trust_hints);
+        assert_eq!(events_of(&mut rx).await, vec![McpStatus::Disconnected]);
+
+        host.shutdown().await;
+        let again = open(dir.path());
+        let zeta = again.list().into_iter().find(|s| s.name == "zeta").unwrap();
+        assert!(zeta.trust_hints);
+        assert!(!zeta.enabled);
+        assert_eq!(zeta.bots, Some(vec!["bot-a".to_owned()]));
+        assert_eq!(zeta.category, "fs");
+        again.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_broken_file_is_never_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(MCP_FILE);
+        std::fs::write(&path, "this is not toml [[[").unwrap();
+        let host = open(dir.path());
+        let err = host.add(stdio("files", false)).await.unwrap_err();
+        assert!(matches!(err, McpControlError::Internal(_)), "{err:?}");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "this is not toml [[["
+        );
+        assert_eq!(host.list().len(), 0);
+        assert!(host.catalog().len() >= 20);
+        host.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn catalog_is_the_curated_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = open(dir.path());
+        let cat = host.catalog();
+        assert!(cat.len() >= 20, "{}", cat.len());
+        let github = cat.iter().find(|e| e.id == "github").unwrap();
+        assert_eq!(github.icon.as_deref(), Some("github"));
+        assert_eq!(github.install.transport, McpTransportKind::Stdio);
+        assert_eq!(
+            github
+                .install
+                .secret_env
+                .get("GITHUB_PERSONAL_ACCESS_TOKEN")
+                .map(String::as_str),
+            Some("mcp/github-token")
+        );
+        assert!(cat.iter().any(|e| e.id == "filesystem" && e.icon.is_none()));
+        for id in ["context7", "home-assistant", "playwright"] {
+            assert!(cat.iter().any(|e| e.id == id), "{id}");
+        }
+        host.shutdown().await;
     }
 }
