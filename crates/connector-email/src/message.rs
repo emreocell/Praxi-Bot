@@ -108,10 +108,7 @@ pub fn parse_detail(
         .parse(raw)
         .ok_or_else(|| EmailError::Imap("message could not be parsed".into()))?;
     let summary = parse_summary(uid, raw, unread, size);
-    let body = msg
-        .body_text(0)
-        .map(|b| b.to_string())
-        .unwrap_or_default();
+    let body = msg.body_text(0).map(|b| b.to_string()).unwrap_or_default();
     let (body_text, body_truncated) = truncate_chars(&body, max_body_chars);
     let attachments = msg
         .attachments()
@@ -160,10 +157,26 @@ pub fn imap_date(s: &str) -> Result<String, EmailError> {
     if y.len() != 4 || m.len() != 2 || d.len() != 2 {
         return Err(bad());
     }
+    if ![y, m, d]
+        .iter()
+        .all(|s| s.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return Err(bad());
+    }
     let y: u32 = y.parse().map_err(|_| bad())?;
     let m: usize = m.parse().map_err(|_| bad())?;
     let d: u32 = d.parse().map_err(|_| bad())?;
-    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || y < 1970 {
+    if !(1..=12).contains(&m) || y == 0 {
+        return Err(bad());
+    }
+    let leap = y.is_multiple_of(4) && (!y.is_multiple_of(100) || y.is_multiple_of(400));
+    let days = match m {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    if !(1..=days).contains(&d) {
         return Err(bad());
     }
     Ok(format!("{d}-{}-{y}", MONTHS[m - 1]))
@@ -177,6 +190,10 @@ mod tests {
     fn dates_convert() {
         assert_eq!(imap_date("2026-11-07").unwrap(), "7-Nov-2026");
         assert!(imap_date("2026-13-07").is_err());
+        assert!(imap_date("2026-02-29").is_err());
+        assert!(imap_date("1900-02-29").is_err());
+        assert!(imap_date("2026-04-31").is_err());
+        assert_eq!(imap_date("2000-02-29").unwrap(), "29-Feb-2000");
         assert!(imap_date("07/11/2026").is_err());
         assert!(imap_date("2026-11-07\r\nA1 DELETE x").is_err());
     }
@@ -203,6 +220,16 @@ Content-Transfer-Encoding: base64\r\n\r\nJVBERg==\r\n--B--\r\n";
         let raw = b"Subject: x\r\n\r\nabcdefghij\r\n";
         let d = parse_detail(1, raw, false, None, 4).unwrap();
         assert_eq!(d.body_text, "abcd");
+        assert!(d.body_truncated);
+    }
+
+    #[test]
+    fn html_fallback_and_unicode_truncation() {
+        let raw =
+            "Subject: html\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>Merhaba dünya</p>";
+        let d = parse_detail(1, raw.as_bytes(), true, None, 10).unwrap();
+        assert!(!d.body_text.contains("<p>"));
+        assert_eq!(d.body_text.chars().count(), 10);
         assert!(d.body_truncated);
     }
 }

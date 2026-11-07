@@ -1,9 +1,8 @@
-//! Message composition and SMTP submission (TLS required) built on `lettre`.
+//! Message composition and SMTP submission with mandatory verified TLS.
 
-use lettre::message::{Mailbox, header::ContentType};
-use lettre::transport::smtp::authentication::Credentials;
-use lettre::transport::smtp::client::{Certificate, Tls, TlsParameters};
-use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
+use mail_builder::MessageBuilder;
+use mail_parser::MessageParser;
+use mail_send::SmtpClientBuilder;
 use serde::Deserialize;
 
 use crate::config::{AccountConfig, SmtpSecurity};
@@ -35,10 +34,42 @@ pub struct OutgoingMail {
     pub body: String,
 }
 
-fn mailbox(s: &str) -> Result<Mailbox, EmailError> {
-    s.trim()
-        .parse::<Mailbox>()
-        .map_err(|e| EmailError::Input(format!("invalid address {s:?}: {e}")))
+fn mailbox(s: &str) -> Result<(String, String), EmailError> {
+    let bad = || EmailError::Input(format!("invalid address {s:?}"));
+    if s.contains(['\r', '\n', '\0']) {
+        return Err(bad());
+    }
+    let header = format!("From: {s}\r\n\r\n");
+    let msg = MessageParser::default()
+        .parse(header.as_bytes())
+        .ok_or_else(bad)?;
+    let addresses = msg.from().ok_or_else(bad)?;
+    let mut iter = addresses.iter();
+    let address = iter.next().ok_or_else(bad)?;
+    let email = address.address.as_deref().ok_or_else(bad)?;
+    if iter.next().is_some() || email.parse::<email_address::EmailAddress>().is_err() {
+        return Err(bad());
+    }
+    Ok((
+        address.name.as_deref().unwrap_or_default().to_owned(),
+        email.to_owned(),
+    ))
+}
+
+/// Composed message and separate delivery envelope. Blind recipients never
+/// appear in transmitted headers.
+pub struct ComposedMail {
+    raw: Vec<u8>,
+    from: String,
+    recipients: Vec<String>,
+}
+
+impl ComposedMail {
+    /// RFC 5322 message bytes.
+    #[must_use]
+    pub fn formatted(&self) -> Vec<u8> {
+        self.raw.clone()
+    }
 }
 
 /// Compose an RFC 5322 message.
@@ -46,10 +77,24 @@ fn mailbox(s: &str) -> Result<Mailbox, EmailError> {
 /// # Errors
 /// [`EmailError::Input`] for invalid or missing recipients, oversized bodies, or
 /// line breaks in the subject.
-pub fn compose(from: &str, mail: &OutgoingMail) -> Result<Message, EmailError> {
+pub fn compose(from: &str, mail: &OutgoingMail) -> Result<ComposedMail, EmailError> {
+    compose_message(from, mail, false)
+}
+
+pub(crate) fn compose_draft(from: &str, mail: &OutgoingMail) -> Result<ComposedMail, EmailError> {
+    compose_message(from, mail, true)
+}
+
+fn compose_message(
+    from: &str,
+    mail: &OutgoingMail,
+    draft: bool,
+) -> Result<ComposedMail, EmailError> {
     let total = mail.to.len() + mail.cc.len() + mail.bcc.len();
     if total == 0 {
-        return Err(EmailError::Input("at least one recipient is required".into()));
+        return Err(EmailError::Input(
+            "at least one recipient is required".into(),
+        ));
     }
     if total > MAX_RECIPIENTS {
         return Err(EmailError::Input(format!(
@@ -62,59 +107,82 @@ pub fn compose(from: &str, mail: &OutgoingMail) -> Result<Message, EmailError> {
     if mail.subject.contains(['\r', '\n']) {
         return Err(EmailError::Input("subject must be a single line".into()));
     }
-    let mut b = Message::builder().from(mailbox(from)?).subject(&mail.subject);
-    for a in &mail.to {
-        b = b.to(mailbox(a)?);
+    let from = mailbox(from)?;
+    let to = mail
+        .to
+        .iter()
+        .map(|s| mailbox(s))
+        .collect::<Result<Vec<_>, _>>()?;
+    let cc = mail
+        .cc
+        .iter()
+        .map(|s| mailbox(s))
+        .collect::<Result<Vec<_>, _>>()?;
+    let bcc = mail
+        .bcc
+        .iter()
+        .map(|s| mailbox(s))
+        .collect::<Result<Vec<_>, _>>()?;
+    let recipients = to
+        .iter()
+        .chain(&cc)
+        .chain(&bcc)
+        .map(|(_, email)| email.clone())
+        .collect();
+    let mut builder = MessageBuilder::new()
+        .from(from.clone())
+        .subject(mail.subject.clone())
+        .text_body(mail.body.clone());
+    if !to.is_empty() {
+        builder = builder.to(to);
     }
-    for a in &mail.cc {
-        b = b.cc(mailbox(a)?);
+    if !cc.is_empty() {
+        builder = builder.cc(cc);
     }
-    for a in &mail.bcc {
-        b = b.bcc(mailbox(a)?);
+    if draft && !bcc.is_empty() {
+        builder = builder.bcc(bcc);
     }
-    b.header(ContentType::TEXT_PLAIN)
-        .body(mail.body.clone())
-        .map_err(|e| EmailError::Input(format!("cannot build message: {e}")))
-}
-
-fn smtp_err(e: impl std::fmt::Display) -> EmailError {
-    EmailError::Smtp(e.to_string())
+    let raw = builder
+        .write_to_vec()
+        .map_err(|e| EmailError::Input(format!("cannot build message: {e}")))?;
+    Ok(ComposedMail {
+        raw,
+        from: from.1,
+        recipients,
+    })
 }
 
 /// Submit a composed message. TLS is always required; there is no plaintext path.
 ///
 /// # Errors
 /// TLS, authentication or delivery failures.
-pub async fn send(acct: &AccountConfig, password: &str, msg: Message) -> Result<String, EmailError> {
-    let host = acct.smtp.host.clone();
-    let mut tls = TlsParameters::builder(host.clone());
-    if let Some(pem) = &acct.extra_root_pem {
-        let cert = Certificate::from_pem(pem.as_bytes())
-            .map_err(|e| EmailError::Tls(format!("bad root certificate: {e}")))?;
-        tls = tls.add_root_certificate(cert);
-    }
-    let params = tls
-        .build_rustls()
-        .map_err(|e| EmailError::Tls(e.to_string()))?;
-    let mode = match acct.smtp.security {
-        SmtpSecurity::Implicit => Tls::Wrapper(params),
-        SmtpSecurity::StartTls => Tls::Required(params),
+pub async fn send(
+    acct: &AccountConfig,
+    password: &str,
+    msg: ComposedMail,
+) -> Result<String, EmailError> {
+    let map_error = |e: mail_send::Error| {
+        // Server authentication replies can echo encoded credentials.
+        if matches!(
+            e,
+            mail_send::Error::AuthenticationFailed(_) | mail_send::Error::Auth(_)
+        ) {
+            EmailError::Smtp("authentication failed".into())
+        } else {
+            EmailError::Smtp(e.to_string().replace(password, "[REDACTED]"))
+        }
     };
-    let transport = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(host)
-        .port(acct.smtp.port)
-        .tls(mode)
-        .credentials(Credentials::new(
-            acct.login().to_string(),
-            password.to_string(),
-        ))
-        .timeout(Some(acct.timeout()))
-        .build();
-    let resp = transport.send(msg).await.map_err(smtp_err)?;
-    Ok(format!(
-        "{} {}",
-        resp.code(),
-        resp.message().collect::<Vec<_>>().join(" ")
-    ))
+    let mut builder = SmtpClientBuilder::new(acct.smtp.host.clone(), acct.smtp.port)
+        .implicit_tls(acct.smtp.security == SmtpSecurity::Implicit)
+        .credentials((acct.login().to_owned(), password.to_owned()))
+        .timeout(acct.timeout());
+    builder.tls_connector = crate::tls::connector(acct.extra_root_pem.as_deref())?;
+    let mut client = builder.connect().await.map_err(map_error)?;
+    let envelope = mail_send::smtp::message::Message::new(msg.from, msg.recipients, msg.raw);
+    client.send(envelope).await.map_err(map_error)?;
+    // DATA acceptance is success. A QUIT failure must not invite duplicate delivery.
+    let _ = client.quit().await;
+    Ok("SMTP server accepted message".into())
 }
 
 #[cfg(test)]

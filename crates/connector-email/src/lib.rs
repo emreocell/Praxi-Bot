@@ -4,7 +4,7 @@
 //!   (`Effect::Read`), [`tools::MARK_READ`] (`Effect::Write`).
 //! - Writing: [`tools::DRAFT`] saves to the drafts folder (`Effect::Write`);
 //!   [`tools::SEND`] sends immediately and is `Effect::Destructive`, so the
-//!   permission layer always asks for approval.
+//!   caller must route it through the platform's approval gate before calling.
 //! - TLS is mandatory (implicit TLS for IMAP, implicit TLS or required
 //!   `STARTTLS` for SMTP) and certificates are always verified.
 //! - Credentials are [`secret_store::SecretRef`]s resolved only when connecting.
@@ -51,6 +51,6 @@ pub fn register(registry: &ToolRegistry, connector: &Arc<EmailConnector>) -> usi
 }
 
 #[cfg(test)]
-mod testutil;
-#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod testutil;

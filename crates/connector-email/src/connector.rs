@@ -100,7 +100,9 @@ impl EmailConnector {
         F: for<'a> FnOnce(
             &'a mut ImapSession,
             &'a AccountConfig,
-        ) -> std::pin::Pin<Box<dyn Future<Output = Result<T, EmailError>> + Send + 'a>>,
+        ) -> std::pin::Pin<
+            Box<dyn Future<Output = Result<T, EmailError>> + Send + 'a>,
+        >,
     {
         let acct = self.account(account)?;
         let pw = self.password(acct).await?;
@@ -134,8 +136,13 @@ impl EmailConnector {
         limit: usize,
     ) -> Result<SearchResult, EmailError> {
         query.to_imap()?; // validate before connecting
+        crate::imap::check_folder(folder)?;
+        let folder = folder.to_owned();
+        let query = query.clone();
         let (messages, total) = self
-            .with_imap(account, |s, _| Box::pin(s.search(folder, query, limit)))
+            .with_imap(account, move |s, _| {
+                Box::pin(async move { s.search(&folder, &query, limit).await })
+            })
             .await?;
         Ok(SearchResult { messages, total })
     }
@@ -151,8 +158,13 @@ impl EmailConnector {
         uid: u32,
         max_body_chars: usize,
     ) -> Result<MessageDetail, EmailError> {
-        self.with_imap(account, |s, _| {
-            Box::pin(s.fetch(folder, uid, max_body_chars))
+        crate::imap::check_folder(folder)?;
+        if uid == 0 {
+            return Err(EmailError::Input("uid must be nonzero".into()));
+        }
+        let folder = folder.to_owned();
+        self.with_imap(account, move |s, _| {
+            Box::pin(async move { s.fetch(&folder, uid, max_body_chars).await })
         })
         .await
     }
@@ -168,8 +180,15 @@ impl EmailConnector {
         uid: u32,
         read: bool,
     ) -> Result<(), EmailError> {
-        self.with_imap(account, |s, _| Box::pin(s.set_seen(folder, uid, read)))
-            .await
+        crate::imap::check_folder(folder)?;
+        if uid == 0 {
+            return Err(EmailError::Input("uid must be nonzero".into()));
+        }
+        let folder = folder.to_owned();
+        self.with_imap(account, move |s, _| {
+            Box::pin(async move { s.set_seen(&folder, uid, read).await })
+        })
+        .await
     }
 
     /// Save a draft to the account's drafts folder. Nothing is sent.
@@ -182,7 +201,7 @@ impl EmailConnector {
         mail: &OutgoingMail,
     ) -> Result<String, EmailError> {
         let from = self.account(account)?.address.clone();
-        let raw = smtp::compose(&from, mail)?.formatted();
+        let raw = smtp::compose_draft(&from, mail)?.formatted();
         self.with_imap(account, |s, acct| {
             Box::pin(async move {
                 s.append_draft(&acct.drafts_folder, &raw).await?;

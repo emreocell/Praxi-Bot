@@ -34,7 +34,7 @@ pub struct FolderInfo {
     pub attributes: Vec<String>,
 }
 
-/// Search criteria; all given criteria are ANDed.
+/// Search criteria; messages must match every supplied criterion.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SearchQuery {
@@ -107,7 +107,7 @@ impl SearchQuery {
     }
 }
 
-fn check_folder(name: &str) -> Result<(), EmailError> {
+pub(crate) fn check_folder(name: &str) -> Result<(), EmailError> {
     if name.is_empty() || name.chars().any(|c| matches!(c, '\r' | '\n' | '\0')) {
         return Err(EmailError::Input("invalid folder name".into()));
     }
@@ -147,7 +147,7 @@ impl ImapSession {
         let session = client
             .login(acct.login(), password)
             .await
-            .map_err(|(e, _)| imap_err(format!("login failed: {e}")))?;
+            .map_err(|_| imap_err("login failed"))?;
         Ok(Self { session })
     }
 
@@ -224,7 +224,7 @@ impl ImapSession {
                 Some(parse_summary(uid, f.header()?, unread, f.size))
             })
             .collect();
-        out.sort_unstable_by(|a, b| b.uid.cmp(&a.uid));
+        out.sort_unstable_by_key(|a| std::cmp::Reverse(a.uid));
         Ok((out, total))
     }
 

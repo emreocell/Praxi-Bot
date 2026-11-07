@@ -20,6 +20,7 @@ pub enum SmtpSecurity {
 
 /// IMAP server (always implicit TLS, usually port 993).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ImapSettings {
     /// Server host name.
     pub host: String,
@@ -30,6 +31,7 @@ pub struct ImapSettings {
 
 /// SMTP server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SmtpSettings {
     /// Server host name.
     pub host: String,
@@ -56,6 +58,7 @@ fn default_timeout() -> u64 {
 
 /// One mailbox account.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AccountConfig {
     /// Short name the agent uses to pick the account (e.g. `"work"`).
     pub name: String,
@@ -103,6 +106,16 @@ impl AccountConfig {
     /// # Errors
     /// [`EmailError::Config`] for empty names/hosts or an invalid sender address.
     pub fn validate(&self) -> Result<(), EmailError> {
+        crate::imap::check_folder(&self.drafts_folder)
+            .map_err(|_| EmailError::Config("invalid drafts folder".into()))?;
+        secret_store::validate_name(self.password.name())
+            .map_err(|_| EmailError::Config("invalid password secret reference".into()))?;
+        if self.imap.port == 0 || self.smtp.port == 0 {
+            return Err(EmailError::Config("server port must be nonzero".into()));
+        }
+        if self.login().contains(['\r', '\n', '\0']) {
+            return Err(EmailError::Config("invalid login name".into()));
+        }
         if self.name.trim().is_empty() {
             return Err(EmailError::Config("account name is empty".into()));
         }
@@ -112,7 +125,7 @@ impl AccountConfig {
                 self.name
             )));
         }
-        if self.address.parse::<lettre::Address>().is_err() {
+        if self.address.parse::<email_address::EmailAddress>().is_err() {
             return Err(EmailError::Config(format!(
                 "account {}: invalid sender address",
                 self.name
