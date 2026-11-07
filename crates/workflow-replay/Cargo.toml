@@ -9,3 +9,25 @@ rust-version.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+async-trait.workspace = true
+builtin-tools = { path = "../builtin-tools", version = "0.1.0" }
+desktop-api = { path = "../desktop-api", version = "0.1.0" }
+parking_lot.workspace = true
+protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+storage.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tool-registry = { path = "../tool-registry", version = "0.1.0" }
+toml.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+desktop-windows = { path = "../desktop-windows", version = "0.1.0" }

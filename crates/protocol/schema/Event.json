@@ -351,6 +351,119 @@
       }
     },
     {
+      "description": "A recorded workflow step is about to run (deterministic replay, no model).",
+      "type": "object",
+      "required": [
+        "kind",
+        "step_index",
+        "type",
+        "workflow"
+      ],
+      "properties": {
+        "kind": {
+          "description": "Step kind, e.g. `desktop_action`.",
+          "type": "string"
+        },
+        "run_id": {
+          "description": "Run that started the replay, if it was started from a run.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "step_index": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "workflow_step_started"
+          ]
+        },
+        "workflow": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "description": "A workflow step finished successfully.",
+      "type": "object",
+      "required": [
+        "step_index",
+        "type",
+        "workflow"
+      ],
+      "properties": {
+        "resolved_via": {
+          "description": "Locator strategy that found the target, when the step had one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "step_index": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "workflow_step_completed"
+          ]
+        },
+        "workflow": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "description": "A workflow step could not run (drift, ambiguity, failure or denial); the replay stopped and control goes back to the agent.",
+      "type": "object",
+      "required": [
+        "reason",
+        "step_index",
+        "type",
+        "workflow"
+      ],
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "step_index": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "workflow_drift"
+          ]
+        },
+        "workflow": {
+          "type": "string"
+        }
+      }
+    },
+    {
       "description": "A non-fatal error occurred during the run.",
       "type": "object",
       "required": [
