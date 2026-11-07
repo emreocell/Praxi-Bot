@@ -19,6 +19,8 @@ export type Scope = S["Scope"];
 export type Decision = S["Decision"];
 export type SendMode = S["Mode"];
 export type SendResponse = S["SendResponse"];
+export type DeliveryKind = S["DeliveryKind"];
+export type RememberResponse = S["RememberResponse"];
 export type ErrorBody = S["ErrorBody"];
 export type ControlStateDto = S["ControlStateDto"];
 export type ControlModeName = NonNullable<ControlStateDto["mode"]>;
@@ -58,6 +60,27 @@ export interface TodoItem {
   text: string;
   status: "pending" | "in_progress" | "done";
 }
+
+/**
+ * The route a turn took (`route_decided.route`, tagged by `kind`); the same
+ * shape `POST /v1/runs/{id}/remember` returns for the cached route.
+ */
+export type RouteInfo =
+  | { kind: "command"; name: string }
+  | {
+      kind: "workflow";
+      name: string;
+      params?: unknown;
+      confidence?: number;
+    }
+  | { kind: "tool_hint"; tools: string[] }
+  | { kind: "skill_hint"; skills: string[] }
+  | { kind: "agent" }
+  /** A kind this UI does not know yet (forward compatible). */
+  | { kind: "unknown" };
+
+/** Level that decided a route: K0 rules, K1 cache, K2 retrieval, K3 classifier, K4 none. */
+export type RouteLevel = "K0" | "K1" | "K2" | "K3" | "K4";
 
 export type DaemonEvent =
   | { type: "run_started"; run_id: string; chat_id: string; bot_id: string }
@@ -114,6 +137,17 @@ export type DaemonEvent =
       run_id: string;
       from: string;
       to: string;
+      reason: string;
+    }
+  | {
+      type: "route_decided";
+      run_id: string;
+      level: string;
+      /** Tagged by `kind` (see {@link RouteInfo}); untrusted shape. */
+      route: unknown;
+      /** `0..=1`. */
+      confidence: number;
+      latency_ms: number;
       reason: string;
     }
   | {

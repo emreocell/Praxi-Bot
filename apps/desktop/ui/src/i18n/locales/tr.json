@@ -146,6 +146,23 @@
       "enable": "Otomatik başlatmayı aç",
       "disable": "Otomatik başlatmayı kapat",
       "error": "Windows otomatik başlatma ayarı güncellenemedi."
+    },
+    "notifications": {
+      "title": "Bildirimler",
+      "description": "Masaüstü bildirimleri; yalnızca uygulama penceresi önde değilken gösterilir.",
+      "notifyNeedsYou": "Senden bir şey bekleniyor",
+      "notifyNeedsYouHint": "Bir onay ya da soru bekliyor.",
+      "notifyLongRun": "Uzun bir çalıştırma bitti",
+      "notifyLongRunHint": "30 saniyeden uzun süren bir çalıştırma tamamlandı.",
+      "notifyFailed": "Bir çalıştırma başarısız oldu",
+      "notifyFailedHint": "Bir çalıştırma hatayla bitti.",
+      "notifyPrivate": "Gizli bildirimler",
+      "notifyPrivateHint": "Yalnızca bot adını ve kısa, genel bir metin gösterir; içeriği asla göstermez.",
+      "showAgentRoute": "Tüm yönlendirme kararlarını göster",
+      "showAgentRouteHint": "Bot turu kendisi yürüttüğünde de bir etiket gösterir (hata ayıklama için)."
+    },
+    "route": {
+      "title": "Yönlendirme"
     }
   },
   "overlay": {
@@ -291,7 +308,25 @@
       "modelFallback": "Model {{from}} yerine {{to}} oldu: {{reason}}",
       "error": "{{message}}",
       "workflowDrift": "{{workflow}} iş akışı sapma gösterdi: {{reason}}"
-    }
+    },
+    "route": {
+      "workflow": "İş akışı: {{name}} (0 LLM çağrısı)",
+      "command": "Komut /{{name}}",
+      "toolHint": "Araç ipucu",
+      "skillHint": "Beceri ipucu",
+      "agent": "Ajan ({{level}})",
+      "hover": "Seviye {{level}} · güven %{{confidence}} · {{latency}} ms · {{reason}}"
+    },
+    "remember": {
+      "button": "Bunu hatırla",
+      "hint": "Bu istek bir dahaki sefere modele sorulmadan doğrudan buraya yönlenir.",
+      "done": "Hatırlandı. Bu istek artık modeli atlıyor.",
+      "saved": "Hatırlandı",
+      "notEligible": "Bu çalıştırma hatırlanamaz.",
+      "failed": "Bu çalıştırma hatırlanamadı: {{message}}"
+    },
+    "stopped": "Çalışan tur durduruldu.",
+    "newChatStarted": "Yeni sohbet başlatıldı."
   },
   "botForm": {
     "createTitle": "Yeni bot",
@@ -532,5 +567,25 @@
       "openFullChat": "Tam sohbette aç",
       "retryPrompt": "İstemi yeniden dene"
     }
+  },
+  "notify": {
+    "generic": {
+      "needsYou": "Dikkatin gerekiyor.",
+      "longRun": "Uzun bir görev bitti.",
+      "failed": "Bir çalıştırma başarısız oldu."
+    },
+    "detail": {
+      "needsYou": "{{detail}}",
+      "longRun": "{{detail}}",
+      "failed": "Başarısız: {{detail}}"
+    }
+  },
+  "tray": {
+    "toggle": "Pencereyi göster / gizle",
+    "needs": "Senden bekleyenler ({n})",
+    "stopAll": "Hepsini durdur",
+    "quit": "Çık",
+    "tooltip": "Praxi-Bot",
+    "tooltipNeeds": "Praxi-Bot: {n} öğe seni bekliyor"
   }
 }

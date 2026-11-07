@@ -361,6 +361,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/runs/{id}/remember": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remember the route a succeeded run took (or the workflow its model ran):
+         *     the same request text is then routed there directly next time (intent
+         *     cache, K1).
+         */
+        post: operations["remember_run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/runs/{id}/resume": {
         parameters: {
             query?: never;
@@ -631,7 +652,7 @@ export interface components {
          * @description How a sent message was delivered.
          * @enum {string}
          */
-        DeliveryKind: "new_turn" | "steered" | "queued";
+        DeliveryKind: "new_turn" | "steered" | "queued" | "stopped";
         /** @description A bot's permission picture (`GET /v1/bots/{id}`). */
         EffectivePolicyDto: {
             /**
@@ -771,6 +792,14 @@ export interface components {
             active: string[];
             /** @description Id of the new default provider. */
             default_provider?: string | null;
+        };
+        /** @description Response of `POST /v1/runs/{id}/remember`. */
+        RememberResponse: {
+            /**
+             * @description The route that was cached for the run's request text, tagged by `kind`
+             *     (`workflow`, `tool_hint` or `skill_hint`).
+             */
+            route: Record<string, never>;
         };
         /** @description `DELETE /v1/bots/{id}/grants`. */
         RevokeGrant: {
@@ -1671,6 +1700,45 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorBody"];
                 };
             };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    remember_run: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RememberResponse"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the run is not eligible */
             409: {
                 headers: {
                     [name: string]: unknown;

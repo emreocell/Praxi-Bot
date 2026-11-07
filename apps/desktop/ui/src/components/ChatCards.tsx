@@ -399,7 +399,7 @@ export interface SubagentCardProps {
 }
 
 function truncate(text: string, max: number): string {
-  const flat = text.replace(/s+/g, " ").trim();
+  const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 

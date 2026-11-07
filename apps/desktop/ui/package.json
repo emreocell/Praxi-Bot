@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "gen:api": "openapi-typescript ../../../docs/api/openapi.json -o src/api/schema.d.ts",
     "check:i18n": "node scripts/check-i18n.mjs",
-    "test": "node --test src/state/timeline.test.ts src/state/controlBridge.test.ts src/api/events.test.ts src/lib/providerView.test.ts"
+    "test": "node --test src/state/timeline.test.ts src/state/controlBridge.test.ts src/api/events.test.ts src/lib/providerView.test.ts src/lib/route.test.ts src/lib/notifyRules.test.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.3.0",
