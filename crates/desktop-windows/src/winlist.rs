@@ -81,11 +81,29 @@ fn window_title(hwnd: HWND) -> String {
     }
 }
 
-fn window_pid(hwnd: HWND) -> u32 {
+pub fn window_pid(hwnd: HWND) -> u32 {
     let mut pid = 0u32;
     // SAFETY: `pid` is a valid out pointer for the duration of the call.
     unsafe { GetWindowThreadProcessId(hwnd, Some(&raw mut pid)) };
     pid
+}
+
+/// Make sure keyboard input goes to `target`'s application.
+///
+/// Keys and text are injected into whatever window has the focus.  When another
+/// *process* owns the foreground (a window that opened on top, a toast, the
+/// previously focused app) the input would land in the wrong app, so `target`
+/// is brought forward first.  A window of the same process (a modal Save dialog)
+/// keeps the focus.  Best effort: a refusal is not an error here.
+pub fn ensure_input_target(target: HWND) {
+    let Some(fg) = foreground_hwnd() else {
+        let _ = activate(target);
+        return;
+    };
+    if fg != target && window_pid(fg) != window_pid(target) {
+        let _ = activate(target);
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
 }
 
 fn is_cloaked(hwnd: HWND) -> bool {
@@ -202,7 +220,8 @@ fn wide(s: &str) -> Vec<u16> {
 }
 
 /// Launch an executable (or document / app alias) via `ShellExecuteExW`.
-/// No shell or PowerShell is involved. Returns the new process id.
+/// No shell or PowerShell is involved. Returns the new process id, or 0 when the
+/// shell handled the request without a new process (URI handlers, reused instance).
 pub fn launch(app: &AppSpec) -> Result<Pid, DesktopError> {
     let file = wide(&app.executable);
     let params = wide(
@@ -233,10 +252,10 @@ pub fn launch(app: &AppSpec) -> Result<Pid, DesktopError> {
         ShellExecuteExW(&raw mut info)
             .map_err(|e| DesktopError::Internal(format!("ShellExecuteEx: {e}")))?;
         if info.hProcess.is_invalid() {
-            return Err(DesktopError::Unsupported(
-                "launch succeeded but no process handle was returned (app reused an instance)"
-                    .into(),
-            ));
+            // URI / protocol launches (`ms-settings:display`, `calculator:`) and
+            // apps that reuse a running instance succeed without a process handle.
+            // That is a success, not an error: pid 0 means "not known".
+            return Ok(0);
         }
         let pid = GetProcessId(info.hProcess);
         let _ = CloseHandle(info.hProcess);

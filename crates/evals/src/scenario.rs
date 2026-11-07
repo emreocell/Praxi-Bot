@@ -6,6 +6,8 @@
 //! policy: approve_destructive     # full | approve_destructive | read_only | read_and_draft
 //! profile_toml: ""                # extra bot profile TOML ([permissions], [tools] ...)
 //! guards: { max_steps: 5 }        # optional overrides
+//! subagents: false                # register spawn_subagent
+//! workflows: []                   # saved workflows (version, name, steps: [{kind: tool, tool, input}])
 //! tools:                          # fake tools
 //!   - { name: t_write, effect: write, category: fs, output: "written" }
 //! user: "do it"
@@ -51,6 +53,12 @@ pub struct Scenario {
     /// Fake tools registered for the run.
     #[serde(default)]
     pub tools: Vec<FakeToolSpec>,
+    /// Register the `spawn_subagent` tool.
+    #[serde(default)]
+    pub subagents: bool,
+    /// Workflows saved before the turn (`/workflow <name>` replays one with no model call).
+    #[serde(default)]
+    pub workflows: Vec<workflow_replay::Workflow>,
     /// The user message that starts the turn.
     pub user: String,
     /// Scripted model responses, consumed one per model call.

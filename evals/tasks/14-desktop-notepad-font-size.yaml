@@ -1,0 +1,20 @@
+name: desktop-notepad-font-size
+description: Change the Notepad font size to 20 through its Settings page and read it back from the UI tree. Notepad's settings hive is backed up in setup and restored in cleanup.
+requires: desktop
+platform: windows
+setup:
+  - mkdir: '{{workdir}}'
+  - powershell: >-
+      $d = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsNotepad_8wekyb3d8bbwe\Settings';
+      if (Test-Path $d) { New-Item -ItemType Directory -Force '{{workdir}}\np-settings' | Out-Null; Copy-Item (Join-Path $d 'settings.dat*') '{{workdir}}\np-settings' -ErrorAction Stop }
+prompt: "Open Notepad (notepad.exe). Open its Settings with the gear button at the top right, expand the Font section and set the font Size to 20. Then tell me the font size the Settings page now shows."
+max_steps: 30
+timeout_s: 240
+checks:
+  - final_text: { contains: ["20"] }
+  - desktop_node: { window_title_contains: "Notepad|Not Defteri", name_contains: "20", role: combobox }
+cleanup:
+  - kill_new: [notepad.exe]
+  - powershell: >-
+      $d = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsNotepad_8wekyb3d8bbwe\Settings';
+      if (Test-Path '{{workdir}}\np-settings') { Copy-Item '{{workdir}}\np-settings\settings.dat*' $d -Force }

@@ -251,6 +251,8 @@ mod tests {
             cost_usd: cost,
             tool_calls: BTreeMap::from([("t".to_owned(), calls)]),
             perception: Perception::default(),
+            tool_time: std::collections::BTreeMap::new(),
+            model_time: crate::metrics::ToolTime::default(),
         }
     }
 

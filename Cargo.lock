@@ -2110,6 +2110,7 @@ dependencies = [
  "tokio",
  "toml 0.8.2",
  "tool-registry",
+ "workflow-replay",
 ]
 
 [[package]]

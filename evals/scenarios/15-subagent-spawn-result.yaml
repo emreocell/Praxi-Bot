@@ -1,0 +1,23 @@
+name: subagent-spawn-result
+description: spawn_subagent runs a child with a fresh history (task plus parent context) and hands its final text back to the parent as the tool result.
+policy: full
+subagents: true
+user: go
+script:
+  # parent: delegate
+  - tool_calls:
+      - { id: c1, tool: spawn_subagent, args: { task: "count to three", context: "the number is 3" } }
+  # child: its only model call
+  - text: three
+  # parent: uses the child's answer
+  - text: "the helper answered: three"
+expect:
+  state: succeeded
+  model_calls: 2
+  tool_calls: [spawn_subagent]
+  final_text: { contains: ["the helper answered"] }
+  requests:
+    - { request: 0, tools_offered: [spawn_subagent] }
+    # the child starts from a fresh history: system + its task (with the context)
+    - { request: 1, roles: [system, user], last_user_contains: "count to three" }
+    - { request: 2, roles: [system, user, assistant, tool], tool_messages_contain: ["three"] }

@@ -64,3 +64,75 @@ BOT_EVAL_LIVE=1 bot-eval run --tier 2 --model gemini/gemini-3.5-flash-lite --min
 ```
 
 Failed HTTP 400 request bodies (redacted, never the key) are written to `<data_dir>/debug/last-failed-request-<provider>.json`.
+
+## Round 2 (task 035): native Gemini, 15 tasks, slow-call diagnosis
+
+Model: `gemini/gemini-3.1-flash-lite` (native provider), throttled to one request per 6.5 s (about 9 RPM).
+Fallback `gemini/gemini-3.5-flash-lite` for three tasks (see below). About **239 model requests** in total.
+Files: `baseline-gemini-3.1-flash-lite.jsonl` (one run per task, 15 records: 14 from the full sweep plus the first
+notepad run), `rerun-gemini-3.1-flash-lite.jsonl` (re-runs after fixes, 3.1), `fallback-gemini-3.5-flash-lite.jsonl`.
+Records now carry `tool_time` (per tool: calls, total, max ms) and `model_time` (model steps, rate-limit waits and
+provider retries included); `bot-eval run --trajectory-dir <dir>` writes each task's calls and results.
+
+| Task | 3.1-flash-lite baseline | LLM calls | 024 / 030 | Final (best result) |
+|---|---|---|---|---|
+| browser-example-read | pass | 2 | pass / pass | pass |
+| browser-follow-link | pass | 3 | pass | pass |
+| browser-wikipedia-search | pass | 9 | pass | pass |
+| browser-httpbin-form | pass | 7 | pass | pass |
+| browser-httpbin-read | pass | 3 | pass / pass | pass |
+| desktop-notepad-write-save | FAIL (26 calls, never saved) | 26 | FAIL / FAIL, pass | pass on 3.5-flash-lite (15 calls, 92 s) |
+| desktop-notepad-read-file | pass | 4 | pass | pass |
+| desktop-explorer-create-folder | pass | 11 | pass | pass |
+| desktop-calculator-compute | pass | 7 | FAIL (400) / pass | pass |
+| desktop-settings-open-page | **pass** | 3 | FAIL / FAIL | pass (was model weakness; see fixes) |
+| browser-httpbin-multifield-form (new) | FAIL (my final_text check was case-sensitive; page checks passed) | 16 | - | pass on 3.5 (23 calls) |
+| browser-wikipedia-second-result (new) | pass | 3 | - | pass |
+| desktop-explorer-rename-file (new) | pass | 17 | - | pass |
+| desktop-notepad-font-size (new) | FAIL (setup: leftover Notepad held settings.dat) | 0 | - | pass on 3.1 re-run (7 calls) |
+| mixed-web-value-to-notepad (new) | FAIL (model launched chrome.exe/Opera, see below) | 14 | - | pass on 3.5 (15 calls, 92 s) |
+
+Baseline pass rate on 3.1-flash-lite: 11/15 (all 10 old tasks except notepad-write-save: 9/10, plus 2/5 new). After fixes
+and re-runs every task passed at least once (15/15), but three of them only on `gemini-3.5-flash-lite`: the 3.1 model
+returned HTTP 503 "high demand" during the re-runs (calls of 100-200 s each), so the fallback was used once.
+
+### Slow-call diagnosis (the 030 "240 s notepad stall")
+
+Per-tool timing says the desktop tools are not slow: in every desktop run the tool bodies summed to 2-7 s
+(`desktop_key` max 0.4 s, `desktop_type` max 0.6 s, `desktop_get_state` max 0.35 s, `desktop_launch` 1.6 s), and a
+model-free timing of launch / snapshot / click / type / Ctrl+S was under 0.1 s per call. The wall time is **model
+steps**: `model_time` of the 240 s notepad runs was 233 s, with single calls of 107-182 s. Those were Gemini
+`503 high demand` upstream errors retried inside the provider (plus the 6.5 s throttle). Not a tool hang.
+
+Two real desktop problems did turn up and are fixed:
+
+1. **Notepad session restore.** The Store Notepad restores the tabs of a killed instance on its next launch. Killing
+   Notepad with `taskkill /F` after a task left tab state for `secret.txt` in deleted temp dirs; the next launch
+   opened extra windows and tabs for them, stealing focus and keystrokes. Eval cleanup now removes the Notepad
+   session-state files a task created (`kill_new: [notepad.exe]` also forgets the new `TabState`/`WindowState`
+   files), and the leftover state of earlier eval runs was deleted by hand.
+2. **Leaked windows poison later runs.** The first sweep left a Notepad (opened by the rename task) and a Chrome plus
+   Opera window (opened by the mixed task through `desktop_launch`); the next task's first `desktop_get_state`
+   then saw and typed into the leftover Opera window. Cleanup of the rename and mixed tasks now kills the new
+   processes, and `desktop_launch` says web pages go to the browser tools.
+
+Hardening that costs nothing: UIA transaction timeout 8 s (default 20 s) so a frozen app cannot block the UIA thread
+for long; keyboard input re-activates the last snapshot's window when another *process* owns the foreground; tier-2
+tool calls are capped at 60 s (the loop default is 120 s).
+
+### Settings page (model weakness)
+
+Two defects made it fail: the task prompt itself suggested `explorer.exe ms-settings:display`, and `desktop_launch` on a
+URI returned an *error* ("no process handle") even though the shell had succeeded. Now `desktop_launch` treats a launch
+without a process handle as success (`pid` 0 -> "launched ... look for the app's window"), its description names
+`ms-settings:` URIs and tells the model never to open Explorer for them, and the prompt no longer mentions Explorer.
+Re-run: pass in 3 calls.
+
+### Notes
+
+- `desktop-notepad-font-size` changes a persistent Notepad setting: setup copies `settings.dat*` into the task's
+  workdir and cleanup restores it after Notepad was killed (`settings.dat` was byte-identical afterwards, `LOG1` differs
+  because Notepad rewrites its transaction log).
+- `browser-wikipedia-second-result` is judged (the search ranking is live data).
+- Eval runs on a real desktop with the user's own browsers installed: a model that launches `chrome.exe` opens the
+  user's Chrome. Tasks now clean up the processes they started (never pre-existing ones).

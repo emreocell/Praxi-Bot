@@ -50,6 +50,10 @@ pub struct TurnConfig {
     pub timeout: Duration,
     /// Model-step retry attempts.
     pub retry_attempts: u32,
+    /// Register `spawn_subagent`.
+    pub subagents: bool,
+    /// Workflows saved to the run's store (the loop replays them for `/workflow <name>`).
+    pub workflows: Vec<workflow_replay::Workflow>,
 }
 
 /// The permission outcome of one tool call.
@@ -97,6 +101,10 @@ pub struct TurnTrace {
     pub tool_counts: BTreeMap<String, u32>,
     /// Perception ladder usage.
     pub perception: Perception,
+    /// Duration of every model step in milliseconds (includes rate-limit waits and provider retries).
+    pub model_durations: Vec<u64>,
+    /// `(tool, duration_ms)` of every completed call (`use_tool` is keyed `use_tool:<target>`).
+    pub tool_durations: Vec<(String, u64)>,
     /// Text of every tool result.
     pub tool_results: Vec<String>,
     /// Plain-text trajectory (for the judge).
@@ -266,12 +274,31 @@ pub async fn run_turn(cfg: TurnConfig) -> Result<TurnTrace> {
     let dir = tempfile::tempdir()?;
     let storage = Arc::new(Storage::open(dir.path())?);
     let (user, bot, chat) = seed(&storage)?;
-    let lp = AgentLoop::new(
+    let mut lp = AgentLoop::new(
         Arc::clone(&storage),
         cfg.registry.clone(),
         Providers::single(Arc::clone(&cfg.provider)),
         build_config(&cfg),
     );
+    if cfg.subagents {
+        lp = lp.with_subagents();
+    }
+    if !cfg.workflows.is_empty() {
+        let store = workflow_replay::WorkflowStore::new(dir.path());
+        for wf in &cfg.workflows {
+            store
+                .save(wf)
+                .map_err(|e| -> Error { format!("workflow {}: {e}", wf.name).into() })?;
+        }
+        lp = lp.with_workflows(
+            store,
+            workflow_replay::Handles {
+                desktop: None,
+                browser: None,
+                tools: ToolRegistry::new(),
+            },
+        );
+    }
     lp.add_profile(
         bot,
         BotProfile::from_toml_str(&profile_toml(&cfg))
@@ -349,9 +376,19 @@ fn collect(
 ) -> TurnTrace {
     let mut calls: Vec<CallRecord> = Vec::new();
     let mut tool_counts: BTreeMap<String, u32> = BTreeMap::new();
+    let mut labels: HashMap<ToolCallId, String> = HashMap::new();
+    let mut tool_durations: Vec<(String, u64)> = Vec::new();
     for ev in &events {
         match ev {
             Event::ToolCallRequested(r) => {
+                let label = if r.tool_name == "use_tool" {
+                    r.input["name"]
+                        .as_str()
+                        .map_or_else(|| r.tool_name.clone(), |t| format!("use_tool:{t}"))
+                } else {
+                    r.tool_name.clone()
+                };
+                labels.insert(r.call_id, label);
                 *tool_counts.entry(r.tool_name.clone()).or_default() += 1;
                 calls.push(CallRecord {
                     call_id: r.call_id,
@@ -378,6 +415,9 @@ fn collect(
                 .clone_into(&mut c.decision);
             }),
             Event::ToolCallCompleted(done) => {
+                if let (Some(ms), Some(label)) = (done.duration_ms, labels.get(&done.call_id)) {
+                    tool_durations.push((label.clone(), ms));
+                }
                 set(&mut calls, done.call_id, |c| {
                     c.error.clone_from(&done.error);
                 });
@@ -388,12 +428,16 @@ fn collect(
 
     let steps = storage.list_steps(run).unwrap_or_default();
     let mut llm_calls = 0u32;
+    let mut model_durations: Vec<u64> = Vec::new();
     let mut tool_results: Vec<String> = Vec::new();
     let mut trajectory = String::new();
     for s in &steps {
         match s.name.as_str() {
             "model" => {
                 llm_calls += 1;
+                if let Some(end) = s.finished_at_ms {
+                    model_durations.push(u64::try_from(end - s.started_at_ms).unwrap_or(0));
+                }
                 if let Some(o) = &s.output {
                     let text = o["text"].as_str().unwrap_or_default();
                     if !text.is_empty() {
@@ -468,6 +512,8 @@ fn collect(
         cost_usd,
         tool_counts,
         perception,
+        model_durations,
+        tool_durations,
         tool_results,
         trajectory,
         storage: Arc::clone(storage),

@@ -37,6 +37,7 @@ tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "process"] }
 tool-registry = { path = "../tool-registry", version = "0.1.0" }
 toml.workspace = true
+workflow-replay = { path = "../workflow-replay", version = "0.1.0" }
 
 [target.'cfg(windows)'.dependencies]
 desktop-windows = { path = "../desktop-windows", version = "0.1.0" }

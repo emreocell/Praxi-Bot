@@ -1,0 +1,14 @@
+name: stop-command
+description: "`/stop` sent while a tool is running cancels the run (K0 command, no model call) instead of being queued or steering the model."
+policy: full
+tools:
+  - { name: t_slow, effect: read, category: fs, output: late, delay_ms: 5000 }
+user: start
+script:
+  - tool_calls: [{ id: c1, tool: t_slow, args: {} }]
+  - text: must not be reached
+reactions:
+  - { on: tool_call_requested, tool: t_slow, do: steer, text: "/stop", once: true }
+expect:
+  state: cancelled
+  model_calls: 1

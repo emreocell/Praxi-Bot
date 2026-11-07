@@ -1,0 +1,19 @@
+name: browser-httpbin-multifield-form
+description: Fill every field of the httpbin order form (text, tel, email, radio, two checkboxes, time, textarea), submit it and verify the echoed values.
+requires: browser
+prompt: "Open https://httpbin.org/forms/post and fill in all of it: customer name 'Eval Bot', telephone '5551234567', e-mail 'bot@example.com', pizza size Large, toppings Cheese and Mushroom, delivery time 19:30, delivery instructions 'ring twice'. Submit the order, then read the response page and tell me which toppings and which delivery time the server received."
+max_steps: 25
+timeout_s: 200
+checks:
+  - browser_text_contains: Eval Bot
+  - browser_text_contains: "5551234567"
+  - browser_text_contains: bot@example.com
+  - browser_text_contains: large
+  - browser_text_contains: cheese
+  - browser_text_contains: mushroom
+  - browser_text_contains: "19:30"
+  - browser_text_contains: ring twice
+  - final_text: { regex: "(?i)mushroom", contains: ["19:30"] }
+fake_script:
+  - tool_calls: [{ id: c1, tool: browser_open, args: { url: "https://httpbin.org/forms/post" } }]
+  - text: The server received cheese and mushroom, delivery 19:30.

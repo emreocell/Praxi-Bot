@@ -183,6 +183,8 @@ pub enum Check {
     FileExists(String),
     /// Directory exists.
     DirExists(String),
+    /// Path does not exist (a rename or delete took effect).
+    FileMissing(String),
     /// File contains text.
     FileContains {
         /// File path.

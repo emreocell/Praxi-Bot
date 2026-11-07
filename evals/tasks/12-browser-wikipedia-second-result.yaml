@@ -1,0 +1,18 @@
+name: browser-wikipedia-second-result
+description: Run a Wikipedia internal search and open the second result (the result order is live data, so a judge verifies "second").
+requires: browser
+prompt: "Open https://en.wikipedia.org/w/index.php?search=lighthouse+keeper&fulltext=1&ns0=1 (Wikipedia's own search results page), open the SECOND result in the list (not the first), and tell me the title of the article you opened."
+max_steps: 15
+timeout_s: 150
+checks:
+  - browser_url_contains: "en.wikipedia.org/wiki/"
+  - judge:
+      screenshot: false
+      rubric: >
+        The trajectory must show a Wikipedia search results list, and the agent must have opened
+        the article that is listed SECOND in that list (not the first, not a link outside the
+        results). Its final answer must name the title of the article it opened, and that title
+        must match the page it navigated to.
+fake_script:
+  - tool_calls: [{ id: c1, tool: browser_open, args: { url: "https://en.wikipedia.org/wiki/Lighthouse" } }]
+  - text: Lighthouse

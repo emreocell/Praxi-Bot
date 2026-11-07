@@ -34,6 +34,35 @@ pub struct Perception {
     pub grid: u32,
 }
 
+/// Execution time of one tool across a run (the tool body only: approval waits excluded).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolTime {
+    /// Completed calls that reported a duration.
+    pub calls: u32,
+    /// Summed duration in milliseconds.
+    pub total_ms: u64,
+    /// Longest single call in milliseconds.
+    pub max_ms: u64,
+}
+
+/// Aggregate per-call `(tool, duration_ms)` pairs by tool name.
+///
+/// `use_tool` calls are keyed `use_tool:<target>` so the slow tool behind the
+/// meta-tool is visible.
+#[must_use]
+pub fn aggregate_tool_time<'a>(
+    calls: impl IntoIterator<Item = (&'a str, u64)>,
+) -> BTreeMap<String, ToolTime> {
+    let mut out: BTreeMap<String, ToolTime> = BTreeMap::new();
+    for (tool, ms) in calls {
+        let t = out.entry(tool.to_owned()).or_default();
+        t.calls += 1;
+        t.total_ms += ms;
+        t.max_ms = t.max_ms.max(ms);
+    }
+    out
+}
+
 /// One run's metrics.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunRecord {
@@ -76,6 +105,12 @@ pub struct RunRecord {
     /// Perception ladder usage.
     #[serde(default)]
     pub perception: Perception,
+    /// Execution time per tool (empty in files written before per-tool timing).
+    #[serde(default)]
+    pub tool_time: BTreeMap<String, ToolTime>,
+    /// Duration of the model steps (rate-limit waits and provider retries included).
+    #[serde(default)]
+    pub model_time: ToolTime,
 }
 
 impl RunRecord {
@@ -106,6 +141,12 @@ impl RunRecord {
             cost_usd: trace.cost_usd,
             tool_calls: trace.tool_counts.clone(),
             perception: trace.perception,
+            tool_time: aggregate_tool_time(
+                trace.tool_durations.iter().map(|(t, ms)| (t.as_str(), *ms)),
+            ),
+            model_time: aggregate_tool_time(trace.model_durations.iter().map(|ms| ("m", *ms)))
+                .remove("m")
+                .unwrap_or_default(),
         }
     }
 
@@ -130,6 +171,8 @@ impl RunRecord {
             cost_usd: None,
             tool_calls: BTreeMap::new(),
             perception: Perception::default(),
+            tool_time: BTreeMap::new(),
+            model_time: ToolTime::default(),
         }
     }
 }
@@ -231,6 +274,20 @@ mod tests {
                 grid: 0
             }
         );
+    }
+
+    #[test]
+    fn tool_time_aggregates_by_tool() {
+        let t = aggregate_tool_time([("a", 10), ("b", 5), ("a", 30)]);
+        assert_eq!(
+            t["a"],
+            ToolTime {
+                calls: 2,
+                total_ms: 40,
+                max_ms: 30
+            }
+        );
+        assert_eq!(t["b"].calls, 1);
     }
 
     #[test]

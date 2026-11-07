@@ -1,0 +1,14 @@
+name: mixed-web-value-to-notepad
+description: Read a value from a web page, type it into Notepad and save the file (browser and desktop tools in one task).
+requires: desktop
+platform: windows
+tools: ["browser_*", "desktop_*", "todo_write"]
+setup:
+  - mkdir: '{{workdir}}'
+prompt: 'Use the browser tools (browser_open etc.) to open https://example.com and read the page heading. Then open Notepad (notepad.exe), type exactly: Heading: <the heading you read>   and save the document with Ctrl+S as {{workdir}}\heading.txt (type the full path into the file-name box, press Enter). Tell me when it is saved.'
+max_steps: 35
+timeout_s: 300
+checks:
+  - file_contains: { path: '{{workdir}}\heading.txt', text: "Heading: Example Domain" }
+cleanup:
+  - kill_new: [notepad.exe, chrome.exe, opera.exe, msedge.exe]

@@ -66,6 +66,9 @@ pub struct RunArgs {
     /// Model-call cap override for tier 2.
     #[arg(long)]
     pub max_steps: Option<u32>,
+    /// Write each tier-2 task's trajectory to `<dir>/<task>.txt` (for diagnosing failures).
+    #[arg(long)]
+    pub trajectory_dir: Option<PathBuf>,
 }
 
 /// Arguments of `eval report`.
@@ -209,6 +212,7 @@ async fn run(a: RunArgs) -> Result<bool> {
                 source,
                 prices: load_prices(&prices_path)?,
                 max_steps: a.max_steps,
+                trajectory_dir: a.trajectory_dir.clone(),
             };
             let recs = tier2::run_dir(
                 &a.evals_dir.join("tasks"),

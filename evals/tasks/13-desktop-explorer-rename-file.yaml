@@ -1,0 +1,18 @@
+name: desktop-explorer-rename-file
+description: Rename a file through the File Explorer window (select, F2, type the new name, Enter).
+requires: desktop
+platform: windows
+setup:
+  - mkdir: '{{workdir}}'
+  - write_file: { path: '{{workdir}}\old-name.txt', content: "rename me" }
+prompt: 'Launch explorer.exe with the folder {{workdir}} as its argument, then rename the file old-name.txt to new-name.txt using the Explorer window itself (select the file, press F2, type the new name, press Enter). Tell me when it is renamed.'
+max_steps: 25
+timeout_s: 240
+checks:
+  - file_contains: { path: '{{workdir}}\new-name.txt', text: rename me }
+  - file_missing: '{{workdir}}\old-name.txt'
+cleanup:
+  - kill_new: [notepad.exe]
+  - powershell: >-
+      $s = New-Object -ComObject Shell.Application;
+      foreach ($w in @($s.Windows())) { try { if ($w.LocationURL -like '*{{workdir_name}}*') { $w.Quit() } } catch {} }

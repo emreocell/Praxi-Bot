@@ -1,0 +1,18 @@
+name: ladder-workflow-route
+description: "`/workflow <name>` is routed by the K0 ladder rung and replays the saved workflow through the tool gate with zero model calls."
+policy: full
+tools:
+  - { name: t_log, effect: write, category: fs, output: logged }
+workflows:
+  - version: 1
+    name: log_it
+    description: write a log line
+    steps:
+      - { kind: tool, tool: t_log, input: {} }
+user: "/workflow log_it"
+script: []
+expect:
+  state: succeeded
+  model_calls: 0
+  tool_runs: { t_log: 1 }
+  final_text: { contains: [completed] }

@@ -15,21 +15,22 @@ use windows::{
             CoUninitialize,
         },
         UI::Accessibility::{
-            CUIAutomation, ExpandCollapseState_Collapsed, IUIAutomation, IUIAutomationCacheRequest,
-            IUIAutomationElement, IUIAutomationExpandCollapsePattern, IUIAutomationInvokePattern,
-            IUIAutomationScrollPattern, IUIAutomationSelectionItemPattern,
-            IUIAutomationTogglePattern, IUIAutomationValuePattern, ScrollAmount_NoAmount,
-            ScrollAmount_SmallDecrement, ScrollAmount_SmallIncrement, ToggleState_Indeterminate,
-            ToggleState_On, TreeScope_Subtree, UIA_BoundingRectanglePropertyId,
-            UIA_ControlTypePropertyId, UIA_ExpandCollapseExpandCollapseStatePropertyId,
-            UIA_ExpandCollapsePatternId, UIA_HasKeyboardFocusPropertyId, UIA_InvokePatternId,
-            UIA_IsEnabledPropertyId, UIA_IsOffscreenPropertyId, UIA_IsPasswordPropertyId,
-            UIA_NamePropertyId, UIA_ScrollPatternId, UIA_SelectionItemIsSelectedPropertyId,
-            UIA_SelectionItemPatternId, UIA_TogglePatternId, UIA_ToggleToggleStatePropertyId,
-            UIA_ValuePatternId, UIA_ValueValuePropertyId,
+            CUIAutomation, ExpandCollapseState_Collapsed, IUIAutomation, IUIAutomation2,
+            IUIAutomationCacheRequest, IUIAutomationElement, IUIAutomationExpandCollapsePattern,
+            IUIAutomationInvokePattern, IUIAutomationScrollPattern,
+            IUIAutomationSelectionItemPattern, IUIAutomationTogglePattern,
+            IUIAutomationValuePattern, ScrollAmount_NoAmount, ScrollAmount_SmallDecrement,
+            ScrollAmount_SmallIncrement, ToggleState_Indeterminate, ToggleState_On,
+            TreeScope_Subtree, UIA_BoundingRectanglePropertyId, UIA_ControlTypePropertyId,
+            UIA_ExpandCollapseExpandCollapseStatePropertyId, UIA_ExpandCollapsePatternId,
+            UIA_HasKeyboardFocusPropertyId, UIA_InvokePatternId, UIA_IsEnabledPropertyId,
+            UIA_IsOffscreenPropertyId, UIA_IsPasswordPropertyId, UIA_NamePropertyId,
+            UIA_ScrollPatternId, UIA_SelectionItemIsSelectedPropertyId, UIA_SelectionItemPatternId,
+            UIA_TogglePatternId, UIA_ToggleToggleStatePropertyId, UIA_ValuePatternId,
+            UIA_ValueValuePropertyId,
         },
     },
-    core::{BOOL, BSTR},
+    core::{BOOL, BSTR, Interface},
 };
 
 use crate::{
@@ -39,6 +40,11 @@ use crate::{
 };
 
 type Res<T> = Result<T, DesktopError>;
+
+/// How long UIA waits to reach a target process (the system default).
+const CONNECTION_TIMEOUT_MS: u32 = 2_000;
+/// How long UIA waits for one cross-process call to finish (default 20 000).
+const TRANSACTION_TIMEOUT_MS: u32 = 8_000;
 
 fn acc<E: std::fmt::Display>(ctx: &str) -> impl Fn(E) -> DesktopError + '_ {
     move |e| DesktopError::Accessibility(format!("{ctx}: {e}"))
@@ -70,6 +76,14 @@ impl Worker {
                 .map_err(acc("CoInitializeEx"))?;
             let uia: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
                 .map_err(acc("CoCreateInstance(CUIAutomation)"))?;
+            // A target whose UI thread is blocked (modal dialog, hung app) would
+            // otherwise stall this single UIA thread for the 20 s default of
+            // every cross-process call, and every queued tool call behind it.
+            // Best effort: older systems lack IUIAutomation2.
+            if let Ok(uia2) = uia.cast::<IUIAutomation2>() {
+                let _ = uia2.SetConnectionTimeout(CONNECTION_TIMEOUT_MS);
+                let _ = uia2.SetTransactionTimeout(TRANSACTION_TIMEOUT_MS);
+            }
             let cache = uia
                 .CreateCacheRequest()
                 .map_err(acc("CreateCacheRequest"))?;
@@ -328,6 +342,14 @@ impl Worker {
         Ok(())
     }
 
+    /// Keyboard input goes to the foreground window: bring the window of the
+    /// last snapshot forward if another application took the focus.
+    fn focus_target(&self) {
+        if let Some(h) = self.hwnd {
+            winlist::ensure_input_target(h);
+        }
+    }
+
     pub fn act(&mut self, action: &Action) -> Res<ActionResult> {
         match action {
             Action::Click { target, method } => match (target, method) {
@@ -357,7 +379,10 @@ impl Worker {
                     ));
                 }
             },
-            Action::TypeText { text } => input::type_text(text)?,
+            Action::TypeText { text } => {
+                self.focus_target();
+                input::type_text(text)?;
+            }
             Action::SetValue { target, value } => match target {
                 Target::ByIndex { index, generation } => {
                     let r = self.resolve(*index, *generation)?;
@@ -384,7 +409,10 @@ impl Worker {
                     ));
                 }
             },
-            Action::KeyPress { keys } => input::key_chord(keys)?,
+            Action::KeyPress { keys } => {
+                self.focus_target();
+                input::key_chord(keys)?;
+            }
             Action::Drag { from, to, method } => {
                 if *method != ClickMethod::Global {
                     return Err(DesktopError::Unsupported(

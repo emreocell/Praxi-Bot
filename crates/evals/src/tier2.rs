@@ -35,6 +35,9 @@ use crate::scenario::{Act, GuardOverrides, Reaction, ScriptStep, Trigger};
 use crate::task::{Check, Launch, PlatformReq, Step, Surface, Task, load_dir};
 use crate::tier1::evaluate_text;
 
+/// Cap of one tool call in tier-2 runs (the loop default is 120 s).
+const TOOL_TIMEOUT_MS: u64 = 60_000;
+
 const PERSONA: &str = "You are an automation agent that operates a computer for the user. \
 Use the provided tools to do exactly what the user asks, verify the result, then reply with a \
 short factual summary of what you did and what you saw. Do not ask questions; no human is \
@@ -64,9 +67,12 @@ pub struct Tier2Options {
     pub prices: HashMap<String, ModelPrice>,
     /// Override of the model-call cap.
     pub max_steps: Option<u32>,
+    /// Write each task's trajectory (calls and results) to `<dir>/<task>.txt`.
+    pub trajectory_dir: Option<PathBuf>,
 }
 
 /// Outcome of one task.
+#[allow(clippy::large_enum_variant)] // short-lived, one per task
 pub enum TaskOutcome {
     /// The task ran (pass or fail is in the record).
     Ran(RunRecord),
@@ -89,6 +95,49 @@ struct Ctx {
     browser: Arc<CdpDriver>,
     desktop: Option<Arc<dyn DesktopBackend>>,
     baseline: HashMap<String, Vec<u32>>,
+    /// Notepad session-state files that existed when the task started.
+    notepad_state: Vec<PathBuf>,
+}
+
+/// Directories where the Store Notepad keeps its session state (open tabs and
+/// windows).  A Notepad killed with `taskkill /F` leaves its tabs there and the
+/// *next* launch restores them: extra windows steal focus and keystrokes, and
+/// show dialogs for files that no longer exist.  This was the cause of the
+/// stalled notepad run in task 030.
+fn notepad_state_dirs() -> Vec<PathBuf> {
+    let Some(local) = std::env::var_os("LOCALAPPDATA") else {
+        return Vec::new();
+    };
+    let Ok(rd) = std::fs::read_dir(PathBuf::from(local).join("Packages")) else {
+        return Vec::new();
+    };
+    rd.filter_map(std::result::Result::ok)
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("Microsoft.WindowsNotepad_")
+        })
+        .flat_map(|e| ["TabState", "WindowState"].map(|d| e.path().join("LocalState").join(d)))
+        .collect()
+}
+
+fn notepad_state_files() -> Vec<PathBuf> {
+    notepad_state_dirs()
+        .into_iter()
+        .filter_map(|d| std::fs::read_dir(d).ok())
+        .flatten()
+        .filter_map(std::result::Result::ok)
+        .map(|e| e.path())
+        .collect()
+}
+
+/// Remove the session-state files a task's Notepad created (never older ones).
+fn forget_new_notepad_state(before: &[PathBuf]) {
+    for f in notepad_state_files() {
+        if !before.contains(&f) {
+            let _ = std::fs::remove_file(f);
+        }
+    }
 }
 
 impl Ctx {
@@ -216,6 +265,11 @@ async fn run_step(step: &Step, ctx: &Ctx) -> std::result::Result<(), String> {
                             .output()
                             .await;
                     }
+                }
+                if n.eq_ignore_ascii_case("notepad.exe") {
+                    // Let the processes die before their state files are judged.
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    forget_new_notepad_state(&ctx.notepad_state);
                 }
             }
             Ok(())
@@ -393,6 +447,14 @@ async fn run_checks(task: &Task, ctx: &Ctx, trace: &TurnTrace, opts: &Tier2Optio
                     Err(format!("dir_exists: {p} is missing"))
                 }
             }
+            Check::FileMissing(p) => {
+                let p = ctx.ex(p);
+                if Path::new(&p).exists() {
+                    Err(format!("file_missing: {p} still exists"))
+                } else {
+                    Ok(())
+                }
+            }
             Check::FileContains { path, text } => {
                 let p = ctx.ex(path);
                 match std::fs::read_to_string(&p) {
@@ -525,6 +587,7 @@ pub async fn run_task(task: &Task, opts: &Tier2Options) -> Result<TaskOutcome> {
         browser: Arc::clone(&browser),
         desktop: desktop.clone(),
         baseline,
+        notepad_state: notepad_state_files(),
     };
 
     let (provider, model): (Arc<dyn ChatProvider>, String) = match &opts.source {
@@ -586,6 +649,8 @@ pub async fn run_task(task: &Task, opts: &Tier2Options) -> Result<TaskOutcome> {
                 max_steps: task.max_steps.or(opts.max_steps),
                 // A model call (with its provider retries) may not outlive the task.
                 model_timeout_ms: Some(task.timeout_s.unwrap_or(180) * 1000),
+                // One hung desktop/browser call must not eat the whole task.
+                tool_timeout_ms: Some(TOOL_TIMEOUT_MS),
                 ..GuardOverrides::default()
             },
             prices: opts.prices.clone(),
@@ -603,6 +668,8 @@ pub async fn run_task(task: &Task, opts: &Tier2Options) -> Result<TaskOutcome> {
             }],
             timeout: Duration::from_secs(task.timeout_s.unwrap_or(180)),
             retry_attempts: 3,
+            subagents: false,
+            workflows: Vec::new(),
         })
         .await;
         // `script_run` keeps a handle to the registry, so registry -> tool ->
@@ -616,6 +683,17 @@ pub async fn run_task(task: &Task, opts: &Tier2Options) -> Result<TaskOutcome> {
                 return RunRecord::setup_failure(2, &task.name, &model, format!("harness: {e}"));
             }
         };
+        if let Some(dir) = &opts.trajectory_dir {
+            let _ = std::fs::create_dir_all(dir);
+            let text = format!(
+                "{}
+--- final answer ---
+{}
+",
+                trace.trajectory, trace.final_text
+            );
+            let _ = std::fs::write(dir.join(format!("{}.txt", task.name)), text);
+        }
         let failures = run_checks(task, &ctx, &trace, opts).await;
         RunRecord::from_trace(2, &task.name, &model, &trace, failures)
     }

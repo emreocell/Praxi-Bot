@@ -68,6 +68,8 @@ pub async fn run_scenario(s: &Scenario) -> Result<ScenarioResult> {
         reactions: s.reactions.clone(),
         timeout: Duration::from_millis(s.timeout_ms.unwrap_or(20_000)),
         retry_attempts: 1,
+        subagents: s.subagents,
+        workflows: s.workflows.clone(),
     })
     .await?;
     let runs: BTreeMap<String, u64> = counters

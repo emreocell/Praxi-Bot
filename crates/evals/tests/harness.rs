@@ -134,6 +134,10 @@ expect:
     );
     assert_eq!(r.cost_usd, None, "no price table, no cost");
     assert_eq!(
+        r.tool_time["t_read"].calls, 1,
+        "per-tool timing is recorded"
+    );
+    assert_eq!(
         r.tool_calls,
         BTreeMap::from([
             ("desktop_get_state".to_owned(), 1),
@@ -151,9 +155,9 @@ expect:
 #[test]
 fn seed_tasks_parse_and_have_the_expected_mix() {
     let tasks = task::load_dir(&evals_dir().join("tasks")).unwrap();
-    assert_eq!(tasks.len(), 10);
+    assert_eq!(tasks.len(), 15);
     let names: HashSet<_> = tasks.iter().map(|t| t.name.clone()).collect();
-    assert_eq!(names.len(), 10, "task names must be unique");
+    assert_eq!(names.len(), 15, "task names must be unique");
     let browser = tasks
         .iter()
         .filter(|t| t.requires == task::Surface::Browser)
@@ -162,7 +166,7 @@ fn seed_tasks_parse_and_have_the_expected_mix() {
         .iter()
         .filter(|t| t.requires == task::Surface::Desktop)
         .count();
-    assert_eq!((browser, desktop), (5, 5));
+    assert_eq!((browser, desktop), (7, 8));
     for t in &tasks {
         assert!(!t.checks.is_empty(), "{} has no checks", t.name);
         assert!(
@@ -195,6 +199,7 @@ fn fake_opts() -> Tier2Options {
         source: Source::Fake,
         prices: std::collections::HashMap::new(),
         max_steps: None,
+        trajectory_dir: None,
     }
 }
 
@@ -337,6 +342,8 @@ async fn judge_receives_rubric_trajectory_and_screenshot() {
         reactions: vec![],
         timeout: std::time::Duration::from_secs(10),
         retry_attempts: 1,
+        subagents: false,
+        workflows: Vec::new(),
     })
     .await
     .unwrap();
@@ -449,6 +456,8 @@ async fn cost_comes_from_the_price_table() {
         reactions: vec![],
         timeout: std::time::Duration::from_secs(10),
         retry_attempts: 1,
+        subagents: false,
+        workflows: Vec::new(),
     })
     .await
     .unwrap();

@@ -411,9 +411,9 @@ pub fn tools(
             Op::Launch,
             spec(
                 "desktop_launch",
-                "Start, open or run an application or program (launch an app, open a file with it) and list windows. Example: {\"executable\":\"notepad.exe\"}",
+                "Start, open or run an application, program, document or URI (launch an app, open a file with it) and list windows. This is the way to open apps. Examples: {\"executable\":\"notepad.exe\"}, {\"executable\":\"calc.exe\"}, a folder in Explorer {\"executable\":\"explorer.exe\",\"args\":[\"C:\\Users\"]}. Windows Settings pages are URIs, not programs: {\"executable\":\"ms-settings:display\"} (also ms-settings:network, ms-settings:bluetooth, ms-settings:about); never open Explorer for them. Other URI examples: calculator:, ms-clock:. Do not use it for web pages (http/https): use the browser tools for those. Never start an app by typing its name into some window; always launch it with this tool.",
                 json!({"type":"object","properties":{
-                    "executable":{"type":"string","description":"Program name or path."},
+                    "executable":{"type":"string","description":"Program name, file path or URI such as ms-settings:display."},
                     "args":{"type":"array","items":{"type":"string"},"description":"Arguments."}
                 },"required":["executable"]}),
                 Effect::Write,
@@ -448,7 +448,7 @@ pub fn tools(
             Op::Type,
             spec(
                 "desktop_type",
-                "Click an element to focus it, then type text with the keyboard (enter text). Returns the refreshed UI tree. Example: {\"index\":5,\"text\":\"hello\"}",
+                "Click an element to focus it, then type text with the keyboard (enter text). Not for starting apps (use desktop_launch). Returns the refreshed UI tree. Example: {\"index\":5,\"text\":\"hello\"}",
                 json!({"type":"object","properties":{
                     "index":index_prop,
                     "text":{"type":"string","description":"Text to type."}
