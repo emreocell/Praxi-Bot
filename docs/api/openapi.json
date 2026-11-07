@@ -722,6 +722,16 @@
               }
             }
           },
+          "409": {
+            "description": "Setup required or chat busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "422": {
             "description": "",
             "content": {
@@ -3040,7 +3050,7 @@
         "properties": {
           "status": {
             "type": "string",
-            "description": "Always `ok`."
+            "description": "`ok` when ready for inference, or `setup_required` before provider setup."
           },
           "uptime_secs": {
             "type": "integer",

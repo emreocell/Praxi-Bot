@@ -114,7 +114,10 @@ struct ProviderClassifier {
 impl Classifier for ProviderClassifier {
     async fn classify(&self, prompt: &str, max_tokens: u32) -> Result<String, BackendError> {
         let model = ModelRef(self.model.clone());
-        let provider = self.providers.pick(&model);
+        let provider = self
+            .providers
+            .pick(&model)
+            .map_err(|e| BackendError::new(e.to_string()))?;
         let mut req = ChatRequest::new(model, vec![Message::text(MessageRole::User, prompt)]);
         req.max_tokens = Some(max_tokens);
         req.temperature = Some(0.0);

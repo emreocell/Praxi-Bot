@@ -539,7 +539,7 @@ impl TurnExecutor {
         specs: &[ToolSpec],
     ) -> Result<ModelOut, ProviderError> {
         let model = req.model.clone();
-        let provider = self.sh.providers.read().pick(&model);
+        let provider = self.sh.providers.read().pick(&model)?;
         let mut stream = provider.stream(req).await?;
         let mut out = ModelOut {
             model: model.0,

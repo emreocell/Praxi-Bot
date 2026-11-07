@@ -197,6 +197,67 @@ log "architecture: ${ARCH}"
 ASSET="praxi-linux-${ARCH}.tar.gz"
 
 # --------------------------------------------------------------- packages
+# Test actual candidate data, not apt-cache's success status on empty output.
+apt_candidate() {
+  local candidate
+  candidate="$(apt-cache policy "$1" | awk '/Candidate:/ {print $2}')"
+  [[ -n "${candidate}" && "${candidate}" != "(none)" && "${candidate}" != *snap* ]]
+}
+
+install_cft() {
+  # Official Google Chrome for Testing, pinned, for both supported CPUs.
+  # No snap, PPA, Node runtime or printer services. Update the pin with releases.
+  local platform=linux64 version=157.0.8103.38 browser_work pkg
+  [[ "${ARCH}" != "aarch64" ]] || platform=linux-arm64
+  local libs=(libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0
+    libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2)
+  for pkg in libasound2 libatspi2.0-0; do
+    if apt_candidate "${pkg}t64"; then libs+=("${pkg}t64"); else libs+=("${pkg}"); fi
+  done
+  apt-get install -y --no-install-recommends unzip "${libs[@]}"
+  browser_work="$(mktemp -d)"
+  log "installing official Chrome for Testing ${version} (${platform}); no snap/PPA"
+  if ! curl -fSL --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 180 \
+    "https://storage.googleapis.com/chrome-for-testing-public/${version}/${platform}/chrome-${platform}.zip" \
+    -o "${browser_work}/chrome.zip"; then
+    rm -rf "${browser_work}"
+    die "Chrome for Testing download failed; install a non-snap browser and use --skip-packages"
+  fi
+  unzip -q "${browser_work}/chrome.zip" -d "${browser_work}"
+  install -d -m 0755 /opt/praxi-browser
+  cp -a "${browser_work}/chrome-${platform}/." /opt/praxi-browser/
+  chown -R root:root /opt/praxi-browser
+  rm -rf "${browser_work}"
+  # Ubuntu 24.04 restricts user namespaces to named AppArmor applications.
+  # Same userns-only profile as Ubuntu's /etc/apparmor.d/chrome; keep the
+  # browser sandbox enabled and leave all systemd protections in place.
+  if [[ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]] && command -v apparmor_parser >/dev/null 2>&1; then
+    cat > /etc/apparmor.d/praxi-browser <<'PROFILE'
+abi <abi/4.0>,
+include <tunables/global>
+profile praxi-browser /opt/praxi-browser/chrome flags=(unconfined) {
+  userns,
+}
+PROFILE
+    apparmor_parser -r /etc/apparmor.d/praxi-browser
+  fi
+}
+
+# Printing is outside the dedicated Praxi host's role. Include socket units,
+# otherwise a disabled cupsd can be activated again by its socket.
+disable_print_services() {
+  local unit
+  for unit in cups.service cups.socket cups.path cups-browsed.service; do
+    if systemctl cat "${unit}" >/dev/null 2>&1; then
+      log "disabling unrelated print unit ${unit}"
+      systemctl disable --now "${unit}"
+    fi
+  done
+  if command -v snap >/dev/null 2>&1 && snap list cups >/dev/null 2>&1; then
+    snap stop --disable cups
+  fi
+}
+
 install_packages() {
   local pkgs_apt=(curl ca-certificates tar libdbus-1-3)
   # bot and bot-node link libssl.so.3 (native-tls via iroh/rmcp). curl usually
@@ -211,29 +272,29 @@ install_packages() {
     apt-get update -y
     apt-get install -y --no-install-recommends "${pkgs_apt[@]}"
     # Debian 12 / Ubuntu: libssl3. Debian 13 renamed it to libssl3t64.
-    if apt-cache show libssl3 >/dev/null 2>&1; then
+    if apt_candidate libssl3; then
       apt-get install -y --no-install-recommends libssl3
-    elif apt-cache show libssl3t64 >/dev/null 2>&1; then
+    elif apt_candidate libssl3t64; then
       apt-get install -y --no-install-recommends libssl3t64
     else
       warn "no libssl3 package found; the binaries need libssl.so.3"
     fi
     if [[ "${WITH_DESKTOP}" -eq 1 ]]; then
-      # Ubuntu's chromium-browser is a snap stub; snap confinement does not
-      # work well under a hardened system service. Prefer a real deb.
-      if apt-cache show chromium >/dev/null 2>&1; then
+      # Only Debian's native package is accepted. Ubuntu's virtual/transitional
+      # chromium packages can resolve to snap even when apt-cache show exits 0.
+      local distro_id
+      # shellcheck source=/dev/null
+      distro_id="$(. /etc/os-release; printf '%s' "${ID}")"
+      if [[ "${distro_id}" == "debian" ]] && apt_candidate chromium; then
         apt-get install -y --no-install-recommends chromium
-      elif apt-cache show chromium-browser >/dev/null 2>&1; then
-        apt-get install -y --no-install-recommends chromium-browser
-        warn "chromium-browser may be a snap on this distro; if browser tools fail, install a non-snap Chromium (see docs/guide/remote-host.md)"
       else
-        warn "no chromium package found; install a Chromium-family browser yourself"
+        install_cft
       fi
     fi
   elif command -v dnf >/dev/null 2>&1; then
     dnf install -y "${pkgs_dnf[@]}"
     if [[ "${WITH_DESKTOP}" -eq 1 ]]; then
-      dnf install -y chromium || warn "chromium is not in your enabled repos (on Oracle Linux enable EPEL); install a Chromium-family browser yourself"
+      dnf install -y --setopt=install_weak_deps=False chromium || die "install a non-snap Chromium and re-run with --skip-packages"
     fi
   else
     warn "unknown package manager; install curl, tar, libdbus, libssl.so.3 (and Xvfb + Chromium for --with-desktop) yourself"
@@ -242,7 +303,25 @@ install_packages() {
 
 if [[ "${SKIP_PACKAGES}" -eq 0 ]]; then
   log "installing OS packages"
+  # Always clean up accidental print services, including on a package failure.
+  trap disable_print_services EXIT
   install_packages
+  trap - EXIT
+fi
+disable_print_services
+
+if [[ "${WITH_DESKTOP}" -eq 1 ]]; then
+  browser_found=0
+  for browser in /opt/praxi-browser/chrome /usr/bin/google-chrome /usr/bin/google-chrome-stable /usr/bin/chromium /usr/bin/chromium-browser; do
+    [[ -x "${browser}" ]] || continue
+    if [[ "$(readlink -f "${browser}")" == /snap/* ]] || head -c 8192 "${browser}" | grep -aqE 'snap run|/snap/'; then
+      warn "ignoring unsupported snap browser: ${browser}"
+      continue
+    fi
+    browser_found=1
+    break
+  done
+  [[ "${browser_found}" -eq 1 ]] || die "no non-snap browser found; snap-only installs are unsupported. Install Chrome/Chromium (see docs/guide/remote-host.md)"
 fi
 
 # --------------------------------------------------------------- download
@@ -321,20 +400,30 @@ log "installed to ${PREFIX} ($(cat "${PREFIX}/VERSION" 2>/dev/null || echo unkno
 # Wrapper commands: run a binary as the service user with that service's env file.
 # praxi-node must source praxi-node.env so it does not receive the daemon passphrase.
 write_wrapper() { # <command name> <binary name> <env file>
-  local cmd="$1" bin="$2" envf="$3"
+  local cmd="$1" bin="$2" envf="$3" property doctor_properties=""
+  while IFS= read -r property; do
+    doctor_properties+=" --property=${property}"
+  done <<< "${HARDENING}"
+  if [[ -f "${UNIT_DIR}/praxi-xvfb.service" ]]; then
+    doctor_properties+=" --property=JoinsNamespaceOf=praxi-xvfb.service --property=After=praxi-xvfb.service"
+  fi
   cat > "/usr/local/bin/${cmd}" <<WRAP
 #!/bin/sh
 # Runs ${PREFIX}/bin/${bin} as the ${SVC_USER} user with ${envf}.
 inner='set -a; . ${envf}; set +a; exec "\$@"'
 if [ "\$(id -u)" -eq 0 ]; then
+  if [ "${cmd}" = praxi ] && [ "\${1:-}" = doctor ]; then
+    exec systemd-run --quiet --wait --pipe --collect --unit="praxi-doctor-\$\$" \
+      --property=User=${SVC_USER} --property=Group=${SVC_USER} \
+      --property=WorkingDirectory=${DATA_DIR} --property=EnvironmentFile=${envf} \
+      ${doctor_properties} ${PREFIX}/bin/${bin} "\$@"
+  fi
   exec runuser -u ${SVC_USER} -- sh -c "\$inner" sh ${PREFIX}/bin/${bin} "\$@"
 fi
 exec sudo -u ${SVC_USER} sh -c "\$inner" sh ${PREFIX}/bin/${bin} "\$@"
 WRAP
   chmod 0755 "/usr/local/bin/${cmd}"
 }
-write_wrapper praxi bot "${ENV_FILE}"
-write_wrapper praxi-node bot-node "${NODE_ENV_FILE}"
 
 # ------------------------------------------------------------ environment
 if [[ ! -f "${ENV_FILE}" ]]; then
@@ -494,6 +583,8 @@ Description=Praxi virtual display (Xvfb ${DISPLAY_NUM})
 Type=simple
 User=${SVC_USER}
 Group=${SVC_USER}
+# '!' bypasses User/Group only, preserving PrivateTmp for this root helper.
+ExecStartPre=!/usr/bin/install -d -o root -g root -m 1777 /tmp/.X11-unix
 ExecStart=${xvfb_bin} ${DISPLAY_NUM} -screen 0 ${SCREEN_SPEC} -nolisten tcp +extension RANDR +extension XTEST
 Restart=on-failure
 RestartSec=3
@@ -513,7 +604,7 @@ if [[ "${WITH_DESKTOP}" -eq 1 ]]; then
   write_xvfb_unit
   write_desktop_dropins
 elif [[ "${KEEP_DESKTOP}" -eq 1 ]]; then
-  if [[ "${DISPLAY_SET}" -eq 1 || "${SCREEN_SET}" -eq 1 ]]; then
+  if [[ -f "${UNIT_DIR}/praxi-xvfb.service" ]]; then
     if [[ -f "${UNIT_DIR}/praxi-xvfb.service" ]]; then
       xvfb_line="$(grep '^ExecStart=' "${UNIT_DIR}/praxi-xvfb.service" | tail -n1 || true)"
       if [[ "${SCREEN_SET}" -eq 0 && "${xvfb_line}" =~ -screen[[:space:]]+0[[:space:]]+([0-9]+x[0-9]+x[0-9]+) ]]; then
@@ -534,28 +625,47 @@ elif [[ "${KEEP_DESKTOP}" -eq 1 ]]; then
   write_desktop_dropins
 fi
 
+write_wrapper praxi bot "${ENV_FILE}"
+write_wrapper praxi-node bot-node "${NODE_ENV_FILE}"
+
 systemctl daemon-reload
 systemctl enable praxi.service >/dev/null
 if [[ "${WITH_DESKTOP}" -eq 1 || "${KEEP_DESKTOP}" -eq 1 ]]; then
   systemctl enable praxi-xvfb.service >/dev/null
 fi
 
+START_FAILED=0
 if [[ "${NO_START}" -eq 0 ]]; then
-  # restart returns non-zero when the start job fails. Under `set -e` that
-  # would abort before the warning and before praxi-node is brought back.
-  if systemctl restart praxi.service; then
-    sleep 2
-    if systemctl is-active --quiet praxi.service; then
-      log "praxi.service is running"
+  if [[ "${WITH_DESKTOP}" -eq 1 || "${KEEP_DESKTOP}" -eq 1 ]]; then
+    systemctl restart praxi-xvfb.service || START_FAILED=1
+  fi
+  systemctl restart praxi.service || START_FAILED=1
+  ready=0
+  consecutive=0
+  for ((attempt=0; attempt<30; attempt++)); do
+    if systemctl is-active --quiet praxi.service && \
+      health="$(curl -fsS --noproxy '*' --connect-timeout 1 --max-time 2 "http://127.0.0.1:${PORT}/v1/health")" && \
+      [[ "${health}" =~ \"status\"[[:space:]]*:[[:space:]]*\"(ok|setup_required)\" ]] && \
+      [[ "${health}" == *'"version"'* ]]; then
+      consecutive=$((consecutive + 1))
+      if [[ "${consecutive}" -ge 2 ]]; then ready=1; break; fi
     else
-      warn "praxi.service did not stay up; see: journalctl -u praxi -n 50"
+      consecutive=0
     fi
-  else
-    warn "praxi.service did not start; see: journalctl -u praxi -n 50"
-  fi
+    sleep 1
+  done
+  [[ "${ready}" -eq 1 ]] || START_FAILED=1
   if [[ "${NODE_WAS_ACTIVE}" -eq 1 ]]; then
-    systemctl restart praxi-node.service || warn "praxi-node.service did not restart; see: journalctl -u praxi-node -n 50"
+    systemctl restart praxi-node.service || START_FAILED=1
+    systemctl is-active --quiet praxi-node.service || START_FAILED=1
   fi
+  if [[ "${START_FAILED}" -ne 0 ]]; then
+    journalctl -u praxi -u praxi-node -u praxi-xvfb -n 50 --no-pager >&2
+    die "files installed, but service readiness failed (bounded wait); see journal above"
+  fi
+  log "daemon ready on loopback (health may report setup_required until provider setup)"
+else
+  log "files installed and units enabled; startup/readiness skipped (--no-start)"
 fi
 
 # ------------------------------------------------------------ next steps
@@ -563,7 +673,7 @@ cat <<EOF
 
 Praxi-Bot is installed.
 
-  Daemon:   praxi.service, listening on 127.0.0.1:${PORT} only (never expose this port)
+  Daemon:   praxi.service, configured for 127.0.0.1:${PORT} only (never expose this port)
   Data:     ${DATA_DIR}
   Env:      ${ENV_FILE} (mode 0640; daemon, contains the secret-store passphrase)
             ${NODE_ENV_FILE} (mode 0640; node-agent, no BOT_SECRETS_PASSPHRASE)

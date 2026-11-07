@@ -236,7 +236,12 @@ fn resolve_bot(input: BotInput) -> Result<(String, Value), ApiError> {
     responses((status = 200, body = Health)))]
 pub(crate) async fn health(State(s): State<AppState>) -> Json<Health> {
     Json(Health {
-        status: "ok".into(),
+        status: if s.agent().providers().setup_required() {
+            "setup_required"
+        } else {
+            "ok"
+        }
+        .into(),
         version: env!("CARGO_PKG_VERSION").into(),
         uptime_secs: s.uptime_secs(),
     })
@@ -435,6 +440,7 @@ pub(crate) async fn list_messages(
     params(("id" = Uuid, Path, description = "Chat id")),
     request_body = SendMessage,
     responses((status = 202, body = SendResponse), (status = 404, body = ErrorBody),
+              (status = 409, description = "Setup required or chat busy", body = ErrorBody),
               (status = 422, body = ErrorBody)))]
 pub(crate) async fn send_message(
     State(s): State<AppState>,
@@ -951,7 +957,7 @@ pub(crate) async fn list_providers(
         .unwrap_or_default();
     catalog.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(Json(ProvidersDto {
-        default_provider: Some(live.default_id().to_owned()),
+        default_provider: (!live.setup_required()).then(|| live.default_id().to_owned()),
         active,
         configured,
         catalog,
@@ -982,7 +988,7 @@ pub(crate) async fn reload_providers(
     let providers =
         built.map_err(|m| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "reload_failed", m))?;
     let out = ReloadResponse {
-        default_provider: Some(providers.default_id().to_owned()),
+        default_provider: (!providers.setup_required()).then(|| providers.default_id().to_owned()),
         active: providers.ids(),
     };
     s.agent().set_providers(providers);
