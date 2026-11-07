@@ -21,6 +21,8 @@ pub mod fake;
 pub mod mcp;
 mod mcp_routes;
 pub mod openapi;
+pub mod peer;
+pub use peer::{PeerIdentity, PeerRole, peer_router};
 mod routes;
 mod schedule;
 mod sse;
@@ -395,6 +397,15 @@ impl AppState {
 
 /// The `/v1` router, guarded by Host / Origin / bearer checks.
 pub fn router(state: AppState) -> Router {
+    api_routes()
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::guard,
+        ))
+        .with_state(state)
+}
+
+fn api_routes() -> Router<AppState> {
     use mcp_routes as m;
     use routes as r;
     Router::new()
@@ -469,11 +480,6 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/mcp/catalog", get(m::mcp_catalog))
         .route("/v1/secrets/{*name}", post(m::set_secret))
         .route("/v1/events", get(sse::events))
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            auth::guard,
-        ))
-        .with_state(state)
 }
 
 /// Serve the API on `listener` until `shutdown` completes.

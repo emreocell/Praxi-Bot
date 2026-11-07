@@ -1133,9 +1133,11 @@ dependencies = [
  "futures-util",
  "mcp-bridge",
  "parking_lot",
+ "peer-network",
  "permission-engine",
  "protocol",
  "provider-catalog",
+ "remote-api",
  "reqwest 0.12.28",
  "secret-store",
  "serde_json",
@@ -1573,6 +1575,7 @@ dependencies = [
  "getrandom 0.3.4",
  "http-body-util",
  "parking_lot",
+ "percent-encoding",
  "permission-engine",
  "protocol",
  "provider-catalog",
@@ -6192,6 +6195,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38540a682c6e9bca04a8bca9e5ec5a6ba168dfbb04c9998fe517a9befb92eb68"
 dependencies = [
  "serde_core",
+]
+
+[[package]]
+name = "remote-api"
+version = "0.1.0"
+dependencies = [
+ "agent-core",
+ "async-trait",
+ "axum",
+ "daemon-api",
+ "futures-util",
+ "getrandom 0.3.4",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "iroh",
+ "peer-network",
+ "reqwest 0.12.28",
+ "serde_json",
+ "storage",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tool-registry",
+ "tower",
+ "url",
 ]
 
 [[package]]

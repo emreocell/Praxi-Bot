@@ -23,6 +23,7 @@ axum = { version = "0.8", default-features = false, features = ["http1", "json",
 futures.workspace = true
 getrandom = "0.3"
 parking_lot.workspace = true
+percent-encoding.workspace = true
 permission-engine = { path = "../permission-engine", version = "0.1.0" }
 protocol.workspace = true
 provider-catalog = { path = "../provider-catalog", version = "0.1.0" }
