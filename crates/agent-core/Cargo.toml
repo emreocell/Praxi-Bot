@@ -9,3 +9,25 @@ rust-version.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+async-trait.workspace = true
+futures.workspace = true
+globset.workspace = true
+parking_lot.workspace = true
+permission-engine = { path = "../permission-engine", version = "0.1.0" }
+protocol.workspace = true
+provider-catalog = { path = "../provider-catalog", version = "0.1.0" }
+serde.workspace = true
+serde_json.workspace = true
+storage.workspace = true
+task-runtime = { path = "../task-runtime", version = "0.1.0" }
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tool-registry = { path = "../tool-registry", version = "0.1.0" }
+toml.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

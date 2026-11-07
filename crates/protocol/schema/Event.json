@@ -251,6 +251,33 @@
       }
     },
     {
+      "description": "The model replaced its todo list (plan tool); carries the full new list.",
+      "type": "object",
+      "required": [
+        "items",
+        "run_id",
+        "type"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TodoItem"
+          }
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "todo_updated"
+          ]
+        }
+      }
+    },
+    {
       "description": "A non-fatal error occurred during the run.",
       "type": "object",
       "required": [
@@ -278,5 +305,32 @@
         }
       }
     }
-  ]
+  ],
+  "definitions": {
+    "TodoItem": {
+      "description": "One entry of the model-maintained todo list.",
+      "type": "object",
+      "required": [
+        "status",
+        "text"
+      ],
+      "properties": {
+        "status": {
+          "$ref": "#/definitions/TodoStatus"
+        },
+        "text": {
+          "type": "string"
+        }
+      }
+    },
+    "TodoStatus": {
+      "description": "Progress of one todo item.",
+      "type": "string",
+      "enum": [
+        "pending",
+        "in_progress",
+        "done"
+      ]
+    }
+  }
 }

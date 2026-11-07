@@ -9,3 +9,26 @@ rust-version.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+default = []
+# Real local embedder (fastembed-rs / ONNX Runtime). Off by default: ort downloads
+# native binaries at build time and the model files are fetched on first use.
+fastembed = ["dep:fastembed"]
+
+[dependencies]
+regex = "1"
+async-trait.workspace = true
+protocol.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlite-vec = "0.1.9"
+storage.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+fastembed = { version = "5", optional = true, default-features = false, features = ["hf-hub-native-tls", "ort-download-binaries-native-tls"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio.workspace = true
