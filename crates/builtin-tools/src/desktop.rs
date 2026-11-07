@@ -6,7 +6,7 @@
 //! * When the accessibility tree is `Weak`, the state also lists OCR text boxes
 //!   with set-of-marks numbers; `index: "mark:<n>"` clicks a mark by coordinates.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -24,6 +24,7 @@ use serde_json::{Value, json};
 use tool_registry::{
     Effect, PermissionCategory, Tool, ToolContext, ToolError, ToolOutput, ToolSpec,
 };
+use tracing::Instrument as _;
 use vision::{BoundingBox, OcrEngine};
 
 use protocol::event::ControlRect;
@@ -54,6 +55,7 @@ impl Default for DesktopSettings {
 
 const MAX_MARKS: usize = 60;
 const MAX_WINDOWS_SHOWN: usize = 40;
+const LAUNCH_POLL: Duration = Duration::from_millis(100);
 
 /// Per-run states kept at once; the oldest run is evicted beyond this.
 const MAX_RUNS: usize = 16;
@@ -119,7 +121,10 @@ impl RunStates {
 
     fn get(&mut self, run_id: &str) -> Option<&State> {
         self.touch(run_id);
-        self.map.get(run_id)
+        if let Some(s) = self.map.get(run_id) {
+            return Some(s);
+        }
+        self.order.back().and_then(|last| self.map.get(last))
     }
 
     fn entry(&mut self, run_id: &str) -> &mut State {
@@ -356,17 +361,21 @@ impl Shared {
         label: String,
         rect: Option<ControlRect>,
     ) -> Result<(), ToolError> {
-        let Some(gate) = &self.control else {
-            return Ok(());
-        };
-        gate.before_action(&ControlRequest {
-            run_id: run_id.to_owned(),
-            rect,
-            label,
-            action: action.to_owned(),
-        })
+        async {
+            let Some(gate) = &self.control else {
+                return Ok(());
+            };
+            gate.before_action(&ControlRequest {
+                run_id: run_id.to_owned(),
+                rect,
+                label,
+                action: action.to_owned(),
+            })
+            .await
+            .map_err(exec_err)
+        }
+        .instrument(tracing::info_span!("desktop.gate", run_id, action))
         .await
-        .map_err(exec_err)
     }
 
     fn default_method(r: ElementRef) -> ClickMethod {
@@ -381,7 +390,12 @@ impl Shared {
     }
 
     async fn act(&self, action: Action) -> Result<String, ToolError> {
-        let res = self.backend.act(action).await.map_err(|e| derr(&e))?;
+        let res = self
+            .backend
+            .act(action)
+            .instrument(tracing::info_span!("desktop.act"))
+            .await
+            .map_err(|e| derr(&e))?;
         let mut head = format!("dispatched: {}", res.dispatched);
         if let Some(v) = res.verified {
             let _ = write!(head, ", verified: {v}");
@@ -396,65 +410,69 @@ impl Shared {
         scope: Option<u64>,
         filter: &ObsFilter,
     ) -> Result<String, ToolError> {
-        let snap = self.backend.snapshot(scope).await.map_err(|e| derr(&e))?;
-        let rendered_nodes: Vec<_> = if filter.is_active() {
-            snap.nodes
-                .iter()
-                .filter(|n| filter.keeps(n))
-                .cloned()
-                .collect()
-        } else {
-            snap.nodes.clone()
-        };
-        let omitted = snap.nodes.len() - rendered_nodes.len();
-        {
-            let mut states = self.state.lock();
-            let st = states.entry(run_id);
-            st.window_id = Some(snap.window.id);
-            st.generation = Some(snap.generation);
-            st.marks.clear();
-            st.targets = rendered_nodes
-                .iter()
-                .map(|n| {
-                    let label = if n.name.is_empty() {
-                        n.role.clone()
-                    } else {
-                        format!(
-                            "{} \"{}\"",
-                            n.role,
-                            n.name
-                                .chars()
-                                .take(60)
-                                .collect::<String>()
-                                .replace('"', "'")
-                        )
-                    };
-                    (n.index, (label, n.bounds.map(rect_of)))
-                })
-                .collect();
-        }
-        let mut text = format!("window_id: {}\n", snap.window.id);
-        if filter.is_active() {
-            let view = Snapshot {
-                window: snap.window.clone(),
-                nodes: rendered_nodes,
-                generation: snap.generation,
-                quality: snap.quality,
+        async {
+            let snap = self.backend.snapshot(scope).await.map_err(|e| derr(&e))?;
+            let rendered_nodes: Vec<_> = if filter.is_active() {
+                snap.nodes
+                    .iter()
+                    .filter(|n| filter.keeps(n))
+                    .cloned()
+                    .collect()
+            } else {
+                snap.nodes.clone()
             };
-            text.push_str(&render_snapshot(&view));
-            if omitted > 0 {
-                let _ = writeln!(
-                    text,
-                    "({omitted} nodes omitted; use interactive_only/query)"
-                );
+            let omitted = snap.nodes.len() - rendered_nodes.len();
+            {
+                let mut states = self.state.lock();
+                let st = states.entry(run_id);
+                st.window_id = Some(snap.window.id);
+                st.generation = Some(snap.generation);
+                st.marks.clear();
+                st.targets = rendered_nodes
+                    .iter()
+                    .map(|n| {
+                        let label = if n.name.is_empty() {
+                            n.role.clone()
+                        } else {
+                            format!(
+                                "{} \"{}\"",
+                                n.role,
+                                n.name
+                                    .chars()
+                                    .take(60)
+                                    .collect::<String>()
+                                    .replace('"', "'")
+                            )
+                        };
+                        (n.index, (label, n.bounds.map(rect_of)))
+                    })
+                    .collect();
             }
-        } else {
-            text.push_str(&render_snapshot(&snap));
+            let mut text = format!("window_id: {}\n", snap.window.id);
+            if filter.is_active() {
+                let view = Snapshot {
+                    window: snap.window.clone(),
+                    nodes: rendered_nodes,
+                    generation: snap.generation,
+                    quality: snap.quality,
+                };
+                text.push_str(&render_snapshot(&view));
+                if omitted > 0 {
+                    let _ = writeln!(
+                        text,
+                        "({omitted} nodes omitted; use interactive_only/query)"
+                    );
+                }
+            } else {
+                text.push_str(&render_snapshot(&snap));
+            }
+            if snap.quality == TreeQuality::Weak {
+                text.push_str(&self.marks_section(run_id, &snap).await);
+            }
+            Ok(text)
         }
-        if snap.quality == TreeQuality::Weak {
-            text.push_str(&self.marks_section(run_id, &snap).await);
-        }
-        Ok(text)
+        .instrument(tracing::info_span!("desktop.snapshot", run_id, ?scope))
+        .await
     }
 
     async fn marks_section(&self, run_id: &str, snap: &Snapshot) -> String {
@@ -531,12 +549,50 @@ impl Shared {
     }
 
     async fn settle_and_refresh(&self, run_id: &str, prefix: String) -> Result<String, ToolError> {
-        if !self.settings.action_settle.is_zero() {
-            tokio::time::sleep(self.settings.action_settle).await;
+        async {
+            if !self.settings.action_settle.is_zero() {
+                tokio::time::sleep(self.settings.action_settle).await;
+            }
         }
+        .instrument(tracing::info_span!("desktop.settle", op = "action"))
+        .await;
         let scope = self.scope(run_id);
         let state = self.refresh(run_id, scope, &ObsFilter::default()).await?;
         Ok(format!("{prefix}\n{state}"))
+    }
+
+    /// Poll `windows()` until a new top-level window appears (matching `pid`, or
+    /// any new window when `pid == 0`). The first sample is immediate; later
+    /// samples are about 100 ms apart. A non-empty title counts as the one
+    /// stable sample that ends the wait. `deadline` is absolute: the caller
+    /// starts it before `launch()` so `WaitForInputIdle` counts toward
+    /// `launch_settle` and the worst case is not slower than the old fixed sleep.
+    async fn poll_launched_windows(
+        &self,
+        before: &HashSet<u64>,
+        pid: u32,
+        deadline: tokio::time::Instant,
+    ) -> Result<Vec<desktop_api::WindowInfo>, ToolError> {
+        let matches_launch = |w: &desktop_api::WindowInfo| -> bool {
+            !before.contains(&w.id) && !w.title.is_empty() && (pid == 0 || w.pid == pid)
+        };
+        async {
+            loop {
+                let wins = self.backend.windows().await.map_err(|e| derr(&e))?;
+                let found: Vec<_> = wins.into_iter().filter(&matches_launch).collect();
+                let now = tokio::time::Instant::now();
+                if !found.is_empty() || now >= deadline {
+                    return Ok(found);
+                }
+                let remaining = deadline.saturating_duration_since(now);
+                if remaining.is_zero() {
+                    return Ok(found);
+                }
+                tokio::time::sleep(LAUNCH_POLL.min(remaining)).await;
+            }
+        }
+        .instrument(tracing::info_span!("desktop.settle", op = "launch"))
+        .await
     }
 }
 
@@ -832,7 +888,12 @@ impl DesktopTool {
         let sh = &self.shared;
         match self.op {
             Op::ListApps => {
-                let wins = sh.backend.windows().await.map_err(|e| derr(&e))?;
+                let wins = sh
+                    .backend
+                    .windows()
+                    .instrument(tracing::info_span!("desktop.act", op = "list_apps"))
+                    .await
+                    .map_err(|e| derr(&e))?;
                 if wins.is_empty() {
                     return Ok("no visible windows".into());
                 }
@@ -847,18 +908,28 @@ impl DesktopTool {
                 let i: LaunchIn = parse(input)?;
                 sh.gate(run_id, "launch", i.executable.clone(), None)
                     .await?;
+                let before: HashSet<u64> = sh
+                    .backend
+                    .windows()
+                    .await
+                    .map_err(|e| derr(&e))?
+                    .into_iter()
+                    .map(|w| w.id)
+                    .collect();
+                // Deadline starts before `launch` so `WaitForInputIdle` shares the
+                // `launch_settle` budget. Zero settle makes the deadline "now":
+                // one sample, no sleep.
+                let deadline = tokio::time::Instant::now() + sh.settings.launch_settle;
                 let pid = sh
                     .backend
                     .launch(AppSpec {
                         executable: i.executable,
                         args: i.args,
                     })
+                    .instrument(tracing::info_span!("desktop.act", op = "launch"))
                     .await
                     .map_err(|e| derr(&e))?;
-                if !sh.settings.launch_settle.is_zero() {
-                    tokio::time::sleep(sh.settings.launch_settle).await;
-                }
-                let wins = sh.backend.windows().await.map_err(|e| derr(&e))?;
+                let wins = sh.poll_launched_windows(&before, pid, deadline).await?;
                 let mut out = format!("launched pid={pid}\nwindows:\n");
                 for w in wins.iter().take(MAX_WINDOWS_SHOWN) {
                     let _ = writeln!(out, "{}", window_line(w));
@@ -1049,7 +1120,14 @@ impl Tool for DesktopTool {
     }
 
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
-        let text = self.run(&ctx.run_id, input).await?;
+        let text = self
+            .run(&ctx.run_id, input)
+            .instrument(tracing::info_span!(
+                "desktop.tool",
+                tool = %self.spec.name,
+                run_id = %ctx.run_id
+            ))
+            .await?;
         Ok(finish_text(ctx, &self.shared.data_dir.join("spill"), text))
     }
 }
@@ -1074,6 +1152,15 @@ pub(crate) mod fake {
         pub lenient_gen: bool,
         /// Extra rows inserted before the buttons (shifts later indexes).
         pub extra_rows: Mutex<u32>,
+        /// Pid returned by `launch` (default 4242).
+        pub launch_pid: Pid,
+        /// Delay after `launch()` before the launched window (`id = 88`) appears.
+        /// `None` means no new window appears after launch.
+        pub launch_window_delay: Option<Duration>,
+        /// Pid of the new window (`id = 88`) that appears after launch.
+        pub launched_window_pid: Pid,
+        /// Timestamp when `launch()` was called.
+        pub launched_at: Mutex<Option<tokio::time::Instant>>,
     }
 
     impl FakeDesktop {
@@ -1087,6 +1174,10 @@ pub(crate) mod fake {
                 scopes: Mutex::new(Vec::new()),
                 lenient_gen: false,
                 extra_rows: Mutex::new(0),
+                launch_pid: 4242,
+                launch_window_delay: Some(Duration::ZERO),
+                launched_window_pid: 4242,
+                launched_at: Mutex::new(None),
             }
         }
     }
@@ -1191,11 +1282,29 @@ pub(crate) mod fake {
         }
 
         async fn windows(&self) -> Result<Vec<WindowInfo>, DesktopError> {
-            Ok(vec![window(77)])
+            let mut wins = vec![window(77)];
+            if let (Some(at), Some(delay)) = (*self.launched_at.lock(), self.launch_window_delay)
+                && at.elapsed() >= delay
+            {
+                wins.push(WindowInfo {
+                    id: 88,
+                    title: "Launched App".into(),
+                    pid: self.launched_window_pid,
+                    bounds: Rect {
+                        x: 150.0,
+                        y: 250.0,
+                        width: 400.0,
+                        height: 300.0,
+                    },
+                    focused: true,
+                });
+            }
+            Ok(wins)
         }
 
         async fn launch(&self, _app: AppSpec) -> Result<Pid, DesktopError> {
-            Ok(4242)
+            *self.launched_at.lock() = Some(tokio::time::Instant::now());
+            Ok(self.launch_pid)
         }
 
         fn capabilities(&self) -> Capabilities {
@@ -1416,12 +1525,217 @@ mod tests {
             .call(&ctx, json!({"executable": "notepad.exe"}))
             .await
             .unwrap();
-        assert!(text(&out).contains("launched pid=4242"));
+        let launch_text = text(&out);
+        assert!(launch_text.contains("launched pid=4242"), "{launch_text}");
+        assert!(
+            launch_text.contains("id=88 pid=4242 focused \"Launched App\""),
+            "launch output should list the new window: {launch_text}"
+        );
+        assert!(
+            !launch_text.contains("id=77"),
+            "launch output should not list pre-existing windows: {launch_text}"
+        );
         let out = get(&t, "desktop_list_apps")
             .call(&ctx, json!({}))
             .await
             .unwrap();
         assert!(text(&out).contains("\"Fake Notepad\""));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn launch_returns_early_when_new_window_appears_at_200ms() {
+        let mut fake = FakeDesktop::new(false);
+        fake.launch_window_delay = Some(Duration::from_millis(200));
+        let fake = Arc::new(fake);
+        let d = tempfile::tempdir().unwrap();
+        let t = tools(
+            fake,
+            None,
+            d.path(),
+            DesktopSettings {
+                action_settle: Duration::ZERO,
+                launch_settle: Duration::from_millis(1500),
+            },
+            None,
+        );
+        let start = tokio::time::Instant::now();
+        let out = get(&t, "desktop_launch")
+            .call(
+                &ToolContext::default(),
+                json!({"executable": "notepad.exe"}),
+            )
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(180) && elapsed < Duration::from_millis(900),
+            "expected early return around 200ms, got {elapsed:?}"
+        );
+        let s = text(&out);
+        assert!(s.contains("id=88 pid=4242 focused \"Launched App\""), "{s}");
+        assert!(!s.contains("id=77"), "only new windows listed: {s}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn launch_returns_at_cap_when_no_new_window_appears() {
+        let mut fake = FakeDesktop::new(false);
+        fake.launch_window_delay = None;
+        let fake = Arc::new(fake);
+        let d = tempfile::tempdir().unwrap();
+        let cap = Duration::from_millis(350);
+        let t = tools(
+            fake,
+            None,
+            d.path(),
+            DesktopSettings {
+                action_settle: Duration::ZERO,
+                launch_settle: cap,
+            },
+            None,
+        );
+        let start = tokio::time::Instant::now();
+        let out = get(&t, "desktop_launch")
+            .call(
+                &ToolContext::default(),
+                json!({"executable": "notepad.exe"}),
+            )
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= cap.saturating_sub(Duration::from_millis(50)) && elapsed <= cap,
+            "expected wait until cap ({cap:?}) and not past it, got {elapsed:?}"
+        );
+        let s = text(&out);
+        assert_eq!(s, "launched pid=4242\nwindows:\n");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn launch_returns_immediately_when_the_window_is_already_there() {
+        let mut fake = FakeDesktop::new(false);
+        fake.launch_window_delay = Some(Duration::ZERO);
+        let fake = Arc::new(fake);
+        let d = tempfile::tempdir().unwrap();
+        let t = tools(
+            fake,
+            None,
+            d.path(),
+            DesktopSettings {
+                action_settle: Duration::ZERO,
+                launch_settle: Duration::from_millis(1500),
+            },
+            None,
+        );
+        let start = tokio::time::Instant::now();
+        let out = get(&t, "desktop_launch")
+            .call(
+                &ToolContext::default(),
+                json!({"executable": "notepad.exe"}),
+            )
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_millis(100),
+            "window already present must not wait out launch_settle, got {elapsed:?}"
+        );
+        let s = text(&out);
+        assert!(s.contains("id=88 pid=4242 focused \"Launched App\""), "{s}");
+        assert!(!s.contains("id=77"), "{s}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn launch_ignores_a_new_window_with_a_different_pid() {
+        let mut fake = FakeDesktop::new(false);
+        fake.launch_pid = 4242;
+        fake.launched_window_pid = 9999;
+        fake.launch_window_delay = Some(Duration::from_millis(50));
+        let fake = Arc::new(fake);
+        let d = tempfile::tempdir().unwrap();
+        let cap = Duration::from_millis(300);
+        let t = tools(
+            fake,
+            None,
+            d.path(),
+            DesktopSettings {
+                action_settle: Duration::ZERO,
+                launch_settle: cap,
+            },
+            None,
+        );
+        let start = tokio::time::Instant::now();
+        let out = get(&t, "desktop_launch")
+            .call(
+                &ToolContext::default(),
+                json!({"executable": "notepad.exe"}),
+            )
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= cap.saturating_sub(Duration::from_millis(50)) && elapsed <= cap,
+            "a different pid is not the launched window; waited {elapsed:?}, cap {cap:?}"
+        );
+        assert_eq!(text(&out), "launched pid=4242\nwindows:\n");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn launch_pid_zero_accepts_any_new_window() {
+        let mut fake = FakeDesktop::new(false);
+        fake.launch_pid = 0;
+        fake.launched_window_pid = 9001;
+        fake.launch_window_delay = Some(Duration::from_millis(150));
+        let fake = Arc::new(fake);
+        let d = tempfile::tempdir().unwrap();
+        let t = tools(
+            fake,
+            None,
+            d.path(),
+            DesktopSettings {
+                action_settle: Duration::ZERO,
+                launch_settle: Duration::from_millis(1500),
+            },
+            None,
+        );
+        let start = tokio::time::Instant::now();
+        let out = get(&t, "desktop_launch")
+            .call(
+                &ToolContext::default(),
+                json!({"executable": "ms-settings:display"}),
+            )
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_millis(800),
+            "expected early return for pid=0 launch, got {elapsed:?}"
+        );
+        let s = text(&out);
+        assert!(s.contains("launched pid=0"), "{s}");
+        assert!(s.contains("id=88 pid=9001 focused \"Launched App\""), "{s}");
+        assert!(!s.contains("id=77"), "{s}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn launch_with_zero_settings_skips_wait() {
+        let mut fake = FakeDesktop::new(false);
+        fake.launch_window_delay = None;
+        let fake = Arc::new(fake);
+        let (_d, t) = build(fake, None);
+        let start = tokio::time::Instant::now();
+        let out = get(&t, "desktop_launch")
+            .call(
+                &ToolContext::default(),
+                json!({"executable": "notepad.exe"}),
+            )
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_millis(50),
+            "zero settings must skip wait, got {elapsed:?}"
+        );
+        assert_eq!(text(&out), "launched pid=4242\nwindows:\n");
     }
 
     #[tokio::test]

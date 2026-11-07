@@ -1,24 +1,26 @@
 //! The peer network: endpoint lifecycle, accept loop, pairing, events, revoke.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use async_trait::async_trait;
 use iroh::endpoint::{Connection, Incoming, presets};
 use iroh::{Endpoint, EndpointAddr, PublicKey, RelayMode, RelayUrl};
 use parking_lot::Mutex;
 use serde_json::{Value, json};
-use tokio::sync::broadcast;
+use tokio::sync::{Semaphore, broadcast};
 use tokio::task::JoinHandle;
 
 use crate::error::{PeerError, Result};
 use crate::identity::{key_to_string, load_or_create_secret_key};
-use crate::invite::{INVITE_TTL, Invite, InviteBook, PairTicket, RedeemError};
+use crate::invite::{INVITE_TTL, Invite, InviteBook, MAX_INVITE_TTL, PairTicket, RedeemError};
 use crate::proto::{
     ALPN_EVENTS, ALPN_PAIR, ALPN_RPC, CLOSE_NOT_PAIRED, CLOSE_REVOKED, CLOSE_SHUTDOWN, Event,
-    MAX_FRAME, MAX_PAIR_FRAME, PROTOCOL_VERSION, PairRequest, PairResponse, RejectReason,
-    read_frame, write_frame,
+    LeaderInfo, MAX_FRAME, MAX_PAIR_FRAME, PROTOCOL_VERSION, PairRequest, PairResponse,
+    RejectReason, read_frame, write_frame,
 };
 use crate::rpc::{DEFAULT_RPC_TIMEOUT, RpcClient, RpcHandler, map_conn_err, serve_connection};
 use crate::store::{Device, DeviceStore, Role, now_secs};
@@ -54,6 +56,20 @@ impl std::str::FromStr for RelayConfig {
     }
 }
 
+/// A protocol served only after the remote key has been paired.
+#[async_trait]
+pub trait ProtocolHandler: Send + Sync {
+    /// Serve a connection from the authenticated paired device.
+    /// Return when finished; revoke closes the connection while this runs.
+    async fn handle(&self, conn: Connection, device: Device);
+}
+
+impl std::fmt::Debug for dyn ProtocolHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ProtocolHandler")
+    }
+}
+
 /// Configuration of a [`PeerNetwork`].
 #[derive(Debug, Clone)]
 pub struct PeerConfig {
@@ -71,6 +87,8 @@ pub struct PeerConfig {
     pub capabilities: Vec<String>,
     /// Per-request RPC timeout (client and handler side).
     pub rpc_timeout: Duration,
+    /// Additional paired-only ALPN handlers. Built-in ALPNs may not be replaced.
+    pub extra_protocols: Vec<(Vec<u8>, Arc<dyn ProtocolHandler>)>,
 }
 
 impl PeerConfig {
@@ -85,6 +103,7 @@ impl PeerConfig {
             display_name: "core".into(),
             capabilities: Vec::new(),
             rpc_timeout: DEFAULT_RPC_TIMEOUT,
+            extra_protocols: Vec::new(),
         }
     }
 }
@@ -96,6 +115,8 @@ pub struct PeerEvent {
     pub peer: PublicKey,
     /// The event itself.
     pub event: Event,
+    /// Leader metadata from this event, if advertised.
+    pub leader: Option<LeaderInfo>,
 }
 
 /// State of the heartbeat link to a core (see [`PeerNetwork::spawn_heartbeat`]).
@@ -137,6 +158,10 @@ pub(crate) struct Inner {
     conns: Mutex<Vec<(PublicKey, Connection)>>,
     last_seen: Mutex<Vec<(PublicKey, Instant)>>,
     events: broadcast::Sender<PeerEvent>,
+    leader: Mutex<Option<LeaderInfo>>,
+    peer_leaders: Mutex<HashMap<PublicKey, LeaderInfo>>,
+    pair_slots: Semaphore,
+    pair_limits: Mutex<HashMap<PublicKey, PairBucket>>,
 }
 
 impl Inner {
@@ -147,22 +172,25 @@ impl Inner {
             .get(peer)
             .ok_or_else(|| PeerError::UnknownDevice(key_to_string(peer)))?;
         let addr = dev.addr.unwrap_or_else(|| EndpointAddr::new(*peer));
-        self.endpoint
+        let conn = self
+            .endpoint
             .connect(addr, alpn)
             .await
-            .map_err(|e| connect_err(&e))
+            .map_err(|e| connect_err(&e))?;
+        self.track(peer, &conn)?;
+        Ok(conn)
     }
 
-    fn close_peer(&self, peer: &PublicKey, code: u32, reason: &[u8]) {
-        let mut guard = self.conns.lock();
-        guard.retain(|(id, conn)| {
-            if id == peer {
-                conn.close(code.into(), reason);
-                false
-            } else {
-                true
-            }
-        });
+    // Use the same lock as revoke, including a second paired-key check after dial.
+    fn track(&self, peer: &PublicKey, conn: &Connection) -> Result<Device> {
+        let mut conns = self.conns.lock();
+        let Some(device) = self.store.get(peer) else {
+            conn.close(CLOSE_NOT_PAIRED.into(), b"not paired");
+            return Err(PeerError::UnknownDevice(key_to_string(peer)));
+        };
+        conns.retain(|(_, c)| c.close_reason().is_none());
+        conns.push((*peer, conn.clone()));
+        Ok(device)
     }
 }
 
@@ -196,6 +224,15 @@ impl PeerNetwork {
     /// Fails if the identity or device list cannot be read or the endpoint
     /// cannot bind.
     pub async fn start(config: PeerConfig, handler: Option<Arc<dyn RpcHandler>>) -> Result<Self> {
+        let mut alpns = vec![ALPN_PAIR.to_vec(), ALPN_RPC.to_vec(), ALPN_EVENTS.to_vec()];
+        for (alpn, _) in &config.extra_protocols {
+            if alpn.is_empty() || alpn.len() > 255 || alpns.contains(alpn) {
+                return Err(PeerError::Protocol(
+                    "invalid or duplicate extra ALPN".into(),
+                ));
+            }
+            alpns.push(alpn.clone());
+        }
         let key = load_or_create_secret_key(&config.data_dir.join("identity.key"))?;
         let store = DeviceStore::open(config.data_dir.join("devices.json"))?;
         let builder = match &config.relay {
@@ -207,11 +244,7 @@ impl PeerNetwork {
                 Endpoint::builder(presets::Minimal).relay_mode(RelayMode::Disabled)
             }
         };
-        let mut builder = builder.secret_key(key).alpns(vec![
-            ALPN_PAIR.to_vec(),
-            ALPN_RPC.to_vec(),
-            ALPN_EVENTS.to_vec(),
-        ]);
+        let mut builder = builder.secret_key(key).alpns(alpns);
         if let Some(addr) = config.bind_addr {
             builder = builder
                 .bind_addr(addr)
@@ -231,6 +264,10 @@ impl PeerNetwork {
             conns: Mutex::new(Vec::new()),
             last_seen: Mutex::new(Vec::new()),
             events,
+            leader: Mutex::new(None),
+            peer_leaders: Mutex::new(HashMap::new()),
+            pair_slots: Semaphore::new(8),
+            pair_limits: Mutex::new(HashMap::new()),
         });
         let task = tokio::spawn(accept_loop(inner.clone()));
         Ok(Self {
@@ -290,6 +327,25 @@ impl PeerNetwork {
             .map(|(_, t)| *t)
     }
 
+    /// Set the metadata included in subsequent heartbeats; no policy is applied.
+    pub fn set_leader_info(&self, leader: Option<LeaderInfo>) {
+        *self.inner.leader.lock() = leader;
+    }
+
+    /// Latest leader metadata received from a paired peer's heartbeat.
+    #[must_use]
+    pub fn peer_leader(&self, peer: &PublicKey) -> Option<LeaderInfo> {
+        self.inner.peer_leaders.lock().get(peer).copied()
+    }
+
+    /// Dial a paired peer on a protocol using its stored address.
+    ///
+    /// # Errors
+    /// Returns `UnknownDevice` for unpaired peers, or a connection error.
+    pub async fn connect(&self, peer: &PublicKey, alpn: &[u8]) -> Result<Connection> {
+        self.inner.dial(peer, alpn).await
+    }
+
     /// Create a one-time invite (valid 2 minutes, single use) for a joiner
     /// taking `role`.
     ///
@@ -299,12 +355,14 @@ impl PeerNetwork {
         self.create_invite_with_ttl(role, INVITE_TTL).await
     }
 
-    /// [`create_invite`](Self::create_invite) with a custom validity window.
+    /// [`create_invite`](Self::create_invite) with a custom validity window,
+    /// clamped to 30 minutes. The returned invite reports the effective TTL.
     ///
     /// # Panics
     ///
     /// Never in practice.
     pub async fn create_invite_with_ttl(&self, role: Role, ttl: Duration) -> Invite {
+        let ttl = ttl.min(MAX_INVITE_TTL);
         if self.inner.config.relay != RelayConfig::Disabled {
             let _ =
                 tokio::time::timeout(Duration::from_secs(10), self.inner.endpoint.online()).await;
@@ -426,14 +484,24 @@ impl PeerNetwork {
         }
     }
 
-    /// Revoke a device: delete it from the list and close its connections.
+    /// Revoke a device: commit the removal, then close its connections.
     ///
     /// # Errors
     ///
-    /// Fails if the device list cannot be persisted.
+    /// Fails if the device list cannot be persisted. Sockets stay up until
+    /// that commit has swapped the in-memory list.
     pub fn revoke(&self, peer: &PublicKey) -> Result<bool> {
+        let mut conns = self.inner.conns.lock();
         let removed = self.inner.store.remove(peer)?;
-        self.inner.close_peer(peer, CLOSE_REVOKED, b"revoked");
+        conns.retain(|(id, conn)| {
+            if id == peer {
+                conn.close(CLOSE_REVOKED.into(), b"revoked");
+                false
+            } else {
+                true
+            }
+        });
+        self.inner.peer_leaders.lock().remove(peer);
         Ok(removed)
     }
 
@@ -505,15 +573,29 @@ async fn handle_incoming(inner: Arc<Inner>, incoming: Incoming) -> Result<()> {
     let remote = conn.remote_id();
 
     if alpn == ALPN_PAIR {
-        return handle_pair(&inner, &conn, remote).await;
+        let Ok(_permit) = inner.pair_slots.try_acquire() else {
+            conn.close(429u32.into(), b"pairing busy");
+            return Ok(());
+        };
+        if !allow_pair(&inner.pair_limits, remote) {
+            conn.close(429u32.into(), b"pairing rate limit");
+            return Ok(());
+        }
+        let result =
+            tokio::time::timeout(Duration::from_secs(15), handle_pair(&inner, &conn, remote))
+                .await
+                .unwrap_or(Err(PeerError::Timeout));
+        if result.is_err() {
+            conn.close(400u32.into(), b"pairing failed");
+        }
+        return result;
     }
     // Everything else requires a paired key, checked right after the handshake.
-    let Some(device) = inner.store.get(&remote) else {
+    let Ok(device) = inner.track(&remote, &conn) else {
         conn.close(CLOSE_NOT_PAIRED.into(), b"not paired");
         let _ = tokio::time::timeout(Duration::from_secs(2), conn.closed()).await;
         return Ok(());
     };
-    inner.conns.lock().push((remote, conn.clone()));
     if alpn == ALPN_RPC {
         if let Some(h) = &inner.handler {
             serve_connection(conn.clone(), device, h.clone(), inner.config.rpc_timeout).await;
@@ -522,6 +604,18 @@ async fn handle_incoming(inner: Arc<Inner>, incoming: Incoming) -> Result<()> {
         }
     } else if alpn == ALPN_EVENTS {
         serve_events(&inner, &conn, remote).await;
+    } else if let Some((_, handler)) = inner
+        .config
+        .extra_protocols
+        .iter()
+        .find(|(a, _)| *a == alpn)
+    {
+        tokio::select! {
+            () = handler.handle(conn.clone(), device) => {}
+            _ = conn.closed() => {}
+        }
+        // A handler may return after handing the connection to another task.
+        let _ = conn.closed().await;
     } else {
         conn.close(400u32.into(), b"unknown protocol");
     }
@@ -558,10 +652,12 @@ async fn handle_pair(inner: &Arc<Inner>, conn: &Connection, remote: PublicKey) -
     if accepted {
         let _ = inner.events.send(PeerEvent {
             peer: remote,
+            leader: None,
             event: Event {
                 kind: "paired".into(),
                 ts_ms: now_secs() * 1000,
                 data: Value::Null,
+                leader: None,
             },
         });
     }
@@ -644,6 +740,19 @@ async fn serve_events(inner: &Arc<Inner>, conn: &Connection, remote: PublicKey) 
                 let Ok(event) = serde_json::from_slice::<Event>(&bytes) else {
                     continue;
                 };
+                // Revoke and metadata updates share the registration lock.
+                let conns = inner.conns.lock();
+                if inner.store.get(&remote).is_none() {
+                    return;
+                }
+                if event.kind == "heartbeat" {
+                    let mut leaders = inner.peer_leaders.lock();
+                    if let Some(leader) = event.leader {
+                        leaders.insert(remote, leader);
+                    } else {
+                        leaders.remove(&remote);
+                    }
+                }
                 note_seen(&inner, remote);
                 let addr = (event.kind == "heartbeat")
                     .then(|| event.data.get("addr"))
@@ -655,8 +764,10 @@ async fn serve_events(inner: &Arc<Inner>, conn: &Connection, remote: PublicKey) 
                 }
                 let _ = inner.events.send(PeerEvent {
                     peer: remote,
+                    leader: event.leader,
                     event,
                 });
+                drop(conns);
             }
         });
     }
@@ -725,6 +836,7 @@ async fn run_link(
     loop {
         seq += 1;
         let event = Event {
+            leader: *inner.leader.lock(),
             kind: "heartbeat".into(),
             ts_ms: now_secs() * 1000,
             data: json!({ "seq": seq, "addr": inner.endpoint.addr() }),
@@ -744,5 +856,393 @@ fn link_end(conn: &Connection, e: &impl std::fmt::Display) -> LinkEnd {
     match map_conn_err(conn, e) {
         PeerError::NotPaired(m) => LinkEnd::Revoked(m),
         other => LinkEnd::Dropped(other.to_string()),
+    }
+}
+
+const PAIR_LIMIT_KEYS: usize = 4096;
+
+struct PairBucket {
+    tokens: f64,
+    updated: Instant,
+}
+
+fn allow_pair(limits: &Mutex<HashMap<PublicKey, PairBucket>>, remote: PublicKey) -> bool {
+    let mut limits = limits.lock();
+    // Sample under the lock. A timestamp taken before the lock can be older
+    // than one another handshake already stored, and `duration_since` panics.
+    let now = Instant::now();
+    allow_pair_at(&mut limits, remote, now)
+}
+
+fn allow_pair_at(
+    limits: &mut HashMap<PublicKey, PairBucket>,
+    remote: PublicKey,
+    now: Instant,
+) -> bool {
+    limits.retain(|_, bucket| {
+        now.saturating_duration_since(bucket.updated) < Duration::from_secs(60)
+    });
+    if limits.len() >= PAIR_LIMIT_KEYS && !limits.contains_key(&remote) {
+        let oldest = limits
+            .iter()
+            .min_by_key(|(_, bucket)| bucket.updated)
+            .map(|(key, _)| *key);
+        if let Some(oldest) = oldest {
+            limits.remove(&oldest);
+        }
+    }
+    let bucket = limits.entry(remote).or_insert(PairBucket {
+        tokens: 5.0,
+        updated: now,
+    });
+    let elapsed = now.saturating_duration_since(bucket.updated).as_secs_f64();
+    bucket.tokens = (bucket.tokens + elapsed / 12.0).min(5.0);
+    bucket.updated = now;
+    if bucket.tokens < 1.0 {
+        return false;
+    }
+    bucket.tokens -= 1.0;
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proto::{ALPN_API, RpcError};
+
+    use async_trait::async_trait;
+
+    struct Park;
+
+    #[async_trait]
+    impl ProtocolHandler for Park {
+        async fn handle(&self, conn: Connection, _device: Device) {
+            conn.closed().await;
+        }
+    }
+
+    struct NopRpc;
+
+    #[async_trait]
+    impl RpcHandler for NopRpc {
+        async fn handle(
+            &self,
+            _peer: &Device,
+            _method: &str,
+            _params: Value,
+        ) -> std::result::Result<Value, RpcError> {
+            Ok(Value::Null)
+        }
+    }
+
+    fn loopback(dir: &std::path::Path, name: &str) -> PeerConfig {
+        let mut cfg = PeerConfig::new(dir.join(name));
+        cfg.relay = RelayConfig::Disabled;
+        cfg.bind_addr = Some(SocketAddr::from(([127, 0, 0, 1], 0)));
+        cfg.local_role = Role::Desktop;
+        cfg
+    }
+
+    async fn expect_not_paired(core: &PeerNetwork, joiner: &PeerNetwork, alpn: &[u8]) {
+        let rejected = joiner
+            .inner
+            .endpoint
+            .connect(core.addr(), alpn)
+            .await
+            .unwrap();
+        let closed = tokio::time::timeout(Duration::from_secs(5), rejected.closed())
+            .await
+            .unwrap();
+        assert!(
+            matches!(closed, iroh::endpoint::ConnectionError::ApplicationClosed(ref c) if c.error_code.into_inner() == u64::from(CLOSE_NOT_PAIRED)),
+            "{closed}"
+        );
+    }
+
+    #[test]
+    fn pairing_buckets_refill_and_isolate_keys() {
+        let mut limits = HashMap::new();
+        let a = iroh::SecretKey::generate().public();
+        let b = iroh::SecretKey::generate().public();
+        let now = Instant::now();
+        for _ in 0..5 {
+            assert!(allow_pair_at(&mut limits, a, now));
+        }
+        assert!(!allow_pair_at(&mut limits, a, now));
+        assert!(allow_pair_at(&mut limits, b, now));
+        assert!(!allow_pair_at(
+            &mut limits,
+            a,
+            now + Duration::from_secs(11)
+        ));
+        assert!(allow_pair_at(&mut limits, a, now + Duration::from_secs(12)));
+        assert!(!allow_pair_at(
+            &mut limits,
+            a,
+            now + Duration::from_secs(12)
+        ));
+        for _ in 0..5 {
+            assert!(allow_pair_at(&mut limits, a, now + Duration::from_secs(72)));
+        }
+        assert!(!allow_pair_at(
+            &mut limits,
+            a,
+            now + Duration::from_secs(72)
+        ));
+    }
+
+    #[test]
+    fn pairing_bucket_storage_is_bounded() {
+        let now = Instant::now();
+        let mut limits = HashMap::new();
+        for _ in 0..PAIR_LIMIT_KEYS {
+            limits.insert(
+                iroh::SecretKey::generate().public(),
+                PairBucket {
+                    tokens: 0.0,
+                    updated: now,
+                },
+            );
+        }
+        let key = iroh::SecretKey::generate().public();
+        assert!(allow_pair_at(&mut limits, key, now));
+        assert_eq!(limits.len(), PAIR_LIMIT_KEYS);
+        assert!(limits.contains_key(&key));
+        assert!(allow_pair_at(
+            &mut limits,
+            key,
+            now + Duration::from_secs(60)
+        ));
+        assert_eq!(limits.len(), 1);
+        assert!(limits.contains_key(&key));
+    }
+
+    #[test]
+    fn concurrent_pair_attempts_do_not_panic_when_a_bucket_is_newer() {
+        let stale = Instant::now();
+        let keys: Vec<_> = (0..32)
+            .map(|_| iroh::SecretKey::generate().public())
+            .collect();
+        let mut skewed = HashMap::new();
+        skewed.insert(
+            keys[0],
+            PairBucket {
+                tokens: 5.0,
+                updated: stale + Duration::from_secs(30),
+            },
+        );
+        // A clock captured before the lock is behind the stored stamp.
+        let _ = allow_pair_at(&mut skewed, keys[0], stale);
+
+        let limits = Mutex::new(HashMap::new());
+        limits.lock().insert(
+            keys[0],
+            PairBucket {
+                tokens: 5.0,
+                updated: Instant::now() + Duration::from_secs(30),
+            },
+        );
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    for _ in 0..40 {
+                        for key in &keys {
+                            let _ = allow_pair(&limits, *key);
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    #[test]
+    fn pairing_flood_evicts_oldest_bucket_when_table_is_full() {
+        let now = Instant::now();
+        let mut limits = HashMap::new();
+        let mut keys = Vec::with_capacity(PAIR_LIMIT_KEYS);
+        for i in 0..PAIR_LIMIT_KEYS {
+            let key = iroh::SecretKey::generate().public();
+            limits.insert(
+                key,
+                PairBucket {
+                    tokens: 0.0,
+                    updated: now + Duration::from_millis(u64::try_from(i).unwrap()),
+                },
+            );
+            keys.push(key);
+        }
+        let oldest = keys[0];
+        let pinned = keys[PAIR_LIMIT_KEYS - 1];
+        let denied_at = now
+            + Duration::from_millis(u64::try_from(PAIR_LIMIT_KEYS - 1).unwrap())
+            + Duration::from_secs(11);
+        // A denied retry still refreshes `updated`, which used to pin every
+        // resident key so an unseen joiner was refused forever.
+        assert!(!allow_pair_at(&mut limits, pinned, denied_at));
+        assert_eq!(limits.len(), PAIR_LIMIT_KEYS);
+        assert!(limits.contains_key(&oldest));
+        assert_eq!(limits.get(&pinned).unwrap().updated, denied_at);
+
+        let mut admitted = Vec::new();
+        for n in 0..128u64 {
+            let fresh = iroh::SecretKey::generate().public();
+            let at = denied_at + Duration::from_millis(n + 1);
+            assert!(
+                allow_pair_at(&mut limits, fresh, at),
+                "unseen key refused from a full pairing table"
+            );
+            assert_eq!(limits.len(), PAIR_LIMIT_KEYS);
+            admitted.push(fresh);
+        }
+        assert!(!limits.contains_key(&oldest));
+        assert!(limits.contains_key(&pinned));
+        for key in &admitted {
+            assert!(limits.contains_key(key));
+        }
+    }
+
+    #[tokio::test]
+    async fn pairing_semaphore_rejects_busy_and_stalled_handshakes_release_slots() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = PeerConfig::new(dir.path().to_path_buf());
+        cfg.relay = RelayConfig::Disabled;
+        cfg.bind_addr = Some(SocketAddr::from(([127, 0, 0, 1], 0)));
+        let net = PeerNetwork::start(cfg, None).await.unwrap();
+        let permits = net.inner.pair_slots.acquire_many(7).await.unwrap();
+        let raw = Endpoint::builder(presets::Minimal)
+            .relay_mode(RelayMode::Disabled)
+            .bind_addr(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .unwrap()
+            .bind()
+            .await
+            .unwrap();
+        let stalled = raw.connect(net.addr(), ALPN_PAIR).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while net.inner.pair_slots.available_permits() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let busy = raw.connect(net.addr(), ALPN_PAIR).await.unwrap();
+        let closed = tokio::time::timeout(Duration::from_secs(5), busy.closed())
+            .await
+            .unwrap();
+        assert!(
+            matches!(closed, iroh::endpoint::ConnectionError::ApplicationClosed(c) if c.error_code.into_inner() == 429)
+        );
+        let closed = tokio::time::timeout(Duration::from_secs(20), stalled.closed())
+            .await
+            .unwrap();
+        assert!(
+            matches!(closed, iroh::endpoint::ConnectionError::ApplicationClosed(c) if c.error_code.into_inner() == 400)
+        );
+        assert_eq!(net.inner.pair_slots.available_permits(), 1);
+        drop(permits);
+        assert_eq!(net.inner.pair_slots.available_permits(), 8);
+        raw.close().await;
+        net.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn injected_persist_failure_keeps_memory_and_live_connections() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = loopback(dir.path(), "core");
+        cfg.extra_protocols
+            .push((ALPN_API.to_vec(), Arc::new(Park)));
+        let core = PeerNetwork::start(cfg, Some(Arc::new(NopRpc)))
+            .await
+            .unwrap();
+        let desktop = PeerNetwork::start(loopback(dir.path(), "desktop"), None)
+            .await
+            .unwrap();
+        let invite = core.create_invite(Role::Desktop).await;
+        desktop
+            .pair(&PairTicket::parse(&invite.ticket).unwrap())
+            .await
+            .unwrap();
+
+        let api = desktop
+            .inner
+            .endpoint
+            .connect(core.addr(), ALPN_API)
+            .await
+            .unwrap();
+        let rpc = desktop
+            .inner
+            .endpoint
+            .connect(core.addr(), ALPN_RPC)
+            .await
+            .unwrap();
+        let events = desktop
+            .inner
+            .endpoint
+            .connect(core.addr(), ALPN_EVENTS)
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let tracked = {
+                    let conns = core.inner.conns.lock();
+                    conns
+                        .iter()
+                        .filter(|(id, conn)| *id == desktop.id() && conn.close_reason().is_none())
+                        .count()
+                };
+                if tracked == 3 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+
+        let path = core.inner.config.data_dir.join("devices.json");
+        let before = std::fs::read(&path).unwrap();
+        std::fs::create_dir(path.with_extension("json.tmp")).unwrap();
+        let err = core.revoke(&desktop.id()).unwrap_err();
+        assert!(matches!(err, PeerError::Storage(_)), "{err}");
+        assert!(core.device(&desktop.id()).is_some());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(api.close_reason().is_none());
+        assert!(rpc.close_reason().is_none());
+        assert!(events.close_reason().is_none());
+        assert_eq!(
+            core.inner
+                .conns
+                .lock()
+                .iter()
+                .filter(|(id, conn)| *id == desktop.id() && conn.close_reason().is_none())
+                .count(),
+            3
+        );
+
+        let other = PeerNetwork::start(loopback(dir.path(), "other"), None)
+            .await
+            .unwrap();
+        let invite = core.create_invite(Role::Desktop).await;
+        let err = other
+            .pair(&PairTicket::parse(&invite.ticket).unwrap())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, PeerError::PairingRejected(ref message) if message.contains("store")),
+            "{err}"
+        );
+        assert!(core.device(&other.id()).is_none());
+        assert_eq!(core.devices().len(), 1);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        expect_not_paired(&core, &other, ALPN_API).await;
+        expect_not_paired(&core, &other, ALPN_RPC).await;
+        expect_not_paired(&core, &other, ALPN_EVENTS).await;
+        assert!(api.close_reason().is_none());
+        assert!(rpc.close_reason().is_none());
+        assert!(events.close_reason().is_none());
+
+        other.shutdown().await;
+        desktop.shutdown().await;
+        core.shutdown().await;
     }
 }

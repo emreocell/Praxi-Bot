@@ -111,6 +111,8 @@ pub struct DoctorEnv<'a> {
     pub online: bool,
     /// Browser binary found on this machine, if any.
     pub browser: Option<PathBuf>,
+    /// Discovery failure for an unusable configured or snap-only browser.
+    pub browser_error: Option<String>,
 }
 
 /// Run every check.
@@ -123,7 +125,10 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         check_providers(env),
         check_catalog(env),
         check_daemon(env.data_dir, env.port),
-        check_browser(env.browser.as_deref()),
+        env.browser_error.as_ref().map_or_else(
+            || check_browser(env.browser.as_deref()),
+            |e| Check::fail("browser", e, "install a non-snap browser or set BOT_BROWSER_PATH; use `sudo praxi doctor` for service-context validation"),
+        ),
         check_mcp(env.data_dir),
         check_disk(env.data_dir),
         check_telegram(env),
@@ -201,7 +206,7 @@ fn check_providers(env: &DoctorEnv<'_>) -> Check {
     if enabled.is_empty() {
         return Check::fail(
             N,
-            "no enabled provider",
+            "setup required: no enabled provider",
             "run `bot setup` or `bot providers add`",
         );
     }
@@ -380,18 +385,62 @@ fn daemon_health(port: u16) -> Option<String> {
             .await
             .ok()?;
         let v: Value = resp.json().await.ok()?;
-        (v["status"] == "ok").then(|| v["version"].as_str().unwrap_or("?").to_string())
+        (v["status"] == "ok" || v["status"] == "setup_required")
+            .then(|| v["version"].as_str().unwrap_or("?").to_string())
     })
 }
 
 fn check_browser(found: Option<&Path>) -> Check {
     const N: &str = "browser";
     match found {
-        Some(p) => Check::ok(N, p.display().to_string()),
+        Some(p) => {
+            if browser_cdp::launch::is_snap_browser(p) {
+                return Check::fail(
+                    N,
+                    "snap browser is unsupported under the hardened service",
+                    "install non-snap Chrome/Chromium or set BOT_BROWSER_PATH",
+                );
+            }
+            let result = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| e.to_string())
+                .and_then(|rt| {
+                    rt.block_on(async {
+                        let opts = browser_cdp::launch::LaunchOptions {
+                            executable: Some(p.to_path_buf()),
+                            startup_timeout: Duration::from_secs(5),
+                            ..Default::default()
+                        };
+                        let probe = async {
+                            let browser = browser_cdp::Browser::launch(opts).await?;
+                            browser.close().await
+                        };
+                        tokio::time::timeout(Duration::from_secs(8), probe)
+                            .await
+                            .map_err(|_| "headless launch timed out".to_string())?
+                            .map_err(|e| e.to_string())
+                    })
+                });
+            match result {
+                Ok(()) => Check::ok(
+                    N,
+                    format!(
+                        "{} (headless launch passed in current user/env)",
+                        p.display()
+                    ),
+                ),
+                Err(e) => Check::fail(
+                    N,
+                    format!("{}: {e}", p.display()),
+                    "install a non-snap browser or set BOT_BROWSER_PATH; on systemd use `sudo praxi doctor` to probe with the service user, environment and hardening",
+                ),
+            }
+        }
         None => Check::warn(
             N,
-            "no Chrome or Edge found (browser tools unavailable)",
-            "install Chrome or Edge, or set PRAXI_BROWSER_PATH",
+            "no usable non-snap browser found (snap-only installs are unsupported)",
+            "install a non-snap Chrome/Chromium or set BOT_BROWSER_PATH",
         ),
     }
 }
@@ -669,6 +718,7 @@ id = "m1"
             port,
             online: false,
             browser: None,
+            browser_error: None,
         }
     }
 
@@ -712,7 +762,7 @@ id = "m1"
         cfg.upsert(s);
         cfg.save(&config_path(d.path())).unwrap();
         let mut e = env(d.path(), &cat, &store, free_port());
-        e.browser = Some(PathBuf::from("/usr/bin/chrome"));
+        e.browser = None;
         let checks = run_checks(&e);
         for n in [
             "data dir",
@@ -720,7 +770,6 @@ id = "m1"
             "secret backend",
             "providers",
             "model catalog",
-            "browser",
             "mcp config",
         ] {
             assert_eq!(
@@ -755,6 +804,33 @@ id = "m1"
     }
 
     #[test]
+    fn unusable_browser_discovery_is_a_failure() {
+        let d = tempfile::tempdir().unwrap();
+        let (cat, store) = (catalog(), MemStore::default());
+        let mut e = env(d.path(), &cat, &store, free_port());
+        e.browser_error = Some("only snap browsers found; unsupported".into());
+        let checks = run_checks(&e);
+        assert_eq!(get(&checks, "browser").status, Status::Fail);
+        assert!(
+            get(&checks, "browser")
+                .hint
+                .as_ref()
+                .unwrap()
+                .contains("non-snap")
+        );
+    }
+
+    #[test]
+    fn browser_presence_does_not_imply_it_can_launch() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("broken-browser");
+        std::fs::write(&path, b"not an executable").unwrap();
+        let check = check_browser(Some(&path));
+        assert_eq!(check.status, Status::Fail);
+        assert!(check.hint.unwrap().contains("non-snap"));
+    }
+
+    #[test]
     fn foreign_listener_on_port_is_a_failure() {
         let d = tempfile::tempdir().unwrap();
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -780,6 +856,7 @@ id = "m1"
             port: free_port(),
             online: false,
             browser: None,
+            browser_error: None,
         };
         let checks = run_checks(&e);
         assert_eq!(get(&checks, "secret backend").status, Status::Fail);
