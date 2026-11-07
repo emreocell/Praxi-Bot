@@ -11,6 +11,7 @@
 mod bm25;
 pub mod discovery;
 pub mod ladder;
+pub mod lexical;
 pub mod surface;
 
 pub use discovery::{ToolHit, ToolIndex};

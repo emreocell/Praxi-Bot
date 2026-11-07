@@ -1,11 +1,14 @@
 //! Mapping from [`ChatRequest`] to an `OpenAI` `/chat/completions` JSON body.
 
+use std::collections::HashMap;
+
 use serde_json::{Map, Value, json};
 
 use crate::{
     entry::ProviderEntry,
     error::ProviderError,
     provider::{ChatRequest, Message, MessageRole, ToolChoice},
+    util::{invalid_arg_calls, sanitize_args, with_args_note},
 };
 
 fn role_str(role: &MessageRole) -> &'static str {
@@ -38,7 +41,12 @@ fn has_image(content: &Value) -> bool {
     })
 }
 
-fn map_message(m: &Message, role: &str, vision: bool) -> Result<Value, ProviderError> {
+fn map_message(
+    m: &Message,
+    role: &str,
+    vision: bool,
+    bad_args: &HashMap<&str, &str>,
+) -> Result<Value, ProviderError> {
     if !vision && has_image(&m.content) {
         return Err(ProviderError::InvalidRequest(
             "image content sent to a model without vision capability".into(),
@@ -57,16 +65,25 @@ fn map_message(m: &Message, role: &str, vision: bool) -> Result<Value, ProviderE
             .tool_calls
             .iter()
             .map(|c| {
-                json!({
+                let mut call = json!({
                     "id": c.id,
                     "type": "function",
-                    "function": {"name": c.name, "arguments": c.arguments},
-                })
+                    "function": {"name": c.name, "arguments": sanitize_args(&c.arguments)},
+                });
+                // Google's thought signature must be echoed back verbatim.
+                if let Some(extra) = &c.provider_extra {
+                    call["extra_content"] = extra.clone();
+                }
+                call
             })
             .collect();
         obj.insert("tool_calls".into(), Value::Array(calls));
     } else if m.role == MessageRole::Tool {
-        obj.insert("content".into(), Value::String(content_text(&m.content)));
+        let mut text = content_text(&m.content);
+        if let Some(original) = m.tool_call_id.as_deref().and_then(|id| bad_args.get(id)) {
+            text = with_args_note(&text, original);
+        }
+        obj.insert("content".into(), Value::String(text));
         obj.insert(
             "tool_call_id".into(),
             m.tool_call_id.clone().unwrap_or_default().into(),
@@ -80,6 +97,7 @@ fn map_message(m: &Message, role: &str, vision: bool) -> Result<Value, ProviderE
 fn map_messages(entry: &ProviderEntry, req: &ChatRequest) -> Result<Vec<Value>, ProviderError> {
     let flags = &entry.compat_flags;
     let vision = entry.capabilities.vision;
+    let bad_args = invalid_arg_calls(&req.messages);
 
     if flags.strip_system_role {
         let system: Vec<String> = req
@@ -96,7 +114,7 @@ fn map_messages(entry: &ProviderEntry, req: &ChatRequest) -> Result<Vec<Value>, 
             .iter()
             .filter(|m| m.role != MessageRole::System)
         {
-            let mut v = map_message(m, role_str(&m.role), vision)?;
+            let mut v = map_message(m, role_str(&m.role), vision, &bad_args)?;
             if !merged && m.role == MessageRole::User {
                 prepend_text(&mut v, &system);
                 merged = true;
@@ -117,7 +135,7 @@ fn map_messages(entry: &ProviderEntry, req: &ChatRequest) -> Result<Vec<Value>, 
             } else {
                 role_str(&m.role)
             };
-            map_message(m, role, vision)
+            map_message(m, role, vision, &bad_args)
         })
         .collect()
 }

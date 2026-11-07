@@ -584,6 +584,8 @@ pub async fn run_task(task: &Task, opts: &Tier2Options) -> Result<TaskOutcome> {
             policy: Policy::full(),
             guards: GuardOverrides {
                 max_steps: task.max_steps.or(opts.max_steps),
+                // A model call (with its provider retries) may not outlive the task.
+                model_timeout_ms: Some(task.timeout_s.unwrap_or(180) * 1000),
                 ..GuardOverrides::default()
             },
             prices: opts.prices.clone(),

@@ -232,7 +232,8 @@ async fn tool_call_with_streamed_args() {
         ToolCall {
             id: "toolu_1".into(),
             name: "get_weather".into(),
-            arguments: "{\"city\":\"Paris\"}".into()
+            arguments: "{\"city\":\"Paris\"}".into(),
+            provider_extra: None,
         }
     );
     assert!(matches!(
@@ -600,11 +601,13 @@ fn tool_round_trip_messages_merge_results_into_one_user_message() {
             id: "t1".into(),
             name: "a".into(),
             arguments: "{\"x\":1}".into(),
+            provider_extra: None,
         },
         ToolCall {
             id: "t2".into(),
             name: "b".into(),
             arguments: "not json".into(),
+            provider_extra: None,
         },
     ];
     let mut r = req();

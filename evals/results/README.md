@@ -36,3 +36,31 @@ output. The baseline was therefore run through a small local proxy (not in the r
 signatures per tool-call id and re-injects them. Without that proxy every Gemini 3.x run fails. See the follow-ups.
 `gemini-2.5-flash-lite` needs no signatures but has only 20 requests per day on this key; `gemma-4-31b-it` returned
 intermittent 500s and leaks `<thought>` text into the content.
+
+## Regression run after the provider-robustness fixes (task 030)
+
+Model: `gemini/gemini-3.5-flash-lite` through the **native** Gemini provider (the `gemini` preset, see below),
+throttled to one request per 6.5 s. File: `gemfix-run1.jsonl`. About 59 model requests in total.
+
+| Task | Before (024) | After | LLM calls | Wall |
+|---|---|---|---|---|
+| desktop-notepad-write-save | FAIL (HTTP 400, then 26 calls) | run 1: FAIL (tool calls stalled, wall cap 240 s, 7 calls); run 2: **pass** | 7 / 14 | 240 s / 90 s |
+| desktop-calculator-compute | FAIL (intermittent 400), pass on re-run | **pass** | 11 | 87 s |
+| desktop-settings-open-page | FAIL (model opened Explorer) | FAIL (no Settings window, judge fail): model weakness | 16 | 114 s |
+| browser-example-read | pass | **pass** | 5 | 30 s |
+| browser-httpbin-read | pass | **pass** | 5 | 32 s |
+
+Pass rate on this subset: before 2/5 (3/5 counting the calculator re-run); after 4/5 tasks passed at least once
+(4 of 6 attempts). No HTTP 400, no `MALFORMED_FUNCTION_CALL`, no thought leakage and no stalled retry occurred.
+The one unexplained failure (notepad run 1) was in tool execution, not the provider: 5 `use_tool` calls consumed the
+whole 240 s; it did not recur.
+
+### Running Gemini evals
+
+Use the native provider; no `providers.toml` entry is needed. The key is read from `GEMINI_API_KEY`:
+
+```
+BOT_EVAL_LIVE=1 bot-eval run --tier 2 --model gemini/gemini-3.5-flash-lite --min-interval-ms 6500
+```
+
+Failed HTTP 400 request bodies (redacted, never the key) are written to `<data_dir>/debug/last-failed-request-<provider>.json`.

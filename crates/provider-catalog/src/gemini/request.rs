@@ -10,7 +10,8 @@ use crate::{
     error::ProviderError,
     provider::{ChatRequest, Message, MessageRole, ToolChoice},
     util::{
-        content_text, has_image, image_url, parse_args, parse_data_url, push_merged, tool_parts,
+        content_text, has_image, image_url, invalid_arg_calls, parse_args, parse_data_url,
+        push_merged, tool_parts, with_args_note,
     },
 };
 
@@ -105,12 +106,19 @@ fn model_parts(m: &Message) -> Vec<Value> {
     out
 }
 
-fn function_response(m: &Message, names: &HashMap<&str, &str>) -> Result<Value, ProviderError> {
+fn function_response(
+    m: &Message,
+    names: &HashMap<&str, &str>,
+    bad_args: &HashMap<&str, &str>,
+) -> Result<Value, ProviderError> {
     let id = m.tool_call_id.as_deref().unwrap_or_default();
     let name = names.get(id).ok_or_else(|| {
         ProviderError::InvalidRequest(format!("tool result for unknown call id {id:?}"))
     })?;
-    let text = content_text(&m.content);
+    let mut text = content_text(&m.content);
+    if let Some(original) = bad_args.get(id) {
+        text = with_args_note(&text, original);
+    }
     // `response` must be a JSON object.
     let response = match serde_json::from_str::<Value>(&text) {
         Ok(v @ Value::Object(_)) => v,
@@ -168,6 +176,7 @@ pub(super) fn build_body(entry: &ProviderEntry, req: &ChatRequest) -> Result<Val
         .map(|c| (c.id.as_str(), c.name.as_str()))
         .collect();
 
+    let bad_args = invalid_arg_calls(&req.messages);
     let mut system = Vec::new();
     let mut contents: Vec<(&'static str, Vec<Value>)> = Vec::new();
     for m in &req.messages {
@@ -187,7 +196,11 @@ pub(super) fn build_body(entry: &ProviderEntry, req: &ChatRequest) -> Result<Val
             MessageRole::Assistant => push_merged(&mut contents, "model", model_parts(m)),
             // All responses to one turn's calls go into one `user` content.
             MessageRole::Tool => {
-                push_merged(&mut contents, "user", vec![function_response(m, &names)?]);
+                push_merged(
+                    &mut contents,
+                    "user",
+                    vec![function_response(m, &names, &bad_args)?],
+                );
             }
         }
     }

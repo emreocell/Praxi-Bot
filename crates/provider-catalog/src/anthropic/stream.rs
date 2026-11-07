@@ -239,6 +239,7 @@ impl EventDecoder for Decoder {
                     } else {
                         args
                     },
+                    provider_extra: None,
                 }));
             }
         }

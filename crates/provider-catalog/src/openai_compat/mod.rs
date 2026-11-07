@@ -20,7 +20,12 @@ use async_trait::async_trait;
 use futures::{StreamExt, stream, stream::BoxStream};
 use serde_json::Value;
 
-use crate::util::{Secret, map_reqwest_error};
+use reqwest::header::HeaderMap;
+
+use crate::util::{
+    Classify, Secret, dump_failed_request, error_message, map_reqwest_error, retry_after,
+    send_with_retry,
+};
 use crate::{
     entry::{Auth, ProviderEntry},
     error::ProviderError,
@@ -37,6 +42,13 @@ pub struct OpenAiCompatConfig {
     pub base_delay: Duration,
     /// Upper bound for any single backoff (also caps `Retry-After`).
     pub max_delay: Duration,
+    /// Upper bound for the total time spent retrying one request: no retry is
+    /// started when its backoff would push the elapsed time past this.
+    pub max_total_retry: Duration,
+    /// When set, the redacted body of a request that failed with HTTP 400 is
+    /// written to `<debug_dir>/last-failed-request-<provider>.json`
+    /// (conventionally `<data_dir>/debug`). Off by default.
+    pub debug_dir: Option<std::path::PathBuf>,
     /// TCP/TLS connect timeout.
     pub connect_timeout: Duration,
     /// Idle timeout: maximum wait for response headers and between body
@@ -50,6 +62,8 @@ impl Default for OpenAiCompatConfig {
             max_retries: 3,
             base_delay: Duration::from_millis(500),
             max_delay: Duration::from_secs(30),
+            max_total_retry: Duration::from_secs(60),
+            debug_dir: None,
             connect_timeout: Duration::from_secs(10),
             timeout: Duration::from_secs(120),
         }
@@ -119,18 +133,13 @@ impl OpenAiCompatProvider {
         }
     }
 
-    fn backoff(&self, attempt: u32, retry_after: Option<Duration>) -> Duration {
-        crate::util::backoff(&self.config, attempt, retry_after)
-    }
-
     /// Send with retry on 429/5xx. Returns the first successful response.
     async fn send(
         &self,
         url: &str,
         body: Option<&Value>,
     ) -> Result<reqwest::Response, ProviderError> {
-        let mut attempt = 0;
-        loop {
+        let make = || {
             let mut rb = match body {
                 Some(b) => self.client.post(url).json(b),
                 None => self.client.get(url),
@@ -138,49 +147,26 @@ impl OpenAiCompatProvider {
             if let Some(k) = &self.key {
                 rb = rb.bearer_auth(&k.0);
             }
-            let resp = rb.send().await.map_err(map_reqwest_error)?;
-            let status = resp.status();
-            if status.is_success() {
-                return Ok(resp);
-            }
-            let retry_after = resp
-                .headers()
-                .get(reqwest::header::RETRY_AFTER)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.trim().parse::<u64>().ok())
-                .map(Duration::from_secs);
-            let message = error_text(resp).await;
-            let err = match status.as_u16() {
-                401 | 403 => ProviderError::Auth(message),
-                429 => ProviderError::RateLimited { retry_after },
-                s @ 500..=599 => ProviderError::Upstream { status: s, message },
-                s => ProviderError::Api { status: s, message },
-            };
-            let retryable = matches!(
-                err,
-                ProviderError::RateLimited { .. } | ProviderError::Upstream { .. }
-            );
-            if !retryable || attempt >= self.config.max_retries {
-                return Err(err);
-            }
-            tokio::time::sleep(self.backoff(attempt, retry_after)).await;
-            attempt += 1;
+            rb
+        };
+        let result = send_with_retry(&self.config, &make, classify as Classify).await;
+        if let (Err(e), Some(b)) = (&result, body) {
+            dump_failed_request(&self.config, &self.entry.id, b, e);
         }
+        result
     }
 }
 
-async fn error_text(resp: reqwest::Response) -> String {
-    let text = resp.text().await.unwrap_or_default();
-    let msg = serde_json::from_str::<Value>(&text)
-        .ok()
-        .and_then(|v| {
-            v.pointer("/error/message")
-                .or_else(|| v.get("message"))
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        })
-        .unwrap_or(text);
-    msg.chars().take(500).collect()
+fn classify(status: u16, headers: &HeaderMap, body: &str) -> ProviderError {
+    let message = error_message(body);
+    match status {
+        401 | 403 => ProviderError::Auth(message),
+        429 => ProviderError::RateLimited {
+            retry_after: retry_after(headers),
+        },
+        s @ 500..=599 => ProviderError::Upstream { status: s, message },
+        s => ProviderError::Api { status: s, message },
+    }
 }
 
 struct StreamState {

@@ -415,6 +415,7 @@ fn body_maps_messages_tools_and_limits() {
                 id: "c1".into(),
                 name: "t".into(),
                 arguments: "{}".into(),
+                provider_extra: None,
             }],
             tool_call_id: None,
         },
@@ -550,4 +551,137 @@ async fn live_provider_roundtrip() {
     let chunks: Vec<_> = p.stream(r).await.unwrap().try_collect().await.unwrap();
     assert!(chunks.iter().any(|c| matches!(c, ChatChunk::TextDelta(_))));
     assert!(matches!(chunks.last(), Some(ChatChunk::Done { .. })));
+}
+
+#[tokio::test]
+async fn thought_signature_is_captured_and_echoed_back() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(sse(&[
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","extra_content":{"google":{"thought_signature":"SIG=="}},"function":{"name":"t","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#,
+            "[DONE]",
+        ]))
+        .mount(&server)
+        .await;
+    let chunks = collect(&provider(&server), req()).await.unwrap();
+    let call = chunks
+        .iter()
+        .find_map(|c| match c {
+            ChatChunk::ToolCall(t) => Some(t.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        call.provider_extra,
+        Some(json!({"google":{"thought_signature":"SIG=="}}))
+    );
+    let mut r = req();
+    r.messages.push(Message {
+        role: MessageRole::Assistant,
+        content: Value::Null,
+        tool_calls: vec![call],
+        tool_call_id: None,
+    });
+    r.messages.push(Message::tool_result("c1", "ok"));
+    let b = body(&entry("http://x"), &r);
+    assert_eq!(
+        b["messages"][1]["tool_calls"][0]["extra_content"]["google"]["thought_signature"],
+        "SIG=="
+    );
+}
+
+#[test]
+fn invalid_arguments_are_replaced_and_original_kept_in_tool_message() {
+    let mut r = req();
+    r.messages.push(Message {
+        role: MessageRole::Assistant,
+        content: Value::Null,
+        tool_calls: vec![
+            ToolCall::new("c1", "t", "{broken"),
+            ToolCall::new("c2", "t", r#"{"a":1}"#),
+        ],
+        tool_call_id: None,
+    });
+    r.messages.push(Message::tool_result("c1", "result1"));
+    r.messages.push(Message::tool_result("c2", "result2"));
+    let b = body(&entry("http://x"), &r);
+    assert_eq!(
+        b["messages"][1]["tool_calls"][0]["function"]["arguments"],
+        "{}"
+    );
+    assert_eq!(
+        b["messages"][1]["tool_calls"][1]["function"]["arguments"],
+        r#"{"a":1}"#
+    );
+    let t1 = b["messages"][2]["content"].as_str().unwrap();
+    assert!(t1.contains("{broken") && t1.contains("result1"));
+    assert_eq!(b["messages"][3]["content"], "result2");
+}
+
+#[tokio::test]
+async fn abnormal_finish_reasons_are_typed_errors() {
+    for (reason, kind) in [
+        ("content_filter", 1),
+        ("function_call_filter", 1),
+        ("SAFETY", 1),
+        ("MALFORMED_FUNCTION_CALL", 2),
+        ("weird_new_reason", 3),
+    ] {
+        let server = MockServer::start().await;
+        let ev = format!(r#"{{"choices":[{{"delta":{{}},"finish_reason":"{reason}"}}]}}"#);
+        Mock::given(method("POST"))
+            .respond_with(sse(&[&ev, "[DONE]"]))
+            .mount(&server)
+            .await;
+        let e = collect(&provider(&server), req()).await.unwrap_err();
+        match kind {
+            1 => assert!(matches!(e, ProviderError::ContentFilter(_)), "{reason}"),
+            2 => assert!(matches!(e, ProviderError::MalformedToolCall(_)), "{reason}"),
+            _ => assert!(matches!(e, ProviderError::Stream(_)), "{reason}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn thought_text_and_flagged_parts_are_dropped() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(sse(&[
+            r#"{"choices":[{"delta":{"content":"hidden","extra_content":{"google":{"thought":true}}}}]}"#,
+            r#"{"choices":[{"delta":{"content":"A<thought>why"}}]}"#,
+            r#"{"choices":[{"delta":{"content":"</thought>B"},"finish_reason":"stop"}]}"#,
+            "[DONE]",
+        ]))
+        .mount(&server)
+        .await;
+    let chunks = collect(&provider(&server), req()).await.unwrap();
+    let text: String = chunks
+        .iter()
+        .filter_map(|c| match c {
+            ChatChunk::TextDelta(t) => Some(t.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(text, "AB");
+}
+
+#[tokio::test]
+async fn retry_time_is_capped() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+    let cfg = OpenAiCompatConfig {
+        max_retries: 1000,
+        base_delay: Duration::from_millis(20),
+        max_delay: Duration::from_millis(20),
+        max_total_retry: Duration::from_millis(100),
+        ..OpenAiCompatConfig::default()
+    };
+    let p = OpenAiCompatProvider::with_api_key(entry(&server.uri()), cfg, None).unwrap();
+    let t = std::time::Instant::now();
+    assert!(collect(&p, req()).await.is_err());
+    assert!(t.elapsed() < Duration::from_secs(2));
+    assert!(server.received_requests().await.unwrap().len() < 30);
 }

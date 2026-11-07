@@ -98,6 +98,7 @@ fn chunks(step: &ScriptStep) -> Vec<ChatChunk> {
                     c.args.to_string()
                 }
             }),
+            provider_extra: None,
         }));
     }
     let u = step.usage.map_or(

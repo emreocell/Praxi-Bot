@@ -314,7 +314,12 @@ impl TurnExecutor {
                 );
             }
             req.model = ModelRef((*name).clone());
-            match self.call_with_retries(&ctx, run, &req, &specs).await {
+            let timeout = self.sh.cfg.guards.model_timeout;
+            let attempt =
+                tokio::time::timeout(timeout, self.call_with_retries(&ctx, run, &req, &specs))
+                    .await
+                    .unwrap_or(Err(ProviderError::Timeout));
+            match attempt {
                 Ok(out) => {
                     result = Some(out);
                     break;
