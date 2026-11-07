@@ -40,7 +40,8 @@ pub struct OpenAiCompatConfig {
     pub max_retries: u32,
     /// Backoff before the first retry; doubles each attempt.
     pub base_delay: Duration,
-    /// Upper bound for any single backoff (also caps `Retry-After`).
+    /// Upper bound for any single backoff. A `Retry-After` longer than this is
+    /// not truncated: the request fails immediately instead.
     pub max_delay: Duration,
     /// Upper bound for the total time spent retrying one request: no retry is
     /// started when its backoff would push the elapsed time past this.

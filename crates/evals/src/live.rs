@@ -148,9 +148,11 @@ fn native_gemini_preset(
     catalog: Option<&Path>,
 ) -> Result<Option<LiveProvider>> {
     let dir = catalog_dir(catalog);
-    let Ok(cat) = Catalog::load_dir(&dir) else {
-        return Ok(None);
-    };
+    // Lenient: one broken catalog file must not hide the valid presets.
+    let (cat, errs) = Catalog::load_dir_lenient(&dir);
+    for e in &errs {
+        eprintln!("warning: provider catalog: {e}");
+    }
     let Some(entry) = cat.get(provider).cloned() else {
         return Ok(None);
     };

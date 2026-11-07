@@ -50,6 +50,10 @@ fn unique_id(index: usize) -> u64 {
     h.finish()
 }
 
+/// Upper bound for a server-supplied `retryDelay` (the retry loop gives up on
+/// anything longer than its own `max_delay` anyway).
+const MAX_RETRY_DELAY: Duration = Duration::from_secs(24 * 3600);
+
 /// Gemini's `retryDelay` ("30s", "1.5s") from error details.
 pub(super) fn retry_delay(body: &str) -> Option<Duration> {
     let v: Value = serde_json::from_str(body).ok()?;
@@ -58,7 +62,11 @@ pub(super) fn retry_delay(body: &str) -> Option<Duration> {
         .iter()
         .find_map(|d| d.get("retryDelay").and_then(Value::as_str))?;
     let secs: f64 = s.strip_suffix('s')?.parse().ok()?;
-    (secs.is_finite() && secs >= 0.0).then(|| Duration::from_secs_f64(secs))
+    if !secs.is_finite() || secs < 0.0 {
+        return None;
+    }
+    // `try_from_secs_f64` rejects overflow ("1e30s"); clamp to a sane ceiling.
+    Some(Duration::try_from_secs_f64(secs).map_or(MAX_RETRY_DELAY, |d| d.min(MAX_RETRY_DELAY)))
 }
 
 impl EventDecoder for Decoder {

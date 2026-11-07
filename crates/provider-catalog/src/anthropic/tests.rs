@@ -351,9 +351,8 @@ fn thinking_blocks_are_kept_but_not_emitted() {
 #[tokio::test]
 async fn finish_reasons_map() {
     for (reason, want) in [
+        ("end_turn", FinishReason::Stop),
         ("max_tokens", FinishReason::Length),
-        ("refusal", FinishReason::ContentFilter),
-        ("pause_turn", FinishReason::Other("pause_turn".into())),
     ] {
         let mut d = Decoder::default();
         d.feed(&msg_delta(reason, 1).to_string()).unwrap();
@@ -364,6 +363,25 @@ async fn finish_reasons_map() {
             "{reason}"
         );
     }
+}
+
+#[tokio::test]
+async fn refusal_and_unknown_stop_reasons_are_errors() {
+    let run = |reason: &str| {
+        let mut d = Decoder::default();
+        d.feed(&msg_delta(reason, 1).to_string()).unwrap();
+        d.feed(&msg_stop().to_string()).unwrap();
+        d.finish()
+    };
+    assert!(matches!(
+        run("refusal"),
+        Err(ProviderError::ContentFilter(_))
+    ));
+    assert!(matches!(run("pause_turn"), Err(ProviderError::Stream(_))));
+    assert!(matches!(
+        run("brand_new_reason"),
+        Err(ProviderError::Stream(_))
+    ));
 }
 
 #[tokio::test]

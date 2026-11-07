@@ -9,7 +9,7 @@ use super::{classify, status_for_error_type};
 use crate::{
     error::ProviderError,
     provider::{ChatChunk, FinishReason, ToolCall, Usage},
-    util::EventDecoder,
+    util::{EventDecoder, finish_error},
 };
 
 /// A thinking block kept from the stream (not shown as answer text).
@@ -245,6 +245,9 @@ impl EventDecoder for Decoder {
         }
         if self.usage.seen {
             out.push(ChatChunk::Usage(self.usage.usage()));
+        }
+        if let Some(e) = self.finish.as_ref().and_then(finish_error) {
+            return Err(e);
         }
         let reason = self.finish.take().unwrap_or_else(|| {
             if out.iter().any(|c| matches!(c, ChatChunk::ToolCall(_))) {

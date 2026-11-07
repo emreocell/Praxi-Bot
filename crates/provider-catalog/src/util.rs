@@ -64,15 +64,18 @@ pub(crate) fn retry_after(headers: &HeaderMap) -> Option<Duration> {
         .map(Duration::from_secs)
 }
 
-/// Jittered exponential backoff, honouring `Retry-After`, capped at `max_delay`.
+/// Jittered exponential backoff, capped at `max_delay`. An explicit
+/// `Retry-After` is returned unchanged (never truncated).
 pub(crate) fn backoff(
     config: &OpenAiCompatConfig,
     attempt: u32,
     retry_after: Option<Duration>,
 ) -> Duration {
     let max = config.max_delay;
+    // A server-requested wait is honoured as-is; callers that cannot afford it
+    // (longer than `max_delay`) give up before sleeping, see `send_with_retry`.
     if let Some(ra) = retry_after {
-        return ra.min(max);
+        return ra;
     }
     let exp = config
         .base_delay
@@ -116,6 +119,11 @@ pub(crate) async fn send_with_retry(
             return Err(err);
         };
         if attempt >= config.max_retries {
+            return Err(err);
+        }
+        // A requested wait longer than we are willing to sleep can never be
+        // honoured: retrying earlier is futile, so fail now.
+        if retry_after.is_some_and(|ra| ra > config.max_delay) {
             return Err(err);
         }
         let delay = backoff(config, attempt, retry_after);
