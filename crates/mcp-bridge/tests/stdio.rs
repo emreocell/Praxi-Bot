@@ -253,7 +253,7 @@ async fn discovery_surface_fronts_a_large_mcp_server() {
     let ContentPart::Json { data } = &hits.content[0] else {
         panic!("expected json")
     };
-    assert_eq!(data[0]["name"], "mcp:d/echo");
+    assert_eq!(data["results"][0]["name"], "mcp:d/echo");
 
     let out = surface
         .resolve(USE_TOOL)

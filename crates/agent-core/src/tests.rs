@@ -2163,6 +2163,39 @@ async fn hidden_native_tools_lower_the_counted_surface_size() {
 }
 
 #[tokio::test]
+async fn platform_hidden_tool_cannot_be_called_by_name() {
+    let env = setup();
+    let other = if cfg!(windows) {
+        Platform::Linux
+    } else {
+        Platform::Windows
+    };
+    let mut foreign = tool("foreign_click", Effect::Write, "clicked");
+    foreign.spec.platforms = vec![other];
+    let foreign = Arc::new(foreign);
+    let local = Arc::new(tool("local_read", Effect::Read, "ok"));
+    let fake = Fake::new(vec![
+        calls(&[("c1", "foreign_click", json!({}))]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&foreign), t(&local)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(foreign.count.load(Ordering::SeqCst), 0);
+    let names = req_tool_names(&fake.request(0));
+    assert!(names.contains(&"local_read".to_owned()), "{names:?}");
+    assert!(!names.iter().any(|n| n == "foreign_click"), "{names:?}");
+    assert!(tool_messages(&fake.request(1))[0].contains("unknown tool"));
+}
+
+#[tokio::test]
 async fn k2_tool_candidates_carry_schema_parameters() {
     let env = setup();
     let mut with_schema = tool("n.send", Effect::Read, "x");

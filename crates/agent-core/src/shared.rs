@@ -666,7 +666,9 @@ impl Shared {
             // it exposed them, and then they are always available.
             (Some(own), name.to_owned())
         } else {
-            if !profile.tool_visible(name) {
+            // Same gate as the spec list: a hidden or wrong-platform tool must
+            // not run just because the model named it.
+            if !profile.tool_visible(name) || !platform_ok(&own.platforms) {
                 return None;
             }
             (Some(own), name.to_owned())

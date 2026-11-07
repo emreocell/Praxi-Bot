@@ -176,7 +176,11 @@ impl Tool for FindTool {
             })
             .take(k)
             .collect();
-        let data = if hits.is_empty() {
+        // One shape for every query: `{results, hint?}`. `hint` is only present
+        // when nothing matched, so the model never has to parse a bare array.
+        let empty = hits.is_empty();
+        let mut data = json!({ "results": hits });
+        if empty {
             let specs = self.discovery.registry.list();
             let fams = tool_families(
                 specs
@@ -184,17 +188,12 @@ impl Tool for FindTool {
                     .filter(|s| self.discovery.visible(ctx, s))
                     .map(|s| s.name.as_str()),
             );
-            json!({
-                "results": [],
-                "hint": format!(
-                    "No tool matched `{query}`. Try a broader or different keyword. \
-                     Available tool families: {}.",
-                    fams.join(", ")
-                ),
-            })
-        } else {
-            Value::Array(hits)
-        };
+            data["hint"] = json!(format!(
+                "No tool matched `{query}`. Try a broader or different keyword. \
+                 Available tool families: {}.",
+                fams.join(", ")
+            ));
+        }
         Ok(ToolOutput {
             content: vec![ContentPart::Json { data }],
             spill: None,
@@ -276,7 +275,9 @@ fn lookup(
 /// How tools are currently presented to the model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SurfaceMode {
-    /// Every registered tool is passed to the model directly.
+    /// Non-namespaced tools are passed to the model directly. Namespaced tools
+    /// (`mcp:`, future `api:`) stay discovery-only; the meta-tools are added
+    /// when any namespaced tool is visible.
     Direct,
     /// Only the three discovery meta-tools are passed.
     Discovery,
@@ -324,8 +325,10 @@ impl ToolSurface {
         let find: Arc<dyn Tool> = Arc::new(FindTool {
             spec: meta_spec(
                 FIND_TOOL,
-                "Search the available tools by keyword. Returns the best matching tool names \
-                 with descriptions. Call this first, then get_tool_details, then use_tool.",
+                "Search the available tools by keyword. Returns `{results: [...]}` \
+                 (name, description, score, effect, category). An empty search also \
+                 includes `hint` listing the visible tool families. Call this first, \
+                 then get_tool_details, then use_tool.",
                 Effect::Read,
                 json!({
                     "type": "object",
@@ -387,7 +390,8 @@ impl ToolSurface {
         &self.discovery.registry
     }
 
-    /// Current presentation mode (every registered tool counts).
+    /// Current presentation mode. Only non-namespaced tools count toward the
+    /// threshold.
     #[must_use]
     pub fn mode(&self) -> SurfaceMode {
         self.mode_for(&|_| true)
@@ -476,7 +480,8 @@ impl ToolSurface {
     }
 
     /// Like [`Self::resolve`] for a turn narrowed by [`Self::hinted_specs`]:
-    /// the meta-tools and the hinted tools are addressable in either mode.
+    /// the meta-tools, and hinted tools that pass `visible`, are addressable
+    /// in either mode.
     #[must_use]
     pub fn resolve_hinted(
         &self,
@@ -488,7 +493,11 @@ impl ToolSurface {
             return Some(Arc::clone(t));
         }
         if hinted.iter().any(|h| h == name) {
-            return self.discovery.registry.get(name);
+            return self
+                .discovery
+                .registry
+                .get(name)
+                .filter(|t| visible(t.spec()));
         }
         self.resolve_with(name, visible)
     }
@@ -516,10 +525,13 @@ impl ToolSurface {
                 if is_namespaced(name) {
                     return None;
                 }
-                self.discovery
-                    .registry
-                    .get(name)
-                    .or_else(|| self.has_namespaced(visible).then(meta).flatten())
+                // A registered name resolves only when `visible` admits it, so a
+                // tool omitted from the spec list cannot be run by naming it.
+                if let Some(tool) = self.discovery.registry.get(name) {
+                    let ok = visible(tool.spec());
+                    return ok.then_some(tool);
+                }
+                self.has_namespaced(visible).then(meta).flatten()
             }
         }
     }
@@ -650,8 +662,9 @@ mod tests {
         let find = surface.resolve(FIND_TOOL).unwrap();
         let out = block_on(find.call(&ctx, json!({ "query": "send email", "k": 2 }))).unwrap();
         let hits = json_of(&out);
-        assert_eq!(hits[0]["name"], "mcp:mail/send_email");
-        assert!(hits.as_array().unwrap().len() <= 2);
+        assert!(hits.get("hint").is_none());
+        assert_eq!(hits["results"][0]["name"], "mcp:mail/send_email");
+        assert!(hits["results"].as_array().unwrap().len() <= 2);
 
         let details = surface.resolve(GET_TOOL_DETAILS).unwrap();
         let out = block_on(details.call(&ctx, json!({ "name": "mcp:mail/send_email" }))).unwrap();
@@ -681,13 +694,9 @@ mod tests {
         assert!(matches!(err, ToolError::InvalidInput(_)));
     }
 
-    /// Hits of a `find_tool` result: a bare array, or `results` of the
-    /// empty-result object that carries a hint.
+    /// Hits of a `find_tool` result (`{results, hint?}`).
     fn hits_of(v: &Value) -> Vec<Value> {
-        v.as_array()
-            .or_else(|| v["results"].as_array())
-            .unwrap()
-            .clone()
+        v["results"].as_array().unwrap().clone()
     }
 
     #[test]
@@ -741,7 +750,8 @@ mod tests {
         );
         reg.register(fake("zebra_tool", "stripes", Effect::Read));
         let hits = json_of(&block_on(find.call(&ctx, q.clone())).unwrap());
-        assert_eq!(hits[0]["name"], "zebra_tool");
+        assert_eq!(hits["results"][0]["name"], "zebra_tool");
+        assert!(hits.get("hint").is_none());
         reg.unregister("zebra_tool");
         assert_eq!(
             hits_of(&json_of(&block_on(find.call(&ctx, q)).unwrap())).len(),
@@ -814,9 +824,11 @@ mod tests {
         let out =
             block_on(find.call(&ToolContext::default(), json!({ "query": "e-mail" }))).unwrap();
         let hits = json_of(&out);
-        assert_eq!(hits[0]["name"], "mcp:mail/send");
-        assert_eq!(hits[0]["effect"], "destructive");
-        assert!(hits[0]["category"].is_string());
+        assert!(hits.as_array().is_none());
+        assert_eq!(hits["results"][0]["name"], "mcp:mail/send");
+        assert_eq!(hits["results"][0]["effect"], "destructive");
+        assert!(hits["results"][0]["category"].is_string());
+        assert!(hits.get("hint").is_none());
     }
 
     #[test]
@@ -837,5 +849,61 @@ mod tests {
         assert!(hint.contains("fs_*"), "{hint}");
         assert!(hint.contains("mcp:mail/*"), "{hint}");
         assert!(!hint.contains("desktop_"), "{hint}");
+    }
+
+    #[test]
+    fn resolve_with_drops_tools_the_predicate_hides() {
+        let reg = registry_with(3);
+        let other = if cfg!(windows) {
+            Platform::Linux
+        } else {
+            Platform::Windows
+        };
+        reg.register(Arc::new(Fake {
+            spec: ToolSpec {
+                name: "foreign_click".into(),
+                description: "click on another os".into(),
+                input_schema: json!({ "type": "object" }),
+                effect: Effect::Write,
+                category: PermissionCategory::Accounts,
+                platforms: vec![other],
+            },
+        }));
+        reg.register(fake("mcp:x/a", "remote", Effect::Read));
+        let surface = ToolSurface::new(reg, 10);
+        let here = if cfg!(windows) {
+            Platform::Windows
+        } else if cfg!(target_os = "macos") {
+            Platform::MacOs
+        } else {
+            Platform::Linux
+        };
+        let visible = |s: &ToolSpec| {
+            s.platforms.is_empty()
+                || s.platforms
+                    .iter()
+                    .any(|p| *p == Platform::All || *p == here)
+        };
+        assert!(surface.resolve_with("tool0", &visible).is_some());
+        assert!(surface.resolve_with("foreign_click", &visible).is_none());
+        assert!(surface.resolve_with("mcp:x/a", &visible).is_none());
+        assert!(surface.resolve_with(USE_TOOL, &visible).is_some());
+        let names: Vec<_> = surface
+            .specs_for(&visible)
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert!(names.iter().any(|n| n == "tool0"));
+        assert!(names.iter().all(|n| n != "foreign_click"));
+        assert!(
+            surface
+                .resolve_hinted("foreign_click", &["foreign_click".into()], &visible)
+                .is_none()
+        );
+        assert!(
+            surface
+                .resolve_hinted("tool1", &["tool1".into()], &visible)
+                .is_some()
+        );
     }
 }
