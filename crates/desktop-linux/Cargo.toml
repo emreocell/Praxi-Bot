@@ -1,6 +1,6 @@
 [package]
 name = "desktop-linux"
-description = "Linux OS backend: AT-SPI accessibility, xdotool/ydotool input, and screenshot capture."
+description = "Linux OS backend: AT-SPI accessibility, XTest input, and XGetImage screenshot capture."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,23 @@ repository.workspace = true
 rust-version.workspace = true
 
 [lints.rust]
-unsafe_code = "warn"
+unsafe_code = "deny"
 
 [lints.clippy]
 pedantic = "warn"
+
+[dependencies]
+desktop-api = { path = "../desktop-api", version = "0.1.0" }
+async-trait.workspace = true
+futures.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+atspi.workspace = true
+jpeg-encoder.workspace = true
+png.workspace = true
+tokio.workspace = true
+x11rb.workspace = true
+
+[[example]]
+name = "inspect"
+path = "examples/inspect.rs"
