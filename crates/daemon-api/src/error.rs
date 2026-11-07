@@ -136,6 +136,9 @@ impl From<scheduler::SchedulerError> for ApiError {
 impl From<LoopError> for ApiError {
     fn from(e: LoopError) -> Self {
         match e {
+            LoopError::SetupRequired => {
+                Self::new(StatusCode::CONFLICT, "setup_required", e.to_string())
+            }
             LoopError::NotFound(w) => Self::not_found(w),
             LoopError::Profile(m) => Self::new(StatusCode::UNPROCESSABLE_ENTITY, "bad_profile", m),
             LoopError::Busy(c) => Self::conflict(format!("chat {c} already has an active turn")),

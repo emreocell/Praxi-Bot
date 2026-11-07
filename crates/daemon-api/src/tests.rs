@@ -229,6 +229,39 @@ async fn events(t: &T, query: &str, last_id: Option<&str>) -> Vec<(String, Strin
 // ------------------------------------------------------------ guards
 
 #[tokio::test]
+async fn unconfigured_daemon_stays_live_and_rejects_chat_until_reload() {
+    let t = setup();
+    t.agent.set_providers(Providers::unconfigured());
+    let (_, chat) = make_chat(&t).await;
+    for _ in 0..2 {
+        let health = send(&t.app, Method::GET, "/v1/health", None, &[]).await;
+        assert_eq!(health.status, StatusCode::OK);
+        assert_eq!(health.json()["status"], "setup_required");
+        let resp = call(
+            &t,
+            Method::POST,
+            &format!("/v1/chats/{chat}/messages"),
+            Some(json!({"text":"hello"})),
+        )
+        .await;
+        assert_eq!(resp.status, StatusCode::CONFLICT);
+        assert_eq!(resp.json()["error"]["code"], "setup_required");
+    }
+    t.agent
+        .set_providers(Providers::single(Arc::new(FakeProvider)));
+    let health = send(&t.app, Method::GET, "/v1/health", None, &[]).await;
+    assert_eq!(health.json()["status"], "ok");
+    let resp = call(
+        &t,
+        Method::POST,
+        &format!("/v1/chats/{chat}/messages"),
+        Some(json!({"text":"hello"})),
+    )
+    .await;
+    assert_eq!(resp.status, StatusCode::ACCEPTED);
+}
+
+#[tokio::test]
 async fn auth_required_and_health_is_public() {
     let t = setup();
     let r = send(&t.app, Method::GET, "/v1/bots", None, &[]).await;

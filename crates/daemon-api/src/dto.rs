@@ -11,7 +11,7 @@ use uuid::Uuid;
 /// `GET /v1/health`.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct Health {
-    /// Always `ok`.
+    /// `ok` when ready for inference, or `setup_required` before provider setup.
     pub status: String,
     /// Daemon crate version.
     pub version: String,

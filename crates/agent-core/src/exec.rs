@@ -592,7 +592,7 @@ impl TurnExecutor {
                 .map_err(|e| ProviderError::InvalidRequest(e.0));
         }
         let model = req.model.clone();
-        let provider = self.sh.providers.read().pick(&model);
+        let provider = self.sh.providers.read().pick(&model)?;
         let mut stream = provider.stream(req).await?;
         let mut out = ModelOut {
             model: model.0,

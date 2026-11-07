@@ -30,6 +30,9 @@ use crate::subagent::SubSpec;
 /// Errors of the public loop API.
 #[derive(Debug, thiserror::Error)]
 pub enum LoopError {
+    /// Configure a provider before starting inference.
+    #[error("setup required; run `bot setup` or `bot providers add`")]
+    SetupRequired,
     /// Storage failure.
     #[error(transparent)]
     Storage(#[from] storage::StorageError),
@@ -156,7 +159,7 @@ pub struct StreamItem {
 /// Chat providers by id, with a default.
 #[derive(Clone)]
 pub struct Providers {
-    default: Arc<dyn ChatProvider>,
+    default: Option<Arc<dyn ChatProvider>>,
     by_id: HashMap<String, Arc<dyn ChatProvider>>,
     /// Catalog prices keyed by the full model reference (`provider/model`).
     prices: HashMap<String, ModelPrice>,
@@ -165,13 +168,30 @@ pub struct Providers {
 }
 
 impl Providers {
+    /// No configured providers. Setup APIs remain available; inference is rejected.
+    #[must_use]
+    pub fn unconfigured() -> Self {
+        Self {
+            default: None,
+            by_id: HashMap::new(),
+            prices: HashMap::new(),
+            embedder: None,
+        }
+    }
+
+    /// Whether inference needs provider setup.
+    #[must_use]
+    pub fn setup_required(&self) -> bool {
+        self.default.is_none()
+    }
+
     /// A set whose only (and default) provider is `p`.
     #[must_use]
     pub fn single(p: Arc<dyn ChatProvider>) -> Self {
         let mut by_id = HashMap::new();
         by_id.insert(p.id().to_owned(), Arc::clone(&p));
         Self {
-            default: p,
+            default: Some(p),
             by_id,
             prices: HashMap::new(),
             embedder: None,
@@ -226,14 +246,18 @@ impl Providers {
     /// Add a provider, addressable by its `id()` (the `provider/` prefix of a model ref).
     #[must_use]
     pub fn with(mut self, p: Arc<dyn ChatProvider>) -> Self {
+        if self.default.is_none() {
+            self.default = Some(Arc::clone(&p));
+        }
         self.by_id.insert(p.id().to_owned(), p);
         self
     }
 
-    /// Id of the default provider (used for models without a `provider/` prefix).
+    /// Id of the default provider (used for models without a `provider/` prefix),
+    /// or an empty string when setup is required.
     #[must_use]
     pub fn default_id(&self) -> &str {
-        self.default.id()
+        self.default.as_ref().map_or("", |p| p.id())
     }
 
     /// Ids of all providers, sorted.
@@ -250,11 +274,20 @@ impl Providers {
         self.by_id.get(id).cloned()
     }
 
-    pub(crate) fn pick(&self, model: &ModelRef) -> Arc<dyn ChatProvider> {
+    pub(crate) fn pick(
+        &self,
+        model: &ModelRef,
+    ) -> Result<Arc<dyn ChatProvider>, provider_catalog::ProviderError> {
         model
             .provider()
             .and_then(|p| self.by_id.get(p))
-            .map_or_else(|| Arc::clone(&self.default), Arc::clone)
+            .or(self.default.as_ref())
+            .cloned()
+            .ok_or_else(|| {
+                provider_catalog::ProviderError::NoProvider(
+                    "setup required; run `bot setup` or `bot providers add`".into(),
+                )
+            })
     }
 }
 
