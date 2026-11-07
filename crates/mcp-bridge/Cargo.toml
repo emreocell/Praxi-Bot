@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
+futures.workspace = true
 globset.workspace = true
 http = "1"
 parking_lot.workspace = true
@@ -34,9 +35,9 @@ tool-registry = { path = "../tool-registry", version = "0.1.0" }
 tracing = "0.1"
 
 [dev-dependencies]
+agent-router = { path = "../agent-router", version = "0.1.0" }
 rmcp = { version = "3.9", default-features = false, features = [
     "client",
-    "macros",
     "server",
     "transport-io",
 ] }

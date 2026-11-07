@@ -54,6 +54,7 @@ impl ToolRegistry {
     /// Remove a tool by exact name.  Returns `true` if it was registered.
     ///
     /// Used e.g. to hide the tools of a quarantined MCP server.
+    #[allow(clippy::must_use_candidate)]
     pub fn unregister(&self, name: &str) -> bool {
         let removed = self.tools.write().remove(name).is_some();
         if removed {

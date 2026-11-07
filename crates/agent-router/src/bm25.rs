@@ -151,7 +151,7 @@ mod tests {
             ["mcp", "github", "create", "issue"]
         );
         assert_eq!(tokenize("createIssueV2"), ["create", "issue", "v2"]);
-        assert!(tokenize("  ,;. ").is_empty());
+        assert_eq!(tokenize("  ,;. ").len(), 0);
     }
 
     #[test]
@@ -167,14 +167,14 @@ mod tests {
         assert_eq!(hits.iter().map(|h| h.0).collect::<Vec<_>>(), [2, 1]);
         // "disk" is unique to doc 0.
         assert_eq!(index.search(&tokenize("disk"), 1)[0].0, 0);
-        assert!(index.search(&tokenize("nothing"), 5).is_empty());
-        assert!(index.search(&tokenize("email"), 0).is_empty());
+        assert_eq!(index.search(&tokenize("nothing"), 5).len(), 0);
+        assert_eq!(index.search(&tokenize("email"), 0).len(), 0);
     }
 
     #[test]
     fn empty_index_returns_nothing() {
         let index = Bm25Index::new(Vec::new());
-        assert!(index.is_empty());
-        assert!(index.search(&tokenize("x"), 3).is_empty());
+        assert_eq!(index.len(), 0);
+        assert_eq!(index.search(&tokenize("x"), 3).len(), 0);
     }
 }

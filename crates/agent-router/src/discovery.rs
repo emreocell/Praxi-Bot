@@ -174,12 +174,21 @@ mod tests {
     fn ranks_the_right_tool_first_among_fifty() {
         let index = ToolIndex::build(&corpus());
         assert_eq!(index.len(), 50);
-        assert_eq!(top(&index, "open an issue on github"), "mcp:github/create_issue");
+        assert_eq!(
+            top(&index, "open an issue on github"),
+            "mcp:github/create_issue"
+        );
         assert_eq!(top(&index, "send email"), "mcp:gmail/send_email");
         assert_eq!(top(&index, "read a file"), "mcp:fs/read_file");
-        assert_eq!(top(&index, "weather forecast for a city"), "mcp:weather/get_forecast");
+        assert_eq!(
+            top(&index, "weather forecast for a city"),
+            "mcp:weather/get_forecast"
+        );
         assert_eq!(top(&index, "sql query"), "mcp:db/run_query");
-        assert_eq!(top(&index, "schedule meeting attendees"), "mcp:calendar/create_event");
+        assert_eq!(
+            top(&index, "schedule meeting attendees"),
+            "mcp:calendar/create_event"
+        );
     }
 
     #[test]
@@ -205,7 +214,7 @@ mod tests {
     fn respects_k_and_returns_nothing_for_unknown_terms() {
         let index = ToolIndex::build(&corpus());
         assert_eq!(index.search("helper", 5).len(), 5);
-        assert!(index.search("zzzzqqq", 5).is_empty());
-        assert!(index.search("", 5).is_empty());
+        assert_eq!(index.search("zzzzqqq", 5).len(), 0);
+        assert_eq!(index.search("", 5).len(), 0);
     }
 }

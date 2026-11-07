@@ -6,7 +6,7 @@
 //! registry via BM25 search.  Per ADR-0005 the router only *narrows*: the model
 //! can always reach any registered tool through `find_tool`.
 
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -103,7 +103,9 @@ impl Tool for FindTool {
             })
             .transpose()?
             .map_or(DEFAULT_FIND_K, |k| {
-                usize::try_from(k).unwrap_or(MAX_FIND_K).clamp(1, MAX_FIND_K)
+                usize::try_from(k)
+                    .unwrap_or(MAX_FIND_K)
+                    .clamp(1, MAX_FIND_K)
             });
         let hits: Vec<Value> = self
             .discovery
@@ -325,7 +327,11 @@ impl ToolSurface {
             if is_meta(target) {
                 return None;
             }
-            return self.discovery.registry.get(target).map(|t| t.spec().clone());
+            return self
+                .discovery
+                .registry
+                .get(target)
+                .map(|t| t.spec().clone());
         }
         self.resolve(name).map(|t| t.spec().clone())
     }
@@ -368,7 +374,11 @@ mod tests {
     fn registry_with(n: usize) -> ToolRegistry {
         let reg = ToolRegistry::new();
         for i in 0..n {
-            reg.register(fake(&format!("tool{i}"), &format!("does job {i}"), Effect::Read));
+            reg.register(fake(
+                &format!("tool{i}"),
+                &format!("does job {i}"),
+                Effect::Read,
+            ));
         }
         reg
     }
@@ -471,18 +481,24 @@ mod tests {
         let ctx = ToolContext::default();
         let find = surface.resolve(FIND_TOOL).unwrap();
         let q = json!({ "query": "zebra" });
-        assert!(json_of(&block_on(find.call(&ctx, q.clone())).unwrap())
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            json_of(&block_on(find.call(&ctx, q.clone())).unwrap())
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
         reg.register(fake("zebra_tool", "stripes", Effect::Read));
         let hits = json_of(&block_on(find.call(&ctx, q.clone())).unwrap());
         assert_eq!(hits[0]["name"], "zebra_tool");
         reg.unregister("zebra_tool");
-        assert!(json_of(&block_on(find.call(&ctx, q)).unwrap())
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            json_of(&block_on(find.call(&ctx, q)).unwrap())
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
     }
 
     #[test]
@@ -490,19 +506,26 @@ mod tests {
         let reg = registry_with(10);
         reg.register(fake("danger", "deletes things", Effect::Destructive));
         let surface = ToolSurface::new(reg, 5);
-        let direct = surface.effective_spec(USE_TOOL, &json!({ "name": "tool1" })).unwrap();
+        let direct = surface
+            .effective_spec(USE_TOOL, &json!({ "name": "tool1" }))
+            .unwrap();
         assert_eq!(direct.effect, Effect::Read);
-        let danger = surface.effective_spec(USE_TOOL, &json!({ "name": "danger" })).unwrap();
+        let danger = surface
+            .effective_spec(USE_TOOL, &json!({ "name": "danger" }))
+            .unwrap();
         assert_eq!(danger.effect, Effect::Destructive);
-        assert!(surface.effective_spec(USE_TOOL, &json!({ "name": "missing" })).is_none());
+        assert!(
+            surface
+                .effective_spec(USE_TOOL, &json!({ "name": "missing" }))
+                .is_none()
+        );
         // use_tool itself is the worst case; find_tool is read-only.
-        assert_eq!(surface.effective_spec(FIND_TOOL, &json!({})).unwrap().effect, Effect::Read);
+        assert_eq!(
+            surface
+                .effective_spec(FIND_TOOL, &json!({}))
+                .unwrap()
+                .effect,
+            Effect::Read
+        );
     }
 }
-
-// Meta-tool specs are cheap but shared; keep a compile-time guarantee that the
-// constants stay distinct.
-const _: () = {
-    assert!(FIND_TOOL.len() != USE_TOOL.len());
-};
-static _UNUSED: LazyLock<()> = LazyLock::new(|| ());
