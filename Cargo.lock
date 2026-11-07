@@ -1053,6 +1053,7 @@ dependencies = [
  "agent-core",
  "agent-router",
  "builtin-tools",
+ "channel-telegram",
  "clap",
  "daemon-api",
  "desktop-api",
@@ -1072,6 +1073,7 @@ dependencies = [
  "toml 0.8.2",
  "tool-registry",
  "uuid",
+ "wiremock",
  "workflow-replay",
 ]
 

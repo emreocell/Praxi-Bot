@@ -76,6 +76,8 @@ impl Modify for Security {
         routes::run_schedule_now,
         routes::parse_schedule,
         routes::webhook,
+        routes::list_channels,
+        routes::telegram_pair_code,
         events_doc,
     ),
     components(schemas(
@@ -89,13 +91,13 @@ impl Modify for Security {
         dto::ControlStateDto, dto::ControlVerdict, dto::ControlDecisionInput,
         dto::ControlDecisionResponse, dto::PolicyDto, dto::PolicyInput, dto::ProvidersDto,
         dto::ConfiguredProviderDto, dto::CatalogProviderDto, dto::ReloadResponse, dto::RememberResponse, dto::ScheduleDto, dto::ScheduleInput,
-        dto::ParseSchedule, dto::ParsedSchedule, dto::AcceptedResponse, error::ErrorBody, error::ErrorDetail,
+        dto::ParseSchedule, dto::ParsedSchedule, dto::AcceptedResponse, dto::ChannelDto, dto::PairCodeDto, dto::ScheduleChanged, dto::ScheduleChangeKind, error::ErrorBody, error::ErrorDetail,
     )),
     modifiers(&Security),
     tags(
         (name = "meta"), (name = "bots"), (name = "chats"), (name = "approvals"),
         (name = "runs"), (name = "usage"), (name = "events"), (name = "control"),
-        (name = "policy"), (name = "providers"), (name = "schedules")
+        (name = "policy"), (name = "providers"), (name = "schedules"), (name = "channels")
     )
 )]
 pub struct ApiDoc;
@@ -111,6 +113,12 @@ pub struct ApiDoc;
 /// headers on `EventSource`, so this route (and only this one) also accepts the
 /// API token as the `token` query parameter (Host / Origin checks still apply;
 /// the token is compared in constant time; beware that URLs may be logged).
+///
+/// The daemon-wide stream (no `run_id`) also carries `schedule_changed` events
+/// (`dto::ScheduleChanged`: `{"type":"schedule_changed","schedule_id","kind"}`,
+/// kind `created` / `updated` / `toggled` / `deleted`) when a schedule is changed
+/// through the API.  They have no SSE `id`, are not replayed and are not
+/// envelopes: treat them as a hint to refetch `/v1/schedules`.
 #[utoipa::path(get, path = "/v1/events", tag = "events", security(("bearer" = [])),
     params(
         ("run_id" = Option<uuid::Uuid>, Query, description = "Follow only this run; the stream ends after run_finished"),

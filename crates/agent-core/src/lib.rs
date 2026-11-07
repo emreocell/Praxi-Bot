@@ -41,7 +41,7 @@ pub use profile::{
 };
 pub use shared::{
     ApprovalScope, CategoryDecision, Delivery, EffectivePolicy, Grant, GrantTarget, LoopError,
-    MessageMode, Providers, ScheduleWork, SkillHintFn, SkillHints, StreamItem,
+    MessageMode, Providers, ScheduleWork, SkillHintFn, SkillHints, StreamItem, schedule_id_of,
 };
 
 /// Audit-log action recording an "always allow" grant rule for a bot.

@@ -112,6 +112,10 @@ Code-signing fields (`certificateThumbprint`, `digestAlgorithm`, `timestampUrl`)
 are pre-configured as placeholders under `bundle.windows` in
 [`apps/desktop/tauri.conf.json`](apps/desktop/tauri.conf.json).
 
+## Telegram
+
+Talk to your bots from Telegram (`bot channels telegram setup` / `pair`); see [docs/telegram.md](docs/telegram.md).
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

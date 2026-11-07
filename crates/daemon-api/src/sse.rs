@@ -36,6 +36,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::dto::ScheduleChanged;
 use crate::error::ApiError;
 
 /// Index rows replayed per batch (bounds memory of a long replay).
@@ -91,6 +92,9 @@ struct Feed {
     scan: u64,
     /// More index rows may be pending (replay in progress).
     replaying: bool,
+    // ---- global form ----
+    /// `schedule_changed` notifications (global stream only).
+    sched_rx: Option<broadcast::Receiver<ScheduleChanged>>,
     // ---- both ----
     storage: Arc<Storage>,
     data_dir: PathBuf,
@@ -140,9 +144,9 @@ impl Feed {
     }
 
     /// Next item to deliver, `None` when the stream is over.
-    async fn next_item(&mut self) -> Option<StreamItem> {
+    async fn next_item(&mut self) -> Option<Out> {
         if self.scoped {
-            self.next_run_item().await
+            self.next_run_item().await.map(Out::Run)
         } else {
             self.next_global_item().await
         }
@@ -194,21 +198,36 @@ impl Feed {
         true
     }
 
-    async fn next_global_item(&mut self) -> Option<StreamItem> {
+    async fn next_global_item(&mut self) -> Option<Out> {
         loop {
             if self.cancel.is_cancelled() {
                 return None;
             }
             if let Some(item) = self.backlog.pop_front() {
-                return Some(item);
+                return Some(Out::Run(item));
             }
             if self.replaying {
                 self.replay_chunk().await;
                 continue;
             }
+            let (rx, sched_rx) = (&mut self.rx, &mut self.sched_rx);
             let received = tokio::select! {
                 () = self.cancel.cancelled() => return None,
-                r = self.rx.recv() => r,
+                r = rx.recv() => r,
+                s = async {
+                    match sched_rx {
+                        Some(r) => r.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => match s {
+                    Ok(change) => return Some(Out::Schedule(change)),
+                    // A dropped notification only means a missed refetch hint.
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => {
+                        self.sched_rx = None;
+                        continue;
+                    }
+                },
             };
             match received {
                 Ok(item) => {
@@ -217,7 +236,7 @@ impl Feed {
                         continue;
                     }
                     self.scan = item.gseq;
-                    return Some(item);
+                    return Some(Out::Run(item));
                 }
                 // Recover what the buffer dropped from the index.
                 Err(RecvError::Lagged(_)) => self.replaying = true,
@@ -225,6 +244,12 @@ impl Feed {
             }
         }
     }
+}
+
+/// What the stream delivers next.
+enum Out {
+    Run(StreamItem),
+    Schedule(ScheduleChanged),
 }
 
 /// One batch of the global replay.
@@ -289,8 +314,13 @@ fn to_sse(item: &StreamItem, scoped: bool) -> SseEvent {
 
 fn event_stream(feed: Feed) -> impl Stream<Item = Result<SseEvent, Infallible>> {
     stream::unfold(feed, |mut feed| async move {
-        let item = feed.next_item().await?;
-        let ev = to_sse(&item, feed.scoped);
+        let ev = match feed.next_item().await? {
+            Out::Run(item) => to_sse(&item, feed.scoped),
+            Out::Schedule(change) => SseEvent::default()
+                .event("schedule_changed")
+                .json_data(&change)
+                .unwrap_or_else(|_| SseEvent::default().comment("unserialisable event")),
+        };
         Some((Ok(ev), feed))
     })
 }
@@ -322,6 +352,9 @@ pub(crate) async fn events(
         finished_in_log: false,
         scan: 0,
         replaying: false,
+        sched_rx: scoped_run
+            .is_none()
+            .then(|| state.subscribe_schedule_events()),
         storage: state.storage_arc(),
         data_dir: state.data_dir(),
         cancel: state.shutdown_token(),

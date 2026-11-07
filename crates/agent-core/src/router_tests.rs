@@ -488,6 +488,7 @@ async fn classifier_routes_to_a_workflow_and_remember_makes_it_a_cache_hit() {
     assert_eq!(script.n("fake/m"), 0);
 
     // Remembering: the same text now routes at K1, no classifier call.
+    assert!(lp.can_remember(run1), "eligible, and asking caches nothing");
     let route = lp.remember_route(run1).unwrap();
     assert_eq!(route["kind"], "workflow");
     assert_eq!(route["name"], "log_it");
@@ -552,11 +553,14 @@ async fn remember_refuses_runs_that_took_no_route_or_did_not_succeed() {
     let t = Arc::new(tool("t_a", Effect::Read, "a"));
     let lp = make(&env, &script, &[as_tool(&t)], CLASSIFIER);
     let (run, _) = turn(&lp, env.chat, "hello there friend").await;
+    assert!(!lp.can_remember(run));
     let err = lp.remember_route(run).unwrap_err();
     assert!(matches!(err, crate::LoopError::Router(_)), "{err}");
     // A cancelled run is refused as well; an unknown one is not found.
     let (stopped, state) = turn(&lp, env.chat, "/stop").await;
     assert_eq!(state, RunState::Cancelled);
+    assert!(!lp.can_remember(stopped));
+    assert!(!lp.can_remember(protocol::RunId::new()));
     assert!(matches!(
         lp.remember_route(stopped),
         Err(crate::LoopError::Router(_))

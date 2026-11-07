@@ -330,6 +330,15 @@ impl Shared {
     /// `POST /v1/runs/{id}/remember`: cache the route a succeeded run took (or
     /// the workflow its model ran) for the same request text.
     pub(crate) fn remember_route(&self, run_id: RunId) -> Result<Route, LoopError> {
+        self.remember_route_inner(run_id, true)
+    }
+
+    /// The checks of [`Self::remember_route`] without caching anything.
+    pub(crate) fn can_remember(&self, run_id: RunId) -> bool {
+        self.remember_route_inner(run_id, false).is_ok()
+    }
+
+    fn remember_route_inner(&self, run_id: RunId, commit: bool) -> Result<Route, LoopError> {
         let run = self
             .storage
             .get_run(run_id)?
@@ -374,10 +383,12 @@ impl Shared {
         let bl = self
             .ladder_for(run.bot_id, &profile)
             .ok_or_else(|| LoopError::Router("the router is disabled for this bot".into()))?;
-        self.refresh_ladder(&bl, &profile, false);
-        bl.ladder
-            .remember_route(&text, &route)
-            .map_err(|e| LoopError::Router(e.to_string()))?;
+        if commit {
+            self.refresh_ladder(&bl, &profile, false);
+            bl.ladder
+                .remember_route(&text, &route)
+                .map_err(|e| LoopError::Router(e.to_string()))?;
+        }
         Ok(route)
     }
 }

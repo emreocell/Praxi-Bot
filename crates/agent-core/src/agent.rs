@@ -289,6 +289,13 @@ impl AgentLoop {
         Ok(serde_json::to_value(route).unwrap_or(serde_json::Value::Null))
     }
 
+    /// Whether [`AgentLoop::remember_route`] would accept `run_id` (same
+    /// checks, nothing is cached).
+    #[must_use]
+    pub fn can_remember(&self, run_id: RunId) -> bool {
+        self.sh.can_remember(run_id)
+    }
+
     /// Subscribe to the live event stream of all runs (events are also
     /// appended to each run's NDJSON log).
     #[must_use]

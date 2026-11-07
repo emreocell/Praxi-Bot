@@ -125,6 +125,9 @@ pub struct BotInput {
 pub struct ChatDto {
     /// Chat id.
     pub id: Uuid,
+    /// Same as `id`, under the name clients that treat `POST /v1/chats` as
+    /// "create chat" expect.
+    pub chat_id: Uuid,
     /// Bot the chat talks to.
     pub bot_id: Uuid,
     /// Title.
@@ -302,6 +305,13 @@ pub struct RunDto {
     /// The run that spawned this one when it is a subagent run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_run_id: Option<Uuid>,
+    /// Whether `POST /v1/runs/{id}/remember` would accept this run (same
+    /// checks; nothing is cached by asking).
+    #[serde(default)]
+    pub can_remember: bool,
+    /// The schedule that started this run (`null` for runs the user started).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule_id: Option<Uuid>,
 }
 
 /// Token totals.
@@ -590,4 +600,69 @@ pub struct AcceptedResponse {
     pub status: String,
     /// The schedule that fires.
     pub schedule_id: Uuid,
+}
+
+/// A messaging channel (e.g. Telegram) as seen by the daemon.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ChannelDto {
+    /// Channel id (`telegram`).
+    pub id: String,
+    /// Credentials are stored.
+    pub configured: bool,
+    /// The user has not turned the channel off.
+    pub enabled: bool,
+    /// The channel is running inside this daemon.
+    pub running: bool,
+    /// Number of paired (allowed) remote users.
+    pub paired_users: usize,
+}
+
+/// A one-time pairing code (`POST /v1/channels/telegram/pair-code`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PairCodeDto {
+    /// The 6-digit code the user sends as `/pair <code>`.
+    pub code: String,
+    /// Seconds until it expires.
+    pub expires_in_secs: u64,
+}
+
+/// What happened to a schedule (see [`ScheduleChanged`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ScheduleChangeKind {
+    /// `POST /v1/schedules`.
+    Created,
+    /// `PUT /v1/schedules/{id}` (definition changed).
+    Updated,
+    /// `PUT /v1/schedules/{id}` flipped `enabled`.
+    Toggled,
+    /// `DELETE /v1/schedules/{id}`.
+    Deleted,
+}
+
+/// Data of the `schedule_changed` SSE event of the daemon-wide stream
+/// (`GET /v1/events` without `run_id`).  It is a notification only (refetch
+/// the schedule): it has no SSE `id`, is not replayed with `Last-Event-ID`
+/// and is not part of `protocol::Envelope`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ScheduleChanged {
+    /// Always `schedule_changed`.
+    #[serde(rename = "type")]
+    pub kind_tag: String,
+    /// The schedule.
+    pub schedule_id: Uuid,
+    /// What happened.
+    pub kind: ScheduleChangeKind,
+}
+
+impl ScheduleChanged {
+    /// The notification for `schedule_id`.
+    #[must_use]
+    pub fn new(schedule_id: Uuid, kind: ScheduleChangeKind) -> Self {
+        Self {
+            kind_tag: "schedule_changed".to_owned(),
+            schedule_id,
+            kind,
+        }
+    }
 }

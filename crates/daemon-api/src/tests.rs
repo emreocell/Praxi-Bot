@@ -189,7 +189,7 @@ fn frames(body: &[u8]) -> Vec<(String, String, Value)> {
                     data = serde_json::from_str(v.trim()).ok();
                 }
             }
-            Some((id?, ev?, data?))
+            Some((id.unwrap_or_default(), ev?, data?))
         })
         .collect()
 }
@@ -854,6 +854,10 @@ async fn remember_is_refused_for_runs_without_a_route_and_unknown_runs() {
         .unwrap()
         .to_owned();
     wait_state(&t, &run, "succeeded").await;
+    let r = call(&t, Method::GET, &format!("/v1/runs/{run}"), None).await;
+    assert_eq!(r.json()["can_remember"], false, "{:?}", r.json());
+    let r = call(&t, Method::GET, "/v1/runs", None).await;
+    assert_eq!(r.json()[0]["can_remember"], false);
     let r = call(&t, Method::POST, &format!("/v1/runs/{run}/remember"), None).await;
     assert_eq!(r.status, StatusCode::CONFLICT, "{:?}", r.json());
     let r = call(
@@ -864,6 +868,81 @@ async fn remember_is_refused_for_runs_without_a_route_and_unknown_runs() {
     )
     .await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn create_chat_returns_chat_id_next_to_id() {
+    let t = setup();
+    let (bot, chat) = make_chat(&t).await;
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/chats",
+        Some(json!({ "bot_id": bot })),
+    )
+    .await;
+    let v = r.json();
+    assert_eq!(v["chat_id"], v["id"]);
+    assert_ne!(v["chat_id"].as_str().unwrap(), chat);
+}
+
+struct FakeChannel {
+    running: bool,
+}
+
+impl crate::ChannelControl for FakeChannel {
+    fn info(&self) -> crate::dto::ChannelDto {
+        crate::dto::ChannelDto {
+            id: "telegram".into(),
+            configured: true,
+            enabled: true,
+            running: self.running,
+            paired_users: 2,
+        }
+    }
+    fn create_pair_code(&self) -> Result<crate::dto::PairCodeDto, String> {
+        if self.running {
+            Ok(crate::dto::PairCodeDto {
+                code: "123456".into(),
+                expires_in_secs: 600,
+            })
+        } else {
+            Err("the telegram channel is not running".into())
+        }
+    }
+}
+
+#[tokio::test]
+async fn channels_and_pair_code_need_auth_and_a_running_channel() {
+    let t = setup();
+    // No channel registered: empty list, pair-code is 404.
+    let r = call(&t, Method::GET, "/v1/channels", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json(), json!([]));
+    let r = call(&t, Method::POST, "/v1/channels/telegram/pair-code", None).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+
+    t.state.add_channel(Arc::new(FakeChannel { running: true }));
+    for (m, p) in [
+        (Method::GET, "/v1/channels"),
+        (Method::POST, "/v1/channels/telegram/pair-code"),
+    ] {
+        let r = send(&t.app, m, p, None, &[]).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{p}");
+    }
+    let r = call(&t, Method::GET, "/v1/channels", None).await;
+    assert_eq!(r.json()[0]["running"], true);
+    assert_eq!(r.json()[0]["paired_users"], 2);
+    let r = call(&t, Method::POST, "/v1/channels/telegram/pair-code", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json()["code"], "123456");
+    assert_eq!(r.json()["expires_in_secs"], 600);
+
+    let t2 = setup();
+    t2.state
+        .add_channel(Arc::new(FakeChannel { running: false }));
+    let r = call(&t2, Method::POST, "/v1/channels/telegram/pair-code", None).await;
+    assert_eq!(r.status, StatusCode::CONFLICT);
 }
 
 #[tokio::test]

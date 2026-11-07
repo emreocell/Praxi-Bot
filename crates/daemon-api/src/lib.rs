@@ -99,7 +99,23 @@ pub struct ProviderHost {
     pub reload: Box<dyn Fn() -> Result<Providers, String> + Send + Sync>,
 }
 
+/// A messaging channel the embedder runs next to the daemon (see
+/// [`AppState::add_channel`]); backs `/v1/channels`.
+pub trait ChannelControl: Send + Sync {
+    /// Current state of the channel.
+    fn info(&self) -> dto::ChannelDto;
+    /// A fresh one-time pairing code.
+    ///
+    /// # Errors
+    /// The reason the channel cannot pair (e.g. it is not running).
+    fn create_pair_code(&self) -> Result<dto::PairCodeDto, String>;
+}
+
 struct Inner {
+    /// `schedule_changed` notifications for the daemon-wide event stream.
+    schedule_events: tokio::sync::broadcast::Sender<dto::ScheduleChanged>,
+    /// Channels registered by the embedder.
+    channels: parking_lot::Mutex<Vec<Arc<dyn ChannelControl>>>,
     agent: AgentLoop,
     storage: Arc<Storage>,
     user_id: UserId,
@@ -149,6 +165,8 @@ impl AppState {
             agent.set_global_policy(p);
         }
         Ok(Self(Arc::new(Inner {
+            schedule_events: tokio::sync::broadcast::channel(64).0,
+            channels: parking_lot::Mutex::new(Vec::new()),
             agent,
             storage,
             user_id,
@@ -168,6 +186,30 @@ impl AppState {
     /// once, right after [`AppState::new`]; a second call is ignored).
     pub fn set_provider_host(&self, host: ProviderHost) {
         let _ = self.0.provider_host.set(host);
+    }
+
+    /// Register a messaging channel for `/v1/channels` (call before [`serve`]).
+    pub fn add_channel(&self, channel: Arc<dyn ChannelControl>) {
+        self.0.channels.lock().push(channel);
+    }
+
+    /// Tell the daemon-wide event stream that a schedule was changed.
+    pub(crate) fn publish_schedule_changed(&self, id: uuid::Uuid, kind: dto::ScheduleChangeKind) {
+        // No subscriber is not an error.
+        let _ = self
+            .0
+            .schedule_events
+            .send(dto::ScheduleChanged::new(id, kind));
+    }
+
+    pub(crate) fn subscribe_schedule_events(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<dto::ScheduleChanged> {
+        self.0.schedule_events.subscribe()
+    }
+
+    pub(crate) fn channels(&self) -> Vec<Arc<dyn ChannelControl>> {
+        self.0.channels.lock().clone()
     }
 
     /// The schedule store (`<data dir>/schedules.db`), opened on first use.
@@ -357,6 +399,11 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/v1/webhooks/{id}",
             post(r::webhook).layer(axum::extract::DefaultBodyLimit::max(r::WEBHOOK_MAX_BODY)),
+        )
+        .route("/v1/channels", get(r::list_channels))
+        .route(
+            "/v1/channels/telegram/pair-code",
+            post(r::telegram_pair_code),
         )
         .route("/v1/events", get(sse::events))
         .layer(axum::middleware::from_fn_with_state(

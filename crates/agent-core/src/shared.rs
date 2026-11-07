@@ -422,7 +422,7 @@ pub(crate) fn kind_for_schedule(id: TaskId) -> String {
 }
 
 /// The schedule behind a run kind written by [`kind_for_schedule`].
-pub(crate) fn schedule_id_of(kind: &str) -> Option<TaskId> {
+pub fn schedule_id_of(kind: &str) -> Option<TaskId> {
     kind.strip_prefix("turn:schedule:")?
         .parse()
         .ok()

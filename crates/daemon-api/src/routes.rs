@@ -28,8 +28,8 @@ use crate::dto::{
     ControlDecisionResponse, ControlStateDto, ControlStateInput, CreateChat, DecideApproval,
     Decision, DecisionResponse, DeliveryKind, EffectivePolicyDto, GrantDto, GrantTargetDto, Health,
     MessageDto, Mode, ParseSchedule, ParsedSchedule, PolicyDto, PolicyInput, ProvidersDto,
-    ReloadResponse, RememberResponse, RevokeGrant, RunDto, ScheduleDto, ScheduleInput, Scope,
-    SendMessage, SendResponse, UsageSummary, UsageTotals,
+    ReloadResponse, RememberResponse, RevokeGrant, RunDto, ScheduleChangeKind, ScheduleDto,
+    ScheduleInput, Scope, SendMessage, SendResponse, UsageSummary, UsageTotals,
 };
 use crate::error::{ApiError, ErrorBody};
 
@@ -129,13 +129,16 @@ fn effective_policy_dto(e: EffectivePolicy) -> EffectivePolicyDto {
 fn chat_dto(c: Chat) -> ChatDto {
     ChatDto {
         id: c.id.0,
+        chat_id: c.id.0,
         bot_id: c.bot_id.0,
         title: c.title,
         created_at_ms: c.created_at_ms,
     }
 }
 
-fn run_dto(r: storage::Run) -> RunDto {
+fn run_dto(s: &AppState, r: storage::Run) -> RunDto {
+    let can_remember = s.agent().can_remember(r.id);
+    let schedule_id = agent_core::schedule_id_of(&r.kind).map(|t| t.0);
     RunDto {
         id: r.id.0,
         bot_id: r.bot_id.0,
@@ -146,6 +149,8 @@ fn run_dto(r: storage::Run) -> RunDto {
         created_at_ms: r.created_at_ms,
         updated_at_ms: r.updated_at_ms,
         parent_run_id: r.parent_run_id.map(|p| p.0),
+        can_remember,
+        schedule_id,
     }
 }
 
@@ -550,7 +555,7 @@ pub(crate) async fn list_runs(State(s): State<AppState>) -> Result<Json<Vec<RunD
         s.storage()
             .list_runs(s.user_id())?
             .into_iter()
-            .map(run_dto)
+            .map(|r| run_dto(&s, r))
             .collect(),
     ))
 }
@@ -563,7 +568,7 @@ pub(crate) async fn get_run(
     State(s): State<AppState>,
     Path(rid): Path<String>,
 ) -> Result<Json<RunDto>, ApiError> {
-    Ok(Json(run_dto(s.run_of_user(RunId(id(&rid)?))?)))
+    Ok(Json(run_dto(&s, s.run_of_user(RunId(id(&rid)?))?)))
 }
 
 /// Cancel a run.
@@ -577,7 +582,7 @@ pub(crate) async fn cancel_run(
 ) -> Result<Json<RunDto>, ApiError> {
     let run = s.run_of_user(RunId(id(&rid)?))?;
     s.agent().cancel(run.id)?;
-    Ok(Json(run_dto(s.run_of_user(run.id)?)))
+    Ok(Json(run_dto(&s, s.run_of_user(run.id)?)))
 }
 
 /// Remember the route a succeeded run took (or the workflow its model ran):
@@ -607,7 +612,10 @@ pub(crate) async fn resume_run(
 ) -> Result<(StatusCode, Json<RunDto>), ApiError> {
     let run = s.run_of_user(RunId(id(&rid)?))?;
     s.agent().resume(run.id)?;
-    Ok((StatusCode::ACCEPTED, Json(run_dto(s.run_of_user(run.id)?))))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(run_dto(&s, s.run_of_user(run.id)?)),
+    ))
 }
 
 // ----------------------------------------------------------------- usage
@@ -1119,6 +1127,7 @@ pub(crate) async fn create_schedule(
         let _ = store.delete(sc.id);
         return Err(e);
     }
+    s.publish_schedule_changed(sc.id.0, ScheduleChangeKind::Created);
     Ok((StatusCode::CREATED, Json(dto_of(&s, &sc)?)))
 }
 
@@ -1150,6 +1159,7 @@ pub(crate) async fn update_schedule(
         return Err(bad_schedule("the bot of a schedule cannot be changed"));
     }
     let p = schedule_parts(&s, &input)?;
+    let was_enabled = sc.enabled;
     let enabled = input.enabled.unwrap_or(sc.enabled);
     let rearm = p.spec != sc.spec || (enabled && !sc.enabled);
     input.name.trim().clone_into(&mut sc.name);
@@ -1169,6 +1179,14 @@ pub(crate) async fn update_schedule(
     let store = s.schedule_store()?;
     store.update(&sc)?;
     apply_webhook(&store, sc.id, input.webhook_secret.as_deref())?;
+    s.publish_schedule_changed(
+        sc.id.0,
+        if enabled == was_enabled {
+            ScheduleChangeKind::Updated
+        } else {
+            ScheduleChangeKind::Toggled
+        },
+    );
     Ok(Json(dto_of(&s, &sc)?))
 }
 
@@ -1185,6 +1203,7 @@ pub(crate) async fn delete_schedule(
     let store = s.schedule_store()?;
     store.remove_trigger(sc.id)?;
     store.delete(sc.id)?;
+    s.publish_schedule_changed(sc.id.0, ScheduleChangeKind::Deleted);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1272,4 +1291,33 @@ pub(crate) async fn webhook(
             schedule_id: sid.0,
         }),
     ))
+}
+
+// -------------------------------------------------------------- channels
+
+/// Messaging channels hosted by the daemon (Telegram).
+#[utoipa::path(get, path = "/v1/channels", tag = "channels", security(("bearer" = [])),
+    responses((status = 200, body = Vec<crate::dto::ChannelDto>)))]
+pub(crate) async fn list_channels(State(s): State<AppState>) -> Json<Vec<crate::dto::ChannelDto>> {
+    Json(s.channels().iter().map(|c| c.info()).collect())
+}
+
+/// Create a one-time pairing code for the Telegram channel (valid 10 minutes;
+/// the user sends `/pair <code>` to the bot).
+#[utoipa::path(post, path = "/v1/channels/telegram/pair-code", tag = "channels",
+    security(("bearer" = [])),
+    responses((status = 200, body = crate::dto::PairCodeDto), (status = 404, body = ErrorBody),
+              (status = 409, body = ErrorBody, description = "the channel is not running")))]
+pub(crate) async fn telegram_pair_code(
+    State(s): State<AppState>,
+) -> Result<Json<crate::dto::PairCodeDto>, ApiError> {
+    let channel = s
+        .channels()
+        .into_iter()
+        .find(|c| c.info().id == "telegram")
+        .ok_or_else(|| ApiError::not_found("channel telegram"))?;
+    channel
+        .create_pair_code()
+        .map(Json)
+        .map_err(ApiError::conflict)
 }

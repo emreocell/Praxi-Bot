@@ -18,6 +18,7 @@ fake-provider = ["daemon-api/fake-provider"]
 [dependencies]
 agent-core = { path = "../../crates/agent-core", version = "0.1.0" }
 agent-router = { path = "../../crates/agent-router", version = "0.1.0" }
+channel-telegram = { path = "../../crates/channel-telegram", version = "0.1.0" }
 builtin-tools = { path = "../../crates/builtin-tools", version = "0.1.0" }
 clap = { workspace = true, features = ["env"] }
 daemon-api = { path = "../../crates/daemon-api", version = "0.1.0" }
@@ -41,6 +42,7 @@ workflow-replay = { path = "../../crates/workflow-replay", version = "0.1.0" }
 desktop-windows = { path = "../../crates/desktop-windows", version = "0.1.0" }
 
 [dev-dependencies]
+wiremock.workspace = true
 daemon-api = { path = "../../crates/daemon-api", version = "0.1.0", features = ["fake-provider"] }
 tempfile.workspace = true
 uuid.workspace = true

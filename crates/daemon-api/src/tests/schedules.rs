@@ -355,6 +355,15 @@ async fn run_now_dispatches_a_prompt_into_a_chat_named_after_the_schedule() {
         .json();
     assert_eq!(got["state"], "succeeded");
     assert_eq!(got["kind"], format!("turn:schedule:{sid}"));
+    assert_eq!(got["schedule_id"], sid, "RunDto names the schedule");
+    let listed = call(&t, Method::GET, "/v1/runs", None).await.json();
+    assert!(
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["id"] == run.to_string() && r["schedule_id"] == sid)
+    );
     assert!(matches!(evs.first(), Some(Event::RunStarted(r)) if r.run_id == run));
     // The chat was created and named after the schedule.
     let chats = call(&t, Method::GET, "/v1/chats", None).await.json();
@@ -791,4 +800,63 @@ async fn shutdown_stops_the_scheduler_before_the_agent_loop() {
         .await
         .expect("tick returns at once on a stopped scheduler");
     let _ = auth();
+}
+
+#[tokio::test]
+async fn schedule_mutations_are_announced_on_the_global_stream() {
+    let t = super::setup();
+    let (bot, chat) = make_chat(&t).await;
+    let mut body = super::open_global(&t, None).await;
+
+    let s = create(&t, new_schedule(&bot, prompt("tick"))).await;
+    let sid = s["id"].as_str().unwrap().to_owned();
+    let put = |enabled: bool, name: &str| {
+        let mut b = new_schedule(&bot, prompt("tick"));
+        b["enabled"] = json!(enabled);
+        b["name"] = json!(name);
+        b
+    };
+    let r = call(
+        &t,
+        Method::PUT,
+        &format!("/v1/schedules/{sid}"),
+        Some(put(true, "renamed")),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    let r = call(
+        &t,
+        Method::PUT,
+        &format!("/v1/schedules/{sid}"),
+        Some(put(false, "renamed")),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    let r = call(&t, Method::DELETE, &format!("/v1/schedules/{sid}"), None).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    // A rejected change announces nothing; neither does a read.
+    let r = call(&t, Method::DELETE, &format!("/v1/schedules/{sid}"), None).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let _ = call(&t, Method::GET, "/v1/schedules", None).await;
+    // A run event after them proves the order and that nothing else came.
+    let run = super::send_msg(&t, &chat, "after", "queue").await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let fr = super::read_until(&mut body, |fr| super::run_finished_of(fr, &run)).await;
+    let changes: Vec<(String, String)> = fr
+        .iter()
+        .filter(|f| f.1 == "schedule_changed")
+        .map(|f| {
+            assert_eq!(f.0, "", "no SSE id: not part of the replay cursor");
+            assert_eq!(f.2["type"], "schedule_changed");
+            (
+                f.2["schedule_id"].as_str().unwrap().to_owned(),
+                f.2["kind"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    let kinds: Vec<&str> = changes.iter().map(|c| c.1.as_str()).collect();
+    assert_eq!(kinds, ["created", "updated", "toggled", "deleted"]);
+    assert!(changes.iter().all(|c| c.0 == sid));
 }

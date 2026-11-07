@@ -24,6 +24,7 @@ use tool_registry::ToolRegistry;
 use workflow_replay::{Handles, WorkflowStore};
 
 use crate::Result;
+use crate::channels::{self, TelegramRuntime};
 
 /// Providers from `providers.toml`: every enabled one that can be built, the
 /// effective default first.
@@ -236,6 +237,39 @@ async fn shutdown_signal() {
     }
 }
 
+/// How `bot serve` runs.
+pub struct ServeOptions {
+    /// Loopback TCP port.
+    pub port: u16,
+    /// Machine-readable startup / stop lines.
+    pub json: bool,
+    /// Grace period of running tool steps on shutdown.
+    pub grace: Duration,
+    /// Secret store of the Telegram channel (`None` = no channels, e.g. the
+    /// fake-provider demo).
+    pub telegram_store: Option<Arc<dyn SecretStore>>,
+}
+
+/// Run the daemon on `listener` until `shutdown` resolves, with the Telegram
+/// channel (when it runs) stopped first so no message arrives mid-shutdown.
+///
+/// # Errors
+/// Server errors.
+pub async fn run_daemon(
+    listener: tokio::net::TcpListener,
+    state: AppState,
+    telegram: Option<Arc<TelegramRuntime>>,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+) -> std::io::Result<Vec<protocol::RunId>> {
+    daemon_api::serve(listener, state, async move {
+        shutdown.await;
+        if let Some(t) = telegram {
+            t.shutdown().await;
+        }
+    })
+    .await
+}
+
 /// Run the daemon until a stop request (see [`shutdown_signal`]); running tool
 /// steps get `grace` to finish, everything else live is paused for the next start.
 ///
@@ -243,13 +277,18 @@ async fn shutdown_signal() {
 /// Storage, token, bind or server errors.
 pub fn serve(
     data_dir: &Path,
-    port: u16,
+    opts: &ServeOptions,
     providers: Providers,
     host: Option<ProviderHost>,
     desktop: Option<Arc<dyn DesktopBackend>>,
-    json: bool,
-    grace: Duration,
 ) -> Result<()> {
+    let ServeOptions {
+        port,
+        json,
+        grace,
+        telegram_store,
+    } = opts;
+    let (port, json, grace) = (*port, *json, *grace);
     let storage = Arc::new(Storage::open(data_dir)?);
     let agent = build_agent(&storage, providers, data_dir, desktop);
     let recovered = agent.recover()?;
@@ -260,7 +299,8 @@ pub fn serve(
             token_path(data_dir).display()
         );
     }
-    let mut cfg = DaemonConfig::new(token.token);
+    let api_token = token.token;
+    let mut cfg = DaemonConfig::new(api_token.clone());
     cfg.shutdown_grace = grace;
     // Extra browser origins (e.g. the desktop app's dev server), comma separated.
     if let Ok(extra) = std::env::var(ALLOWED_ORIGINS_ENV) {
@@ -279,6 +319,29 @@ pub fn serve(
         let listener =
             tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).await?;
         let addr = listener.local_addr()?;
+        // The Telegram channel (when a token is stored and it is enabled) talks
+        // to this daemon through its own loopback address.
+        let telegram = telegram_store.as_ref().map(|store| {
+            let t = channels::start_telegram(
+                data_dir,
+                Arc::clone(store),
+                &format!("http://{addr}"),
+                &api_token,
+                None,
+            );
+            state.add_channel(t.clone());
+            t
+        });
+        if let Some(t) = &telegram {
+            use daemon_api::ChannelControl;
+            let i = t.info();
+            if i.running {
+                eprintln!(
+                    "telegram channel: running ({} paired user(s))",
+                    i.paired_users
+                );
+            }
+        }
         if json {
             println!(
                 "{}",
@@ -298,7 +361,7 @@ pub fn serve(
                 );
             }
         }
-        let paused = daemon_api::serve(listener, state, shutdown_signal()).await?;
+        let paused = run_daemon(listener, state, telegram, shutdown_signal()).await?;
         if json {
             println!(
                 "{}",

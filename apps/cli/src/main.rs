@@ -1,5 +1,8 @@
 //! Command-line interface entry point for the Praxi-Bot agent (`bot`).
 
+mod channels;
+#[cfg(test)]
+mod channels_tests;
 mod client;
 mod commands;
 mod presets;
@@ -123,6 +126,11 @@ enum Command {
         #[command(subcommand)]
         action: SchedulesCmd,
     },
+    /// Messaging channels (Telegram).
+    Channels {
+        #[command(subcommand)]
+        action: ChannelsCmd,
+    },
     /// Approve (or deny) a pending tool call.
     Approve {
         /// Tool call id (shown in the chat stream / `approval_needed` event).
@@ -237,6 +245,31 @@ struct SetupCmd {
 }
 
 #[derive(Subcommand)]
+enum ChannelsCmd {
+    /// Talk to your bots from Telegram.
+    Telegram {
+        #[command(subcommand)]
+        action: TelegramCmd,
+    },
+}
+
+#[derive(Subcommand, Debug, PartialEq, Eq)]
+enum TelegramCmd {
+    /// Store the `BotFather` token (hidden prompt, never printed) and enable the channel.
+    Setup {
+        /// Read the token from this environment variable instead of prompting.
+        #[arg(long)]
+        token_env: Option<String>,
+    },
+    /// Print a one-time 6-digit pairing code (valid 10 minutes) from the running daemon.
+    Pair,
+    /// Show whether the channel is configured, running, and how many users are paired.
+    Status,
+    /// Turn the channel off (the token stays stored).
+    Disable,
+}
+
+#[derive(Subcommand)]
 enum SecretsCmd {
     /// List secret names.
     List,
@@ -342,6 +375,7 @@ fn main() {
     }
 }
 
+#[allow(clippy::too_many_lines)] // one flat dispatch over every command
 fn run() -> Result<()> {
     let cli = Cli::parse();
     let Some(command) = &cli.command else {
@@ -360,9 +394,20 @@ fn run() -> Result<()> {
         | Command::Approve { .. }
         | Command::Answer { .. }
         | Command::Schedules { .. }
-        | Command::Grants { .. } => {
+        | Command::Grants { .. }
+        | Command::Channels {
+            action: ChannelsCmd::Telegram {
+                action: TelegramCmd::Pair,
+            },
+        } => {
             return run_client(&cli, command, &data_dir);
         }
+        Command::Channels {
+            action:
+                ChannelsCmd::Telegram {
+                    action: TelegramCmd::Disable,
+                },
+        } => return channels::telegram_disable(&data_dir, &mut say),
         _ => {}
     }
 
@@ -390,6 +435,9 @@ fn run() -> Result<()> {
 
     match command {
         Command::Setup(c) => run_setup(c, &env),
+        Command::Channels {
+            action: ChannelsCmd::Telegram { action },
+        } => run_telegram(&cli, &data_dir, store, action, &mut say),
         Command::Secrets { action } => match action {
             SecretsCmd::List => commands::secrets_list(store, &mut say),
             SecretsCmd::Set { name, value_env } => {
@@ -466,15 +514,13 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
         let providers = agent_core::Providers::single(Arc::new(daemon_api::fake::FakeProvider));
         let desktop: Arc<dyn desktop_api::DesktopBackend> =
             Arc::new(daemon_api::fake::FakeDesktop::default());
-        return serve::serve(
-            data_dir,
-            cli.port,
-            providers,
-            None,
-            Some(desktop),
-            cli.json,
+        let opts = serve::ServeOptions {
+            port: cli.port,
+            json: cli.json,
             grace,
-        );
+            telegram_store: None,
+        };
+        return serve::serve(data_dir, &opts, providers, None, Some(desktop));
     }
     let (store, kind) = open_store(cli.secrets_backend, data_dir, &ask_passphrase)?;
     eprintln!("(secret backend: {kind:?})");
@@ -484,6 +530,7 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
     })?;
     // `POST /v1/providers/reload` rebuilds the providers the same way.
     let store: Arc<dyn secret_store::SecretStore> = Arc::from(store);
+    let telegram_store = Arc::clone(&store);
     let host = daemon_api::ProviderHost {
         catalog: catalog.clone(),
         reload: {
@@ -495,18 +542,18 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
         },
     };
     let desktop = serve::local_desktop(&mut |w| eprintln!("warning: {w}"));
-    serve::serve(
-        data_dir,
-        cli.port,
-        providers,
-        Some(host),
-        desktop,
-        cli.json,
+    let opts = serve::ServeOptions {
+        port: cli.port,
+        json: cli.json,
         grace,
-    )
+        telegram_store: Some(telegram_store),
+    };
+    serve::serve(data_dir, &opts, providers, Some(host), desktop)
 }
 
-fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result<()> {
+/// A client of the daemon: token from `BOT_API_TOKEN` or the token file,
+/// address from `--url` / `--port`.
+fn make_client(cli: &Cli, data_dir: &std::path::Path) -> Result<Client> {
     let token = match std::env::var("BOT_API_TOKEN") {
         Ok(t) if !t.trim().is_empty() => t.trim().to_owned(),
         _ => daemon_api::read_token(data_dir).map_err(|e| {
@@ -523,7 +570,60 @@ fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Resul
         .url
         .clone()
         .unwrap_or_else(|| format!("http://127.0.0.1:{}", cli.port));
-    let c = Client::new(&base, token);
+    Ok(Client::new(&base, token))
+}
+
+fn current_thread_runtime() -> Result<tokio::runtime::Runtime> {
+    Ok(tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?)
+}
+
+/// `bot channels telegram setup|status` (the ones that read the secret store).
+fn run_telegram(
+    cli: &Cli,
+    data_dir: &std::path::Path,
+    store: &dyn SecretStore,
+    action: &TelegramCmd,
+    say: &mut dyn FnMut(&str),
+) -> Result<()> {
+    match action {
+        TelegramCmd::Setup { token_env } => {
+            let token = read_value(
+                token_env.as_deref(),
+                "Telegram bot token (from @BotFather; input hidden)",
+            )?;
+            channels::telegram_setup(store, data_dir, &token, say)
+        }
+        TelegramCmd::Status => {
+            let configured = channels::telegram_configured(store)?;
+            let enabled = channels::telegram_enabled(data_dir);
+            // The daemon's view; unreachable / unauthorised just means "not running".
+            let daemon = make_client(cli, data_dir).ok().and_then(|c| {
+                current_thread_runtime()
+                    .ok()?
+                    .block_on(c.request(reqwest::Method::GET, "/v1/channels", None))
+                    .ok()?
+                    .as_array()?
+                    .iter()
+                    .find(|ch| ch["id"] == "telegram")
+                    .cloned()
+            });
+            channels::telegram_status(
+                configured,
+                enabled,
+                daemon.as_ref(),
+                channels::paired_users_on_disk(data_dir),
+                cli.json,
+                &mut std::io::stdout().lock(),
+            )
+        }
+        TelegramCmd::Pair | TelegramCmd::Disable => Ok(()),
+    }
+}
+
+fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result<()> {
+    let c = make_client(cli, data_dir)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
@@ -570,6 +670,12 @@ fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Resul
                 remote::grants_revoke(&c, bot_id, target, json, &mut out).await
             }
             Command::Schedules { action } => run_schedules(&c, action, json, &mut out).await,
+            Command::Channels {
+                action:
+                    ChannelsCmd::Telegram {
+                        action: TelegramCmd::Pair,
+                    },
+            } => channels::telegram_pair(&c, json, &mut out).await,
             Command::Approve {
                 tool_call_id,
                 scope,
@@ -673,6 +779,38 @@ mod tests {
         let c = load_catalog(None).unwrap();
         assert!(c.get("openrouter").is_some());
         assert_eq!(c.len(), BUILTIN_CATALOG.len());
+    }
+
+    #[test]
+    fn parses_channels_telegram_commands() {
+        let parse = |args: &[&str]| {
+            let mut v = vec!["bot", "channels", "telegram"];
+            v.extend_from_slice(args);
+            Cli::try_parse_from(v).map(|c| c.command)
+        };
+        for (arg, want) in [
+            ("pair", TelegramCmd::Pair),
+            ("status", TelegramCmd::Status),
+            ("disable", TelegramCmd::Disable),
+            ("setup", TelegramCmd::Setup { token_env: None }),
+        ] {
+            assert!(
+                matches!(
+                    parse(&[arg]).unwrap(),
+                    Some(Command::Channels { action: ChannelsCmd::Telegram { action } }) if action == want
+                ),
+                "{arg}"
+            );
+        }
+        assert!(matches!(
+            parse(&["setup", "--token-env", "TG"]).unwrap(),
+            Some(Command::Channels { action: ChannelsCmd::Telegram {
+                action: TelegramCmd::Setup { token_env: Some(ref v) } } }) if v == "TG"
+        ));
+        // The token is never an argv value.
+        assert!(parse(&["setup", "123:abc"]).is_err());
+        assert!(parse(&[]).is_err());
+        assert!(parse(&["pair", "extra"]).is_err());
     }
 
     #[test]

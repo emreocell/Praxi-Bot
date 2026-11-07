@@ -475,6 +475,81 @@
         ]
       }
     },
+    "/v1/channels": {
+      "get": {
+        "tags": [
+          "channels"
+        ],
+        "summary": "Messaging channels hosted by the daemon (Telegram).",
+        "operationId": "list_channels",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ChannelDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/channels/telegram/pair-code": {
+      "post": {
+        "tags": [
+          "channels"
+        ],
+        "summary": "Create a one-time pairing code for the Telegram channel (valid 10 minutes;\nthe user sends `/pair <code>` to the bot).",
+        "operationId": "telegram_pair_code",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairCodeDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "the channel is not running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/chats": {
       "get": {
         "tags": [
@@ -799,7 +874,7 @@
           "events"
         ],
         "summary": "Documentation stub for the SSE route (the handler lives in `sse.rs`).",
-        "description": "Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the\nSSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local\n`seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without\nit the stream covers all runs: the SSE `id` is a daemon-wide, strictly\nincreasing `gseq` (persisted) and `Last-Event-ID: <gseq>` replays every\nmissed event of every run, in order, before going live.  Browsers cannot set\nheaders on `EventSource`, so this route (and only this one) also accepts the\nAPI token as the `token` query parameter (Host / Origin checks still apply;\nthe token is compared in constant time; beware that URLs may be logged).",
+        "description": "Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the\nSSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local\n`seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without\nit the stream covers all runs: the SSE `id` is a daemon-wide, strictly\nincreasing `gseq` (persisted) and `Last-Event-ID: <gseq>` replays every\nmissed event of every run, in order, before going live.  Browsers cannot set\nheaders on `EventSource`, so this route (and only this one) also accepts the\nAPI token as the `token` query parameter (Host / Origin checks still apply;\nthe token is compared in constant time; beware that URLs may be logged).\n\nThe daemon-wide stream (no `run_id`) also carries `schedule_changed` events\n(`dto::ScheduleChanged`: `{\"type\":\"schedule_changed\",\"schedule_id\",\"kind\"}`,\nkind `created` / `updated` / `toggled` / `deleted`) when a schedule is changed\nthrough the API.  They have no SSE `id`, are not replayed and are not\nenvelopes: treat them as a hint to refetch `/v1/schedules`.",
         "operationId": "events_doc",
         "parameters": [
           {
@@ -2071,11 +2146,46 @@
           }
         }
       },
+      "ChannelDto": {
+        "type": "object",
+        "description": "A messaging channel (e.g. Telegram) as seen by the daemon.",
+        "required": [
+          "id",
+          "configured",
+          "enabled",
+          "running",
+          "paired_users"
+        ],
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "description": "Credentials are stored."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "The user has not turned the channel off."
+          },
+          "id": {
+            "type": "string",
+            "description": "Channel id (`telegram`)."
+          },
+          "paired_users": {
+            "type": "integer",
+            "description": "Number of paired (allowed) remote users.",
+            "minimum": 0
+          },
+          "running": {
+            "type": "boolean",
+            "description": "The channel is running inside this daemon."
+          }
+        }
+      },
       "ChatDto": {
         "type": "object",
         "description": "A chat thread.",
         "required": [
           "id",
+          "chat_id",
           "bot_id",
           "title",
           "created_at_ms"
@@ -2085,6 +2195,11 @@
             "type": "string",
             "format": "uuid",
             "description": "Bot the chat talks to."
+          },
+          "chat_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Same as `id`, under the name clients that treat `POST /v1/chats` as\n\"create chat\" expect."
           },
           "created_at_ms": {
             "type": "integer",
@@ -2547,6 +2662,26 @@
           "queue"
         ]
       },
+      "PairCodeDto": {
+        "type": "object",
+        "description": "A one-time pairing code (`POST /v1/channels/telegram/pair-code`).",
+        "required": [
+          "code",
+          "expires_in_secs"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The 6-digit code the user sends as `/pair <code>`."
+          },
+          "expires_in_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds until it expires.",
+            "minimum": 0
+          }
+        }
+      },
       "ParseSchedule": {
         "type": "object",
         "description": "Body of `POST /v1/schedules/parse`.",
@@ -2741,6 +2876,10 @@
             "format": "uuid",
             "description": "Bot executing it."
           },
+          "can_remember": {
+            "type": "boolean",
+            "description": "Whether `POST /v1/runs/{id}/remember` would accept this run (same\nchecks; nothing is cached by asking)."
+          },
           "chat_id": {
             "type": [
               "string",
@@ -2778,6 +2917,14 @@
             "format": "uuid",
             "description": "The run that spawned this one when it is a subagent run."
           },
+          "schedule_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The schedule that started this run (`null` for runs the user started)."
+          },
           "state": {
             "type": "string",
             "description": "`pending` / `running` / `waiting_approval` / `paused` / `succeeded` / `failed` / `cancelled`."
@@ -2786,6 +2933,40 @@
             "type": "integer",
             "format": "int64",
             "description": "Last state change."
+          }
+        }
+      },
+      "ScheduleChangeKind": {
+        "type": "string",
+        "description": "What happened to a schedule (see [`ScheduleChanged`]).",
+        "enum": [
+          "created",
+          "updated",
+          "toggled",
+          "deleted"
+        ]
+      },
+      "ScheduleChanged": {
+        "type": "object",
+        "description": "Data of the `schedule_changed` SSE event of the daemon-wide stream\n(`GET /v1/events` without `run_id`).  It is a notification only (refetch\nthe schedule): it has no SSE `id`, is not replayed with `Last-Event-ID`\nand is not part of `protocol::Envelope`.",
+        "required": [
+          "type",
+          "schedule_id",
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ScheduleChangeKind",
+            "description": "What happened."
+          },
+          "schedule_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The schedule."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `schedule_changed`."
           }
         }
       },
@@ -3085,6 +3266,9 @@
     },
     {
       "name": "schedules"
+    },
+    {
+      "name": "channels"
     }
   ]
 }
