@@ -80,6 +80,7 @@ dependencies = [
  "tokio-util",
  "toml 0.8.2",
  "tool-registry",
+ "tracing",
  "uuid",
  "workflow-replay",
 ]
@@ -99,6 +100,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tool-registry",
+ "tracing",
  "wiremock",
 ]
 
