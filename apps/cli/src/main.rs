@@ -1,8 +1,11 @@
 //! Command-line interface entry point for the Praxi-Bot agent (`bot`).
 
+mod client;
 mod commands;
 mod presets;
 mod prompt;
+mod remote;
+mod serve;
 mod wizard;
 
 use std::path::PathBuf;
@@ -11,6 +14,7 @@ use clap::{Args, Parser, Subcommand};
 use provider_catalog::{Catalog, ProviderEntry};
 use secret_store::{BackendChoice, SecretStore, SecretValue, open_store};
 
+use client::{Client, ExitError};
 use presets::{BotPreset, Lang, PermissionPreset};
 use prompt::{TerminalPrompter, ask_passphrase};
 use wizard::{NetConnector, ProviderChoice, SetupArgs, SetupEnv};
@@ -38,6 +42,16 @@ struct Cli {
         env = "BOT_SECRETS_BACKEND"
     )]
     secrets_backend: BackendChoice,
+    /// Machine-readable output (JSON / NDJSON on stdout) for status, chat,
+    /// bots and approve. Errors always go to stderr as text.
+    #[arg(long, global = true)]
+    json: bool,
+    /// TCP port of the daemon (`serve` binds 127.0.0.1:PORT; clients connect to it).
+    #[arg(long, global = true, env = "BOT_PORT", default_value_t = daemon_api::DEFAULT_PORT)]
+    port: u16,
+    /// Full daemon URL for client commands (overrides --port).
+    #[arg(long, global = true, env = "BOT_URL")]
+    url: Option<String>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -55,6 +69,61 @@ enum Command {
     Providers {
         #[command(subcommand)]
         action: ProvidersCmd,
+    },
+    /// Run the local daemon API (127.0.0.1 only) until Ctrl-C.
+    ///
+    /// Exit codes of the client commands: 0 ok, 1 error, 2 usage, 3 daemon
+    /// unreachable, 4 auth rejected, 5 not found, 6 request rejected, 7 run failed.
+    Serve {
+        /// Use the built-in echo provider instead of configured providers.
+        #[cfg(feature = "fake-provider")]
+        #[arg(long)]
+        fake_provider: bool,
+    },
+    /// Show daemon status (also verifies the API token).
+    Status,
+    /// Send a message to a bot and stream the answer.
+    Chat {
+        /// Bot id (see `bot bots list`).
+        bot_id: String,
+        /// The message.
+        message: String,
+        /// Continue an existing chat instead of starting a new one.
+        #[arg(long)]
+        chat: Option<String>,
+        /// What to do if the chat has a running turn.
+        #[arg(long, value_parser = ["steer", "queue"], default_value = "queue")]
+        mode: String,
+    },
+    /// Manage bots on the daemon.
+    Bots {
+        #[command(subcommand)]
+        action: BotsCmd,
+    },
+    /// Approve (or deny) a pending tool call.
+    Approve {
+        /// Tool call id (shown in the chat stream / `approval_needed` event).
+        tool_call_id: String,
+        /// How far the approval reaches.
+        #[arg(long, value_parser = ["once", "this_chat", "always"], default_value = "once")]
+        scope: String,
+        /// Deny instead of approving.
+        #[arg(long)]
+        deny: bool,
+        /// Reason given to the model on deny.
+        #[arg(long, requires = "deny")]
+        reason: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum BotsCmd {
+    /// List bots.
+    List,
+    /// Add a bot from a profile TOML file.
+    Add {
+        /// Path of the profile file.
+        file: PathBuf,
     },
 }
 
@@ -189,7 +258,7 @@ fn read_value(env_var: Option<&str>, prompt: &str) -> Result<SecretValue> {
 fn main() {
     if let Err(e) = run() {
         eprintln!("error: {e}");
-        std::process::exit(1);
+        std::process::exit(e.downcast_ref::<ExitError>().map_or(1, |x| x.code));
     }
 }
 
@@ -201,6 +270,15 @@ fn run() -> Result<()> {
     };
     let data_dir = data_dir(&cli)?;
     let mut say = |s: &str| println!("{s}");
+
+    // Daemon commands (no secret store needed, except `serve` with real providers).
+    match command {
+        Command::Serve { .. } => return run_serve(&cli, command, &data_dir),
+        Command::Status | Command::Chat { .. } | Command::Bots { .. } | Command::Approve { .. } => {
+            return run_client(&cli, command, &data_dir);
+        }
+        _ => {}
+    }
 
     // Commands that need no secret store.
     match command {
@@ -234,6 +312,11 @@ fn run() -> Result<()> {
             }
             SecretsCmd::Delete { name } => commands::secrets_delete(store, name),
         },
+        Command::Serve { .. }
+        | Command::Status
+        | Command::Chat { .. }
+        | Command::Bots { .. }
+        | Command::Approve { .. } => Ok(()),
         Command::Providers { action } => match action {
             ProvidersCmd::Add {
                 id,
@@ -275,6 +358,94 @@ fn run() -> Result<()> {
             ProvidersCmd::List | ProvidersCmd::Default { .. } => Ok(()),
         },
     }
+}
+
+fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result<()> {
+    #[cfg(feature = "fake-provider")]
+    if let Command::Serve {
+        fake_provider: true,
+    } = command
+    {
+        let providers =
+            agent_core::Providers::single(std::sync::Arc::new(daemon_api::fake::FakeProvider));
+        return serve::serve(data_dir, cli.port, providers, cli.json);
+    }
+    let _ = command;
+    let (store, kind) = open_store(cli.secrets_backend, data_dir, &ask_passphrase)?;
+    eprintln!("(secret backend: {kind:?})");
+    let catalog = load_catalog(cli.catalog_dir.as_ref())?;
+    let providers = serve::build_providers(data_dir, &catalog, store.as_ref(), &mut |w| {
+        eprintln!("warning: {w}");
+    })?;
+    serve::serve(data_dir, cli.port, providers, cli.json)
+}
+
+fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result<()> {
+    let token = match std::env::var("BOT_API_TOKEN") {
+        Ok(t) if !t.trim().is_empty() => t.trim().to_owned(),
+        _ => daemon_api::read_token(data_dir).map_err(|e| {
+            client::fail(
+                client::exit::AUTH,
+                format!(
+                    "cannot read the API token ({}): {e}; run `bot serve` once or set BOT_API_TOKEN",
+                    daemon_api::token_path(data_dir).display()
+                ),
+            )
+        })?,
+    };
+    let base = cli
+        .url
+        .clone()
+        .unwrap_or_else(|| format!("http://127.0.0.1:{}", cli.port));
+    let c = Client::new(&base, token);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let mut out = std::io::stdout().lock();
+    let json = cli.json;
+    rt.block_on(async {
+        match command {
+            Command::Status => remote::status(&c, json, &mut out).await,
+            Command::Bots {
+                action: BotsCmd::List,
+            } => remote::bots_list(&c, json, &mut out).await,
+            Command::Bots {
+                action: BotsCmd::Add { file },
+            } => remote::bots_add(&c, file, json, &mut out).await,
+            Command::Chat {
+                bot_id,
+                message,
+                chat,
+                mode,
+            } => {
+                let opts = remote::ChatOpts {
+                    bot_id,
+                    message,
+                    chat_id: chat.as_deref(),
+                    mode,
+                };
+                remote::chat(&c, &opts, json, &mut out).await
+            }
+            Command::Approve {
+                tool_call_id,
+                scope,
+                deny,
+                reason,
+            } => {
+                remote::approve(
+                    &c,
+                    tool_call_id,
+                    scope,
+                    *deny,
+                    reason.as_deref(),
+                    json,
+                    &mut out,
+                )
+                .await
+            }
+            _ => Ok(()),
+        }
+    })
 }
 
 fn run_setup(c: &SetupCmd, env: &SetupEnv<'_>) -> Result<()> {
@@ -327,6 +498,40 @@ mod tests {
         let c = load_catalog(None).unwrap();
         assert!(c.get("openrouter").is_some());
         assert_eq!(c.len(), BUILTIN_CATALOG.len());
+    }
+
+    #[test]
+    fn parses_daemon_commands() {
+        let cli = Cli::try_parse_from(["bot", "serve", "--port", "0"]).unwrap();
+        assert_eq!(cli.port, 0);
+        assert!(matches!(cli.command, Some(Command::Serve { .. })));
+        let cli = Cli::try_parse_from(["bot", "--json", "chat", "b1", "hello", "--mode", "steer"])
+            .unwrap();
+        assert!(cli.json);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Chat { ref mode, .. }) if mode == "steer"
+        ));
+        let cli = Cli::try_parse_from(["bot", "approve", "c1", "--scope", "always"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Approve { deny: false, .. })
+        ));
+        assert!(Cli::try_parse_from(["bot", "approve", "c1", "--scope", "bogus"]).is_err());
+        assert!(Cli::try_parse_from(["bot", "approve", "c1", "--reason", "x"]).is_err());
+        assert!(Cli::try_parse_from(["bot", "chat", "b1"]).is_err());
+        assert!(matches!(
+            Cli::try_parse_from(["bot", "bots", "add", "p.toml"])
+                .unwrap()
+                .command,
+            Some(Command::Bots {
+                action: BotsCmd::Add { .. }
+            })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["bot", "status"]).unwrap().command,
+            Some(Command::Status)
+        ));
     }
 
     #[test]

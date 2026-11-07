@@ -24,6 +24,7 @@ members = [
     "crates/plugin-host",
     "crates/storage",
     "crates/secret-store",
+    "crates/daemon-api",
     "apps/cli",
     "apps/desktop",
     "apps/node-agent",
