@@ -1,0 +1,215 @@
+.overlayViewport {
+  position: fixed;
+  inset: var(--space-0);
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  user-select: none;
+  overflow: hidden;
+  background-color: transparent;
+}
+
+.humanControlBannerWrap {
+  position: fixed;
+  top: var(--space-6);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  pointer-events: none;
+}
+
+.humanControlBanner {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: var(--size-overlay-banner-max);
+  padding: var(--space-3) var(--space-5);
+  background-color: var(--color-surface);
+  border: var(--size-border-thick) solid var(--color-warning);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-overlay), var(--shadow-human-banner);
+  text-align: center;
+}
+
+.humanControlBadgeRow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.humanControlDot {
+  width: var(--size-overlay-dot);
+  height: var(--size-overlay-dot);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-warning);
+}
+
+.humanControlTitle {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text);
+  line-height: var(--line-height-tight);
+}
+
+.humanControlHint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  line-height: var(--line-height-normal);
+}
+
+.targetHighlight {
+  position: fixed;
+  left: var(--target-x, var(--space-0));
+  top: var(--target-y, var(--space-0));
+  width: var(--target-w, var(--size-overlay-target-min));
+  height: var(--target-h, var(--size-overlay-target-min));
+  min-width: var(--size-overlay-target-min);
+  min-height: var(--size-overlay-target-min);
+  border: var(--size-border-heavy) solid var(--color-accent);
+  border-radius: var(--radius-md);
+  background-color: var(--color-overlay-target-bg);
+  box-shadow: var(--shadow-target);
+  pointer-events: none;
+  transition:
+    left var(--motion-duration-fast) var(--motion-easing-standard),
+    top var(--motion-duration-fast) var(--motion-easing-standard),
+    width var(--motion-duration-fast) var(--motion-easing-standard),
+    height var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.targetAnimated {
+  animation: targetPulse var(--motion-duration-pulse)
+    var(--motion-easing-standard) infinite;
+}
+
+.targetReducedMotion {
+  transition: none;
+  animation: none;
+}
+
+.targetLabelPill {
+  position: absolute;
+  left: var(--space-0);
+  bottom: calc(100% + var(--space-2));
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-surface);
+  border: var(--size-border) solid var(--color-accent);
+  box-shadow: var(--shadow-overlay);
+  white-space: nowrap;
+}
+
+.targetLabelPillBelow {
+  bottom: auto;
+  top: calc(100% + var(--space-2));
+}
+
+.actionTag {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-inverse);
+  background-color: var(--color-accent);
+  padding: var(--space-0) var(--space-2);
+  border-radius: var(--radius-pill);
+  line-height: var(--line-height-normal);
+}
+
+.targetLabelText {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+  line-height: var(--line-height-tight);
+}
+
+.typingPreviewPill {
+  position: absolute;
+  left: var(--space-0);
+  top: calc(100% + var(--space-2));
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: var(--size-overlay-typing-max);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+  border: var(--size-border-thick) solid var(--color-accent);
+  box-shadow: var(--shadow-overlay);
+}
+
+.typingPreviewLabel {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.typingPreviewText {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rippleAnchor {
+  position: fixed;
+  left: var(--ripple-x, var(--space-0));
+  top: var(--ripple-y, var(--space-0));
+  width: var(--size-overlay-ripple);
+  height: var(--size-overlay-ripple);
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.rippleRing {
+  position: absolute;
+  inset: var(--space-0);
+  border-radius: var(--radius-pill);
+  border: var(--size-border-heavy) solid var(--color-accent);
+  background-color: var(--color-overlay-ripple);
+}
+
+.rippleRingAnimated {
+  animation: rippleExpand var(--motion-duration-ripple)
+    var(--motion-easing-standard) forwards;
+}
+
+.rippleDot {
+  width: var(--size-overlay-dot);
+  height: var(--size-overlay-dot);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-accent);
+  box-shadow: var(--shadow-focus);
+}
+
+@keyframes targetPulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.015);
+  }
+}
+
+@keyframes rippleExpand {
+  0% {
+    transform: scale(0.35);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.75);
+    opacity: 0;
+  }
+}

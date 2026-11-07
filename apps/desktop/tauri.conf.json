@@ -11,6 +11,7 @@
     "beforeBuildCommand": "pnpm --filter desktop-ui build"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",

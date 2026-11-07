@@ -31,6 +31,22 @@ export function isReducedMotionPreferred(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
+export function subscribeReducedMotion(
+  onChange: (reduced: boolean) => void
+): () => void {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return () => {};
+  }
+  const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const handler = (event: MediaQueryListEvent) => {
+    onChange(event.matches);
+  };
+  mediaQuery.addEventListener("change", handler);
+  return () => {
+    mediaQuery.removeEventListener("change", handler);
+  };
+}
+
 export function resolveTheme(mode: ThemeMode): Theme {
   if (mode === "light") {
     return lightTheme;
@@ -80,6 +96,14 @@ export function applyTheme(theme: Theme, overrides?: ThemeOverrides): void {
     root.style.setProperty(
       "--color-accent-subtle",
       `color-mix(in srgb, ${accent} 14%, transparent)`
+    );
+    root.style.setProperty(
+      "--color-overlay-target-bg",
+      `color-mix(in srgb, ${accent} 16%, transparent)`
+    );
+    root.style.setProperty(
+      "--color-overlay-ripple",
+      `color-mix(in srgb, ${accent} 48%, transparent)`
     );
   }
 

@@ -39,3 +39,17 @@ export const DIM_PRESETS: readonly DimPreset[] = [
   { id: "medium", value: "0.45" },
   { id: "heavy", value: "0.7" }
 ] as const;
+
+export interface HotkeyPreset {
+  id: "default" | "shiftEsc" | "altShiftS";
+  value: string;
+}
+
+export const DEFAULT_STOP_HOTKEY = "Ctrl+Alt+Esc";
+
+export const HOTKEY_PRESETS: readonly HotkeyPreset[] = [
+  { id: "default", value: "Ctrl+Alt+Esc" },
+  { id: "shiftEsc", value: "Ctrl+Shift+Esc" },
+  { id: "altShiftS", value: "Alt+Shift+S" }
+] as const;
+
