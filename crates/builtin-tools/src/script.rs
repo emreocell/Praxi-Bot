@@ -266,7 +266,20 @@ impl Tool for ScriptTool {
             ctx.run_id.clone(),
             ctx.max_inline_bytes,
         ));
-        match ScriptRuntime::run(&i.code, host, limits).await {
+        // QuickJS is synchronous CPU work: a busy loop would block the async
+        // worker (and `tokio::time::timeout` cannot preempt it). Run it on the
+        // blocking pool; the engine's interrupt handler enforces the deadline.
+        let handle = tokio::runtime::Handle::current();
+        let code = i.code;
+        let joined = tokio::task::spawn_blocking(move || {
+            handle.block_on(ScriptRuntime::run(&code, host, limits))
+        })
+        .await;
+        let result = match joined {
+            Ok(r) => r,
+            Err(e) => return Err(exec_err(format!("script worker failed: {e}"))),
+        };
+        match result {
             Ok(out) => {
                 let data = json!({
                     "result": out.result,
@@ -351,6 +364,38 @@ mod tests {
             .unwrap()
             .call(&ToolContext::default(), json!({"code": code}))
             .await
+    }
+
+    #[tokio::test]
+    async fn busy_loop_does_not_block_the_async_runtime() {
+        // Default #[tokio::test] is a current_thread runtime.
+        let (reg, _gate, _calls) = setup(vec![]);
+        let ticks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let t2 = ticks.clone();
+        let ticker = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                t2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+        let started = std::time::Instant::now();
+        let err = reg
+            .get(SCRIPT_TOOL_NAME)
+            .unwrap()
+            .call(
+                &ToolContext::default(),
+                json!({"code": "while (true) {}", "timeout": 1}),
+            )
+            .await
+            .unwrap_err();
+        ticker.abort();
+        assert!(err.to_string().to_lowercase().contains("time"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(8));
+        assert!(
+            ticks.load(std::sync::atomic::Ordering::SeqCst) >= 5,
+            "runtime was starved: {} ticks",
+            ticks.load(std::sync::atomic::Ordering::SeqCst)
+        );
     }
 
     #[tokio::test]

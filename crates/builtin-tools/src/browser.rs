@@ -612,6 +612,31 @@ struct EvalIn {
     js: String,
 }
 
+/// Only `http`, `https` and `about:blank` may be opened. `file:`, `javascript:`,
+/// `data:`, `chrome:` and friends would bypass the Fs and Script permission
+/// categories (and `view-source:`/`blob:` can wrap them).
+fn check_open_url(url: &str) -> Result<(), ToolError> {
+    // Browsers drop ASCII tab/newline anywhere in a URL and trim control
+    // characters and spaces at the ends, so a `java<newline>script:` URL is still a scheme.
+    let cleaned: String = url
+        .trim_matches(|c: char| c.is_ascii_control() || c == ' ')
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .collect();
+    let lower = cleaned.to_ascii_lowercase();
+    let ok = lower == "about:blank"
+        || ["http://", "https://"]
+            .iter()
+            .any(|p| lower.starts_with(p) && lower.len() > p.len());
+    if ok {
+        Ok(())
+    } else {
+        Err(ToolError::InvalidInput(
+            "browser_open only accepts full http:// or https:// URLs (or about:blank)".into(),
+        ))
+    }
+}
+
 impl BrowserTool {
     /// Ask the control gate before a mutating action, when the browser is a
     /// visible window on the user's desktop.
@@ -639,6 +664,7 @@ impl BrowserTool {
         let text = match self.op {
             Op::Open => {
                 let i: OpenIn = parse(input)?;
+                check_open_url(&i.url)?;
                 self.gate(run_id, "open", i.url.clone()).await?;
                 d.open(&i.url, i.profile.as_deref()).await
             }
@@ -820,6 +846,43 @@ mod tests {
             ContentPart::Text { text } => text.clone(),
             _ => panic!(),
         }
+    }
+
+    #[tokio::test]
+    async fn browser_open_rejects_non_web_schemes() {
+        let (_d, fake, t) = build();
+        let ctx = ToolContext::default();
+        for bad in [
+            "file:///C:/Users/x/.ssh/id_rsa",
+            "javascript:alert(1)",
+            " JaVaScRiPt:alert(1)",
+            "java\nscript:alert(1)",
+            "data:text/html,<script>1</script>",
+            "chrome://settings",
+            "view-source:https://example.com",
+            "blob:https://example.com/x",
+            "example.com",
+            "https://",
+            "",
+        ] {
+            let err = get(&t, "browser_open")
+                .call(&ctx, json!({"url": bad}))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, ToolError::InvalidInput(_)), "{bad}: {err}");
+        }
+        assert!(fake.calls.lock().is_empty());
+        for good in [
+            "http://localhost:3000/a",
+            "HTTPS://example.com",
+            "about:blank",
+        ] {
+            get(&t, "browser_open")
+                .call(&ctx, json!({"url": good}))
+                .await
+                .unwrap();
+        }
+        assert_eq!(fake.calls.lock().len(), 3);
     }
 
     #[tokio::test]
