@@ -196,7 +196,8 @@ else
 fi
 
 if [[ -n "${EXPECTED_SHA}" ]]; then
-  ACTUAL_SHA="$(sha256sum "${WORK}/${ASSET}" | awk '{print $1}')"
+  ACTUAL_SHA="$(sha256sum "${WORK}/${ASSET}" | awk '{print tolower($1)}')"
+  EXPECTED_SHA="${EXPECTED_SHA,,}"
   [[ "${ACTUAL_SHA}" == "${EXPECTED_SHA}" ]] || die "SHA-256 mismatch (expected ${EXPECTED_SHA}, got ${ACTUAL_SHA})"
   log "checksum OK"
 else
