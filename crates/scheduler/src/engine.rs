@@ -19,7 +19,7 @@ use crate::clock::{Clock, SystemClock};
 use crate::error::{Result, SchedulerError};
 use crate::model::{MisfirePolicy, Schedule, ScheduleSpec};
 use crate::store::ScheduleStore;
-use crate::webhook::prepare_webhook;
+use crate::webhook::{PendingReplay, ReplayGuard, WebhookMeta, prepare_webhook};
 
 /// Discrepancy between wall-clock delta and monotonic delta (in milliseconds)
 /// above which a wall-clock jump (OS sleep/resume, DST shift, manual clock
@@ -66,6 +66,7 @@ struct Inner {
     wall_jumps: AtomicU64,
     req_seq: AtomicU64,
     pass_tx: watch::Sender<u64>,
+    replay_guard: ReplayGuard,
 }
 
 /// Handle to the running scheduler engine.
@@ -117,6 +118,7 @@ impl Scheduler {
             wall_jumps: AtomicU64::new(0),
             req_seq: AtomicU64::new(0),
             pass_tx,
+            replay_guard: ReplayGuard::default(),
         });
 
         let init_wall = inner.clock.wall_ms();
@@ -153,12 +155,37 @@ impl Scheduler {
     /// Returns an error if the schedule or trigger is missing, disabled, the
     /// signature is invalid, or execution fails.
     pub async fn handle_webhook(&self, id: TaskId, body: &str, signature: &str) -> Result<()> {
+        self.handle_webhook_with_meta(id, body, signature, &WebhookMeta::default())
+            .await
+    }
+
+    /// As [`Self::handle_webhook`] with optional replay-protection metadata.
+    ///
+    /// # Errors
+    /// As [`Self::handle_webhook`]; a replayed delivery id or stale timestamp
+    /// yields [`SchedulerError::InvalidSignature`].
+    pub async fn handle_webhook_with_meta(
+        &self,
+        id: TaskId,
+        body: &str,
+        signature: &str,
+        meta: &WebhookMeta,
+    ) -> Result<()> {
         let now_ms = self.inner.clock.wall_ms();
-        let fired = prepare_webhook(&self.inner.store, id, body, signature, now_ms)?;
+        let (fired, pending) = prepare_webhook(
+            &self.inner.store,
+            id,
+            body,
+            signature,
+            now_ms,
+            meta,
+            Some(&self.inner.replay_guard),
+        )?;
         // Same per-schedule concurrency limit (1) as timer-driven runs.
         let Some(_guard) = try_acquire_in_flight(&self.inner, &fired) else {
             return Err(SchedulerError::Busy(id.to_string()));
         };
+        self.commit_replay(pending, now_ms)?;
         self.inner.executor.execute(&fired).await
     }
 
@@ -170,13 +197,52 @@ impl Scheduler {
     /// # Errors
     /// As [`Self::handle_webhook`], except execution errors (those are logged).
     pub fn trigger_webhook(&self, id: TaskId, body: &str, signature: &str) -> Result<()> {
+        self.trigger_webhook_with_meta(id, body, signature, &WebhookMeta::default())
+    }
+
+    /// As [`Self::trigger_webhook`] with optional replay-protection metadata.
+    ///
+    /// # Errors
+    /// As [`Self::trigger_webhook`]; a replayed delivery id or stale timestamp
+    /// yields [`SchedulerError::InvalidSignature`].
+    pub fn trigger_webhook_with_meta(
+        &self,
+        id: TaskId,
+        body: &str,
+        signature: &str,
+        meta: &WebhookMeta,
+    ) -> Result<()> {
         let now_ms = self.inner.clock.wall_ms();
-        let fired = prepare_webhook(&self.inner.store, id, body, signature, now_ms)?;
+        let (fired, pending) = prepare_webhook(
+            &self.inner.store,
+            id,
+            body,
+            signature,
+            now_ms,
+            meta,
+            Some(&self.inner.replay_guard),
+        )?;
         let Some(guard) = try_acquire_in_flight(&self.inner, &fired) else {
             return Err(SchedulerError::Busy(id.to_string()));
         };
+        self.commit_replay(pending, now_ms)?;
         spawn_executions(&self.inner, fired, 1, guard);
         Ok(())
+    }
+
+    /// Remember an accepted webhook request; a replay that raced past the
+    /// early check is refused here (the in-flight slot is released on return).
+    fn commit_replay(&self, pending: Option<PendingReplay>, now_ms: i64) -> Result<()> {
+        match pending {
+            Some(p) => {
+                if self.inner.replay_guard.commit(p, now_ms) {
+                    Ok(())
+                } else {
+                    Err(SchedulerError::InvalidSignature)
+                }
+            }
+            None => Ok(()),
+        }
     }
 
     /// Fire schedule `id` now (`run-now`), in the background, without touching

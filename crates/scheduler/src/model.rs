@@ -374,20 +374,13 @@ impl Payload {
             Self::AgentPrompt { text } => Self::AgentPrompt {
                 text: text.replace("{input}", body),
             },
-            Self::Workflow { name, params } => {
-                let mut rendered = substitute_input_in_value(params, body);
-                if let Value::Object(ref mut map) = rendered {
-                    if !map.contains_key("input") && !value_contains_input_placeholder(params) {
-                        map.insert("input".to_owned(), Value::String(body.to_owned()));
-                    }
-                } else if rendered.is_null() {
-                    rendered = serde_json::json!({ "input": body });
-                }
-                Self::Workflow {
-                    name: name.clone(),
-                    params: rendered,
-                }
-            }
+            // `input` is only injected through an explicit `{input}` placeholder:
+            // most workflows do not declare an `input` parameter and
+            // `bind_params` rejects undeclared ones. Null params stay null.
+            Self::Workflow { name, params } => Self::Workflow {
+                name: name.clone(),
+                params: substitute_input_in_value(params, body),
+            },
             Self::Tool { name, input } => {
                 let rendered = if input.is_null() {
                     Value::String(body.to_owned())
@@ -400,15 +393,6 @@ impl Payload {
                 }
             }
         }
-    }
-}
-
-fn value_contains_input_placeholder(v: &Value) -> bool {
-    match v {
-        Value::String(s) => s.contains("{input}"),
-        Value::Array(arr) => arr.iter().any(value_contains_input_placeholder),
-        Value::Object(map) => map.values().any(value_contains_input_placeholder),
-        _ => false,
     }
 }
 

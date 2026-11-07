@@ -96,17 +96,166 @@ pub fn referenced(t: &str) -> Result<Vec<String>, WorkflowError> {
 /// # Errors
 /// Malformed template or an unbound parameter.
 pub fn render(t: &str, vars: &Vars) -> Result<String, WorkflowError> {
+    render_with(t, vars, |v| Ok(v.to_owned()))
+}
+
+fn render_with(
+    t: &str,
+    vars: &Vars,
+    quote: impl Fn(&str) -> Result<String, WorkflowError>,
+) -> Result<String, WorkflowError> {
     let mut out = String::new();
     for p in parse(t)? {
         match p {
             Piece::Lit(l) => out.push_str(&l),
-            Piece::Var(v) => out.push_str(
-                vars.get(v)
-                    .ok_or_else(|| WorkflowError::Template(format!("unbound parameter `{v}`")))?,
-            ),
+            Piece::Var(v) => out
+                .push_str(&quote(vars.get(v).ok_or_else(|| {
+                    WorkflowError::Template(format!("unbound parameter `{v}`"))
+                })?)?),
         }
     }
     Ok(out)
+}
+
+/// Quoting rules of the shell a command line is handed to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellDialect {
+    /// `sh` / `bash`.
+    Posix,
+    /// Windows PowerShell.
+    PowerShell,
+    /// `cmd.exe`.
+    Cmd,
+}
+
+impl ShellDialect {
+    /// Dialect for a `shell` step / `shell_run` `shell` value (`None` = host default,
+    /// the same default `shell_run` uses).
+    #[must_use]
+    pub fn from_name(name: Option<&str>) -> Self {
+        match name.map(str::to_ascii_lowercase).as_deref() {
+            Some("bash" | "sh") => Self::Posix,
+            Some("cmd") => Self::Cmd,
+            Some("powershell") => Self::PowerShell,
+            _ => {
+                if cfg!(windows) {
+                    Self::PowerShell
+                } else {
+                    Self::Posix
+                }
+            }
+        }
+    }
+
+    /// Quote `value` as exactly one literal shell word.
+    ///
+    /// # Errors
+    /// `cmd.exe` has no reliable quoting for `"`, `%`, `!` and line breaks, so
+    /// values containing them are refused.
+    pub fn quote(self, value: &str) -> Result<String, WorkflowError> {
+        match self {
+            Self::Posix => Ok(format!("'{}'", value.replace('\'', "'\\''"))),
+            Self::PowerShell => {
+                // PowerShell also treats the typographic single quotes as delimiters.
+                let mut out = String::with_capacity(value.len() + 2);
+                out.push('\'');
+                for c in value.chars() {
+                    out.push(c);
+                    if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+                        out.push(c);
+                    }
+                }
+                out.push('\'');
+                Ok(out)
+            }
+            Self::Cmd => {
+                if value
+                    .chars()
+                    .any(|c| matches!(c, '"' | '%' | '!' | '\r' | '\n' | '\0'))
+                {
+                    return Err(WorkflowError::Template(
+                        "parameter value cannot be passed safely to cmd.exe (contains one of \" % ! or a line break); use powershell or bash".into(),
+                    ));
+                }
+                let trailing = value.chars().rev().take_while(|c| *c == '\\').count();
+                Ok(format!("\"{value}{}\"", "\\".repeat(trailing)))
+            }
+        }
+    }
+}
+
+/// Like [`render`], but every substituted parameter value is quoted as one
+/// literal word for `dialect`, so a value can never inject extra commands.
+/// Write placeholders unquoted in the template: `echo {msg}`, not `echo "{msg}"`.
+///
+/// # Errors
+/// As [`render`], plus values `dialect` cannot quote safely and templates with
+/// a placeholder inside a quoted string.
+pub fn render_shell(t: &str, vars: &Vars, dialect: ShellDialect) -> Result<String, WorkflowError> {
+    reject_quoted_placeholders(t, dialect)?;
+    render_with(t, vars, |v| dialect.quote(v))
+}
+
+/// Refuse templates where a placeholder sits inside a quoted string of the
+/// target shell: our own quoting would then nest in the author's quotes
+/// (`echo "{x}"` with `$(id)` still runs the substitution in posix, and an
+/// unescaped `&` survives in cmd).
+const BACKSLASH: char = '\u{5c}';
+
+fn reject_quoted_placeholders(t: &str, dialect: ShellDialect) -> Result<(), WorkflowError> {
+    #[derive(Clone, Copy, PartialEq)]
+    enum Q {
+        None,
+        Single,
+        Double,
+    }
+    let escape = match dialect {
+        ShellDialect::Posix => Some(BACKSLASH),
+        ShellDialect::PowerShell => Some('`'),
+        ShellDialect::Cmd => None,
+    };
+    let is_single = |c: char| match dialect {
+        ShellDialect::Posix => c == '\'',
+        ShellDialect::PowerShell => {
+            matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}')
+        }
+        ShellDialect::Cmd => false,
+    };
+    let mut q = Q::None;
+    for p in parse(t)? {
+        match p {
+            Piece::Var(v) => {
+                if q != Q::None {
+                    return Err(WorkflowError::Template(format!(
+                        "placeholder `{{{v}}}` is inside a quoted string in a shell template; \
+                         write it unquoted (values are quoted automatically): {t:?}"
+                    )));
+                }
+            }
+            Piece::Lit(l) => {
+                let mut chars = l.chars();
+                while let Some(c) = chars.next() {
+                    match q {
+                        Q::Single => {
+                            if is_single(c) {
+                                q = Q::None;
+                            }
+                        }
+                        Q::Double | Q::None => {
+                            if Some(c) == escape {
+                                chars.next();
+                            } else if c == '"' {
+                                q = if q == Q::Double { Q::None } else { Q::Double };
+                            } else if q == Q::None && is_single(c) {
+                                q = Q::Single;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Escape literal text so [`render`] returns it unchanged.
@@ -232,5 +381,55 @@ mod tests {
     #[test]
     fn referenced_lists_names() {
         assert_eq!(referenced("{a} and {b} {{c}}").unwrap(), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn shell_templates_with_quoted_placeholders_are_rejected() {
+        let v = vars(&[("x", "$(id)")]);
+        for (t, d) in [
+            ("echo \"{x}\"", ShellDialect::Posix),
+            ("echo 'a {x}'", ShellDialect::Posix),
+            ("echo \"a\" \"b {x}\"", ShellDialect::Posix),
+            ("echo \"{x}\"", ShellDialect::Cmd),
+            ("echo \"{x}\"", ShellDialect::PowerShell),
+            ("echo '{x}'", ShellDialect::PowerShell),
+        ] {
+            assert!(render_shell(t, &v, d).is_err(), "{t} {d:?}");
+        }
+        // Closed quotes, escaped quotes and quotes inside literals are fine.
+        assert!(render_shell("echo \"a\" {x}", &v, ShellDialect::Posix).is_ok());
+        assert!(render_shell("echo \\\" {x}", &v, ShellDialect::Posix).is_ok());
+        assert!(render_shell("echo \"it's\" {x}", &v, ShellDialect::Posix).is_ok());
+        assert!(render_shell("echo '\"' {x}", &v, ShellDialect::Posix).is_ok());
+        assert!(render_shell("echo --k={x}", &v, ShellDialect::Posix).is_ok());
+    }
+
+    #[test]
+    fn shell_rendering_quotes_values() {
+        let v = vars(&[("x", "a'b; rm -rf /")]);
+        assert_eq!(
+            render_shell("echo {x}", &v, ShellDialect::Posix).unwrap(),
+            "echo 'a'\\''b; rm -rf /'"
+        );
+        assert_eq!(
+            render_shell("echo {x}", &v, ShellDialect::PowerShell).unwrap(),
+            "echo 'a''b; rm -rf /'"
+        );
+        assert_eq!(
+            render_shell(
+                "echo {x}",
+                &vars(&[("x", "\u{2019}; calc")]),
+                ShellDialect::PowerShell
+            )
+            .unwrap(),
+            "echo '\u{2019}\u{2019}; calc'"
+        );
+        assert!(
+            render_shell("echo {x}", &vars(&[("x", "a\" & calc")]), ShellDialect::Cmd).is_err()
+        );
+        assert_eq!(
+            render_shell("echo {x}", &vars(&[("x", "a & b")]), ShellDialect::Cmd).unwrap(),
+            "echo \"a & b\""
+        );
     }
 }

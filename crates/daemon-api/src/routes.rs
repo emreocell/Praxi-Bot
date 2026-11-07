@@ -1277,8 +1277,11 @@ pub(crate) async fn parse_schedule(
 
 /// Fire a schedule from outside.  No bearer token: the body is authenticated
 /// with `X-Signature-256: sha256=<hex HMAC-SHA256(secret, body)>` (the secret
-/// is the schedule's `webhook_secret`).  Host / Origin checks still apply and
-/// the body may be at most 256 KB.  The body replaces `{input}` in the payload.
+/// is the schedule's `webhook_secret`).  Optional replay protection:
+/// `X-Webhook-Timestamp` (Unix ms; then the HMAC must cover `"{timestamp}.{body}"`
+/// and the timestamp must be within 5 minutes) and `X-Delivery-Id` /
+/// `X-GitHub-Delivery` (enables duplicate detection).  Host / Origin checks still
+/// apply and the body may be at most 256 KB.  The body replaces `{input}` in the payload.
 /// `202` once accepted (the run goes on in the background).
 #[utoipa::path(post, path = "/v1/webhooks/{id}", tag = "schedules",
     params(("id" = Uuid, Path, description = "Schedule id"),
@@ -1303,7 +1306,27 @@ pub(crate) async fn webhook(
         .unwrap_or_default();
     let text = std::str::from_utf8(&body)
         .map_err(|_| ApiError::bad_request("the body must be UTF-8 text"))?;
-    s.scheduler()?.trigger_webhook(sid, text, signature)?;
+    let header = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+    };
+    let meta = scheduler::WebhookMeta {
+        delivery_id: header("x-delivery-id")
+            .or_else(|| header("x-github-delivery"))
+            .map(str::to_owned),
+        timestamp_ms: header("x-webhook-timestamp").and_then(|v| v.parse().ok()),
+    };
+    // A present but unparsable timestamp must not silently downgrade to body-only auth.
+    if header("x-webhook-timestamp").is_some() && meta.timestamp_ms.is_none() {
+        return Err(ApiError::bad_request(
+            "X-Webhook-Timestamp must be Unix milliseconds",
+        ));
+    }
+    s.scheduler()?
+        .trigger_webhook_with_meta(sid, text, signature, &meta)?;
     Ok((
         StatusCode::ACCEPTED,
         Json(AcceptedResponse {
