@@ -19,6 +19,8 @@ use crate::util::{exec_err, finish_text, parse, spec};
 const MAX_LIST: usize = 500;
 const MAX_MATCHES: usize = 200;
 const MAX_SEARCH_FILE_BYTES: u64 = 2 * 1024 * 1024;
+/// Largest file `fs_read` (without a range) and `fs_edit` load into memory.
+const MAX_TEXT_BYTES: u64 = 16 * 1024 * 1024;
 const SKIP_DIRS: [&str; 4] = [".git", "node_modules", "target", ".hg"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -254,29 +256,116 @@ struct CpRestoreIn {
 }
 
 fn read_text(path: &Path) -> Result<String, ToolError> {
-    let bytes = fs::read(path).map_err(|e| exec_err(format!("read {}: {e}", path.display())))?;
+    use std::io::Read as _;
+    let too_big = || {
+        exec_err(format!(
+            "{} is larger than {} MiB; read a line range instead",
+            path.display(),
+            MAX_TEXT_BYTES / (1024 * 1024)
+        ))
+    };
+    let f = fs::File::open(path).map_err(|e| exec_err(format!("read {}: {e}", path.display())))?;
+    if f.metadata().is_ok_and(|m| m.len() > MAX_TEXT_BYTES) {
+        return Err(too_big());
+    }
+    // Bound the read even if the file grows (or reports no size, e.g. a pipe).
+    let mut bytes = Vec::new();
+    f.take(MAX_TEXT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| exec_err(format!("read {}: {e}", path.display())))?;
+    if bytes.len() as u64 > MAX_TEXT_BYTES {
+        return Err(too_big());
+    }
     if bytes.iter().take(8192).any(|b| *b == 0) {
         return Err(exec_err(format!("{} is a binary file", path.display())));
     }
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-fn do_read(i: &ReadIn) -> Result<String, ToolError> {
-    let text = read_text(Path::new(&i.path))?;
-    let Some(r) = &i.range else {
-        return Ok(text);
+/// Stream a file once, keeping only lines `start..=end` (1-based) in memory.
+/// Returns the kept lines and the total line count.
+fn read_line_range(
+    path: &Path,
+    start: usize,
+    end: usize,
+) -> Result<(Vec<String>, usize), ToolError> {
+    use std::io::{BufRead as _, Read as _};
+    let f = fs::File::open(path).map_err(|e| exec_err(format!("read {}: {e}", path.display())))?;
+    let mut r = std::io::BufReader::new(f);
+    let mut head = vec![0u8; 8192];
+    let n = {
+        let buf = r
+            .fill_buf()
+            .map_err(|e| exec_err(format!("read {}: {e}", path.display())))?;
+        let n = buf.len().min(head.len());
+        head[..n].copy_from_slice(&buf[..n]);
+        n
     };
-    let lines: Vec<&str> = text.lines().collect();
+    if head[..n].contains(&0) {
+        return Err(exec_err(format!("{} is a binary file", path.display())));
+    }
+    let too_big = |what: &str| {
+        exec_err(format!(
+            "{} {what} exceeds {} MiB; request a narrower line range",
+            path.display(),
+            MAX_TEXT_BYTES / (1024 * 1024)
+        ))
+    };
+    let mut kept = Vec::new();
+    let mut kept_bytes = 0u64;
+    let mut total = 0usize;
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        // Cap a single line so a newline-free huge file cannot exhaust memory.
+        // A line that hits the cap is an error: splitting it would silently
+        // corrupt the line numbers.
+        let got = r
+            .by_ref()
+            .take(MAX_TEXT_BYTES + 1)
+            .read_until(b'\n', &mut line)
+            .map_err(|e| exec_err(format!("read {}: {e}", path.display())))?;
+        if got == 0 {
+            break;
+        }
+        if got as u64 > MAX_TEXT_BYTES {
+            return Err(too_big("line"));
+        }
+        total += 1;
+        if total >= start && total <= end {
+            // Strip exactly one line terminator (`\n` or `\r\n`), like `str::lines`.
+            if line.last() == Some(&b'\n') {
+                line.pop();
+                if line.last() == Some(&b'\r') {
+                    line.pop();
+                }
+            }
+            // Total cap: an open or wide range must not load a huge file.
+            kept_bytes += line.len() as u64 + 1;
+            if kept_bytes > MAX_TEXT_BYTES {
+                return Err(too_big("range"));
+            }
+            kept.push(String::from_utf8_lossy(&line).into_owned());
+        }
+    }
+    Ok((kept, total))
+}
+
+fn do_read(i: &ReadIn) -> Result<String, ToolError> {
+    let Some(r) = &i.range else {
+        return read_text(Path::new(&i.path));
+    };
     let start = r.start.unwrap_or(1).max(1);
-    let end = r.end.unwrap_or(lines.len()).min(lines.len());
+    let end = r.end.unwrap_or(usize::MAX);
+    let (kept, total) = read_line_range(Path::new(&i.path), start, end)?;
+    let end = end.min(total);
     if start > end {
         return Err(exec_err(format!(
-            "range starts after the end; file has {} lines",
-            lines.len()
+            "range starts after the end; file has {total} lines"
         )));
     }
-    let mut out = format!("# {} lines {start}-{end} of {}\n", i.path, lines.len());
-    out.push_str(&lines[start - 1..end].join("\n"));
+    let mut out = format!("# {} lines {start}-{end} of {total}\n", i.path);
+    out.push_str(&kept.join("\n"));
     Ok(out)
 }
 
@@ -538,15 +627,19 @@ fn do_cp_list(sh: &Shared, run: &str) -> Result<String, ToolError> {
 }
 
 fn do_cp_restore(sh: &Shared, id: &str) -> Result<String, ToolError> {
-    let (paths, safety) = sh
+    let (paths, safety, warnings) = sh
         .checkpoints
-        .restore(id)
+        .restore_with_warnings(id)
         .map_err(|e| exec_err(format!("restore failed: {e}")))?;
-    Ok(format!(
+    let mut out = format!(
         "restored {} path(s): {} (previous state saved as {safety})",
         paths.len(),
         paths.join(", ")
-    ))
+    );
+    for w in warnings {
+        let _ = write!(out, "\nwarning: {w}");
+    }
+    Ok(out)
 }
 
 async fn blocking<T: Send + 'static>(
@@ -719,6 +812,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn read_range_is_capped_in_total_and_keeps_line_numbers() {
+        let (_d, w, t) = setup();
+        let c = ctx();
+        let file = p(&w, "big.txt");
+        // ~17 MiB in many short lines: every line is small, the total is not.
+        let line = "x".repeat(1023) + "\n";
+        fs::write(&file, line.repeat(17 * 1024)).unwrap();
+        let err = get(&t, "fs_read")
+            .call(&c, json!({"path": file, "range": {"start": 1}}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("MiB"), "{err}");
+        // A narrow range of the same file still works and counts lines right.
+        let ok = text(
+            &get(&t, "fs_read")
+                .call(&c, json!({"path": file, "range": {"start": 5, "end": 6}}))
+                .await
+                .unwrap(),
+        );
+        assert!(ok.contains("lines 5-6 of 17408"), "{ok}");
+    }
+
+    #[tokio::test]
     async fn read_range_list_search_move() {
         let (_d, w, t) = setup();
         let c = ctx();
@@ -759,6 +875,34 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("exists"));
+    }
+
+    #[tokio::test]
+    async fn oversized_files_are_not_loaded_whole() {
+        let (_d, w, t) = setup();
+        let c = ctx();
+        let file = p(&w, "big.log");
+        let f = fs::File::create(&file).unwrap();
+        drop(f);
+        fs::write(&file, "x\n".repeat(16 * 1024 * 1024 / 2 + 10)).unwrap();
+        let err = get(&t, "fs_read")
+            .call(&c, json!({"path": file}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("larger than"), "{err}");
+        let err = get(&t, "fs_edit")
+            .call(&c, json!({"path": file, "old": "x", "new": "y"}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("larger than"), "{err}");
+        // A ranged read still works by streaming.
+        let r = text(
+            &get(&t, "fs_read")
+                .call(&c, json!({"path": file, "range": {"start": 2, "end": 3}}))
+                .await
+                .unwrap(),
+        );
+        assert!(r.ends_with("\nx\nx"), "{r}");
     }
 
     #[tokio::test]

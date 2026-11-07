@@ -122,21 +122,24 @@ fn build_command(kind: ShellKind, command: &str) -> Command {
     }
 }
 
-async fn drain<R: tokio::io::AsyncRead + Unpin>(mut r: R) -> Vec<u8> {
-    let mut kept = Vec::new();
+/// Read `r` to EOF into a shared buffer (capped at `HARD_CAPTURE_BYTES`).
+///
+/// The buffer is shared so partial output survives when the task is aborted
+/// because a background grandchild keeps the pipe open.
+async fn drain<R: tokio::io::AsyncRead + Unpin>(mut r: R, kept: Arc<parking_lot::Mutex<Vec<u8>>>) {
     let mut buf = vec![0u8; 16 * 1024];
     loop {
         match r.read(&mut buf).await {
             Ok(0) | Err(_) => break,
             Ok(n) => {
-                if kept.len() < HARD_CAPTURE_BYTES {
-                    let take = n.min(HARD_CAPTURE_BYTES - kept.len());
-                    kept.extend_from_slice(&buf[..take]);
+                let mut k = kept.lock();
+                if k.len() < HARD_CAPTURE_BYTES {
+                    let take = n.min(HARD_CAPTURE_BYTES - k.len());
+                    k.extend_from_slice(&buf[..take]);
                 }
             }
         }
     }
-    kept
 }
 
 fn format_output(code: Option<i32>, stdout: &[u8], stderr: &[u8], note: Option<&str>) -> String {
@@ -186,8 +189,16 @@ impl Tool for ShellTool {
         let mut child = cmd
             .spawn()
             .map_err(|e| exec_err(format!("could not start {kind:?}: {e}")))?;
-        let out_task = tokio::spawn(drain(child.stdout.take().expect("piped stdout")));
-        let err_task = tokio::spawn(drain(child.stderr.take().expect("piped stderr")));
+        let out_buf = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let err_buf = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let mut out_task = tokio::spawn(drain(
+            child.stdout.take().expect("piped stdout"),
+            out_buf.clone(),
+        ));
+        let mut err_task = tokio::spawn(drain(
+            child.stderr.take().expect("piped stderr"),
+            err_buf.clone(),
+        ));
 
         let waited = tokio::time::timeout(timeout, child.wait()).await;
         let (code, note) = match waited {
@@ -204,18 +215,19 @@ impl Tool for ShellTool {
                 )
             }
         };
-        // Grandchildren may keep the pipes open after a kill; do not wait forever.
+        // Grandchildren may keep the pipes open after the shell exits or is
+        // killed: wait a grace period, then keep whatever was read and stop the
+        // reader tasks so they do not accumulate output in the background.
         let grace = Duration::from_secs(2);
-        let stdout = tokio::time::timeout(grace, out_task)
-            .await
-            .ok()
-            .and_then(Result::ok)
-            .unwrap_or_default();
-        let stderr = tokio::time::timeout(grace, err_task)
-            .await
-            .ok()
-            .and_then(Result::ok)
-            .unwrap_or_default();
+        let _ = tokio::time::timeout(grace, async {
+            let _ = (&mut out_task).await;
+            let _ = (&mut err_task).await;
+        })
+        .await;
+        out_task.abort();
+        err_task.abort();
+        let stdout = std::mem::take(&mut *out_buf.lock());
+        let stderr = std::mem::take(&mut *err_buf.lock());
         let text = format_output(code, &stdout, &stderr, note.as_deref());
         if let Some(n) = note {
             let out = finish_text(ctx, &self.spill_dir, text);
@@ -335,6 +347,31 @@ mod tests {
             .await
             .unwrap();
         assert!(text(&out).contains("a \"quoted\" value"), "{}", text(&out));
+    }
+
+    #[tokio::test]
+    async fn background_grandchild_holding_pipe_keeps_partial_output() {
+        // NOTE: only a true regression test on Unix (`sleep 8 &` inherits the pipe).
+        // On Windows `Start-Process -NoNewWindow` may not inherit the handles, so
+        // this can pass even without the drain/grace fix.
+        let d = tempfile::tempdir().unwrap();
+        let t = tool(d.path());
+        let cmd = if cfg!(windows) {
+            "Start-Process -NoNewWindow powershell -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 8'; echo started-bg"
+        } else {
+            "sleep 8 & echo started-bg"
+        };
+        let started = std::time::Instant::now();
+        let out = t
+            .call(
+                &ToolContext::default(),
+                json!({"command": cmd, "shell": shell_for_tests()}),
+            )
+            .await
+            .unwrap();
+        let s = text(&out);
+        assert!(s.contains("started-bg"), "{s}");
+        assert!(started.elapsed() < Duration::from_secs(7));
     }
 
     #[tokio::test]
