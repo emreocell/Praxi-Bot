@@ -327,7 +327,19 @@
       "failed": "Bu çalıştırma hatırlanamadı: {{message}}"
     },
     "stopped": "Çalışan tur durduruldu.",
-    "newChatStarted": "Yeni sohbet başlatıldı."
+    "newChatStarted": "Yeni sohbet başlatıldı.",
+    "md": {
+      "copy": "Kopyala",
+      "copied": "Kopyalandı",
+      "code": "kod"
+    },
+    "slash": {
+      "new": "Yeni bir sohbet başlat",
+      "stop": "Çalışan işi durdur",
+      "menu": "Komutlar",
+      "mentionMenu": "Botlar",
+      "noMatch": "Eşleşme yok"
+    }
   },
   "botForm": {
     "createTitle": "Yeni bot",
@@ -683,5 +695,28 @@
         "prompt": "Bot'un ne yapacağını yaz."
       }
     }
+  },
+  "palette": {
+    "title": "Komut paleti",
+    "placeholder": "Bir komut yazın…",
+    "empty": "Eşleşen komut yok",
+    "hint": "↑↓ gezin · Enter çalıştır · Esc kapat",
+    "go": {
+      "home": "Genel bakışa git",
+      "needs": "Sizi bekleyenlere git",
+      "schedules": "Zamanlanmış görevlere git",
+      "usage": "Kullanıma git",
+      "settings": "Ayarları aç"
+    },
+    "group": {
+      "navigate": "Gezinti",
+      "chat": "Sohbet",
+      "bot": "Bot",
+      "schedule": "Zamanlama"
+    },
+    "newChat": "Yeni sohbet",
+    "switchBot": "{{name}} botuna geç",
+    "runSchedule": "Şimdi çalıştır: {{name}}",
+    "scheduleStarted": "Zamanlama başlatıldı"
   }
 }

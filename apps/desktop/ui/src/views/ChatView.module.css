@@ -90,7 +90,6 @@
   color: var(--color-text);
   font-size: var(--font-size-sm);
   line-height: var(--line-height-normal);
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
@@ -255,4 +254,40 @@
 .rememberDone {
   font-size: var(--font-size-xs);
   color: var(--color-success);
+}
+
+.menu {
+  margin: var(--space-0);
+  padding: var(--space-1);
+  list-style: none;
+  max-height: calc(var(--size-control-lg) * 5);
+  overflow-y: auto;
+  border: var(--size-border) solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-elevated);
+  box-shadow: var(--shadow-overlay);
+}
+
+.menuItem {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.menuItemActive {
+  background-color: var(--color-accent-subtle);
+}
+
+.menuLabel {
+  font-weight: var(--font-weight-medium);
+}
+
+.menuDetail {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
 }
