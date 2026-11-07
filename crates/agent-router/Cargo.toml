@@ -21,6 +21,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true }
 tool-registry = { path = "../tool-registry", version = "0.1.0" }
+tracing = "0.1"
 
 [dev-dependencies]
 futures.workspace = true

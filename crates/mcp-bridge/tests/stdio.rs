@@ -237,15 +237,12 @@ async fn discovery_surface_fronts_a_large_mcp_server() {
     let mgr = McpManager::with_policy(reg.clone(), fast_policy(3));
     mgr.add_server(config("d")).await.unwrap();
 
-    // 6 MCP tools: above a threshold of 3 the model only sees the meta-tools.
+    // MCP tools are namespaced: they never count against the threshold and
+    // are never passed directly, so the model only sees the meta-tools.
     let surface = ToolSurface::new(reg.clone(), 3);
-    assert_eq!(surface.mode(), SurfaceMode::Discovery);
+    assert_eq!(surface.mode(), SurfaceMode::Direct);
     assert_eq!(surface.specs().len(), 3);
-    // Below the threshold they would be passed directly.
-    assert_eq!(
-        ToolSurface::new(reg.clone(), 10).mode(),
-        SurfaceMode::Direct
-    );
+    assert!(surface.resolve("mcp:d/echo").is_none());
 
     let ctx = ToolContext::default();
     let find = surface.resolve(FIND_TOOL).unwrap();
