@@ -253,8 +253,10 @@ enum ProvidersCmd {
 }
 
 const BUILTIN_CATALOG: &[&str] = &[
+    include_str!("../../../providers/catalog/anthropic.toml"),
     include_str!("../../../providers/catalog/deepseek.toml"),
     include_str!("../../../providers/catalog/gemini-openai-compat.toml"),
+    include_str!("../../../providers/catalog/gemini.toml"),
     include_str!("../../../providers/catalog/lmstudio.toml"),
     include_str!("../../../providers/catalog/ollama.toml"),
     include_str!("../../../providers/catalog/openrouter.toml"),
