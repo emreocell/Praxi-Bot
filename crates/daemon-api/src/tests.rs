@@ -1675,6 +1675,7 @@ fn catalog_entry(id: &str) -> provider_catalog::ProviderEntry {
         },
         compat_flags: provider_catalog::CompatFlags::default(),
         models_endpoint: None,
+        models: Vec::new(),
     }
 }
 
