@@ -2,6 +2,7 @@
 //! Run with `cargo test -p builtin-tools --test integration -- --ignored --nocapture --test-threads=1`.
 
 use std::sync::Arc;
+#[cfg_attr(not(windows), allow(unused_imports))]
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
