@@ -29,6 +29,7 @@ members = [
     "crates/secret-store",
     "crates/scheduler",
     "crates/daemon-api",
+    "crates/connector-email",
     "apps/cli",
     "apps/desktop",
     "apps/node-agent",
