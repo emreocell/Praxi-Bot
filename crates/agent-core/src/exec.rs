@@ -710,14 +710,16 @@ impl TurnExecutor {
         let ctx_ref: &RunCtx = &ctx;
         let outcomes = futures::future::join_all(slots.into_iter().map(|slot| async move {
             match slot {
-                Slot::Done { text, is_error } => (text, is_error, None),
+                Slot::Done { text, is_error } => (text, is_error, None, false),
                 Slot::Spawn {
                     input,
                     call,
                     model_call_id,
                 } => {
-                    self.run_subagent(run, ctx_ref, call, &model_call_id, input)
-                        .await
+                    let (t, e, d) = self
+                        .run_subagent(run, ctx_ref, call, &model_call_id, input)
+                        .await;
+                    (t, e, d, false)
                 }
                 Slot::Run {
                     tool,
@@ -731,12 +733,17 @@ impl TurnExecutor {
 
         let g = &self.sh.cfg.guards;
         let mut results = Vec::with_capacity(calls.len());
-        for ((call, call_uuid), (text, is_error, duration_ms)) in
+        for ((call, call_uuid), (text, is_error, duration_ms, self_spilled)) in
             calls.iter().zip(uuids).zip(outcomes)
         {
             let text = self.sh.redact(text);
             let output_preview = preview(&text);
-            let (mut text, spill_path) = self.spill(run, call_uuid, text);
+            // A tool that already spilled its own output is not spilled again.
+            let (mut text, spill_path) = if self_spilled {
+                (text, None)
+            } else {
+                self.spill(run, call_uuid, text)
+            };
             if call.repeat >= g.repeat_warn {
                 let _ = write!(
                     text,
@@ -775,7 +782,7 @@ impl TurnExecutor {
         tool: &Arc<dyn Tool>,
         input: Value,
         meta: bool,
-    ) -> (String, bool, Option<u64>) {
+    ) -> (String, bool, Option<u64>, bool) {
         let g = &self.sh.cfg.guards;
         let tctx = ToolContext {
             run_id: run.id.to_string(),
@@ -786,6 +793,7 @@ impl TurnExecutor {
         let started = std::time::Instant::now();
         let outcome = tokio::time::timeout(g.tool_timeout, tool.call(&tctx, input)).await;
         let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let mut self_spilled = false;
         let (text, is_error) = match outcome {
             Err(_) => (
                 format!("Error: tool timed out after {:?}", g.tool_timeout),
@@ -793,9 +801,12 @@ impl TurnExecutor {
             ),
             Ok(Err(e)) => (format!("Error: {e}"), true),
             Ok(Ok(out)) if meta => self.meta_output(ctx, call, &out).await,
-            Ok(Ok(out)) => (render_output(&out), false),
+            Ok(Ok(out)) => {
+                self_spilled = out.spill.is_some();
+                (render_output(&out), false)
+            }
         };
-        (text, is_error, Some(duration_ms))
+        (text, is_error, Some(duration_ms), self_spilled)
     }
 
     /// Turn the structured output of a `Meta` tool into events: a todo list

@@ -131,6 +131,9 @@ pub(crate) struct TestTool {
     pub(crate) delay: Duration,
     pub(crate) barrier: Option<Arc<Barrier>>,
     pub(crate) output: String,
+    /// When set, behaves like `builtin_tools::finish_text`: writes `output` to
+    /// this file and returns `max_inline_bytes - 100` of it plus a `SpillRef`.
+    pub(crate) self_spill: Option<PathBuf>,
 }
 
 pub(crate) fn tool(name: &str, effect: Effect, output: &str) -> TestTool {
@@ -147,6 +150,7 @@ pub(crate) fn tool(name: &str, effect: Effect, output: &str) -> TestTool {
         delay: Duration::ZERO,
         barrier: None,
         output: output.to_owned(),
+        self_spill: None,
     }
 }
 
@@ -155,13 +159,26 @@ impl Tool for TestTool {
     fn spec(&self) -> &ToolSpec {
         &self.spec
     }
-    async fn call(&self, _: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
+    async fn call(&self, ctx: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
         self.count.fetch_add(1, Ordering::SeqCst);
         if let Some(b) = &self.barrier {
             b.wait().await;
         }
         if !self.delay.is_zero() {
             tokio::time::sleep(self.delay).await;
+        }
+        if let Some(path) = &self.self_spill {
+            std::fs::write(path, &self.output).unwrap();
+            return Ok(ToolOutput {
+                content: vec![tool_registry::ContentPart::Text {
+                    text: self.output[..ctx.max_inline_bytes - 100].to_owned(),
+                }],
+                spill: Some(tool_registry::SpillRef {
+                    path: path.display().to_string(),
+                    mime_type: "text/plain".into(),
+                    size_bytes: self.output.len() as u64,
+                }),
+            });
         }
         Ok(ToolOutput::text(self.output.clone()))
     }
@@ -782,6 +799,37 @@ async fn large_output_is_spilled_with_preview_and_path() {
     );
     assert!(path.starts_with(env.dir.path().join("spill")));
     assert_eq!(std::fs::read_to_string(path).unwrap().len(), big.len());
+}
+
+#[tokio::test]
+async fn self_spilled_output_is_not_spilled_again() {
+    let env = setup();
+    let own_dir = tempfile::tempdir().unwrap();
+    let mut tl = tool("t.selfspill", Effect::Read, &"y".repeat(30 * 1024));
+    tl.self_spill = Some(own_dir.path().join("own-spill.txt"));
+    let r = Arc::new(tl);
+    let fake = Fake::new(vec![calls(&[("c1", "t.selfspill", json!({}))]), text("ok")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&r)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let msg = tool_messages(&fake.request(1)).remove(0);
+    let threshold = cfg(Policy::full()).guards.spill_threshold_bytes;
+    assert!(
+        msg.len() > threshold - 1024 && msg.len() < threshold + 1024,
+        "model sees about the threshold inline ({} bytes)",
+        msg.len()
+    );
+    assert_eq!(msg.matches("own-spill.txt").count(), 1);
+    assert!(!msg.contains("output truncated"));
+    // agent-core wrote no second spill file.
+    assert!(!env.dir.path().join("spill").exists());
 }
 
 #[tokio::test]
