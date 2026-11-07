@@ -10,12 +10,14 @@
 //! - **Headers:** `X-Signature-256: sha256=<hex>` (or `X-Hub-Signature-256: sha256=<hex>`)
 //! - **Body:** Raw UTF-8 payload string (JSON or plain text), exposed to the
 //!   schedule's payload as `{input}`.
-//! - **Optional replay protection:** a caller (or the daemon route, when it
-//!   forwards the headers) may supply [`WebhookMeta`]:
-//!   - `delivery_id` (e.g. `X-GitHub-Delivery` / `X-Delivery-Id`): its presence
-//!     turns on duplicate detection. The id itself is not signed, so requests are
-//!     deduplicated on the verified signature (schedule + signature), never on
-//!     the id: re-sending a captured request with a new id is still rejected.
+//! - **Replay protection:** every accepted request is remembered by its verified
+//!   signature (schedule + signature) for the 5-minute window, so the same signed
+//!   request is accepted once, with or without the optional headers below.
+//!   A caller (or the daemon route, when it forwards the headers) may also supply
+//!   [`WebhookMeta`]:
+//!   - `delivery_id` (e.g. `X-GitHub-Delivery` / `X-Delivery-Id`): informational.
+//!     The id itself is not signed, so it never keys the duplicate check:
+//!     re-sending a captured request with a new id is still rejected.
 //!     An accepted request is remembered until its timestamp leaves the window
 //!     (`2 * REPLAY_WINDOW_MS` at most); requests rejected as `Disabled` or
 //!     `Busy` are not remembered, so the sender may retry them.
@@ -23,9 +25,11 @@
 //!     then be `HMAC-SHA256(secret, "{timestamp}.{body}")` and the timestamp must
 //!     be within +/- [`REPLAY_WINDOW_MS`] of now.
 //!
-//!   Without either (or after the window), a captured request can be replayed (GitHub-style signatures
-//!   cover the body only). The endpoint is only reachable over loopback or a
-//!   tunnel, which bounds the risk; senders that can should send a timestamp.
+//!   Without a timestamp, a captured request can still be replayed once the
+//!   5-minute memory has expired (GitHub-style signatures cover the body only),
+//!   and a sender must vary the body to fire twice within the window. The
+//!   endpoint is only reachable over loopback or a tunnel, which bounds the
+//!   risk; senders that can should send a timestamp.
 //!   Replays and stale timestamps are reported as [`SchedulerError::InvalidSignature`]
 //!   (`401`).
 //! - **Handler behaviour:**
@@ -92,10 +96,6 @@ pub struct ReplayGuard {
 }
 
 impl ReplayGuard {
-    fn is_replay(&self, key: &ReplayKey, now_ms: i64) -> bool {
-        self.seen.lock().get(key).is_some_and(|exp| *exp > now_ms)
-    }
-
     /// Remember an accepted request; returns `false` if it was already
     /// remembered (lost a race with an identical request) or the cache is full.
     pub(crate) fn commit(&self, pending: PendingReplay, now_ms: i64) -> bool {
@@ -215,19 +215,18 @@ pub(crate) fn prepare_webhook(
     } else {
         verify_webhook_signature(&secret, body.as_bytes(), signature)?;
     }
-    // Dedupe on the (signed) signature, not the unsigned delivery id. Without a
-    // timestamp or delivery id the sender opted out of replay protection.
+    // Always dedupe on the (signed) signature, never on the unsigned delivery
+    // id: the same signed request is accepted once per 5-minute window.
     let pending = match guard {
-        Some(g) if meta.timestamp_ms.is_some() || meta.delivery_id.is_some() => {
+        Some(_) => {
             let trimmed = signature.trim();
             let hex_part = trimmed
                 .strip_prefix("sha256=")
                 .or_else(|| trimmed.strip_prefix("SHA256="))
                 .unwrap_or(trimmed);
             let key = ReplayKey(id, hex_part.to_ascii_lowercase());
-            if g.is_replay(&key, now_ms) {
-                return Err(SchedulerError::InvalidSignature);
-            }
+            // The replay itself is refused at `commit` (after the Busy check, so a retry
+            // while a run is in flight gets 409 rather than 401).
             // Timestamps may be up to a window in the future: remember until
             // the timestamp itself leaves the window.
             let base = meta.timestamp_ms.map_or(now_ms, |ts| ts.max(now_ms));
@@ -236,7 +235,7 @@ pub(crate) fn prepare_webhook(
                 expires_ms: base.saturating_add(REPLAY_WINDOW_MS),
             })
         }
-        _ => None,
+        None => None,
     };
 
     if !schedule.enabled {
