@@ -188,6 +188,11 @@ impl ScriptHost for GateHost {
         if name == SCRIPT_TOOL_NAME {
             return Err("scripts cannot call script_run".into());
         }
+        // Scripts run on another thread, so a workflow's task-local recursion
+        // guard cannot see through them; workflows stay out of scripts.
+        if name == "workflow_run" {
+            return Err("scripts cannot call workflow_run".into());
+        }
         let tool = self
             .registry
             .get(name)
@@ -448,7 +453,7 @@ mod tests {
         let (reg, gate, _calls) = setup(vec![]);
         let out = run(
             &reg,
-            "let r = []; for (const n of ['script_run','nope']) { try { await tools.call(n, {}); } catch (e) { r.push(e.message); } } return r;",
+            "let r = []; for (const n of ['script_run','workflow_run','nope']) { try { await tools.call(n, {}); } catch (e) { r.push(e.message); } } return r;",
         )
         .await
         .unwrap();
@@ -456,6 +461,7 @@ mod tests {
             panic!()
         };
         assert!(text.contains("cannot call script_run"), "{text}");
+        assert!(text.contains("cannot call workflow_run"), "{text}");
         assert!(text.contains("unknown tool"), "{text}");
         assert!(gate.seen.lock().is_empty());
     }

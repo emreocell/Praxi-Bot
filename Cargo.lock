@@ -9331,6 +9331,7 @@ dependencies = [
  "desktop-windows",
  "parking_lot",
  "protocol",
+ "script-runtime",
  "serde",
  "serde_json",
  "storage",
