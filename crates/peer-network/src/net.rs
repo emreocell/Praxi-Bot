@@ -484,11 +484,12 @@ impl PeerNetwork {
         }
     }
 
-    /// Revoke a device: delete it from the list and close its connections.
+    /// Revoke a device: commit the removal, then close its connections.
     ///
     /// # Errors
     ///
-    /// Fails if the device list cannot be persisted.
+    /// Fails if the device list cannot be persisted. Sockets stay up until
+    /// that commit has swapped the in-memory list.
     pub fn revoke(&self, peer: &PublicKey) -> Result<bool> {
         let mut conns = self.inner.conns.lock();
         let removed = self.inner.store.remove(peer)?;
@@ -576,7 +577,7 @@ async fn handle_incoming(inner: Arc<Inner>, incoming: Incoming) -> Result<()> {
             conn.close(429u32.into(), b"pairing busy");
             return Ok(());
         };
-        if !allow_pair(&inner.pair_limits, remote, Instant::now()) {
+        if !allow_pair(&inner.pair_limits, remote) {
             conn.close(429u32.into(), b"pairing rate limit");
             return Ok(());
         }
@@ -858,27 +859,44 @@ fn link_end(conn: &Connection, e: &impl std::fmt::Display) -> LinkEnd {
     }
 }
 
+const PAIR_LIMIT_KEYS: usize = 4096;
+
 struct PairBucket {
     tokens: f64,
     updated: Instant,
 }
 
-fn allow_pair(
-    limits: &Mutex<HashMap<PublicKey, PairBucket>>,
+fn allow_pair(limits: &Mutex<HashMap<PublicKey, PairBucket>>, remote: PublicKey) -> bool {
+    let mut limits = limits.lock();
+    // Sample under the lock. A timestamp taken before the lock can be older
+    // than one another handshake already stored, and `duration_since` panics.
+    let now = Instant::now();
+    allow_pair_at(&mut limits, remote, now)
+}
+
+fn allow_pair_at(
+    limits: &mut HashMap<PublicKey, PairBucket>,
     remote: PublicKey,
     now: Instant,
 ) -> bool {
-    let mut limits = limits.lock();
-    limits.retain(|_, b| now.duration_since(b.updated) < Duration::from_secs(60));
-    if limits.len() >= 4096 && !limits.contains_key(&remote) {
-        return false;
+    limits.retain(|_, bucket| {
+        now.saturating_duration_since(bucket.updated) < Duration::from_secs(60)
+    });
+    if limits.len() >= PAIR_LIMIT_KEYS && !limits.contains_key(&remote) {
+        let oldest = limits
+            .iter()
+            .min_by_key(|(_, bucket)| bucket.updated)
+            .map(|(key, _)| *key);
+        if let Some(oldest) = oldest {
+            limits.remove(&oldest);
+        }
     }
     let bucket = limits.entry(remote).or_insert(PairBucket {
         tokens: 5.0,
         updated: now,
     });
-    bucket.tokens =
-        (bucket.tokens + now.duration_since(bucket.updated).as_secs_f64() / 12.0).min(5.0);
+    let elapsed = now.saturating_duration_since(bucket.updated).as_secs_f64();
+    bucket.tokens = (bucket.tokens + elapsed / 12.0).min(5.0);
     bucket.updated = now;
     if bucket.tokens < 1.0 {
         return false;
@@ -890,33 +908,95 @@ fn allow_pair(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proto::{ALPN_API, RpcError};
+
+    use async_trait::async_trait;
+
+    struct Park;
+
+    #[async_trait]
+    impl ProtocolHandler for Park {
+        async fn handle(&self, conn: Connection, _device: Device) {
+            conn.closed().await;
+        }
+    }
+
+    struct NopRpc;
+
+    #[async_trait]
+    impl RpcHandler for NopRpc {
+        async fn handle(
+            &self,
+            _peer: &Device,
+            _method: &str,
+            _params: Value,
+        ) -> std::result::Result<Value, RpcError> {
+            Ok(Value::Null)
+        }
+    }
+
+    fn loopback(dir: &std::path::Path, name: &str) -> PeerConfig {
+        let mut cfg = PeerConfig::new(dir.join(name));
+        cfg.relay = RelayConfig::Disabled;
+        cfg.bind_addr = Some(SocketAddr::from(([127, 0, 0, 1], 0)));
+        cfg.local_role = Role::Desktop;
+        cfg
+    }
+
+    async fn expect_not_paired(core: &PeerNetwork, joiner: &PeerNetwork, alpn: &[u8]) {
+        let rejected = joiner
+            .inner
+            .endpoint
+            .connect(core.addr(), alpn)
+            .await
+            .unwrap();
+        let closed = tokio::time::timeout(Duration::from_secs(5), rejected.closed())
+            .await
+            .unwrap();
+        assert!(
+            matches!(closed, iroh::endpoint::ConnectionError::ApplicationClosed(ref c) if c.error_code.into_inner() == u64::from(CLOSE_NOT_PAIRED)),
+            "{closed}"
+        );
+    }
 
     #[test]
     fn pairing_buckets_refill_and_isolate_keys() {
-        let limits = Mutex::new(HashMap::new());
+        let mut limits = HashMap::new();
         let a = iroh::SecretKey::generate().public();
         let b = iroh::SecretKey::generate().public();
         let now = Instant::now();
         for _ in 0..5 {
-            assert!(allow_pair(&limits, a, now));
+            assert!(allow_pair_at(&mut limits, a, now));
         }
-        assert!(!allow_pair(&limits, a, now));
-        assert!(allow_pair(&limits, b, now));
-        assert!(!allow_pair(&limits, a, now + Duration::from_secs(11)));
-        assert!(allow_pair(&limits, a, now + Duration::from_secs(12)));
-        assert!(!allow_pair(&limits, a, now + Duration::from_secs(12)));
+        assert!(!allow_pair_at(&mut limits, a, now));
+        assert!(allow_pair_at(&mut limits, b, now));
+        assert!(!allow_pair_at(
+            &mut limits,
+            a,
+            now + Duration::from_secs(11)
+        ));
+        assert!(allow_pair_at(&mut limits, a, now + Duration::from_secs(12)));
+        assert!(!allow_pair_at(
+            &mut limits,
+            a,
+            now + Duration::from_secs(12)
+        ));
         for _ in 0..5 {
-            assert!(allow_pair(&limits, a, now + Duration::from_secs(72)));
+            assert!(allow_pair_at(&mut limits, a, now + Duration::from_secs(72)));
         }
-        assert!(!allow_pair(&limits, a, now + Duration::from_secs(72)));
+        assert!(!allow_pair_at(
+            &mut limits,
+            a,
+            now + Duration::from_secs(72)
+        ));
     }
 
     #[test]
     fn pairing_bucket_storage_is_bounded() {
         let now = Instant::now();
-        let mut buckets = HashMap::new();
-        for _ in 0..4096 {
-            buckets.insert(
+        let mut limits = HashMap::new();
+        for _ in 0..PAIR_LIMIT_KEYS {
+            limits.insert(
                 iroh::SecretKey::generate().public(),
                 PairBucket {
                     tokens: 0.0,
@@ -924,12 +1004,101 @@ mod tests {
                 },
             );
         }
-        let limits = Mutex::new(buckets);
         let key = iroh::SecretKey::generate().public();
-        assert!(!allow_pair(&limits, key, now));
-        assert_eq!(limits.lock().len(), 4096);
-        assert!(allow_pair(&limits, key, now + Duration::from_secs(60)));
-        assert_eq!(limits.lock().len(), 1);
+        assert!(allow_pair_at(&mut limits, key, now));
+        assert_eq!(limits.len(), PAIR_LIMIT_KEYS);
+        assert!(limits.contains_key(&key));
+        assert!(allow_pair_at(
+            &mut limits,
+            key,
+            now + Duration::from_secs(60)
+        ));
+        assert_eq!(limits.len(), 1);
+        assert!(limits.contains_key(&key));
+    }
+
+    #[test]
+    fn concurrent_pair_attempts_do_not_panic_when_a_bucket_is_newer() {
+        let stale = Instant::now();
+        let keys: Vec<_> = (0..32)
+            .map(|_| iroh::SecretKey::generate().public())
+            .collect();
+        let mut skewed = HashMap::new();
+        skewed.insert(
+            keys[0],
+            PairBucket {
+                tokens: 5.0,
+                updated: stale + Duration::from_secs(30),
+            },
+        );
+        // A clock captured before the lock is behind the stored stamp.
+        let _ = allow_pair_at(&mut skewed, keys[0], stale);
+
+        let limits = Mutex::new(HashMap::new());
+        limits.lock().insert(
+            keys[0],
+            PairBucket {
+                tokens: 5.0,
+                updated: Instant::now() + Duration::from_secs(30),
+            },
+        );
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    for _ in 0..40 {
+                        for key in &keys {
+                            let _ = allow_pair(&limits, *key);
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    #[test]
+    fn pairing_flood_evicts_oldest_bucket_when_table_is_full() {
+        let now = Instant::now();
+        let mut limits = HashMap::new();
+        let mut keys = Vec::with_capacity(PAIR_LIMIT_KEYS);
+        for i in 0..PAIR_LIMIT_KEYS {
+            let key = iroh::SecretKey::generate().public();
+            limits.insert(
+                key,
+                PairBucket {
+                    tokens: 0.0,
+                    updated: now + Duration::from_millis(u64::try_from(i).unwrap()),
+                },
+            );
+            keys.push(key);
+        }
+        let oldest = keys[0];
+        let pinned = keys[PAIR_LIMIT_KEYS - 1];
+        let denied_at = now
+            + Duration::from_millis(u64::try_from(PAIR_LIMIT_KEYS - 1).unwrap())
+            + Duration::from_secs(11);
+        // A denied retry still refreshes `updated`, which used to pin every
+        // resident key so an unseen joiner was refused forever.
+        assert!(!allow_pair_at(&mut limits, pinned, denied_at));
+        assert_eq!(limits.len(), PAIR_LIMIT_KEYS);
+        assert!(limits.contains_key(&oldest));
+        assert_eq!(limits.get(&pinned).unwrap().updated, denied_at);
+
+        let mut admitted = Vec::new();
+        for n in 0..128u64 {
+            let fresh = iroh::SecretKey::generate().public();
+            let at = denied_at + Duration::from_millis(n + 1);
+            assert!(
+                allow_pair_at(&mut limits, fresh, at),
+                "unseen key refused from a full pairing table"
+            );
+            assert_eq!(limits.len(), PAIR_LIMIT_KEYS);
+            admitted.push(fresh);
+        }
+        assert!(!limits.contains_key(&oldest));
+        assert!(limits.contains_key(&pinned));
+        for key in &admitted {
+            assert!(limits.contains_key(key));
+        }
     }
 
     #[tokio::test]
@@ -973,5 +1142,107 @@ mod tests {
         assert_eq!(net.inner.pair_slots.available_permits(), 8);
         raw.close().await;
         net.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn injected_persist_failure_keeps_memory_and_live_connections() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = loopback(dir.path(), "core");
+        cfg.extra_protocols
+            .push((ALPN_API.to_vec(), Arc::new(Park)));
+        let core = PeerNetwork::start(cfg, Some(Arc::new(NopRpc)))
+            .await
+            .unwrap();
+        let desktop = PeerNetwork::start(loopback(dir.path(), "desktop"), None)
+            .await
+            .unwrap();
+        let invite = core.create_invite(Role::Desktop).await;
+        desktop
+            .pair(&PairTicket::parse(&invite.ticket).unwrap())
+            .await
+            .unwrap();
+
+        let api = desktop
+            .inner
+            .endpoint
+            .connect(core.addr(), ALPN_API)
+            .await
+            .unwrap();
+        let rpc = desktop
+            .inner
+            .endpoint
+            .connect(core.addr(), ALPN_RPC)
+            .await
+            .unwrap();
+        let events = desktop
+            .inner
+            .endpoint
+            .connect(core.addr(), ALPN_EVENTS)
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let tracked = {
+                    let conns = core.inner.conns.lock();
+                    conns
+                        .iter()
+                        .filter(|(id, conn)| *id == desktop.id() && conn.close_reason().is_none())
+                        .count()
+                };
+                if tracked == 3 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+
+        let path = core.inner.config.data_dir.join("devices.json");
+        let before = std::fs::read(&path).unwrap();
+        std::fs::create_dir(path.with_extension("json.tmp")).unwrap();
+        let err = core.revoke(&desktop.id()).unwrap_err();
+        assert!(matches!(err, PeerError::Storage(_)), "{err}");
+        assert!(core.device(&desktop.id()).is_some());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(api.close_reason().is_none());
+        assert!(rpc.close_reason().is_none());
+        assert!(events.close_reason().is_none());
+        assert_eq!(
+            core.inner
+                .conns
+                .lock()
+                .iter()
+                .filter(|(id, conn)| *id == desktop.id() && conn.close_reason().is_none())
+                .count(),
+            3
+        );
+
+        let other = PeerNetwork::start(loopback(dir.path(), "other"), None)
+            .await
+            .unwrap();
+        let invite = core.create_invite(Role::Desktop).await;
+        let err = other
+            .pair(&PairTicket::parse(&invite.ticket).unwrap())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, PeerError::PairingRejected(ref message) if message.contains("store")),
+            "{err}"
+        );
+        assert!(core.device(&other.id()).is_none());
+        assert_eq!(core.devices().len(), 1);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        expect_not_paired(&core, &other, ALPN_API).await;
+        expect_not_paired(&core, &other, ALPN_RPC).await;
+        expect_not_paired(&core, &other, ALPN_EVENTS).await;
+        assert!(api.close_reason().is_none());
+        assert!(rpc.close_reason().is_none());
+        assert!(events.close_reason().is_none());
+
+        other.shutdown().await;
+        desktop.shutdown().await;
+        core.shutdown().await;
     }
 }
