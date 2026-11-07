@@ -121,7 +121,10 @@ impl RunStates {
 
     fn get(&mut self, run_id: &str) -> Option<&State> {
         self.touch(run_id);
-        self.map.get(run_id)
+        if let Some(s) = self.map.get(run_id) {
+            return Some(s);
+        }
+        self.order.back().and_then(|last| self.map.get(last))
     }
 
     fn entry(&mut self, run_id: &str) -> &mut State {

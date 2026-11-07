@@ -15,8 +15,8 @@ reachable only from the machine itself.
 
 ## What you need
 
-- A VM with 1 GB RAM or more (2 GB or more if you add the virtual display and
-  Chromium), running Ubuntu 22.04+, Debian 12+, or an Oracle Linux / Fedora
+- A VM with 6 GB RAM (1 core) or 12 GB (2 cores) for an always-on host with
+  browser automation, running Ubuntu 22.04+, Debian 12+, or an Oracle Linux / Fedora
   family system with systemd, and root access.
 - Architecture `x86_64` or `aarch64` (the installer detects it).
 - An API key for a model provider (see [Providers and models](providers-and-models.md)).
@@ -75,12 +75,26 @@ The script:
 - installs `praxi.service` (`bot serve`, 127.0.0.1 only) and enables it, plus
   `praxi-node.service` (not enabled, see below);
 - with `--with-desktop`, installs `praxi-xvfb.service` (virtual display `:99`)
-  and Chromium. A later run keeps that unit until `--without-desktop`;
+  and a non-snap Chromium browser (source selection below). Prepares the root-owned,
+  mode 1777 X11 socket directory inside the shared private `/tmp` before Xvfb starts. A later run keeps that unit until `--without-desktop`;
 - applies systemd hardening: `NoNewPrivileges`, `ProtectSystem=strict` with
   `ReadWritePaths=/var/lib/praxi`, `ProtectHome`, `PrivateTmp`,
   `PrivateDevices`, kernel and cgroup protections;
 - adds wrapper commands `praxi` (the `bot` CLI, using `praxi.env`) and
   `praxi-node` (using `praxi-node.env`) that run as the `praxi` user.
+
+The installer waits for two consecutive active-unit and valid loopback health
+checks, with at most 30 attempts (each HTTP request has a two-second timeout).
+Failure prints the last 50 service journal entries and exits nonzero, after
+attempting to restore a previously active node. `--no-start` installs/enables
+files only and explicitly skips startup and readiness.
+
+A fresh daemon stays running with HTTP 200 health `status: "setup_required"`.
+Doctor reports **setup required** for providers. Setup APIs are available;
+sending a chat turn returns HTTP 409 `setup_required` with configuration steps.
+There is no placeholder provider. Configure a provider and restart the daemon
+(`sudo systemctl restart praxi`), or use `POST /v1/providers/reload`, to enable
+inference and change health to `status: "ok"`.
 
 ## 3. Configure and pair
 
@@ -149,26 +163,76 @@ You do **not** need to open any port for Praxi. Keep it that way.
   [Chatting and approvals](chatting-and-approvals.md#the-four-presets)). A server with Chromium and a virtual display is a
   powerful machine; use a dedicated VM without personal data.
 - Use SSH keys only and keep the OS patched (`unattended-upgrades` on Ubuntu).
-- Chromium: Ubuntu's `chromium-browser` package is a snap, which does not work
-  well inside a hardened system service. Prefer Debian's `chromium` deb, or
-  another non-snap Chromium build.
-- Chromium under `ProtectSystem=strict` and `PrivateDevices=true` is untested.
-  Those settings make the filesystem read-only except `/var/lib/praxi` and
-  replace `/dev` with a private set of pseudo-devices, so a browser can fail
-  to reach `/dev/shm` or `/dev/dri`. Relax them with a drop-in. The installer
-  only rewrites `desktop.conf` in the drop-in directory, so this file stays
-  across updates:
+### Browser source and service diagnostics
 
-  ```ini
-  # /etc/systemd/system/praxi.service.d/chromium.conf
-  # Repeat under praxi-node.service.d if the node should launch Chromium.
-  [Service]
-  ProtectSystem=full
-  PrivateDevices=false
-  ```
+`--with-desktop` uses Debian's native `chromium` candidate on Debian. On
+Ubuntu (including 24.04 ARM64), it downloads **Google Chrome for Testing
+157.0.8103.38**, directly over HTTPS from Google's official
+[Chrome for Testing archive](https://github.com/GoogleChromeLabs/chrome-for-testing),
+into `/opt/praxi-browser`. The CPU choice is explicit: `linux64` for x86_64,
+`linux-arm64` for aarch64. The
+[official download metadata](https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json)
+now publishes Linux ARM64 builds (since version 153); older advice that Google's
+Linux browser builds are x86_64-only is no longer true for this distribution.
+The pinned archive is delivered via HTTPS and verified against pinned SHA-256
+checksums for each architecture before extraction. Re-run an updated installer
+to receive a newer browser pin; Chrome for Testing does not auto-update.
 
-  Apply it with `sudo systemctl daemon-reload` and
-  `sudo systemctl restart praxi`.
+To update the pinned Chrome for Testing version and checksums in
+`scripts/install-linux.sh`, download the new version's archives for both
+platforms (`linux64` and `linux-arm64`) from
+`https://storage.googleapis.com/chrome-for-testing-public/<version>/<platform>/chrome-<platform>.zip`,
+compute their hashes using `sha256sum`, and update `version`,
+`sha256_linux64`, and `sha256_linux_arm64` together at the top of
+`install_cft`.
+
+Fedora/RHEL uses `chromium` from the administrator's enabled RPM repos, without
+weak dependencies; absence is an installation error. No PPA or snap is added.
+An xtradeb PPA would add third-party trust and isn't needed with the official
+ARM64 archive. Playwright also supports ARM64, but adds a separate runtime and
+browser lifecycle that this installer doesn't need.
+
+Ubuntu's `chromium-browser` and virtual `chromium` may resolve to snap. They are
+never selected by the installer. Snap-only discovery and snap overrides are
+unsupported and produce a clear diagnostic. With `--skip-packages`, provide a
+working non-snap browser yourself. `BOT_BROWSER_PATH` overrides discovery;
+`PRAXI_BROWSER_PATH` remains a compatible fallback. An invalid override fails
+instead of silently choosing a different browser.
+
+The browser needs **libcups**, the client library; it does not need a print
+server. Packages use `--no-install-recommends`. The installer disables/stops
+`cups.service`, `cups.socket`, `cups.path`, `cups-browsed.service`, and an
+installed CUPS snap if present, including after package failure. This installer
+is for a dedicated bot host: it also disables pre-existing printing. Do not use
+it on a print server. No browser or desktop TCP listener is enabled.
+
+`sudo praxi doctor` launches a short-lived transient unit with the same user,
+env file, working directory, hardening and Xvfb private namespace as the daemon.
+Its browser row actually launches headless, establishes CDP, and closes the
+browser, with a five-second startup/eight-second overall timeout. A failure is
+reported as **fail**, with a non-snap/path hint. A direct `bot doctor` probes
+only its current user/environment; use the wrapper for service validation.
+Ubuntu 24.04's AppArmor user-namespace restriction is accommodated by a named
+`praxi-browser` profile permitting `userns` for `/opt/praxi-browser/chrome`,
+following Ubuntu's Chrome profile. The Chromium sandbox and systemd hardening
+remain enabled; no `--no-sandbox` or broad unit relaxation is applied.
+
+### Small-host resource check
+
+Production hosts run prebuilt release tarballs; don't compile Rust on the
+1-core/6-GB (or 2-core/12-GB) machine. Keep Chromium lazy: this installer never
+starts a persistent browser. The doctor probe closes its browser after checking.
+Configurable idle shutdown/concurrency limits belong to task 054 and are not
+implemented by this packaging fix.
+
+For a repeatable check, record `MemoryCurrent` and `MemoryPeak` from
+`sudo systemctl show praxi praxi-xvfb -p MemoryCurrent -p MemoryPeak` while idle,
+during a representative chat turn, and with one browser tab open. When running
+`sudo praxi doctor`, sample the corresponding `praxi-doctor-*.service` too
+(`systemctl list-units 'praxi-doctor-*'`). These cgroup counters include browser
+children; `/proc/<pid>/status` `VmRSS`/`VmHWM` can separately record process RSS.
+Target a combined peak below 2.5 GB, leaving room on a 6-GB host. A doctor probe
+is a short launch smoke test, not a representative chat workload measurement.
 
 ## Update, logs, uninstall
 

@@ -37,7 +37,9 @@ use crate::{
 enum Reply {
     Chunks(Vec<ChatChunk>),
     Hang,
-    /// A provider error: `upstream` (retryable), `auth` or `api400` (not).
+    /// A provider error: `upstream` (retryable), `auth`, `api400`, `invalid`
+    /// (hard stop), `unsupported` (not retried, but the chain continues),
+    /// or `malformed` (retried once).
     Fail(&'static str),
 }
 
@@ -115,6 +117,10 @@ impl ChatProvider for Fake {
                 },
                 "auth" => ProviderError::Auth("bad key".into()),
                 "malformed" => ProviderError::MalformedToolCall("finish reason x".into()),
+                "unsupported" => ProviderError::Unsupported {
+                    capability: "tools".into(),
+                },
+                "invalid" => ProviderError::InvalidRequest("bad request".into()),
                 _ => ProviderError::Api {
                     status: 400,
                     message: "bad".into(),
@@ -1356,6 +1362,9 @@ fn retryable_classification() {
     }));
     assert!(!is_retryable(&ProviderError::Auth("x".into())));
     assert!(!is_retryable(&ProviderError::InvalidRequest("x".into())));
+    assert!(!is_retryable(&ProviderError::Unsupported {
+        capability: "tools".into(),
+    }));
     assert!(!is_retryable(&ProviderError::Api {
         status: 404,
         message: String::new()
@@ -1402,6 +1411,84 @@ async fn fallback_model_is_tried_after_retries_are_exhausted() {
             .content,
         "from the fallback"
     );
+}
+
+#[tokio::test]
+async fn unsupported_on_the_primary_falls_back_and_records_the_reason() {
+    let env = setup();
+    let fake = Fake::new(vec![Reply::Fail("unsupported"), text("from the fallback")]);
+    let mut config = cfg(Policy::full());
+    config.model_retry.max_attempts = 3;
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile("fallback = [\"fake/b\"]\n"),
+        config,
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "hi").unwrap();
+    let Event::ModelFallback(f) = until(&mut rx, |e| matches!(e, Event::ModelFallback(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!((f.from.as_str(), f.to.as_str()), ("fake/m", "fake/b"));
+    assert!(f.reason.contains("tools"), "{}", f.reason);
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(fake.n_requests(), 2, "the same model is not retried");
+    assert_eq!(fake.request(0).model.0, "fake/m");
+    assert_eq!(fake.request(1).model.0, "fake/b");
+    assert_eq!(
+        env.storage
+            .list_messages(env.chat)
+            .unwrap()
+            .last()
+            .unwrap()
+            .content,
+        "from the fallback"
+    );
+}
+
+#[tokio::test]
+async fn invalid_request_on_the_primary_stops_the_chain() {
+    let env = setup();
+    let fake = Fake::new(vec![Reply::Fail("invalid"), text("never")]);
+    let mut config = cfg(Policy::full());
+    config.model_retry.max_attempts = 3;
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile("fallback = [\"fake/b\"]\n"),
+        config,
+    );
+    let run = lp.run_turn(env.chat, "hi").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Failed);
+    assert_eq!(fake.n_requests(), 1, "no retry and no fallback");
+}
+
+#[tokio::test]
+async fn every_model_unsupported_names_the_gap_and_model_caps() {
+    let env = setup();
+    let fake = Fake::new(vec![Reply::Fail("unsupported"), Reply::Fail("unsupported")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile("fallback = [\"fake/b\"]\n"),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "hi").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Failed);
+    assert_eq!(fake.n_requests(), 2);
+    let err = env.storage.get_run(run).unwrap().unwrap().error.unwrap();
+    assert!(err.contains("fake/m"), "{err}");
+    assert!(err.contains("fake/b"), "{err}");
+    assert!(err.contains("tools"), "{err}");
+    assert!(err.contains("model_caps"), "{err}");
 }
 
 #[tokio::test]

@@ -32,7 +32,7 @@ use crate::channels::{self, TelegramRuntime};
 /// effective default first.
 ///
 /// # Errors
-/// No usable provider.
+/// Provider configuration cannot be read or parsed.
 pub fn build_providers(
     data_dir: &Path,
     catalog: &Catalog,
@@ -53,7 +53,8 @@ pub fn build_providers(
         .position(|(id, _, _)| Some(id) == default_id.as_ref())
         .unwrap_or(0);
     if built.is_empty() {
-        return Err("no usable provider; run `bot setup` or `bot providers add`".into());
+        warn("setup required; run `bot setup` or `bot providers add`");
+        return Ok(Providers::unconfigured());
     }
     // The catalog's prices go with the providers, so a reload refreshes them
     // too and `/v1/usage` can report `cost_usd`.
@@ -422,6 +423,23 @@ cached_per_mtok = 0.5
 [[models]]
 id = "unpriced"
 "#;
+
+    #[test]
+    fn fresh_install_builds_unconfigured_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let providers = build_providers(
+            dir.path(),
+            &Catalog::from_entries([]),
+            &MemoryStore::new(),
+            &mut |_| {},
+        )
+        .unwrap();
+        assert!(providers.setup_required());
+        assert_eq!(providers.ids(), Vec::<String>::new());
+        let storage = Arc::new(Storage::open(dir.path()).unwrap());
+        let agent = build_agent(&storage, providers, dir.path(), None);
+        assert!(agent.providers().setup_required());
+    }
 
     #[test]
     fn providers_carry_the_catalog_prices_and_a_reload_refreshes_them() {

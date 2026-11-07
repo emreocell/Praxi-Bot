@@ -520,6 +520,7 @@ fn run_doctor(cli: &Cli, c: &DoctorCmd, data_dir: &std::path::Path) -> Result<()
     let store = open_store(cli.secrets_backend, data_dir, &|_| pass.clone())
         .map(|(s, k)| (s, format!("{k:?}")))
         .map_err(|e| e.to_string());
+    let browser = browser_cdp::find_browser();
     let env = doctor::DoctorEnv {
         data_dir,
         catalog: catalog.as_ref().map_err(Clone::clone),
@@ -529,7 +530,11 @@ fn run_doctor(cli: &Cli, c: &DoctorCmd, data_dir: &std::path::Path) -> Result<()
             .map_err(Clone::clone),
         port: cli.port,
         online: c.online,
-        browser: browser_cdp::find_browser().ok(),
+        browser: browser.as_ref().ok().cloned(),
+        browser_error: browser.err().and_then(|e| match e {
+            browser_cdp::Error::BrowserNotFound => None,
+            other => Some(other.to_string()),
+        }),
     };
     let checks = doctor::run_checks(&env);
     if cli.json {

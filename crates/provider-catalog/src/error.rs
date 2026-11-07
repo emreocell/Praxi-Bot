@@ -53,10 +53,18 @@ pub enum ProviderError {
     #[error("request timed out")]
     Timeout,
 
-    /// The request cannot be expressed for this provider (for example images
-    /// sent to a model without `vision`).
+    /// The request cannot be expressed for this provider (for example a tool
+    /// result whose call id is unknown, or an image URL the provider cannot
+    /// accept). A missing capability is [`Self::Unsupported`], not this.
     #[error("invalid request: {0}")]
     InvalidRequest(String),
+
+    /// The model cannot perform a requested capability (`tools`, `vision`,
+    /// ...). The same model is not retried; the fallback chain tries the next
+    /// model. A generic [`Self::InvalidRequest`] or an unmatched HTTP 400 stays
+    /// a hard stop.
+    #[error("model does not support {capability}")]
+    Unsupported { capability: String },
 
     /// The connection to the provider failed.
     #[error("connection error: {0}")]
