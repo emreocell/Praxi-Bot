@@ -179,11 +179,10 @@ impl InviteBook {
         let now = Instant::now();
         let mut guard = self.pending.lock();
         let Some(idx) = guard.iter().position(|p| ct_eq(&p.secret, secret)) else {
-            // Unknown secret: count against every live invite so guessing is capped.
-            for p in guard.iter_mut().filter(|p| p.expires > now) {
-                p.failed += 1;
-            }
-            guard.retain(|p| p.failed < MAX_FAILED);
+            // Unknown secret: an unauthenticated caller must not be able to
+            // invalidate other people's invites, so leave the book untouched.
+            // (The 256-bit secret is unguessable; the per-invite `failed`
+            // counter below caps code guessing once the secret is known.)
             return Err(RedeemError::Invalid);
         };
         if guard[idx].expires <= now {
@@ -271,9 +270,22 @@ mod tests {
         let b = InviteBook::default();
         let (s, c) = b.create(Role::Node, INVITE_TTL);
         for _ in 0..MAX_FAILED {
-            let _ = b.redeem("deadbeef", &c, Role::Node);
+            let _ = b.redeem(&s, "wrong!", Role::Node);
         }
         assert_eq!(b.redeem(&s, &c, Role::Node), Err(RedeemError::Invalid));
+    }
+
+    #[test]
+    fn unknown_secret_does_not_destroy_live_invites() {
+        let b = InviteBook::default();
+        let (s, c) = b.create(Role::Node, INVITE_TTL);
+        for _ in 0..(MAX_FAILED * 4) {
+            assert_eq!(
+                b.redeem("deadbeef", "000000", Role::Node),
+                Err(RedeemError::Invalid)
+            );
+        }
+        assert_eq!(b.redeem(&s, &c, Role::Node), Ok(()));
     }
 
     #[test]

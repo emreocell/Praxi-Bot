@@ -300,7 +300,13 @@ pub fn launch(app: &AppSpec) -> Result<Pid, DesktopError> {
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| DesktopError::Internal(format!("launch '{}': {e}", app.executable)))?;
-    Ok(child.id())
+    let pid = child.id();
+    // Reap the child when it exits so it does not linger as a zombie.
+    thread::spawn(move || {
+        let mut child = child;
+        let _ = child.wait();
+    });
+    Ok(pid)
 }
 
 // ── XTest input injection ─────────────────────────────────────────────────────
@@ -347,9 +353,11 @@ pub fn drag(from: (f64, f64), to: (f64, f64)) -> Result<(), DesktopError> {
     move_pointer(&conn, from.0, from.1)?;
     button_event(&conn, root, 1, true)?;
     thread::sleep(Duration::from_millis(40));
-    move_pointer(&conn, to.0, to.1)?;
+    let moved = move_pointer(&conn, to.0, to.1);
     thread::sleep(Duration::from_millis(40));
-    button_event(&conn, root, 1, false)
+    // Always try to release the button, even if the move failed.
+    let up = button_event(&conn, root, 1, false);
+    moved.and(up)
 }
 
 /// Scroll at `(x, y)` using X11 scroll buttons (`4`/`5` vertical, `6`/`7` horizontal).

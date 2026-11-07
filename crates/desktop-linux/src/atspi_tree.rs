@@ -396,7 +396,18 @@ async fn set_element_value(conn: &zbus::Connection, r: &Retained, value: &str) -
         }
         if !focused && let Ok((x, y)) = AtspiWorker::element_center(conn, r).await {
             x11::click_at(x, y)?;
+            focused = true;
         }
+        if !focused {
+            return Err(DesktopError::Accessibility(
+                "set_value: could not focus the target element; refusing to type into the focused window"
+                    .into(),
+            ));
+        }
+    } else {
+        return Err(DesktopError::Accessibility(
+            "set_value: target has no bus name; refusing to type into the focused window".into(),
+        ));
     }
 
     x11::key_chord(&["ctrl".to_string(), "a".to_string()])?;
