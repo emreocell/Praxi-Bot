@@ -15,6 +15,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { DEFAULT_STOP_HOTKEY } from "../config/product";
 import type { AppSettings } from "../store/settingsStore";
+import { createTauriBridge } from "./tauriBridge";
 
 export const OVERLAY_SHOW_TARGET_EVENT = "overlay.show_target" as const;
 export const OVERLAY_CLICK_EVENT = "overlay.click" as const;
@@ -196,6 +197,37 @@ export interface OverlayEventHandlers {
   onSettingsUpdated?: (settings: AppSettings) => void;
 }
 
+function dispatchWindow(name: string, detail?: unknown): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(name, { detail }));
+}
+
+const tauriBridge = createTauriBridge(
+  (event, handler) => listen(event, handler),
+  [
+    {
+      wire: WIRE_OVERLAY_SHOW_TARGET,
+      publish: (p) => dispatchWindow(OVERLAY_SHOW_TARGET_EVENT, p)
+    },
+    {
+      wire: WIRE_OVERLAY_CLICK,
+      publish: (p) => dispatchWindow(OVERLAY_CLICK_EVENT, p)
+    },
+    {
+      wire: WIRE_OVERLAY_CLEAR,
+      publish: () => dispatchWindow(OVERLAY_CLEAR_EVENT)
+    },
+    {
+      wire: WIRE_CONTROL_STATE,
+      publish: (p) => dispatchWindow(CONTROL_STATE_CHANGED_EVENT, p)
+    }
+  ]
+);
+
+function acquireTauriBridge(): () => void {
+  return tauriBridge.acquire();
+}
+
 /**
  * Subscribes to `overlay.show_target`, `overlay.click`, `overlay.clear`, and `control.state_changed`
  * across both Tauri IPC and DOM CustomEvents.
@@ -205,6 +237,7 @@ export function subscribeOverlayEvents(
 ): () => void {
   let disposed = false;
   const unlistens: UnlistenFn[] = [];
+  let releaseBridge: (() => void) | null = null;
 
   const handleDomShowTarget = (event: Event) => {
     const custom = event as CustomEvent<OverlayShowTargetPayload>;
@@ -236,59 +269,9 @@ export function subscribeOverlayEvents(
   }
 
   if (isTauriRuntime()) {
-    void listen<OverlayShowTargetPayload>(WIRE_OVERLAY_SHOW_TARGET, (e) => {
-      if (disposed) return;
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(
-          new CustomEvent(OVERLAY_SHOW_TARGET_EVENT, { detail: e.payload })
-        );
-      } else {
-        handlers.onShowTarget?.(e.payload);
-      }
-    }).then((u) => {
-      if (disposed) u();
-      else unlistens.push(u);
-    });
-
-    void listen<OverlayClickPayload>(WIRE_OVERLAY_CLICK, (e) => {
-      if (disposed) return;
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(
-          new CustomEvent(OVERLAY_CLICK_EVENT, { detail: e.payload })
-        );
-      } else {
-        handlers.onClick?.(e.payload);
-      }
-    }).then((u) => {
-      if (disposed) u();
-      else unlistens.push(u);
-    });
-
-    void listen(WIRE_OVERLAY_CLEAR, () => {
-      if (disposed) return;
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent(OVERLAY_CLEAR_EVENT));
-      } else {
-        handlers.onClear?.();
-      }
-    }).then((u) => {
-      if (disposed) u();
-      else unlistens.push(u);
-    });
-
-    void listen<ControlSnapshot>(WIRE_CONTROL_STATE, (e) => {
-      if (disposed) return;
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(
-          new CustomEvent(CONTROL_STATE_CHANGED_EVENT, { detail: e.payload })
-        );
-      } else {
-        handlers.onControlStateChanged?.(e.payload);
-      }
-    }).then((u) => {
-      if (disposed) u();
-      else unlistens.push(u);
-    });
+    // One shared Tauri -> window bridge per window (ref-counted); each
+    // subscriber only listens to the window events above.
+    releaseBridge = acquireTauriBridge();
 
     if (handlers.onSettingsUpdated) {
       void listen<AppSettings>(WIRE_SETTINGS_UPDATED, (e) => {
@@ -307,6 +290,8 @@ export function subscribeOverlayEvents(
     for (const u of unlistens) {
       u();
     }
+    releaseBridge?.();
+    releaseBridge = null;
     if (typeof window !== "undefined") {
       window.removeEventListener(
         OVERLAY_SHOW_TARGET_EVENT,

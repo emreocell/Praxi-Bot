@@ -2,6 +2,7 @@
 
 pub mod control;
 pub mod daemon;
+pub mod listener;
 pub mod shell;
 
 use std::sync::Arc;
@@ -560,9 +561,7 @@ async fn daemon_connect(daemon: State<'_, Arc<DaemonHandle>>) -> Result<Connecti
 /// providers).  A daemon started by someone else is left alone.
 #[tauri::command]
 async fn daemon_restart(daemon: State<'_, Arc<DaemonHandle>>) -> Result<Connection, String> {
-    daemon.stop();
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    daemon::connect(&daemon).await
+    daemon::restart(&daemon).await
 }
 
 /// Arguments of `providers_cli` (typed so no free-form flag reaches the CLI).
