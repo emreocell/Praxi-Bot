@@ -19,6 +19,10 @@ allow = [
     "CC0-1.0",
     # jpeg-encoder is "(MIT OR Apache-2.0) AND IJG"; IJG is a permissive BSD-style license.
     "IJG",
+    # iroh -> async_io_stream / pharos / ws_stream_wasm (wasm-only helpers): public-domain dedication.
+    "Unlicense",
+    # webpki-roots / webpki-root-certs (Mozilla CA bundle data, via iroh and the optional fastembed feature)
+    "CDLA-Permissive-2.0",
 ]
 
 [bans]

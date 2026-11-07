@@ -20,6 +20,7 @@ members = [
     "crates/channel-api",
     "crates/peer-network",
     "crates/script-runtime",
+    "crates/builtin-tools",
     "crates/plugin-host",
     "crates/storage",
     "crates/secret-store",

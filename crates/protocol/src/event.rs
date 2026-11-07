@@ -85,6 +85,31 @@ pub struct ToolCallCompleted {
     pub error: Option<String>,
 }
 
+// ── Plan / todo ───────────────────────────────────────────────────────────────
+
+/// Progress of one todo item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TodoStatus {
+    Pending,
+    InProgress,
+    Done,
+}
+
+/// One entry of the model-maintained todo list.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TodoItem {
+    pub text: String,
+    pub status: TodoStatus,
+}
+
+/// The model replaced its todo list (plan tool); carries the full new list.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TodoUpdated {
+    pub run_id: RunId,
+    pub items: Vec<TodoItem>,
+}
+
 // ── Errors ────────────────────────────────────────────────────────────────────
 
 /// A non-fatal error occurred during the run.
@@ -109,6 +134,7 @@ pub enum Event {
     ToolCallApproved(ToolCallApproved),
     ToolCallDenied(ToolCallDenied),
     ToolCallCompleted(ToolCallCompleted),
+    TodoUpdated(TodoUpdated),
     Error(RunError),
 }
 
