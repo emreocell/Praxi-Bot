@@ -97,6 +97,23 @@ impl AgentLoop {
         self
     }
 
+    /// Register extra tools that need the loop's permission gate (for example
+    /// `workflow_run`, whose inner steps must pass the same approval flow as
+    /// direct calls). `build` receives that gate.
+    #[must_use]
+    pub fn with_gated_tools<F>(self, build: F) -> Self
+    where
+        F: FnOnce(Arc<dyn builtin_tools::ToolGate>) -> Vec<Arc<dyn tool_registry::Tool>>,
+    {
+        let gate: Arc<dyn builtin_tools::ToolGate> = Arc::new(LoopGate {
+            sh: Arc::downgrade(&self.sh),
+        });
+        for tool in build(gate) {
+            let _ = self.sh.tools.register(tool);
+        }
+        self
+    }
+
     /// Register the profile used by `bot_id` (otherwise the bot row's JSON
     /// `config` is parsed as a profile).
     pub fn add_profile(&self, bot_id: BotId, profile: BotProfile) {

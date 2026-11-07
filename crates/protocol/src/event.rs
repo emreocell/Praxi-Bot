@@ -138,6 +138,39 @@ pub struct ModelFallback {
     pub reason: String,
 }
 
+// ── Workflow replay ───────────────────────────────────────────────────────────
+
+/// A recorded workflow step is about to run (deterministic replay, no model).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WorkflowStepStarted {
+    /// Run that started the replay, if it was started from a run.
+    pub run_id: Option<RunId>,
+    pub workflow: String,
+    pub step_index: u32,
+    /// Step kind, e.g. `desktop_action`.
+    pub kind: String,
+}
+
+/// A workflow step finished successfully.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WorkflowStepCompleted {
+    pub run_id: Option<RunId>,
+    pub workflow: String,
+    pub step_index: u32,
+    /// Locator strategy that found the target, when the step had one.
+    pub resolved_via: Option<String>,
+}
+
+/// A workflow step could not run (drift, ambiguity, failure or denial); the
+/// replay stopped and control goes back to the agent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WorkflowDrift {
+    pub run_id: Option<RunId>,
+    pub workflow: String,
+    pub step_index: u32,
+    pub reason: String,
+}
+
 // ── Errors ────────────────────────────────────────────────────────────────────
 
 /// A non-fatal error occurred during the run.
@@ -165,6 +198,9 @@ pub enum Event {
     TodoUpdated(TodoUpdated),
     QuestionAsked(QuestionAsked),
     ModelFallback(ModelFallback),
+    WorkflowStepStarted(WorkflowStepStarted),
+    WorkflowStepCompleted(WorkflowStepCompleted),
+    WorkflowDrift(WorkflowDrift),
     Error(RunError),
 }
 

@@ -9086,6 +9086,23 @@ dependencies = [
 [[package]]
 name = "workflow-replay"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "builtin-tools",
+ "desktop-api",
+ "desktop-windows",
+ "parking_lot",
+ "protocol",
+ "serde",
+ "serde_json",
+ "storage",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "toml 0.8.2",
+ "tool-registry",
+ "uuid",
+]
 
 [[package]]
 name = "writeable"
