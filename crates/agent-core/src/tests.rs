@@ -2058,6 +2058,179 @@ async fn use_tool_cannot_reach_tools_hidden_from_the_bot() {
     assert!(tool_messages(&fake.request(1))[0].contains("unknown tool"));
 }
 
+fn req_tool_names(req: &ChatRequest) -> Vec<String> {
+    req.tools
+        .iter()
+        .map(|d| d["function"]["name"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn mcp_tools_never_push_native_tools_behind_use_tool() {
+    let env = setup();
+    let native: Vec<Arc<TestTool>> = (0..40)
+        .map(|i| Arc::new(tool(&format!("n.t{i:02}"), Effect::Read, "x")))
+        .collect();
+    let mcp_write = Arc::new(tool("mcp:x/t00", Effect::Write, "mcp ok"));
+    let mut mcp: Vec<Arc<TestTool>> = vec![Arc::clone(&mcp_write)];
+    mcp.extend((1..30).map(|i| Arc::new(tool(&format!("mcp:x/t{i:02}"), Effect::Read, "x"))));
+    let all: Vec<&Arc<TestTool>> = native.iter().chain(mcp.iter()).collect();
+    let fake = Fake::new(vec![
+        // A namespaced tool called directly is unknown; via use_tool it asks (Write).
+        calls(&[("c1", "mcp:x/t01", json!({}))]),
+        calls(&[("c2", "use_tool", json!({"name": "mcp:x/t00", "input": {}}))]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &all,
+        profile(""),
+        cfg(Policy::approve_destructive()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    // The permission check evaluates the use_tool *target*.
+    assert_eq!(a.tool_name, "mcp:x/t00");
+    lp.approve(a.call_id, ApprovalScope::Once, env.user)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(mcp_write.count.load(Ordering::SeqCst), 1);
+
+    let names = req_tool_names(&fake.request(0));
+    assert_eq!(names.len(), 43, "{names:?}");
+    assert!(
+        native
+            .iter()
+            .all(|n| names.contains(&n.spec.name.replace('.', "__")))
+    );
+    assert!(names.ends_with(&[
+        "find_tool".to_owned(),
+        "get_tool_details".to_owned(),
+        "use_tool".to_owned()
+    ]));
+    assert!(!names.iter().any(|n| n.starts_with("mcp:")));
+    assert!(tool_messages(&fake.request(1))[0].contains("unknown tool"));
+}
+
+#[tokio::test]
+async fn hidden_native_tools_lower_the_counted_surface_size() {
+    let env = setup();
+    let native: Vec<Arc<TestTool>> = (0..6)
+        .map(|i| Arc::new(tool(&format!("n.t{i}"), Effect::Read, "x")))
+        .collect();
+    let mcp = Arc::new(tool("mcp:x/a", Effect::Read, "x"));
+    let mut all: Vec<&Arc<TestTool>> = native.iter().collect();
+    all.push(&mcp);
+    let mut config = cfg(Policy::full());
+    config.discovery_threshold = 4;
+
+    // 6 visible native tools > 4: discovery.
+    let fake = Fake::new(vec![text("a")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &all,
+        profile(""),
+        config.clone(),
+    );
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    lp.wait(run).await.unwrap();
+    assert_eq!(
+        req_tool_names(&fake.request(0)),
+        ["find_tool", "get_tool_details", "use_tool"]
+    );
+
+    // Hiding two lowers the count to 4: native tools are direct again.
+    let fake = Fake::new(vec![text("b")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &all,
+        profile("[tools]\nexclude = [\"n.t0\", \"n.t1\"]\n"),
+        config,
+    );
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    lp.wait(run).await.unwrap();
+    assert_eq!(req_tool_names(&fake.request(0)).len(), 4 + 3);
+}
+
+#[tokio::test]
+async fn platform_hidden_tool_cannot_be_called_by_name() {
+    let env = setup();
+    let other = if cfg!(windows) {
+        Platform::Linux
+    } else {
+        Platform::Windows
+    };
+    let mut foreign = tool("foreign_click", Effect::Write, "clicked");
+    foreign.spec.platforms = vec![other];
+    let foreign = Arc::new(foreign);
+    let local = Arc::new(tool("local_read", Effect::Read, "ok"));
+    let fake = Fake::new(vec![
+        calls(&[("c1", "foreign_click", json!({}))]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&foreign), t(&local)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(foreign.count.load(Ordering::SeqCst), 0);
+    let names = req_tool_names(&fake.request(0));
+    assert!(names.contains(&"local_read".to_owned()), "{names:?}");
+    assert!(!names.iter().any(|n| n == "foreign_click"), "{names:?}");
+    assert!(tool_messages(&fake.request(1))[0].contains("unknown tool"));
+}
+
+#[tokio::test]
+async fn k2_tool_candidates_carry_schema_parameters() {
+    let env = setup();
+    let mut with_schema = tool("n.send", Effect::Read, "x");
+    with_schema.spec.input_schema = json!({
+        "type": "object",
+        "properties": { "to": {}, "body": {} },
+        "required": ["to"]
+    });
+    let w = Arc::new(with_schema);
+    let fake = Fake::new(vec![text("a")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[&w],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let cands = lp.sh.router_candidates(&profile(""));
+    let c = cands.iter().find(|c| c.name == "n.send").unwrap();
+    let json = serde_json::to_value(c).unwrap();
+    let params = json["params"].as_array().unwrap();
+    assert_eq!(params.len(), 2);
+    assert!(
+        params
+            .iter()
+            .any(|p| p["name"] == "to" && p["required"] == true)
+    );
+    assert!(
+        params
+            .iter()
+            .any(|p| p["name"] == "body" && p["required"] == false)
+    );
+}
+
 // ---------- redaction ----------
 
 #[tokio::test]
