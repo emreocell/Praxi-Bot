@@ -1,0 +1,15 @@
+name: max-steps-guard
+description: The per-turn model-call cap stops a turn that keeps calling tools.
+policy: full
+guards: { max_steps: 2 }
+tools:
+  - { name: t_read, effect: read, category: fs, output: x }
+user: go
+script:
+  - tool_calls: [{ id: "1", tool: t_read, args: { n: 1 } }]
+  - tool_calls: [{ id: "2", tool: t_read, args: { n: 2 } }]
+  - text: never
+expect:
+  # Graceful guard stop (008b): one closing model call, run succeeds.
+  state: succeeded
+  model_calls: 3

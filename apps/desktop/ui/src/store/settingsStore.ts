@@ -1,6 +1,6 @@
 import { load, type Store } from "@tauri-apps/plugin-store";
 import type { ThemeMode } from "ui";
-import { PRODUCT_CONFIG } from "../config/product";
+import { DEFAULT_STOP_HOTKEY, PRODUCT_CONFIG } from "../config/product";
 import type { SupportedLanguage } from "../i18n";
 
 export interface AppSettings {
@@ -11,6 +11,7 @@ export interface AppSettings {
   backgroundBlur: string;
   backgroundDim: string;
   language: SupportedLanguage;
+  stopHotkey: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -20,7 +21,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   backgroundFileName: "",
   backgroundBlur: "0px",
   backgroundDim: "0",
-  language: "en"
+  language: "en",
+  stopHotkey: DEFAULT_STOP_HOTKEY
 };
 
 const LOCAL_STORAGE_KEY = "desktop_ui_settings";
@@ -71,6 +73,8 @@ export async function loadSettings(): Promise<AppSettings> {
       const language =
         (await store.get<SupportedLanguage>("language")) ??
         DEFAULT_SETTINGS.language;
+      const stopHotkey =
+        (await store.get<string>("stopHotkey")) ?? DEFAULT_SETTINGS.stopHotkey;
 
       return {
         themeMode,
@@ -79,7 +83,8 @@ export async function loadSettings(): Promise<AppSettings> {
         backgroundFileName,
         backgroundBlur,
         backgroundDim,
-        language
+        language,
+        stopHotkey
       };
     } catch {
       // Fall back to localStorage below if reading from plugin-store fails
@@ -123,6 +128,7 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
       await store.set("backgroundBlur", settings.backgroundBlur);
       await store.set("backgroundDim", settings.backgroundDim);
       await store.set("language", settings.language);
+      await store.set("stopHotkey", settings.stopHotkey);
       await store.save();
     } catch {
       // Ignore store write errors in non-Tauri environments

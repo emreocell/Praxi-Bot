@@ -1,0 +1,18 @@
+name: bad-args-and-unknown-tool
+description: Malformed JSON arguments and an unknown tool become error results the model can recover from; nothing executes.
+policy: full
+tools:
+  - { name: t_read, effect: read, category: fs, output: fine }
+user: go
+script:
+  - tool_calls: [{ id: c1, tool: t_read, raw_args: "{not json" }]
+  - tool_calls: [{ id: c2, tool: does_not_exist, args: {} }]
+  - text: recovered
+expect:
+  state: succeeded
+  model_calls: 3
+  tool_runs: { t_read: 0 }
+  final_text: { contains: [recovered] }
+  requests:
+    - { request: 1, tool_messages_contain: [invalid JSON arguments] }
+    - { request: 2, tool_messages_contain: [unknown tool] }

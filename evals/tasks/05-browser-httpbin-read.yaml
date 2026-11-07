@@ -1,0 +1,12 @@
+name: browser-httpbin-read
+description: Read a static page (httpbin /html) and report its heading.
+requires: browser
+prompt: "Open https://httpbin.org/html and tell me the text of the page's top heading."
+max_steps: 10
+timeout_s: 120
+checks:
+  - final_text: { contains: [Melville] }
+  - browser_text_contains: Moby-Dick
+fake_script:
+  - tool_calls: [{ id: c1, tool: browser_open, args: { url: "https://httpbin.org/html" } }]
+  - text: Herman Melville - Moby-Dick

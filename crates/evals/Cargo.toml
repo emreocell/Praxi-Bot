@@ -1,0 +1,42 @@
+[package]
+name = "evals"
+description = "Evaluation harness: hermetic tier-1 scenarios, opt-in live tier-2 tasks, metrics and reports."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "bot-eval"
+path = "src/bin/eval.rs"
+
+[dependencies]
+agent-core = { path = "../agent-core", version = "0.1.0" }
+async-trait.workspace = true
+base64.workspace = true
+builtin-tools = { path = "../builtin-tools", version = "0.1.0" }
+clap = { workspace = true, features = ["env"] }
+desktop-api = { path = "../desktop-api", version = "0.1.0" }
+futures.workspace = true
+parking_lot.workspace = true
+permission-engine = { path = "../permission-engine", version = "0.1.0" }
+protocol.workspace = true
+provider-catalog = { path = "../provider-catalog", version = "0.1.0" }
+regex = "1"
+secret-store.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml = "0.9"
+storage.workspace = true
+task-runtime = { path = "../task-runtime", version = "0.1.0" }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "process"] }
+tool-registry = { path = "../tool-registry", version = "0.1.0" }
+toml.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+desktop-windows = { path = "../desktop-windows", version = "0.1.0" }

@@ -1,0 +1,17 @@
+name: desktop-settings-open-page
+description: Open the Display page of Windows Settings (English or Turkish UI), judged with a screenshot.
+requires: desktop
+platform: windows
+prompt: "Open the Display page of Windows Settings (for example launch explorer.exe with the argument ms-settings:display) and tell me the name of one setting shown on that page."
+max_steps: 15
+timeout_s: 180
+checks:
+  - desktop_window: "Settings|Ayarlar"
+  - desktop_node: { window_title_contains: "Settings|Ayarlar", name_contains: "Display|Ekran" }
+  - judge:
+      rubric: >
+        The final screenshot must show the Display page of the Windows Settings app (heading
+        "Display" or the Turkish "Ekran"), and the agent's answer must name a setting that is
+        visible on that page.
+cleanup:
+  - kill_new: [SystemSettings.exe]

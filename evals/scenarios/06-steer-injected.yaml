@@ -1,0 +1,19 @@
+name: steer-injected
+description: A message sent while a tool runs is injected as a user message before the next model call.
+policy: full
+tools:
+  - { name: t_slow, effect: read, category: fs, output: slow-result, delay_ms: 300 }
+user: start
+script:
+  - tool_calls: [{ id: c1, tool: t_slow, args: {} }]
+  - text: adjusted
+reactions:
+  - { on: tool_call_requested, tool: t_slow, do: steer, text: "actually, do X", once: true }
+expect:
+  state: succeeded
+  model_calls: 2
+  final_text: { contains: [adjusted] }
+  requests:
+    - request: 1
+      roles: [system, user, assistant, tool, user]
+      last_user_contains: "actually, do X"

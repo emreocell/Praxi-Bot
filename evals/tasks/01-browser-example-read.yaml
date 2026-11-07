@@ -1,0 +1,13 @@
+name: browser-example-read
+description: Open example.com and quote the English sentence on the page.
+requires: browser
+prompt: "Open https://example.com in the browser and quote the English sentence on the page that says what the domain is for."
+max_steps: 10
+timeout_s: 120
+checks:
+  - final_text: { regex: "(?i)documentation examples" }
+  - browser_url_contains: example.com
+  - browser_text_contains: documentation examples
+fake_script:
+  - tool_calls: [{ id: c1, tool: browser_open, args: { url: "https://example.com" } }]
+  - text: This domain is for use in documentation examples without needing permission.

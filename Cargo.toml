@@ -23,6 +23,7 @@ members = [
     "crates/builtin-tools",
     "crates/plugin-host",
     "crates/storage",
+    "crates/evals",
     "crates/secret-store",
     "crates/daemon-api",
     "apps/cli",

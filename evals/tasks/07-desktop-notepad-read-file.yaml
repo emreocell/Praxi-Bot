@@ -1,0 +1,14 @@
+name: desktop-notepad-read-file
+description: Open an existing file in Notepad and read a word from the window.
+requires: desktop
+platform: windows
+setup:
+  - write_file: { path: '{{workdir}}\secret.txt', content: "The magic word is pineapple-42." }
+prompt: 'Launch notepad.exe with the file {{workdir}}\secret.txt as its argument, then tell me the magic word shown in the Notepad window.'
+max_steps: 15
+timeout_s: 180
+checks:
+  - final_text: { contains: [pineapple-42] }
+  - desktop_window: secret.txt
+cleanup:
+  - kill_new: [notepad.exe]

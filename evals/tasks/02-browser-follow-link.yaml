@@ -1,0 +1,12 @@
+name: browser-follow-link
+description: Click the "Learn more" link on example.com and report where it led.
+requires: browser
+prompt: "Open https://example.com, click the link to learn more about example domains, and tell me the domain of the page you land on."
+max_steps: 12
+timeout_s: 120
+checks:
+  - browser_url_contains: iana.org
+  - final_text: { regex: "(?i)iana" }
+fake_script:
+  - tool_calls: [{ id: c1, tool: browser_open, args: { url: "https://www.iana.org/help/example-domains" } }]
+  - text: I landed on iana.org.

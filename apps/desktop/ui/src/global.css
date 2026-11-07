@@ -17,3 +17,13 @@ body,
   color: var(--color-text);
   background-color: var(--color-background);
 }
+
+html[data-window-kind="overlay"],
+html[data-window-kind="overlay"] body,
+html[data-window-kind="overlay"] #root,
+html[data-window-kind="widget"],
+html[data-window-kind="widget"] body,
+html[data-window-kind="widget"] #root {
+  background-color: transparent;
+  overflow: hidden;
+}

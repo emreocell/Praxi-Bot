@@ -69,6 +69,56 @@
       "description": "Select the display language for the interface.",
       "en": "English",
       "tr": "Türkçe"
+    },
+    "hotkey": {
+      "title": "Stop All Global Hotkey",
+      "description": "Emergency shortcut that immediately cancels any active bot run across all screens.",
+      "currentLabel": "Active shortcut",
+      "record": "Record Shortcut",
+      "recording": "Press modifier + key...",
+      "reset": "Reset to Ctrl+Alt+Esc",
+      "presets": {
+        "default": "Ctrl+Alt+Esc",
+        "shiftEsc": "Ctrl+Shift+Esc",
+        "altShiftS": "Alt+Shift+S"
+      }
     }
+  },
+  "overlay": {
+    "youAreInControl": "You are in control",
+    "humanDrivingHint": "Bot desktop actions are refused while you drive. Click Give back in the mini widget to resume.",
+    "typingPreview": "Typing",
+    "actions": {
+      "click": "Click",
+      "type": "Type",
+      "scroll": "Scroll",
+      "key": "Shortcut",
+      "default": "Action"
+    }
+  },
+  "widget": {
+    "status": {
+      "bot_driving": "Bot Driving",
+      "human_driving": "You are in control",
+      "paused": "Paused",
+      "idle": "Idle"
+    },
+    "stop": "Stop",
+    "pause": "Pause",
+    "resume": "Resume",
+    "takeTheWheel": "Take the wheel",
+    "giveBack": "Give back",
+    "humanDrivingStep": "You are in control — bot desktop actions are refused.",
+    "pausedStep": "Run paused — waiting to resume.",
+    "idleStep": "No active bot run.",
+    "refusedBadge": "{{count}} bot action refused",
+    "refusedBadge_other": "{{count}} bot actions refused",
+    "hotkeyHint": "Stop all: {{hotkey}}",
+    "dragHandleAria": "Drag floating control widget"
+  },
+  "dev": {
+    "sectionTitle": "Developer",
+    "simulateBotRun": "Simulate bot run",
+    "runningLabel": "Bot Run Active"
   }
 }

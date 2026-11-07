@@ -69,6 +69,56 @@
       "description": "Arayüz görüntüleme dilini seçin.",
       "en": "English",
       "tr": "Türkçe"
+    },
+    "hotkey": {
+      "title": "Tümünü Durdur Kısayolu",
+      "description": "Aktif bot çalışmasını tüm ekranlarda anında iptal eden acil durum kısayolu.",
+      "currentLabel": "Aktif kısayol",
+      "record": "Kısayol Kaydet",
+      "recording": "Değiştirici + tuşa basın...",
+      "reset": "Ctrl+Alt+Esc varsayılanına sıfırla",
+      "presets": {
+        "default": "Ctrl+Alt+Esc",
+        "shiftEsc": "Ctrl+Shift+Esc",
+        "altShiftS": "Alt+Shift+S"
+      }
     }
+  },
+  "overlay": {
+    "youAreInControl": "Kontrol sizde",
+    "humanDrivingHint": "Siz kullanırken bot masaüstü eylemleri reddedilir. Devam etmek için mini pencerede Kontrolü geri ver düğmesine tıklayın.",
+    "typingPreview": "Yazılıyor",
+    "actions": {
+      "click": "Tıkla",
+      "type": "Yaz",
+      "scroll": "Kaydır",
+      "key": "Kısayol",
+      "default": "Eylem"
+    }
+  },
+  "widget": {
+    "status": {
+      "bot_driving": "Bot Sürüyor",
+      "human_driving": "Kontrol sizde",
+      "paused": "Duraklatıldı",
+      "idle": "Boşta"
+    },
+    "stop": "Durdur",
+    "pause": "Duraklat",
+    "resume": "Devam et",
+    "takeTheWheel": "Direksiyonu devral",
+    "giveBack": "Kontrolü geri ver",
+    "humanDrivingStep": "Kontrol sizde — bot masaüstü eylemleri reddediliyor.",
+    "pausedStep": "Çalışma duraklatıldı — devam etmesi bekleniyor.",
+    "idleStep": "Aktif bot çalışması yok.",
+    "refusedBadge": "{{count}} bot eylemi reddedildi",
+    "refusedBadge_other": "{{count}} bot eylemi reddedildi",
+    "hotkeyHint": "Tümünü durdur: {{hotkey}}",
+    "dragHandleAria": "Yüzen kontrol penceresini sürükle"
+  },
+  "dev": {
+    "sectionTitle": "Geliştirici",
+    "simulateBotRun": "Bot çalışmasını simüle et",
+    "runningLabel": "Bot Çalışması Aktif"
   }
 }

@@ -1,0 +1,7 @@
+# USD per million tokens, keyed by "provider/model". Cost stays empty for models without an entry
+# (the provider catalog carries no prices). Example:
+#
+# [prices."deepseek/deepseek-chat"]
+# input_per_mtok = 0.0
+# output_per_mtok = 0.0
+# cached_per_mtok = 0.0

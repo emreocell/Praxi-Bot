@@ -1,0 +1,15 @@
+name: desktop-explorer-create-folder
+description: Create a new folder through the File Explorer window.
+requires: desktop
+platform: windows
+setup:
+  - mkdir: '{{workdir}}'
+prompt: 'Launch explorer.exe with the folder {{workdir}} as its argument, then create a new folder named eval-folder inside it using the Explorer window (for example Ctrl+Shift+N, type the name, Enter). Tell me when it exists.'
+max_steps: 25
+timeout_s: 240
+checks:
+  - dir_exists: '{{workdir}}\eval-folder'
+cleanup:
+  - powershell: >-
+      $s = New-Object -ComObject Shell.Application;
+      foreach ($w in @($s.Windows())) { try { if ($w.LocationURL -like '*{{workdir_name}}*') { $w.Quit() } } catch {} }
