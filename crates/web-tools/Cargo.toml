@@ -1,0 +1,32 @@
+[package]
+name = "web-tools"
+description = "Web research primitives: readable HTML to markdown, web search backends, RSS/Atom and sitemap parsing, page metadata, behind an SSRF-safe URL policy."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+ego-tree = "0.11"
+futures-util.workspace = true
+reqwest.workspace = true
+roxmltree = "0.21"
+scraper = "0.26"
+secret-store.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tool-registry = { path = "../tool-registry", version = "0.1.0" }
+url = "2"
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+wiremock.workspace = true
