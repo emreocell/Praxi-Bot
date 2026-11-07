@@ -82,6 +82,10 @@ pub struct McpServerConfig {
     /// [`Self::secret_headers`].
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub secret_env: BTreeMap<String, String>,
+    /// Bots that may use this server's tools; `None` = all bots.  Stored and
+    /// reported by the management API; the bridge itself does not filter on it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bots: Option<Vec<String>>,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)] // serde `skip_serializing_if` signature
@@ -118,6 +122,7 @@ impl McpServerConfig {
             category: None,
             secret_headers: BTreeMap::new(),
             secret_env: BTreeMap::new(),
+            bots: None,
         }
     }
 
@@ -137,6 +142,7 @@ impl McpServerConfig {
             category: None,
             secret_headers: BTreeMap::new(),
             secret_env: BTreeMap::new(),
+            bots: None,
         }
     }
 
@@ -326,7 +332,12 @@ impl McpConfigStore for TomlFileStore {
         }
         // Write-then-rename so a crash never leaves a half-written file.
         let tmp = self.path.with_extension("toml.tmp");
-        fs::write(&tmp, text).map_err(io)?;
+        {
+            use std::io::Write;
+            let mut f = fs::File::create(&tmp).map_err(io)?;
+            f.write_all(text.as_bytes()).map_err(io)?;
+            f.sync_all().map_err(io)?;
+        }
         fs::rename(&tmp, &self.path).map_err(io)
     }
 }

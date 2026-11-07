@@ -18,6 +18,8 @@ pub mod dto;
 pub mod error;
 #[cfg(any(test, feature = "fake-provider"))]
 pub mod fake;
+pub mod mcp;
+mod mcp_routes;
 pub mod openapi;
 mod routes;
 mod schedule;
@@ -33,7 +35,7 @@ use std::time::{Duration, Instant};
 
 use agent_core::{AgentLoop, BotProfile, Providers};
 use axum::Router;
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use protocol::{BotId, ChatId, RunId, UserId};
 use provider_catalog::Catalog;
 use scheduler::{ScheduleStore, Scheduler};
@@ -44,6 +46,7 @@ use tokio_util::sync::CancellationToken;
 pub use auth::{TOKEN_FILE_NAME, TokenInfo, load_or_create_token, read_token, token_path};
 pub use control::{ControlConfig, ControlHub};
 pub use error::ApiError;
+pub use mcp::{McpControl, McpControlError};
 pub use openapi::openapi_json;
 
 /// Default TCP port of `bot serve`.
@@ -124,6 +127,10 @@ struct Inner {
     shutdown: CancellationToken,
     hub: Arc<ControlHub>,
     provider_host: OnceLock<ProviderHost>,
+    /// MCP server management (see [`AppState::set_mcp`]).
+    mcp: OnceLock<Arc<dyn McpControl>>,
+    /// Write-only secret sink of `POST /v1/secrets/{name}`.
+    secrets: OnceLock<Arc<dyn secret_store::SecretStore>>,
     /// `schedules.db`, opened on first use.
     schedules: parking_lot::Mutex<Option<Arc<ScheduleStore>>>,
     /// Serialises `PUT /v1/policy` (read-modify-write of memory + `policy.json`).
@@ -177,6 +184,8 @@ impl AppState {
             shutdown: CancellationToken::new(),
             hub,
             provider_host: OnceLock::new(),
+            mcp: OnceLock::new(),
+            secrets: OnceLock::new(),
             schedules: parking_lot::Mutex::new(None),
             policy_lock: parking_lot::Mutex::new(()),
             scheduler: OnceLock::new(),
@@ -189,6 +198,26 @@ impl AppState {
     /// once, right after [`AppState::new`]; a second call is ignored).
     pub fn set_provider_host(&self, host: ProviderHost) {
         let _ = self.0.provider_host.set(host);
+    }
+
+    /// Enable `/v1/mcp/*` with the embedder MCP manager (call once, before
+    /// [`serve`]; a second call is ignored).
+    pub fn set_mcp(&self, mcp: Arc<dyn McpControl>) {
+        let _ = self.0.mcp.set(mcp);
+    }
+
+    /// Enable `POST /v1/secrets/{name}` (write-only) over `store` (call once;
+    /// a second call is ignored).
+    pub fn set_secret_store(&self, store: Arc<dyn secret_store::SecretStore>) {
+        let _ = self.0.secrets.set(store);
+    }
+
+    pub(crate) fn mcp(&self) -> Option<Arc<dyn McpControl>> {
+        self.0.mcp.get().cloned()
+    }
+
+    pub(crate) fn secret_store(&self) -> Option<Arc<dyn secret_store::SecretStore>> {
+        self.0.secrets.get().cloned()
     }
 
     /// Register a messaging channel for `/v1/channels` (call before [`serve`]).
@@ -355,6 +384,7 @@ impl AppState {
 
 /// The `/v1` router, guarded by Host / Origin / bearer checks.
 pub fn router(state: AppState) -> Router {
+    use mcp_routes as m;
     use routes as r;
     Router::new()
         .route("/v1/health", get(r::health))
@@ -411,6 +441,21 @@ pub fn router(state: AppState) -> Router {
             "/v1/channels/telegram/pair-code",
             post(r::telegram_pair_code),
         )
+        .route(
+            "/v1/mcp/servers",
+            get(m::list_mcp_servers).post(m::create_mcp_server),
+        )
+        .route(
+            "/v1/mcp/servers/{name}",
+            put(m::update_mcp_server).delete(m::delete_mcp_server),
+        )
+        .route(
+            "/v1/mcp/servers/{name}/reconnect",
+            post(m::reconnect_mcp_server),
+        )
+        .route("/v1/mcp/servers/{name}/tools", get(m::list_mcp_tools))
+        .route("/v1/mcp/catalog", get(m::mcp_catalog))
+        .route("/v1/secrets/{*name}", post(m::set_secret))
         .route("/v1/events", get(sse::events))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

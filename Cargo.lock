@@ -1457,6 +1457,7 @@ dependencies = [
  "protocol",
  "provider-catalog",
  "scheduler",
+ "secret-store",
  "serde",
  "serde_json",
  "storage",
