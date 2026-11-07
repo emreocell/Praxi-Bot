@@ -22,6 +22,7 @@ members = [
     "crates/peer-network",
     "crates/script-runtime",
     "crates/builtin-tools",
+    "crates/dev-tools",
     "crates/plugin-host",
     "crates/storage",
     "crates/skills",
