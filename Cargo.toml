@@ -26,6 +26,7 @@ members = [
     "crates/dev-tools",
     "crates/plugin-host",
     "crates/storage",
+    "crates/state-bundle",
     "crates/skills",
     "crates/evals",
     "crates/secret-store",
