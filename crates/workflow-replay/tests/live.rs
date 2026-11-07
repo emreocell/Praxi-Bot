@@ -93,23 +93,56 @@ async fn notepad_windows(backend: &Arc<dyn DesktopBackend>) -> Vec<u64> {
         .collect()
 }
 
-async fn close_notepad(reg: &ToolRegistry, backend: &Arc<dyn DesktopBackend>) {
-    let key_tool = reg.get("desktop_key").expect("desktop_key missing");
-    for id in notepad_windows(backend).await {
-        let _ = call(reg, "desktop_get_state", &json!({"window_id": id})).await;
-        for keys in [
-            json!(["ctrl", "a"]),
-            json!(["Delete"]),
-            json!(["alt", "F4"]),
-        ] {
-            // `alt+F4` closes the window before the post-action refresh snapshot,
-            // so the final `window not found` error is expected.
-            let _ = key_tool
-                .call(&ToolContext::default(), json!({"keys": keys}))
-                .await;
+/// Index of the first button whose rendered line contains one of `needles`.
+fn button_index(state: &str, needles: &[&str]) -> Option<u32> {
+    state.lines().find_map(|line| {
+        let lower = line.to_lowercase();
+        if !lower.contains("] button ") || !needles.iter().any(|n| lower.contains(n)) {
+            return None;
         }
+        let end = line.find(']')?;
+        line[1..end].parse().ok()
+    })
+}
+
+async fn close_notepad(reg: &ToolRegistry, backend: &Arc<dyn DesktopBackend>) {
+    let click = reg.get("desktop_click").expect("desktop_click missing");
+    // Alt+F4 from this process does not reach Store Notepad (foreground lock),
+    // so close through the UIA button. A dirty buffer then shows Kaydetme /
+    // Don't save; click that too. The click's refresh may fail once the
+    // window is gone, which is expected.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        let ids = notepad_windows(backend).await;
+        if ids.is_empty() {
+            return;
+        }
+        for id in ids {
+            let state = call(reg, "desktop_get_state", &json!({"window_id": id})).await;
+            let Ok(generation) = state
+                .lines()
+                .find_map(|l| {
+                    l.strip_prefix("# window ")?
+                        .split_whitespace()
+                        .find_map(|tok| tok.strip_prefix("gen=")?.parse::<u64>().ok())
+                })
+                .ok_or(())
+            else {
+                continue;
+            };
+            let target = button_index(&state, &["kaydetme", "don't save", "do not save"])
+                .or_else(|| button_index(&state, &["button \"kapat\"", "button \"close\""]));
+            if let Some(index) = target {
+                let _ = click
+                    .call(
+                        &ToolContext::default(),
+                        json!({"index": index, "gen": generation}),
+                    )
+                    .await;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(400)).await;
     }
-    tokio::time::sleep(Duration::from_millis(800)).await;
 }
 
 /// Backs up and clears Store Notepad's `TabState` / `WindowState` so the test

@@ -771,6 +771,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tool-registry",
+ "tracing",
  "uuid",
  "vision",
 ]

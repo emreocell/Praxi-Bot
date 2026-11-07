@@ -18,16 +18,17 @@ use windows::{
             CUIAutomation, ExpandCollapseState_Collapsed, IUIAutomation, IUIAutomation2,
             IUIAutomationCacheRequest, IUIAutomationElement, IUIAutomationExpandCollapsePattern,
             IUIAutomationInvokePattern, IUIAutomationScrollPattern,
-            IUIAutomationSelectionItemPattern, IUIAutomationTogglePattern,
-            IUIAutomationValuePattern, ScrollAmount_NoAmount, ScrollAmount_SmallDecrement,
-            ScrollAmount_SmallIncrement, ToggleState_Indeterminate, ToggleState_On,
-            TreeScope_Subtree, UIA_BoundingRectanglePropertyId, UIA_ControlTypePropertyId,
+            IUIAutomationSelectionItemPattern, IUIAutomationTextPattern,
+            IUIAutomationTogglePattern, IUIAutomationValuePattern, IUIAutomationWindowPattern,
+            ScrollAmount_NoAmount, ScrollAmount_SmallDecrement, ScrollAmount_SmallIncrement,
+            ToggleState_Indeterminate, ToggleState_On, TreeScope_Subtree,
+            UIA_BoundingRectanglePropertyId, UIA_ControlTypePropertyId,
             UIA_ExpandCollapseExpandCollapseStatePropertyId, UIA_ExpandCollapsePatternId,
             UIA_HasKeyboardFocusPropertyId, UIA_InvokePatternId, UIA_IsEnabledPropertyId,
             UIA_IsOffscreenPropertyId, UIA_IsPasswordPropertyId, UIA_NamePropertyId,
             UIA_ScrollPatternId, UIA_SelectionItemIsSelectedPropertyId, UIA_SelectionItemPatternId,
-            UIA_TogglePatternId, UIA_ToggleToggleStatePropertyId, UIA_ValuePatternId,
-            UIA_ValueValuePropertyId, UIA_WindowPatternId, IUIAutomationWindowPattern,
+            UIA_TextPatternId, UIA_TogglePatternId, UIA_ToggleToggleStatePropertyId,
+            UIA_ValuePatternId, UIA_ValueValuePropertyId, UIA_WindowPatternId,
         },
         UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE},
     },
@@ -393,8 +394,13 @@ impl Worker {
                     {
                         return Ok(());
                     }
-                    PostMessageW(Some(hwnd), WM_CLOSE, windows::Win32::Foundation::WPARAM(0), windows::Win32::Foundation::LPARAM(0))
-                        .map_err(acc("PostMessageW(WM_CLOSE)"))
+                    PostMessageW(
+                        Some(hwnd),
+                        WM_CLOSE,
+                        windows::Win32::Foundation::WPARAM(0),
+                        windows::Win32::Foundation::LPARAM(0),
+                    )
+                    .map_err(acc("PostMessageW(WM_CLOSE)"))
                 }
             }
             _ => Err(DesktopError::Accessibility(format!(
@@ -408,9 +414,8 @@ impl Worker {
             return Some(el.clone());
         }
         // SAFETY: COM query on the STA thread's IUIAutomation instance.
-        unsafe { self.uia.GetFocusedElement().ok() }.or_else(|| {
-            self.retained.first().map(|r| r.element.clone())
-        })
+        unsafe { self.uia.GetFocusedElement().ok() }
+            .or_else(|| self.retained.first().map(|r| r.element.clone()))
     }
 
     fn scroll(el: &IUIAutomationElement, dx: f64, dy: f64) -> Res<()> {
@@ -446,61 +451,66 @@ impl Worker {
         }
     }
 
-    pub fn act(&mut self, action: &Action) -> Res<ActionResult> {
-        let mut verified = None;
-        match action {
-            Action::Click { target, method } => match (target, method) {
-                (Target::ByIndex { index, generation }, ClickMethod::Accessibility) => {
-                    let r = self.resolve(*index, *generation)?;
-                    let el = r.element.clone();
-                    let (ok, ver) = Self::pattern_click(&el)?;
-                    if !ok {
-                        return Err(DesktopError::Unsupported(
-                            "element has no invoke/toggle/select/expand pattern; \
-                             retry with method=global to click its centre"
-                                .into(),
-                        ));
-                    }
-                    self.last_focused = Some(el);
-                    verified = ver;
-                }
-                (_, ClickMethod::Global) => {
-                    let resolved_el = match *target {
-                        Target::ByIndex { index, generation } => {
-                            Some(self.resolve(index, generation)?.element.clone())
-                        }
-                        Target::ByCoordinate { .. } => None,
-                    };
-                    let (x, y) = self.point(target)?;
-                    if let Err(e) = input::click_at(x, y) {
-                        if let Some(el) = &resolved_el {
-                            // Fallback to UIA focus / pattern invoke when SendInput is blocked.
-                            // SAFETY: COM call on a live element owned by this thread.
-                            let focused = unsafe { el.SetFocus().is_ok() };
-                            let patterned = Self::pattern_click(el).is_ok_and(|(ok, _)| ok);
-                            if !focused && !patterned {
-                                return Err(e);
-                            }
-                        } else {
-                            return Err(e);
-                        }
-                    }
-                    if let Some(el) = resolved_el {
-                        self.last_focused = Some(el);
-                    }
-                }
-                (Target::ByCoordinate { .. }, ClickMethod::Accessibility) => {
+    fn click(&mut self, target: &Target, method: ClickMethod) -> Res<Option<bool>> {
+        match (target, method) {
+            (Target::ByIndex { index, generation }, ClickMethod::Accessibility) => {
+                let r = self.resolve(*index, *generation)?;
+                let el = r.element.clone();
+                let (ok, ver) = Self::pattern_click(&el)?;
+                if !ok {
                     return Err(DesktopError::Unsupported(
-                        "accessibility clicks need an element index; use method=global for coordinates"
+                        "element has no invoke/toggle/select/expand pattern; \
+                         retry with method=global to click its centre"
                             .into(),
                     ));
                 }
-                (_, ClickMethod::AppPost) => {
-                    return Err(DesktopError::Unsupported(
-                        "app_post click is not implemented on Windows yet".into(),
-                    ));
+                self.last_focused = Some(el);
+                Ok(ver)
+            }
+            (_, ClickMethod::Global) => {
+                let resolved_el = match *target {
+                    Target::ByIndex { index, generation } => {
+                        Some(self.resolve(index, generation)?.element.clone())
+                    }
+                    Target::ByCoordinate { .. } => None,
+                };
+                let (x, y) = self.point(target)?;
+                if let Err(e) = input::click_at(x, y) {
+                    if let Some(el) = &resolved_el {
+                        // Fallback to UIA focus / pattern invoke when SendInput is blocked.
+                        // SAFETY: COM call on a live element owned by this thread.
+                        let focused = unsafe { el.SetFocus().is_ok() };
+                        let patterned = Self::pattern_click(el).is_ok_and(|(ok, _)| ok);
+                        if !focused && !patterned {
+                            return Err(e);
+                        }
+                    } else {
+                        return Err(e);
+                    }
                 }
-            },
+                if let Some(el) = resolved_el {
+                    self.last_focused = Some(el);
+                }
+                Ok(None)
+            }
+            (Target::ByCoordinate { .. }, ClickMethod::Accessibility) => {
+                Err(DesktopError::Unsupported(
+                    "accessibility clicks need an element index; use method=global for coordinates"
+                        .into(),
+                ))
+            }
+            (_, ClickMethod::AppPost) => Err(DesktopError::Unsupported(
+                "app_post click is not implemented on Windows yet".into(),
+            )),
+        }
+    }
+
+    pub fn act(&mut self, action: &Action) -> Res<ActionResult> {
+        let mut verified = None;
+        match action {
+            Action::Click { target, method } => {
+                verified = self.click(target, *method)?;
+            }
             Action::TypeText { text } => {
                 self.focus_target();
                 if let Err(e) = input::type_text(text) {
@@ -562,7 +572,7 @@ impl Worker {
 
 /// Compare the requested `SetValue` string against `ValuePattern.CurrentValue`.
 ///
-/// Normalises `\r\n` to `\n` because Win32 / RichEdit controls convert lone
+/// Normalises `\r\n` to `\n` because Win32 / `RichEdit` controls convert lone
 /// newlines to CRLF on write. Returns `false` (never an error) on mismatch or
 /// when `actual` could not be read.
 #[must_use]
@@ -582,6 +592,34 @@ pub fn verify_value(expected: &str, actual: Option<&str>) -> bool {
 #[must_use]
 pub fn verify_toggle(before: Option<i32>, after: Option<i32>) -> bool {
     matches!((before, after), (Some(b), Some(a)) if b != a)
+}
+
+/// Body text of a document or edit that does not expose `ValuePattern`.
+///
+/// Windows 11 Notepad's editor is a document whose text is only available
+/// through `TextPattern`. Capped so a large buffer cannot dominate a snapshot.
+fn text_pattern_excerpt(el: &IUIAutomationElement, role: &str) -> Option<String> {
+    if role != "document" && role != "edit" {
+        return None;
+    }
+    // SAFETY: current (not cached) pattern query on an element from this walk.
+    // Text ranges are not part of the cache request.
+    unsafe {
+        let pattern = el
+            .GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId)
+            .ok()?;
+        let text = pattern
+            .DocumentRange()
+            .ok()?
+            .GetText(2_000)
+            .ok()?
+            .to_string();
+        if text.chars().any(|c| !c.is_whitespace()) {
+            Some(text)
+        } else {
+            None
+        }
+    }
 }
 
 /// Read one cached element into a [`RawNode`]. Every property read is
@@ -630,7 +668,8 @@ fn read_raw(el: &IUIAutomationElement) -> RawNode {
             .ok()
             .and_then(|p| p.CachedValue().ok())
             .map(|b| b.to_string())
-            .filter(|s| !s.is_empty());
+            .filter(|s| !s.is_empty())
+            .or_else(|| text_pattern_excerpt(el, role));
         RawNode {
             role,
             name,

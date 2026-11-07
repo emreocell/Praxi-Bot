@@ -293,16 +293,20 @@ pub fn launch(app: &AppSpec) -> Result<Pid, DesktopError> {
             // That is a success, not an error: pid 0 means "not known".
             return Ok(0);
         }
-        // Let GUI apps initialise their message loop (capped). Stub launchers
-        // (`calc.exe` activating `CalculatorApp.exe`) exit within a few ms
-        // without creating a window under their own pid; returning 0 lets the
-        // caller match any new window.
+        // Let GUI apps initialise their message loop (capped). App-execution
+        // aliases (`notepad.exe`, `calc.exe`) keep a launcher pid that never
+        // owns the window; pid 0 tells the caller to accept any new window.
+        // A process that already has a titled window keeps its pid so the
+        // caller can match that process only.
         let idle = WaitForInputIdle(info.hProcess, LAUNCH_IDLE_CAP_MS);
         let stub_wait = if idle == 0 { 0 } else { 100 };
         let pid = if WaitForSingleObject(info.hProcess, stub_wait) == WAIT_OBJECT_0 {
             0
         } else {
-            GetProcessId(info.hProcess)
+            let pid = GetProcessId(info.hProcess);
+            let owns_window = list_windows()
+                .is_ok_and(|wins| wins.iter().any(|w| w.pid == pid && !w.title.is_empty()));
+            if pid == 0 || !owns_window { 0 } else { pid }
         };
         let _ = CloseHandle(info.hProcess);
         Ok(pid)

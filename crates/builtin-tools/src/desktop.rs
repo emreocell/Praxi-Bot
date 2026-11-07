@@ -561,36 +561,34 @@ impl Shared {
         Ok(format!("{prefix}\n{state}"))
     }
 
-    /// Poll `windows()` every ~100 ms after launch until a new top-level window
-    /// appears (matching `pid`, or any new window when `pid == 0`), capped at
-    /// `launch_settle`. Skips waiting when `launch_settle` is zero.
-    async fn wait_for_launched_windows(
+    /// Poll `windows()` until a new top-level window appears (matching `pid`, or
+    /// any new window when `pid == 0`). The first sample is immediate; later
+    /// samples are about 100 ms apart. A non-empty title counts as the one
+    /// stable sample that ends the wait. `deadline` is absolute: the caller
+    /// starts it before `launch()` so `WaitForInputIdle` counts toward
+    /// `launch_settle` and the worst case is not slower than the old fixed sleep.
+    async fn poll_launched_windows(
         &self,
         before: &HashSet<u64>,
         pid: u32,
+        deadline: tokio::time::Instant,
     ) -> Result<Vec<desktop_api::WindowInfo>, ToolError> {
         let matches_launch = |w: &desktop_api::WindowInfo| -> bool {
             !before.contains(&w.id) && !w.title.is_empty() && (pid == 0 || w.pid == pid)
         };
-        if self.settings.launch_settle.is_zero() {
-            let wins = self.backend.windows().await.map_err(|e| derr(&e))?;
-            return Ok(wins.into_iter().filter(matches_launch).collect());
-        }
         async {
-            let deadline = tokio::time::Instant::now() + self.settings.launch_settle;
             loop {
-                let now = tokio::time::Instant::now();
-                let remaining = deadline.saturating_duration_since(now);
-                if remaining.is_zero() {
-                    let wins = self.backend.windows().await.map_err(|e| derr(&e))?;
-                    return Ok(wins.into_iter().filter(matches_launch).collect());
-                }
-                tokio::time::sleep(LAUNCH_POLL.min(remaining)).await;
                 let wins = self.backend.windows().await.map_err(|e| derr(&e))?;
                 let found: Vec<_> = wins.into_iter().filter(&matches_launch).collect();
-                if !found.is_empty() || tokio::time::Instant::now() >= deadline {
+                let now = tokio::time::Instant::now();
+                if !found.is_empty() || now >= deadline {
                     return Ok(found);
                 }
+                let remaining = deadline.saturating_duration_since(now);
+                if remaining.is_zero() {
+                    return Ok(found);
+                }
+                tokio::time::sleep(LAUNCH_POLL.min(remaining)).await;
             }
         }
         .instrument(tracing::info_span!("desktop.settle", op = "launch"))
@@ -918,6 +916,10 @@ impl DesktopTool {
                     .into_iter()
                     .map(|w| w.id)
                     .collect();
+                // Deadline starts before `launch` so `WaitForInputIdle` shares the
+                // `launch_settle` budget. Zero settle makes the deadline "now":
+                // one sample, no sleep.
+                let deadline = tokio::time::Instant::now() + sh.settings.launch_settle;
                 let pid = sh
                     .backend
                     .launch(AppSpec {
@@ -927,7 +929,7 @@ impl DesktopTool {
                     .instrument(tracing::info_span!("desktop.act", op = "launch"))
                     .await
                     .map_err(|e| derr(&e))?;
-                let wins = sh.wait_for_launched_windows(&before, pid).await?;
+                let wins = sh.poll_launched_windows(&before, pid, deadline).await?;
                 let mut out = format!("launched pid={pid}\nwindows:\n");
                 for w in wins.iter().take(MAX_WINDOWS_SHOWN) {
                     let _ = writeln!(out, "{}", window_line(w));
@@ -1540,7 +1542,7 @@ mod tests {
         assert!(text(&out).contains("\"Fake Notepad\""));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn launch_returns_early_when_new_window_appears_at_200ms() {
         let mut fake = FakeDesktop::new(false);
         fake.launch_window_delay = Some(Duration::from_millis(200));
@@ -1558,7 +1560,10 @@ mod tests {
         );
         let start = tokio::time::Instant::now();
         let out = get(&t, "desktop_launch")
-            .call(&ToolContext::default(), json!({"executable": "notepad.exe"}))
+            .call(
+                &ToolContext::default(),
+                json!({"executable": "notepad.exe"}),
+            )
             .await
             .unwrap();
         let elapsed = start.elapsed();
@@ -1571,7 +1576,7 @@ mod tests {
         assert!(!s.contains("id=77"), "only new windows listed: {s}");
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn launch_returns_at_cap_when_no_new_window_appears() {
         let mut fake = FakeDesktop::new(false);
         fake.launch_window_delay = None;
@@ -1590,19 +1595,91 @@ mod tests {
         );
         let start = tokio::time::Instant::now();
         let out = get(&t, "desktop_launch")
-            .call(&ToolContext::default(), json!({"executable": "notepad.exe"}))
+            .call(
+                &ToolContext::default(),
+                json!({"executable": "notepad.exe"}),
+            )
             .await
             .unwrap();
         let elapsed = start.elapsed();
         assert!(
-            elapsed >= Duration::from_millis(300),
-            "expected wait until cap ({cap:?}), got {elapsed:?}"
+            elapsed >= cap.saturating_sub(Duration::from_millis(50)) && elapsed <= cap,
+            "expected wait until cap ({cap:?}) and not past it, got {elapsed:?}"
         );
         let s = text(&out);
         assert_eq!(s, "launched pid=4242\nwindows:\n");
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
+    async fn launch_returns_immediately_when_the_window_is_already_there() {
+        let mut fake = FakeDesktop::new(false);
+        fake.launch_window_delay = Some(Duration::ZERO);
+        let fake = Arc::new(fake);
+        let d = tempfile::tempdir().unwrap();
+        let t = tools(
+            fake,
+            None,
+            d.path(),
+            DesktopSettings {
+                action_settle: Duration::ZERO,
+                launch_settle: Duration::from_millis(1500),
+            },
+            None,
+        );
+        let start = tokio::time::Instant::now();
+        let out = get(&t, "desktop_launch")
+            .call(
+                &ToolContext::default(),
+                json!({"executable": "notepad.exe"}),
+            )
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_millis(100),
+            "window already present must not wait out launch_settle, got {elapsed:?}"
+        );
+        let s = text(&out);
+        assert!(s.contains("id=88 pid=4242 focused \"Launched App\""), "{s}");
+        assert!(!s.contains("id=77"), "{s}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn launch_ignores_a_new_window_with_a_different_pid() {
+        let mut fake = FakeDesktop::new(false);
+        fake.launch_pid = 4242;
+        fake.launched_window_pid = 9999;
+        fake.launch_window_delay = Some(Duration::from_millis(50));
+        let fake = Arc::new(fake);
+        let d = tempfile::tempdir().unwrap();
+        let cap = Duration::from_millis(300);
+        let t = tools(
+            fake,
+            None,
+            d.path(),
+            DesktopSettings {
+                action_settle: Duration::ZERO,
+                launch_settle: cap,
+            },
+            None,
+        );
+        let start = tokio::time::Instant::now();
+        let out = get(&t, "desktop_launch")
+            .call(
+                &ToolContext::default(),
+                json!({"executable": "notepad.exe"}),
+            )
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= cap.saturating_sub(Duration::from_millis(50)) && elapsed <= cap,
+            "a different pid is not the launched window; waited {elapsed:?}, cap {cap:?}"
+        );
+        assert_eq!(text(&out), "launched pid=4242\nwindows:\n");
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn launch_pid_zero_accepts_any_new_window() {
         let mut fake = FakeDesktop::new(false);
         fake.launch_pid = 0;
@@ -1639,7 +1716,7 @@ mod tests {
         assert!(!s.contains("id=77"), "{s}");
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn launch_with_zero_settings_skips_wait() {
         let mut fake = FakeDesktop::new(false);
         fake.launch_window_delay = None;
@@ -1647,7 +1724,10 @@ mod tests {
         let (_d, t) = build(fake, None);
         let start = tokio::time::Instant::now();
         let out = get(&t, "desktop_launch")
-            .call(&ToolContext::default(), json!({"executable": "notepad.exe"}))
+            .call(
+                &ToolContext::default(),
+                json!({"executable": "notepad.exe"}),
+            )
             .await
             .unwrap();
         let elapsed = start.elapsed();
