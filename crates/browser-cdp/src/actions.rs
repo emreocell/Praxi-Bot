@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 use crate::diff::{self, SnapshotDiff};
 use crate::error::{Error, Result};
-use crate::page::{DEFAULT_WAIT, Page};
+use crate::page::{DEFAULT_WAIT, DialogInfo, DialogOptions, Page};
 use crate::snapshot::{RefEntry, Snapshot};
 
 /// Result of an action: success flag, refreshed view as a diff against what the agent saw before.
@@ -24,6 +24,17 @@ pub struct ActionResult {
     pub new_snapshot_diff: SnapshotDiff,
     /// The full post-action snapshot (new baseline).
     pub snapshot: Snapshot,
+    /// All JS dialogs that opened during the action and were answered.
+    pub dialogs: Vec<DialogInfo>,
+    /// Set when the page did not settle (for example `network still busy: 2 requests`).
+    pub settle_note: Option<String>,
+}
+
+impl ActionResult {
+    /// First JS dialog that opened during the action, if any.
+    pub fn dialog(&self) -> Option<&DialogInfo> {
+        self.dialogs.first()
+    }
 }
 
 /// Condition for [`Page::wait_for`].
@@ -179,47 +190,84 @@ impl Page {
     // -- result plumbing ------------------------------------------------------------------------
 
     /// Baseline for diffing: the last snapshot the agent saw (taking one if there is none yet).
-    async fn baseline(&self) -> Result<Snapshot> {
+    async fn baseline_with(&self, opts: &DialogOptions) -> Result<Snapshot> {
+        if let Ok(mut d) = self.shared.dialogs.lock() {
+            d.clear();
+        }
+        if let Ok(mut p) = self.shared.dialog_policy.lock() {
+            *p = opts.clone();
+        }
         let last = self.state.lock().await.last.clone();
         if let Some(s) = last {
             return Ok(s);
         }
-        let opts = self.state.lock().await.opts.clone();
-        self.snapshot(&opts).await
+        let snap_opts = self.state.lock().await.opts.clone();
+        self.snapshot(&snap_opts).await
+    }
+
+    async fn baseline(&self) -> Result<Snapshot> {
+        self.baseline_with(&DialogOptions::default()).await
     }
 
     /// Wait for the page to settle after an action, take a new snapshot, diff, and package.
     async fn finish(&self, before: Snapshot, outcome: Result<()>) -> Result<ActionResult> {
+        self.finish_with(before, outcome, true).await
+    }
+
+    /// Like [`Page::finish`]; `settle = false` skips the settle wait (the caller already knows
+    /// the page is in the wanted state).
+    async fn finish_with(
+        &self,
+        before: Snapshot,
+        outcome: Result<()>,
+        settle: bool,
+    ) -> Result<ActionResult> {
         if let Err(e) = &outcome
             && e.is_fatal()
         {
             return Err(outcome.unwrap_err());
         }
-        self.settle().await;
+        let settle_note = if settle { self.settle().await } else { None };
         let opts = self.state.lock().await.opts.clone();
         let snapshot = self.snapshot(&opts).await?;
         let new_snapshot_diff = diff::diff(&before, &snapshot);
+        let dialogs = self
+            .shared
+            .dialogs
+            .lock()
+            .map(|mut d| std::mem::take(&mut *d))
+            .unwrap_or_default();
+        if let Ok(mut p) = self.shared.dialog_policy.lock() {
+            *p = DialogOptions::default();
+        }
         Ok(ActionResult {
             ok: outcome.is_ok(),
             error: outcome.err().map(|e| e.to_string()),
             new_snapshot_diff,
             snapshot,
+            dialogs,
+            settle_note,
         })
     }
 
-    /// Give navigation, rendering and XHRs a chance to finish (best effort).
-    async fn settle(&self) {
+    /// Give navigation, rendering and XHRs a chance to finish (best effort). Returns a note when
+    /// the network was still busy at the end.
+    async fn settle(&self) -> Option<String> {
         tokio::time::sleep(Duration::from_millis(100)).await;
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
-            match self.evaluate("document.readyState").await {
-                Ok(v) if v.as_str() == Some("complete") => break,
+            let ready =
+                tokio::time::timeout(Duration::from_secs(2), self.evaluate("document.readyState"))
+                    .await;
+            match ready {
+                Ok(Ok(v)) if v.as_str() == Some("complete") => break,
                 _ => tokio::time::sleep(Duration::from_millis(50)).await,
             }
         }
-        let _ = self
-            .wait_network_idle(Duration::from_millis(250), Duration::from_secs(2))
-            .await;
+        self.wait_network_idle(Duration::from_millis(250), Duration::from_secs(2))
+            .await
+            .err()
+            .map(|_| format!("network still busy: {} requests", self.busy_requests()))
     }
 
     // -- geometry -------------------------------------------------------------------------------
@@ -386,11 +434,16 @@ impl Page {
 
     // -- public actions -------------------------------------------------------------------------
 
-    /// Click an element: scroll into view, compute the box-model center, dispatch mouse events.
-    pub async fn click(&self, r: &str) -> Result<ActionResult> {
-        let before = self.baseline().await?;
+    /// Click an element with explicit dialog handling options.
+    pub async fn click_with(&self, r: &str, opts: &DialogOptions) -> Result<ActionResult> {
+        let before = self.baseline_with(opts).await?;
         let res = self.click_inner(r, 1).await;
         self.finish(before, res).await
+    }
+
+    /// Click an element: scroll into view, compute the box-model center, dispatch mouse events.
+    pub async fn click(&self, r: &str) -> Result<ActionResult> {
+        self.click_with(r, &DialogOptions::default()).await
     }
 
     /// Double-click an element.
@@ -577,7 +630,8 @@ impl Page {
                 self.poll_true(&js, timeout, "text").await
             }
         };
-        self.finish(before, res).await
+        // The wanted condition already holds (or timed out): snapshot only, no settle.
+        self.finish_with(before, res, false).await
     }
 
     async fn poll_true(&self, js: &str, timeout: Duration, what: &str) -> Result<()> {
@@ -607,11 +661,45 @@ impl Page {
         Ok(())
     }
 
-    /// Navigate to a URL and wait for the load event.
-    pub async fn navigate(&self, url: &str) -> Result<ActionResult> {
-        let before = self.baseline().await?;
+    /// Navigate and return the first view of the page with snapshot and dialog options.
+    pub async fn navigate_snapshot_with(
+        &self,
+        url: &str,
+        opts: &crate::snapshot::SnapshotOptions,
+        dialog_opts: &DialogOptions,
+    ) -> Result<ActionResult> {
+        if let Ok(mut d) = self.shared.dialogs.lock() {
+            d.clear();
+        }
+        if let Ok(mut p) = self.shared.dialog_policy.lock() {
+            *p = dialog_opts.clone();
+        }
+        self.set_snapshot_options(opts).await;
+        let res = self.navigate_inner(url).await;
+        self.finish(Snapshot::default(), res).await
+    }
+
+    /// Navigate and return the first view of the page: one snapshot taken with `opts` (no
+    /// baseline snapshot, so the diff is against an empty page). Used by `browser_open`.
+    pub async fn navigate_snapshot(
+        &self,
+        url: &str,
+        opts: &crate::snapshot::SnapshotOptions,
+    ) -> Result<ActionResult> {
+        self.navigate_snapshot_with(url, opts, &DialogOptions::default())
+            .await
+    }
+
+    /// Navigate to a URL with explicit dialog handling options.
+    pub async fn navigate_with(&self, url: &str, opts: &DialogOptions) -> Result<ActionResult> {
+        let before = self.baseline_with(opts).await?;
         let res = self.navigate_inner(url).await;
         self.finish(before, res).await
+    }
+
+    /// Navigate to a URL and wait for the load event.
+    pub async fn navigate(&self, url: &str) -> Result<ActionResult> {
+        self.navigate_with(url, &DialogOptions::default()).await
     }
 
     async fn history_inner(&self, delta: i64) -> Result<()> {
@@ -628,16 +716,27 @@ impl Page {
             json!({"entryId": target["id"]}),
         )
         .await?;
-        // Same-document entries fire no load event; do not fail on timeout.
-        let _ = self.wait_load(&mut rx, Duration::from_secs(5)).await;
+        // Same-document entries fire `navigatedWithinDocument` instead of a load event.
+        let _ = self
+            .wait_events(
+                &mut rx,
+                &["Page.loadEventFired", "Page.navigatedWithinDocument"],
+                Duration::from_secs(5),
+            )
+            .await;
         Ok(())
+    }
+
+    /// Go back in history with explicit dialog handling options.
+    pub async fn back_with(&self, opts: &DialogOptions) -> Result<ActionResult> {
+        let before = self.baseline_with(opts).await?;
+        let res = self.history_inner(-1).await;
+        self.finish(before, res).await
     }
 
     /// Go back in history.
     pub async fn back(&self) -> Result<ActionResult> {
-        let before = self.baseline().await?;
-        let res = self.history_inner(-1).await;
-        self.finish(before, res).await
+        self.back_with(&DialogOptions::default()).await
     }
 
     /// Go forward in history.

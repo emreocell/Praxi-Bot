@@ -92,8 +92,33 @@ impl ServerHandler for TestServer {
     }
 }
 
+/// Child that would outlive this process unless the parent's process group
+/// (Unix) or job object (Windows) is killed. Stdio is detached so it does not
+/// hold the MCP pipes open.
+fn spawn_orphan() {
+    let Some(path) = std::env::var_os("MCP_ORPHAN_PIDFILE") else {
+        return;
+    };
+    let exe = std::env::current_exe().expect("current_exe");
+    let child = std::process::Command::new(exe)
+        .arg("--sleep")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn orphan");
+    std::fs::write(&path, child.id().to_string()).expect("write pidfile");
+    // Do not wait or kill: survival is the shutdown test's problem.
+    std::mem::forget(child);
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().any(|a| a == "--sleep") {
+        std::thread::sleep(std::time::Duration::from_secs(120));
+        return Ok(());
+    }
+    spawn_orphan();
     let service = TestServer.serve(stdio()).await?;
     service.waiting().await?;
     Ok(())

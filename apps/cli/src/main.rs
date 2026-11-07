@@ -5,6 +5,8 @@ mod channels;
 mod channels_tests;
 mod client;
 mod commands;
+mod doctor;
+mod mcp_host;
 mod presets;
 mod prompt;
 mod remote;
@@ -63,6 +65,8 @@ struct Cli {
 enum Command {
     /// Interactive first-run setup (or scripted with --provider).
     Setup(SetupCmd),
+    /// Check the installation (data dir, config, providers, daemon, browser, ...).
+    Doctor(DoctorCmd),
     /// Manage stored secrets (values are never printed).
     Secrets {
         #[command(subcommand)]
@@ -211,6 +215,16 @@ enum BotsCmd {
         /// Path of the profile file.
         file: PathBuf,
     },
+}
+
+#[derive(Args)]
+struct DoctorCmd {
+    /// Also test provider connections over the network.
+    #[arg(long)]
+    online: bool,
+    /// Write a redacted diagnostic bundle (JSON, no secrets) to this file.
+    #[arg(long, value_name = "FILE")]
+    report: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -388,6 +402,7 @@ fn run() -> Result<()> {
     // Daemon commands (no secret store needed, except `serve` with real providers).
     match command {
         Command::Serve { .. } => return run_serve(&cli, command, &data_dir),
+        Command::Doctor(c) => return run_doctor(&cli, c, &data_dir),
         Command::Status
         | Command::Chat { .. }
         | Command::Bots { .. }
@@ -446,7 +461,8 @@ fn run() -> Result<()> {
             }
             SecretsCmd::Delete { name } => commands::secrets_delete(store, name),
         },
-        Command::Serve { .. }
+        Command::Doctor(_)
+        | Command::Serve { .. }
         | Command::Status
         | Command::Chat { .. }
         | Command::Bots { .. }
@@ -495,6 +511,50 @@ fn run() -> Result<()> {
             ProvidersCmd::List | ProvidersCmd::Default { .. } => Ok(()),
         },
     }
+}
+
+/// `bot doctor`: never prompts, opens the secret store read-only.
+fn run_doctor(cli: &Cli, c: &DoctorCmd, data_dir: &std::path::Path) -> Result<()> {
+    let catalog = load_catalog(cli.catalog_dir.as_ref()).map_err(|e| e.to_string());
+    let pass = std::env::var("BOT_SECRETS_PASSPHRASE").ok();
+    let store = open_store(cli.secrets_backend, data_dir, &|_| pass.clone())
+        .map(|(s, k)| (s, format!("{k:?}")))
+        .map_err(|e| e.to_string());
+    let env = doctor::DoctorEnv {
+        data_dir,
+        catalog: catalog.as_ref().map_err(Clone::clone),
+        store: store
+            .as_ref()
+            .map(|(s, k)| (s.as_ref(), k.clone()))
+            .map_err(Clone::clone),
+        port: cli.port,
+        online: c.online,
+        browser: browser_cdp::find_browser().ok(),
+    };
+    let checks = doctor::run_checks(&env);
+    if cli.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&doctor::to_json(&checks))?
+        );
+    } else {
+        doctor::render_table(&checks, &mut std::io::stdout().lock())?;
+    }
+    if let Some(p) = &c.report {
+        doctor::write_report(&env, &checks, p)?;
+        eprintln!("report written to {}", p.display());
+    }
+    let fails = checks
+        .iter()
+        .filter(|c| c.status == doctor::Status::Fail)
+        .count();
+    if fails > 0 {
+        return Err(client::fail(
+            client::exit::GENERIC,
+            format!("{fails} check(s) failed"),
+        ));
+    }
+    Ok(())
 }
 
 fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result<()> {
@@ -760,7 +820,12 @@ fn run_setup(c: &SetupCmd, env: &SetupEnv<'_>) -> Result<()> {
     if let Some(s) = &out.secret_name {
         println!("API key stored as secret {s:?}");
     }
-    println!("Bot created: {}", out.bot_id);
+    match out.bot_id {
+        Some(id) => println!("Bot created: {id}"),
+        None => println!(
+            "No model chosen, so no bot was created. Pick one with `bot providers default <id> --model <m>`, then add a bot (`bot bots add <profile.toml>`)."
+        ),
+    }
     Ok(())
 }
 

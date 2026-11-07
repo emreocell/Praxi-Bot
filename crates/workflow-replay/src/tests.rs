@@ -754,3 +754,50 @@ async fn non_cyclic_nesting_deeper_than_max_depth_is_refused() {
         .unwrap();
     assert_eq!(capture.inputs.lock().len(), 1);
 }
+
+#[tokio::test]
+async fn workflow_cannot_recurse_through_script_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(dir.path());
+    let mut wf = Workflow::new("loopy");
+    wf.description = "calls itself through a script".into();
+    wf.steps = vec![Step::Tool(ToolStep {
+        tool: "script_run".into(),
+        input: json!({"code": "return await tools.call('workflow_run', Object.fromEntries([['name', 'loopy']]));"}),
+    })];
+    store.save(&wf).unwrap();
+    let registry = ToolRegistry::new();
+    let h = Handles {
+        desktop: None,
+        browser: None,
+        tools: registry.clone(),
+    };
+    let gate: Arc<dyn builtin_tools::ToolGate> = Arc::new(RecordingGate::default());
+    assert!(registry.register(builtin_tools::script::tool(
+        registry.clone(),
+        gate.clone(),
+        script_runtime::Limits::default(),
+    )));
+    for t in crate::tools(store.clone(), h, gate, ReplayOptions::instant()) {
+        assert!(registry.register(t));
+    }
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        registry
+            .get("workflow_run")
+            .unwrap()
+            .call(&ToolContext::default(), json!({"name": "loopy"})),
+    )
+    .await
+    .expect("must not recurse unbounded")
+    .unwrap();
+    let tool_registry::ContentPart::Text { text } = &out.content[0] else {
+        panic!()
+    };
+    assert!(text.contains("HANDOVER"), "{text}");
+    // Either guard may fire first depending on feature unification.
+    assert!(
+        text.contains("would call itself") || text.contains("cannot call workflow_run"),
+        "{text}"
+    );
+}

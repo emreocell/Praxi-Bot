@@ -8,13 +8,14 @@ use rmcp::{
     model::{CallToolRequestParams, CallToolResult, JsonObject},
     service::ServiceError,
 };
+use secret_store::SecretStore;
 use tool_registry::{Tool, ToolRegistry};
 
 use crate::{
     config::{McpServerConfig, ToolFilter},
     error::{McpError, Result},
     tool::{McpToolAdapter, qualified_name},
-    transport::{Session, StderrLog, open},
+    transport::{Session, StderrLog, open, resolve_secrets},
 };
 
 /// Exponential reconnect backoff: `initial`, `2*initial`, ... capped at `max`.
@@ -115,6 +116,7 @@ pub(crate) struct Server {
     filter: ToolFilter,
     registry: ToolRegistry,
     policy: McpPolicy,
+    secrets: Option<Arc<dyn SecretStore>>,
     stderr: Arc<StderrLog>,
     /// The session; the async mutex also serialises (re)connects.
     session: tokio::sync::Mutex<Option<Arc<Session>>>,
@@ -124,6 +126,10 @@ pub(crate) struct Server {
 impl Server {
     pub(crate) fn id(&self) -> &str {
         &self.config.id
+    }
+
+    pub(crate) fn config(&self) -> &McpServerConfig {
+        &self.config
     }
 
     fn is_alive(s: &Session) -> bool {
@@ -174,10 +180,27 @@ impl Server {
             *slot = None;
         }
         self.check_usable()?;
+        // Secrets are resolved fresh on every connect cycle and only held for
+        // the duration of the attempts.  A missing secret means nothing is
+        // spawned and nothing is retried.
+        let secrets = match resolve_secrets(&self.config, self.secrets.as_deref()) {
+            Ok(s) => s,
+            Err(e) => {
+                self.record_failure(&e);
+                return Err(e);
+            }
+        };
         let attempts = self.policy.backoff.max_attempts.max(1);
         let mut last = None;
         for attempt in 0..attempts {
-            match open(&self.config, &self.stderr, self.policy.connect_timeout).await {
+            match open(
+                &self.config,
+                &secrets,
+                &self.stderr,
+                self.policy.connect_timeout,
+            )
+            .await
+            {
                 Ok(session) => {
                     let session = Arc::new(session);
                     *slot = Some(Arc::clone(&session));
@@ -213,6 +236,15 @@ impl Server {
 
     async fn drop_session(&self) {
         *self.session.lock().await = None;
+    }
+
+    /// Cancel the session and wait until its stdio child (and, via the process
+    /// group or job object, its wrapper tree) has exited or the timeout hits.
+    async fn close_session(&self) {
+        let session = self.session.lock().await.take();
+        if let Some(session) = session {
+            close_session(session).await;
+        }
     }
 
     /// Call a remote tool by its server-side name.
@@ -311,10 +343,40 @@ impl Server {
     }
 }
 
+/// How long [`McpManager::shutdown`] waits for one session to finish closing
+/// (the transport itself also bounds the child wait).
+const SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// Cancel `session` and wait for its service task, which closes the transport
+/// and reaps the child. In-flight callers are given a moment to drop their
+/// clones so the task can be awaited rather than aborted.
+async fn close_session(session: Arc<Session>) {
+    session.cancellation_token().cancel();
+    let mut held = session;
+    let give_up = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        match Arc::try_unwrap(held) {
+            Ok(mut owned) => {
+                let _ = tokio::time::timeout(SESSION_CLOSE_TIMEOUT, owned.close()).await;
+                return;
+            }
+            Err(shared) => {
+                if tokio::time::Instant::now() >= give_up {
+                    drop(shared);
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+                held = shared;
+            }
+        }
+    }
+}
+
 /// Owns all configured MCP servers and keeps a [`ToolRegistry`] in sync with them.
 pub struct McpManager {
     registry: ToolRegistry,
     policy: McpPolicy,
+    secrets: Option<Arc<dyn SecretStore>>,
     servers: Mutex<BTreeMap<String, Arc<Server>>>,
 }
 
@@ -331,8 +393,17 @@ impl McpManager {
         Self {
             registry,
             policy,
+            secrets: None,
             servers: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// Secret store used to resolve `secret_headers` / `secret_env` at connect
+    /// time.  Without one, servers that use secret references fail to start.
+    #[must_use]
+    pub fn with_secret_store(mut self, store: Arc<dyn SecretStore>) -> Self {
+        self.secrets = Some(store);
+        self
     }
 
     fn get(&self, id: &str) -> Result<Arc<Server>> {
@@ -356,6 +427,7 @@ impl McpManager {
             filter: config.tool_filter()?,
             registry: self.registry.clone(),
             policy: self.policy,
+            secrets: self.secrets.clone(),
             stderr: Arc::default(),
             session: tokio::sync::Mutex::new(None),
             state: Mutex::new(State {
@@ -437,16 +509,15 @@ impl McpManager {
             .remove(id)
             .ok_or_else(|| McpError::UnknownServer(id.to_owned()))?;
         server.unregister_all();
-        server.drop_session().await;
+        server.close_session().await;
         Ok(())
     }
 
-    /// Disconnect every server (tools stay registered but calls will reconnect lazily).
+    /// Cancel every session and wait for each stdio child to exit.
     pub async fn shutdown(&self) {
         let all: Vec<_> = self.servers.lock().values().cloned().collect();
-        for s in all {
-            s.drop_session().await;
-        }
+        let closes = all.iter().map(|s| s.close_session());
+        futures::future::join_all(closes).await;
     }
 
     /// Snapshot of one server.

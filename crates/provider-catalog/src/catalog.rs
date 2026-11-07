@@ -168,4 +168,31 @@ mod tests {
         assert_eq!(errs.len(), 1);
         std::fs::remove_dir_all(&dir).unwrap();
     }
+
+    #[test]
+    fn shipped_catalog_toml_loads_without_capability_overrides() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../providers/catalog");
+        let cat = Catalog::load_dir(&dir).expect("every catalog toml parses");
+        for id in [
+            "ollama",
+            "lmstudio",
+            "openrouter",
+            "anthropic",
+            "gemini",
+            "deepseek",
+            "gemini-openai-compat",
+        ] {
+            assert!(cat.get(id).is_some(), "{id} missing");
+        }
+        for e in cat.all() {
+            for m in &e.models {
+                assert!(
+                    m.capabilities.is_none(),
+                    "{} / {} should load with no capability override",
+                    e.id,
+                    m.id
+                );
+            }
+        }
+    }
 }

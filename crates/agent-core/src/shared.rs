@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
-use agent_router::{SurfaceMode, ToolSurface};
+use agent_router::ToolSurface;
 use parking_lot::{Mutex, RwLock};
 use permission_engine::{Decision, PermissionResolver, Policy};
 use protocol::event::TodoItem;
@@ -614,10 +614,11 @@ impl Shared {
                 return narrowed;
             }
         }
-        match self.surface.mode() {
-            SurfaceMode::Discovery => self.surface.specs(),
-            SurfaceMode::Direct => self.visible_specs(profile),
-        }
+        // Only profile-visible, non-namespaced tools count against the
+        // threshold; `mcp:` tools are reached via `use_tool` and never push
+        // native tools behind it.
+        self.surface
+            .specs_for(&|s| profile.tool_visible(&s.name) && platform_ok(&s.platforms))
     }
 
     /// Resolve a model-requested call to the tool to run plus the spec and name
@@ -631,9 +632,13 @@ impl Shared {
         hints: &[String],
     ) -> Option<Resolved> {
         let tool = if hints.is_empty() {
-            self.surface.resolve(name)?
+            self.surface.resolve_with(name, &|s| {
+                profile.tool_visible(&s.name) && platform_ok(&s.platforms)
+            })?
         } else {
-            self.surface.resolve_hinted(name, hints)?
+            self.surface.resolve_hinted(name, hints, &|s| {
+                profile.tool_visible(&s.name) && platform_ok(&s.platforms)
+            })?
         };
         let own = tool.spec().clone();
         let mut eff_input = input.clone();
@@ -656,12 +661,14 @@ impl Shared {
         } else if matches!(
             name,
             agent_router::FIND_TOOL | agent_router::GET_TOOL_DETAILS
-        ) && (self.surface.mode() == SurfaceMode::Discovery || !hints.is_empty())
-        {
-            // find_tool / get_tool_details: always available to the model.
+        ) {
+            // find_tool / get_tool_details: the surface only resolves them when
+            // it exposed them, and then they are always available.
             (Some(own), name.to_owned())
         } else {
-            if !profile.tool_visible(name) {
+            // Same gate as the spec list: a hidden or wrong-platform tool must
+            // not run just because the model named it.
+            if !profile.tool_visible(name) || !platform_ok(&own.platforms) {
                 return None;
             }
             (Some(own), name.to_owned())

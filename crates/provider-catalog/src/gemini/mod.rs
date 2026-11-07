@@ -145,9 +145,9 @@ impl ChatProvider for GeminiProvider {
         &self,
         req: ChatRequest,
     ) -> Result<BoxStream<'static, Result<ChatChunk, ProviderError>>, ProviderError> {
-        let body = request::build_body(&self.entry, &req)?;
         let model = model_name(&self.entry.id, &req);
         let model = model.strip_prefix("models/").unwrap_or(model);
+        let body = request::build_body(&self.entry, model, &req)?;
         let url = format!(
             "{}/models/{model}:streamGenerateContent?alt=sse",
             self.base()

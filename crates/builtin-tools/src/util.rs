@@ -1,6 +1,5 @@
 //! Shared helpers: spec construction, input parsing, output capping.
 
-use std::fmt::Write as _;
 use std::path::Path;
 
 use serde::de::DeserializeOwned;
@@ -57,26 +56,36 @@ pub(crate) fn finish_text(ctx: &ToolContext, spill_dir: &Path, text: String) -> 
     let written = std::fs::create_dir_all(spill_dir)
         .and_then(|()| std::fs::write(&path, text.as_bytes()))
         .is_ok();
-    let cut = floor_boundary(&text, ctx.max_inline_bytes);
-    let mut inline = text[..cut].to_string();
+    let total = text.len();
     if written {
-        let _ = write!(
-            inline,
-            "
-…[output truncated at {cut} of {} bytes; full output in {}]",
-            text.len(),
-            path.display()
-        );
+        // The footer is built first so the whole inline text, footer included,
+        // stays within `max_inline_bytes`. The cut length in the footer has at
+        // most as many digits as `total`, so `total`'s width is a safe bound.
+        let footer = |cut: usize| {
+            format!(
+                "
+…[output truncated at {cut} of {total} bytes; full output in {}]",
+                path.display()
+            )
+        };
+        let room = ctx.max_inline_bytes.saturating_sub(footer(total).len());
+        let cut = floor_boundary(&text, room);
+        let mut inline = text[..cut].to_string();
+        inline.push_str(&footer(cut));
         ToolOutput {
             content: vec![ContentPart::Text { text: inline }],
             spill: Some(SpillRef {
                 path: path.display().to_string(),
                 mime_type: "text/plain".into(),
-                size_bytes: text.len() as u64,
+                size_bytes: total as u64,
             }),
         }
     } else {
-        inline.push_str("\n…[output truncated]");
+        const MARK: &str = "
+…[output truncated]";
+        let cut = floor_boundary(&text, ctx.max_inline_bytes.saturating_sub(MARK.len()));
+        let mut inline = text[..cut].to_string();
+        inline.push_str(MARK);
         ToolOutput::text(inline)
     }
 }
@@ -105,9 +114,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ctx = ToolContext {
             run_id: String::new(),
-            max_inline_bytes: 10,
+            max_inline_bytes: 1001,
+            bot_id: None,
         };
-        let text = "é".repeat(50);
+        let text = "é".repeat(2000);
         let out = finish_text(&ctx, dir.path(), text.clone());
         let spill = out.spill.expect("spilled");
         assert_eq!(std::fs::read_to_string(&spill.path).unwrap(), text);
@@ -117,5 +127,50 @@ mod tests {
         };
         assert!(inline.starts_with("ééééé"));
         assert!(inline.contains("truncated"));
+    }
+
+    fn inline_len(out: &ToolOutput) -> usize {
+        let ContentPart::Text { text } = &out.content[0] else {
+            panic!()
+        };
+        text.len()
+    }
+
+    #[test]
+    fn inline_including_footer_fits_max_inline_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        for text in [
+            "a".repeat(30_000),
+            "é".repeat(15_000),
+            "日本語".repeat(5_000),
+        ] {
+            for max in [400_usize, 1000, 16 * 1024] {
+                let ctx = ToolContext {
+                    run_id: String::new(),
+                    max_inline_bytes: max,
+                    bot_id: None,
+                };
+                let out = finish_text(&ctx, dir.path(), text.clone());
+                assert!(out.spill.is_some());
+                let n = inline_len(&out);
+                assert!(n <= max, "{n} > {max}");
+                assert!(n > max - 200, "{n} wastes room under {max}");
+            }
+        }
+    }
+
+    #[test]
+    fn unwritable_spill_dir_still_respects_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocker = dir.path().join("file");
+        std::fs::write(&blocker, "x").unwrap();
+        let ctx = ToolContext {
+            run_id: String::new(),
+            max_inline_bytes: 100,
+            bot_id: None,
+        };
+        let out = finish_text(&ctx, &blocker.join("sub"), "é".repeat(500));
+        assert!(out.spill.is_none());
+        assert!(inline_len(&out) <= 100);
     }
 }

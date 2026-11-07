@@ -10,14 +10,16 @@ use permission_engine::Policy;
 use secret_store::Redactor;
 use task_runtime::RetryPolicy;
 
-/// Registry size above which the model sees the discovery tools instead of
-/// every tool, unless [`LoopConfig::discovery_threshold`] says otherwise.
+/// Profile-visible, non-namespaced tool count above which the model sees the
+/// discovery tools instead of every tool, unless
+/// [`LoopConfig::discovery_threshold`] says otherwise.  Namespaced (`mcp:`)
+/// tools never count.  Same value as the router's own default.
 ///
 /// The built-in set (with `spawn_subagent`, the skill and the workflow tools)
 /// is just over the router's own default of 25; the model should see these
 /// directly and only switch to `find_tool` / `use_tool` once plugins or MCP
 /// servers add many more.
-pub const DEFAULT_DIRECT_TOOL_LIMIT: usize = 40;
+pub const DEFAULT_DIRECT_TOOL_LIMIT: usize = agent_router::DEFAULT_DISCOVERY_THRESHOLD;
 
 /// Default [`LoopConfig::schedule_approval_timeout`]: 30 minutes.
 pub const DEFAULT_SCHEDULE_APPROVAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);

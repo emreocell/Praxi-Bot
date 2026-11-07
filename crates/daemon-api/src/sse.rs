@@ -39,6 +39,7 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::dto::ScheduleChanged;
 use crate::error::ApiError;
+use crate::mcp::McpServerChanged;
 
 /// Index rows replayed per batch (bounds memory of a long replay).
 const REPLAY_CHUNK: u32 = 500;
@@ -110,6 +111,8 @@ struct Feed {
     // ---- global form ----
     /// `schedule_changed` notifications (global stream only).
     sched_rx: Option<broadcast::Receiver<ScheduleChanged>>,
+    /// `mcp_server_changed` notifications (global stream only).
+    mcp_rx: Option<broadcast::Receiver<McpServerChanged>>,
     // ---- both ----
     storage: Arc<Storage>,
     data_dir: PathBuf,
@@ -264,7 +267,7 @@ impl Feed {
                 self.replaying = true;
                 continue;
             }
-            let (rx, sched_rx) = (&mut self.rx, &mut self.sched_rx);
+            let (rx, sched_rx, mcp_rx) = (&mut self.rx, &mut self.sched_rx, &mut self.mcp_rx);
             let received = tokio::select! {
                 () = self.cancel.cancelled() => return None,
                 r = rx.recv() => r,
@@ -279,6 +282,19 @@ impl Feed {
                     Err(RecvError::Lagged(_)) => continue,
                     Err(RecvError::Closed) => {
                         self.sched_rx = None;
+                        continue;
+                    }
+                },
+                m = async {
+                    match mcp_rx {
+                        Some(r) => r.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => match m {
+                    Ok(change) => return Some(Out::Mcp(change)),
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => {
+                        self.mcp_rx = None;
                         continue;
                     }
                 },
@@ -304,6 +320,7 @@ impl Feed {
 enum Out {
     Run(StreamItem),
     Schedule(ScheduleChanged),
+    Mcp(McpServerChanged),
 }
 
 /// One batch of the global replay.
@@ -399,6 +416,10 @@ fn event_stream(feed: Feed) -> impl Stream<Item = Result<SseEvent, Infallible>> 
                 .event("schedule_changed")
                 .json_data(&change)
                 .unwrap_or_else(|_| SseEvent::default().comment("unserialisable event")),
+            Out::Mcp(change) => SseEvent::default()
+                .event("mcp_server_changed")
+                .json_data(&change)
+                .unwrap_or_else(|_| SseEvent::default().comment("unserialisable event")),
         };
         Some((Ok(ev), feed))
     })
@@ -435,6 +456,10 @@ pub(crate) async fn events(
         sched_rx: scoped_run
             .is_none()
             .then(|| state.subscribe_schedule_events()),
+        mcp_rx: scoped_run
+            .is_none()
+            .then(|| state.mcp().map(|m| m.subscribe()))
+            .flatten(),
         storage: state.storage_arc(),
         data_dir: state.data_dir(),
         cancel: state.shutdown_token(),

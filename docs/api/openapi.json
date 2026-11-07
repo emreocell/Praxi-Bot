@@ -874,7 +874,7 @@
           "events"
         ],
         "summary": "Documentation stub for the SSE route (the handler lives in `sse.rs`).",
-        "description": "Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the\nSSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local\n`seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without\nit the stream covers all runs: the SSE `id` is a daemon-wide, strictly\nincreasing `gseq` (persisted) and `Last-Event-ID: <gseq>` replays every\nmissed event of every run, in order, before going live.  Browsers cannot set\nheaders on `EventSource`, so this route (and only this one) also accepts the\nAPI token as the `token` query parameter (Host / Origin checks still apply;\nthe token is compared in constant time; beware that URLs may be logged).\n\nThe daemon-wide stream (no `run_id`) also carries `schedule_changed` events\n(`dto::ScheduleChanged`: `{\"type\":\"schedule_changed\",\"schedule_id\",\"kind\"}`,\nkind `created` / `updated` / `toggled` / `deleted`) when a schedule is changed\nthrough the API.  They have no SSE `id`, are not replayed and are not\nenvelopes: treat them as a hint to refetch `/v1/schedules`.",
+        "description": "Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the\nSSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local\n`seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without\nit the stream covers all runs: the SSE `id` is a daemon-wide, strictly\nincreasing `gseq` (persisted) and `Last-Event-ID: <gseq>` replays every\nmissed event of every run, in order, before going live.  Browsers cannot set\nheaders on `EventSource`, so this route (and only this one) also accepts the\nAPI token as the `token` query parameter (Host / Origin checks still apply;\nthe token is compared in constant time; beware that URLs may be logged).\n\nThe daemon-wide stream (no `run_id`) also carries `schedule_changed` events\n(`dto::ScheduleChanged`: `{\"type\":\"schedule_changed\",\"schedule_id\",\"kind\"}`,\nkind `created` / `updated` / `toggled` / `deleted`) when a schedule is changed\nthrough the API.  They have no SSE `id`, are not replayed and are not\nenvelopes: treat them as a hint to refetch `/v1/schedules`.\n\nIt likewise carries `mcp_server_changed` events (`mcp::McpServerChanged`:\n`{\"type\":\"mcp_server_changed\",\"name\",\"status\"}`) when an MCP server is\nadded, updated, removed or changes status (connecting / connected / error /\nquarantined ...); same rules: a hint to refetch `/v1/mcp/servers`.",
         "operationId": "events_doc",
         "parameters": [
           {
@@ -957,6 +957,390 @@
             }
           }
         }
+      }
+    },
+    "/v1/mcp/catalog": {
+      "get": {
+        "tags": [
+          "mcp"
+        ],
+        "summary": "The curated catalog of popular MCP servers (one-click install data).",
+        "operationId": "mcp_catalog",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/McpCatalogEntryDto"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "MCP management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/mcp/servers": {
+      "get": {
+        "tags": [
+          "mcp"
+        ],
+        "summary": "All configured MCP servers with their live status and full config.\nSecret values are never included; `secret_env` and `secret_headers` list\nsecret names.",
+        "operationId": "list_mcp_servers",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/McpServerDto"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "MCP management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "mcp"
+        ],
+        "summary": "Add an MCP server, connect it (when enabled) and save `mcp.toml`.  A server\nthat cannot connect is still added (`status: error`).  Secrets are given as\nsecret names (`secret_env` / `secret_headers`), never as values; `category`\ndefaults to `accounts`, `meta` is rejected, `trust_hints` defaults to `false`.",
+        "operationId": "create_mcp_server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpServerInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "the name is taken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid config",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "MCP management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/mcp/servers/{name}": {
+      "put": {
+        "tags": [
+          "mcp"
+        ],
+        "summary": "Merge a partial config onto the stored server (it reconnects) and save\n`mcp.toml`.  Omitted fields keep their previous values.  `bots: null`\nmeans every bot.  Secret values are never accepted or returned; send\nsecret **names** in `secret_env` / `secret_headers`.",
+        "operationId": "update_mcp_server",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Server name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpServerPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid config",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "MCP management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "mcp"
+        ],
+        "summary": "Disconnect and remove a server (its tools disappear) and save `mcp.toml`.",
+        "operationId": "delete_mcp_server",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Server name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "MCP management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/mcp/servers/{name}/reconnect": {
+      "post": {
+        "tags": [
+          "mcp"
+        ],
+        "summary": "Reconnect a server (also lifts a quarantine) and refresh its tools.  A\nfailed connect is reported as `status: error`, not as an HTTP error.",
+        "operationId": "reconnect_mcp_server",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Server name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "MCP management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/mcp/servers/{name}/tools": {
+      "get": {
+        "tags": [
+          "mcp"
+        ],
+        "summary": "The tools a server currently exposes (after its allow / exclude filters).",
+        "operationId": "list_mcp_tools",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Server name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/McpToolDto"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "MCP management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
       }
     },
     "/v1/policy": {
@@ -1760,6 +2144,66 @@
         ]
       }
     },
+    "/v1/secrets/{name}": {
+      "post": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Store a secret (create or overwrite).  **Write-only**: no route returns a\nsecret value.  The name may contain `/` (e.g. `mcp/github-token`).",
+        "operationId": "set_secret",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Secret name, `[A-Za-z0-9._:/-]`, at most 128 bytes",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSecret"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "bad name or value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "no secret store",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/usage": {
       "get": {
         "tags": [
@@ -1803,7 +2247,7 @@
         "tags": [
           "schedules"
         ],
-        "summary": "Fire a schedule from outside.  No bearer token: the body is authenticated\nwith `X-Signature-256: sha256=<hex HMAC-SHA256(secret, body)>` (the secret\nis the schedule's `webhook_secret`).  Host / Origin checks still apply and\nthe body may be at most 256 KB.  The body replaces `{input}` in the payload.\n`202` once accepted (the run goes on in the background).",
+        "summary": "Fire a schedule from outside.  No bearer token: the body is authenticated\nwith `X-Signature-256: sha256=<hex HMAC-SHA256(secret, body)>` (the secret\nis the schedule's `webhook_secret`).  Optional replay protection:\n`X-Webhook-Timestamp` (Unix ms; then the HMAC must cover `\"{timestamp}.{body}\"`\nand the timestamp must be within 5 minutes) and `X-Delivery-Id` /\n`X-GitHub-Delivery` (informational).  A signed request is accepted once per\n5-minute window whether or not those headers are sent, so the same body fired\ntwice in that time needs a timestamp (fresh signature) or a different body.  Host / Origin checks still\napply and the body may be at most 256 KB.  The body replaces `{input}` in the payload.\n`202` once accepted (the run goes on in the background).",
         "operationId": "webhook",
         "parameters": [
           {
@@ -2610,6 +3054,746 @@
           }
         }
       },
+      "McpCatalogEntryDto": {
+        "type": "object",
+        "description": "An entry of the curated MCP catalog (`GET /v1/mcp/catalog`).",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "category",
+          "homepage",
+          "install"
+        ],
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "Permission category of its tools."
+          },
+          "description": {
+            "type": "string",
+            "description": "One-line description."
+          },
+          "homepage": {
+            "type": "string",
+            "description": "Project page."
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "simple-icons slug, or `null`."
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable id."
+          },
+          "install": {
+            "$ref": "#/components/schemas/McpCatalogInstallDto",
+            "description": "How to install it."
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name."
+          }
+        }
+      },
+      "McpCatalogInstallDto": {
+        "type": "object",
+        "description": "How to install a catalog entry: send it (plus `name` and `category`) to\n`POST /v1/mcp/servers` after storing the `required_secrets`.",
+        "required": [
+          "transport",
+          "required_secrets"
+        ],
+        "properties": {
+          "args": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Arguments (stdio)."
+          },
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Executable (stdio)."
+          },
+          "env": {
+            "type": "object",
+            "description": "Non-secret environment variables (stdio).",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "required_secrets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McpRequiredSecretDto"
+            },
+            "description": "Secrets to collect first."
+          },
+          "secret_env": {
+            "type": "object",
+            "description": "Environment variable -> secret name (stdio).",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "secret_headers": {
+            "type": "object",
+            "description": "Header -> secret name (http).",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "transport": {
+            "$ref": "#/components/schemas/McpTransportKind",
+            "description": "`stdio` or `http`."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Endpoint (http)."
+          }
+        }
+      },
+      "McpRequiredSecretDto": {
+        "type": "object",
+        "description": "A secret the user must provide to install a catalog entry.",
+        "required": [
+          "name",
+          "label"
+        ],
+        "properties": {
+          "help_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the user can get the value."
+          },
+          "label": {
+            "type": "string",
+            "description": "Label for the input field."
+          },
+          "name": {
+            "type": "string",
+            "description": "Secret name (store it with `POST /v1/secrets/{name}`)."
+          }
+        }
+      },
+      "McpServerChanged": {
+        "type": "object",
+        "description": "Data of the `mcp_server_changed` SSE event of the daemon-wide stream: a\nserver was added, changed, removed, or its status moved.  A notification\nonly (refetch `/v1/mcp/servers`); no SSE `id`, not replayed, not an envelope.",
+        "required": [
+          "type",
+          "name",
+          "status"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Server name."
+          },
+          "status": {
+            "$ref": "#/components/schemas/McpStatus",
+            "description": "New status; `disconnected` for a removed server."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `mcp_server_changed`."
+          }
+        }
+      },
+      "McpServerDto": {
+        "type": "object",
+        "description": "A configured MCP server (`GET /v1/mcp/servers`).  The full stored config,\nexcept secret *values*: `secret_env` / `secret_headers` carry secret\n**names** only.",
+        "required": [
+          "name",
+          "transport",
+          "enabled",
+          "status",
+          "tool_count",
+          "category",
+          "trust_hints"
+        ],
+        "properties": {
+          "args": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Arguments (stdio)."
+          },
+          "bots": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Bots that may use the server; `null` = all bots."
+          },
+          "category": {
+            "type": "string",
+            "description": "Permission category of every tool of the server."
+          },
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Executable (stdio)."
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Working directory (stdio)."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Disabled servers are kept but never connected."
+          },
+          "env": {
+            "type": "object",
+            "description": "Plain environment variables (stdio). Not secrets.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Most recent error, if any."
+          },
+          "headers": {
+            "type": "object",
+            "description": "Plain request headers (http). Not secrets.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": "string",
+            "description": "Server name (the `<server>` of `mcp:<server>/<tool>`)."
+          },
+          "secret_env": {
+            "type": "object",
+            "description": "Environment variable -> secret name (stdio).",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "secret_headers": {
+            "type": "object",
+            "description": "HTTP header -> secret name (http).",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/McpStatus",
+            "description": "Connection state."
+          },
+          "tool_allow": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Glob allow list over server-side tool names; empty = all."
+          },
+          "tool_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of tools currently registered.",
+            "minimum": 0
+          },
+          "tool_exclude": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Glob exclude list over server-side tool names."
+          },
+          "transport": {
+            "$ref": "#/components/schemas/McpTransportKind",
+            "description": "Transport."
+          },
+          "trust_hints": {
+            "type": "boolean",
+            "description": "Whether the readOnlyHint annotations of the server are believed."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Endpoint (http)."
+          }
+        }
+      },
+      "McpServerInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/mcp/servers`: the `mcp-bridge` server config.  Secrets go\nin `secret_headers` / `secret_env` as secret **names** (store the value with\n`POST /v1/secrets/{name}`).",
+        "required": [
+          "transport"
+        ],
+        "properties": {
+          "args": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Arguments (stdio, with `transport: \"stdio\"`)."
+          },
+          "bots": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Bots that may use the server; absent / `null` = all bots."
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Permission category of the tools; default `accounts`; `meta` is rejected."
+          },
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Executable (stdio, with `transport: \"stdio\"`)."
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Working directory (stdio, with `transport: \"stdio\"`)."
+          },
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Default `true`."
+          },
+          "env": {
+            "type": "object",
+            "description": "Plain environment variables (stdio, with `transport: \"stdio\"`).",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "headers": {
+            "type": "object",
+            "description": "Plain request headers (http, with `transport: \"http\"`).",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Server name; `id` is accepted as an alias.  Required on POST; on PUT the\npath wins (a different name in the body is rejected)."
+          },
+          "secret_env": {
+            "type": "object",
+            "description": "Environment variable -> secret name.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "secret_headers": {
+            "type": "object",
+            "description": "HTTP header -> secret name.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "tool_allow": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Glob allow list over server-side tool names; empty = all."
+          },
+          "tool_exclude": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Glob exclude list over server-side tool names."
+          },
+          "transport": {
+            "$ref": "#/components/schemas/McpTransportInput",
+            "description": "Transport (see [`McpTransportInput`])."
+          },
+          "trust_hints": {
+            "type": "boolean",
+            "description": "Believe the readOnlyHint annotations of the server.  Default `false`."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Endpoint (http, with `transport: \"http\"`)."
+          }
+        }
+      },
+      "McpServerPatch": {
+        "type": "object",
+        "description": "Body of `PUT /v1/mcp/servers/{name}`.  Every field is optional: a field left\nout keeps the stored value.  `bots: null` means every bot.  The handler\nreads the raw JSON so an omitted field is not the same as `null`.",
+        "properties": {
+          "args": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Arguments (stdio)."
+          },
+          "bots": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Bots that may use the server.  Omit to keep the list; `null` = all bots."
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Permission category of the tools; `null` clears it; `meta` is rejected."
+          },
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Executable (stdio)."
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Working directory (stdio).  `null` clears it."
+          },
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Disabled servers are kept but never connected."
+          },
+          "env": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Plain environment variables (stdio).  Present object replaces the map.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "headers": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Plain request headers (http).  Present object replaces the map.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Server name; `id` is accepted as an alias.  The path wins (a different\nname in the body is rejected)."
+          },
+          "secret_env": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Environment variable -> secret name.  Present object replaces the map.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "secret_headers": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "HTTP header -> secret name.  Present object replaces the map.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "tool_allow": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Glob allow list over server-side tool names; empty = all."
+          },
+          "tool_exclude": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Glob exclude list over server-side tool names."
+          },
+          "transport": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/McpTransportInput",
+                "description": "Transport (see [`McpTransportInput`]).  Omit to keep the stored transport."
+              }
+            ]
+          },
+          "trust_hints": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Believe the readOnlyHint annotations of the server."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Endpoint (http)."
+          }
+        }
+      },
+      "McpStatus": {
+        "type": "string",
+        "description": "Connection state of an MCP server.",
+        "enum": [
+          "connected",
+          "connecting",
+          "disconnected",
+          "error",
+          "quarantined"
+        ]
+      },
+      "McpToolDto": {
+        "type": "object",
+        "description": "A tool of an MCP server (`GET /v1/mcp/servers/{name}/tools`).",
+        "required": [
+          "name",
+          "description",
+          "effect"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Description given by the server."
+          },
+          "effect": {
+            "type": "string",
+            "description": "`read`, `write` or `destructive` (`destructive` unless the server is trusted)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Qualified tool name (`mcp:<server>/<tool>`)."
+          }
+        }
+      },
+      "McpTransportInput": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/McpTransportKind",
+            "description": "`\"stdio\"` or `\"http\"`."
+          },
+          {
+            "$ref": "#/components/schemas/McpTransportObject",
+            "description": "`{ \"type\": \"stdio\", \"command\": ... }`."
+          }
+        ],
+        "description": "`transport` of an MCP server body: either the kind (`\"stdio\"` / `\"http\"`,\nwith `command` / `args` / `url` as sibling fields, the shape of\n[`McpServerDto`]) or the nested `McpServerConfig` object."
+      },
+      "McpTransportKind": {
+        "type": "string",
+        "description": "Transport of an MCP server.",
+        "enum": [
+          "stdio",
+          "http"
+        ]
+      },
+      "McpTransportObject": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Child process.",
+            "required": [
+              "command",
+              "type"
+            ],
+            "properties": {
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Arguments."
+              },
+              "command": {
+                "type": "string",
+                "description": "Executable."
+              },
+              "cwd": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Working directory."
+              },
+              "env": {
+                "type": "object",
+                "description": "Plain (non-secret) environment variables.",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "propertyNames": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "stdio"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Streamable HTTP.",
+            "required": [
+              "url",
+              "type"
+            ],
+            "properties": {
+              "headers": {
+                "type": "object",
+                "description": "Plain (non-secret) request headers.",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "propertyNames": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "http"
+                ]
+              },
+              "url": {
+                "type": "string",
+                "description": "Endpoint URL."
+              }
+            }
+          }
+        ],
+        "description": "Detailed transport of an MCP server body (the `McpServerConfig` shape)."
+      },
       "MessageDto": {
         "type": "object",
         "description": "A stored chat message.",
@@ -2927,7 +4111,7 @@
           },
           "state": {
             "type": "string",
-            "description": "`pending` / `running` / `waiting_approval` / `paused` / `succeeded` / `failed` / `cancelled`."
+            "description": "`queued` / `running` / `waiting_approval` / `paused` / `succeeded` / `failed` / `cancelled`."
           },
           "updated_at_ms": {
             "type": "integer",
@@ -3152,6 +4336,19 @@
           }
         }
       },
+      "SetSecret": {
+        "type": "object",
+        "description": "Body of `POST /v1/secrets/{name}`.",
+        "required": [
+          "value"
+        ],
+        "properties": {
+          "value": {
+            "type": "string",
+            "description": "The secret value.  Write-only: no route returns it."
+          }
+        }
+      },
       "UsageSummary": {
         "type": "object",
         "description": "`GET /v1/usage`.",
@@ -3269,6 +4466,12 @@
     },
     {
       "name": "channels"
+    },
+    {
+      "name": "mcp"
+    },
+    {
+      "name": "secrets"
     }
   ]
 }

@@ -25,8 +25,14 @@ pub const GET_TOOL_DETAILS: &str = "get_tool_details";
 /// Name of the dispatch meta-tool.
 pub const USE_TOOL: &str = "use_tool";
 
-/// Registry size above which discovery meta-tools replace direct exposure.
-pub const DEFAULT_DISCOVERY_THRESHOLD: usize = 25;
+/// Number of profile-visible, non-namespaced tools above which discovery
+/// meta-tools replace direct exposure.
+///
+/// This is the single default for both the surface and the agent loop
+/// (`agent_core::DEFAULT_DIRECT_TOOL_LIMIT` is this value): the built-in set
+/// (with `spawn_subagent`, skill and workflow tools) is just over 25, and the
+/// model should see it directly.
+pub const DEFAULT_DISCOVERY_THRESHOLD: usize = 40;
 /// Default number of results of `find_tool`.
 pub const DEFAULT_FIND_K: usize = 5;
 /// Upper bound on `k` accepted by `find_tool`.
@@ -34,6 +40,36 @@ pub const MAX_FIND_K: usize = 25;
 
 fn is_meta(name: &str) -> bool {
     matches!(name, FIND_TOOL | GET_TOOL_DETAILS | USE_TOOL)
+}
+
+/// Namespaced tools (`mcp:server/tool`, future `api:...`) are discovery-only:
+/// they never count against the threshold and are reached via `use_tool`.
+#[must_use]
+pub fn is_namespaced(name: &str) -> bool {
+    name.contains(':')
+}
+
+/// Short family labels (`fs_*`, `mcp:server/*`) of `names`, sorted and deduped,
+/// so an empty `find_tool` result still tells the model where to look.
+fn tool_families<'a>(names: impl Iterator<Item = &'a str>) -> Vec<String> {
+    let mut fams: Vec<String> = names
+        .filter(|n| !is_meta(n))
+        .map(|n| {
+            if let Some((ns, rest)) = n.split_once(':') {
+                match rest.split_once('/') {
+                    Some((server, _)) => format!("{ns}:{server}/*"),
+                    None => format!("{ns}:*"),
+                }
+            } else if let Some((prefix, _)) = n.split_once('_') {
+                format!("{prefix}_*")
+            } else {
+                n.to_owned()
+            }
+        })
+        .collect();
+    fams.sort();
+    fams.dedup();
+    fams
 }
 
 /// Per-call visibility of a tool: `(call context, tool spec) -> visible`.
@@ -125,19 +161,41 @@ impl Tool for FindTool {
         let hits: Vec<Value> = index
             .search(query, index.len())
             .into_iter()
-            .filter(|h| {
-                self.discovery
-                    .registry
-                    .get(&h.name)
-                    .is_some_and(|t| self.discovery.visible(ctx, t.spec()))
+            .filter_map(|h| {
+                let tool = self.discovery.registry.get(&h.name)?;
+                let spec = tool.spec();
+                self.discovery.visible(ctx, spec).then(|| {
+                    json!({
+                        "name": h.name,
+                        "description": h.description,
+                        "score": h.score,
+                        "effect": spec.effect,
+                        "category": spec.category,
+                    })
+                })
             })
             .take(k)
-            .map(|h| json!({ "name": h.name, "description": h.description, "score": h.score }))
             .collect();
+        // One shape for every query: `{results, hint?}`. `hint` is only present
+        // when nothing matched, so the model never has to parse a bare array.
+        let empty = hits.is_empty();
+        let mut data = json!({ "results": hits });
+        if empty {
+            let specs = self.discovery.registry.list();
+            let fams = tool_families(
+                specs
+                    .iter()
+                    .filter(|s| self.discovery.visible(ctx, s))
+                    .map(|s| s.name.as_str()),
+            );
+            data["hint"] = json!(format!(
+                "No tool matched `{query}`. Try a broader or different keyword. \
+                 Available tool families: {}.",
+                fams.join(", ")
+            ));
+        }
         Ok(ToolOutput {
-            content: vec![ContentPart::Json {
-                data: Value::Array(hits),
-            }],
+            content: vec![ContentPart::Json { data }],
             spill: None,
         })
     }
@@ -217,7 +275,9 @@ fn lookup(
 /// How tools are currently presented to the model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SurfaceMode {
-    /// Every registered tool is passed to the model directly.
+    /// Non-namespaced tools are passed to the model directly. Namespaced tools
+    /// (`mcp:`, future `api:`) stay discovery-only; the meta-tools are added
+    /// when any namespaced tool is visible.
     Direct,
     /// Only the three discovery meta-tools are passed.
     Discovery,
@@ -265,8 +325,10 @@ impl ToolSurface {
         let find: Arc<dyn Tool> = Arc::new(FindTool {
             spec: meta_spec(
                 FIND_TOOL,
-                "Search the available tools by keyword. Returns the best matching tool names \
-                 with descriptions. Call this first, then get_tool_details, then use_tool.",
+                "Search the available tools by keyword. Returns `{results: [...]}` \
+                 (name, description, score, effect, category). An empty search also \
+                 includes `hint` listing the visible tool families. Call this first, \
+                 then get_tool_details, then use_tool.",
                 Effect::Read,
                 json!({
                     "type": "object",
@@ -328,24 +390,68 @@ impl ToolSurface {
         &self.discovery.registry
     }
 
-    /// Current presentation mode.
+    /// Current presentation mode. Only non-namespaced tools count toward the
+    /// threshold.
     #[must_use]
     pub fn mode(&self) -> SurfaceMode {
-        if self.discovery.registry.list().len() > self.threshold {
+        self.mode_for(&|_| true)
+    }
+
+    /// Presentation mode counting only the non-namespaced tools `visible`
+    /// admits (e.g. those a bot profile may see).
+    #[must_use]
+    pub fn mode_for(&self, visible: &dyn Fn(&ToolSpec) -> bool) -> SurfaceMode {
+        let counted = self
+            .discovery
+            .registry
+            .list()
+            .iter()
+            .filter(|s| !is_namespaced(&s.name) && visible(s))
+            .count();
+        if counted > self.threshold {
             SurfaceMode::Discovery
         } else {
             SurfaceMode::Direct
         }
     }
 
+    /// Whether a namespaced tool `visible` admits exists; if so the meta-tools
+    /// are exposed even in direct mode.
+    fn has_namespaced(&self, visible: &dyn Fn(&ToolSpec) -> bool) -> bool {
+        self.discovery
+            .registry
+            .list()
+            .iter()
+            .any(|s| is_namespaced(&s.name) && visible(s))
+    }
+
     /// Tool definitions to hand to the model, sorted by name.
     #[must_use]
     pub fn specs(&self) -> Vec<ToolSpec> {
-        match self.mode() {
-            SurfaceMode::Discovery => self.meta.iter().map(|t| t.spec().clone()).collect(),
+        self.specs_for(&|_| true)
+    }
+
+    /// Like [`Self::specs`] for the tools `visible` admits.  Direct mode lists
+    /// the admitted non-namespaced tools (plus the meta-tools when namespaced
+    /// tools exist, so they stay reachable); discovery mode lists only the
+    /// meta-tools.
+    #[must_use]
+    pub fn specs_for(&self, visible: &dyn Fn(&ToolSpec) -> bool) -> Vec<ToolSpec> {
+        let meta = || self.meta.iter().map(|t| t.spec().clone());
+        match self.mode_for(visible) {
+            SurfaceMode::Discovery => meta().collect(),
             SurfaceMode::Direct => {
-                let mut specs = self.discovery.registry.list();
+                let mut specs: Vec<ToolSpec> = self
+                    .discovery
+                    .registry
+                    .list()
+                    .into_iter()
+                    .filter(|s| !is_namespaced(&s.name) && visible(s))
+                    .collect();
                 specs.sort_by(|a, b| a.name.cmp(&b.name));
+                if self.has_namespaced(visible) {
+                    specs.extend(meta());
+                }
                 specs
             }
         }
@@ -374,26 +480,59 @@ impl ToolSurface {
     }
 
     /// Like [`Self::resolve`] for a turn narrowed by [`Self::hinted_specs`]:
-    /// the meta-tools and the hinted tools are addressable in either mode.
+    /// the meta-tools, and hinted tools that pass `visible`, are addressable
+    /// in either mode.
     #[must_use]
-    pub fn resolve_hinted(&self, name: &str, hinted: &[String]) -> Option<Arc<dyn Tool>> {
+    pub fn resolve_hinted(
+        &self,
+        name: &str,
+        hinted: &[String],
+        visible: &dyn Fn(&ToolSpec) -> bool,
+    ) -> Option<Arc<dyn Tool>> {
         if let Some(t) = self.meta.iter().find(|t| t.spec().name == name) {
             return Some(Arc::clone(t));
         }
         if hinted.iter().any(|h| h == name) {
-            return self.discovery.registry.get(name);
+            return self
+                .discovery
+                .registry
+                .get(name)
+                .filter(|t| visible(t.spec()));
         }
-        self.resolve(name)
+        self.resolve_with(name, visible)
     }
 
     /// Resolve a tool the model asked for.  In discovery mode only the three
     /// meta-tools are directly addressable (everything else goes via
-    /// `use_tool`).
+    /// `use_tool`); namespaced tools are never directly addressable.
     #[must_use]
     pub fn resolve(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        match self.mode() {
-            SurfaceMode::Discovery => self.meta.iter().find(|t| t.spec().name == name).cloned(),
-            SurfaceMode::Direct => self.discovery.registry.get(name),
+        self.resolve_with(name, &|_| true)
+    }
+
+    /// [`Self::resolve`] against the same `visible` filter as
+    /// [`Self::specs_for`], so what the model was shown is what resolves.
+    #[must_use]
+    pub fn resolve_with(
+        &self,
+        name: &str,
+        visible: &dyn Fn(&ToolSpec) -> bool,
+    ) -> Option<Arc<dyn Tool>> {
+        let meta = || self.meta.iter().find(|t| t.spec().name == name).cloned();
+        match self.mode_for(visible) {
+            SurfaceMode::Discovery => meta(),
+            SurfaceMode::Direct => {
+                if is_namespaced(name) {
+                    return None;
+                }
+                // A registered name resolves only when `visible` admits it, so a
+                // tool omitted from the spec list cannot be run by naming it.
+                if let Some(tool) = self.discovery.registry.get(name) {
+                    let ok = visible(tool.spec());
+                    return ok.then_some(tool);
+                }
+                self.has_namespaced(visible).then(meta).flatten()
+            }
         }
     }
 
@@ -523,8 +662,9 @@ mod tests {
         let find = surface.resolve(FIND_TOOL).unwrap();
         let out = block_on(find.call(&ctx, json!({ "query": "send email", "k": 2 }))).unwrap();
         let hits = json_of(&out);
-        assert_eq!(hits[0]["name"], "mcp:mail/send_email");
-        assert!(hits.as_array().unwrap().len() <= 2);
+        assert!(hits.get("hint").is_none());
+        assert_eq!(hits["results"][0]["name"], "mcp:mail/send_email");
+        assert!(hits["results"].as_array().unwrap().len() <= 2);
 
         let details = surface.resolve(GET_TOOL_DETAILS).unwrap();
         let out = block_on(details.call(&ctx, json!({ "name": "mcp:mail/send_email" }))).unwrap();
@@ -554,6 +694,11 @@ mod tests {
         assert!(matches!(err, ToolError::InvalidInput(_)));
     }
 
+    /// Hits of a `find_tool` result (`{results, hint?}`).
+    fn hits_of(v: &Value) -> Vec<Value> {
+        v["results"].as_array().unwrap().clone()
+    }
+
     #[test]
     fn discovery_only_reveals_tools_visible_to_the_caller() {
         let reg = registry_with(10);
@@ -572,9 +717,7 @@ mod tests {
         let names = |id: &str| -> Vec<String> {
             let out =
                 block_on(find.call(&ctx(id), json!({ "query": "send message", "k": 25 }))).unwrap();
-            json_of(&out)
-                .as_array()
-                .unwrap()
+            hits_of(&json_of(&out))
                 .iter()
                 .map(|h| h["name"].as_str().unwrap().to_owned())
                 .collect()
@@ -602,21 +745,16 @@ mod tests {
         let find = surface.resolve(FIND_TOOL).unwrap();
         let q = json!({ "query": "zebra" });
         assert_eq!(
-            json_of(&block_on(find.call(&ctx, q.clone())).unwrap())
-                .as_array()
-                .unwrap()
-                .len(),
+            hits_of(&json_of(&block_on(find.call(&ctx, q.clone())).unwrap())).len(),
             0
         );
         reg.register(fake("zebra_tool", "stripes", Effect::Read));
         let hits = json_of(&block_on(find.call(&ctx, q.clone())).unwrap());
-        assert_eq!(hits[0]["name"], "zebra_tool");
+        assert_eq!(hits["results"][0]["name"], "zebra_tool");
+        assert!(hits.get("hint").is_none());
         reg.unregister("zebra_tool");
         assert_eq!(
-            json_of(&block_on(find.call(&ctx, q)).unwrap())
-                .as_array()
-                .unwrap()
-                .len(),
+            hits_of(&json_of(&block_on(find.call(&ctx, q)).unwrap())).len(),
             0
         );
     }
@@ -646,6 +784,126 @@ mod tests {
                 .unwrap()
                 .effect,
             Effect::Read
+        );
+    }
+
+    #[test]
+    fn namespaced_tools_are_discovery_only_and_do_not_count() {
+        let reg = registry_with(5);
+        for i in 0..30 {
+            reg.register(fake(&format!("mcp:x/t{i}"), "remote", Effect::Read));
+        }
+        let surface = ToolSurface::new(reg, 5);
+        // 5 native tools are at the threshold: direct, plus the meta-tools.
+        assert_eq!(surface.mode(), SurfaceMode::Direct);
+        let names: Vec<_> = surface.specs().into_iter().map(|s| s.name).collect();
+        assert_eq!(names.len(), 8);
+        assert!(names.iter().all(|n| !n.starts_with("mcp:")));
+        assert!(surface.resolve("tool2").is_some());
+        assert!(surface.resolve("mcp:x/t3").is_none());
+        assert!(surface.resolve(USE_TOOL).is_some());
+        // The permission check still sees the use_tool target.
+        let spec = surface
+            .effective_spec(USE_TOOL, &json!({ "name": "mcp:x/t3" }))
+            .unwrap();
+        assert_eq!(spec.name, "mcp:x/t3");
+        // A visibility filter lowers the counted size.
+        let reg2 = registry_with(6);
+        reg2.register(fake("mcp:x/a", "remote", Effect::Read));
+        let s2 = ToolSurface::new(reg2, 5);
+        assert_eq!(s2.mode(), SurfaceMode::Discovery);
+        assert_eq!(s2.mode_for(&|s| s.name != "tool0"), SurfaceMode::Direct);
+    }
+
+    #[test]
+    fn find_tool_hits_carry_effect_and_category() {
+        let reg = registry_with(10);
+        reg.register(fake("mcp:mail/send", "Send an e-mail", Effect::Destructive));
+        let surface = ToolSurface::new(reg, 5);
+        let find = surface.resolve(FIND_TOOL).unwrap();
+        let out =
+            block_on(find.call(&ToolContext::default(), json!({ "query": "e-mail" }))).unwrap();
+        let hits = json_of(&out);
+        assert!(hits.as_array().is_none());
+        assert_eq!(hits["results"][0]["name"], "mcp:mail/send");
+        assert_eq!(hits["results"][0]["effect"], "destructive");
+        assert!(hits["results"][0]["category"].is_string());
+        assert!(hits.get("hint").is_none());
+    }
+
+    #[test]
+    fn empty_find_tool_result_lists_only_visible_families() {
+        let reg = ToolRegistry::new();
+        reg.register(fake("fs_read", "read a file", Effect::Read));
+        reg.register(fake("fs_write", "write a file", Effect::Write));
+        reg.register(fake("desktop_click", "click", Effect::Write));
+        reg.register(fake("mcp:mail/send", "send", Effect::Write));
+        let vis: ToolVisibility = Arc::new(|_, s| !s.name.starts_with("desktop_"));
+        let surface = ToolSurface::with_visibility(reg, 1, vis);
+        let find = surface.resolve(FIND_TOOL).unwrap();
+        let out =
+            block_on(find.call(&ToolContext::default(), json!({ "query": "zzzzqqq" }))).unwrap();
+        let data = json_of(&out);
+        assert_eq!(data["results"], json!([]));
+        let hint = data["hint"].as_str().unwrap();
+        assert!(hint.contains("fs_*"), "{hint}");
+        assert!(hint.contains("mcp:mail/*"), "{hint}");
+        assert!(!hint.contains("desktop_"), "{hint}");
+    }
+
+    #[test]
+    fn resolve_with_drops_tools_the_predicate_hides() {
+        let reg = registry_with(3);
+        let other = if cfg!(windows) {
+            Platform::Linux
+        } else {
+            Platform::Windows
+        };
+        reg.register(Arc::new(Fake {
+            spec: ToolSpec {
+                name: "foreign_click".into(),
+                description: "click on another os".into(),
+                input_schema: json!({ "type": "object" }),
+                effect: Effect::Write,
+                category: PermissionCategory::Accounts,
+                platforms: vec![other],
+            },
+        }));
+        reg.register(fake("mcp:x/a", "remote", Effect::Read));
+        let surface = ToolSurface::new(reg, 10);
+        let here = if cfg!(windows) {
+            Platform::Windows
+        } else if cfg!(target_os = "macos") {
+            Platform::MacOs
+        } else {
+            Platform::Linux
+        };
+        let visible = |s: &ToolSpec| {
+            s.platforms.is_empty()
+                || s.platforms
+                    .iter()
+                    .any(|p| *p == Platform::All || *p == here)
+        };
+        assert!(surface.resolve_with("tool0", &visible).is_some());
+        assert!(surface.resolve_with("foreign_click", &visible).is_none());
+        assert!(surface.resolve_with("mcp:x/a", &visible).is_none());
+        assert!(surface.resolve_with(USE_TOOL, &visible).is_some());
+        let names: Vec<_> = surface
+            .specs_for(&visible)
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert!(names.iter().any(|n| n == "tool0"));
+        assert!(names.iter().all(|n| n != "foreign_click"));
+        assert!(
+            surface
+                .resolve_hinted("foreign_click", &["foreign_click".into()], &visible)
+                .is_none()
+        );
+        assert!(
+            surface
+                .resolve_hinted("tool1", &["tool1".into()], &visible)
+                .is_some()
         );
     }
 }

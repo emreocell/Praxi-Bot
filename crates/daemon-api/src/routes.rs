@@ -1280,7 +1280,9 @@ pub(crate) async fn parse_schedule(
 /// is the schedule's `webhook_secret`).  Optional replay protection:
 /// `X-Webhook-Timestamp` (Unix ms; then the HMAC must cover `"{timestamp}.{body}"`
 /// and the timestamp must be within 5 minutes) and `X-Delivery-Id` /
-/// `X-GitHub-Delivery` (enables duplicate detection).  Host / Origin checks still
+/// `X-GitHub-Delivery` (informational).  A signed request is accepted once per
+/// 5-minute window whether or not those headers are sent, so the same body fired
+/// twice in that time needs a timestamp (fresh signature) or a different body.  Host / Origin checks still
 /// apply and the body may be at most 256 KB.  The body replaces `{input}` in the payload.
 /// `202` once accepted (the run goes on in the background).
 #[utoipa::path(post, path = "/v1/webhooks/{id}", tag = "schedules",

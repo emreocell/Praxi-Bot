@@ -678,8 +678,28 @@ fn images_become_base64_blocks() {
     e.capabilities.vision = false;
     assert!(matches!(
         build_body(&e, "m", &r, false),
-        Err(ProviderError::InvalidRequest(_))
+        Err(ProviderError::Unsupported { capability }) if capability == "vision"
     ));
+}
+
+#[test]
+fn per_model_tool_override_is_unsupported_for_that_model_only() {
+    let mut e = entry("http://x");
+    e.models.push(crate::entry::ModelInfo {
+        id: "weak".into(),
+        capabilities: Some(crate::entry::CapabilityOverrides {
+            tools: Some(false),
+            ..crate::entry::CapabilityOverrides::default()
+        }),
+        ..crate::entry::ModelInfo::default()
+    });
+    let mut r = req();
+    r.tools = vec![tool_def("t")];
+    assert!(matches!(
+        build_body(&e, "weak", &r, false),
+        Err(ProviderError::Unsupported { capability }) if capability == "tools"
+    ));
+    assert!(build_body(&e, "strong", &r, false).is_ok());
 }
 
 #[test]

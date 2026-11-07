@@ -1,7 +1,9 @@
 //! Deterministic provider for tests and `bot serve --fake-provider`.
 //!
 //! * `call:<tool> <json args>` -> the model requests that tool call;
-//! * after a tool result -> "tool said: <result>";
+//! * several `call:` lines -> one tool call per line, in order (`$gen` in a
+//!   later line is replaced with `gen=N` from the previous tool result);
+//! * after the last tool result -> "tool said: <result>";
 //! * anything else -> echoes the message word by word.
 
 use async_trait::async_trait;
@@ -46,38 +48,94 @@ impl ChatProvider for FakeProvider {
         &self,
         req: ChatRequest,
     ) -> Result<BoxStream<'static, Result<ChatChunk, ProviderError>>, ProviderError> {
-        let last = req
+        let user_at = req
             .messages
             .iter()
-            .rev()
-            .find(|m| matches!(m.role, MessageRole::User | MessageRole::Tool));
-        let text = last
-            .and_then(|m| m.content.as_str())
-            .unwrap_or_default()
-            .to_owned();
-        let chunks = match last.map(|m| &m.role) {
-            Some(MessageRole::Tool) => words("tool said: ", &text),
-            _ => match text.strip_prefix("call:") {
-                Some(rest) => {
-                    let (name, args) = rest.split_once(' ').unwrap_or((rest, "{}"));
-                    vec![
-                        ChatChunk::ToolCall(ToolCall {
-                            id: "fake-call-1".to_owned(),
-                            name: name.to_owned(),
-                            arguments: args.to_owned(),
-                            provider_extra: None,
-                        }),
-                        usage(),
-                        ChatChunk::Done {
-                            finish_reason: FinishReason::ToolCalls,
-                        },
-                    ]
-                }
-                None => words("echo: ", &text),
-            },
+            .rposition(|m| matches!(m.role, MessageRole::User));
+        let user_text = user_at
+            .and_then(|i| req.messages[i].content.as_str())
+            .unwrap_or_default();
+        let calls = scripted_calls(user_text);
+        let done = user_at.map_or(0, |i| {
+            req.messages[i + 1..]
+                .iter()
+                .filter(|m| matches!(m.role, MessageRole::Tool))
+                .count()
+        });
+        let chunks = if let Some(calls) = calls
+            && done < calls.len()
+        {
+            let (name, args) = calls[done];
+            let args = if done == 0 {
+                args.to_owned()
+            } else {
+                let prev = req
+                    .messages
+                    .iter()
+                    .rev()
+                    .find(|m| matches!(m.role, MessageRole::Tool))
+                    .and_then(|m| m.content.as_str())
+                    .unwrap_or_default();
+                let generation = gen_token(prev).unwrap_or("$gen");
+                args.replace("$gen", generation)
+            };
+            vec![
+                ChatChunk::ToolCall(ToolCall {
+                    id: format!("fake-call-{}", done + 1),
+                    name: name.to_owned(),
+                    arguments: args,
+                    provider_extra: None,
+                }),
+                usage(),
+                ChatChunk::Done {
+                    finish_reason: FinishReason::ToolCalls,
+                },
+            ]
+        } else if req
+            .messages
+            .last()
+            .is_some_and(|m| matches!(m.role, MessageRole::Tool))
+        {
+            let text = req
+                .messages
+                .last()
+                .and_then(|m| m.content.as_str())
+                .unwrap_or_default();
+            words("tool said: ", text)
+        } else {
+            words("echo: ", user_text)
         };
         Ok(futures::stream::iter(chunks.into_iter().map(Ok)).boxed())
     }
+}
+
+/// `call:` lines in a user message, each split into tool name and arguments.
+fn scripted_calls(text: &str) -> Option<Vec<(&str, &str)>> {
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    if lines.is_empty() || !lines.iter().all(|l| l.starts_with("call:")) {
+        return None;
+    }
+    Some(
+        lines
+            .into_iter()
+            .map(|line| {
+                let rest = line.strip_prefix("call:").unwrap_or(line);
+                let (name, args) = rest.split_once(' ').unwrap_or((rest, "{}"));
+                (name.trim(), args.trim())
+            })
+            .collect(),
+    )
+}
+
+/// The `N` of `gen=N` in a desktop observation.
+fn gen_token(text: &str) -> Option<&str> {
+    let rest = text.split("gen=").nth(1)?;
+    let n = rest.split(|c: char| !c.is_ascii_digit()).next()?;
+    (!n.is_empty()).then_some(n)
 }
 
 /// A scripted in-memory desktop for demos and tests (`bot serve
