@@ -12,6 +12,7 @@
 
 mod agent;
 mod approval;
+mod cli;
 mod config;
 mod control;
 mod exec;

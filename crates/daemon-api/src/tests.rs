@@ -76,6 +76,9 @@ fn setup() -> T {
         LoopConfig::default(),
     );
     let state = AppState::new(agent.clone(), storage, DaemonConfig::new(TOKEN)).unwrap();
+    state.set_detector(Arc::new(cli_provider::Detector::with_env(
+        cli_provider::PathEnv::for_test(dir.path().join("sealed-cli-path")),
+    )));
     T {
         app: router(state.clone()),
         state,
@@ -2219,4 +2222,33 @@ async fn tool_completion_events_carry_a_preview_and_duration() {
     let done = fr.iter().find(|f| f.1 == "tool_call_completed").unwrap();
     assert_eq!(done.2["event"]["output_preview"], "boom done");
     assert!(done.2["event"]["duration_ms"].is_u64());
+}
+
+#[tokio::test]
+async fn providers_lists_secret_free_cli_records_without_probing() {
+    let t = setup();
+    let mut p = provider_catalog::ProviderSettings::new("cli:codex", 0);
+    p.cli = Some(provider_catalog::config::CliSettings::Cli {
+        engine: provider_catalog::config::CliEngine::Codex,
+        command: "missing-c062-fixture".into(),
+    });
+    let cfg = provider_catalog::ProviderConfig {
+        providers: vec![p],
+        default_provider: None,
+    };
+    cfg.save(&provider_catalog::config_path(t.state.storage().data_dir()))
+        .unwrap();
+    let response = call(&t, Method::GET, "/v1/providers", None).await;
+    assert_eq!(response.status, StatusCode::OK);
+    let v = response.json();
+    assert_eq!(v["configured"][0]["id"], "cli:codex");
+    assert_eq!(v["configured"][0]["has_key"], false);
+    assert_eq!(v["configured"][0]["active"], true);
+    assert!(
+        v["catalog"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["id"] == "cli:codex" && r["kind"] == "cli")
+    );
 }

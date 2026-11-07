@@ -426,3 +426,20 @@ async fn test_caching_and_refresh() {
     assert!(!claude3.installed);
     assert_eq!(claude3.detail.as_deref(), Some("not_on_path"));
 }
+
+#[tokio::test]
+async fn only_installed_claude_and_codex_are_runnable() {
+    let temp = tempfile::tempdir().unwrap();
+    for name in ["claude", "codex", "cursor-agent", "opencode", "gemini"] {
+        install_fake(temp.path(), name);
+    }
+    let detector = Detector::with_env(PathEnv::for_test(temp.path().into()));
+    for cli in detector.detect(true).await {
+        assert_eq!(
+            cli.runnable,
+            cli.installed && matches!(cli.id.as_str(), "claude" | "codex"),
+            "{}",
+            cli.id
+        );
+    }
+}

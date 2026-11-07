@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
 
@@ -29,7 +30,7 @@ pub struct DetectedCli {
     pub auth: AuthState,
     /// Account label (email or org name, max 160 chars, or null).
     pub account_label: Option<String>,
-    /// Whether this engine can currently run turns (always false in this task).
+    /// Whether this installed engine supports turn execution.
     pub runnable: bool,
     /// Stable detail code (`not_on_path`, `timeout`, `auth_unparsed`, etc., or null).
     pub detail: Option<String>,
@@ -215,6 +216,26 @@ pub fn resolve_spawn(candidate: &Path, env: &PathEnv) -> Result<ResolvedCommand,
                     });
                 }
             }
+            return Err(ShimError::Refused);
+        }
+        // Native installers also ship a batch wrapper around a sibling .exe.
+        // Trust only a literal target spelled in the shim, never shell expansion.
+        for line in text.lines() {
+            for prefix in ["\"%~dp0\\", "\"%dp0%\\", "\"%~dp0"] {
+                if let Some((_, rest)) = line.split_once(prefix)
+                    && let Some((target, _)) = rest.split_once('"')
+                    && !target.contains(['/', '\\', '%', ':'])
+                    && Path::new(target)
+                        .extension()
+                        .is_some_and(|e| e.eq_ignore_ascii_case("exe"))
+                    && dir.join(target).is_file()
+                {
+                    return Ok(ResolvedCommand {
+                        program: dir.join(target),
+                        args: Vec::new(),
+                    });
+                }
+            }
         }
     }
 
@@ -232,22 +253,13 @@ fn is_js_extension(target: &str) -> bool {
 }
 
 fn parse_npm_shim_target(text: &str) -> Option<String> {
-    for line in text.lines() {
-        if let Some(idx) = line.find("\"%~dp0\\") {
-            let rest = &line[idx + 7..];
-            if let Some(end) = rest.find('\"') {
-                let target = &rest[..end];
-                if is_js_extension(target) {
-                    return Some(target.to_owned());
-                }
-            }
-        } else if let Some(idx) = line.find("\"%dp0%\\") {
-            let rest = &line[idx + 7..];
-            if let Some(end) = rest.find('\"') {
-                let target = &rest[..end];
-                if is_js_extension(target) {
-                    return Some(target.to_owned());
-                }
+    for prefix in ["\"%~dp0\\", "\"%dp0%\\", "\"%~dp0"] {
+        for (idx, _) in text.match_indices(prefix) {
+            if let Some((target, _)) = text[idx + prefix.len()..].split_once('"')
+                && !target.contains(['%', '\n', '\r', ':'])
+                && is_js_extension(target)
+            {
+                return Some(target.to_owned());
             }
         }
     }
@@ -336,7 +348,7 @@ fn tree_kill_program() -> PathBuf {
     }
 }
 
-async fn kill_tree(child: &mut tokio::process::Child) {
+pub(crate) async fn kill_tree(child: &mut dyn ChildWrapper) {
     if let Some(pid) = child.id() {
         let mut cmd = tokio::process::Command::new(tree_kill_program());
         #[cfg(windows)]
@@ -346,11 +358,28 @@ async fn kill_tree(child: &mut tokio::process::Child) {
         scrub_process_env(&mut cmd);
         let _ = cmd.output().await;
     }
-    let _ = child.kill().await;
+    let _ = child.start_kill();
     let _ = child.wait().await;
 }
 
-fn apply_sanitized_env(cmd: &mut tokio::process::Command, env: &PathEnv) {
+/// The same isolation for probes and sessions: groups on Unix, kill-on-close
+/// jobs on Windows (including when the parent runtime is torn down).
+pub(crate) fn isolate(cmd: tokio::process::Command) -> CommandWrap {
+    let mut wrap = CommandWrap::from(cmd);
+    wrap.wrap(KillOnDrop);
+    #[cfg(unix)]
+    wrap.wrap(process_wrap::tokio::ProcessGroup::leader());
+    #[cfg(windows)]
+    {
+        wrap.wrap(process_wrap::tokio::CreationFlags(
+            windows::Win32::System::Threading::CREATE_NO_WINDOW,
+        ));
+        wrap.wrap(process_wrap::tokio::JobObject);
+    }
+    wrap
+}
+
+pub(crate) fn apply_sanitized_env(cmd: &mut tokio::process::Command, env: &PathEnv) {
     cmd.env_clear();
 
     let path_val = std::env::join_paths(&env.path_dirs).unwrap_or_default();
@@ -378,19 +407,18 @@ fn apply_sanitized_env(cmd: &mut tokio::process::Command, env: &PathEnv) {
         }
     }
 
-    // Allow test fixture control flags (e.g. FAKE_*) but NEVER any secret
+    // Preserve the user's non-secret environment, including CLI home overrides.
     for (k, v) in &env.env_vars {
         let upper = k.to_ascii_uppercase();
-        if upper.contains("KEY")
+        if upper == "PATH"
+            || upper.contains("KEY")
             || upper.contains("TOKEN")
             || upper.contains("SECRET")
             || upper.contains("CREDENTIAL")
         {
             continue;
         }
-        if upper.starts_with("FAKE_") {
-            cmd.env(k, v);
-        }
+        cmd.env(k, v);
     }
 }
 
@@ -408,7 +436,7 @@ async fn run_process_probe(
     let mut cmd = tokio::process::Command::new(&resolved.program);
     cmd.args(&resolved.args);
     cmd.args(args);
-    cmd.stdin(std::process::Stdio::null());
+    cmd.stdin(std::process::Stdio::null()).kill_on_drop(true);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
 
@@ -419,9 +447,9 @@ async fn run_process_probe(
         cmd.process_group(0);
     }
 
-    let mut child = cmd.spawn().map_err(|_| ProbeError::SpawnFailed)?;
-    let mut stdout = child.stdout.take().expect("piped");
-    let mut stderr = child.stderr.take().expect("piped");
+    let mut child = isolate(cmd).spawn().map_err(|_| ProbeError::SpawnFailed)?;
+    let mut stdout = child.stdout().take().expect("piped");
+    let mut stderr = child.stderr().take().expect("piped");
 
     let read_fut = async {
         let mut stdout_buf = Vec::new();
@@ -474,18 +502,39 @@ async fn run_process_probe(
     match tokio::time::timeout(PROBE_TIMEOUT, read_fut).await {
         Ok(Ok(res)) => Ok(res),
         Ok(Err(ProbeError::OutputTooLarge)) => {
-            kill_tree(&mut child).await;
+            kill_tree(child.as_mut()).await;
             Err(ProbeError::OutputTooLarge)
         }
         Ok(Err(e)) => {
-            kill_tree(&mut child).await;
+            kill_tree(child.as_mut()).await;
             Err(e)
         }
         Err(_) => {
-            kill_tree(&mut child).await;
+            kill_tree(child.as_mut()).await;
             Err(ProbeError::Timeout)
         }
     }
+}
+
+/// Probe a version without opening login files or exposing raw diagnostics.
+pub(crate) async fn claude_version(
+    resolved: &ResolvedCommand,
+    env: &PathEnv,
+) -> Option<(u32, u32, u32)> {
+    let Ok((status, stdout, _)) = run_process_probe(resolved, &["--version"], env).await else {
+        return None;
+    };
+    if !status.success() {
+        return None;
+    }
+    stdout.split_whitespace().find_map(|part| {
+        let parts: Vec<u32> = part
+            .split('.')
+            .map(str::parse)
+            .collect::<Result<_, _>>()
+            .ok()?;
+        (parts.len() == 3).then(|| (parts[0], parts[1], parts[2]))
+    })
 }
 
 fn parse_version_string(stdout: &str) -> Option<String> {
@@ -631,7 +680,7 @@ impl Detector {
                             version,
                             auth: AuthState::Unknown,
                             account_label: None,
-                            runnable: false,
+                            runnable: matches!(id, "claude" | "codex"),
                             detail: None,
                         },
                         Some(resolved),
