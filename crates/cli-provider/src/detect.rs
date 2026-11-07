@@ -182,18 +182,19 @@ pub fn find_candidate(argv0: &str, env: &PathEnv) -> Option<PathBuf> {
     None
 }
 
+fn is_batch_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
+}
+
 /// Resolve a candidate executable, refusing unsafe `.cmd`/`.bat` shims.
 ///
 /// # Errors
 /// Returns [`ShimError::Refused`] if the candidate is a Windows `.cmd` or `.bat` shim
 /// that cannot be safely unwrapped without executing `cmd.exe`.
 pub fn resolve_spawn(candidate: &Path, env: &PathEnv) -> Result<ResolvedCommand, ShimError> {
-    let is_cmd = candidate
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"));
-
-    if !is_cmd {
+    if !is_batch_file(candidate) {
         return Ok(ResolvedCommand {
             program: candidate.to_path_buf(),
             args: Vec::new(),
@@ -258,7 +259,13 @@ fn find_node_executable(near: &Path, env: &PathEnv) -> Option<PathBuf> {
     if local.is_file() {
         return Some(local);
     }
-    find_candidate("node", env)
+    // `node.cmd` / `node.bat` would be re-parsed by `cmd.exe` together with the
+    // script path. Refuse those instead of spawning them.
+    let found = find_candidate("node", env)?;
+    if is_batch_file(&found) {
+        return None;
+    }
+    Some(found)
 }
 
 #[derive(Debug)]
@@ -270,24 +277,74 @@ enum ProbeError {
 }
 
 const MAX_OUTPUT_BYTES: usize = 64 * 1024; // 64 KiB
+const READ_CHUNK: usize = 4096;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// Read until EOF, but stop as soon as another chunk would pass `limit`.
+///
+/// The check happens before the chunk is stored. Callers must not buffer the
+/// remainder with `read_to_end` and only then compare lengths.
+async fn read_capped<R>(reader: &mut R, buf: &mut Vec<u8>, limit: usize) -> Result<(), ProbeError>
+where
+    R: AsyncReadExt + Unpin,
+{
+    let mut chunk = [0u8; READ_CHUNK];
+    loop {
+        let n = reader.read(&mut chunk).await.map_err(|_| ProbeError::Io)?;
+        if n == 0 {
+            return Ok(());
+        }
+        if buf.len().saturating_add(n) > limit {
+            return Err(ProbeError::OutputTooLarge);
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+}
+
+/// Drop inherited environment, including `KEY` / `TOKEN` / `SECRET` / `CREDENTIAL`.
+///
+/// `PATH` and the Windows system-root variables stay so `taskkill` / `kill` can
+/// still be resolved and can start. Nothing else is copied from the parent.
+fn scrub_process_env(cmd: &mut tokio::process::Command) {
+    cmd.env_clear();
+    // Names only. None of these contain KEY, TOKEN, SECRET, or CREDENTIAL.
+    // PATH/PATHEXT stay so a relative program name can still be resolved after
+    // `env_clear` (Rust searches the child's PATH in that case).
+    for key in ["SYSTEMROOT", "WINDIR", "PATH", "PATHEXT"] {
+        if let Some(val) = std::env::var_os(key) {
+            cmd.env(key, val);
+        }
+    }
+}
+
+fn tree_kill_program() -> PathBuf {
+    #[cfg(windows)]
+    {
+        std::env::var_os("SYSTEMROOT")
+            .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
+            .join("System32")
+            .join("taskkill.exe")
+    }
+    #[cfg(not(windows))]
+    {
+        let bin = PathBuf::from("/bin/kill");
+        if bin.is_file() {
+            bin
+        } else {
+            PathBuf::from("kill")
+        }
+    }
+}
 
 async fn kill_tree(child: &mut tokio::process::Child) {
     if let Some(pid) = child.id() {
+        let mut cmd = tokio::process::Command::new(tree_kill_program());
         #[cfg(windows)]
-        {
-            let _ = tokio::process::Command::new("taskkill")
-                .args(["/F", "/T", "/PID", &pid.to_string()])
-                .output()
-                .await;
-        }
-        #[cfg(unix)]
-        {
-            let _ = tokio::process::Command::new("kill")
-                .args(["-9", &format!("-{pid}")])
-                .output()
-                .await;
-        }
+        cmd.args(["/F", "/T", "/PID", &pid.to_string()]);
+        #[cfg(not(windows))]
+        cmd.args(["-9", &format!("-{pid}")]);
+        scrub_process_env(&mut cmd);
+        let _ = cmd.output().await;
     }
     let _ = child.kill().await;
     let _ = child.wait().await;
@@ -342,6 +399,12 @@ async fn run_process_probe(
     args: &[&str],
     env: &PathEnv,
 ) -> Result<(std::process::ExitStatus, String, String), ProbeError> {
+    // Last line of defence: Rust runs `.cmd`/`.bat` through `cmd.exe /c` and
+    // appends the arguments. Never start those.
+    if is_batch_file(&resolved.program) {
+        return Err(ProbeError::SpawnFailed);
+    }
+
     let mut cmd = tokio::process::Command::new(&resolved.program);
     cmd.args(&resolved.args);
     cmd.args(args);
@@ -363,8 +426,8 @@ async fn run_process_probe(
     let read_fut = async {
         let mut stdout_buf = Vec::new();
         let mut stderr_buf = Vec::new();
-        let mut stdout_chunk = [0u8; 4096];
-        let mut stderr_chunk = [0u8; 4096];
+        let mut stdout_chunk = [0u8; READ_CHUNK];
+        let mut stderr_chunk = [0u8; READ_CHUNK];
         let mut stdout_done = false;
         let mut stderr_done = false;
 
@@ -393,20 +456,10 @@ async fn run_process_probe(
                 status = child.wait() => {
                     let status = status.map_err(|_| ProbeError::Io)?;
                     if !stdout_done {
-                        let mut rem = Vec::new();
-                        let _ = stdout.read_to_end(&mut rem).await;
-                        if stdout_buf.len() + rem.len() > MAX_OUTPUT_BYTES {
-                            return Err(ProbeError::OutputTooLarge);
-                        }
-                        stdout_buf.extend_from_slice(&rem);
+                        read_capped(&mut stdout, &mut stdout_buf, MAX_OUTPUT_BYTES).await?;
                     }
                     if !stderr_done {
-                        let mut rem = Vec::new();
-                        let _ = stderr.read_to_end(&mut rem).await;
-                        if stderr_buf.len() + rem.len() > MAX_OUTPUT_BYTES {
-                            return Err(ProbeError::OutputTooLarge);
-                        }
-                        stderr_buf.extend_from_slice(&rem);
+                        read_capped(&mut stderr, &mut stderr_buf, MAX_OUTPUT_BYTES).await?;
                     }
                     return Ok((
                         status,
@@ -978,4 +1031,108 @@ fn parse_cursor_json(stdout: &str) -> Option<bool> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::pin::Pin;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Poll};
+    use tokio::io::{AsyncRead, ReadBuf};
+
+    struct ChunkReader {
+        left: usize,
+        taken: std::sync::Arc<AtomicUsize>,
+    }
+
+    impl AsyncRead for ChunkReader {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            if self.left == 0 {
+                return Poll::Ready(Ok(()));
+            }
+            let n = READ_CHUNK.min(self.left).min(buf.remaining());
+            let bytes = [b'A'; READ_CHUNK];
+            buf.put_slice(&bytes[..n]);
+            self.left -= n;
+            self.taken.fetch_add(n, Ordering::SeqCst);
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    async fn output_cap_is_enforced_while_reading() {
+        let taken = std::sync::Arc::new(AtomicUsize::new(0));
+        let mut reader = ChunkReader {
+            left: MAX_OUTPUT_BYTES * 4,
+            taken: std::sync::Arc::clone(&taken),
+        };
+        let mut buf = Vec::new();
+        let err = read_capped(&mut reader, &mut buf, MAX_OUTPUT_BYTES)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ProbeError::OutputTooLarge));
+        assert!(buf.len() <= MAX_OUTPUT_BYTES);
+        let n = taken.load(Ordering::SeqCst);
+        assert!(
+            n <= MAX_OUTPUT_BYTES + READ_CHUNK,
+            "reader yielded {n} bytes; the cap must stop the read, not run after it"
+        );
+    }
+
+    #[test]
+    fn node_cmd_is_refused_and_node_exe_is_used() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("cli.js"), "").unwrap();
+        std::fs::write(root.join("tool.cmd"), "\"%~dp0\\cli.js\"\r\n").unwrap();
+        std::fs::write(root.join("node.cmd"), "@echo off\r\n").unwrap();
+        let env = PathEnv::for_test(root.to_path_buf());
+        let candidate = find_candidate("tool", &env).unwrap();
+        assert!(matches!(
+            resolve_spawn(&candidate, &env),
+            Err(ShimError::Refused)
+        ));
+
+        std::fs::write(root.join("node.exe"), "").unwrap();
+        let resolved = resolve_spawn(&candidate, &env).unwrap();
+        assert_eq!(
+            resolved.program.file_name().and_then(|n| n.to_str()),
+            Some("node.exe")
+        );
+        assert!(resolved.args.iter().any(|arg| arg.ends_with("cli.js")));
+    }
+
+    #[tokio::test]
+    async fn scrubbed_command_does_not_inherit_secret_env() {
+        #[cfg(windows)]
+        let program = std::env::var_os("SYSTEMROOT")
+            .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
+            .join("System32")
+            .join("cmd.exe");
+        #[cfg(windows)]
+        let args = ["/d", "/c", "set"];
+        #[cfg(not(windows))]
+        let program = PathBuf::from("/usr/bin/env");
+        #[cfg(not(windows))]
+        let args: [&str; 0] = [];
+
+        let mut cmd = tokio::process::Command::new(&program);
+        cmd.args(args);
+        cmd.env("API_KEY", "SENTINEL_KEY_DO_NOT_LEAK");
+        cmd.env("ACCESS_TOKEN", "SENTINEL_TOKEN_DO_NOT_LEAK");
+        cmd.env("DB_SECRET", "SENTINEL_SECRET_DO_NOT_LEAK");
+        cmd.env("USER_CREDENTIAL", "SENTINEL_CREDENTIAL_DO_NOT_LEAK");
+        scrub_process_env(&mut cmd);
+        let out = cmd.output().await.expect("scrubbed command");
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            !text.contains("SENTINEL_"),
+            "kill helper environment still contains a secret:\n{text}"
+        );
+    }
 }

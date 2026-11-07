@@ -1,5 +1,6 @@
 use cli_provider::detect::{AuthState, Detector, PathEnv};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 fn fake_cli_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_fake-cli"))
@@ -290,6 +291,110 @@ async fn test_windows_cmd_shim_refused_and_multiline() {
     let detected2 = detector2.detect(true).await;
     let codex2 = detected2.iter().find(|c| c.id == "codex").unwrap();
     assert_eq!(codex2.version.as_deref(), Some("fake 1.2.3"));
+}
+
+fn pid_alive(pid: u32) -> bool {
+    #[cfg(windows)]
+    {
+        let output = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .output();
+        output.is_ok_and(|out| {
+            String::from_utf8_lossy(&out.stdout)
+                .split_whitespace()
+                .any(|field| field == pid.to_string())
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+}
+
+#[tokio::test]
+async fn test_secret_env_is_not_passed_to_the_probe() {
+    let temp = tempfile::tempdir().unwrap();
+    install_fake(temp.path(), "claude");
+    let env = PathEnv::for_test(temp.path().to_path_buf())
+        .with_env_var("API_KEY", "SENTINEL_KEY_DO_NOT_LEAK")
+        .with_env_var("ACCESS_TOKEN", "SENTINEL_TOKEN_DO_NOT_LEAK")
+        .with_env_var("DB_SECRET", "SENTINEL_SECRET_DO_NOT_LEAK")
+        .with_env_var("USER_CREDENTIAL", "SENTINEL_CREDENTIAL_DO_NOT_LEAK");
+    let detector = Detector::with_env(env);
+    let detected = detector.detect(false).await;
+    let claude = detected.iter().find(|c| c.id == "claude").unwrap();
+    assert_eq!(claude.version.as_deref(), Some("fake 1.2.3"));
+    let rendered = format!("{claude:?}{}", serde_json::to_string(claude).unwrap());
+    assert!(!rendered.contains("SENTINEL_"), "{rendered}");
+    assert!(!rendered.contains("LEAKED"), "{rendered}");
+}
+
+#[tokio::test]
+async fn test_batch_node_shim_is_not_executed() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+    std::fs::write(dir.join("cli.js"), "console.log('nope')\n").unwrap();
+    std::fs::write(dir.join("claude.cmd"), "\"%~dp0\\cli.js\" %*\r\n").unwrap();
+    #[cfg(windows)]
+    std::fs::write(
+        dir.join("node.cmd"),
+        "@echo off\r\necho RAN> \"%~dp0spawned.txt\"\r\necho fake 1.2.3\r\n",
+    )
+    .unwrap();
+    #[cfg(not(windows))]
+    {
+        std::fs::write(
+            dir.join("node.cmd"),
+            "#!/bin/sh\necho RAN > \"$(dirname \"$0\")/spawned.txt\"\necho fake 1.2.3\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.join("node.cmd"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+    }
+
+    let detector = Detector::with_env(PathEnv::for_test(dir.to_path_buf()));
+    let detected = detector.detect(false).await;
+    let claude = detected.iter().find(|c| c.id == "claude").unwrap();
+    assert!(
+        !dir.join("spawned.txt").exists(),
+        "node.cmd must not be spawned"
+    );
+    assert_eq!(claude.detail.as_deref(), Some("shim_refused"));
+    assert!(claude.version.is_none());
+}
+
+#[tokio::test]
+async fn test_timeout_kills_the_child_tree() {
+    let temp = tempfile::tempdir().unwrap();
+    install_fake(temp.path(), "claude");
+    let marker = temp.path().join("grandchild.pid");
+    let env = PathEnv::for_test(temp.path().to_path_buf())
+        .with_env_var("FAKE_SPAWN_TREE", "1")
+        .with_env_var("FAKE_TREE_MARKER", marker.to_string_lossy().into_owned());
+    let detector = Detector::with_env(env);
+    let started = std::time::Instant::now();
+    let detected = detector.detect(false).await;
+    assert!(
+        started.elapsed() < Duration::from_secs(20),
+        "probe did not time out"
+    );
+    let claude = detected.iter().find(|c| c.id == "claude").unwrap();
+    assert_eq!(claude.detail.as_deref(), Some("timeout"));
+
+    let pid: u32 = std::fs::read_to_string(&marker)
+        .expect("grandchild pid file")
+        .trim()
+        .parse()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(400));
+    assert!(
+        !pid_alive(pid),
+        "grandchild {pid} survived the probe timeout"
+    );
 }
 
 #[tokio::test]

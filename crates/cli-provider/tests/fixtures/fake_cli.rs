@@ -1,8 +1,53 @@
 use std::io::Write;
 use std::time::Duration;
 
+fn leaked_sentinel() -> bool {
+    std::env::vars().any(|(key, value)| {
+        let upper = key.to_ascii_uppercase();
+        let sensitive = upper.contains("KEY")
+            || upper.contains("TOKEN")
+            || upper.contains("SECRET")
+            || upper.contains("CREDENTIAL");
+        sensitive && value.contains("SENTINEL_")
+    })
+}
+
 fn main() {
+    if leaked_sentinel() {
+        println!("LEAKED");
+        return;
+    }
+
     let args: Vec<String> = std::env::args().skip(1).collect();
+
+    if std::env::var("FAKE_TREE_GRANDCHILD").is_ok() {
+        let marker = std::env::var("FAKE_TREE_MARKER").unwrap_or_default();
+        let _ = std::fs::write(&marker, std::process::id().to_string());
+        std::thread::sleep(Duration::from_secs(60));
+        return;
+    }
+
+    if std::env::var("FAKE_SPAWN_TREE").is_ok() {
+        let marker = std::env::var("FAKE_TREE_MARKER").unwrap_or_default();
+        let exe = std::env::current_exe().expect("current exe");
+        let mut child = std::process::Command::new(exe);
+        child
+            .env_clear()
+            .env("FAKE_TREE_GRANDCHILD", "1")
+            .env("FAKE_TREE_MARKER", &marker)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        if let Ok(value) = std::env::var("SYSTEMROOT") {
+            child.env("SYSTEMROOT", value);
+        }
+        if let Ok(value) = std::env::var("WINDIR") {
+            child.env("WINDIR", value);
+        }
+        let _ = child.spawn();
+        std::thread::sleep(Duration::from_secs(60));
+        return;
+    }
 
     // Check timeout flag
     if std::env::var("FAKE_CLI_TIMEOUT").is_ok() {
