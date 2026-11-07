@@ -3,7 +3,13 @@
 //! The search algorithm is a simple TF-style substring score.  BM25 will be
 //! added in `agent-router` once an inverted index is available.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use parking_lot::RwLock;
 
@@ -21,6 +27,9 @@ struct Entry {
 #[derive(Clone, Default)]
 pub struct ToolRegistry {
     tools: Arc<RwLock<HashMap<String, Entry>>>,
+    /// Bumped on every successful `register` / `unregister` so that derived
+    /// indexes (e.g. the BM25 discovery index) can detect staleness cheaply.
+    generation: Arc<AtomicU64>,
 }
 
 impl ToolRegistry {
@@ -38,7 +47,27 @@ impl ToolRegistry {
             return false;
         }
         map.insert(name, Entry { tool });
+        self.generation.fetch_add(1, Ordering::Release);
         true
+    }
+
+    /// Remove a tool by exact name.  Returns `true` if it was registered.
+    ///
+    /// Used e.g. to hide the tools of a quarantined MCP server.
+    #[allow(clippy::must_use_candidate)]
+    pub fn unregister(&self, name: &str) -> bool {
+        let removed = self.tools.write().remove(name).is_some();
+        if removed {
+            self.generation.fetch_add(1, Ordering::Release);
+        }
+        removed
+    }
+
+    /// Monotonic change counter: differs between two calls iff the set of
+    /// registered tools changed in between.
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
     }
 
     /// Look up a tool by exact name.
@@ -198,5 +227,21 @@ mod tests {
         let reg = ToolRegistry::new();
         reg.register(Arc::new(EchoTool));
         assert!(reg.search("", 10).is_empty());
+    }
+
+    #[test]
+    fn unregister_removes_and_bumps_generation() {
+        let reg = ToolRegistry::new();
+        let g0 = reg.generation();
+        reg.register(Arc::new(EchoTool));
+        let g1 = reg.generation();
+        assert_ne!(g0, g1);
+        assert!(reg.unregister("echo"));
+        assert!(reg.get("echo").is_none());
+        assert_ne!(g1, reg.generation());
+        // Removing a missing tool is a no-op and does not bump the generation.
+        let g2 = reg.generation();
+        assert!(!reg.unregister("echo"));
+        assert_eq!(g2, reg.generation());
     }
 }
