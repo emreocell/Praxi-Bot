@@ -795,5 +795,9 @@ async fn workflow_cannot_recurse_through_script_run() {
         panic!()
     };
     assert!(text.contains("HANDOVER"), "{text}");
-    assert!(text.contains("would call itself"), "{text}");
+    // Either guard may fire first depending on feature unification.
+    assert!(
+        text.contains("would call itself") || text.contains("cannot call workflow_run"),
+        "{text}"
+    );
 }
