@@ -69,8 +69,8 @@ pub struct SetupOutcome {
     pub model_ref: Option<ModelRef>,
     /// Whether this provider is now the effective global default.
     pub is_default: bool,
-    /// The created bot.
-    pub bot_id: BotId,
+    /// The created bot (none when no model was chosen).
+    pub bot_id: Option<BotId>,
 }
 
 /// Connection test seam (real network in production, fake in tests).
@@ -429,35 +429,40 @@ pub fn apply_plan(plan: &SetupPlan, env: &SetupEnv<'_>) -> Result<SetupOutcome> 
     )?;
     let model_ref = settings.model_ref();
 
-    let storage = Storage::open(env.data_dir)?;
-    let user_id = if let Some(u) = storage.list_users()?.into_iter().next() {
-        u.id
-    } else {
-        let u = User {
-            id: UserId::new(),
-            name: "me".to_string(),
-            created_at_ms: now_ms(),
-        };
-        storage.insert_user(&u)?;
-        u.id
+    // The bot is a real profile (`bot.id`, `models.executor`, ...) that the
+    // agent loop loads; it needs a model. Without one only the provider is
+    // saved, and the user adds a bot later (`bot bots add`).
+    let bot_id = match &model_ref {
+        Some(model) => {
+            let storage = Storage::open(env.data_dir)?;
+            let user_id = if let Some(u) = storage.list_users()?.into_iter().next() {
+                u.id
+            } else {
+                let u = User {
+                    id: UserId::new(),
+                    name: "me".to_string(),
+                    created_at_ms: now_ms(),
+                };
+                storage.insert_user(&u)?;
+                u.id
+            };
+            let name = if plan.bot_name.is_empty() {
+                plan.bot_preset.default_name().to_string()
+            } else {
+                plan.bot_name.clone()
+            };
+            let bot = Bot {
+                id: BotId::new(),
+                user_id,
+                config: bot_config(plan.bot_preset, plan.permission, &name, &model.0, plan.lang),
+                name,
+                created_at_ms: now_ms(),
+            };
+            storage.insert_bot(&bot)?;
+            Some(bot.id)
+        }
+        None => None,
     };
-    let bot = Bot {
-        id: BotId::new(),
-        user_id,
-        name: if plan.bot_name.is_empty() {
-            plan.bot_preset.default_name().to_string()
-        } else {
-            plan.bot_name.clone()
-        },
-        config: bot_config(
-            plan.bot_preset,
-            plan.permission,
-            model_ref.as_ref().map(|m| m.0.as_str()),
-            plan.lang,
-        ),
-        created_at_ms: now_ms(),
-    };
-    storage.insert_bot(&bot)?;
     save_language(env.data_dir, plan.lang)?;
 
     Ok(SetupOutcome {
@@ -465,7 +470,7 @@ pub fn apply_plan(plan: &SetupPlan, env: &SetupEnv<'_>) -> Result<SetupOutcome> 
         secret_name: settings.key.as_ref().map(|r| r.name().to_string()),
         model_ref,
         is_default: cfg.effective_default().is_some_and(|d| d.id == settings.id),
-        bot_id: bot.id,
+        bot_id,
     })
 }
 
@@ -708,9 +713,87 @@ mod tests {
         let bots = storage.list_bots(user.id).unwrap();
         assert_eq!(bots.len(), 1);
         assert_eq!(bots[0].name, "Helper");
-        assert_eq!(bots[0].config["preset"], "general");
-        assert_eq!(bots[0].config["permission_preset"], "read-and-draft");
-        assert!(bots[0].config["permissions"]["categories"].is_object());
+        // The stored config is a real profile the agent loop can load.
+        let profile: agent_core::BotProfile =
+            serde_json::from_value(bots[0].config.clone()).unwrap();
+        assert_eq!(profile.name, "Helper");
+        assert_eq!(profile.id, "helper");
+        assert_eq!(profile.models.executor, "alpha/m1");
+        assert_eq!(
+            profile.permissions.preset.as_deref(),
+            Some("read-and-draft")
+        );
+        assert!(profile.tool_visible("ask_user"));
+    }
+
+    /// Regression: the first bot saved by `bot setup` used a simplified config
+    /// the agent loop could not load ("has no usable profile"). Run the
+    /// non-interactive wizard and load the stored bot exactly as the loop does.
+    #[test]
+    fn setup_bot_loads_as_agent_profile_for_every_preset() {
+        for preset in BotPreset::ALL {
+            for perm in PermissionPreset::ALL {
+                let f = Fixture::new(FakeConnector::ok(&["first", "second"]));
+                let mut a = args("alpha");
+                a.bot_preset = preset;
+                a.permission = perm;
+                a.lang = Lang::Tr;
+                a.bot_name = Some("Benim Botum 2".into());
+                let plan =
+                    plan_from_args(&a, &f.env(), &|_| Some("sk-key-0123456789".into())).unwrap();
+                let out = apply_plan(&plan, &f.env()).unwrap();
+
+                let storage = Storage::open(f.dir.path()).unwrap();
+                let bot = storage.get_bot(out.bot_id.unwrap()).unwrap().unwrap();
+                let profile: agent_core::BotProfile = serde_json::from_value(bot.config)
+                    .unwrap_or_else(|e| panic!("{preset:?}/{perm:?} has no usable profile: {e}"));
+                assert_eq!(profile.models.executor, "alpha/first");
+                assert_eq!(profile.id, "benim-botum-2");
+                assert_eq!(profile.language.as_deref(), Some("tr"));
+                assert_eq!(profile.permissions.preset.as_deref(), Some(perm.id()));
+                assert!(profile.policy().is_some());
+                assert!(profile.tool_visible("ask_user"));
+                assert_eq!(
+                    profile.tool_visible("browser_open"),
+                    preset == BotPreset::Browser
+                );
+                assert_eq!(
+                    profile.tool_visible("desktop_click"),
+                    preset == BotPreset::Desktop
+                );
+                assert!(!profile.tool_visible("shell_run"));
+            }
+        }
+    }
+
+    #[test]
+    fn no_model_saves_provider_but_creates_no_bot() {
+        let f = Fixture::new(FakeConnector::ok(&[]));
+        let plan = SetupPlan {
+            lang: Lang::En,
+            provider: ProviderChoice::Catalog("alpha".into()),
+            key: None,
+            model: None,
+            bot_preset: BotPreset::General,
+            bot_name: "X".into(),
+            permission: PermissionPreset::Full,
+        };
+        let out = apply_plan(&plan, &f.env()).unwrap();
+        assert!(out.bot_id.is_none() && out.model_ref.is_none());
+        assert!(
+            ProviderConfig::load(&config_path(f.dir.path()))
+                .unwrap()
+                .get("alpha")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn slug_handles_odd_names() {
+        use crate::presets::slug;
+        assert_eq!(slug("  My Bot!! 2 ", "x"), "my-bot-2");
+        assert_eq!(slug("Çalışkan", "general"), "al-kan");
+        assert_eq!(slug("!!!", "general"), "general");
     }
 
     #[test]
