@@ -795,5 +795,5 @@ async fn workflow_cannot_recurse_through_script_run() {
         panic!()
     };
     assert!(text.contains("HANDOVER"), "{text}");
-    assert!(text.contains("workflow_run"), "{text}");
+    assert!(text.contains("would call itself"), "{text}");
 }
