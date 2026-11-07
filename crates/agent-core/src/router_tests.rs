@@ -102,6 +102,7 @@ impl ChatProvider for Script {
                             id: id.to_owned(),
                             name: name.replace('.', "__"),
                             arguments: "{}".to_owned(),
+                            provider_extra: None,
                         }))
                     })
                     .collect();
