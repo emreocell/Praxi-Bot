@@ -2,10 +2,9 @@
 //! refusal rate-limiting, bot token storage in [`secret_store`], and persistent
 //! channel state.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::hash::{BuildHasher, Hasher};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
 use protocol::{BotId, ChatId};
@@ -25,8 +24,24 @@ pub const PAIR_CODE_TTL: Duration = Duration::from_secs(10 * 60);
 /// refusal message could ever receive another one.
 pub const REFUSAL_COOLDOWN: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// Maximum wrong `/pair` guesses before pending codes are invalidated.
+/// Maximum wrong `/pair` guesses (from anyone) before pending codes are invalidated.
+/// This is the global brute-force cap: a 6-digit code survives at most this many guesses.
 pub const MAX_PAIR_ATTEMPTS: u32 = 5;
+
+/// Maximum wrong `/pair` guesses per Telegram user before that user is locked out.
+pub const MAX_PAIR_ATTEMPTS_PER_USER: u32 = 5;
+
+/// How long a user stays locked out after exceeding [`MAX_PAIR_ATTEMPTS_PER_USER`].
+pub const PAIR_LOCKOUT: Duration = Duration::from_secs(60 * 60);
+
+/// Global cap of polite refusal messages per minute (flood protection).
+pub const MAX_REFUSALS_PER_MINUTE: usize = 30;
+
+/// Upper bound for per-user bookkeeping maps (memory-exhaustion protection).
+const MAX_TRACKED_USERS: usize = 10_000;
+
+/// A persisted polling offset older than this is ignored (Telegram keeps updates 24 h).
+const OFFSET_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Polite refusal message sent once to an unpaired user.
 pub const UNPAIRED_REFUSAL_TEXT: &str = "This bot is private and your Telegram account is not paired. Run the pairing command on your computer and send `/pair <6-digit-code>` here.";
@@ -74,6 +89,8 @@ pub enum PairAttempt {
     Expired,
     /// The code did not match any active pairing invite.
     InvalidCode,
+    /// The user made too many wrong guesses and is locked out (no reply should be sent).
+    RateLimited,
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +110,15 @@ struct PersistedFile {
     chat_bots: BTreeMap<i64, BotId>,
     #[serde(default)]
     chat_threads: BTreeMap<String, ChatId>,
+    /// Next `getUpdates` offset, so a restart never replays confirmed updates.
+    #[serde(default)]
+    next_offset: Option<i64>,
+    /// Bot (token prefix) the offset belongs to.
+    #[serde(default)]
+    offset_bot: Option<String>,
+    /// Unix seconds when the offset was saved.
+    #[serde(default)]
+    offset_saved_at: u64,
 }
 
 const fn default_version() -> u32 {
@@ -104,6 +130,9 @@ struct StateInner {
     persisted: PersistedFile,
     pending_codes: Vec<PendingCode>,
     refused_at: HashMap<i64, Instant>,
+    refusal_times: VecDeque<Instant>,
+    /// Per-user wrong-guess counter and optional lockout deadline.
+    pair_failures: HashMap<i64, (u32, Option<Instant>)>,
 }
 
 /// Manages paired Telegram user IDs, one-time 6-digit pairing codes, refusal
@@ -122,13 +151,17 @@ fn ct_eq(a: &str, b: &str) -> bool {
     a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
+/// Uniform 6-digit code from the OS CSPRNG (via a v4 UUID), using rejection sampling.
 fn generate_six_digit_code() -> String {
-    let uuid = Uuid::now_v7();
-    let bytes = uuid.as_bytes();
-    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
-    hasher.write(bytes);
-    let n = hasher.finish() % 1_000_000;
-    format!("{n:06}")
+    const LIMIT: u32 = u32::MAX - (u32::MAX % 1_000_000);
+    loop {
+        let uuid = Uuid::new_v4();
+        let b = uuid.as_bytes();
+        let n = u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
+        if n < LIMIT {
+            return format!("{:06}", n % 1_000_000);
+        }
+    }
 }
 
 fn thread_key(telegram_chat_id: i64, bot_id: BotId) -> String {
@@ -231,15 +264,27 @@ impl PairingStore {
         let now = Instant::now();
         let mut guard = self.inner.lock();
 
-        if let Some(idx) = guard
-            .pending_codes
-            .iter()
-            .position(|c| ct_eq(&c.code, candidate))
-        {
+        // Per-user brute-force lockout.
+        if let Some((_, Some(until))) = guard.pair_failures.get(&user_id) {
+            if *until > now {
+                return Ok(PairAttempt::RateLimited);
+            }
+            guard.pair_failures.remove(&user_id);
+        }
+
+        // Compare against every pending code (no early exit on the first byte mismatch).
+        let mut matched: Option<usize> = None;
+        for (idx, pending) in guard.pending_codes.iter().enumerate() {
+            if ct_eq(&pending.code, candidate) && matched.is_none() {
+                matched = Some(idx);
+            }
+        }
+        if let Some(idx) = matched {
             let entry = guard.pending_codes.remove(idx);
             if entry.expires_at <= now {
                 return Ok(PairAttempt::Expired);
             }
+            guard.pair_failures.remove(&user_id);
             let newly_inserted = guard.persisted.paired_users.insert(user_id);
             guard.refused_at.remove(&user_id);
             Self::save_locked(self.path.as_deref(), &guard.persisted)?;
@@ -250,7 +295,17 @@ impl PairingStore {
             });
         }
 
-        // Wrong code: increment failure count on all live codes and burn any that exceed the cap.
+        // Wrong code: count it against the user and against all live codes.
+        if guard.pair_failures.len() >= MAX_TRACKED_USERS {
+            guard
+                .pair_failures
+                .retain(|_, (_, until)| until.is_some_and(|u| u > now));
+        }
+        let entry = guard.pair_failures.entry(user_id).or_insert((0, None));
+        entry.0 += 1;
+        if entry.0 >= MAX_PAIR_ATTEMPTS_PER_USER {
+            entry.1 = Some(now + PAIR_LOCKOUT);
+        }
         for pending in &mut guard.pending_codes {
             if pending.expires_at > now {
                 pending.failed_attempts += 1;
@@ -305,8 +360,61 @@ impl PairingStore {
         {
             return false;
         }
+        // Global flood cap: a swarm of distinct accounts cannot make us spam Telegram.
+        while let Some(&front) = guard.refusal_times.front() {
+            if now.duration_since(front) >= Duration::from_secs(60) {
+                guard.refusal_times.pop_front();
+            } else {
+                break;
+            }
+        }
+        if guard.refusal_times.len() >= MAX_REFUSALS_PER_MINUTE {
+            return false;
+        }
+        if guard.refused_at.len() >= MAX_TRACKED_USERS {
+            guard
+                .refused_at
+                .retain(|_, t| now.duration_since(*t) < REFUSAL_COOLDOWN);
+            if guard.refused_at.len() >= MAX_TRACKED_USERS {
+                guard.refused_at.clear();
+            }
+        }
+        guard.refusal_times.push_back(now);
         guard.refused_at.insert(user_id, now);
         true
+    }
+
+    /// Polling offset persisted for `bot_key`, if it is recent enough to be trusted.
+    #[must_use]
+    pub fn saved_offset(&self, bot_key: &str) -> Option<i64> {
+        let guard = self.inner.lock();
+        let p = &guard.persisted;
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+        if p.offset_bot.as_deref() != Some(bot_key)
+            || now.saturating_sub(p.offset_saved_at) > OFFSET_MAX_AGE.as_secs()
+        {
+            return None;
+        }
+        p.next_offset
+    }
+
+    /// Persist the next `getUpdates` offset for `bot_key` (best effort for in-memory stores).
+    ///
+    /// # Errors
+    /// Returns [`TelegramError::Storage`] if persistence fails.
+    pub fn save_offset(&self, bot_key: &str, offset: i64) -> Result<()> {
+        let mut guard = self.inner.lock();
+        if guard.persisted.next_offset == Some(offset)
+            && guard.persisted.offset_bot.as_deref() == Some(bot_key)
+        {
+            return Ok(());
+        }
+        guard.persisted.next_offset = Some(offset);
+        guard.persisted.offset_bot = Some(bot_key.to_owned());
+        guard.persisted.offset_saved_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        Self::save_locked(self.path.as_deref(), &guard.persisted)
     }
 
     /// Get the bot currently mapped to `telegram_chat_id`.

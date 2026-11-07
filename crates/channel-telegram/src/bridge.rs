@@ -39,6 +39,35 @@ pub const DEFAULT_POLL_TIMEOUT_SECS: u64 = 25;
 /// Default backoff between `getUpdates` polls on error or when active streams are open.
 pub const DEFAULT_POLL_BACKOFF: Duration = Duration::from_millis(100);
 
+/// Longest incoming text forwarded to the daemon (Telegram itself caps at 4096).
+const MAX_INCOMING_CHARS: usize = 8192;
+
+/// Maximum number of outstanding approval/question tokens remembered.
+const MAX_PENDING_PROMPTS: usize = 1024;
+
+/// Backoff after `409 Conflict` (another poller or a webhook is active).
+const CONFLICT_BACKOFF: Duration = Duration::from_secs(15);
+
+/// Upper bound of the exponential error backoff.
+const MAX_ERROR_BACKOFF: Duration = Duration::from_secs(30);
+
+/// Delay before the next poll after `err` (the `failures`-th consecutive failure).
+pub(crate) fn poll_error_delay(err: &TelegramError, failures: u32, base: Duration) -> Duration {
+    match err {
+        TelegramError::RateLimited { retry_after_secs } => {
+            Duration::from_secs((*retry_after_secs).clamp(1, 120))
+        }
+        TelegramError::TelegramApi {
+            error_code: Some(409),
+            ..
+        } => CONFLICT_BACKOFF,
+        _ => {
+            let shift = failures.saturating_sub(1).min(16);
+            base.saturating_mul(1u32 << shift).min(MAX_ERROR_BACKOFF)
+        }
+    }
+}
+
 /// Configuration for [`TelegramChannel`].
 #[derive(Clone)]
 pub struct TelegramConfig {
@@ -209,6 +238,11 @@ struct Inner {
     pairing: PairingStore,
     redactor: Redactor,
     runtime: AsyncMutex<RuntimeState>,
+    /// Approval requests this bridge sent: `call_id` -> Telegram chat that received the buttons.
+    /// A callback is only honoured for an entry issued to the pressing chat (anti-forgery).
+    pending_approvals: Mutex<HashMap<ToolCallId, i64>>,
+    /// Key identifying the bot the persisted polling offset belongs to.
+    offset_key: String,
     cancel: CancellationToken,
 }
 
@@ -251,6 +285,25 @@ fn compact_json(v: &Value, max_chars: usize) -> String {
     compact_one_line(&raw, max_chars)
 }
 
+/// Only `https` (or plain `http` to a loopback host, for tests) may carry the bot token.
+fn validate_base_url(url: &str) -> Result<()> {
+    let lower = url.to_ascii_lowercase();
+    let loopback = ["http://127.0.0.1", "http://localhost", "http://[::1]"]
+        .iter()
+        .any(|p| {
+            lower.strip_prefix(p).is_some_and(|rest| {
+                rest.is_empty() || rest.starts_with(':') || rest.starts_with('/')
+            })
+        });
+    if lower.starts_with("https://") || loopback {
+        Ok(())
+    } else {
+        Err(TelegramError::Config(
+            "telegram api_base_url must use https (http is allowed for loopback only)".into(),
+        ))
+    }
+}
+
 impl TelegramChannel {
     /// Construct a [`TelegramChannel`] without spawning the background polling task.
     ///
@@ -261,7 +314,13 @@ impl TelegramChannel {
     /// Returns an error if the bot token is missing from `config.secret_store`,
     /// the store cannot be read, or the state file cannot be opened.
     pub fn new(config: TelegramConfig, api_client: Arc<dyn DaemonClient>) -> Result<Self> {
+        validate_base_url(&config.api_base_url)?;
         let token = load_bot_token(&*config.secret_store, &config.bot_token_secret)?;
+        let offset_key = token
+            .expose()
+            .split_once(':')
+            .map_or("bot", |(id, _)| id)
+            .to_owned();
         let mut redactor = Redactor::from_store(&*config.secret_store)?;
         redactor.add_secret(token.expose());
         for extra in &config.extra_redactor_secrets {
@@ -277,13 +336,19 @@ impl TelegramChannel {
         }
 
         let bot_api = BotApiClient::with_base_url(token, &config.api_base_url);
+        let runtime = RuntimeState {
+            next_offset: pairing.saved_offset(&offset_key),
+            ..RuntimeState::default()
+        };
         let inner = Arc::new(Inner {
             config,
             bot_api,
             api_client,
             pairing,
             redactor,
-            runtime: AsyncMutex::new(RuntimeState::default()),
+            runtime: AsyncMutex::new(runtime),
+            pending_approvals: Mutex::new(HashMap::new()),
+            offset_key,
             cancel: CancellationToken::new(),
         });
 
@@ -343,6 +408,19 @@ impl TelegramChannel {
         self.inner.redactor.redact(text)
     }
 
+    fn redact_value(&self, v: &Value) -> Value {
+        match v {
+            Value::String(s) => Value::String(self.redact(s)),
+            Value::Array(a) => Value::Array(a.iter().map(|x| self.redact_value(x)).collect()),
+            Value::Object(o) => Value::Object(
+                o.iter()
+                    .map(|(k, x)| (self.redact(k), self.redact_value(x)))
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
+
     /// Signal the background polling loop to stop.
     pub fn stop(&self) {
         self.inner.cancel.cancel();
@@ -358,6 +436,7 @@ impl TelegramChannel {
     }
 
     async fn run_loop(&self) {
+        let mut failures: u32 = 0;
         while !self.inner.cancel.is_cancelled() {
             let poll_res = tokio::select! {
                 () = self.inner.cancel.cancelled() => break,
@@ -367,13 +446,39 @@ impl TelegramChannel {
                 let rt = self.inner.runtime.lock().await;
                 !rt.active_runs.is_empty()
             };
-            if poll_res.is_err() || has_active {
+            let delay = if let Err(e) = &poll_res {
+                failures = failures.saturating_add(1);
+                Some(poll_error_delay(
+                    e,
+                    failures,
+                    self.inner.config.poll_backoff,
+                ))
+            } else {
+                failures = 0;
+                has_active.then_some(self.inner.config.poll_backoff)
+            };
+            if let Some(delay) = delay {
                 tokio::select! {
                     () = self.inner.cancel.cancelled() => break,
-                    () = tokio::time::sleep(self.inner.config.poll_backoff) => {}
+                    () = tokio::time::sleep(delay) => {}
                 }
             }
         }
+    }
+
+    /// Remember the next offset (in memory and on disk) so confirmed updates never replay.
+    async fn advance_offset(&self, update_id: i64) {
+        let next = update_id.saturating_add(1);
+        let to_save = {
+            let mut rt = self.inner.runtime.lock().await;
+            let merged = rt.next_offset.map_or(next, |cur| cur.max(next));
+            rt.next_offset = Some(merged);
+            merged
+        };
+        let _ = self
+            .inner
+            .pairing
+            .save_offset(&self.inner.offset_key, to_save);
     }
 
     /// Execute a single `getUpdates` poll pass, process all returned updates,
@@ -395,17 +500,23 @@ impl TelegramChannel {
         let updates = self.inner.bot_api.get_updates(offset, timeout).await?;
         let count = updates.len();
 
+        // One failing update (e.g. a user who blocked the bot) must not starve the rest of
+        // the batch; the offset is advanced first so a poison update is never replayed.
+        let mut first_err: Option<TelegramError> = None;
         for update in updates {
-            {
-                let mut rt = self.inner.runtime.lock().await;
-                let next = update.update_id.saturating_add(1);
-                rt.next_offset = Some(rt.next_offset.map_or(next, |cur| cur.max(next)));
+            self.advance_offset(update.update_id).await;
+            if let Err(e) = self.handle_update(update).await {
+                first_err.get_or_insert(e);
             }
-            self.handle_update(update).await?;
         }
 
-        self.drain_active_runs().await?;
-        Ok(count)
+        if let Err(e) = self.drain_active_runs().await {
+            first_err.get_or_insert(e);
+        }
+        match first_err {
+            Some(e) => Err(e),
+            None => Ok(count),
+        }
     }
 
     /// Process a single Telegram [`Update`] and advance active run streams.
@@ -450,16 +561,19 @@ impl TelegramChannel {
         // Security gate: only paired Telegram user IDs may interact with the bot.
         if !self.inner.pairing.is_paired(user_id) {
             if self.inner.pairing.should_send_refusal(user_id) {
+                // Best effort: a failing refusal (blocked bot, 429) is never fatal.
                 match msg.kind {
                     IncomingKind::Text(_) => {
-                        self.send_redacted(chat_id, UNPAIRED_REFUSAL_TEXT, None)
-                            .await?;
+                        let _ = self
+                            .send_redacted(chat_id, UNPAIRED_REFUSAL_TEXT, None)
+                            .await;
                     }
                     IncomingKind::Callback { ref query_id, .. } => {
-                        self.inner
+                        let _ = self
+                            .inner
                             .bot_api
                             .answer_callback_query(query_id, Some(UNPAIRED_REFUSAL_TEXT))
-                            .await?;
+                            .await;
                     }
                 }
             }
@@ -509,6 +623,8 @@ impl TelegramChannel {
                 self.send_redacted(chat_id, "❌ Invalid pairing code.", None)
                     .await?;
             }
+            // Locked-out guesser: stay silent.
+            PairAttempt::RateLimited => {}
         }
         Ok(())
     }
@@ -516,6 +632,11 @@ impl TelegramChannel {
     async fn handle_paired_text(&self, chat_id: i64, text: &str) -> Result<()> {
         let trimmed = text.trim();
         if trimmed.is_empty() {
+            return Ok(());
+        }
+        if trimmed.chars().count() > MAX_INCOMING_CHARS {
+            self.send_redacted(chat_id, "Message too long; please shorten it.", None)
+                .await?;
             return Ok(());
         }
 
@@ -758,12 +879,35 @@ impl TelegramChannel {
         Ok(())
     }
 
-    async fn handle_callback(&self, _chat_id: i64, query_id: &str, data: &str) -> Result<()> {
+    async fn handle_callback(&self, chat_id: i64, query_id: &str, data: &str) -> Result<()> {
         if let Some((call_id, decision, scope)) = parse_approval_callback(data) {
-            self.inner
+            // Only approvals this bridge issued to *this* chat may be decided from it.
+            let allowed = {
+                let mut pending = self.inner.pending_approvals.lock();
+                if pending.get(&call_id) == Some(&chat_id) {
+                    pending.remove(&call_id);
+                    true
+                } else {
+                    false
+                }
+            };
+            if !allowed {
+                self.inner
+                    .bot_api
+                    .answer_callback_query(query_id, Some("Unknown or expired request"))
+                    .await?;
+                return Ok(());
+            }
+            if let Err(e) = self
+                .inner
                 .api_client
                 .decide_approval(call_id, decision, scope, None)
-                .await?;
+                .await
+            {
+                // Let the user retry the button.
+                self.inner.pending_approvals.lock().insert(call_id, chat_id);
+                return Err(e);
+            }
             let ack = match decision {
                 ApprovalDecision::Approve => "Approved",
                 ApprovalDecision::Deny => "Denied",
@@ -778,18 +922,33 @@ impl TelegramChannel {
         if let Some((call_id, payload)) = parse_question_callback(data) {
             let answer = {
                 let mut rt = self.inner.runtime.lock().await;
-                if let Some(pq) = rt.pending_questions.remove(&call_id) {
-                    rt.chat_pending_question.remove(&pq.telegram_chat_id);
-                    if let Ok(idx) = payload.parse::<usize>()
-                        && let Some(opt) = pq.options.get(idx)
-                    {
-                        opt.clone()
-                    } else {
-                        payload
+                // Only questions this bridge asked in *this* chat can be answered from it,
+                // and only with one of the offered options.
+                let valid = rt.pending_questions.get(&call_id).and_then(|pq| {
+                    (pq.telegram_chat_id == chat_id)
+                        .then(|| {
+                            payload
+                                .parse::<usize>()
+                                .ok()
+                                .and_then(|i| pq.options.get(i))
+                        })
+                        .flatten()
+                        .cloned()
+                });
+                if valid.is_some() {
+                    rt.pending_questions.remove(&call_id);
+                    if rt.chat_pending_question.get(&chat_id) == Some(&call_id) {
+                        rt.chat_pending_question.remove(&chat_id);
                     }
-                } else {
-                    payload
                 }
+                valid
+            };
+            let Some(answer) = answer else {
+                self.inner
+                    .bot_api
+                    .answer_callback_query(query_id, Some("Unknown or expired request"))
+                    .await?;
+                return Ok(());
             };
             self.inner
                 .api_client
@@ -873,7 +1032,8 @@ impl TelegramChannel {
             }
             Event::ToolCallRequested(t) => {
                 run.tool_names.insert(t.call_id, t.tool_name.clone());
-                let args = compact_json(&t.input, 160);
+                // Redact BEFORE truncating, so a secret cut in half cannot slip through.
+                let args = compact_json(&self.redact_value(&t.input), 160);
                 let line = if args.is_empty() {
                     format!("🔧 {}", t.tool_name)
                 } else {
@@ -887,14 +1047,24 @@ impl TelegramChannel {
                     .get(&t.call_id)
                     .map_or("tool", String::as_str);
                 if let Some(err) = &t.error {
-                    let line = format!("❌ {name}: {}", compact_one_line(err, 200));
+                    let line = format!("❌ {name}: {}", compact_one_line(&self.redact(err), 200));
                     self.send_redacted(chat_id, &line, None).await?;
                 } else if let Some(preview) = &t.output_preview {
-                    let line = format!("✅ {name}: {}", compact_one_line(preview, 200));
+                    let line = format!(
+                        "✅ {name}: {}",
+                        compact_one_line(&self.redact(preview), 200)
+                    );
                     self.send_redacted(chat_id, &line, None).await?;
                 }
             }
             Event::ApprovalNeeded(a) => {
+                {
+                    let mut pending = self.inner.pending_approvals.lock();
+                    if pending.len() >= MAX_PENDING_PROMPTS {
+                        pending.clear();
+                    }
+                    pending.insert(a.call_id, chat_id);
+                }
                 let rows = vec![vec![
                     InlineButton::new("Approve once", format_approval_callback(a.call_id, "once")),
                     InlineButton::new("Always", format_approval_callback(a.call_id, "always")),
@@ -970,8 +1140,7 @@ impl Channel for TelegramChannel {
             }
         }
         if let Some(next) = max_next {
-            let mut rt = self.inner.runtime.lock().await;
-            rt.next_offset = Some(rt.next_offset.map_or(next, |cur| cur.max(next)));
+            self.advance_offset(next - 1).await;
         }
         Ok(Box::pin(stream::iter(items)))
     }

@@ -32,7 +32,27 @@ pub struct ApiResponse<T> {
     pub description: Option<String>,
     /// Numerical error code when `ok` is `false`.
     pub error_code: Option<i64>,
+    /// Extra error parameters (e.g. `retry_after` on HTTP 429).
+    #[serde(default)]
+    pub parameters: Option<ResponseParameters>,
 }
+
+/// Optional `parameters` object of a failed Bot API response.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ResponseParameters {
+    /// Seconds to wait before repeating the request (HTTP 429).
+    #[serde(default)]
+    pub retry_after: Option<u64>,
+}
+
+/// Upper bound for a Bot API response body we are willing to buffer.
+const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+
+/// Longest `retry_after` that is waited out inline (longer ones are surfaced as an error).
+const MAX_INLINE_RETRY_SECS: u64 = 10;
+
+/// Maximum number of inline retries after `429`.
+const MAX_RATE_LIMIT_RETRIES: u32 = 2;
 
 /// An incoming Telegram update returned by `getUpdates`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,9 +71,13 @@ impl Update {
     /// Convert this Telegram update into a channel-agnostic [`IncomingMessage`], if supported.
     #[must_use]
     pub fn into_incoming(self) -> Option<IncomingMessage> {
+        // Only private (1:1) chats are ever accepted; the sender must be a human. Groups, supergroups and channels are ignored entirely.
         if let Some(msg) = self.message {
-            let text = msg.text?;
             let from = msg.from?;
+            if !is_private_chat_with(&msg.chat, &from) {
+                return None;
+            }
+            let text = msg.text?;
             let username = from.username.or(from.first_name);
             return Some(IncomingMessage {
                 update_id: self.update_id,
@@ -65,9 +89,14 @@ impl Update {
             });
         }
         if let Some(cb) = self.callback_query {
+            // A callback without its originating message cannot be tied to a chat: drop it.
+            let msg = cb.message.as_ref()?;
+            if !is_private_chat_with(&msg.chat, &cb.from) {
+                return None;
+            }
             let data = cb.data.unwrap_or_default();
-            let chat_id = cb.message.as_ref().map_or(cb.from.id, |m| m.chat.id);
-            let message_id = cb.message.as_ref().map(|m| m.message_id);
+            let chat_id = msg.chat.id;
+            let message_id = Some(msg.message_id);
             let username = cb.from.username.or(cb.from.first_name);
             return Some(IncomingMessage {
                 update_id: self.update_id,
@@ -84,6 +113,10 @@ impl Update {
         }
         None
     }
+}
+
+fn is_private_chat_with(chat: &TgChat, user: &TgUser) -> bool {
+    chat.kind.as_deref() == Some("private") && !user.is_bot
 }
 
 /// A Telegram message object.
@@ -257,8 +290,13 @@ impl BotApiClient {
     #[must_use]
     pub fn with_base_url(token: SecretValue, base_url: impl Into<String>) -> Self {
         let base_url = base_url.into().trim_end_matches('/').to_owned();
+        // Never follow redirects: the token is part of the request URL.
+        let http = Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap_or_default();
         Self {
-            http: Client::new(),
+            http,
             base_url,
             token,
         }
@@ -274,8 +312,9 @@ impl BotApiClient {
         format!("{}/bot{}/{method}", self.base_url, self.token.expose())
     }
 
-    fn sanitize_error(&self, err: &reqwest::Error) -> TelegramError {
-        let raw = err.to_string();
+    fn sanitize_error(&self, err: reqwest::Error) -> TelegramError {
+        // reqwest errors embed the request URL, which contains the bot token.
+        let raw = err.without_url().to_string();
         let tok = self.token.expose();
         let clean = if !tok.is_empty() && raw.contains(tok) {
             raw.replace(tok, REDACTED)
@@ -291,18 +330,56 @@ impl BotApiClient {
         body: &B,
         timeout: Duration,
     ) -> Result<R> {
-        let resp = self
-            .http
-            .post(self.endpoint(method))
-            .timeout(timeout)
-            .json(body)
-            .send()
-            .await
-            .map_err(|e| self.sanitize_error(&e))?;
+        let mut retries = 0;
+        loop {
+            let resp = self
+                .http
+                .post(self.endpoint(method))
+                .timeout(timeout)
+                .json(body)
+                .send()
+                .await
+                .map_err(|e| self.sanitize_error(e))?;
 
-        let parsed: ApiResponse<R> = resp.json().await.map_err(|e| self.sanitize_error(&e))?;
+            if resp
+                .content_length()
+                .is_some_and(|n| n > MAX_RESPONSE_BYTES as u64)
+            {
+                return Err(TelegramError::Http(format!("{method}: response too large")));
+            }
+            let bytes = resp.bytes().await.map_err(|e| self.sanitize_error(e))?;
+            if bytes.len() > MAX_RESPONSE_BYTES {
+                return Err(TelegramError::Http(format!("{method}: response too large")));
+            }
+            let parsed: ApiResponse<R> = serde_json::from_slice(&bytes).map_err(|_| {
+                TelegramError::Http(format!("{method}: invalid response from Telegram"))
+            })?;
 
-        if !parsed.ok {
+            if parsed.ok {
+                return parsed.result.ok_or_else(|| TelegramError::TelegramApi {
+                    error_code: parsed.error_code,
+                    description: format!("{method} returned ok=true without result"),
+                });
+            }
+
+            if parsed.error_code == Some(429) {
+                let retry_after_secs = parsed
+                    .parameters
+                    .as_ref()
+                    .and_then(|p| p.retry_after)
+                    .unwrap_or(1);
+                // Long polling is paced by the caller's loop; other calls wait briefly.
+                if method != "getUpdates"
+                    && retries < MAX_RATE_LIMIT_RETRIES
+                    && retry_after_secs <= MAX_INLINE_RETRY_SECS
+                {
+                    retries += 1;
+                    tokio::time::sleep(Duration::from_secs(retry_after_secs)).await;
+                    continue;
+                }
+                return Err(TelegramError::RateLimited { retry_after_secs });
+            }
+
             let mut desc = parsed
                 .description
                 .unwrap_or_else(|| format!("{method} failed"));
@@ -315,11 +392,6 @@ impl BotApiClient {
                 description: desc,
             });
         }
-
-        parsed.result.ok_or_else(|| TelegramError::TelegramApi {
-            error_code: parsed.error_code,
-            description: format!("{method} returned ok=true without result"),
-        })
     }
 
     /// Long-poll `getUpdates` for new messages and callback queries.
@@ -543,6 +615,13 @@ impl ThrottledEditor {
             }
             Some(msg_id) => {
                 if self.pending_text != self.last_sent_text {
+                    // The final edit must also respect the edit interval (Telegram 429s).
+                    if let Some(t) = self.last_touch_at {
+                        let wait = self.min_interval.saturating_sub(t.elapsed());
+                        if !wait.is_zero() {
+                            tokio::time::sleep(wait).await;
+                        }
+                    }
                     api.edit_message_text(self.chat_id, msg_id, &self.pending_text, None)
                         .await?;
                     self.last_sent_text.clone_from(&self.pending_text);

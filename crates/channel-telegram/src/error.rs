@@ -22,6 +22,13 @@ pub enum TelegramError {
         description: String,
     },
 
+    /// Telegram answered `429 Too Many Requests`.
+    #[error("telegram rate limited, retry after {retry_after_secs}s")]
+    RateLimited {
+        /// Seconds Telegram asked us to wait.
+        retry_after_secs: u64,
+    },
+
     /// Daemon API error or unexpected response.
     #[error("daemon api error: {0}")]
     Daemon(String),

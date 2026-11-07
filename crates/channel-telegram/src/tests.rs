@@ -21,7 +21,7 @@ use crate::{
     ApprovalDecision, ApprovalScope, BotSummary, Channel, ChannelCaps, ChatRef, ChatSummary,
     DaemonClient, DaemonStatus, DeliveryKind, HttpDaemonClient, IncomingKind, OutgoingMessage,
     Result, SendOutcome, TELEGRAM_BOT_TOKEN_SECRET, TelegramChannel, TelegramConfig,
-    ThrottledEditor, Update, store_bot_token,
+    ThrottledEditor, Update, format_approval_callback, format_question_callback, store_bot_token,
 };
 
 const TEST_BOT_TOKEN: &str = "123456789:AAH_test_bot_token_secret_value_xyz";
@@ -565,20 +565,22 @@ async fn approval_buttons_map_to_daemon_decisions() {
     let channel = TelegramChannel::new(cfg, daemon.clone()).unwrap();
 
     let run_id = RunId::new();
-    let approval_call_id = ToolCallId::new();
+    let call_ids = [ToolCallId::new(), ToolCallId::new(), ToolCallId::new()];
 
     let (tx, rx) = mpsc::unbounded_channel::<Envelope>();
-    tx.send(Envelope::new(
-        0,
-        Event::ApprovalNeeded(ApprovalNeeded {
-            run_id,
-            call_id: approval_call_id,
-            tool_name: "fs_delete".into(),
-            input: json!({ "path": "/tmp/a.txt" }),
-            summary: "Delete /tmp/a.txt".into(),
-        }),
-    ))
-    .unwrap();
+    for (i, call_id) in call_ids.iter().enumerate() {
+        tx.send(Envelope::new(
+            i as u64,
+            Event::ApprovalNeeded(ApprovalNeeded {
+                run_id,
+                call_id: *call_id,
+                tool_name: "fs_delete".into(),
+                input: json!({ "path": "/tmp/a.txt" }),
+                summary: "Delete /tmp/a.txt".into(),
+            }),
+        ))
+        .unwrap();
+    }
 
     let stream = futures::stream::unfold(rx, |mut rx| async move {
         rx.recv().await.map(|item| (item, rx))
@@ -592,23 +594,19 @@ async fn approval_buttons_map_to_daemon_decisions() {
 
     let reqs = server.received_requests().await.unwrap();
     let msgs = sent_messages(&reqs);
-    assert_eq!(msgs.len(), 1);
+    assert_eq!(msgs.len(), 3);
     let keyboard = &msgs[0]["reply_markup"]["inline_keyboard"][0];
     assert_eq!(keyboard[0]["text"], "Approve once");
     assert_eq!(keyboard[1]["text"], "Always");
     assert_eq!(keyboard[2]["text"], "Deny");
 
-    let approve_once_data = keyboard[0]["callback_data"].as_str().unwrap().to_owned();
-    let always_data = keyboard[1]["callback_data"].as_str().unwrap().to_owned();
-    let deny_data = keyboard[2]["callback_data"].as_str().unwrap().to_owned();
-
-    for (idx, qid, data) in [
-        (2, "cb-1", &approve_once_data),
-        (3, "cb-2", &always_data),
-        (4, "cb-3", &deny_data),
-    ] {
+    // msg0 -> "Approve once", msg1 -> "Always", msg2 -> "Deny".
+    for (i, qid) in ["cb-1", "cb-2", "cb-3"].into_iter().enumerate() {
+        let data = msgs[i]["reply_markup"]["inline_keyboard"][0][i]["callback_data"]
+            .as_str()
+            .unwrap();
         let cb: Update = serde_json::from_value(callback_update(
-            idx,
+            i64::try_from(i + 2).unwrap(),
             PAIRED_USER_ID,
             TEST_CHAT_ID,
             qid,
@@ -623,17 +621,17 @@ async fn approval_buttons_map_to_daemon_decisions() {
         approvals,
         vec![
             RecordedApproval {
-                call_id: approval_call_id,
+                call_id: call_ids[0],
                 decision: ApprovalDecision::Approve,
                 scope: ApprovalScope::Once,
             },
             RecordedApproval {
-                call_id: approval_call_id,
+                call_id: call_ids[1],
                 decision: ApprovalDecision::Approve,
                 scope: ApprovalScope::Always,
             },
             RecordedApproval {
-                call_id: approval_call_id,
+                call_id: call_ids[2],
                 decision: ApprovalDecision::Deny,
                 scope: ApprovalScope::Once,
             },
@@ -641,6 +639,18 @@ async fn approval_buttons_map_to_daemon_decisions() {
     );
     let reqs = server.received_requests().await.unwrap();
     assert_eq!(callback_answers(&reqs).len(), 3);
+
+    // Single use: replaying a button must not reach the daemon again.
+    let replay: Update = serde_json::from_value(callback_update(
+        9,
+        PAIRED_USER_ID,
+        TEST_CHAT_ID,
+        "cb-replay",
+        &format_approval_callback(call_ids[0], "once"),
+    ))
+    .unwrap();
+    channel.handle_update(replay).await.unwrap();
+    assert_eq!(daemon.approvals.lock().len(), 3);
 }
 
 #[tokio::test]
@@ -1064,4 +1074,636 @@ async fn http_daemon_client_maps_routes_and_sse_stream() {
 
     let events: Vec<Envelope> = client.subscribe_run(run_id).await.unwrap().collect().await;
     assert_eq!(events.len(), 2);
+}
+
+// ---------------------------------------------------------------------------
+// Security review additions
+// ---------------------------------------------------------------------------
+
+const OTHER_PAIRED_USER_ID: i64 = 4343;
+const OTHER_CHAT_ID: i64 = 7002;
+
+fn one_bot_daemon() -> Arc<FakeDaemon> {
+    Arc::new(FakeDaemon::new(vec![BotSummary {
+        id: BotId::new(),
+        name: "Mira".into(),
+    }]))
+}
+
+fn update(v: Value) -> Update {
+    serde_json::from_value(v).unwrap()
+}
+
+fn with_chat_type(mut v: Value, kind: &str) -> Value {
+    if v.get("message").is_some() {
+        v["message"]["chat"]["type"] = json!(kind);
+    } else {
+        v["callback_query"]["message"]["chat"]["type"] = json!(kind);
+    }
+    v
+}
+
+#[tokio::test]
+async fn non_private_chats_and_other_update_types_are_ignored() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let daemon = one_bot_daemon();
+    let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+        .with_api_base_url(server.uri())
+        .with_paired_users([PAIRED_USER_ID]);
+    let channel = TelegramChannel::new(cfg, daemon.clone()).unwrap();
+
+    for kind in ["group", "supergroup", "channel"] {
+        // Even a paired user is ignored in non-private chats (also /pair and callbacks).
+        let msg = with_chat_type(text_update(1, PAIRED_USER_ID, -100, "hello"), kind);
+        assert!(update(msg.clone()).into_incoming().is_none());
+        channel.handle_update(update(msg)).await.unwrap();
+        let code = channel.create_pair_code();
+        let pair = with_chat_type(
+            text_update(2, UNPAIRED_USER_ID, -100, &format!("/pair {code}")),
+            kind,
+        );
+        channel.handle_update(update(pair)).await.unwrap();
+        let cb = with_chat_type(
+            callback_update(3, PAIRED_USER_ID, -100, "q", "approve:once:x"),
+            kind,
+        );
+        channel.handle_update(update(cb)).await.unwrap();
+    }
+    assert!(!channel.is_paired(UNPAIRED_USER_ID));
+
+    // Messages from bots, messages without a chat type, and edited/channel posts are dropped.
+    let mut from_bot = text_update(4, PAIRED_USER_ID, TEST_CHAT_ID, "hi");
+    from_bot["message"]["from"]["is_bot"] = json!(true);
+    assert!(update(from_bot).into_incoming().is_none());
+    let mut no_type = text_update(5, PAIRED_USER_ID, TEST_CHAT_ID, "hi");
+    no_type["message"]["chat"]
+        .as_object_mut()
+        .unwrap()
+        .remove("type");
+    assert!(update(no_type).into_incoming().is_none());
+    let edited = json!({
+        "update_id": 6,
+        "edited_message": text_update(6, PAIRED_USER_ID, TEST_CHAT_ID, "hi")["message"].clone(),
+    });
+    assert!(update(edited).into_incoming().is_none());
+    let channel_post = json!({
+        "update_id": 7,
+        "channel_post": text_update(7, PAIRED_USER_ID, TEST_CHAT_ID, "hi")["message"].clone(),
+    });
+    assert!(update(channel_post).into_incoming().is_none());
+
+    assert!(server.received_requests().await.unwrap().is_empty());
+    assert!(daemon.sent_messages.lock().is_empty());
+}
+
+#[tokio::test]
+async fn forged_approval_callbacks_are_rejected() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let daemon = one_bot_daemon();
+    let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+        .with_api_base_url(server.uri())
+        .with_paired_users([PAIRED_USER_ID, OTHER_PAIRED_USER_ID]);
+    let channel = TelegramChannel::new(cfg, daemon.clone()).unwrap();
+
+    let run_id = RunId::new();
+    let call_id = ToolCallId::new();
+    let (tx, rx) = mpsc::unbounded_channel::<Envelope>();
+    tx.send(Envelope::new(
+        0,
+        Event::ApprovalNeeded(ApprovalNeeded {
+            run_id,
+            call_id,
+            tool_name: "shell".into(),
+            input: json!({}),
+            summary: "rm".into(),
+        }),
+    ))
+    .unwrap();
+    daemon.queue_run_stream(
+        run_id,
+        Box::pin(futures::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|i| (i, rx))
+        })),
+    );
+    channel
+        .handle_update(update(text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, "go")))
+        .await
+        .unwrap();
+
+    // 1. Unknown call id from a paired user.
+    let unknown = format_approval_callback(ToolCallId::new(), "once");
+    channel
+        .handle_update(update(callback_update(
+            2,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "c1",
+            &unknown,
+        )))
+        .await
+        .unwrap();
+    // 2. Real call id, but pressed from another paired user's chat.
+    let real = format_approval_callback(call_id, "always");
+    channel
+        .handle_update(update(callback_update(
+            3,
+            OTHER_PAIRED_USER_ID,
+            OTHER_CHAT_ID,
+            "c2",
+            &real,
+        )))
+        .await
+        .unwrap();
+    // 3. Real call id from an unpaired user in the right chat.
+    channel
+        .handle_update(update(callback_update(
+            4,
+            UNPAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "c3",
+            &real,
+        )))
+        .await
+        .unwrap();
+    assert!(
+        daemon.approvals.lock().is_empty(),
+        "forged callbacks must not decide"
+    );
+
+    // 4. The legitimate press still works.
+    channel
+        .handle_update(update(callback_update(
+            5,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "c4",
+            &real,
+        )))
+        .await
+        .unwrap();
+    assert_eq!(daemon.approvals.lock().len(), 1);
+}
+
+#[tokio::test]
+async fn forged_question_callbacks_are_rejected() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let daemon = one_bot_daemon();
+    let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+        .with_api_base_url(server.uri())
+        .with_paired_users([PAIRED_USER_ID, OTHER_PAIRED_USER_ID]);
+    let channel = TelegramChannel::new(cfg, daemon.clone()).unwrap();
+
+    let run_id = RunId::new();
+    let call_id = ToolCallId::new();
+    let (tx, rx) = mpsc::unbounded_channel::<Envelope>();
+    tx.send(Envelope::new(
+        0,
+        Event::QuestionAsked(QuestionAsked {
+            run_id,
+            call_id,
+            question: "Which?".into(),
+            options: vec!["A".into(), "B".into()],
+        }),
+    ))
+    .unwrap();
+    daemon.queue_run_stream(
+        run_id,
+        Box::pin(futures::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|i| (i, rx))
+        })),
+    );
+    channel
+        .handle_update(update(text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, "go")))
+        .await
+        .unwrap();
+
+    let forged = [
+        // unknown call id
+        (
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            format_question_callback(ToolCallId::new(), 0),
+        ),
+        // other chat
+        (
+            OTHER_PAIRED_USER_ID,
+            OTHER_CHAT_ID,
+            format_question_callback(call_id, 0),
+        ),
+        // arbitrary payload instead of an offered option index
+        (
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            format!("question:{}:rm -rf /", call_id.0),
+        ),
+        // out-of-range option index
+        (
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            format_question_callback(call_id, 9),
+        ),
+    ];
+    for (i, (user, chat, data)) in forged.iter().enumerate() {
+        channel
+            .handle_update(update(callback_update(
+                i64::try_from(i + 2).unwrap(),
+                *user,
+                *chat,
+                "cq",
+                data,
+            )))
+            .await
+            .unwrap();
+    }
+    assert!(daemon.answers.lock().is_empty());
+
+    channel
+        .handle_update(update(callback_update(
+            20,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "cq",
+            &format_question_callback(call_id, 1),
+        )))
+        .await
+        .unwrap();
+    let answers = daemon.answers.lock().clone();
+    assert_eq!(answers.len(), 1);
+    assert_eq!(answers[0].answer, "B");
+}
+
+#[test]
+fn pairing_codes_are_random_six_digits_and_user_lockout_applies() {
+    use crate::pairing::{MAX_PAIR_ATTEMPTS_PER_USER, PairAttempt, PairingStore};
+    let store = PairingStore::in_memory();
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..200 {
+        let c = store.create_code();
+        assert_eq!(c.len(), 6);
+        assert!(c.bytes().all(|b| b.is_ascii_digit()));
+        seen.insert(c);
+    }
+    assert!(
+        seen.len() > 150,
+        "codes must be random, got {} unique",
+        seen.len()
+    );
+
+    // A single user is locked out after the per-user cap, even for the right code.
+    let store = PairingStore::in_memory();
+    let code = store.create_code();
+    let wrong = if code == "000000" { "111111" } else { "000000" };
+    for _ in 0..MAX_PAIR_ATTEMPTS_PER_USER {
+        let _ = store.redeem_code(1, wrong);
+    }
+    let live = store.create_code();
+    assert_eq!(
+        store.redeem_code(1, &live).unwrap(),
+        PairAttempt::RateLimited
+    );
+    assert!(!store.is_paired(1));
+    // Another user is unaffected.
+    assert_eq!(store.redeem_code(2, &live).unwrap(), PairAttempt::Paired);
+    assert_eq!(
+        store.redeem_code(3, &live).unwrap(),
+        PairAttempt::InvalidCode
+    );
+}
+
+#[test]
+fn global_wrong_guess_cap_burns_pending_codes() {
+    use crate::pairing::{MAX_PAIR_ATTEMPTS, PairAttempt, PairingStore};
+    let store = PairingStore::in_memory();
+    let code = store.create_code();
+    let wrong = if code == "000000" { "111111" } else { "000000" };
+    // Different users each guess once: the shared cap still burns the code.
+    for uid in 0..i64::from(MAX_PAIR_ATTEMPTS) {
+        assert_eq!(
+            store.redeem_code(100 + uid, wrong).unwrap(),
+            PairAttempt::InvalidCode
+        );
+    }
+    assert_eq!(
+        store.redeem_code(999, &code).unwrap(),
+        PairAttempt::InvalidCode
+    );
+    assert!(!store.is_paired(999));
+}
+
+#[test]
+fn refusals_are_globally_rate_limited_and_per_user_once() {
+    use crate::pairing::{MAX_REFUSALS_PER_MINUTE, PairingStore};
+    let store = PairingStore::in_memory();
+    let sent = (0..(i64::try_from(MAX_REFUSALS_PER_MINUTE).unwrap() + 20))
+        .filter(|uid| store.should_send_refusal(*uid))
+        .count();
+    assert_eq!(sent, MAX_REFUSALS_PER_MINUTE);
+    assert!(
+        !store.should_send_refusal(0),
+        "same user is refused only once"
+    );
+}
+
+#[tokio::test]
+async fn transport_errors_never_contain_the_bot_token() {
+    // Nothing listens on port 1: reqwest's error text would normally embed the URL.
+    let client =
+        crate::BotApiClient::with_base_url(SecretValue::new(TEST_BOT_TOKEN), "http://127.0.0.1:1");
+    let err = client.send_message(1, "x", None).await.unwrap_err();
+    let text = format!("{err} {err:?}");
+    assert!(!text.contains(TEST_BOT_TOKEN), "token leaked: {text}");
+    assert!(!text.contains("AAH_test_bot_token"), "token leaked: {text}");
+    assert!(!format!("{client:?}").contains("AAH_test_bot_token"));
+}
+
+#[tokio::test]
+async fn api_errors_echoing_the_token_are_redacted() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("sendMessage")))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "ok": false,
+            "error_code": 400,
+            "description": format!("bad request for {TEST_BOT_TOKEN}"),
+        })))
+        .mount(&server)
+        .await;
+    let client = crate::BotApiClient::with_base_url(SecretValue::new(TEST_BOT_TOKEN), server.uri());
+    let err = client.send_message(1, "x", None).await.unwrap_err();
+    assert!(!err.to_string().contains(TEST_BOT_TOKEN));
+}
+
+#[tokio::test]
+async fn rate_limit_429_is_retried_for_sends_and_surfaced_for_polling() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("sendMessage")))
+        .respond_with(ResponseTemplate::new(429).set_body_json(json!({
+            "ok": false,
+            "error_code": 429,
+            "description": "Too Many Requests: retry after 1",
+            "parameters": { "retry_after": 1 }
+        })))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("sendMessage")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ok": true,
+            "result": { "message_id": 5, "chat": { "id": 1, "type": "private" }, "text": "x" }
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("getUpdates")))
+        .respond_with(ResponseTemplate::new(429).set_body_json(json!({
+            "ok": false,
+            "error_code": 429,
+            "description": "Too Many Requests",
+            "parameters": { "retry_after": 7 }
+        })))
+        .mount(&server)
+        .await;
+    let client = crate::BotApiClient::with_base_url(SecretValue::new(TEST_BOT_TOKEN), server.uri());
+    let started = std::time::Instant::now();
+    let msg = client.send_message(1, "x", None).await.unwrap();
+    assert_eq!(msg.message_id, 5);
+    assert!(
+        started.elapsed() >= Duration::from_millis(900),
+        "must honour retry_after"
+    );
+
+    let err = client.get_updates(None, 0).await.unwrap_err();
+    assert!(matches!(
+        err,
+        crate::TelegramError::RateLimited {
+            retry_after_secs: 7
+        }
+    ));
+}
+
+#[test]
+fn poll_error_backoff_policy() {
+    use crate::TelegramError;
+    use crate::bridge::poll_error_delay;
+    let base = Duration::from_millis(100);
+    let conflict = TelegramError::TelegramApi {
+        error_code: Some(409),
+        description: "Conflict: terminated by other getUpdates request".into(),
+    };
+    assert!(poll_error_delay(&conflict, 1, base) >= Duration::from_secs(10));
+    let limited = TelegramError::RateLimited {
+        retry_after_secs: 7,
+    };
+    assert_eq!(poll_error_delay(&limited, 1, base), Duration::from_secs(7));
+    let other = TelegramError::Http("boom".into());
+    assert_eq!(poll_error_delay(&other, 1, base), base);
+    assert_eq!(poll_error_delay(&other, 3, base), base * 4);
+    assert_eq!(poll_error_delay(&other, 60, base), Duration::from_secs(30));
+}
+
+#[tokio::test]
+async fn polling_offset_is_persisted_across_restarts() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("getUpdates")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ok": true,
+            "result": [
+                text_update(10, UNPAIRED_USER_ID, TEST_CHAT_ID, "hi"),
+                text_update(11, PAIRED_USER_ID, TEST_CHAT_ID, "/status")
+            ]
+        })))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("getUpdates")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "ok": true, "result": [] })))
+        .mount(&server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state.json");
+    let make = || {
+        TelegramChannel::new(
+            TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+                .with_api_base_url(server.uri())
+                .with_poll_timeout_secs(0)
+                .with_state_path(&state)
+                .with_paired_users([PAIRED_USER_ID]),
+            one_bot_daemon(),
+        )
+        .unwrap()
+    };
+
+    let first = make();
+    assert_eq!(first.poll_once().await.unwrap(), 2);
+    drop(first);
+
+    let second = make();
+    second.poll_once().await.unwrap();
+    let reqs = server.received_requests().await.unwrap();
+    let polls: Vec<Value> = reqs
+        .iter()
+        .filter(|r| r.url.path() == tg_endpoint("getUpdates"))
+        .filter_map(|r| serde_json::from_slice(&r.body).ok())
+        .collect();
+    assert_eq!(polls.len(), 2);
+    assert!(polls[0].get("offset").is_none());
+    assert_eq!(
+        polls[1]["offset"], 12,
+        "restart must resume after the last update"
+    );
+    assert_eq!(
+        polls[1]["allowed_updates"],
+        json!(["message", "callback_query"])
+    );
+}
+
+#[tokio::test]
+async fn a_failing_update_does_not_starve_the_rest_of_the_batch() {
+    let server = MockServer::start().await;
+    // sendMessage always fails (e.g. the unpaired user blocked the bot).
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("sendMessage")))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({
+            "ok": false, "error_code": 403, "description": "Forbidden: bot was blocked by the user"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("getUpdates")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ok": true,
+            "result": [
+                text_update(1, UNPAIRED_USER_ID, TEST_CHAT_ID, "hi"),
+                text_update(2, PAIRED_USER_ID, TEST_CHAT_ID, "do the thing")
+            ]
+        })))
+        .mount(&server)
+        .await;
+    let daemon = one_bot_daemon();
+    let channel = TelegramChannel::new(
+        TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+            .with_api_base_url(server.uri())
+            .with_poll_timeout_secs(0)
+            .with_paired_users([PAIRED_USER_ID]),
+        daemon.clone(),
+    )
+    .unwrap();
+    let _ = channel.poll_once().await;
+    assert_eq!(
+        daemon.sent_messages.lock().len(),
+        1,
+        "the paired user's message must still be processed"
+    );
+}
+
+#[test]
+fn plain_http_to_non_loopback_hosts_is_rejected() {
+    for bad in [
+        "http://api.telegram.org",
+        "ftp://x",
+        "http://127.0.0.1.evil.com",
+    ] {
+        let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN).with_api_base_url(bad);
+        assert!(
+            TelegramChannel::new(cfg, one_bot_daemon()).is_err(),
+            "{bad} must be rejected"
+        );
+    }
+    for good in [
+        "https://api.telegram.org",
+        "http://127.0.0.1:8080",
+        "http://localhost:9",
+    ] {
+        let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN).with_api_base_url(good);
+        assert!(
+            TelegramChannel::new(cfg, one_bot_daemon()).is_ok(),
+            "{good}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn secrets_cut_by_truncation_are_still_redacted() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let store = Arc::new(MemoryStore::new());
+    store_bot_token(&*store, TEST_BOT_TOKEN).unwrap();
+    let secret = "hunter2-super-secret-db-password";
+    store.set("db.password", secret).unwrap();
+    let daemon = one_bot_daemon();
+    let channel = TelegramChannel::new(
+        TelegramConfig::new(store)
+            .with_api_base_url(server.uri())
+            .with_paired_users([PAIRED_USER_ID]),
+        daemon.clone(),
+    )
+    .unwrap();
+
+    let run_id = RunId::new();
+    let call_id = ToolCallId::new();
+    // Place the secret so that the 160/200-char tool-line limits would cut it in half.
+    let padding = "x".repeat(145);
+    let output_padding = "y".repeat(185);
+    daemon.queue_run_events(
+        run_id,
+        vec![
+            Event::ToolCallRequested(ToolCallRequested {
+                run_id,
+                call_id,
+                tool_name: "shell".into(),
+                input: json!({ "cmd": format!("{padding}{secret}") }),
+            }),
+            Event::ToolCallCompleted(ToolCallCompleted {
+                run_id,
+                call_id,
+                error: None,
+                output_preview: Some(format!("{output_padding} {secret}")),
+                duration_ms: None,
+            }),
+            Event::RunFinished(RunFinished {
+                run_id,
+                error: None,
+            }),
+        ],
+    );
+    channel
+        .handle_update(update(text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, "go")))
+        .await
+        .unwrap();
+    let reqs = server.received_requests().await.unwrap();
+    let sends = sent_messages(&reqs);
+    assert!(sends.len() >= 2);
+    for m in sends {
+        let text = m["text"].as_str().unwrap();
+        assert!(!text.contains("hunter2"), "partial secret leaked: {text}");
+    }
+}
+
+#[tokio::test]
+async fn oversized_incoming_text_is_not_forwarded() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let daemon = one_bot_daemon();
+    let channel = TelegramChannel::new(
+        TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+            .with_api_base_url(server.uri())
+            .with_paired_users([PAIRED_USER_ID]),
+        daemon.clone(),
+    )
+    .unwrap();
+    let huge = "a".repeat(100_000);
+    channel
+        .handle_update(update(text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, &huge)))
+        .await
+        .unwrap();
+    assert!(daemon.sent_messages.lock().is_empty());
 }
