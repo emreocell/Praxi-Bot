@@ -174,6 +174,18 @@ struct Env {
     chat: ChatId,
 }
 
+impl Env {
+    /// Simulates a process crash: releases this process's storage handle but
+    /// keeps the data directory alive. The caller must hold the returned
+    /// `TempDir` until the test ends, or the directory is deleted before the
+    /// "restarted" process reopens it (Linux does not block on open files).
+    fn crash(self) -> tempfile::TempDir {
+        let Env { dir, storage, .. } = self;
+        drop(storage);
+        dir
+    }
+}
+
 fn setup() -> Env {
     let dir = tempfile::tempdir().unwrap();
     let storage = Arc::new(Storage::open(dir.path()).unwrap());
@@ -1155,7 +1167,7 @@ fn crash_mid_tool_then_recover_never_replays_the_tool() {
         run
     });
     drop(rt1);
-    drop(env);
+    let _data_dir = env.crash();
 
     // Process 2: reopen the same data dir.
     let storage = Arc::new(Storage::open(&path).unwrap());
@@ -1231,7 +1243,7 @@ fn crash_mid_model_call_replays_the_model_step() {
         run
     });
     drop(rt1);
-    drop(env);
+    let _data_dir = env.crash();
 
     let storage = Arc::new(Storage::open(&path).unwrap());
     let rt2 = tokio::runtime::Builder::new_multi_thread()
@@ -1284,7 +1296,7 @@ fn crash_while_waiting_for_approval_recovers_to_paused() {
         run
     });
     drop(rt1);
-    drop(env);
+    let _data_dir = env.crash();
 
     let storage = Arc::new(Storage::open(&path).unwrap());
     let rt2 = tokio::runtime::Builder::new_multi_thread()
@@ -1424,7 +1436,7 @@ fn crash_while_waiting_for_an_answer_recovers_to_paused() {
         run
     });
     drop(rt1);
-    drop(env);
+    let _data_dir = env.crash();
 
     let storage = Arc::new(Storage::open(&path).unwrap());
     let rt2 = tokio::runtime::Builder::new_multi_thread()
