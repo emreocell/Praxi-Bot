@@ -4,11 +4,13 @@
 //! it as `bot eval ...` without changes here.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use clap::{Args, Subcommand};
+use provider_catalog::ChatProvider;
 
 use crate::Result;
-use crate::live::{JUDGE_MODEL_ENV, build_live_provider, live_allowed, load_prices};
+use crate::live::{JUDGE_MODEL_ENV, Throttled, build_live_provider, live_allowed, load_prices};
 use crate::metrics::{RunRecord, append_jsonl, read_jsonl};
 use crate::report::render;
 use crate::tier2::{Source, TaskOutcome, Tier2Options};
@@ -58,6 +60,9 @@ pub struct RunArgs {
     /// Provider catalog directory.
     #[arg(long, env = "BOT_CATALOG_DIR")]
     pub catalog_dir: Option<PathBuf>,
+    /// Minimum milliseconds between model requests (free-tier rate limits).
+    #[arg(long, env = "BOT_EVAL_MIN_INTERVAL_MS")]
+    pub min_interval_ms: Option<u64>,
     /// Model-call cap override for tier 2.
     #[arg(long)]
     pub max_steps: Option<u32>,
@@ -187,8 +192,15 @@ async fn run(a: RunArgs) -> Result<bool> {
                     build_live_provider(a.model.as_deref(), &data_dir, a.catalog_dir.as_deref())?;
                 let judge_model =
                     std::env::var(JUDGE_MODEL_ENV).unwrap_or_else(|_| live.model.clone());
+                let provider = match a.min_interval_ms {
+                    Some(ms) if ms > 0 => Arc::new(Throttled::new(
+                        live.provider,
+                        std::time::Duration::from_millis(ms),
+                    )) as Arc<dyn ChatProvider>,
+                    _ => live.provider,
+                };
                 Source::Live {
-                    provider: live.provider,
+                    provider,
                     model: live.model,
                     judge_model,
                 }

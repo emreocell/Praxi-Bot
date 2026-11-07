@@ -14,4 +14,4 @@ checks:
         "Display" or the Turkish "Ekran"), and the agent's answer must name a setting that is
         visible on that page.
 cleanup:
-  - kill_new: [SystemSettings.exe]
+  - kill_new: [SystemSettings.exe, explorer.exe]
