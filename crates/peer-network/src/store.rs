@@ -20,13 +20,36 @@ pub enum Role {
     Phone,
     /// The desktop app / core (the controlling side).
     Desktop,
+    /// An always-on daemon server.
+    Host,
 }
 
 impl Role {
+    /// Whether this is the `node` role.
+    #[must_use]
+    pub fn is_node(self) -> bool {
+        self == Self::Node
+    }
+    /// Whether this is the `phone` role.
+    #[must_use]
+    pub fn is_phone(self) -> bool {
+        self == Self::Phone
+    }
+    /// Whether this is the `desktop` role.
+    #[must_use]
+    pub fn is_desktop(self) -> bool {
+        self == Self::Desktop
+    }
+    /// Whether this is the `host` role.
+    #[must_use]
+    pub fn is_host(self) -> bool {
+        self == Self::Host
+    }
+
     /// Whether peers of this role may issue `desktop.*` commands.
     #[must_use]
     pub fn may_control(self) -> bool {
-        matches!(self, Role::Desktop | Role::Phone)
+        matches!(self, Role::Desktop | Role::Phone | Role::Host)
     }
 }
 
@@ -36,6 +59,7 @@ impl std::fmt::Display for Role {
             Role::Node => "node",
             Role::Phone => "phone",
             Role::Desktop => "desktop",
+            Role::Host => "host",
         })
     }
 }
@@ -47,8 +71,9 @@ impl std::str::FromStr for Role {
             "node" => Ok(Role::Node),
             "phone" => Ok(Role::Phone),
             "desktop" => Ok(Role::Desktop),
+            "host" => Ok(Role::Host),
             other => Err(PeerError::Protocol(format!(
-                "unknown role '{other}' (expected node, phone or desktop)"
+                "unknown role '{other}' (expected node, phone, desktop or host)"
             ))),
         }
     }
@@ -234,6 +259,38 @@ mod tests {
         assert!(s.remove(&k).unwrap());
         assert!(s.get(&k).is_none());
         assert!(!s.remove(&k).unwrap());
+    }
+
+    #[test]
+    fn host_round_trip_and_legacy_devices() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("devices.json");
+        let key = iroh::SecretKey::generate().public();
+        // The original version-1 file shape and role remain readable.
+        let legacy = serde_json::json!({"version":1,"devices":[{
+            "id":key_to_string(&key),"name":"old node","role":"node",
+            "capabilities":[],"addr":null,"paired_at":1
+        }]});
+        std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        let store = DeviceStore::open(path.clone()).unwrap();
+        assert!(store.get(&key).unwrap().role.is_node());
+        store.upsert(dev(&key, Role::Host)).unwrap();
+        drop(store);
+        assert!(
+            DeviceStore::open(path)
+                .unwrap()
+                .get(&key)
+                .unwrap()
+                .role
+                .is_host()
+        );
+        for role in [Role::Node, Role::Phone, Role::Desktop, Role::Host] {
+            assert_eq!(role.to_string().parse::<Role>().unwrap(), role);
+        }
+        assert!(Role::Phone.is_phone());
+        assert!(Role::Desktop.is_desktop());
+        assert!(Role::Host.may_control());
+        assert!(!Role::Node.may_control());
     }
 
     #[test]

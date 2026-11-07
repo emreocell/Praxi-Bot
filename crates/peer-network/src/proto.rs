@@ -14,6 +14,9 @@ pub const ALPN_RPC: &[u8] = b"bot/rpc/1";
 /// ALPN of the event / heartbeat protocol (paired keys only).
 pub const ALPN_EVENTS: &[u8] = b"bot/events/1";
 
+/// ALPN of the remote HTTP API (handler supplied by the daemon).
+pub const ALPN_API: &[u8] = b"bot/api/1";
+
 /// Application protocol version carried inside pairing and `node.info`.
 ///
 /// The ALPN suffix is the transport-level major version; this number lets two
@@ -232,9 +235,28 @@ pub enum PairResponse {
 
 // ── Events ────────────────────────────────────────────────────────────────────
 
+/// Leader metadata advertised by a daemon; this crate applies no policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeaderInfo {
+    pub epoch: u64,
+    pub state: LeaderState,
+}
+
+/// The sender's declared leader state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LeaderState {
+    Active,
+    Standby,
+    Fresh,
+}
+
 /// A message pushed by a peer on `bot/events/1`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
+    /// Optional daemon leader metadata (absent on older peers).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leader: Option<LeaderInfo>,
     /// Event kind, e.g. `heartbeat`.
     pub kind: String,
     /// Sender clock, unix milliseconds.
@@ -247,6 +269,48 @@ pub struct Event {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn leader_metadata_is_additive() {
+        #[derive(Deserialize)]
+        struct OldEvent {
+            kind: String,
+            ts_ms: u64,
+            data: Value,
+        }
+
+        let old = r#"{"kind":"heartbeat","ts_ms":1,"data":{"seq":1}}"#;
+        let mut event: Event = serde_json::from_str(old).unwrap();
+        assert_eq!(event.leader, None);
+        assert!(
+            !serde_json::to_value(&event)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .contains_key("leader")
+        );
+        for state in [
+            LeaderState::Active,
+            LeaderState::Standby,
+            LeaderState::Fresh,
+        ] {
+            event.leader = Some(LeaderInfo {
+                epoch: u64::MAX,
+                state,
+            });
+            let wire = serde_json::to_value(&event).unwrap();
+            assert_eq!(
+                serde_json::from_value::<Event>(wire.clone())
+                    .unwrap()
+                    .leader,
+                event.leader
+            );
+            let old: OldEvent = serde_json::from_value(wire).unwrap();
+            assert_eq!(old.kind, "heartbeat");
+            assert_eq!(old.ts_ms, 1);
+            assert_eq!(old.data["seq"], 1);
+        }
+    }
 
     #[test]
     fn response_omits_absent_members() {
