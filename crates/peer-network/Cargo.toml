@@ -1,6 +1,6 @@
 [package]
 name = "peer-network"
-description = "Dial-out peer networking: manages WebSocket connections to remote node-agents."
+description = "Peer networking over iroh: key-based pairing, JSON-RPC desktop control, events, and a remote DesktopBackend."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,3 +9,24 @@ rust-version.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+desktop-api = { path = "../desktop-api", version = "0.1.0" }
+async-trait.workspace = true
+base64.workspace = true
+data-encoding = "2"
+iroh = "1.4"
+parking_lot.workspace = true
+qrcode = { version = "0.14", default-features = false }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[[example]]
+name = "core"
+path = "examples/core.rs"
