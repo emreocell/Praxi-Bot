@@ -118,6 +118,11 @@ enum Command {
         #[command(subcommand)]
         action: GrantsCmd,
     },
+    /// Manage scheduled runs (cron / interval / one-shot, English or Turkish).
+    Schedules {
+        #[command(subcommand)]
+        action: SchedulesCmd,
+    },
     /// Approve (or deny) a pending tool call.
     Approve {
         /// Tool call id (shown in the chat stream / `approval_needed` event).
@@ -151,6 +156,41 @@ enum GrantsCmd {
         /// Revoke the grant of this permission category (fs, shell, ...).
         #[arg(long, group = "target")]
         category: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SchedulesCmd {
+    /// List schedules.
+    List,
+    /// Add a schedule: `bot schedules add <bot-id> "every weekday at 9" "summarize my inbox"`.
+    Add {
+        /// Bot id (see `bot bots list`).
+        bot_id: String,
+        /// When: a phrase such as "every 15 minutes", "in 2 hours",
+        /// "her gün 09:00" (parsed by the daemon).
+        when: String,
+        /// The prompt the bot runs each time.
+        prompt: String,
+        /// Name (default: the start of the prompt).
+        #[arg(long)]
+        name: Option<String>,
+        /// IANA timezone for calendar phrases (default UTC).
+        #[arg(long)]
+        tz: Option<String>,
+        /// Post the runs to this chat (default: a chat named after the schedule).
+        #[arg(long)]
+        chat: Option<String>,
+    },
+    /// Delete a schedule.
+    Rm {
+        /// Schedule id.
+        id: String,
+    },
+    /// Fire a schedule now (in the background on the daemon).
+    RunNow {
+        /// Schedule id.
+        id: String,
     },
 }
 
@@ -319,6 +359,7 @@ fn run() -> Result<()> {
         | Command::Bots { .. }
         | Command::Approve { .. }
         | Command::Answer { .. }
+        | Command::Schedules { .. }
         | Command::Grants { .. } => {
             return run_client(&cli, command, &data_dir);
         }
@@ -363,6 +404,7 @@ fn run() -> Result<()> {
         | Command::Bots { .. }
         | Command::Approve { .. }
         | Command::Answer { .. }
+        | Command::Schedules { .. }
         | Command::Grants { .. } => Ok(()),
         Command::Providers { action } => match action {
             ProvidersCmd::Add {
@@ -527,6 +569,7 @@ fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Resul
                 let target = remote::grant_target_body(tool.as_deref(), category.as_deref())?;
                 remote::grants_revoke(&c, bot_id, target, json, &mut out).await
             }
+            Command::Schedules { action } => run_schedules(&c, action, json, &mut out).await,
             Command::Approve {
                 tool_call_id,
                 scope,
@@ -547,6 +590,37 @@ fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Resul
             _ => Ok(()),
         }
     })
+}
+
+async fn run_schedules(
+    c: &Client,
+    action: &SchedulesCmd,
+    json: bool,
+    out: &mut dyn std::io::Write,
+) -> Result<()> {
+    match action {
+        SchedulesCmd::List => remote::schedules_list(c, json, out).await,
+        SchedulesCmd::Add {
+            bot_id,
+            when,
+            prompt,
+            name,
+            tz,
+            chat,
+        } => {
+            let opts = remote::ScheduleAdd {
+                bot_id,
+                when,
+                prompt,
+                name: name.as_deref(),
+                tz: tz.as_deref(),
+                chat_id: chat.as_deref(),
+            };
+            remote::schedules_add(c, &opts, json, out).await
+        }
+        SchedulesCmd::Rm { id } => remote::schedules_rm(c, id, json, out).await,
+        SchedulesCmd::RunNow { id } => remote::schedules_run_now(c, id, json, out).await,
+    }
 }
 
 fn run_setup(c: &SetupCmd, env: &SetupEnv<'_>) -> Result<()> {
@@ -599,6 +673,52 @@ mod tests {
         let c = load_catalog(None).unwrap();
         assert!(c.get("openrouter").is_some());
         assert_eq!(c.len(), BUILTIN_CATALOG.len());
+    }
+
+    #[test]
+    fn parses_schedules_commands() {
+        assert!(matches!(
+            Cli::try_parse_from(["bot", "schedules", "list"])
+                .unwrap()
+                .command,
+            Some(Command::Schedules {
+                action: SchedulesCmd::List
+            })
+        ));
+        let cli = Cli::try_parse_from([
+            "bot",
+            "schedules",
+            "add",
+            "b1",
+            "every day at 9",
+            "report",
+            "--tz",
+            "Europe/Istanbul",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Schedules {
+                action: SchedulesCmd::Add { ref when, ref prompt, ref tz, .. }
+            }) if when == "every day at 9" && prompt == "report" && tz.as_deref() == Some("Europe/Istanbul")
+        ));
+        assert!(Cli::try_parse_from(["bot", "schedules", "add", "b1", "when"]).is_err());
+        assert!(matches!(
+            Cli::try_parse_from(["bot", "schedules", "rm", "s1"])
+                .unwrap()
+                .command,
+            Some(Command::Schedules {
+                action: SchedulesCmd::Rm { .. }
+            })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["bot", "schedules", "run-now", "s1"])
+                .unwrap()
+                .command,
+            Some(Command::Schedules {
+                action: SchedulesCmd::RunNow { .. }
+            })
+        ));
     }
 
     #[test]

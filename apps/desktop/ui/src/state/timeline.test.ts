@@ -12,6 +12,7 @@ import {
   type EventsState,
   needsYou,
   reconcile,
+  runText,
   type ToolItem
 } from "./timeline.ts";
 
@@ -361,4 +362,23 @@ test("assignChildRuns falls back to unmatched children in order", () => {
     task: "a"
   });
   assert.equal(assignChildRuns(s, s.runs[RUN])["c1"].id, "child-1");
+});
+
+test("route_decided is stored on the run; runText joins the reply", () => {
+  let s = started();
+  s = feed(s, {
+    type: "route_decided",
+    run_id: RUN,
+    level: "K1",
+    route: { kind: "workflow", name: "daily-report", confidence: 0.9 },
+    confidence: 0.9,
+    latency_ms: 4,
+    reason: "intent cache"
+  });
+  const r = s.runs[RUN].route;
+  assert.equal(r?.level, "K1");
+  assert.equal(r?.route.kind, "workflow");
+  assert.equal(r?.latencyMs, 4);
+  s = feed(s, { type: "message_delta", run_id: RUN, text: "Started a new chat: x" });
+  assert.equal(runText(s.runs[RUN]), "Started a new chat: x");
 });

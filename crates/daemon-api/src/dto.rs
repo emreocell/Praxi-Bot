@@ -500,3 +500,94 @@ pub struct ReloadResponse {
     /// Ids now loaded.
     pub active: Vec<String>,
 }
+
+/// A schedule (`/v1/schedules`).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ScheduleDto {
+    /// Schedule id.
+    pub id: Uuid,
+    /// Bot that runs it.
+    pub bot_id: Uuid,
+    /// Chat the runs post to; without one a chat named after the schedule is
+    /// used (and created on the first firing).
+    pub chat_id: Option<Uuid>,
+    /// Display name.
+    pub name: String,
+    /// When it fires: `{"cron": "0 9 * * 1-5 Europe/Istanbul"}`,
+    /// `{"every": {"seconds": 600}}` or `{"at": {"unix_ms": 1767225600000}}`.
+    pub spec: Value,
+    /// What it does: `{"kind": "agent_prompt", "text": "..."}`,
+    /// `{"kind": "workflow", "name": "...", "params": {}}` or
+    /// `{"kind": "tool", "name": "...", "input": {}}`.
+    pub payload: Value,
+    /// Whether the timer is armed.
+    pub enabled: bool,
+    /// Creation time.
+    pub created_at_ms: i64,
+    /// Last firing.
+    pub last_run_at_ms: Option<i64>,
+    /// Next firing (`null` for a disabled or finished schedule).
+    pub next_run_at_ms: Option<i64>,
+    /// `skip`, `run_once` or `run_all`: what happens to occurrences missed
+    /// while the daemon was down.
+    pub misfire_policy: String,
+    /// A webhook trigger is configured (`POST /v1/webhooks/{id}`); the secret
+    /// is never returned.
+    pub has_webhook: bool,
+}
+
+/// Body of `POST /v1/schedules` and `PUT /v1/schedules/{id}`.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct ScheduleInput {
+    /// Bot that runs it (cannot be changed afterwards).
+    pub bot_id: Uuid,
+    /// Chat the runs post to (default: a chat named after the schedule).
+    #[serde(default)]
+    pub chat_id: Option<Uuid>,
+    /// Display name (must not be empty).
+    pub name: String,
+    /// See [`ScheduleDto::spec`].
+    pub spec: Value,
+    /// See [`ScheduleDto::payload`].
+    pub payload: Value,
+    /// Armed or not (default `true`).
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    /// `skip` (default), `run_once` or `run_all`.
+    #[serde(default)]
+    pub misfire_policy: Option<String>,
+    /// HMAC secret of a webhook trigger.  Absent: unchanged (none on create);
+    /// the empty string removes the trigger.
+    #[serde(default)]
+    pub webhook_secret: Option<String>,
+}
+
+/// Body of `POST /v1/schedules/parse`.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct ParseSchedule {
+    /// English or Turkish phrase, e.g. `every weekday at 9`, `her gün 09:00`.
+    pub text: String,
+    /// IANA timezone for calendar phrases (default UTC).
+    #[serde(default)]
+    pub tz: Option<String>,
+}
+
+/// Result of `POST /v1/schedules/parse`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ParsedSchedule {
+    /// The [`ScheduleDto::spec`] the phrase means.
+    pub spec: Value,
+    /// First firing from now.
+    pub next_run_at_ms: Option<i64>,
+}
+
+/// Answer of `POST /v1/schedules/{id}/run-now` and `POST /v1/webhooks/{id}`:
+/// the run goes on in the background (follow it in the events, with the
+/// `schedule_id` of its `run_started`).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AcceptedResponse {
+    /// Always `accepted`.
+    pub status: String,
+    /// The schedule that fires.
+    pub schedule_id: Uuid,
+}

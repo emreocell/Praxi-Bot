@@ -1335,6 +1335,356 @@
         ]
       }
     },
+    "/v1/schedules": {
+      "get": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "List schedules.",
+        "operationId": "list_schedules",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScheduleDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Create a schedule (armed unless `enabled` is `false`).",
+        "operationId": "create_schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/schedules/parse": {
+      "post": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Turn an English / Turkish phrase into a schedule spec.",
+        "operationId": "parse_schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParseSchedule"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParsedSchedule"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "the phrase is not understood",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/schedules/{id}": {
+      "get": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Get one schedule.",
+        "operationId": "get_schedule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Schedule id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Replace a schedule's definition (its bot stays).  A changed or re-enabled\ntimer is re-armed from now; run state (`last_run_at_ms`) is kept.",
+        "operationId": "update_schedule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Schedule id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Delete a schedule (and its webhook trigger).  Runs it already started stay.",
+        "operationId": "delete_schedule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Schedule id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/schedules/{id}/run-now": {
+      "post": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Fire a schedule now, in the background; its timer is untouched.  The run is\na normal run (its `run_started` event carries the `schedule_id`).",
+        "operationId": "run_schedule_now",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Schedule id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptedResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "a run of it is still in flight",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "the scheduler is not running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/usage": {
       "get": {
         "tags": [
@@ -1372,10 +1722,124 @@
           }
         ]
       }
+    },
+    "/v1/webhooks/{id}": {
+      "post": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Fire a schedule from outside.  No bearer token: the body is authenticated\nwith `X-Signature-256: sha256=<hex HMAC-SHA256(secret, body)>` (the secret\nis the schedule's `webhook_secret`).  Host / Origin checks still apply and\nthe body may be at most 256 KB.  The body replaces `{input}` in the payload.\n`202` once accepted (the run goes on in the background).",
+        "operationId": "webhook",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Schedule id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Signature-256",
+            "in": "header",
+            "description": "`sha256=<hex>` HMAC-SHA256 of the raw body",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptedResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or wrong signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such schedule or no webhook trigger",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "disabled, or a run of it is in flight",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "body larger than 256 KB"
+          },
+          "503": {
+            "description": "the scheduler is not running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AcceptedResponse": {
+        "type": "object",
+        "description": "Answer of `POST /v1/schedules/{id}/run-now` and `POST /v1/webhooks/{id}`:\nthe run goes on in the background (follow it in the events, with the\n`schedule_id` of its `run_started`).",
+        "required": [
+          "status",
+          "schedule_id"
+        ],
+        "properties": {
+          "schedule_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The schedule that fires."
+          },
+          "status": {
+            "type": "string",
+            "description": "Always `accepted`."
+          }
+        }
+      },
       "AnswerQuestion": {
         "type": "object",
         "description": "`POST /v1/questions/{call_id}`.",
@@ -2083,6 +2547,46 @@
           "queue"
         ]
       },
+      "ParseSchedule": {
+        "type": "object",
+        "description": "Body of `POST /v1/schedules/parse`.",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "English or Turkish phrase, e.g. `every weekday at 9`, `her gün 09:00`."
+          },
+          "tz": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "IANA timezone for calendar phrases (default UTC)."
+          }
+        }
+      },
+      "ParsedSchedule": {
+        "type": "object",
+        "description": "Result of `POST /v1/schedules/parse`.",
+        "required": [
+          "spec"
+        ],
+        "properties": {
+          "next_run_at_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "First firing from now."
+          },
+          "spec": {
+            "description": "The [`ScheduleDto::spec`] the phrase means."
+          }
+        }
+      },
       "PolicyDto": {
         "type": "object",
         "description": "The global default permission policy (`GET` / `PUT /v1/policy`).",
@@ -2285,6 +2789,140 @@
           }
         }
       },
+      "ScheduleDto": {
+        "type": "object",
+        "description": "A schedule (`/v1/schedules`).",
+        "required": [
+          "id",
+          "bot_id",
+          "name",
+          "spec",
+          "payload",
+          "enabled",
+          "created_at_ms",
+          "misfire_policy",
+          "has_webhook"
+        ],
+        "properties": {
+          "bot_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Bot that runs it."
+          },
+          "chat_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Chat the runs post to; without one a chat named after the schedule is\nused (and created on the first firing)."
+          },
+          "created_at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Creation time."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the timer is armed."
+          },
+          "has_webhook": {
+            "type": "boolean",
+            "description": "A webhook trigger is configured (`POST /v1/webhooks/{id}`); the secret\nis never returned."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Schedule id."
+          },
+          "last_run_at_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Last firing."
+          },
+          "misfire_policy": {
+            "type": "string",
+            "description": "`skip`, `run_once` or `run_all`: what happens to occurrences missed\nwhile the daemon was down."
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "next_run_at_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Next firing (`null` for a disabled or finished schedule)."
+          },
+          "payload": {
+            "description": "What it does: `{\"kind\": \"agent_prompt\", \"text\": \"...\"}`,\n`{\"kind\": \"workflow\", \"name\": \"...\", \"params\": {}}` or\n`{\"kind\": \"tool\", \"name\": \"...\", \"input\": {}}`."
+          },
+          "spec": {
+            "description": "When it fires: `{\"cron\": \"0 9 * * 1-5 Europe/Istanbul\"}`,\n`{\"every\": {\"seconds\": 600}}` or `{\"at\": {\"unix_ms\": 1767225600000}}`."
+          }
+        }
+      },
+      "ScheduleInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/schedules` and `PUT /v1/schedules/{id}`.",
+        "required": [
+          "bot_id",
+          "name",
+          "spec",
+          "payload"
+        ],
+        "properties": {
+          "bot_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Bot that runs it (cannot be changed afterwards)."
+          },
+          "chat_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Chat the runs post to (default: a chat named after the schedule)."
+          },
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Armed or not (default `true`)."
+          },
+          "misfire_policy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`skip` (default), `run_once` or `run_all`."
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name (must not be empty)."
+          },
+          "payload": {
+            "description": "See [`ScheduleDto::payload`]."
+          },
+          "spec": {
+            "description": "See [`ScheduleDto::spec`]."
+          },
+          "webhook_secret": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "HMAC secret of a webhook trigger.  Absent: unchanged (none on create);\nthe empty string removes the trigger."
+          }
+        }
+      },
       "Scope": {
         "type": "string",
         "description": "How far an approval reaches.",
@@ -2444,6 +3082,9 @@
     },
     {
       "name": "providers"
+    },
+    {
+      "name": "schedules"
     }
   ]
 }

@@ -30,6 +30,13 @@
       "enum": [
         "subagent"
       ]
+    },
+    {
+      "description": "A schedule (cron / interval / one-shot / webhook) started the run. Behaves like [`InitiatorKind::Human`] unless a rule says otherwise, but never auto-approves money or never-list actions.",
+      "type": "string",
+      "enum": [
+        "schedule"
+      ]
     }
   ]
 }

@@ -115,6 +115,24 @@ impl From<storage::StorageError> for ApiError {
     }
 }
 
+impl From<scheduler::SchedulerError> for ApiError {
+    fn from(e: scheduler::SchedulerError) -> Self {
+        use scheduler::SchedulerError as E;
+        match e {
+            E::InvalidSpec(m) => Self::new(StatusCode::UNPROCESSABLE_ENTITY, "bad_schedule", m),
+            E::NotFound(w) => Self::not_found(w),
+            E::Disabled(m) => Self::conflict(format!("schedule {m} is disabled")),
+            E::Busy(m) => Self::conflict(format!("schedule {m} is already running")),
+            E::InvalidSignature => Self::new(
+                StatusCode::UNAUTHORIZED,
+                "invalid_signature",
+                "missing or invalid X-Signature-256",
+            ),
+            other => Self::internal(other),
+        }
+    }
+}
+
 impl From<LoopError> for ApiError {
     fn from(e: LoopError) -> Self {
         match e {

@@ -2,6 +2,7 @@
 
 pub mod control;
 pub mod daemon;
+pub mod shell;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -798,6 +799,8 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_notification::init())
+        .manage(shell::TrayState::default())
         .manage(control)
         .manage(daemon_handle)
         .setup(move |app| {
@@ -809,6 +812,9 @@ pub fn run() {
             ensure_auxiliary_windows(&app_handle);
             spawn_global_hotkey_listener(control_for_setup.clone());
             setup_dev_menu(app, control_for_setup.clone());
+            if let Err(e) = shell::setup_tray(&app_handle) {
+                eprintln!("bot-desktop: tray icon unavailable: {e}");
+            }
 
             if cfg!(debug_assertions)
                 && std::env::var("PRAXIBOT_AUTO_SIMULATE").as_deref() == Ok("1")
@@ -854,6 +860,9 @@ pub fn run() {
             providers_cli,
             get_autostart,
             set_autostart,
+            shell::notify_show,
+            shell::set_needs_count,
+            shell::set_tray_labels,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

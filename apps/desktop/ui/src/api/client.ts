@@ -16,6 +16,7 @@ import type {
   PolicyDto,
   PolicyInput,
   ProvidersDto,
+  RememberResponse,
   Run,
   Scope,
   SendMode,
@@ -161,6 +162,11 @@ export class ApiClient {
   }
   resumeRun(runId: string): Promise<Run> {
     return this.request("POST", `/runs/${runId}/resume`);
+  }
+
+  /** Cache the route of a succeeded run (409 when the run is not eligible). */
+  rememberRun(runId: string): Promise<RememberResponse> {
+    return this.request("POST", `/runs/${runId}/remember`);
   }
 
   listApprovals(runId?: string): Promise<Approval[]> {

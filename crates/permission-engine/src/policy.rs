@@ -90,9 +90,18 @@ impl Rule {
     /// Return the effective level for the given initiator kind.
     ///
     /// Uses the per-initiator override if present, otherwise the base level.
+    /// A [`InitiatorKind::Schedule`] run behaves like the user by default: with
+    /// no override of its own it follows the `Human` override, if any.
     #[must_use]
     pub fn level_for(&self, initiator: InitiatorKind) -> &Level {
-        self.by_initiator.get(&initiator).unwrap_or(&self.level)
+        self.by_initiator
+            .get(&initiator)
+            .or_else(|| {
+                (initiator == InitiatorKind::Schedule)
+                    .then(|| self.by_initiator.get(&InitiatorKind::Human))
+                    .flatten()
+            })
+            .unwrap_or(&self.level)
     }
 }
 
@@ -197,5 +206,17 @@ mod tests {
     fn rule_level_for_falls_back_to_base_level() {
         let rule = Rule::new(Level::Allow);
         assert_eq!(rule.level_for(InitiatorKind::Subagent), &Level::Allow);
+    }
+
+    #[test]
+    fn schedule_follows_human_unless_overridden() {
+        let mut rule = Rule::new(Level::Ask);
+        assert_eq!(rule.level_for(InitiatorKind::Schedule), &Level::Ask);
+        rule.by_initiator.insert(InitiatorKind::Human, Level::Allow);
+        assert_eq!(rule.level_for(InitiatorKind::Schedule), &Level::Allow);
+        rule.by_initiator
+            .insert(InitiatorKind::Schedule, Level::Deny);
+        assert_eq!(rule.level_for(InitiatorKind::Schedule), &Level::Deny);
+        assert_eq!(rule.level_for(InitiatorKind::Human), &Level::Allow);
     }
 }

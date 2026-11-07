@@ -22,6 +22,8 @@ use tower::ServiceExt;
 use crate::fake::FakeProvider;
 use crate::{AppState, DaemonConfig, router};
 
+mod schedules;
+
 const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 const PROFILE: &str = r#"
@@ -1356,15 +1358,44 @@ fn setup_desktop() -> (T, Arc<crate::fake::FakeDesktop>) {
 /// Send `text`, wait for the run and return the assistant's reply (the fake
 /// provider echoes the tool result as `tool said: ...`).
 async fn run_and_reply(t: &T, chat: &str, text: &str) -> String {
+    run_and_reply_seen(t, chat, text).await.0
+}
+
+/// [`run_and_reply`] plus every event of the run.  Waits on the loop's event
+/// stream (`run_finished`), not on the clock: the only timeout is a generous
+/// failure bound.
+async fn run_and_reply_seen(t: &T, chat: &str, text: &str) -> (String, Vec<protocol::Event>) {
+    let mut rx = t.agent.subscribe();
     let run = send_msg(t, chat, text, "queue").await["run_id"]
         .as_str()
         .unwrap()
         .to_owned();
+    let mut events = Vec::new();
+    loop {
+        let item = tokio::time::timeout(Duration::from_secs(60), rx.recv())
+            .await
+            .expect("run never finished")
+            .expect("stream closed");
+        let ev = item.envelope.event;
+        let finished =
+            matches!(&ev, protocol::Event::RunFinished(f) if f.run_id.to_string() == run);
+        let mine = match &ev {
+            protocol::Event::RunStarted(r) => r.run_id.to_string() == run,
+            _ => true,
+        };
+        if mine {
+            events.push(ev);
+        }
+        if finished {
+            break;
+        }
+    }
     wait_state(t, &run, "succeeded").await;
     let msgs = call(t, Method::GET, &format!("/v1/chats/{chat}/messages"), None)
         .await
         .json();
-    msgs.as_array()
+    let reply = msgs
+        .as_array()
         .unwrap()
         .iter()
         .rev()
@@ -1372,7 +1403,8 @@ async fn run_and_reply(t: &T, chat: &str, text: &str) -> String {
         .unwrap()["content"]
         .as_str()
         .unwrap()
-        .to_owned()
+        .to_owned();
+    (reply, events)
 }
 
 #[tokio::test]
@@ -1446,14 +1478,17 @@ async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
         Some(json!({"mode": "human_driving"})),
     )
     .await;
-    let started = std::time::Instant::now();
     let r = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
     assert!(r.contains("Button 2"), "reads are not gated: {r}");
-    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 3}"#).await;
+    let (r, events) = run_and_reply_seen(&t, &chat, r#"call:desktop_click {"index": 3}"#).await;
     assert!(r.contains("taken control of the desktop"), "{r}");
+    // "At once" means no round trip to the app (which would have emitted a
+    // `control_requested` and waited for its answer), not a wall-clock bound.
     assert!(
-        started.elapsed() < Duration::from_millis(500),
-        "no round trip while the human drives"
+        !events
+            .iter()
+            .any(|e| matches!(e, protocol::Event::ControlRequested(_))),
+        "no round trip while the human drives: {events:?}"
     );
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
 

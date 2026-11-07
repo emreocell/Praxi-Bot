@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::ids::{BotId, ChatId, RunId, ToolCallId, UserId};
+use crate::ids::{BotId, ChatId, RunId, TaskId, ToolCallId, UserId};
 
 // ── Run lifecycle ─────────────────────────────────────────────────────────────
 
@@ -17,6 +17,9 @@ pub struct RunStarted {
     pub run_id: RunId,
     pub chat_id: ChatId,
     pub bot_id: BotId,
+    /// The schedule that started this run (scheduled runs only; additive).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule_id: Option<TaskId>,
 }
 
 /// A run has completed (successfully or not).
@@ -309,6 +312,7 @@ mod tests {
             run_id: RunId::new(),
             chat_id: ChatId::new(),
             bot_id: BotId::new(),
+            schedule_id: Some(TaskId::new()),
         });
         let json = serde_json::to_string(&ev).unwrap();
         let back: Event = serde_json::from_str(&json).unwrap();
