@@ -20,13 +20,36 @@ pub enum Role {
     Phone,
     /// The desktop app / core (the controlling side).
     Desktop,
+    /// An always-on daemon server.
+    Host,
 }
 
 impl Role {
+    /// Whether this is the `node` role.
+    #[must_use]
+    pub fn is_node(self) -> bool {
+        self == Self::Node
+    }
+    /// Whether this is the `phone` role.
+    #[must_use]
+    pub fn is_phone(self) -> bool {
+        self == Self::Phone
+    }
+    /// Whether this is the `desktop` role.
+    #[must_use]
+    pub fn is_desktop(self) -> bool {
+        self == Self::Desktop
+    }
+    /// Whether this is the `host` role.
+    #[must_use]
+    pub fn is_host(self) -> bool {
+        self == Self::Host
+    }
+
     /// Whether peers of this role may issue `desktop.*` commands.
     #[must_use]
     pub fn may_control(self) -> bool {
-        matches!(self, Role::Desktop | Role::Phone)
+        matches!(self, Role::Desktop | Role::Phone | Role::Host)
     }
 }
 
@@ -36,6 +59,7 @@ impl std::fmt::Display for Role {
             Role::Node => "node",
             Role::Phone => "phone",
             Role::Desktop => "desktop",
+            Role::Host => "host",
         })
     }
 }
@@ -47,8 +71,9 @@ impl std::str::FromStr for Role {
             "node" => Ok(Role::Node),
             "phone" => Ok(Role::Phone),
             "desktop" => Ok(Role::Desktop),
+            "host" => Ok(Role::Host),
             other => Err(PeerError::Protocol(format!(
-                "unknown role '{other}' (expected node, phone or desktop)"
+                "unknown role '{other}' (expected node, phone, desktop or host)"
             ))),
         }
     }
@@ -157,51 +182,67 @@ impl DeviceStore {
 
     /// Insert or replace a device.
     ///
+    /// The replacement list is committed with the temp-file rename before
+    /// memory changes.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the list cannot be persisted.
+    /// Returns an error if the list cannot be persisted. Memory is unchanged.
     pub fn upsert(&self, device: Device) -> Result<()> {
         let mut guard = self.devices.lock();
-        match guard.iter_mut().find(|d| d.id == device.id) {
+        let mut next = guard.clone();
+        match next.iter_mut().find(|d| d.id == device.id) {
             Some(slot) => *slot = device,
-            None => guard.push(device),
+            None => next.push(device),
         }
-        self.persist(&guard)
+        self.persist(&next)?;
+        *guard = next;
+        Ok(())
     }
 
     /// Update a device's last known address; returns `false` if unknown.
     ///
+    /// The replacement list is committed with the temp-file rename before
+    /// memory changes.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the list cannot be persisted.
+    /// Returns an error if the list cannot be persisted. Memory is unchanged.
     pub fn update_addr(&self, key: &PublicKey, addr: EndpointAddr) -> Result<bool> {
         let id = key_to_string(key);
         let mut guard = self.devices.lock();
-        let Some(dev) = guard.iter_mut().find(|d| d.id == id) else {
+        let Some(index) = guard.iter().position(|d| d.id == id) else {
             return Ok(false);
         };
-        if dev.addr.as_ref() != Some(&addr) {
-            dev.addr = Some(addr);
-            self.persist(&guard)?;
+        if guard[index].addr.as_ref() == Some(&addr) {
+            return Ok(true);
         }
+        let mut next = guard.clone();
+        next[index].addr = Some(addr);
+        self.persist(&next)?;
+        *guard = next;
         Ok(true)
     }
 
     /// Remove a device; returns whether it existed.
     ///
+    /// The replacement list is committed with the temp-file rename before
+    /// memory changes.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the list cannot be persisted.
+    /// Returns an error if the list cannot be persisted. Memory is unchanged.
     pub fn remove(&self, key: &PublicKey) -> Result<bool> {
         let id = key_to_string(key);
         let mut guard = self.devices.lock();
-        let before = guard.len();
-        guard.retain(|d| d.id != id);
-        let removed = guard.len() != before;
-        if removed {
-            self.persist(&guard)?;
+        if !guard.iter().any(|d| d.id == id) {
+            return Ok(false);
         }
-        Ok(removed)
+        let mut next = guard.clone();
+        next.retain(|d| d.id != id);
+        self.persist(&next)?;
+        *guard = next;
+        Ok(true)
     }
 }
 
@@ -237,8 +278,78 @@ mod tests {
     }
 
     #[test]
+    fn host_round_trip_and_legacy_devices() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("devices.json");
+        let key = iroh::SecretKey::generate().public();
+        // The original version-1 file shape and role remain readable.
+        let legacy = serde_json::json!({"version":1,"devices":[{
+            "id":key_to_string(&key),"name":"old node","role":"node",
+            "capabilities":[],"addr":null,"paired_at":1
+        }]});
+        std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        let store = DeviceStore::open(path.clone()).unwrap();
+        assert!(store.get(&key).unwrap().role.is_node());
+        store.upsert(dev(&key, Role::Host)).unwrap();
+        drop(store);
+        assert!(
+            DeviceStore::open(path)
+                .unwrap()
+                .get(&key)
+                .unwrap()
+                .role
+                .is_host()
+        );
+        for role in [Role::Node, Role::Phone, Role::Desktop, Role::Host] {
+            assert_eq!(role.to_string().parse::<Role>().unwrap(), role);
+        }
+        assert!(Role::Phone.is_phone());
+        assert!(Role::Desktop.is_desktop());
+        assert!(Role::Host.may_control());
+        assert!(!Role::Node.may_control());
+    }
+
+    #[test]
     fn role_parsing() {
         assert_eq!("phone".parse::<Role>().unwrap(), Role::Phone);
         assert!("root".parse::<Role>().is_err());
+    }
+
+    #[test]
+    fn injected_persist_failure_does_not_commit_devices() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("devices.json");
+        let store = DeviceStore::open(path.clone()).unwrap();
+        let kept = iroh::SecretKey::generate().public();
+        let added = iroh::SecretKey::generate().public();
+        store.upsert(dev(&kept, Role::Node)).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        // `persist` writes `devices.json.tmp` and then renames it into place.
+        std::fs::create_dir(path.with_extension("json.tmp")).unwrap();
+
+        let err = store.upsert(dev(&added, Role::Phone)).unwrap_err();
+        assert!(matches!(err, PeerError::Storage(_)), "{err}");
+        assert!(store.get(&added).is_none());
+        assert_eq!(store.get(&kept).unwrap().role, Role::Node);
+        assert_eq!(store.get(&kept).unwrap().name, "x");
+        let mut changed = dev(&kept, Role::Host);
+        changed.name = "changed".into();
+        let err = store.upsert(changed).unwrap_err();
+        assert!(matches!(err, PeerError::Storage(_)), "{err}");
+        assert_eq!(store.get(&kept).unwrap().role, Role::Node);
+        assert_eq!(store.get(&kept).unwrap().name, "x");
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+
+        let err = store
+            .update_addr(&kept, EndpointAddr::new(kept))
+            .unwrap_err();
+        assert!(matches!(err, PeerError::Storage(_)), "{err}");
+        assert!(store.get(&kept).unwrap().addr.is_none());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+
+        let err = store.remove(&kept).unwrap_err();
+        assert!(matches!(err, PeerError::Storage(_)), "{err}");
+        assert!(store.get(&kept).is_some());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
     }
 }
