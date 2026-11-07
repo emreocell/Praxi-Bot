@@ -1,6 +1,8 @@
 //! Local TLS protocol servers. No external mail service is contacted.
 #![allow(clippy::too_many_lines)]
 
+use std::fmt::Write as _;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rcgen::{CertifiedKey, generate_simple_self_signed};
@@ -21,6 +23,8 @@ pub struct Server {
     pub pem: String,
     pub commands: Arc<Mutex<Vec<String>>>,
     pub messages: Arc<Mutex<Vec<Vec<u8>>>>,
+    /// Set when a FETCH response includes a body literal.
+    pub body_literal_sent: Arc<AtomicBool>,
     task: JoinHandle<()>,
 }
 
@@ -30,6 +34,7 @@ impl Drop for Server {
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum Protocol {
     Imap,
     Smtp,
@@ -37,6 +42,10 @@ pub enum Protocol {
     NoStartTls,
     RejectLogin,
     Stall,
+    /// `RFC822.SIZE` is over the fetch cap. A body literal sets `body_literal_sent`.
+    Oversized,
+    /// Login succeeds. The next command is `NO` and echoes the password.
+    PasswordInNo,
 }
 
 pub async fn server(protocol: Protocol) -> Server {
@@ -57,8 +66,10 @@ pub async fn server(protocol: Protocol) -> Server {
     let port = listener.local_addr().unwrap().port();
     let commands = Arc::new(Mutex::new(Vec::new()));
     let messages = Arc::new(Mutex::new(Vec::new()));
+    let body_literal_sent = Arc::new(AtomicBool::new(false));
     let log = commands.clone();
     let received = messages.clone();
+    let body_flag = body_literal_sent.clone();
     let task = tokio::spawn(async move {
         loop {
             let (stream, _) = listener.accept().await.unwrap();
@@ -107,13 +118,7 @@ pub async fn server(protocol: Protocol) -> Server {
                 if matches!(protocol, Protocol::Smtp) {
                     smtp(tls, &log, &received, true).await;
                 } else {
-                    imap(
-                        tls,
-                        &log,
-                        &received,
-                        matches!(protocol, Protocol::RejectLogin),
-                    )
-                    .await;
+                    imap(tls, &log, &received, protocol, &body_flag).await;
                 }
             }
         }
@@ -123,16 +128,32 @@ pub async fn server(protocol: Protocol) -> Server {
         pem,
         commands,
         messages,
+        body_literal_sent,
         task,
     }
+}
+
+fn fetch_uids(command: &str) -> Vec<u32> {
+    let spec = command.split_whitespace().nth(2).unwrap_or("");
+    let mut uids = Vec::new();
+    for part in spec.split(',') {
+        if part == "7" {
+            uids.push(7);
+        } else if part == "42" {
+            uids.push(42);
+        }
+    }
+    uids
 }
 
 async fn imap<S: AsyncRead + AsyncWrite + Unpin>(
     stream: S,
     log: &Mutex<Vec<String>>,
     received: &Mutex<Vec<Vec<u8>>>,
-    reject: bool,
+    protocol: Protocol,
+    body_literal: &AtomicBool,
 ) {
+    let reject = matches!(protocol, Protocol::RejectLogin);
     let mut reader = BufReader::new(stream);
     reader
         .get_mut()
@@ -152,6 +173,8 @@ async fn imap<S: AsyncRead + AsyncWrite + Unpin>(
             } else {
                 format!("{tag} OK authenticated\r\n")
             }
+        } else if matches!(protocol, Protocol::PasswordInNo) && !command.starts_with("LOGOUT") {
+            format!("{tag} NO marker-secret-echo {PASSWORD}\r\n")
         } else if command.starts_with("LIST") {
             format!(
                 "* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n* LIST (\\Drafts) \"/\" \"Drafts\"\r\n{tag} OK listed\r\n"
@@ -165,6 +188,22 @@ async fn imap<S: AsyncRead + AsyncWrite + Unpin>(
         } else if command.starts_with("UID FETCH") {
             if command.contains("999") {
                 format!("{tag} OK absent\r\n")
+            } else if matches!(protocol, Protocol::Oversized) {
+                if command.contains("BODY") {
+                    body_literal.store(true, Ordering::SeqCst);
+                }
+                format!("* 1 FETCH (UID 42 FLAGS () RFC822.SIZE 50000000)\r\n{tag} OK size\r\n")
+            } else if !command.contains("BODY") {
+                let mut data = String::new();
+                for uid in fetch_uids(command) {
+                    let _ = write!(
+                        data,
+                        "* 1 FETCH (UID {uid} FLAGS () RFC822.SIZE {})\r\n",
+                        RAW.len()
+                    );
+                }
+                let _ = write!(data, "{tag} OK size\r\n");
+                data
             } else {
                 let header = command.contains("HEADER");
                 let bytes = if header {
@@ -174,7 +213,8 @@ async fn imap<S: AsyncRead + AsyncWrite + Unpin>(
                 };
                 let section = if header { "HEADER" } else { "" };
                 let mut data = Vec::new();
-                for uid in if header { vec![7, 42] } else { vec![42] } {
+                body_literal.store(true, Ordering::SeqCst);
+                for uid in fetch_uids(command) {
                     data.extend_from_slice(format!("* 1 FETCH (UID {uid} FLAGS () RFC822.SIZE {} BODY[{section}] {{{}}}\r\n", RAW.len(), bytes.len()).as_bytes());
                     data.extend_from_slice(bytes);
                     data.extend_from_slice(b")\r\n");

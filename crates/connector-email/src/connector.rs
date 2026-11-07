@@ -86,13 +86,16 @@ impl EmailConnector {
         .map_err(|e| EmailError::Credential(e.to_string()))
     }
 
-    async fn timed<T>(
-        acct: &AccountConfig,
+    /// One deadline around secret resolution and the network call.
+    async fn deadline<T>(
+        limit: std::time::Duration,
+        secs: u64,
         fut: impl Future<Output = Result<T, EmailError>>,
     ) -> Result<T, EmailError> {
-        tokio::time::timeout(acct.timeout(), fut)
-            .await
-            .map_err(|_| EmailError::Timeout(acct.timeout().as_secs()))?
+        match tokio::time::timeout(limit, fut).await {
+            Ok(result) => result,
+            Err(_) => Err(EmailError::Timeout(secs)),
+        }
     }
 
     async fn with_imap<T, F>(&self, account: Option<&str>, f: F) -> Result<T, EmailError>
@@ -104,11 +107,13 @@ impl EmailConnector {
             Box<dyn Future<Output = Result<T, EmailError>> + Send + 'a>,
         >,
     {
-        let acct = self.account(account)?;
-        let pw = self.password(acct).await?;
-        Self::timed(acct, async {
-            let mut s = ImapSession::connect(acct, &pw).await?;
-            let r = f(&mut s, acct).await;
+        let acct = self.account(account)?.clone();
+        let limit = acct.timeout();
+        let secs = limit.as_secs();
+        Self::deadline(limit, secs, async {
+            let pw = self.password(&acct).await?;
+            let mut s = ImapSession::connect(&acct, &pw).await?;
+            let r = f(&mut s, &acct).await;
             s.logout().await;
             r
         })
@@ -220,9 +225,14 @@ impl EmailConnector {
         account: Option<&str>,
         mail: &OutgoingMail,
     ) -> Result<String, EmailError> {
-        let acct = self.account(account)?;
+        let acct = self.account(account)?.clone();
         let msg = smtp::compose(&acct.address, mail)?;
-        let pw = self.password(acct).await?;
-        Self::timed(acct, smtp::send(acct, &pw, msg)).await
+        let limit = acct.timeout();
+        let secs = limit.as_secs();
+        Self::deadline(limit, secs, async {
+            let pw = self.password(&acct).await?;
+            smtp::send(&acct, &pw, msg).await
+        })
+        .await
     }
 }

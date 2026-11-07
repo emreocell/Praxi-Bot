@@ -7,6 +7,16 @@ use crate::error::EmailError;
 
 /// Maximum body characters returned by default.
 pub const DEFAULT_MAX_BODY_CHARS: usize = 20_000;
+/// Hard ceiling for `max_body_chars`. Callers cannot raise the returned body above this.
+pub const MAX_BODY_CHARS: usize = DEFAULT_MAX_BODY_CHARS;
+/// Refuse to fetch or parse a message (body and attachments) larger than this.
+pub const MAX_MESSAGE_BYTES: u32 = 1024 * 1024;
+/// Maximum characters kept from a server-controlled subject, sender, or file name.
+pub const MAX_UNTRUSTED_FIELD_CHARS: usize = 256;
+
+pub(crate) fn over_message_cap(len: usize) -> bool {
+    u64::try_from(len).unwrap_or(u64::MAX) > u64::from(MAX_MESSAGE_BYTES)
+}
 
 /// Header-level view of a message (search results).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -84,9 +94,9 @@ pub fn parse_summary(uid: u32, header: &[u8], unread: bool, size: Option<u32>) -
     };
     MessageSummary {
         uid,
-        subject,
-        from,
-        to,
+        subject: cap_untrusted(&subject),
+        from: cap_untrusted(&from),
+        to: to.iter().map(|s| cap_untrusted(s)).collect(),
         date,
         unread,
         size,
@@ -104,6 +114,13 @@ pub fn parse_detail(
     size: Option<u32>,
     max_body_chars: usize,
 ) -> Result<MessageDetail, EmailError> {
+    if over_message_cap(raw.len()) {
+        return Err(EmailError::Imap(format!(
+            "message uid {uid} is {} bytes, over the {MAX_MESSAGE_BYTES} byte cap",
+            raw.len()
+        )));
+    }
+    let max_body_chars = max_body_chars.min(MAX_BODY_CHARS);
     let msg = MessageParser::default()
         .parse(raw)
         .ok_or_else(|| EmailError::Imap("message could not be parsed".into()))?;
@@ -113,7 +130,7 @@ pub fn parse_detail(
     let attachments = msg
         .attachments()
         .map(|p| AttachmentInfo {
-            filename: p.attachment_name().map(str::to_string),
+            filename: p.attachment_name().map(cap_untrusted),
             content_type: p.content_type().map_or_else(
                 || "application/octet-stream".to_string(),
                 |ct| match ct.subtype() {
@@ -126,12 +143,19 @@ pub fn parse_detail(
         .collect();
     Ok(MessageDetail {
         summary,
-        cc: addresses(msg.cc()),
-        message_id: msg.message_id().map(str::to_string),
+        cc: addresses(msg.cc())
+            .iter()
+            .map(|s| cap_untrusted(s))
+            .collect(),
+        message_id: msg.message_id().map(cap_untrusted),
         body_text,
         body_truncated,
         attachments,
     })
+}
+
+pub(crate) fn cap_untrusted(s: &str) -> String {
+    truncate_chars(s, MAX_UNTRUSTED_FIELD_CHARS).0
 }
 
 fn truncate_chars(s: &str, max: usize) -> (String, bool) {
@@ -231,5 +255,50 @@ Content-Transfer-Encoding: base64\r\n\r\nJVBERg==\r\n--B--\r\n";
         assert!(!d.body_text.contains("<p>"));
         assert_eq!(d.body_text.chars().count(), 10);
         assert!(d.body_truncated);
+    }
+
+    #[test]
+    fn max_body_chars_is_clamped() {
+        let body = "a".repeat(MAX_BODY_CHARS + 80);
+        let raw = format!("Subject: s\r\n\r\n{body}\r\n");
+        let d = parse_detail(
+            1,
+            raw.as_bytes(),
+            false,
+            u32::try_from(raw.len()).ok(),
+            usize::MAX,
+        )
+        .unwrap();
+        assert_eq!(d.body_text.chars().count(), MAX_BODY_CHARS);
+        assert!(d.body_truncated);
+    }
+
+    #[test]
+    fn oversized_payload_is_refused_before_parse() {
+        let mut raw = b"Subject: hi\r\n\r\n".to_vec();
+        let extra = usize::try_from(MAX_MESSAGE_BYTES).unwrap_or(1024 * 1024);
+        raw.extend(std::iter::repeat_n(b'A', extra));
+        let err = parse_detail(1, &raw, false, Some(u32::MAX), usize::MAX).unwrap_err();
+        assert!(err.to_string().contains("byte cap"), "{err}");
+        assert!(!err.to_string().contains("could not be parsed"), "{err}");
+    }
+
+    #[test]
+    fn subject_from_and_filename_are_length_capped() {
+        let long = "n".repeat(MAX_UNTRUSTED_FIELD_CHARS + 40);
+        let raw = format!(
+            "From: {long} <ann@example.com>\r\nSubject: {long}\r\n\
+MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=B\r\n\r\n\
+--B\r\nContent-Type: text/plain\r\n\r\nHi\r\n\
+--B\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=\"{long}.pdf\"\r\n\
+Content-Transfer-Encoding: base64\r\n\r\nJVBERg==\r\n--B--\r\n"
+        );
+        let d = parse_detail(1, raw.as_bytes(), true, Some(100), 100).unwrap();
+        assert_eq!(d.summary.subject.chars().count(), MAX_UNTRUSTED_FIELD_CHARS);
+        assert_eq!(d.summary.from.chars().count(), MAX_UNTRUSTED_FIELD_CHARS);
+        assert_eq!(
+            d.attachments[0].filename.as_ref().unwrap().chars().count(),
+            MAX_UNTRUSTED_FIELD_CHARS
+        );
     }
 }
