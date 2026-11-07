@@ -803,6 +803,11 @@ export interface components {
             id: string;
             /** @description `turn`, `turn:routine`, ... */
             kind: string;
+            /**
+             * Format: uuid
+             * @description The run that spawned this one when it is a subagent run.
+             */
+            parent_run_id?: string | null;
             /** @description `pending` / `running` / `waiting_approval` / `paused` / `succeeded` / `failed` / `cancelled`. */
             state: string;
             /**

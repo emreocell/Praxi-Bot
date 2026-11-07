@@ -401,7 +401,7 @@ pub fn tools(
             Op::ListApps,
             spec(
                 "desktop_list_apps",
-                "List visible windows with id, pid and title. Example: {}",
+                "List visible windows (open apps, programs) with id, pid and title. Example: {}",
                 json!({"type":"object","properties":{}}),
                 Effect::Read,
                 d,
@@ -411,7 +411,7 @@ pub fn tools(
             Op::Launch,
             spec(
                 "desktop_launch",
-                "Start an application and list windows. Example: {\"executable\":\"notepad.exe\"}",
+                "Start, open or run an application or program (launch an app, open a file with it) and list windows. Example: {\"executable\":\"notepad.exe\"}",
                 json!({"type":"object","properties":{
                     "executable":{"type":"string","description":"Program name or path."},
                     "args":{"type":"array","items":{"type":"string"},"description":"Arguments."}
@@ -438,7 +438,7 @@ pub fn tools(
             Op::Click,
             spec(
                 "desktop_click",
-                "Click an element. Returns the refreshed UI tree. Example: {\"index\":12}",
+                "Click a button, link or other element (mouse click). Returns the refreshed UI tree. Example: {\"index\":12}",
                 json!({"type":"object","properties":{"index":index_prop,"method":method_prop},"required":["index"]}),
                 Effect::Write,
                 d,
@@ -448,7 +448,7 @@ pub fn tools(
             Op::Type,
             spec(
                 "desktop_type",
-                "Click an element to focus it, then type text. Returns the refreshed UI tree. Example: {\"index\":5,\"text\":\"hello\"}",
+                "Click an element to focus it, then type text with the keyboard (enter text). Returns the refreshed UI tree. Example: {\"index\":5,\"text\":\"hello\"}",
                 json!({"type":"object","properties":{
                     "index":index_prop,
                     "text":{"type":"string","description":"Text to type."}
@@ -474,7 +474,7 @@ pub fn tools(
             Op::Key,
             spec(
                 "desktop_key",
-                "Press a key or chord, optionally after focusing an element. Example: {\"keys\":[\"ctrl\",\"s\"]}",
+                "Press a keyboard key or shortcut chord (Enter, Tab, Ctrl+S, Ctrl+Shift+N), optionally after focusing an element. Example: {\"keys\":[\"ctrl\",\"s\"]}",
                 json!({"type":"object","properties":{
                     "keys":{"description":"Key names, e.g. [\"ctrl\",\"s\"], [\"Return\"] or \"ctrl+s\".","oneOf":[
                         {"type":"array","items":{"type":"string"},"minItems":1},{"type":"string"}]},

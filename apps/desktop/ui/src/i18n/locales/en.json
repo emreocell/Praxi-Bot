@@ -231,6 +231,22 @@
     "placeholder": "Message the bot…",
     "placeholderBusy": "The bot is working — queue or steer…",
     "send": "Send",
+    "subagent": {
+      "title": "Subagent",
+      "task": "Task",
+      "summary": "Summary",
+      "toggle": "Subagent: {{task}}",
+      "cancel": "Cancel",
+      "cancelLabel": "Cancel subagent: {{task}}",
+      "status": {
+        "running": "Running",
+        "waiting_approval": "Needs approval",
+        "succeeded": "Done",
+        "failed": "Failed",
+        "cancelled": "Cancelled",
+        "paused": "Paused"
+      }
+    },
     "tool": {
       "subagent": "Subagent",
       "input": "Input",

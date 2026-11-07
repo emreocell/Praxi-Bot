@@ -123,15 +123,15 @@ impl ChatProvider for Fake {
     }
 }
 
-struct TestTool {
-    spec: ToolSpec,
-    count: Arc<AtomicUsize>,
-    delay: Duration,
-    barrier: Option<Arc<Barrier>>,
-    output: String,
+pub(crate) struct TestTool {
+    pub(crate) spec: ToolSpec,
+    pub(crate) count: Arc<AtomicUsize>,
+    pub(crate) delay: Duration,
+    pub(crate) barrier: Option<Arc<Barrier>>,
+    pub(crate) output: String,
 }
 
-fn tool(name: &str, effect: Effect, output: &str) -> TestTool {
+pub(crate) fn tool(name: &str, effect: Effect, output: &str) -> TestTool {
     TestTool {
         spec: ToolSpec {
             name: name.to_owned(),
@@ -167,12 +167,12 @@ impl Tool for TestTool {
 
 // ---------- harness ----------
 
-struct Env {
-    dir: tempfile::TempDir,
-    storage: Arc<Storage>,
-    user: UserId,
-    bot: BotId,
-    chat: ChatId,
+pub(crate) struct Env {
+    pub(crate) dir: tempfile::TempDir,
+    pub(crate) storage: Arc<Storage>,
+    pub(crate) user: UserId,
+    pub(crate) bot: BotId,
+    pub(crate) chat: ChatId,
 }
 
 impl Env {
@@ -180,14 +180,14 @@ impl Env {
     /// keeps the data directory alive. The caller must hold the returned
     /// `TempDir` until the test ends, or the directory is deleted before the
     /// "restarted" process reopens it (Linux does not block on open files).
-    fn crash(self) -> tempfile::TempDir {
+    pub(crate) fn crash(self) -> tempfile::TempDir {
         let Env { dir, storage, .. } = self;
         drop(storage);
         dir
     }
 }
 
-fn setup() -> Env {
+pub(crate) fn setup() -> Env {
     let dir = tempfile::tempdir().unwrap();
     let storage = Arc::new(Storage::open(dir.path()).unwrap());
     let (user, bot, chat) = (UserId::new(), BotId::new(), ChatId::new());
@@ -225,14 +225,14 @@ fn setup() -> Env {
     }
 }
 
-fn profile(extra: &str) -> BotProfile {
+pub(crate) fn profile(extra: &str) -> BotProfile {
     BotProfile::from_toml_str(&format!(
         "[bot]\nid = \"t\"\nname = \"T\"\npersona = \"You are T.\"\n[models]\nexecutor = \"fake/m\"\n{extra}"
     ))
     .unwrap()
 }
 
-fn cfg(policy: Policy) -> LoopConfig {
+pub(crate) fn cfg(policy: Policy) -> LoopConfig {
     LoopConfig {
         global_policy: policy,
         model_retry: RetryPolicy {
@@ -267,7 +267,7 @@ fn make_loop(
     lp
 }
 
-async fn until(
+pub(crate) async fn until(
     rx: &mut broadcast::Receiver<StreamItem>,
     mut f: impl FnMut(&Event) -> bool,
 ) -> Event {

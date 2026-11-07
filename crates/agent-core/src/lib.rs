@@ -19,7 +19,10 @@ mod history;
 mod memory;
 mod profile;
 mod shared;
+mod subagent;
 
+#[cfg(test)]
+mod subagent_tests;
 #[cfg(test)]
 mod tests;
 
@@ -30,7 +33,7 @@ pub use permission_engine::Decision as PolicyDecision;
 pub use profile::{BotProfile, ModelsConfig, PermissionsConfig, ProfileError, ToolFilter};
 pub use shared::{
     ApprovalScope, CategoryDecision, Delivery, EffectivePolicy, Grant, GrantTarget, LoopError,
-    MessageMode, Providers, StreamItem,
+    MessageMode, Providers, SkillHintFn, SkillHints, StreamItem,
 };
 
 /// Audit-log action recording an "always allow" grant rule for a bot.

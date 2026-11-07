@@ -88,6 +88,11 @@ pub struct Run {
     pub created_at_ms: i64,
     /// Last state change time.
     pub updated_at_ms: i64,
+    /// The run that spawned this one (a subagent), if any.
+    pub parent_run_id: Option<RunId>,
+    /// Spawn parameters of a subagent run (task, limits, ...); `None` for
+    /// top-level runs.
+    pub spec: Option<Value>,
 }
 
 /// One persisted step of a run.

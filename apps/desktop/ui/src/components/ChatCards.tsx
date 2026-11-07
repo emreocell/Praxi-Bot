@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import type { Scope } from "../api/types";
@@ -7,6 +7,9 @@ import {
   isSubagentTool,
   type NoticeItem,
   type QuestionItem,
+  type RunState,
+  subagentStatus,
+  type TimelineItem,
   type TodoListItem,
   type ToolItem
 } from "../state/timeline";
@@ -381,5 +384,114 @@ export function NoticeLine({ n }: { n: NoticeItem }) {
     >
       {t(n.i18nKey, n.values)}
     </p>
+  );
+}
+
+// ------------------------------------------------------------ subagent card
+
+export interface SubagentCardProps {
+  /** The child run (its own items form the nested timeline). */
+  run: RunState;
+  /** Renders one nested timeline item (shared with the top-level view). */
+  renderItem: (item: TimelineItem, runId: string) => ReactNode;
+  /** Cancel the child run (and, daemon-side, its descendants). */
+  onCancel: (runId: string) => Promise<void>;
+}
+
+function truncate(text: string, max: number): string {
+  const flat = text.replace(/s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+export function SubagentCard({ run, renderItem, onCancel }: SubagentCardProps) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const status = subagentStatus(run);
+  const waiting = status === "waiting_approval";
+  // an approval inside the card must never stay hidden
+  const expanded = open || waiting;
+  const cancellable = status === "running" || waiting;
+  const task = run.task ?? "";
+
+  const cancel = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await onCancel(run.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className={[styles.card, styles.subagent].join(" ")}
+      data-testid="subagent-card"
+      data-status={status}
+    >
+      <div className={styles.subagentHead}>
+        <button
+          type="button"
+          className={styles.cardHeader}
+          aria-expanded={expanded}
+          aria-label={t("chat.subagent.toggle", { task: truncate(task, 60) })}
+          onClick={() => setOpen((o) => !o)}
+        >
+          <span className={styles.chevron} aria-hidden="true">
+            {expanded ? "▾" : "▸"}
+          </span>
+          <span className={styles.toolName}>{t("chat.subagent.title")}</span>
+          <span className={styles.inputSummary}>{truncate(task, 90)}</span>
+          <span
+            className={[styles.status, styles[`subagent_${status}`]].join(" ")}
+          >
+            {t(`chat.subagent.status.${status}`)}
+          </span>
+        </button>
+        {cancellable ? (
+          <Button
+            size="sm"
+            variant="danger"
+            disabled={busy}
+            aria-label={t("chat.subagent.cancelLabel", {
+              task: truncate(task, 60)
+            })}
+            onClick={() => void cancel()}
+          >
+            {t("chat.subagent.cancel")}
+          </Button>
+        ) : null}
+      </div>
+      {error ? <p className={formStyles.error}>{error}</p> : null}
+      {expanded ? (
+        <div className={styles.cardBody}>
+          {task ? (
+            <>
+              <span className={styles.bodyLabel}>
+                {t("chat.subagent.task")}
+              </span>
+              <p className={styles.bodyText}>{task}</p>
+            </>
+          ) : null}
+          <div className={styles.nested}>
+            {run.items.map((item) => (
+              <div key={item.key}>{renderItem(item, run.id)}</div>
+            ))}
+          </div>
+          {run.summary ? (
+            <>
+              <span className={styles.bodyLabel}>
+                {t("chat.subagent.summary")}
+              </span>
+              <p className={styles.bodyText}>{run.summary}</p>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }

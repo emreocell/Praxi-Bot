@@ -47,6 +47,12 @@ enum Slot {
         call: ToolCallId,
         meta: bool,
     },
+    /// A `spawn_subagent` call, executed by the loop itself.
+    Spawn {
+        input: Value,
+        call: ToolCallId,
+        model_call_id: String,
+    },
 }
 
 fn call_key(name: &str, args: &str) -> (String, Value) {
@@ -94,6 +100,9 @@ impl TurnExecutor {
     fn plan_next(&self, run: &Run, history: &[RunStep]) -> Result<Option<StepSpec>, ExecError> {
         let ctx = self.sh.ctx(run)?;
         if history.is_empty() {
+            if let Some(sub) = &ctx.sub {
+                return Ok(Some(user_step(&sub.first_message())));
+            }
             let first = self
                 .sh
                 .storage
@@ -128,11 +137,13 @@ impl TurnExecutor {
         }
 
         let g = &self.sh.cfg.guards;
-        if model_steps >= g.max_steps as usize {
-            let reason = format!(
-                "step limit reached: {} model calls in one turn",
-                g.max_steps
-            );
+        let max_steps = ctx.sub.as_ref().map_or(g.max_steps, |s| s.max_steps);
+        let max_tokens = ctx
+            .sub
+            .as_ref()
+            .map_or(g.max_tokens_per_turn, |s| s.token_budget);
+        if model_steps >= max_steps as usize {
+            let reason = format!("step limit reached: {max_steps} model calls in one turn");
             return Ok(Some(Self::guard_step(&ctx, model_steps, &reason)));
         }
         let tokens: u64 = history
@@ -142,11 +153,8 @@ impl TurnExecutor {
             .filter_map(|m| m.usage)
             .map(|u| u.prompt_tokens + u.completion_tokens)
             .sum();
-        if tokens >= g.max_tokens_per_turn {
-            let reason = format!(
-                "token budget exhausted: {tokens} >= {}",
-                g.max_tokens_per_turn
-            );
+        if tokens >= max_tokens {
+            let reason = format!("token budget exhausted: {tokens} >= {max_tokens}");
             return Ok(Some(Self::guard_step(&ctx, model_steps, &reason)));
         }
         Ok(Some(StepSpec {
@@ -178,7 +186,13 @@ impl TurnExecutor {
     /// Prepend the recalled-memory block to the first user message (never to
     /// the system prompt, so the prompt cache stays valid).
     fn with_recall(&self, ctx: &RunCtx, text: &str) -> String {
-        let Some(m) = self.sh.cfg.memory.as_ref().filter(|m| m.enabled) else {
+        let Some(m) = self
+            .sh
+            .cfg
+            .memory
+            .as_ref()
+            .filter(|m| m.enabled && ctx.parent_run_id.is_none())
+        else {
             return text.to_owned();
         };
         match m
@@ -288,8 +302,16 @@ impl TurnExecutor {
         let note = guard_reason
             .as_deref()
             .map(|r| GUARD_NOTE.replace("{reason}", r));
-        let messages = build_messages(&self.sh.storage, run, &steps, &ctx.profile, note.as_deref())
-            .map_err(xe)?;
+        let skills = self.skills_block(&ctx, &steps);
+        let messages = build_messages(
+            &self.sh.storage,
+            run,
+            &steps,
+            &ctx.profile,
+            note.as_deref(),
+            skills.as_deref(),
+        )
+        .map_err(xe)?;
         let primary = ctx.profile.models.executor.clone();
         let mut req = ChatRequest::new(ModelRef(primary.clone()), messages);
         req.tools = tool_defs(&specs);
@@ -352,9 +374,7 @@ impl TurnExecutor {
         if let Some(u) = out.usage {
             let cost = self
                 .sh
-                .cfg
-                .prices
-                .get(&out.model)
+                .price_for(&out.model)
                 .map(|p| p.cost(u.prompt_tokens, u.completion_tokens, u.cached_tokens));
             self.sh.audit(
                 &ctx,
@@ -370,6 +390,33 @@ impl TurnExecutor {
             );
         }
         serde_json::to_value(out).map_err(xe)
+    }
+
+    /// The skills index block for the system prompt: skills matching the
+    /// foreground page / app (when the embedder tells us) or else the turn's
+    /// latest user text are listed first.
+    fn skills_block(&self, ctx: &RunCtx, steps: &[RunStep]) -> Option<String> {
+        let index = self.sh.skills.get()?;
+        let hints = self
+            .sh
+            .skill_hints
+            .read()
+            .as_ref()
+            .map(|f| f())
+            .unwrap_or_default();
+        let text = steps
+            .iter()
+            .rev()
+            .find(|s| s.name == STEP_USER)
+            .and_then(|s| s.input["text"].as_str())
+            .map(str::to_owned)
+            .or_else(|| ctx.sub.as_ref().map(|s| s.task.clone()));
+        let block = index.prompt_block(&skills::SkillContext {
+            domain: hints.domain,
+            app: hints.app,
+            text,
+        });
+        (!block.is_empty()).then_some(block)
     }
 
     /// One model, up to `model_retry.max_attempts` attempts; non-retryable
@@ -497,6 +544,8 @@ impl TurnExecutor {
                 // Malformed `use_tool`: executes nothing, only reports the error.
                 None => Decision::Allow,
             };
+            let is_spawn = resolved.name == crate::subagent::SPAWN_SUBAGENT;
+            let spawn_input = resolved.input.clone();
             let tool = resolved.tool;
             let slot = match decision {
                 Decision::Allow => Slot::Run {
@@ -554,6 +603,14 @@ impl TurnExecutor {
                     }
                 }
             };
+            let slot = match slot {
+                Slot::Run { call: c, .. } if is_spawn => Slot::Spawn {
+                    input: spawn_input,
+                    call: c,
+                    model_call_id: call.id.clone(),
+                },
+                other => other,
+            };
             slots.push(slot);
         }
 
@@ -562,6 +619,14 @@ impl TurnExecutor {
         let outcomes = futures::future::join_all(slots.into_iter().map(|slot| async move {
             match slot {
                 Slot::Done { text, is_error } => (text, is_error, None),
+                Slot::Spawn {
+                    input,
+                    call,
+                    model_call_id,
+                } => {
+                    self.run_subagent(run, ctx_ref, call, &model_call_id, input)
+                        .await
+                }
                 Slot::Run {
                     tool,
                     input,

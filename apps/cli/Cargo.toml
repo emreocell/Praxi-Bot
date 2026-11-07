@@ -29,6 +29,7 @@ provider-catalog = { path = "../../crates/provider-catalog", version = "0.1.0" }
 reqwest.workspace = true
 secret-store.workspace = true
 serde_json.workspace = true
+skills = { path = "../../crates/skills", version = "0.1.0" }
 storage.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 tool-registry = { path = "../../crates/tool-registry", version = "0.1.0" }

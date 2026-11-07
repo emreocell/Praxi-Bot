@@ -4,9 +4,15 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+
 use agent_core::ModelPrice;
+use async_trait::async_trait;
+use futures::stream::BoxStream;
 use provider_catalog::{
-    Catalog, ChatProvider, ModelRef, OpenAiCompatConfig, ProviderConfig, config_path,
+    Catalog, ChatChunk, ChatProvider, ChatRequest, ModelRef, OpenAiCompatConfig, ProviderConfig,
+    ProviderError, config_path,
 };
 use secret_store::{BackendChoice, open_store};
 use serde::Deserialize;
@@ -110,6 +116,56 @@ pub fn build_live_provider(
         provider: Arc::from(provider),
         model: model_ref.0,
     })
+}
+
+/// Wraps a provider to space requests at least `min_interval` apart (free-tier
+/// rate limits) and to count them (reported on stderr as `[requests N]`).
+pub struct Throttled {
+    inner: Arc<dyn ChatProvider>,
+    min_interval: Duration,
+    next_slot: tokio::sync::Mutex<tokio::time::Instant>,
+    count: AtomicU64,
+}
+
+impl Throttled {
+    /// Wrap `inner`.
+    #[must_use]
+    pub fn new(inner: Arc<dyn ChatProvider>, min_interval: Duration) -> Self {
+        Self {
+            inner,
+            min_interval,
+            next_slot: tokio::sync::Mutex::new(tokio::time::Instant::now()),
+            count: AtomicU64::new(0),
+        }
+    }
+}
+
+#[async_trait]
+impl ChatProvider for Throttled {
+    fn id(&self) -> &str {
+        self.inner.id()
+    }
+
+    async fn stream(
+        &self,
+        req: ChatRequest,
+    ) -> std::result::Result<
+        BoxStream<'static, std::result::Result<ChatChunk, ProviderError>>,
+        ProviderError,
+    > {
+        {
+            let mut slot = self.next_slot.lock().await;
+            tokio::time::sleep_until(*slot).await;
+            *slot = tokio::time::Instant::now() + self.min_interval;
+        }
+        let n = self.count.fetch_add(1, Ordering::Relaxed) + 1;
+        eprintln!("[requests {n}]");
+        self.inner.stream(req).await
+    }
+
+    async fn list_models(&self) -> std::result::Result<Vec<String>, ProviderError> {
+        self.inner.list_models().await
+    }
 }
 
 #[derive(Deserialize)]
