@@ -1,5 +1,7 @@
 //! Deterministic loop tests driven by a scripted fake `ChatProvider`.
 
+#![allow(clippy::assert_is_empty)]
+
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -26,7 +28,8 @@ use tool_registry::{
 };
 
 use crate::{
-    AgentLoop, ApprovalScope, BotProfile, Delivery, LoopConfig, MessageMode, Providers, StreamItem,
+    AgentLoop, ApprovalScope, BotProfile, Delivery, GrantTarget, LoopConfig, MessageMode,
+    Providers, StreamItem,
 };
 
 // ---------- fakes ----------
@@ -34,6 +37,8 @@ use crate::{
 enum Reply {
     Chunks(Vec<ChatChunk>),
     Hang,
+    /// A provider error: `upstream` (retryable), `auth` or `api400` (not).
+    Fail(&'static str),
 }
 
 fn text(s: &str) -> Reply {
@@ -101,6 +106,17 @@ impl ChatProvider for Fake {
         match self.replies.lock().pop_front() {
             Some(Reply::Chunks(c)) => Ok(futures::stream::iter(c.into_iter().map(Ok)).boxed()),
             Some(Reply::Hang) => Ok(futures::stream::pending().boxed()),
+            Some(Reply::Fail(kind)) => Err(match kind {
+                "upstream" => ProviderError::Upstream {
+                    status: 503,
+                    message: "down".into(),
+                },
+                "auth" => ProviderError::Auth("bad key".into()),
+                _ => ProviderError::Api {
+                    status: 400,
+                    message: "bad".into(),
+                },
+            }),
             None => Err(ProviderError::InvalidRequest("script exhausted".into())),
         }
     }
@@ -265,6 +281,13 @@ fn t<T>(x: &Arc<T>) -> &Arc<T> {
     x
 }
 
+/// Register `ask_user` / `todo_write` (the loop treats them by category).
+fn register_meta(lp: &AgentLoop) {
+    for tool in builtin_tools::meta::tools() {
+        lp.sh.tools.register(tool);
+    }
+}
+
 // ---------- tests ----------
 
 #[tokio::test]
@@ -362,7 +385,6 @@ async fn allowed_tool_call_executes_and_result_reaches_model() {
         .map(|d| d["function"]["name"].as_str().unwrap().to_owned())
         .collect();
     assert!(names.contains(&"t__write".to_owned()));
-    assert!(names.contains(&"plan__todo_write".to_owned()));
     // Steps: user_message, model, tools, model.
     let steps = env.storage.list_steps(run).unwrap();
     assert_eq!(
@@ -549,7 +571,7 @@ async fn repeat_detector_warns_then_stops() {
         same("3"),
         same("4"),
         same("5"),
-        text("unreachable"),
+        text("summary so far"),
     ]);
     let lp = make_loop(
         &env.storage,
@@ -560,15 +582,43 @@ async fn repeat_detector_warns_then_stops() {
         cfg(Policy::full()),
     );
     let run = lp.run_turn(env.chat, "go").unwrap();
-    assert_eq!(lp.wait(run).await.unwrap(), RunState::Failed);
-    let err = env.storage.get_run(run).unwrap().unwrap().error.unwrap();
-    assert!(err.contains("repeat detected"), "{err}");
+    // The guard no longer fails the turn: one closing call without tools.
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(lp.stopped_by_guard(run).unwrap());
     assert_eq!(
         r.count.load(Ordering::SeqCst),
         4,
         "5th identical call is never executed"
     );
-    assert_eq!(fake.n_requests(), 5);
+    assert_eq!(fake.n_requests(), 6);
+    let last = fake.request(5);
+    assert!(
+        last.tools.is_empty(),
+        "tools are disabled in the closing call"
+    );
+    let note = last.messages.last().unwrap();
+    assert_eq!(note.role, MessageRole::System);
+    assert!(
+        note.content.as_str().unwrap().contains("repeat detected"),
+        "{:?}",
+        note.content
+    );
+    // The unexecuted 5th call is answered so the provider accepts the history.
+    assert!(
+        tool_messages(&last)
+            .last()
+            .unwrap()
+            .contains("not executed")
+    );
+    assert_eq!(
+        env.storage
+            .list_messages(env.chat)
+            .unwrap()
+            .last()
+            .unwrap()
+            .content,
+        "summary so far"
+    );
     let third = tool_messages(&fake.request(3));
     assert!(!third[1].contains("warning"));
     assert!(
@@ -590,17 +640,20 @@ async fn max_steps_guard_stops_the_turn() {
     config.guards.max_steps = 2;
     let lp = make_loop(&env.storage, env.bot, &fake, &[t(&r)], profile(""), config);
     let run = lp.run_turn(env.chat, "go").unwrap();
-    assert_eq!(lp.wait(run).await.unwrap(), RunState::Failed);
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(lp.stopped_by_guard(run).unwrap());
+    assert_eq!(fake.n_requests(), 3, "two steps + the closing call");
+    assert!(fake.request(2).tools.is_empty());
     assert!(
-        env.storage
-            .get_run(run)
+        fake.request(2)
+            .messages
+            .last()
             .unwrap()
-            .unwrap()
-            .error
+            .content
+            .as_str()
             .unwrap()
             .contains("step limit")
     );
-    assert_eq!(fake.n_requests(), 2);
 }
 
 #[tokio::test]
@@ -619,23 +672,42 @@ async fn token_budget_guard_stops_the_turn() {
             );
             Reply::Chunks(c)
         }
-        Reply::Hang => unreachable!(),
+        Reply::Hang | Reply::Fail(_) => unreachable!(),
     };
     let fake = Fake::new(vec![with_usage("1", 1), text("never")]);
     let mut config = cfg(Policy::full());
     config.guards.max_tokens_per_turn = 50;
     let lp = make_loop(&env.storage, env.bot, &fake, &[t(&r)], profile(""), config);
     let run = lp.run_turn(env.chat, "go").unwrap();
-    assert_eq!(lp.wait(run).await.unwrap(), RunState::Failed);
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(lp.stopped_by_guard(run).unwrap());
+    assert_eq!(fake.n_requests(), 2);
     assert!(
-        env.storage
-            .get_run(run)
+        fake.request(1)
+            .messages
+            .last()
             .unwrap()
-            .unwrap()
-            .error
+            .content
+            .as_str()
             .unwrap()
             .contains("token budget")
     );
+}
+
+#[tokio::test]
+async fn failing_closing_call_still_fails_the_run() {
+    let env = setup();
+    let r = Arc::new(tool("t.read", Effect::Read, "x"));
+    let fake = Fake::new(vec![
+        calls(&[("1", "t.read", json!({"n": 1}))]),
+        Reply::Fail("api400"),
+    ]);
+    let mut config = cfg(Policy::full());
+    config.guards.max_steps = 1;
+    let lp = make_loop(&env.storage, env.bot, &fake, &[t(&r)], profile(""), config);
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Failed);
+    assert!(!lp.stopped_by_guard(run).unwrap());
 }
 
 #[tokio::test]
@@ -702,20 +774,24 @@ async fn todo_tool_emits_event_without_permission() {
     let fake = Fake::new(vec![
         calls(&[(
             "c1",
-            "plan.todo_write",
-            json!({"todos": [{"text": "a", "status": "done"}, {"text": "b", "status": "in_progress"}]}),
+            "todo_write",
+            json!({"items": [
+                {"content": "a", "status": "completed"},
+                {"content": "b", "status": "in_progress"}
+            ]}),
         )]),
         text("planned"),
     ]);
-    // Default policy would Ask for everything; the built-in plan tool is exempt.
+    // Even a read-only policy allows the Meta category.
     let lp = make_loop(
         &env.storage,
         env.bot,
         &fake,
         &[],
         profile(""),
-        cfg(Policy::approve_destructive()),
+        cfg(Policy::read_only()),
     );
+    register_meta(&lp);
     let mut rx = lp.subscribe();
     let run = lp.run_turn(env.chat, "plan it").unwrap();
     let Event::TodoUpdated(u) = until(&mut rx, |e| matches!(e, Event::TodoUpdated(_))).await else {
@@ -723,8 +799,9 @@ async fn todo_tool_emits_event_without_permission() {
     };
     assert_eq!(u.items.len(), 2);
     assert_eq!(u.items[0].status, TodoStatus::Done);
+    assert_eq!(u.items[1].text, "b");
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
-    assert!(tool_messages(&fake.request(1))[0].contains("1/2 done"));
+    assert!(tool_messages(&fake.request(1))[0].contains("Plan updated"));
 }
 
 #[tokio::test]
@@ -929,19 +1006,115 @@ async fn queue_runs_as_next_turn_with_history() {
 }
 
 #[tokio::test]
-async fn provider_failure_is_retried_for_model_steps() {
-    // First stream() errors (script exhausted -> InvalidRequest), retry sees the reply.
+async fn transient_provider_failure_is_retried() {
     let env = setup();
-    let fake = Fake::new(vec![]);
+    let fake = Fake::new(vec![Reply::Fail("upstream"), text("recovered")]);
     let mut config = cfg(Policy::full());
     config.model_retry.max_attempts = 3;
     let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
     let run = lp.run_turn(env.chat, "hi").unwrap();
-    // Feed the reply after the first failed attempt.
-    tokio::time::sleep(Duration::from_millis(5)).await;
-    fake.replies.lock().push_back(text("recovered"));
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
-    assert!(fake.n_requests() >= 2);
+    assert_eq!(fake.n_requests(), 2);
+}
+
+#[tokio::test]
+async fn non_retryable_errors_are_not_retried() {
+    for kind in ["auth", "api400"] {
+        let env = setup();
+        let fake = Fake::new(vec![Reply::Fail(kind), text("never")]);
+        let mut config = cfg(Policy::full());
+        config.model_retry.max_attempts = 3;
+        let lp = make_loop(
+            &env.storage,
+            env.bot,
+            &fake,
+            &[],
+            profile("fallback = [\"fake/b\"]\n"),
+            config,
+        );
+        let run = lp.run_turn(env.chat, "hi").unwrap();
+        assert_eq!(lp.wait(run).await.unwrap(), RunState::Failed, "{kind}");
+        assert_eq!(fake.n_requests(), 1, "{kind}: no retry and no fallback");
+    }
+}
+
+#[test]
+fn retryable_classification() {
+    use crate::exec::is_retryable;
+    assert!(is_retryable(&ProviderError::Timeout));
+    assert!(is_retryable(&ProviderError::RateLimited {
+        retry_after: None
+    }));
+    assert!(is_retryable(&ProviderError::Connection("x".into())));
+    assert!(is_retryable(&ProviderError::Api {
+        status: 429,
+        message: String::new()
+    }));
+    assert!(!is_retryable(&ProviderError::Auth("x".into())));
+    assert!(!is_retryable(&ProviderError::InvalidRequest("x".into())));
+    assert!(!is_retryable(&ProviderError::Api {
+        status: 404,
+        message: String::new()
+    }));
+}
+
+#[tokio::test]
+async fn fallback_model_is_tried_after_retries_are_exhausted() {
+    let env = setup();
+    let fake = Fake::new(vec![
+        Reply::Fail("upstream"),
+        Reply::Fail("upstream"),
+        text("from the fallback"),
+    ]);
+    let mut config = cfg(Policy::full());
+    config.model_retry.max_attempts = 2;
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile("fallback = [\"fake/b\"]\n"),
+        config,
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "hi").unwrap();
+    let Event::ModelFallback(f) = until(&mut rx, |e| matches!(e, Event::ModelFallback(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!((f.from.as_str(), f.to.as_str()), ("fake/m", "fake/b"));
+    assert!(f.reason.contains("down"), "{}", f.reason);
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(fake.n_requests(), 3);
+    assert_eq!(fake.request(0).model.0, "fake/m");
+    assert_eq!(fake.request(1).model.0, "fake/m");
+    assert_eq!(fake.request(2).model.0, "fake/b");
+    assert_eq!(
+        env.storage
+            .list_messages(env.chat)
+            .unwrap()
+            .last()
+            .unwrap()
+            .content,
+        "from the fallback"
+    );
+}
+
+#[tokio::test]
+async fn all_models_failing_fails_the_run() {
+    let env = setup();
+    let fake = Fake::new(vec![Reply::Fail("upstream"), Reply::Fail("upstream")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile("fallback = [\"fake/b\"]\n"),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "hi").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Failed);
+    assert_eq!(fake.n_requests(), 2);
 }
 
 // ---------- crash / recover ----------
@@ -1140,4 +1313,583 @@ fn crash_while_waiting_for_approval_recovers_to_paused() {
         assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
         assert_eq!(w.count.load(Ordering::SeqCst), 0);
     });
+}
+
+// ---------- question cards ----------
+
+#[tokio::test]
+async fn ask_user_waits_for_the_answer_and_feeds_it_back() {
+    let env = setup();
+    let fake = Fake::new(vec![
+        calls(&[(
+            "c1",
+            "ask_user",
+            json!({"question": "Which file?", "options": ["a.txt", "b.txt"]}),
+        )]),
+        text("using b"),
+    ]);
+    // Meta is allowed even by a read-only policy: no approval prompt.
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(""),
+        cfg(Policy::read_only()),
+    );
+    register_meta(&lp);
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::QuestionAsked(q) = until(&mut rx, |e| matches!(e, Event::QuestionAsked(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(q.question, "Which file?");
+    assert_eq!(q.options, ["a.txt", "b.txt"]);
+    assert_eq!(lp.runtime().state(run).unwrap(), RunState::WaitingApproval);
+    let pending = env.storage.list_approvals(run).unwrap();
+    assert_eq!(pending.len(), 1);
+    assert!(pending[0].summary.starts_with("question:"));
+    assert!(pending[0].decision.is_none());
+
+    lp.answer_question(q.call_id, "b.txt").unwrap();
+    assert!(lp.answer_question(q.call_id, "again").is_err());
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(
+        tool_messages(&fake.request(1)),
+        vec!["The user answered: b.txt".to_owned()]
+    );
+    assert_eq!(
+        env.storage.list_approvals(run).unwrap()[0]
+            .decision
+            .as_deref(),
+        Some("answered")
+    );
+}
+
+#[tokio::test]
+async fn declining_a_question_tells_the_model() {
+    let env = setup();
+    let fake = Fake::new(vec![
+        calls(&[("c1", "ask_user", json!({"question": "Sure?"}))]),
+        text("ok"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    register_meta(&lp);
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::QuestionAsked(q) = until(&mut rx, |e| matches!(e, Event::QuestionAsked(_))).await
+    else {
+        unreachable!()
+    };
+    lp.deny(q.call_id, env.user, None).unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(tool_messages(&fake.request(1))[0].contains("declined"));
+}
+
+#[test]
+fn crash_while_waiting_for_an_answer_recovers_to_paused() {
+    let env = setup();
+    let path = env.dir.path().to_path_buf();
+    let (bot, chat) = (env.bot, env.chat);
+    let rt1 = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let run = rt1.block_on(async {
+        let fake = Fake::new(vec![
+            calls(&[("c1", "ask_user", json!({"question": "Which?"}))]),
+            Reply::Hang,
+        ]);
+        let lp = make_loop(
+            &env.storage,
+            bot,
+            &fake,
+            &[],
+            profile(""),
+            cfg(Policy::full()),
+        );
+        register_meta(&lp);
+        let mut rx = lp.subscribe();
+        let run = lp.run_turn(chat, "go").unwrap();
+        until(&mut rx, |e| matches!(e, Event::QuestionAsked(_))).await;
+        run
+    });
+    drop(rt1);
+    drop(env);
+
+    let storage = Arc::new(Storage::open(&path).unwrap());
+    let rt2 = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    rt2.block_on(async {
+        let fake = Fake::new(vec![text("thanks")]);
+        let lp = make_loop(&storage, bot, &fake, &[], profile(""), cfg(Policy::full()));
+        register_meta(&lp);
+        assert_eq!(lp.recover().unwrap(), vec![run]);
+        assert_eq!(lp.runtime().state(run).unwrap(), RunState::Paused);
+        assert_eq!(
+            storage.list_approvals(run).unwrap()[0].decision.as_deref(),
+            Some("expired")
+        );
+        // The question step is a read (replayable): resuming asks it again.
+        let mut rx = lp.subscribe();
+        lp.resume(run).unwrap();
+        let Event::QuestionAsked(q) =
+            until(&mut rx, |e| matches!(e, Event::QuestionAsked(_))).await
+        else {
+            unreachable!()
+        };
+        lp.answer_question(q.call_id, "the first one").unwrap();
+        assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+        assert_eq!(
+            tool_messages(&fake.request(0)),
+            vec!["The user answered: the first one".to_owned()]
+        );
+    });
+}
+
+// ---------- grants ----------
+
+async fn approve_always(
+    env: &Env,
+    lp: &AgentLoop,
+    rx: &mut broadcast::Receiver<StreamItem>,
+    run: protocol::RunId,
+    scope: ApprovalScope,
+) {
+    let Event::ApprovalNeeded(a) = until(rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    lp.approve(a.call_id, scope, env.user).unwrap();
+    lp.wait(run).await.unwrap();
+}
+
+#[tokio::test]
+async fn always_grants_are_listed_and_revocable() {
+    let env = setup();
+    let w = Arc::new(tool("t.write", Effect::Write, "w"));
+    let fake = Fake::new(vec![calls(&[("c1", "t.write", json!({}))]), text("done")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&w)],
+        profile(""),
+        cfg(Policy::approve_destructive()),
+    );
+    assert!(lp.list_grants(env.bot).is_empty());
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    approve_always(&env, &lp, &mut rx, run, ApprovalScope::Always).await;
+
+    let grants = lp.list_grants(env.bot);
+    assert_eq!(grants.len(), 1);
+    assert_eq!(grants[0].target, GrantTarget::Tool("t.write".into()));
+    assert!(
+        env.storage
+            .list_audit(env.user)
+            .unwrap()
+            .iter()
+            .any(|a| a.action == "grant.always"),
+        "audit entry kept"
+    );
+
+    // Revoke: the next call asks again; the revocation survives a restart.
+    assert!(
+        lp.revoke_grant(env.bot, &GrantTarget::Tool("t.write".into()))
+            .unwrap()
+    );
+    assert!(
+        !lp.revoke_grant(env.bot, &GrantTarget::Tool("t.write".into()))
+            .unwrap()
+    );
+    assert!(lp.list_grants(env.bot).is_empty());
+
+    let fake2 = Fake::new(vec![calls(&[("c1", "t.write", json!({}))]), text("done")]);
+    let lp2 = make_loop(
+        &env.storage,
+        env.bot,
+        &fake2,
+        &[t(&w)],
+        profile(""),
+        cfg(Policy::approve_destructive()),
+    );
+    assert!(lp2.list_grants(env.bot).is_empty(), "revocation is durable");
+    let mut rx2 = lp2.subscribe();
+    let run2 = lp2.run_turn(env.chat, "again").unwrap();
+    until(&mut rx2, |e| matches!(e, Event::ApprovalNeeded(_))).await;
+    lp2.cancel(run2).unwrap();
+}
+
+#[tokio::test]
+async fn category_grant_covers_other_tools_but_not_the_money_floor() {
+    let env = setup();
+    let w1 = Arc::new(tool("t.one", Effect::Write, "1"));
+    let w2 = Arc::new(tool("t.two", Effect::Write, "2"));
+    let mut pay = tool("t.pay", Effect::Write, "paid");
+    pay.spec.category = PermissionCategory::Money;
+    let pay = Arc::new(pay);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "t.one", json!({}))]),
+        text("one done"),
+        calls(&[("c2", "t.two", json!({}))]),
+        text("two done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&w1), t(&w2), t(&pay)],
+        profile(""),
+        cfg(Policy::approve_destructive()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "one").unwrap();
+    approve_always(&env, &lp, &mut rx, run, ApprovalScope::AlwaysCategory).await;
+    assert_eq!(
+        lp.list_grants(env.bot)[0].target,
+        GrantTarget::Category(PermissionCategory::Fs)
+    );
+
+    // Another tool of the same category needs no approval now.
+    let run2 = lp.run_turn(env.chat, "two").unwrap();
+    assert_eq!(lp.wait(run2).await.unwrap(), RunState::Succeeded);
+    assert_eq!(w2.count.load(Ordering::SeqCst), 1);
+
+    // A category grant on Money must never waive the floor.
+    let fake3 = Fake::new(vec![calls(&[("c3", "t.pay", json!({}))]), text("x")]);
+    let lp3 = make_loop(
+        &env.storage,
+        env.bot,
+        &fake3,
+        &[t(&pay)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    lp3.sh.grants.lock().always.push(crate::Grant {
+        bot_id: env.bot,
+        target: GrantTarget::Category(PermissionCategory::Money),
+        granted_at_ms: 0,
+    });
+    let mut rx3 = lp3.subscribe();
+    let run3 = lp3.run_turn(env.chat, "pay").unwrap();
+    until(&mut rx3, |e| matches!(e, Event::ApprovalNeeded(_))).await;
+    assert_eq!(pay.count.load(Ordering::SeqCst), 0);
+    lp3.cancel(run3).unwrap();
+}
+
+// ---------- builtin tools wiring ----------
+
+fn builtin_cfg(env: &Env, gate: Arc<dyn builtin_tools::ToolGate>) -> builtin_tools::BuiltinConfig {
+    builtin_tools::BuiltinConfig::new(env.dir.path().join("bt"), gate)
+}
+
+struct NoGate;
+
+#[async_trait]
+impl builtin_tools::ToolGate for NoGate {
+    async fn authorize(&self, _req: &builtin_tools::GateRequest) -> Result<(), String> {
+        Err("the loop must replace this gate".into())
+    }
+}
+
+#[tokio::test]
+async fn script_inner_calls_ask_for_approval_interactively() {
+    let env = setup();
+    let file = env
+        .dir
+        .path()
+        .join("out.txt")
+        .display()
+        .to_string()
+        .replace('\\', "/");
+    let code = format!("return await tools.call('fs_write', {{path: '{file}', content: 'hi'}});");
+    let fake = Fake::new(vec![
+        calls(&[("c1", "script_run", json!({ "code": code }))]),
+        text("script done"),
+    ]);
+    // Scripts themselves are allowed; their inner writes ask.
+    let mut policy = Policy::approve_destructive();
+    policy.categories.insert(
+        PermissionCategory::Script,
+        permission_engine::Rule::new(permission_engine::Level::Allow),
+    );
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), cfg(policy))
+        .with_builtin_tools(builtin_cfg(&env, Arc::new(NoGate)));
+    assert!(lp.sh.tools.get("fs_write").is_some());
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "write it").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(a.tool_name, "fs_write");
+    assert_eq!(lp.runtime().state(run).unwrap(), RunState::WaitingApproval);
+    assert!(!std::path::Path::new(&file).exists());
+    lp.approve(a.call_id, ApprovalScope::Once, env.user)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "hi");
+}
+
+#[tokio::test]
+async fn script_inner_call_denied_by_the_user_throws_in_the_script() {
+    let env = setup();
+    let file = env
+        .dir
+        .path()
+        .join("never.txt")
+        .display()
+        .to_string()
+        .replace('\\', "/");
+    let code = format!(
+        "try {{ await tools.call('fs_write', {{path: '{file}', content: 'x'}}); return 'wrote'; }} catch (e) {{ return 'blocked: ' + e; }}"
+    );
+    let fake = Fake::new(vec![
+        calls(&[("c1", "script_run", json!({ "code": code }))]),
+        text("ok"),
+    ]);
+    let mut policy = Policy::approve_destructive();
+    policy.categories.insert(
+        PermissionCategory::Script,
+        permission_engine::Rule::new(permission_engine::Level::Allow),
+    );
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), cfg(policy))
+        .with_builtin_tools(builtin_cfg(&env, Arc::new(NoGate)));
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    lp.deny(a.call_id, env.user, Some("no".into())).unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(!std::path::Path::new(&file).exists());
+    assert!(tool_messages(&fake.request(1))[0].contains("blocked"));
+}
+
+// ---------- tool surface ----------
+
+#[tokio::test]
+async fn many_tools_switch_to_discovery_and_use_tool_is_gated_by_the_target() {
+    let env = setup();
+    let r = Arc::new(tool("t.read", Effect::Read, "read ok"));
+    let w = Arc::new(tool("t.write", Effect::Write, "write ok"));
+    let extra: Vec<Arc<TestTool>> = (0..4)
+        .map(|i| Arc::new(tool(&format!("t.extra{i}"), Effect::Read, "x")))
+        .collect();
+    let mut all = vec![t(&r), t(&w)];
+    all.extend(extra.iter());
+    let fake = Fake::new(vec![
+        calls(&[("c1", "use_tool", json!({"name": "t.read", "input": {}}))]),
+        calls(&[("c2", "use_tool", json!({"name": "t.write", "input": {}}))]),
+        text("done"),
+    ]);
+    let mut config = cfg(Policy::approve_destructive());
+    config.discovery_threshold = 3;
+    let lp = make_loop(&env.storage, env.bot, &fake, &all, profile(""), config);
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    // The read target runs without a prompt; the write target asks (as t.write).
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(a.tool_name, "t.write");
+    assert_eq!(r.count.load(Ordering::SeqCst), 1);
+    assert_eq!(w.count.load(Ordering::SeqCst), 0);
+    lp.approve(a.call_id, ApprovalScope::Once, env.user)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(w.count.load(Ordering::SeqCst), 1);
+
+    let names: Vec<String> = fake
+        .request(0)
+        .tools
+        .iter()
+        .map(|d| d["function"]["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(names, ["find_tool", "get_tool_details", "use_tool"]);
+    assert_eq!(tool_messages(&fake.request(1)), vec!["read ok".to_owned()]);
+}
+
+#[tokio::test]
+async fn use_tool_cannot_reach_tools_hidden_from_the_bot() {
+    let env = setup();
+    let w = Arc::new(tool("t.write", Effect::Write, "w"));
+    let extra: Vec<Arc<TestTool>> = (0..4)
+        .map(|i| Arc::new(tool(&format!("t.extra{i}"), Effect::Read, "x")))
+        .collect();
+    let mut all = vec![t(&w)];
+    all.extend(extra.iter());
+    let fake = Fake::new(vec![
+        calls(&[("c1", "use_tool", json!({"name": "t.write", "input": {}}))]),
+        text("blocked"),
+    ]);
+    let mut config = cfg(Policy::full());
+    config.discovery_threshold = 3;
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &all,
+        profile("[tools]\nexclude = [\"t.write\"]\n"),
+        config,
+    );
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(w.count.load(Ordering::SeqCst), 0);
+    assert!(tool_messages(&fake.request(1))[0].contains("unknown tool"));
+}
+
+// ---------- redaction ----------
+
+#[tokio::test]
+async fn redactor_masks_tool_output_and_events() {
+    let env = setup();
+    let secret = "sk-abcdefghijklmnopqrstuvwxyz0123";
+    let r = Arc::new(tool("t.read", Effect::Read, &format!("key is {secret} ok")));
+    let fake = Fake::new(vec![
+        calls(&[("c1", "t.read", json!({"note": secret}))]),
+        text("done"),
+    ]);
+    let mut config = cfg(Policy::full());
+    config.redactor = Some(secret_store::Redactor::new());
+    let lp = make_loop(&env.storage, env.bot, &fake, &[t(&r)], profile(""), config);
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+
+    let to_model = tool_messages(&fake.request(1));
+    assert!(!to_model[0].contains(secret), "{to_model:?}");
+    assert!(to_model[0].contains("[REDACTED]"));
+
+    let mut saw_requested = false;
+    while let Ok(i) = rx.try_recv() {
+        let json = serde_json::to_string(&i.envelope.event).unwrap();
+        assert!(!json.contains(secret), "leaked in event: {json}");
+        saw_requested |= matches!(i.envelope.event, Event::ToolCallRequested(_));
+    }
+    assert!(saw_requested);
+    let log = serde_json::to_string(&read_event_log(env.dir.path(), run).unwrap()).unwrap();
+    assert!(log.contains("[REDACTED]"));
+    assert!(!log.contains(secret));
+}
+
+// ---------- memory ----------
+
+fn memory_cfg() -> (Arc<memory_store::MemoryStore>, crate::MemoryConfig) {
+    let store = Arc::new(
+        memory_store::MemoryStore::open_in_memory(Arc::new(memory_store::HashEmbedder::default()))
+            .unwrap(),
+    );
+    let cfg = crate::MemoryConfig::new(Arc::clone(&store));
+    (store, cfg)
+}
+
+#[tokio::test]
+async fn recalled_memory_is_prepended_to_the_user_message_not_the_system_prompt() {
+    let env = setup();
+    let (store, mem) = memory_cfg();
+    store
+        .add(
+            &memory_store::NewMemory::new(
+                env.user,
+                None,
+                memory_store::Kind::Profile,
+                "The user loves jazz music",
+            ),
+            "test",
+        )
+        .unwrap();
+    // Reply 2 answers the background extraction call (no candidates).
+    let fake = Fake::new(vec![text("jazz it is"), text("[]")]);
+    let mut config = cfg(Policy::full());
+    config.memory = Some(mem);
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
+    let run = lp.run_turn(env.chat, "recommend some jazz music").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    lp.flush_background().await;
+
+    let req = fake.request(0);
+    let system = req.messages[0].content.as_str().unwrap();
+    assert!(!system.contains("jazz"), "system prompt stays memory-free");
+    let user = req.messages[1].content.as_str().unwrap();
+    assert!(
+        user.contains("<recalled_memory>") && user.contains("loves jazz"),
+        "{user}"
+    );
+    assert!(user.ends_with("recommend some jazz music"));
+    // The stored chat message is the raw one.
+    assert_eq!(
+        env.storage.list_messages(env.chat).unwrap()[0].content,
+        "recommend some jazz music"
+    );
+}
+
+#[tokio::test]
+async fn finished_turn_is_extracted_into_memory_in_the_background() {
+    let env = setup();
+    let (store, mem) = memory_cfg();
+    let extraction = json!([{
+        "kind": "profile",
+        "content": "The user is called Ayse",
+        "quote": "I am Ayse",
+        "hypothetical": false,
+        "importance": 0.8
+    }])
+    .to_string();
+    let fake = Fake::new(vec![text("Nice to meet you"), text(&extraction)]);
+    let mut config = cfg(Policy::full());
+    config.memory = Some(mem);
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
+    let run = lp.run_turn(env.chat, "I am Ayse").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    lp.flush_background().await;
+
+    assert_eq!(fake.n_requests(), 2, "second request is the extraction");
+    let prompt = fake.request(1).messages[0]
+        .content
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(prompt.contains("User: I am Ayse") && prompt.contains("Assistant: Nice to meet you"));
+    let mems = store
+        .list(env.user, &memory_store::ListFilter::default())
+        .unwrap();
+    assert_eq!(mems.len(), 1);
+    assert_eq!(mems[0].content, "The user is called Ayse");
+}
+
+#[tokio::test]
+async fn disabled_memory_does_nothing() {
+    let env = setup();
+    let (store, mut mem) = memory_cfg();
+    mem.enabled = false;
+    let fake = Fake::new(vec![text("hi"), text("[]")]);
+    let mut config = cfg(Policy::full());
+    config.memory = Some(mem);
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
+    let run = lp.run_turn(env.chat, "I am Ayse").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    lp.flush_background().await;
+    assert_eq!(fake.n_requests(), 1);
+    assert!(
+        store
+            .list(env.user, &memory_store::ListFilter::default())
+            .unwrap()
+            .is_empty()
+    );
 }

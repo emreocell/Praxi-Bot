@@ -316,6 +316,79 @@
           }
         },
         {
+          "description": "The model asked the user a question (`ask_user`); the run waits until the question is answered.",
+          "type": "object",
+          "required": [
+            "call_id",
+            "options",
+            "question",
+            "run_id",
+            "type"
+          ],
+          "properties": {
+            "call_id": {
+              "description": "Id to answer with.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "options": {
+              "description": "Suggested answers (may be empty).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "question": {
+              "type": "string"
+            },
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "question_asked"
+              ]
+            }
+          }
+        },
+        {
+          "description": "The loop switched to a fallback model after the previous one kept failing.",
+          "type": "object",
+          "required": [
+            "from",
+            "reason",
+            "run_id",
+            "to",
+            "type"
+          ],
+          "properties": {
+            "from": {
+              "description": "Model that failed.",
+              "type": "string"
+            },
+            "reason": {
+              "description": "The error that caused the switch.",
+              "type": "string"
+            },
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "to": {
+              "description": "Model tried next.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "model_fallback"
+              ]
+            }
+          }
+        },
+        {
           "description": "A non-fatal error occurred during the run.",
           "type": "object",
           "required": [

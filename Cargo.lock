@@ -47,13 +47,17 @@ dependencies = [
 name = "agent-core"
 version = "0.1.0"
 dependencies = [
+ "agent-router",
  "async-trait",
+ "builtin-tools",
  "futures",
  "globset",
+ "memory-store",
  "parking_lot",
  "permission-engine",
  "protocol",
  "provider-catalog",
+ "secret-store",
  "serde",
  "serde_json",
  "storage",

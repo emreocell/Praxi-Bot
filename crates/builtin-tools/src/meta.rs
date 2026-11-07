@@ -21,8 +21,7 @@ use crate::util::{parse, spec};
 pub const QUESTION_CARD_KIND: &str = "question_card";
 /// `kind` of the JSON part produced by `todo_write`.
 pub const TODO_LIST_KIND: &str = "todo_list";
-/// Names of the meta tools (they have no external effect; the loop may skip
-/// approval for them, see the crate docs).
+/// Names of the meta tools (category `Meta`: always allowed, no approval).
 pub const META_TOOL_NAMES: [&str; 2] = ["ask_user", "todo_write"];
 
 /// Status of a todo item.
@@ -75,8 +74,8 @@ pub struct MetaTool {
 /// Build `ask_user` and `todo_write`.
 #[must_use]
 pub fn tools() -> Vec<Arc<dyn Tool>> {
-    // No permission category fits exactly; `Script` is the closest "agent-internal" one.
-    let cat = PermissionCategory::Script;
+    // Agent-internal tools without external effect; the resolver always allows them.
+    let cat = PermissionCategory::Meta;
     vec![
         Arc::new(MetaTool {
             spec: spec(

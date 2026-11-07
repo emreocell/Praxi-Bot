@@ -3,7 +3,11 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use std::sync::Arc;
+
+use memory_store::MemoryStore;
 use permission_engine::Policy;
+use secret_store::Redactor;
 use task_runtime::RetryPolicy;
 
 /// Per-turn safety limits.
@@ -65,6 +69,29 @@ impl ModelPrice {
     }
 }
 
+/// Memory hook configuration (ADR-0017): recall before a turn, extraction after.
+#[derive(Debug, Clone)]
+pub struct MemoryConfig {
+    /// The store.
+    pub store: Arc<MemoryStore>,
+    /// `memory.enabled`; defaults to `true` when a store is given.
+    pub enabled: bool,
+    /// Token budget of the recall block prepended to the user message.
+    pub recall_budget_tokens: usize,
+}
+
+impl MemoryConfig {
+    /// Enabled hook over `store` with an 800-token recall budget.
+    #[must_use]
+    pub fn new(store: Arc<MemoryStore>) -> Self {
+        Self {
+            store,
+            enabled: true,
+            recall_budget_tokens: 800,
+        }
+    }
+}
+
 /// Configuration of an [`AgentLoop`](crate::AgentLoop).
 #[derive(Debug, Clone)]
 pub struct LoopConfig {
@@ -83,6 +110,13 @@ pub struct LoopConfig {
     pub max_tokens: Option<u32>,
     /// Sampling temperature.
     pub temperature: Option<f64>,
+    /// Registry size above which the model sees the `find_tool` /
+    /// `get_tool_details` / `use_tool` discovery tools instead of every tool.
+    pub discovery_threshold: usize,
+    /// Masks secrets in tool outputs and emitted events when set.
+    pub redactor: Option<Redactor>,
+    /// Memory hook; `None` = no memory.
+    pub memory: Option<MemoryConfig>,
 }
 
 impl Default for LoopConfig {
@@ -100,6 +134,9 @@ impl Default for LoopConfig {
             read_tools_skip_ask: true,
             max_tokens: None,
             temperature: None,
+            discovery_threshold: agent_router::DEFAULT_DISCOVERY_THRESHOLD,
+            redactor: None,
+            memory: None,
         }
     }
 }
