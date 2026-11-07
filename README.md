@@ -9,6 +9,15 @@ from every machine you want to control, requiring no inbound ports.
 **Status: early development — not usable yet.**
 No stable API, no releases. Expect breaking changes at any time.
 
+## Documentation
+
+The **[user guide](docs/guide/index.md)** explains how to install Praxi, create
+bots, chat and approve actions, schedule tasks, use workflows and skills, pick a
+provider (including the Gemini free tier), connect Telegram, and understand the
+security model. It also has a [CLI reference](docs/guide/cli-reference.md),
+[troubleshooting](docs/guide/troubleshooting.md) and an [FAQ](docs/guide/faq.md).
+Features that are not available yet are marked **Planned**.
+
 ## Windows Installer & First-Run Onboarding
 
 Praxi-Bot ships as a single per-user Windows NSIS installer that bundles both
@@ -114,7 +123,8 @@ are pre-configured as placeholders under `bundle.windows` in
 
 ## Telegram
 
-Talk to your bots from Telegram (`bot channels telegram setup` / `pair`); see [docs/telegram.md](docs/telegram.md).
+Talk to your bots from Telegram (`bot channels telegram setup` / `pair`); see [docs/telegram.md](docs/telegram.md)
+or the [user guide page](docs/guide/telegram.md).
 
 ## License
 

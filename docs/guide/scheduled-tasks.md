@@ -1,0 +1,84 @@
+# Scheduled tasks
+
+A **schedule** makes a bot do something on its own: every weekday morning, every
+15 minutes, once in two hours. When it fires, the daemon starts a normal run
+(same events, same approvals, same history) in a chat. The daemon must be
+running (`bot serve`, or the desktop app) for schedules to fire.
+
+## Create one
+
+```sh
+bot schedules add <bot-id> "every weekday at 9" "Summarize my unread notifications"
+bot schedules add <bot-id> "her gün 09:00" "Günlük raporu hazırla" --tz Europe/Istanbul
+bot schedules add <bot-id> "in 2 hours" "Remind me to stand up" --name stretch
+bot schedules list
+bot schedules run-now <schedule-id>     # fire it now; the timer is unchanged
+bot schedules rm <schedule-id>
+```
+
+Arguments of `add`: the bot id, a **when** phrase, and the **prompt** the bot
+runs each time. Options: `--name` (default: the start of the prompt), `--tz`
+(IANA timezone such as `Europe/Istanbul`; default UTC), and `--chat` (post the
+runs to this chat; by default a chat named after the schedule is created and
+reused).
+
+The desktop app has a Schedules screen for the same thing.
+
+## When phrases
+
+English and Turkish phrases are understood; the daemon parses them
+(`POST /v1/schedules/parse` previews the result). Examples taken from the
+parser's tables:
+
+| Kind | Examples |
+| --- | --- |
+| Interval | `every minute`, `every hour`, `every 15 minutes`, `saat basi` |
+| Daily and weekly | `every day`, `every morning` (09:00), `every evening` (18:00), `every night` (22:00), `at midnight`, `at noon`, `every weekday`, `every weekend`, `every week`, `every monday at 8`, `her gün 09:00` |
+| Monthly | `every month` (1st, 09:00) |
+| One-shot, relative | `in a minute`, `in half an hour`, `in 30 minutes`, `2 saat sonra`, `yarim saat sonra` |
+
+If a phrase is not understood the command fails with an error rather than
+guessing. The API also accepts raw 5-field **cron** expressions (for example
+`0 9 * * 1-5`, optionally with a timezone), fixed intervals in seconds and exact
+one-off timestamps.
+
+Calendar phrases use the timezone you give with `--tz`; without it, UTC.
+
+## What a schedule can run
+
+The CLI creates schedules that send a **prompt** to the bot. Through the API
+(and so the desktop app) a schedule's payload can also be:
+
+- a **workflow** (replayed without a model, see [Workflows](workflows.md)), or
+- a direct **tool** call.
+
+All of these go through the normal permission gate.
+
+## Webhooks
+
+A schedule can have a webhook trigger so something outside can fire it:
+`POST /v1/webhooks/{id}` with the header
+`X-Signature-256: sha256=<hex HMAC-SHA256 of the body with the schedule's webhook secret>`.
+No bearer token is used there; the signature is the authentication. The body
+(at most 256 KB) replaces `{input}` in the schedule's prompt. The route is still
+loopback-only like the rest of the API, so reaching it from outside your machine
+needs a tunnel or reverse proxy you set up yourself. Webhook secrets are set
+through the API (`webhook_secret` on create or update); the CLI has no flag for it.
+
+## Missed runs
+
+If the daemon was stopped or the computer asleep when a schedule was due, the
+schedule's **misfire policy** decides: `skip` (default: ignore missed runs),
+`run_once` (run once for the missed window) or `run_all` (run every missed
+occurrence, at most 10). The policy is set through the API; the CLI always uses
+the default.
+
+## Approvals in unattended runs
+
+A scheduled run behaves like you for permissions unless the bot's rule has a
+separate `schedule` setting. If it needs approval and you do not answer within 30
+minutes, the run pauses. Money and never-list actions always ask. Tip: give
+unattended schedules a bot whose policy only allows what the job needs.
+
+A schedule runs one run at a time: if the previous firing is still in flight
+(for example waiting for an approval), a new firing is skipped.
