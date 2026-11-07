@@ -105,11 +105,13 @@ fn chunks(step: &ScriptStep) -> Vec<ChatChunk> {
             prompt_tokens: 10,
             completion_tokens: 5,
             cached_tokens: None,
+            cache_write_tokens: None,
         },
         |u| Usage {
             prompt_tokens: u.prompt,
             completion_tokens: u.completion,
             cached_tokens: u.cached,
+            cache_write_tokens: None,
         },
     );
     v.push(ChatChunk::Usage(u));

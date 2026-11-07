@@ -98,4 +98,60 @@ pub struct ProviderEntry {
     pub compat_flags: CompatFlags,
     /// URL to list available models (optional).
     pub models_endpoint: Option<String>,
+    /// Known models with limits and prices (optional; may be empty).
+    #[serde(default)]
+    pub models: Vec<ModelInfo>,
+}
+
+impl ProviderEntry {
+    /// Catalog data for a model id (without the provider prefix).
+    #[must_use]
+    pub fn model(&self, id: &str) -> Option<&ModelInfo> {
+        self.models.iter().find(|m| m.id == id)
+    }
+}
+
+/// A model known to the catalog, with limits and USD prices per million tokens.
+///
+/// Every field except `id` is optional: unknown values are left out rather than
+/// guessed. `prices_as_of` (ISO date) says when the prices were last checked.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModelInfo {
+    /// Model id as sent to the API.
+    pub id: String,
+    /// Context window in tokens.
+    pub context_window: Option<u32>,
+    /// Maximum output tokens.
+    pub max_output_tokens: Option<u32>,
+    /// USD per million uncached input tokens.
+    pub input_per_mtok: Option<f64>,
+    /// USD per million output tokens (including thinking tokens).
+    pub output_per_mtok: Option<f64>,
+    /// USD per million cache-read tokens.
+    pub cached_per_mtok: Option<f64>,
+    /// USD per million cache-write tokens (Anthropic 5-minute TTL).
+    pub cache_write_per_mtok: Option<f64>,
+    /// ISO date (`YYYY-MM-DD`) the prices were checked.
+    pub prices_as_of: Option<String>,
+}
+
+impl ModelInfo {
+    /// Cost of one completion in USD, or `None` when input or output prices
+    /// are unknown. Cache reads/writes without their own price are charged at
+    /// the plain input price (an upper bound).
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn cost_usd(&self, usage: &crate::provider::Usage) -> Option<f64> {
+        let input = self.input_per_mtok?;
+        let output = self.output_per_mtok?;
+        let read = usage.cached_tokens.unwrap_or(0);
+        let write = usage.cache_write_tokens.unwrap_or(0);
+        let plain = usage.prompt_tokens.saturating_sub(read + write);
+        let total = plain as f64 * input
+            + read as f64 * self.cached_per_mtok.unwrap_or(input)
+            + write as f64 * self.cache_write_per_mtok.unwrap_or(input)
+            + usage.completion_tokens as f64 * output;
+        Some(total / 1_000_000.0)
+    }
 }

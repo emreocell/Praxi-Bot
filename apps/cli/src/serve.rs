@@ -69,7 +69,7 @@ fn build_one(
             .cloned()
             .ok_or_else(|| format!("{:?} is not in the catalog", s.id))?,
     };
-    Ok(Arc::new(s.build_provider(
+    Ok(Arc::from(s.build_provider(
         &entry,
         store,
         OpenAiCompatConfig::default(),

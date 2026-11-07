@@ -12,8 +12,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     entry::{Auth, ProviderEntry},
     error::ProviderError,
-    openai_compat::{OpenAiCompatConfig, OpenAiCompatProvider},
+    factory::build_chat_provider,
+    openai_compat::OpenAiCompatConfig,
     provider::{ChatChunk, ChatProvider, ChatRequest, Message, MessageRole, ModelRef},
+    util::key_from_env,
 };
 
 /// File name inside the data directory.
@@ -91,21 +93,18 @@ impl ProviderSettings {
         entry: &ProviderEntry,
         store: &dyn SecretStore,
         config: OpenAiCompatConfig,
-    ) -> Result<OpenAiCompatProvider, ProviderError> {
-        match &self.key {
-            Some(r) => {
-                let v = resolve(store, r).map_err(|e| ProviderError::Auth(e.to_string()))?;
-                OpenAiCompatProvider::with_api_key(
-                    entry.clone(),
-                    config,
-                    Some(v.expose().to_string()),
-                )
-            }
-            None => match entry.auth {
-                Auth::None => OpenAiCompatProvider::with_api_key(entry.clone(), config, None),
-                Auth::ApiKeyEnv(_) => OpenAiCompatProvider::new(entry.clone(), config),
-            },
-        }
+    ) -> Result<Box<dyn ChatProvider>, ProviderError> {
+        let key = match (&self.key, &entry.auth) {
+            (Some(r), _) => Some(
+                resolve(store, r)
+                    .map_err(|e| ProviderError::Auth(e.to_string()))?
+                    .expose()
+                    .to_string(),
+            ),
+            (None, Auth::None) => None,
+            (None, Auth::ApiKeyEnv(var)) => Some(key_from_env(var)?),
+        };
+        build_chat_provider(entry, config, key)
     }
 }
 
@@ -300,6 +299,7 @@ mod tests {
             },
             compat_flags: CompatFlags::default(),
             models_endpoint: None,
+            models: Vec::new(),
         }
     }
 
@@ -392,8 +392,8 @@ mod tests {
         // Missing secret -> auth error.
         let err = s
             .build_provider(&custom_entry(), &store, OpenAiCompatConfig::default())
-            .unwrap_err();
-        assert!(matches!(err, ProviderError::Auth(_)));
+            .err();
+        assert!(matches!(err, Some(ProviderError::Auth(_))));
         store.set(&name, "sk-test-123456").unwrap();
         assert!(
             s.build_provider(&custom_entry(), &store, OpenAiCompatConfig::default())

@@ -48,6 +48,7 @@ fn text(s: &str) -> Reply {
             prompt_tokens: 10,
             completion_tokens: 5,
             cached_tokens: Some(2),
+            cache_write_tokens: None,
         }),
         ChatChunk::Done {
             finish_reason: FinishReason::Stop,
@@ -680,6 +681,7 @@ async fn token_budget_guard_stops_the_turn() {
                     prompt_tokens: 100,
                     completion_tokens: 0,
                     cached_tokens: None,
+                    cache_write_tokens: None,
                 }),
             );
             Reply::Chunks(c)
