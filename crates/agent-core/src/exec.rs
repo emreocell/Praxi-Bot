@@ -206,13 +206,9 @@ impl TurnExecutor {
             let reason = format!("step limit reached: {max_steps} model calls in one turn");
             return Ok(Some(Self::guard_step(&ctx, model_steps, &reason)));
         }
-        let tokens: u64 = history
-            .iter()
-            .filter(|s| s.name == STEP_MODEL)
-            .filter_map(step_output::<ModelOut>)
-            .filter_map(|m| m.usage)
-            .map(|u| u.prompt_tokens + u.completion_tokens)
-            .sum();
+        let tokens = crate::subagent::model_tokens(history).saturating_add(
+            crate::subagent::descendant_tokens(&self.sh.storage, ctx.run_id),
+        );
         if tokens >= max_tokens {
             let reason = format!("token budget exhausted: {tokens} >= {max_tokens}");
             return Ok(Some(Self::guard_step(&ctx, model_steps, &reason)));

@@ -68,7 +68,7 @@ pub(crate) struct BotLadder {
 /// Ladders per bot and the workflow wiring.
 #[derive(Default)]
 pub(crate) struct Router {
-    ladders: Mutex<HashMap<BotId, Arc<BotLadder>>>,
+    pub(crate) ladders: Mutex<HashMap<BotId, Arc<BotLadder>>>,
     pub workflows: OnceLock<WorkflowWiring>,
 }
 
@@ -353,6 +353,12 @@ impl Shared {
         let chat_id = run
             .chat_id
             .ok_or_else(|| LoopError::Router("the run has no chat".into()))?;
+        // Cheap checks first: the profile is cached, and the router flag
+        // needs no ladder (a read-only probe must not create one).
+        let profile = self.profile_for(run.bot_id).map_err(LoopError::Profile)?;
+        if !profile.router.enabled {
+            return refuse("the router is disabled for this bot");
+        }
         let text = self
             .storage
             .list_messages(chat_id)?
@@ -379,11 +385,10 @@ impl Shared {
                 None => return refuse("the run followed no route and ran no workflow"),
             },
         };
-        let profile = self.profile_for(run.bot_id).map_err(LoopError::Profile)?;
-        let bl = self
-            .ladder_for(run.bot_id, &profile)
-            .ok_or_else(|| LoopError::Router("the router is disabled for this bot".into()))?;
         if commit {
+            let bl = self
+                .ladder_for(run.bot_id, &profile)
+                .ok_or_else(|| LoopError::Router("the router is disabled for this bot".into()))?;
             self.refresh_ladder(&bl, &profile, false);
             bl.ladder
                 .remember_route(&text, &route)

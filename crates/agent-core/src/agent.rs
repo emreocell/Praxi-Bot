@@ -102,6 +102,7 @@ impl AgentLoop {
                 router: crate::router::Router::default(),
                 directives: Mutex::new(HashMap::new()),
                 approval_paused: Mutex::new(HashSet::new()),
+                parked: Mutex::new(HashMap::new()),
             }
         });
         let rt = Arc::new(Runtime::new(
@@ -330,7 +331,7 @@ impl AgentLoop {
         user_message: &str,
         initiator: InitiatorKind,
     ) -> Result<RunId> {
-        self.start_turn(chat_id, user_message, &kind_for(initiator), None)
+        self.start_turn(chat_id, user_message, &kind_for(initiator), None, None)
     }
 
     /// Start a run on behalf of schedule `schedule_id` (initiator
@@ -360,15 +361,25 @@ impl AgentLoop {
             }
         };
         let directive = (!matches!(work, ScheduleWork::Prompt(_))).then_some(work);
-        self.start_turn(chat_id, &text, &kind_for_schedule(schedule_id), directive)
+        self.start_turn(
+            chat_id,
+            &text,
+            &kind_for_schedule(schedule_id),
+            directive,
+            None,
+        )
     }
 
+    /// `handoff`: the just-concluded run that still holds the chat's `active`
+    /// slot; the new turn takes the slot over from it without a gap in which
+    /// another start could slip in.
     fn start_turn(
         &self,
         chat_id: ChatId,
         user_message: &str,
         kind: &str,
         directive: Option<ScheduleWork>,
+        handoff: Option<RunId>,
     ) -> Result<RunId> {
         if self.sh.shutting_down.load(Ordering::SeqCst) {
             return Err(LoopError::ShuttingDown);
@@ -383,7 +394,10 @@ impl AgentLoop {
             .map_err(LoopError::Profile)?;
         let run_id = {
             let mut active = self.sh.active.lock();
-            if active.contains_key(&chat_id) {
+            if active
+                .get(&chat_id)
+                .is_some_and(|held| Some(*held) != handoff)
+            {
                 return Err(LoopError::Busy(chat_id));
             }
             let run_id = self
@@ -957,20 +971,60 @@ impl AgentLoop {
         self.sh.runs.lock().remove(&run_id);
 
         let Some(run) = run else { return };
-        let Some(chat_id) = run.chat_id else { return };
+        self.start_next_queued(&run, run_id);
+    }
+
+    /// Release the chat after `run_id`, or hand it straight to the next queued
+    /// message (see [`Self::start_turn`]'s `handoff`).
+    fn start_next_queued(&self, run: &storage::Run, run_id: RunId) {
+        let Some(chat_id) = run.chat_id else {
+            return;
+        };
+        // Take the next queued message and keep the chat reserved (the slot
+        // stays with this run) until its turn has started, so a concurrent
+        // start cannot make the follow-up bounce off `Busy`.
         let next = {
             let mut active = self.sh.active.lock();
-            if active.get(&chat_id) == Some(&run_id) {
-                active.remove(&chat_id);
-            }
-            self.sh
-                .queued
-                .lock()
-                .get_mut(&chat_id)
-                .and_then(std::collections::VecDeque::pop_front)
+            let next = if active.get(&chat_id) == Some(&run_id) {
+                let next = self
+                    .sh
+                    .queued
+                    .lock()
+                    .get_mut(&chat_id)
+                    .and_then(std::collections::VecDeque::pop_front);
+                if next.is_none() {
+                    active.remove(&chat_id);
+                }
+                next
+            } else {
+                None
+            };
+            drop(active);
+            next
         };
         if let Some(text) = next {
-            let _ = self.run_turn_as(chat_id, &text, initiator_of(&run.kind));
+            let started = self.start_turn(
+                chat_id,
+                &text,
+                &kind_for(initiator_of(&run.kind)),
+                None,
+                Some(run_id),
+            );
+            if started.is_err() {
+                // Never lose the follow-up: release the slot and put it back.
+                {
+                    let mut active = self.sh.active.lock();
+                    if active.get(&chat_id) == Some(&run_id) {
+                        active.remove(&chat_id);
+                    }
+                }
+                self.sh
+                    .queued
+                    .lock()
+                    .entry(chat_id)
+                    .or_default()
+                    .push_front(text);
+            }
         }
     }
 

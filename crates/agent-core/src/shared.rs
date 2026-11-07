@@ -376,6 +376,9 @@ pub(crate) struct Shared {
     pub directives: Mutex<HashMap<RunId, ScheduleWork>>,
     /// Runs that paused because nobody answered an approval in time.
     pub approval_paused: Mutex<HashSet<RunId>>,
+    /// How many approvals/questions each run has parked right now (parallel
+    /// `ask_user` calls park several); the run is `WaitingApproval` while > 0.
+    pub parked: Mutex<HashMap<RunId, usize>>,
 }
 
 /// What a schedule-started run does (see

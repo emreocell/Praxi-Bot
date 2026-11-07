@@ -829,3 +829,28 @@ async fn subagents_are_not_routed() {
     let first = &env.storage.list_steps(run).unwrap()[0];
     assert!(first.input.get("route").is_some_and(Value::is_object));
 }
+
+#[tokio::test]
+async fn can_remember_does_not_build_a_ladder_or_touch_the_disk() {
+    let env = setup();
+    let log = Arc::new(tool("t_log", Effect::Write, "logged"));
+    let script = Script::new(vec![
+        ("fake/c", vec![Rep::Text(WF_ROUTE)]),
+        ("fake/m", vec![Rep::Text("done")]),
+    ]);
+    let (lp, store) = with_store(&env, make(&env, &script, &[as_tool(&log)], CLASSIFIER));
+    store
+        .save(&wf_tool_step("log_it", "t_log", "write a log line"))
+        .unwrap();
+    let (run, state) = turn(&lp, env.chat, "please tidy up my desk").await;
+    assert_eq!(state, RunState::Succeeded);
+    // Forget the ladder the turn built, and its cache directory.
+    lp.sh.router.ladders.lock().clear();
+    let _ = std::fs::remove_dir_all(env.storage.data_dir().join("router"));
+    assert!(lp.can_remember(run));
+    assert!(lp.sh.router.ladders.lock().is_empty(), "no ladder created");
+    assert!(
+        !env.storage.data_dir().join("router").exists(),
+        "no sqlite cache created"
+    );
+}

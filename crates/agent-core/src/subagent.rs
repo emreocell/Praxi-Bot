@@ -388,23 +388,21 @@ impl TurnExecutor {
         Ok((id, false))
     }
 
-    /// A quarter of what the parent's own token budget still has left.
+    /// A quarter of what the parent's own token budget still has left (its own
+    /// model calls and its whole subtree's spend are charged against it).
     fn child_token_budget(&self, run: &Run, ctx: &RunCtx) -> Result<u64, String> {
         let budget = ctx
             .sub
             .as_ref()
             .map_or(self.sh.cfg.guards.max_tokens_per_turn, |s| s.token_budget);
-        let used: u64 = self
-            .sh
-            .storage
-            .list_steps(run.id)
-            .map_err(|e| e.to_string())?
-            .iter()
-            .filter(|s| s.name == STEP_MODEL)
-            .filter_map(step_output::<ModelOut>)
-            .filter_map(|m| m.usage)
-            .map(|u| u.prompt_tokens + u.completion_tokens)
-            .sum();
+        let own = model_tokens(
+            &self
+                .sh
+                .storage
+                .list_steps(run.id)
+                .map_err(|e| e.to_string())?,
+        );
+        let used = own.saturating_add(descendant_tokens(&self.sh.storage, run.id));
         Ok((budget.saturating_sub(used) / 4).max(1))
     }
 
@@ -475,6 +473,37 @@ impl TurnExecutor {
             ),
         }
     }
+}
+
+/// Tokens the `STEP_MODEL` steps of `steps` spent.
+pub(crate) fn model_tokens(steps: &[storage::RunStep]) -> u64 {
+    steps
+        .iter()
+        .filter(|s| s.name == STEP_MODEL)
+        .filter_map(step_output::<ModelOut>)
+        .filter_map(|m| m.usage)
+        .map(|u| u.prompt_tokens + u.completion_tokens)
+        .sum()
+}
+
+/// Tokens spent by every descendant of `run_id` (children, grandchildren, ...),
+/// finished ones included: a parent pays for what its subtree burned.
+pub(crate) fn descendant_tokens(storage: &storage::Storage, run_id: RunId) -> u64 {
+    let mut total = 0u64;
+    let mut seen = std::collections::HashSet::new();
+    let mut todo = vec![run_id];
+    while let Some(id) = todo.pop() {
+        for kid in storage.list_child_runs(id).unwrap_or_default() {
+            if !seen.insert(kid.id) {
+                continue;
+            }
+            total = total.saturating_add(model_tokens(
+                &storage.list_steps(kid.id).unwrap_or_default(),
+            ));
+            todo.push(kid.id);
+        }
+    }
+    total
 }
 
 /// Last model text of a run.

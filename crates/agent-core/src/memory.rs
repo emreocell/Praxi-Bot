@@ -9,13 +9,13 @@ use futures::StreamExt;
 use memory_store::{
     Candidate, Decision, ExtractionContext, Memory, MemoryError, MemoryModel, Pipeline, prompts,
 };
-use protocol::{BotId, ChatId, UserId};
+use protocol::{BotId, ChatId, InitiatorKind, PermissionCategory, UserId};
 use provider_catalog::{ChatChunk, ChatRequest, Message, MessageRole, ModelRef};
 use serde_json::Value;
 use storage::Run;
 use uuid::Uuid;
 
-use crate::shared::Shared;
+use crate::shared::{STEP_TOOLS, STEP_WORKFLOW, Shared, initiator_of};
 
 /// [`MemoryModel`] over the bot's classifier model (falling back to its
 /// executor), using the prompt templates shipped with `memory-store`.
@@ -101,6 +101,28 @@ pub(crate) struct Exchange {
     pub bot_id: BotId,
     pub chat_id: ChatId,
     pub excerpt: String,
+    /// The turn was not a plain human conversation (channel/schedule/subagent
+    /// initiator) or it used a tool that can bring in outside content (web,
+    /// browser, files, MCP, workflows, subagents): everything extracted from
+    /// it is stored as `trust = untrusted`.
+    pub untrusted: bool,
+}
+
+/// Whether the steps of a run show contact with content the user did not
+/// write.  Only `Meta` tools (which have no external effect) keep a run
+/// clean; `use_tool` hides the real tool, and unknown names cannot be vouched
+/// for, so both count as outside content.
+fn steps_touch_outside_content(steps: &[storage::RunStep], is_meta: impl Fn(&str) -> bool) -> bool {
+    steps.iter().any(|s| match s.name.as_str() {
+        STEP_TOOLS => s.input["calls"].as_array().is_some_and(|calls| {
+            calls.iter().any(|c| {
+                let name = c["name"].as_str().unwrap_or_default();
+                name == agent_router::USE_TOOL || !is_meta(name)
+            })
+        }),
+        STEP_WORKFLOW => true,
+        _ => false,
+    })
 }
 
 impl Exchange {
@@ -118,11 +140,24 @@ impl Exchange {
         if users.is_empty() {
             return None;
         }
+        let untrusted = initiator_of(&run.kind) != InitiatorKind::Human
+            || sh.storage.list_steps(run.id).map_or(true, |steps| {
+                steps_touch_outside_content(&steps, |name| {
+                    sh.tools
+                        .get(name)
+                        .is_some_and(|t| t.spec().category == PermissionCategory::Meta)
+                })
+            })
+            || sh
+                .storage
+                .list_child_runs(run.id)
+                .map_or(true, |k| !k.is_empty());
         Some(Self {
             user_id: run.user_id,
             bot_id: run.bot_id,
             chat_id,
             excerpt: format!("User: {}\nAssistant: {final_text}", users.join("\nUser: ")),
+            untrusted,
         })
     }
 }
@@ -153,7 +188,63 @@ pub(crate) async fn extract(sh: Arc<Shared>, ex: Exchange) {
         chat_id: ex.chat_id,
         message_id: None,
         excerpt: ex.excerpt,
-        untrusted: false,
+        untrusted: ex.untrusted,
     };
     let _ = Pipeline::new(&store, &model).ingest(&ctx).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn step(name: &str, input: Value) -> storage::RunStep {
+        storage::RunStep {
+            id: Uuid::nil(),
+            run_id: protocol::RunId::new(),
+            user_id: UserId::new(),
+            idx: 0,
+            name: name.to_owned(),
+            input,
+            idempotent: true,
+            retry: None,
+            status: "succeeded".to_owned(),
+            attempt: 1,
+            output: None,
+            error: None,
+            started_at_ms: 0,
+            finished_at_ms: None,
+        }
+    }
+
+    #[test]
+    fn only_meta_tools_keep_an_exchange_trusted() {
+        let is_meta = |n: &str| n == "ask_user";
+        let calls = |names: &[&str]| {
+            step(
+                STEP_TOOLS,
+                json!({ "calls": names.iter().map(|n| json!({ "name": n })).collect::<Vec<_>>() }),
+            )
+        };
+        assert!(!steps_touch_outside_content(&[], is_meta));
+        assert!(!steps_touch_outside_content(
+            &[calls(&["ask_user"])],
+            is_meta
+        ));
+        assert!(steps_touch_outside_content(
+            &[calls(&["web_fetch"])],
+            is_meta
+        ));
+        assert!(steps_touch_outside_content(
+            &[calls(&["ask_user", "mcp.x"])],
+            is_meta
+        ));
+        assert!(steps_touch_outside_content(&[calls(&["use_tool"])], |_| {
+            true
+        }));
+        assert!(steps_touch_outside_content(
+            &[step(STEP_WORKFLOW, json!({}))],
+            is_meta
+        ));
+    }
 }
