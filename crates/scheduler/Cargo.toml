@@ -1,0 +1,35 @@
+[package]
+name = "scheduler"
+description = "Durable scheduled tasks (cron, interval, one-shot), misfire policies, HMAC webhook triggers, and EN/TR natural-language schedule parser."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+chrono-tz = "0.10"
+croner = "2"
+hex = "0.4"
+hmac = "0.12"
+parking_lot.workspace = true
+protocol.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+storage.workspace = true
+subtle = "2"
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing = "0.1"
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
