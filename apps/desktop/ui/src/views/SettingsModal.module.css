@@ -1,0 +1,303 @@
+.nav {
+  flex-shrink: 0;
+  width: calc(var(--size-sidebar-width) * 0.85);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-3);
+  border-right: var(--size-border) solid var(--color-border);
+  background-color: var(--color-background);
+}
+
+.search {
+  width: 100%;
+  min-height: var(--size-control-md);
+  padding: var(--space-2) var(--space-3);
+  border: var(--size-border) solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+}
+
+.search:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+  border-color: var(--color-accent);
+}
+
+.navList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.navItem {
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  text-align: left;
+  cursor: pointer;
+}
+
+.navItem:hover:not(:disabled) {
+  background-color: var(--color-surface-elevated);
+  color: var(--color-text);
+}
+
+.navItem:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.navItem:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.navActive,
+.navActive:hover:not(:disabled) {
+  background-color: var(--color-accent-subtle);
+  color: var(--color-text);
+}
+
+.content {
+  flex: 1;
+  min-width: var(--space-0);
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-6);
+  border-bottom: var(--size-border) solid var(--color-border);
+}
+
+.title {
+  margin: var(--space-0);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+}
+
+.close {
+  width: var(--size-control-sm);
+  height: var(--size-control-sm);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-lg);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.close:hover {
+  background-color: var(--color-surface-elevated);
+  color: var(--color-text);
+}
+
+.close:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-5) var(--space-6) var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.sectionLabel {
+  margin: var(--space-0);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.cardSlot,
+.blockSlot {
+  min-width: var(--space-0);
+}
+
+.empty {
+  margin: var(--space-8) var(--space-0);
+  text-align: center;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hidden {
+  display: none;
+}
+
+.shortInput {
+  width: calc(var(--size-widget-width) * 0.7);
+  max-width: 100%;
+}
+
+.keyInput {
+  width: calc(var(--size-widget-width) * 0.75);
+  max-width: 100%;
+}
+
+.chip {
+  padding: var(--space-1) var(--space-3);
+  border: var(--size-border) solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-surface-elevated);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.swatch {
+  width: var(--space-6);
+  height: var(--space-6);
+  padding: var(--space-0);
+  border: var(--size-border-thick) solid transparent;
+  border-radius: var(--radius-pill);
+  background-color: var(--swatch-color);
+  cursor: pointer;
+  outline: var(--size-border) solid var(--color-border-strong);
+  outline-offset: var(--size-border-thick);
+}
+
+.swatch:focus-visible {
+  box-shadow: var(--shadow-focus);
+}
+
+.swatchActive {
+  outline: var(--size-border-thick) solid var(--swatch-color);
+}
+
+.customColor {
+  display: inline-flex;
+}
+
+.colorInput {
+  width: var(--space-6);
+  height: var(--space-6);
+  padding: var(--space-0);
+  border: var(--size-border) solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  background: none;
+  cursor: pointer;
+}
+
+.blockStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.blockIntro {
+  margin: var(--space-0);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.targetGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(var(--space-0), 1fr));
+  gap: var(--space-3);
+}
+
+.targetCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.targetCard:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+}
+
+.targetCard:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.targetActive,
+.targetActive:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  background-color: var(--color-accent-subtle);
+}
+
+.targetSoon {
+  border-style: dashed;
+  cursor: default;
+}
+
+.targetHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.targetTitle {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.targetDesc {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.badge {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-warning-subtle);
+  color: var(--color-warning);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+}

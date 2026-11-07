@@ -13,6 +13,10 @@ import type {
   Grant,
   GrantTarget,
   Health,
+  McpCatalogEntry,
+  McpServer,
+  McpServerConfig,
+  McpTool,
   Message,
   ParsedSchedule,
   PolicyDto,
@@ -61,7 +65,7 @@ export class ApiClient {
     return { Authorization: `Bearer ${this.token}` };
   }
 
-  private async request<T>(
+  protected async request<T>(
     method: string,
     path: string,
     opts: { body?: unknown; query?: Query; auth?: boolean } = {}
@@ -242,6 +246,44 @@ export class ApiClient {
   providers(): Promise<ProvidersDto> {
     return this.request("GET", "/providers");
   }
+  // ---- MCP servers & secrets -------------------------------------------
+
+  listMcpServers(): Promise<McpServer[]> {
+    return this.request("GET", "/mcp/servers");
+  }
+  createMcpServer(config: McpServerConfig): Promise<McpServer> {
+    return this.request("POST", "/mcp/servers", { body: config });
+  }
+  updateMcpServer(name: string, config: McpServerConfig): Promise<McpServer> {
+    return this.request("PUT", `/mcp/servers/${encodeURIComponent(name)}`, {
+      body: config
+    });
+  }
+  deleteMcpServer(name: string): Promise<void> {
+    return this.request("DELETE", `/mcp/servers/${encodeURIComponent(name)}`);
+  }
+  reconnectMcpServer(name: string): Promise<McpServer> {
+    return this.request(
+      "POST",
+      `/mcp/servers/${encodeURIComponent(name)}/reconnect`
+    );
+  }
+  listMcpTools(name: string): Promise<McpTool[]> {
+    return this.request(
+      "GET",
+      `/mcp/servers/${encodeURIComponent(name)}/tools`
+    );
+  }
+  mcpCatalog(): Promise<McpCatalogEntry[]> {
+    return this.request("GET", "/mcp/catalog");
+  }
+  /** Store a secret (write-only: the daemon never returns the value). */
+  setSecret(name: string, value: string): Promise<void> {
+    return this.request("POST", `/secrets/${encodeURIComponent(name)}`, {
+      body: { value }
+    });
+  }
+
   reloadProviders(): Promise<{
     default_provider?: string | null;
     active: string[];

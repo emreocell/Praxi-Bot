@@ -3,6 +3,12 @@ import type { ThemeMode } from "ui";
 import type { PermissionPreset } from "../api/types";
 import { DEFAULT_STOP_HOTKEY, PRODUCT_CONFIG } from "../config/product";
 import type { SupportedLanguage } from "../i18n";
+import {
+  type ComputerTarget,
+  parseComputerTarget,
+  parseSendWith,
+  type SendWith
+} from "../lib/settingsPrefs";
 
 export interface AppSettings {
   themeMode: ThemeMode;
@@ -31,6 +37,14 @@ export interface AppSettings {
   notifyPrivate: boolean;
   /** Debug: also show the route chip for a plain `Agent` decision at K4. */
   showAgentRoute: boolean;
+  /** Display name of the account shown in the sidebar menu. */
+  accountName: string;
+  /** Native window frame (title bar) on / off. */
+  windowFrame: boolean;
+  /** Key chord that sends a chat message. */
+  sendWith: SendWith;
+  /** Where the bot's computer / browser runs. */
+  computerTarget: ComputerTarget;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -54,7 +68,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   notifyLongRun: true,
   notifyFailed: true,
   notifyPrivate: false,
-  showAgentRoute: false
+  showAgentRoute: false,
+  accountName: "",
+  windowFrame: true,
+  sendWith: "enter",
+  computerTarget: "this-pc"
 };
 
 export function shouldOpenOnboardingOnStart(
@@ -151,6 +169,16 @@ export async function loadSettings(): Promise<AppSettings> {
       const showAgentRoute =
         (await store.get<boolean>("showAgentRoute")) ??
         DEFAULT_SETTINGS.showAgentRoute;
+      const accountName =
+        (await store.get<string>("accountName")) ??
+        DEFAULT_SETTINGS.accountName;
+      const windowFrame =
+        (await store.get<boolean>("windowFrame")) ??
+        DEFAULT_SETTINGS.windowFrame;
+      const sendWith = parseSendWith(await store.get<string>("sendWith"));
+      const computerTarget = parseComputerTarget(
+        await store.get<string>("computerTarget")
+      );
 
       return {
         themeMode,
@@ -173,7 +201,11 @@ export async function loadSettings(): Promise<AppSettings> {
         notifyLongRun,
         notifyFailed,
         notifyPrivate,
-        showAgentRoute
+        showAgentRoute,
+        accountName,
+        windowFrame,
+        sendWith,
+        computerTarget
       };
     } catch {
       // Fall back to localStorage below if reading from plugin-store fails
@@ -234,6 +266,10 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
       await store.set("notifyFailed", settings.notifyFailed);
       await store.set("notifyPrivate", settings.notifyPrivate);
       await store.set("showAgentRoute", settings.showAgentRoute);
+      await store.set("accountName", settings.accountName);
+      await store.set("windowFrame", settings.windowFrame);
+      await store.set("sendWith", settings.sendWith);
+      await store.set("computerTarget", settings.computerTarget);
       await store.save();
     } catch {
       // Ignore store write errors in non-Tauri environments

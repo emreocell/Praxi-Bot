@@ -20,8 +20,16 @@ import {
   ToolCard
 } from "../components/ChatCards";
 import { Markdown } from "../components/Markdown";
+import { ModelPicker } from "../components/ModelPicker";
 import { useToast } from "../components/Toast";
-import { botView } from "../lib/botProfile";
+import {
+  botView,
+  configFromDraft,
+  draftFromBot,
+  parseModelRef
+} from "../lib/botProfile";
+import { modelGroups } from "../lib/modelPicker";
+import { type SendWith, shouldSend } from "../lib/settingsPrefs";
 import { rank } from "../lib/fuzzy";
 import {
   applyCompletion,
@@ -36,6 +44,7 @@ import {
   routeHoverValues
 } from "../lib/route";
 import { useDaemon } from "../state/DaemonContext";
+import { useProviders } from "../state/useProviders";
 import {
   assignChildRuns,
   itemTs,
@@ -73,7 +82,8 @@ export function ChatView({
   chatId,
   onBack,
   onSwitchChat,
-  showAgentRoute = false
+  showAgentRoute = false,
+  sendWith = "enter"
 }: {
   chatId: string;
   onBack: () => void;
@@ -81,6 +91,8 @@ export function ChatView({
   onSwitchChat?: (chatId: string) => void;
   /** Debug: also show the chip for a plain `Agent` decision at K4. */
   showAgentRoute?: boolean;
+  /** Key chord that sends the message (Settings, General). */
+  sendWith?: SendWith;
 }) {
   const { t } = useTranslation();
   const toast = useToast();
@@ -92,11 +104,36 @@ export function ChatView({
     runs,
     recordAnswer,
     refreshRuns,
-    refreshChats
+    refreshChats,
+    refreshBots
   } = useDaemon();
   const chat = chats.find((c) => c.id === chatId);
   const bot = bots.find((b) => b.id === chat?.bot_id);
   const view = bot ? botView(bot) : null;
+  const { dto: providersDto } = useProviders();
+  const pickerGroups = useMemo(
+    () => modelGroups(providersDto, view?.executor),
+    [providersDto, view?.executor]
+  );
+
+  // Switch the bot's executor model from the header (a profile update).
+  const pickModel = async (ref: string) => {
+    if (!client || !bot) {
+      return;
+    }
+    try {
+      const draft = draftFromBot(bot);
+      draft.executor = parseModelRef(ref);
+      await client.updateBot(bot.id, {
+        name: bot.name,
+        config: configFromDraft(draft, bot)
+      });
+      await refreshBots();
+      toast.show(t("modelPicker.switched", { model: ref }), "success");
+    } catch (e) {
+      toast.show(e instanceof Error ? e.message : String(e), "danger");
+    }
+  };
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
@@ -392,7 +429,18 @@ export function ChatView({
         return;
       }
     }
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (
+      shouldSend(
+        {
+          key: e.key,
+          shiftKey: e.shiftKey,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          isComposing: e.nativeEvent.isComposing
+        },
+        sendWith
+      )
+    ) {
       e.preventDefault();
       void send();
     }
@@ -556,6 +604,14 @@ export function ChatView({
           <span className={styles.title}>{chat.title}</span>
           <span className={styles.subtitle}>{view?.name}</span>
         </div>
+        {bot ? (
+          <ModelPicker
+            groups={pickerGroups}
+            value={view?.executor ?? ""}
+            disabled={!client}
+            onPick={(ref) => void pickModel(ref)}
+          />
+        ) : null}
         {active ? (
           <Button size="sm" variant="danger" onClick={() => void stop()}>
             {t("chat.stop")}

@@ -1,5 +1,5 @@
-import type { ChangeEvent, CSSProperties } from "react";
-import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   applyTheme,
@@ -17,37 +17,34 @@ import {
   type ThemeMode
 } from "ui";
 import styles from "./App.module.css";
-import {
-  ACCENT_PRESETS,
-  BLUR_PRESETS,
-  DEFAULT_STOP_HOTKEY,
-  DIM_PRESETS,
-  HOTKEY_PRESETS,
-  PRODUCT_CONFIG
-} from "./config/product";
+import { PRODUCT_CONFIG } from "./config/product";
+import { AccountMenu, type AccountAction } from "./components/AccountMenu";
 import { HealthIndicator } from "./components/HealthIndicator";
+import { HelpModal } from "./components/HelpModal";
 import { botView } from "./lib/botProfile";
 import { getAutostart, setAutostart } from "./lib/providers";
 import { ToastProvider } from "./components/Toast";
 import { ControlBridgeHost } from "./state/ControlBridgeHost";
-import { PaletteHost } from "./state/PaletteHost";
+import { PaletteHost, type PaletteScreen } from "./state/PaletteHost";
 import { ShellBridgeHost } from "./state/ShellBridgeHost";
 import { DaemonProvider, useDaemon } from "./state/DaemonContext";
 import { BotFormView } from "./views/BotFormView";
 import { BotHomeView } from "./views/BotHomeView";
 import { ChatView } from "./views/ChatView";
 import { NeedsYouView } from "./views/NeedsYouView";
-import { NotificationSettings } from "./views/NotificationSettings";
 import { OnboardingView } from "./views/OnboardingView";
-import { PermissionsSection, ProvidersSection } from "./views/SettingsSections";
 import { SchedulesView } from "./views/SchedulesView";
-import { UsageView } from "./views/UsageView";
+import { AppsModal } from "./views/AppsModal";
+import { SettingsModal } from "./views/SettingsModal";
+import type { SettingsSectionId } from "./views/settings/types";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { i18n, type SupportedLanguage } from "./i18n";
 import {
   broadcastSettingsUpdated,
   type ControlSnapshot,
   formatKeyboardEventAsHotkey,
   getControlState,
+  isTauriRuntime,
   giveBackControl,
   INITIAL_CONTROL_SNAPSHOT,
   matchesHotkeyEvent,
@@ -74,9 +71,7 @@ type Route =
   | { kind: "botForm"; botId?: string }
   | { kind: "chat"; chatId: string; botId: string }
   | { kind: "needs" }
-  | { kind: "usage" }
-  | { kind: "schedules" }
-  | { kind: "settings" };
+  | { kind: "schedules" };
 
 function AppShell() {
   const { t } = useTranslation();
@@ -96,7 +91,11 @@ function AppShell() {
   );
   const [recordingHotkey, setRecordingHotkey] = useState<boolean>(false);
   const [autostartError, setAutostartError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState<SettingsSectionId | null>(
+    null
+  );
+  const [appsOpen, setAppsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -220,6 +219,16 @@ function AppShell() {
     };
   }, [recordingHotkey, controlState.stopHotkey, settings.stopHotkey]);
 
+  // Native title bar on / off (Tauri window decorations; no-op in a browser).
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+    void getCurrentWindow()
+      .setDecorations(settings.windowFrame)
+      .catch(() => {});
+  }, [settings.windowFrame]);
+
   const handleThemeChange = (themeMode: ThemeMode) => {
     updateSettings({ themeMode });
   };
@@ -233,38 +242,16 @@ function AppShell() {
     updateSettings({ language });
   };
 
+  const handleWindowFrameChange = (windowFrame: boolean) => {
+    updateSettings({ windowFrame });
+  };
+
   const handleStopHotkeyChange = (stopHotkey: string) => {
     setRecordingHotkey(false);
     updateSettings({ stopHotkey });
     void setStopHotkey(stopHotkey)
       .then(setControlState)
       .catch(() => {});
-  };
-
-  const handleBackgroundFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) {
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
-      if (result) {
-        updateSettings({
-          backgroundUrl: result,
-          backgroundFileName: file.name
-        });
-      }
-    };
-    reader.readAsDataURL(file);
-    event.target.value = "";
-  };
-
-  const handleClearBackground = () => {
-    updateSettings({
-      backgroundUrl: "",
-      backgroundFileName: ""
-    });
   };
 
   const handleToggleAutostart = async () => {
@@ -309,6 +296,26 @@ function AppShell() {
       botColor: view?.color ?? "#3b82f6",
       botInitials: view?.initials ?? "AT"
     }).then(setControlState);
+  };
+
+  const handleAccountAction = (action: AccountAction) => {
+    if (action === "settings") {
+      setSettingsOpen("general");
+    } else if (action === "computer") {
+      setSettingsOpen("computer");
+    } else if (action === "apps") {
+      setAppsOpen(true);
+    } else {
+      setHelpOpen(true);
+    }
+  };
+
+  const handlePaletteScreen = (screen: PaletteScreen) => {
+    if (screen === "settings" || screen === "usage") {
+      setSettingsOpen(screen === "usage" ? "usage" : "general");
+    } else {
+      setRoute({ kind: screen });
+    }
   };
 
   const openChat = (chatId: string) => {
@@ -477,19 +484,18 @@ function AppShell() {
                 {t("sidebar.schedules")}
               </Button>
               <Button
-                variant={route.kind === "usage" ? "primary" : "secondary"}
+                variant="secondary"
                 fullWidth
-                onClick={() => setRoute({ kind: "usage" })}
+                data-testid="open-apps"
+                onClick={() => setAppsOpen(true)}
               >
-                {t("sidebar.usage")}
+                {t("sidebar.apps")}
               </Button>
-              <Button
-                variant={route.kind === "settings" ? "primary" : "secondary"}
-                fullWidth
-                onClick={() => setRoute({ kind: "settings" })}
-              >
-                {t("sidebar.settings")}
-              </Button>
+              <AccountMenu
+                name={settings.accountName}
+                computerTarget={settings.computerTarget}
+                onAction={handleAccountAction}
+              />
             </div>
           </SidebarFooter>
         </Sidebar>
@@ -654,342 +660,52 @@ function AppShell() {
             onBack={() => setRoute({ kind: "bot", botId: route.botId })}
             onSwitchChat={openChat}
             showAgentRoute={settings.showAgentRoute}
+            sendWith={settings.sendWith}
           />
         ) : null}
         {route.kind === "needs" ? <NeedsYouView onOpenChat={openChat} /> : null}
-        {route.kind === "usage" ? <UsageView /> : null}
         {route.kind === "schedules" ? (
           <SchedulesView onOpenChat={openChat} />
-        ) : null}
-        {route.kind === "settings" ? (
-        <div className={styles.settingsPane}>
-          <div className={styles.settingsContainer}>
-            <header className={styles.settingsHeader}>
-              <h1 className={styles.settingsTitle}>{t("settings.title")}</h1>
-              <p className={styles.settingsSubtitle}>
-                {t("settings.subtitle")}
-              </p>
-            </header>
-
-            <Card padding="md" className={styles.settingCard}>
-              <div className={styles.settingInfo}>
-                <h2 className={styles.settingHeading}>
-                  {t("settings.onboarding.title")}
-                </h2>
-                <p className={styles.settingDescription}>
-                  {t("settings.onboarding.description")}
-                </p>
-              </div>
-              <div className={styles.optionRow}>
-                <span className={styles.hotkeyChip}>
-                  {settings.onboardingCompleted
-                    ? t("settings.onboarding.statusCompleted")
-                    : settings.onboardingSkipped
-                      ? t("settings.onboarding.statusSkipped", {
-                          step: settings.onboardingStep || 1
-                        })
-                      : t("settings.onboarding.statusPending")}
-                </span>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() =>
-                    handleOpenOnboarding(settings.onboardingCompleted)
-                  }
-                  data-testid="settings-open-onboarding"
-                >
-                  {settings.onboardingCompleted
-                    ? t("settings.onboarding.restart")
-                    : t("settings.onboarding.resume")}
-                </Button>
-              </div>
-            </Card>
-
-            <Card padding="md" className={styles.settingCard}>
-              <div className={styles.settingInfo}>
-                <h2 className={styles.settingHeading}>
-                  {t("settings.autostart.title")}
-                </h2>
-                <p className={styles.settingDescription}>
-                  {t("settings.autostart.description")}
-                </p>
-              </div>
-              <div className={styles.optionRow}>
-                <span className={styles.hotkeyChip}>
-                  {settings.autostart
-                    ? t("settings.autostart.enabled")
-                    : t("settings.autostart.disabled")}
-                </span>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => void handleToggleAutostart()}
-                  data-testid="settings-toggle-autostart"
-                >
-                  {settings.autostart
-                    ? t("settings.autostart.disable")
-                    : t("settings.autostart.enable")}
-                </Button>
-              </div>
-              {autostartError ? (
-                <p className={styles.errorDetailMono}>{autostartError}</p>
-              ) : null}
-            </Card>
-
-            <Card padding="md" className={styles.settingCard}>
-              <div className={styles.settingInfo}>
-                <h2 className={styles.settingHeading}>
-                  {t("settings.theme.title")}
-                </h2>
-                <p className={styles.settingDescription}>
-                  {t("settings.theme.description")}
-                </p>
-              </div>
-              <div className={styles.optionRow}>
-                {(["light", "dark", "system"] as const).map((mode) => (
-                  <Button
-                    key={mode}
-                    variant="secondary"
-                    active={settings.themeMode === mode}
-                    onClick={() => handleThemeChange(mode)}
-                  >
-                    {t(`settings.theme.${mode}`)}
-                  </Button>
-                ))}
-              </div>
-            </Card>
-
-            <Card padding="md" className={styles.settingCard}>
-              <div className={styles.settingInfo}>
-                <h2 className={styles.settingHeading}>
-                  {t("settings.accent.title")}
-                </h2>
-                <p className={styles.settingDescription}>
-                  {t("settings.accent.description")}
-                </p>
-              </div>
-              <div className={styles.accentControls}>
-                <div className={styles.swatchRow}>
-                  {ACCENT_PRESETS.map((preset) => {
-                    const isSelected =
-                      settings.accentColor.toLowerCase() ===
-                      preset.value.toLowerCase();
-                    return (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        className={[
-                          styles.colorSwatch,
-                          isSelected ? styles.colorSwatchActive : ""
-                        ]
-                          .filter(Boolean)
-                          .join(" ")}
-                        style={
-                          {
-                            "--swatch-color": preset.value
-                          } as CSSProperties
-                        }
-                        title={t(`settings.accent.presets.${preset.id}`)}
-                        aria-label={t(`settings.accent.presets.${preset.id}`)}
-                        onClick={() => handleAccentChange(preset.value)}
-                      />
-                    );
-                  })}
-                  <label className={styles.customColorLabel}>
-                    <span>{t("settings.accent.custom")}</span>
-                    <input
-                      type="color"
-                      className={styles.colorInput}
-                      value={settings.accentColor || "#2563eb"}
-                      onChange={(e) => handleAccentChange(e.target.value)}
-                    />
-                  </label>
-                </div>
-                {settings.accentColor ? (
-                  <div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleAccentChange("")}
-                    >
-                      {t("settings.accent.reset")}
-                    </Button>
-                  </div>
-                ) : null}
-              </div>
-            </Card>
-
-            <Card padding="md" className={styles.settingCard}>
-              <div className={styles.settingInfo}>
-                <h2 className={styles.settingHeading}>
-                  {t("settings.background.title")}
-                </h2>
-                <p className={styles.settingDescription}>
-                  {t("settings.background.description")}
-                </p>
-              </div>
-
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
-                className={styles.hiddenFileInput}
-                onChange={handleBackgroundFileChange}
-              />
-
-              <div className={styles.optionRow}>
-                <Button
-                  variant="primary"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  {t("settings.background.chooseFile")}
-                </Button>
-                {settings.backgroundUrl ? (
-                  <Button variant="secondary" onClick={handleClearBackground}>
-                    {t("settings.background.clearFile")}
-                  </Button>
-                ) : null}
-                <span className={styles.fileNameLabel}>
-                  {settings.backgroundFileName ||
-                    t("settings.background.noFile")}
-                </span>
-              </div>
-
-              <div className={styles.subSettingBlock}>
-                <span className={styles.subSettingLabel}>
-                  {t("settings.background.blur")}
-                </span>
-                <div className={styles.optionRow}>
-                  {BLUR_PRESETS.map((preset) => (
-                    <Button
-                      key={preset.id}
-                      size="sm"
-                      variant="secondary"
-                      active={settings.backgroundBlur === preset.value}
-                      onClick={() =>
-                        updateSettings({ backgroundBlur: preset.value })
-                      }
-                    >
-                      {t(`settings.background.blurLevels.${preset.id}`)}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-
-              <div className={styles.subSettingBlock}>
-                <span className={styles.subSettingLabel}>
-                  {t("settings.background.dim")}
-                </span>
-                <div className={styles.optionRow}>
-                  {DIM_PRESETS.map((preset) => (
-                    <Button
-                      key={preset.id}
-                      size="sm"
-                      variant="secondary"
-                      active={settings.backgroundDim === preset.value}
-                      onClick={() =>
-                        updateSettings({ backgroundDim: preset.value })
-                      }
-                    >
-                      {t(`settings.background.dimLevels.${preset.id}`)}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            </Card>
-
-            <Card padding="md" className={styles.settingCard}>
-              <div className={styles.settingInfo}>
-                <h2 className={styles.settingHeading}>
-                  {t("settings.hotkey.title")}
-                </h2>
-                <p className={styles.settingDescription}>
-                  {t("settings.hotkey.description")}
-                </p>
-              </div>
-              <div className={styles.optionRow}>
-                <span className={styles.subSettingLabel}>
-                  {t("settings.hotkey.currentLabel")}:
-                </span>
-                <span className={styles.hotkeyChip}>
-                  {settings.stopHotkey || DEFAULT_STOP_HOTKEY}
-                </span>
-                <Button
-                  size="sm"
-                  variant={recordingHotkey ? "primary" : "secondary"}
-                  onClick={() => setRecordingHotkey((prev) => !prev)}
-                >
-                  {recordingHotkey
-                    ? t("settings.hotkey.recording")
-                    : t("settings.hotkey.record")}
-                </Button>
-                {settings.stopHotkey !== DEFAULT_STOP_HOTKEY ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => handleStopHotkeyChange(DEFAULT_STOP_HOTKEY)}
-                  >
-                    {t("settings.hotkey.reset")}
-                  </Button>
-                ) : null}
-              </div>
-              <div className={styles.optionRow}>
-                {HOTKEY_PRESETS.map((preset) => (
-                  <Button
-                    key={preset.id}
-                    size="sm"
-                    variant="secondary"
-                    active={
-                      settings.stopHotkey.toLowerCase() ===
-                      preset.value.toLowerCase()
-                    }
-                    onClick={() => handleStopHotkeyChange(preset.value)}
-                  >
-                    {t(`settings.hotkey.presets.${preset.id}`)}
-                  </Button>
-                ))}
-              </div>
-            </Card>
-
-            <Card padding="md" className={styles.settingCard}>
-              <div className={styles.settingInfo}>
-                <h2 className={styles.settingHeading}>
-                  {t("settings.language.title")}
-                </h2>
-                <p className={styles.settingDescription}>
-                  {t("settings.language.description")}
-                </p>
-              </div>
-              <div className={styles.optionRow}>
-                {(["en", "tr"] as const).map((lang) => (
-                  <Button
-                    key={lang}
-                    variant="secondary"
-                    active={settings.language === lang}
-                    onClick={() => handleLanguageChange(lang)}
-                  >
-                    {t(`settings.language.${lang}`)}
-                  </Button>
-                ))}
-              </div>
-            </Card>
-
-            <NotificationSettings
-              settings={settings}
-              onChange={updateSettings}
-            />
-
-            <ProvidersSection />
-            <PermissionsSection />
-          </div>
-        </div>
         ) : null}
       </div>
       <PaletteHost
         currentBotId={routeBotId}
-        onScreen={(screen) => setRoute({ kind: screen })}
+        onScreen={handlePaletteScreen}
         onBot={(botId) => setRoute({ kind: "bot", botId })}
         onChat={(chatId, botId) => setRoute({ kind: "chat", chatId, botId })}
+      />
+      <SettingsModal
+        open={settingsOpen !== null}
+        initialSection={settingsOpen ?? "general"}
+        onClose={() => setSettingsOpen(null)}
+        bridge={{
+          settings,
+          update: updateSettings,
+          onTheme: handleThemeChange,
+          onAccent: handleAccentChange,
+          onLanguage: handleLanguageChange,
+          onWindowFrame: handleWindowFrameChange,
+          recordingHotkey,
+          onToggleRecordHotkey: () => setRecordingHotkey((prev) => !prev),
+          onStopHotkey: handleStopHotkeyChange,
+          onToggleAutostart: () => void handleToggleAutostart(),
+          autostartError,
+          onOpenOnboarding: (restart) => {
+            setSettingsOpen(null);
+            handleOpenOnboarding(restart);
+          }
+        }}
+      />
+      <AppsModal open={appsOpen} onClose={() => setAppsOpen(false)} />
+      <HelpModal
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        stopHotkey={controlState.stopHotkey || settings.stopHotkey}
+        sendKeys={settings.sendWith === "enter" ? "Enter" : "Ctrl+Enter"}
+        onSetup={() => {
+          setHelpOpen(false);
+          handleOpenOnboarding(false);
+        }}
       />
     </SidebarLayout>
   );

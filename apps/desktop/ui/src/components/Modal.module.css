@@ -1,0 +1,36 @@
+.backdrop {
+  position: fixed;
+  inset: var(--space-0);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background-color: var(--color-surface-overlay);
+  backdrop-filter: blur(var(--space-1));
+}
+
+.dialog {
+  display: flex;
+  width: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  border: var(--size-border) solid var(--color-border-strong);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface);
+  box-shadow: var(--shadow-overlay);
+  color: var(--color-text);
+}
+
+.dialog:focus-visible {
+  outline: none;
+}
+
+.lg {
+  max-width: calc(var(--size-content-max) * 1.45);
+  height: min(100%, 80vh);
+}
+
+.md {
+  max-width: var(--size-content-max);
+}
