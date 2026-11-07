@@ -301,6 +301,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "builtin-tools"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "browser-cdp",
+ "desktop-api",
+ "desktop-windows",
+ "globset",
+ "image",
+ "parking_lot",
+ "permission-engine",
+ "protocol",
+ "script-runtime",
+ "serde",
+ "serde_json",
+ "storage",
+ "tempfile",
+ "tokio",
+ "tool-registry",
+ "uuid",
+ "vision",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

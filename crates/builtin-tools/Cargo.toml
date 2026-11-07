@@ -1,0 +1,36 @@
+[package]
+name = "builtin-tools"
+description = "Built-in agent tools: desktop, browser, files, shell, script and meta tools."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+browser-cdp = { path = "../browser-cdp", version = "0.1.0" }
+desktop-api = { path = "../desktop-api", version = "0.1.0" }
+globset.workspace = true
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+parking_lot.workspace = true
+permission-engine = { path = "../permission-engine", version = "0.1.0" }
+protocol.workspace = true
+script-runtime = { path = "../script-runtime", version = "0.1.0" }
+serde.workspace = true
+serde_json.workspace = true
+storage.workspace = true
+tokio.workspace = true
+tool-registry = { path = "../tool-registry", version = "0.1.0" }
+uuid.workspace = true
+vision = { path = "../vision", version = "0.1.0" }
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+desktop-windows = { path = "../desktop-windows", version = "0.1.0" }
