@@ -123,6 +123,10 @@ impl TurnExecutor {
             return Ok(None);
         }
         let raw = self.first_user_text(&ctx, run)?;
+        let work = self.sh.directives.lock().remove(&run.id);
+        if let Some(spec) = work.and_then(|w| self.scheduled_first_step(&ctx, &raw, w)) {
+            return Ok(Some(spec));
+        }
         let Some(decision) = self.route_first(&ctx, &raw).await else {
             return Ok(Some(user_step(&self.with_recall(&ctx, &raw))));
         };
@@ -159,7 +163,9 @@ impl TurnExecutor {
             return Ok(Some(user_step(&self.with_recall(&ctx, &first))));
         }
         let steer_empty = ctx.state.lock().steer.is_empty();
-        match Self::route_plan(history, steer_empty) {
+        let plan =
+            Self::directive_plan(history).unwrap_or_else(|| Self::route_plan(history, steer_empty));
+        match plan {
             RoutePlan::Step(spec) => return Ok(Some(spec)),
             RoutePlan::Done => {
                 ctx.state.lock().closed = true;
@@ -507,9 +513,19 @@ impl TurnExecutor {
         let policy = self.sh.cfg.model_retry;
         let attempts = policy.max_attempts.max(1);
         let mut attempt = 1;
+        let mut malformed_retried = false;
         loop {
             match self.stream_once(ctx, run, req.clone(), specs).await {
                 Ok(out) => return Ok(out),
+                // A garbled tool call is retried once, not `attempts` times.
+                Err(e @ ProviderError::MalformedToolCall(_)) if malformed_retried => {
+                    return Err(e);
+                }
+                Err(ProviderError::MalformedToolCall(_)) if attempt < attempts => {
+                    malformed_retried = true;
+                    tokio::time::sleep(policy.backoff(attempt)).await;
+                    attempt += 1;
+                }
                 Err(e) if attempt < attempts && is_retryable(&e) => {
                     tokio::time::sleep(policy.backoff(attempt)).await;
                     attempt += 1;
@@ -910,7 +926,10 @@ pub(crate) fn is_retryable(e: &ProviderError) -> bool {
         | ProviderError::Upstream { .. }
         | ProviderError::Timeout
         | ProviderError::Connection(_)
-        | ProviderError::Stream(_) => true,
+        | ProviderError::Stream(_)
+        // The OpenAI-compatible path has no internal retry; `call_with_retries`
+        // allows this one only once.
+        | ProviderError::MalformedToolCall(_) => true,
         ProviderError::Api { status, .. } => matches!(*status, 408 | 429) || *status >= 500,
         _ => false,
     }

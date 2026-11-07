@@ -379,6 +379,181 @@ pub async fn grants_revoke(
     Ok(())
 }
 
+/// Arguments of `bot schedules add`.
+pub struct ScheduleAdd<'a> {
+    /// Bot id.
+    pub bot_id: &'a str,
+    /// Phrase for the daemon's parser.
+    pub when: &'a str,
+    /// Prompt run each time.
+    pub prompt: &'a str,
+    /// Name (default: start of the prompt).
+    pub name: Option<&'a str>,
+    /// IANA timezone for calendar phrases.
+    pub tz: Option<&'a str>,
+    /// Chat the runs post to.
+    pub chat_id: Option<&'a str>,
+}
+
+fn when_text(spec: &Value) -> String {
+    if let Some(c) = spec["cron"].as_str() {
+        format!("cron {c}")
+    } else if let Some(s) = spec["every"]["seconds"].as_u64() {
+        format!("every {s}s")
+    } else if let Some(ms) = spec["at"]["unix_ms"].as_i64() {
+        format!("once at {}", fmt_ms(Some(ms)))
+    } else {
+        "?".to_owned()
+    }
+}
+
+/// Unix milliseconds as `YYYY-MM-DD HH:MMZ` (UTC).
+fn fmt_ms(ms: Option<i64>) -> String {
+    let Some(ms) = ms else {
+        return "-".to_owned();
+    };
+    let secs = ms.div_euclid(1000);
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(mo <= 2);
+    format!(
+        "{y:04}-{mo:02}-{d:02} {:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60
+    )
+}
+
+/// `bot schedules list`.
+///
+/// # Errors
+/// Daemon errors.
+pub async fn schedules_list(c: &Client, json_out: bool, out: &mut dyn Write) -> Result<()> {
+    let list = c.request(Method::GET, "/v1/schedules", None).await?;
+    if json_out {
+        return print_json(out, &list);
+    }
+    let items = list.as_array().cloned().unwrap_or_default();
+    if items.is_empty() {
+        writeln!(
+            out,
+            "(no schedules; add one with `bot schedules add <bot-id> \"<when>\" \"<prompt>\"`)"
+        )?;
+    }
+    for s in items {
+        writeln!(
+            out,
+            "{}  {}  {}  {}  next {}{}",
+            s["id"].as_str().unwrap_or("?"),
+            s["name"].as_str().unwrap_or("?"),
+            when_text(&s["spec"]),
+            if s["enabled"] == true { "on" } else { "off" },
+            fmt_ms(s["next_run_at_ms"].as_i64()),
+            if s["has_webhook"] == true {
+                "  webhook"
+            } else {
+                ""
+            },
+        )?;
+    }
+    Ok(())
+}
+
+/// `bot schedules add <bot-id> "<when>" "<prompt>"`: the daemon parses the
+/// phrase (`422` / exit 6 when it does not understand it), then the schedule
+/// is created.
+///
+/// # Errors
+/// Unparsable phrase (exit 6), unknown bot (exit 5), daemon errors.
+pub async fn schedules_add(
+    c: &Client,
+    a: &ScheduleAdd<'_>,
+    json_out: bool,
+    out: &mut dyn Write,
+) -> Result<()> {
+    let parsed = c
+        .request(
+            Method::POST,
+            "/v1/schedules/parse",
+            Some(json!({ "text": a.when, "tz": a.tz })),
+        )
+        .await?;
+    let name = a.name.map_or_else(
+        || a.prompt.chars().take(40).collect::<String>(),
+        str::to_owned,
+    );
+    let created = c
+        .request(
+            Method::POST,
+            "/v1/schedules",
+            Some(json!({
+                "bot_id": a.bot_id,
+                "chat_id": a.chat_id,
+                "name": name,
+                "spec": parsed["spec"],
+                "payload": { "kind": "agent_prompt", "text": a.prompt },
+            })),
+        )
+        .await?;
+    if json_out {
+        return print_json(out, &created);
+    }
+    writeln!(
+        out,
+        "schedule created: {} ({}), {}, next {}",
+        created["id"].as_str().unwrap_or("?"),
+        created["name"].as_str().unwrap_or("?"),
+        when_text(&created["spec"]),
+        fmt_ms(created["next_run_at_ms"].as_i64()),
+    )?;
+    Ok(())
+}
+
+/// `bot schedules rm <id>`.
+///
+/// # Errors
+/// Unknown schedule (exit 5), daemon errors.
+pub async fn schedules_rm(c: &Client, id: &str, json_out: bool, out: &mut dyn Write) -> Result<()> {
+    c.request(Method::DELETE, &format!("/v1/schedules/{id}"), None)
+        .await?;
+    if json_out {
+        return print_json(out, &json!({ "deleted": id }));
+    }
+    writeln!(out, "deleted")?;
+    Ok(())
+}
+
+/// `bot schedules run-now <id>`.
+///
+/// # Errors
+/// Unknown schedule (exit 5), a run still in flight (exit 6), daemon errors.
+pub async fn schedules_run_now(
+    c: &Client,
+    id: &str,
+    json_out: bool,
+    out: &mut dyn Write,
+) -> Result<()> {
+    let r = c
+        .request(Method::POST, &format!("/v1/schedules/{id}/run-now"), None)
+        .await?;
+    if json_out {
+        return print_json(out, &r);
+    }
+    writeln!(
+        out,
+        "started (follow it with `bot status` / the desktop app)"
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -662,5 +837,114 @@ mod tests {
         let c = Client::new(&url, TOKEN.to_owned());
         let err = status(&c, false, &mut Vec::new()).await.unwrap_err();
         assert_eq!(code_of(&*err), exit::UNREACHABLE);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn schedules_add_list_run_now_rm_against_a_live_daemon() {
+        let (dir, url) = daemon().await;
+        let c = Client::new(&url, TOKEN.to_owned());
+        let (bot, _) = setup_bot_and_chat(&c, dir.path()).await;
+        let mut out = Vec::new();
+
+        schedules_list(&c, false, &mut out).await.unwrap();
+        assert!(String::from_utf8_lossy(&out).contains("no schedules"));
+
+        out.clear();
+        let add = ScheduleAdd {
+            bot_id: &bot,
+            when: "every 15 minutes",
+            prompt: "say hello",
+            name: None,
+            tz: None,
+            chat_id: None,
+        };
+        schedules_add(&c, &add, true, &mut out).await.unwrap();
+        let s: Value = serde_json::from_slice(&out).unwrap();
+        let id = s["id"].as_str().unwrap().to_owned();
+        assert_eq!(s["name"], "say hello");
+        assert_eq!(s["spec"], json!({"every": {"seconds": 900}}));
+        assert_eq!(s["payload"]["text"], "say hello");
+
+        out.clear();
+        schedules_list(&c, false, &mut out).await.unwrap();
+        let text = String::from_utf8_lossy(&out).into_owned();
+        assert!(
+            text.contains(&id) && text.contains("every 900s") && text.contains("on"),
+            "{text}"
+        );
+
+        out.clear();
+        schedules_run_now(&c, &id, true, &mut out).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&out).unwrap()["status"],
+            "accepted"
+        );
+        // The run lands in the chat named after the schedule.
+        let mut said = String::new();
+        for _ in 0..400 {
+            let chats = c.request(Method::GET, "/v1/chats", None).await.unwrap();
+            if let Some(chat) = chats
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|x| x["title"] == "say hello")
+            {
+                let msgs = c
+                    .request(
+                        Method::GET,
+                        &format!("/v1/chats/{}/messages", chat["id"].as_str().unwrap()),
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                if let Some(m) = msgs
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|m| m["role"] == "assistant")
+                {
+                    said = m["content"].as_str().unwrap().to_owned();
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert_eq!(said, "echo: say hello");
+
+        // Exit codes: unparsable phrase (6), unknown bot / schedule (5).
+        let bad = ScheduleAdd {
+            when: "whenever",
+            ..add
+        };
+        let err = schedules_add(&c, &bad, false, &mut out).await.unwrap_err();
+        assert_eq!(code_of(&*err), exit::REJECTED);
+        let unknown_bot = ScheduleAdd {
+            bot_id: &uuid_like(),
+            ..add
+        };
+        let err = schedules_add(&c, &unknown_bot, false, &mut out)
+            .await
+            .unwrap_err();
+        assert_eq!(code_of(&*err), exit::NOT_FOUND);
+        let err = schedules_run_now(&c, &uuid_like(), false, &mut out)
+            .await
+            .unwrap_err();
+        assert_eq!(code_of(&*err), exit::NOT_FOUND);
+
+        out.clear();
+        schedules_rm(&c, &id, false, &mut out).await.unwrap();
+        let err = schedules_rm(&c, &id, false, &mut out).await.unwrap_err();
+        assert_eq!(code_of(&*err), exit::NOT_FOUND);
+        assert_eq!(
+            c.request(Method::GET, "/v1/schedules", None).await.unwrap(),
+            json!([])
+        );
+    }
+
+    #[test]
+    fn dates_render_as_utc() {
+        assert_eq!(fmt_ms(Some(0)), "1970-01-01 00:00Z");
+        assert_eq!(fmt_ms(Some(1_767_225_600_000)), "2026-01-01 00:00Z");
+        assert_eq!(fmt_ms(None), "-");
     }
 }

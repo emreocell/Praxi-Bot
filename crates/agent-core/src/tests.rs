@@ -114,6 +114,7 @@ impl ChatProvider for Fake {
                     message: "down".into(),
                 },
                 "auth" => ProviderError::Auth("bad key".into()),
+                "malformed" => ProviderError::MalformedToolCall("finish reason x".into()),
                 _ => ProviderError::Api {
                     status: 400,
                     message: "bad".into(),
@@ -1070,6 +1071,228 @@ async fn model_call_timeout_covers_a_hanging_provider() {
     assert_eq!(fake.n_requests(), 1);
 }
 
+#[tokio::test]
+async fn malformed_tool_call_is_retried_exactly_once() {
+    // Once: the second attempt succeeds.
+    let env = setup();
+    let fake = Fake::new(vec![Reply::Fail("malformed"), text("fine now")]);
+    let mut config = cfg(Policy::full());
+    config.model_retry.max_attempts = 5;
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
+    let run = lp.run_turn(env.chat, "hi").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(fake.n_requests(), 2);
+
+    // Not twice, however many attempts the policy allows.
+    let env = setup();
+    let fake = Fake::new(vec![
+        Reply::Fail("malformed"),
+        Reply::Fail("malformed"),
+        text("never"),
+    ]);
+    let mut config = cfg(Policy::full());
+    config.model_retry.max_attempts = 5;
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
+    let run = lp.run_turn(env.chat, "hi").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Failed);
+    assert_eq!(fake.n_requests(), 2);
+}
+
+// ---------- schedule-started runs ----------
+
+fn run_started(rx: &mut broadcast::Receiver<StreamItem>) -> Vec<protocol::event::RunStarted> {
+    let mut v = Vec::new();
+    while let Ok(i) = rx.try_recv() {
+        if let Event::RunStarted(r) = i.envelope.event {
+            v.push(r);
+        }
+    }
+    v
+}
+
+fn tool_work(name: &str) -> crate::ScheduleWork {
+    crate::ScheduleWork::Tool {
+        name: name.into(),
+        input: json!({"a": 1}),
+    }
+}
+
+#[tokio::test]
+async fn scheduled_tool_run_calls_the_tool_without_a_model_and_carries_the_schedule_id() {
+    let env = setup();
+    let w = Arc::new(tool("t.write", Effect::Write, "written"));
+    let fake = Fake::new(vec![]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&w)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let mut rx = lp.subscribe();
+    let sid = protocol::TaskId::new();
+    let run = lp
+        .run_scheduled(env.chat, sid, tool_work("t.write"))
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(w.count.load(Ordering::SeqCst), 1);
+    assert_eq!(fake.n_requests(), 0, "no model call");
+    let started = run_started(&mut rx);
+    assert_eq!(started.len(), 1);
+    assert_eq!(started[0].schedule_id, Some(sid));
+    let r = env.storage.get_run(run).unwrap().unwrap();
+    assert_eq!(crate::shared::schedule_id_of(&r.kind), Some(sid));
+    assert_eq!(
+        crate::shared::initiator_of(&r.kind),
+        protocol::InitiatorKind::Schedule
+    );
+    let names: Vec<_> = env
+        .storage
+        .list_steps(run)
+        .unwrap()
+        .into_iter()
+        .map(|s| s.name)
+        .collect();
+    assert_eq!(names, ["user_message", "tools"]);
+}
+
+#[tokio::test]
+async fn human_runs_have_no_schedule_id() {
+    let env = setup();
+    let fake = Fake::new(vec![text("hi")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "hi").unwrap();
+    lp.wait(run).await.unwrap();
+    assert_eq!(run_started(&mut rx)[0].schedule_id, None);
+}
+
+#[tokio::test]
+async fn scheduled_prompt_run_is_a_normal_turn_with_the_schedule_initiator() {
+    let env = setup();
+    let fake = Fake::new(vec![text("report ready")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp
+        .run_scheduled(
+            env.chat,
+            protocol::TaskId::new(),
+            crate::ScheduleWork::Prompt("daily report".into()),
+        )
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(fake.n_requests(), 1);
+    let msgs = env.storage.list_messages(env.chat).unwrap();
+    assert_eq!(msgs[0].content, "daily report");
+    assert_eq!(msgs[1].content, "report ready");
+}
+
+#[tokio::test]
+async fn schedule_runs_never_skip_the_money_floor_even_with_a_full_policy_and_grant() {
+    let env = setup();
+    let mut pay = tool("t.pay", Effect::Write, "paid");
+    pay.spec.category = PermissionCategory::Money;
+    let pay = Arc::new(pay);
+    let fake = Fake::new(vec![]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&pay)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp
+        .run_scheduled(env.chat, protocol::TaskId::new(), tool_work("t.pay"))
+        .unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(pay.count.load(Ordering::SeqCst), 0);
+    lp.approve(a.call_id, ApprovalScope::Always, env.user)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(pay.count.load(Ordering::SeqCst), 1);
+    // The "always" grant does not waive the floor on the next firing.
+    let run2 = lp
+        .run_scheduled(env.chat, protocol::TaskId::new(), tool_work("t.pay"))
+        .unwrap();
+    until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await;
+    assert_eq!(pay.count.load(Ordering::SeqCst), 1);
+    lp.cancel(run2).unwrap();
+}
+
+#[tokio::test]
+async fn scheduled_run_pauses_when_nobody_answers_the_approval() {
+    let env = setup();
+    let w = Arc::new(tool("t.write", Effect::Write, "written"));
+    let fake = Fake::new(vec![calls(&[("c1", "t.write", json!({}))]), text("never")]);
+    let mut config = cfg(Policy::approve_destructive());
+    config.schedule_approval_timeout = Duration::from_millis(150);
+    let lp = make_loop(&env.storage, env.bot, &fake, &[t(&w)], profile(""), config);
+    let mut rx = lp.subscribe();
+    let run = lp
+        .run_scheduled(
+            env.chat,
+            protocol::TaskId::new(),
+            crate::ScheduleWork::Prompt("go".into()),
+        )
+        .unwrap();
+    let state = tokio::time::timeout(Duration::from_secs(10), lp.wait(run))
+        .await
+        .expect("the approval timeout must end the wait")
+        .unwrap();
+    assert_eq!(state, RunState::Paused);
+    assert_eq!(w.count.load(Ordering::SeqCst), 0, "never ran unapproved");
+    let approvals = env.storage.list_approvals(run).unwrap();
+    assert_eq!(approvals[0].decision.as_deref(), Some("expired"));
+    let mut saw_error = false;
+    while let Ok(i) = rx.try_recv() {
+        if let Event::Error(e) = i.envelope.event {
+            saw_error |= e.recoverable && e.message.contains("nobody answered");
+        }
+    }
+    assert!(saw_error, "a recoverable 'paused' error event");
+    assert!(lp.sh.active.lock().get(&env.chat).is_none());
+}
+
+#[tokio::test]
+async fn human_runs_wait_for_approvals_beyond_the_schedule_timeout() {
+    let env = setup();
+    let w = Arc::new(tool("t.write", Effect::Write, "written"));
+    let fake = Fake::new(vec![calls(&[("c1", "t.write", json!({}))]), text("done")]);
+    let mut config = cfg(Policy::approve_destructive());
+    config.schedule_approval_timeout = Duration::from_millis(50);
+    let lp = make_loop(&env.storage, env.bot, &fake, &[t(&w)], profile(""), config);
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(lp.runtime().state(run).unwrap(), RunState::WaitingApproval);
+    lp.approve(a.call_id, ApprovalScope::Once, env.user)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+}
+
 #[test]
 fn retryable_classification() {
     use crate::exec::is_retryable;
@@ -1078,6 +1301,7 @@ fn retryable_classification() {
         retry_after: None
     }));
     assert!(is_retryable(&ProviderError::Connection("x".into())));
+    assert!(is_retryable(&ProviderError::MalformedToolCall("x".into())));
     assert!(is_retryable(&ProviderError::Api {
         status: 429,
         message: String::new()

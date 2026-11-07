@@ -10,8 +10,9 @@ use axum::extract::{FromRequest, Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::{Json, extract::rejection::JsonRejection};
 use permission_engine::{Level, Policy, Rule};
-use protocol::{BotId, ChatId, Event, PermissionCategory, RunId, ToolCallId};
+use protocol::{BotId, ChatId, Event, PermissionCategory, RunId, TaskId, ToolCallId};
 use provider_catalog::Usage;
+use scheduler::{MisfirePolicy, Payload, Schedule, ScheduleSpec, Trigger};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -22,12 +23,13 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::dto::{
-    AnswerQuestion, AnswerResponse, ApprovalDto, BotDto, BotInput, BotUsage, CatalogProviderDto,
-    CategoryDecisionDto, ChatDto, ConfiguredProviderDto, ControlDecisionInput,
+    AcceptedResponse, AnswerQuestion, AnswerResponse, ApprovalDto, BotDto, BotInput, BotUsage,
+    CatalogProviderDto, CategoryDecisionDto, ChatDto, ConfiguredProviderDto, ControlDecisionInput,
     ControlDecisionResponse, ControlStateDto, ControlStateInput, CreateChat, DecideApproval,
     Decision, DecisionResponse, DeliveryKind, EffectivePolicyDto, GrantDto, GrantTargetDto, Health,
-    MessageDto, Mode, PolicyDto, PolicyInput, ProvidersDto, ReloadResponse, RememberResponse,
-    RevokeGrant, RunDto, Scope, SendMessage, SendResponse, UsageSummary, UsageTotals,
+    MessageDto, Mode, ParseSchedule, ParsedSchedule, PolicyDto, PolicyInput, ProvidersDto,
+    ReloadResponse, RememberResponse, RevokeGrant, RunDto, ScheduleDto, ScheduleInput, Scope,
+    SendMessage, SendResponse, UsageSummary, UsageTotals,
 };
 use crate::error::{ApiError, ErrorBody};
 
@@ -957,4 +959,317 @@ pub(crate) async fn reload_providers(
     };
     s.agent().set_providers(providers);
     Ok(Json(out))
+}
+
+// -------------------------------------------------------------- schedules
+
+/// Largest webhook body accepted (256 KB).
+pub(crate) const WEBHOOK_MAX_BODY: usize = 256 * 1024;
+
+fn bad_schedule(m: impl Into<String>) -> ApiError {
+    ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "bad_schedule", m)
+}
+
+fn schedule_dto(sc: &Schedule, has_webhook: bool) -> ScheduleDto {
+    ScheduleDto {
+        id: sc.id.0,
+        bot_id: sc.bot_id.0,
+        chat_id: sc.chat_id.map(|c| c.0),
+        name: sc.name.clone(),
+        spec: serde_json::to_value(&sc.spec).unwrap_or(Value::Null),
+        payload: serde_json::to_value(&sc.payload).unwrap_or(Value::Null),
+        enabled: sc.enabled,
+        created_at_ms: sc.created_at,
+        last_run_at_ms: sc.last_run_at,
+        next_run_at_ms: sc.next_run_at,
+        misfire_policy: sc.misfire_policy.as_str().to_owned(),
+        has_webhook,
+    }
+}
+
+fn dto_of(s: &AppState, sc: &Schedule) -> Result<ScheduleDto, ApiError> {
+    let has = s.schedule_store()?.get_trigger(sc.id)?.is_some();
+    Ok(schedule_dto(sc, has))
+}
+
+/// The schedule `id`, when its bot belongs to the local user.
+fn schedule_of_user(s: &AppState, raw: &str) -> Result<Schedule, ApiError> {
+    let sid = TaskId(id(raw)?);
+    s.schedule_store()?
+        .get(sid)?
+        .filter(|sc| s.bot_of_user(sc.bot_id).is_ok())
+        .ok_or_else(|| ApiError::not_found(format!("schedule {sid}")))
+}
+
+/// Validated pieces of a [`ScheduleInput`].
+struct ScheduleParts {
+    spec: ScheduleSpec,
+    payload: Payload,
+    policy: MisfirePolicy,
+    chat_id: Option<ChatId>,
+}
+
+fn schedule_parts(s: &AppState, input: &ScheduleInput) -> Result<ScheduleParts, ApiError> {
+    s.bot_of_user(BotId(input.bot_id))?;
+    if input.name.trim().is_empty() {
+        return Err(ApiError::bad_request("name must not be empty"));
+    }
+    let spec: ScheduleSpec = serde_json::from_value(input.spec.clone())
+        .map_err(|e| bad_schedule(format!("invalid spec: {e}")))?;
+    spec.validate()?;
+    let payload: Payload = serde_json::from_value(input.payload.clone())
+        .map_err(|e| bad_schedule(format!("invalid payload: {e}")))?;
+    match &payload {
+        Payload::AgentPrompt { text } if text.trim().is_empty() => {
+            return Err(bad_schedule("prompt text must not be empty"));
+        }
+        Payload::Workflow { name, params } if name.trim().is_empty() => {
+            let _ = params;
+            return Err(bad_schedule("workflow name must not be empty"));
+        }
+        Payload::Tool { name, .. } if name.trim().is_empty() => {
+            return Err(bad_schedule("tool name must not be empty"));
+        }
+        _ => {}
+    }
+    let policy = match input.misfire_policy.as_deref() {
+        None => MisfirePolicy::default(),
+        Some(p) => MisfirePolicy::parse(p)
+            .ok_or_else(|| bad_schedule(format!("unknown misfire_policy {p:?}")))?,
+    };
+    let chat_id = match input.chat_id {
+        None => None,
+        Some(c) => {
+            let chat = s.chat_of_user(ChatId(c))?;
+            if chat.bot_id.0 != input.bot_id {
+                return Err(bad_schedule("the chat belongs to another bot"));
+            }
+            Some(chat.id)
+        }
+    };
+    Ok(ScheduleParts {
+        spec,
+        payload,
+        policy,
+        chat_id,
+    })
+}
+
+fn apply_webhook(
+    store: &scheduler::ScheduleStore,
+    sid: TaskId,
+    secret: Option<&str>,
+) -> Result<(), ApiError> {
+    match secret {
+        None => {}
+        Some("") => {
+            store.remove_trigger(sid)?;
+        }
+        Some(sec) => store.set_trigger(
+            sid,
+            &Trigger::Webhook {
+                secret: sec.to_owned(),
+            },
+        )?,
+    }
+    Ok(())
+}
+
+/// List schedules.
+#[utoipa::path(get, path = "/v1/schedules", tag = "schedules", security(("bearer" = [])),
+    responses((status = 200, body = Vec<ScheduleDto>)))]
+pub(crate) async fn list_schedules(
+    State(s): State<AppState>,
+) -> Result<Json<Vec<ScheduleDto>>, ApiError> {
+    let mut out = Vec::new();
+    for sc in s.schedule_store()?.list()? {
+        if s.bot_of_user(sc.bot_id).is_ok() {
+            out.push(dto_of(&s, &sc)?);
+        }
+    }
+    Ok(Json(out))
+}
+
+/// Create a schedule (armed unless `enabled` is `false`).
+#[utoipa::path(post, path = "/v1/schedules", tag = "schedules", security(("bearer" = [])),
+    request_body = ScheduleInput,
+    responses((status = 201, body = ScheduleDto), (status = 404, body = ErrorBody),
+              (status = 422, body = ErrorBody)))]
+pub(crate) async fn create_schedule(
+    State(s): State<AppState>,
+    ApiJson(input): ApiJson<ScheduleInput>,
+) -> Result<(StatusCode, Json<ScheduleDto>), ApiError> {
+    let p = schedule_parts(&s, &input)?;
+    let mut sc = Schedule::new(
+        BotId(input.bot_id),
+        p.chat_id,
+        input.name.trim(),
+        p.spec,
+        p.payload,
+        p.policy,
+        now_ms(),
+    )?;
+    if input.enabled == Some(false) {
+        sc.enabled = false;
+        sc.next_run_at = None;
+    }
+    let store = s.schedule_store()?;
+    store.insert(&sc)?;
+    if let Err(e) = apply_webhook(&store, sc.id, input.webhook_secret.as_deref()) {
+        let _ = store.delete(sc.id);
+        return Err(e);
+    }
+    Ok((StatusCode::CREATED, Json(dto_of(&s, &sc)?)))
+}
+
+/// Get one schedule.
+#[utoipa::path(get, path = "/v1/schedules/{id}", tag = "schedules", security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "Schedule id")),
+    responses((status = 200, body = ScheduleDto), (status = 404, body = ErrorBody)))]
+pub(crate) async fn get_schedule(
+    State(s): State<AppState>,
+    Path(sid): Path<String>,
+) -> Result<Json<ScheduleDto>, ApiError> {
+    Ok(Json(dto_of(&s, &schedule_of_user(&s, &sid)?)?))
+}
+
+/// Replace a schedule's definition (its bot stays).  A changed or re-enabled
+/// timer is re-armed from now; run state (`last_run_at_ms`) is kept.
+#[utoipa::path(put, path = "/v1/schedules/{id}", tag = "schedules", security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "Schedule id")),
+    request_body = ScheduleInput,
+    responses((status = 200, body = ScheduleDto), (status = 404, body = ErrorBody),
+              (status = 422, body = ErrorBody)))]
+pub(crate) async fn update_schedule(
+    State(s): State<AppState>,
+    Path(sid): Path<String>,
+    ApiJson(input): ApiJson<ScheduleInput>,
+) -> Result<Json<ScheduleDto>, ApiError> {
+    let mut sc = schedule_of_user(&s, &sid)?;
+    if input.bot_id != sc.bot_id.0 {
+        return Err(bad_schedule("the bot of a schedule cannot be changed"));
+    }
+    let p = schedule_parts(&s, &input)?;
+    let enabled = input.enabled.unwrap_or(sc.enabled);
+    let rearm = p.spec != sc.spec || (enabled && !sc.enabled);
+    input.name.trim().clone_into(&mut sc.name);
+    sc.chat_id = p.chat_id;
+    sc.payload = p.payload;
+    sc.misfire_policy = p.policy;
+    sc.enabled = enabled;
+    if !enabled {
+        sc.next_run_at = None;
+    } else if rearm || sc.next_run_at.is_none() {
+        sc.next_run_at = match &p.spec {
+            ScheduleSpec::At { unix_ms } => Some(*unix_ms),
+            other => other.next_after(now_ms())?,
+        };
+    }
+    sc.spec = p.spec;
+    let store = s.schedule_store()?;
+    store.update(&sc)?;
+    apply_webhook(&store, sc.id, input.webhook_secret.as_deref())?;
+    Ok(Json(dto_of(&s, &sc)?))
+}
+
+/// Delete a schedule (and its webhook trigger).  Runs it already started stay.
+#[utoipa::path(delete, path = "/v1/schedules/{id}", tag = "schedules",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "Schedule id")),
+    responses((status = 204), (status = 404, body = ErrorBody)))]
+pub(crate) async fn delete_schedule(
+    State(s): State<AppState>,
+    Path(sid): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let sc = schedule_of_user(&s, &sid)?;
+    let store = s.schedule_store()?;
+    store.remove_trigger(sc.id)?;
+    store.delete(sc.id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Fire a schedule now, in the background; its timer is untouched.  The run is
+/// a normal run (its `run_started` event carries the `schedule_id`).
+#[utoipa::path(post, path = "/v1/schedules/{id}/run-now", tag = "schedules",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "Schedule id")),
+    responses((status = 202, body = AcceptedResponse), (status = 404, body = ErrorBody),
+              (status = 409, body = ErrorBody, description = "a run of it is still in flight"),
+              (status = 503, body = ErrorBody, description = "the scheduler is not running")))]
+pub(crate) async fn run_schedule_now(
+    State(s): State<AppState>,
+    Path(sid): Path<String>,
+) -> Result<(StatusCode, Json<AcceptedResponse>), ApiError> {
+    let sc = schedule_of_user(&s, &sid)?;
+    s.scheduler()?.run_now(sc.id)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(AcceptedResponse {
+            status: "accepted".to_owned(),
+            schedule_id: sc.id.0,
+        }),
+    ))
+}
+
+/// Turn an English / Turkish phrase into a schedule spec.
+#[utoipa::path(post, path = "/v1/schedules/parse", tag = "schedules",
+    security(("bearer" = [])),
+    request_body = ParseSchedule,
+    responses((status = 200, body = ParsedSchedule),
+              (status = 422, body = ErrorBody, description = "the phrase is not understood")))]
+pub(crate) async fn parse_schedule(
+    ApiJson(input): ApiJson<ParseSchedule>,
+) -> Result<Json<ParsedSchedule>, ApiError> {
+    let now = now_ms();
+    let tz = input.tz.as_deref().map(str::trim).filter(|t| !t.is_empty());
+    let spec = scheduler::parse_natural_language_with_tz(&input.text, now, tz)
+        .ok_or_else(|| bad_schedule(format!("cannot understand {:?}", input.text)))?;
+    // A bad timezone only shows when the spec is validated.
+    spec.validate()?;
+    let next = match &spec {
+        ScheduleSpec::At { unix_ms } => Some(*unix_ms),
+        other => other.next_after(now)?,
+    };
+    Ok(Json(ParsedSchedule {
+        spec: serde_json::to_value(&spec).unwrap_or(Value::Null),
+        next_run_at_ms: next,
+    }))
+}
+
+/// Fire a schedule from outside.  No bearer token: the body is authenticated
+/// with `X-Signature-256: sha256=<hex HMAC-SHA256(secret, body)>` (the secret
+/// is the schedule's `webhook_secret`).  Host / Origin checks still apply and
+/// the body may be at most 256 KB.  The body replaces `{input}` in the payload.
+/// `202` once accepted (the run goes on in the background).
+#[utoipa::path(post, path = "/v1/webhooks/{id}", tag = "schedules",
+    params(("id" = Uuid, Path, description = "Schedule id"),
+        ("X-Signature-256" = String, Header, description = "`sha256=<hex>` HMAC-SHA256 of the raw body")),
+    request_body(content = String, content_type = "text/plain"),
+    responses((status = 202, body = AcceptedResponse),
+              (status = 401, body = ErrorBody, description = "missing or wrong signature"),
+              (status = 404, body = ErrorBody, description = "no such schedule or no webhook trigger"),
+              (status = 409, body = ErrorBody, description = "disabled, or a run of it is in flight"),
+              (status = 413, description = "body larger than 256 KB"),
+              (status = 503, body = ErrorBody, description = "the scheduler is not running")))]
+pub(crate) async fn webhook(
+    State(s): State<AppState>,
+    Path(sid): Path<String>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<(StatusCode, Json<AcceptedResponse>), ApiError> {
+    let sid = TaskId(id(&sid)?);
+    let signature = headers
+        .get("x-signature-256")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    let text = std::str::from_utf8(&body)
+        .map_err(|_| ApiError::bad_request("the body must be UTF-8 text"))?;
+    s.scheduler()?.trigger_webhook(sid, text, signature)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(AcceptedResponse {
+            status: "accepted".to_owned(),
+            schedule_id: sid.0,
+        }),
+    ))
 }

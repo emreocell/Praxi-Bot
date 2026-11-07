@@ -441,4 +441,97 @@ mod tests {
             Decision::Allow
         );
     }
+
+    fn req_schedule(cat: PermissionCategory, cmd: &str) -> ActionRequest {
+        ActionRequest {
+            category: cat,
+            raw_command: cmd.to_owned(),
+            initiator: InitiatorKind::Schedule,
+        }
+    }
+
+    #[test]
+    fn schedule_behaves_like_the_user_by_default() {
+        let resolver = PermissionResolver::new();
+        for global in [
+            Policy::full(),
+            Policy::approve_destructive(),
+            Policy::read_only(),
+        ] {
+            for cat in [PermissionCategory::Fs, PermissionCategory::Browser] {
+                assert_eq!(
+                    resolver.resolve(&global, None, None, &req_schedule(cat, "")),
+                    resolver.resolve(&global, None, None, &req_human(cat)),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn schedule_never_auto_approves_money_or_never_list() {
+        let resolver = PermissionResolver::new();
+        let full = Policy::full();
+        assert_eq!(
+            resolver.resolve(
+                &full,
+                None,
+                None,
+                &req_schedule(PermissionCategory::Money, "")
+            ),
+            Decision::Ask
+        );
+        assert_eq!(
+            resolver.resolve(
+                &full,
+                None,
+                None,
+                &req_schedule(PermissionCategory::Shell, "rm -rf /")
+            ),
+            Decision::Ask
+        );
+        // A schedule-specific Allow override cannot lower the floors either.
+        let mut bot = Policy::default();
+        let mut rule = Rule::new(Level::Ask);
+        rule.by_initiator
+            .insert(InitiatorKind::Schedule, Level::Allow);
+        bot.categories.insert(PermissionCategory::Money, rule);
+        assert_eq!(
+            resolver.resolve(
+                &full,
+                Some(&bot),
+                None,
+                &req_schedule(PermissionCategory::Money, "")
+            ),
+            Decision::Ask
+        );
+    }
+
+    #[test]
+    fn schedule_override_is_independent_of_human() {
+        let global = Policy::full();
+        let mut bot = Policy::default();
+        let mut rule = Rule::new(Level::Allow);
+        rule.by_initiator
+            .insert(InitiatorKind::Schedule, Level::Deny);
+        bot.categories.insert(PermissionCategory::Messaging, rule);
+        let resolver = PermissionResolver::new();
+        assert_eq!(
+            resolver.resolve(
+                &global,
+                Some(&bot),
+                None,
+                &req_schedule(PermissionCategory::Messaging, "")
+            ),
+            Decision::Deny
+        );
+        assert_eq!(
+            resolver.resolve(
+                &global,
+                Some(&bot),
+                None,
+                &req_human(PermissionCategory::Messaging)
+            ),
+            Decision::Allow
+        );
+    }
 }

@@ -1429,6 +1429,7 @@ dependencies = [
  "permission-engine",
  "protocol",
  "provider-catalog",
+ "scheduler",
  "serde",
  "serde_json",
  "storage",
@@ -1441,6 +1442,7 @@ dependencies = [
  "tower",
  "utoipa",
  "uuid",
+ "workflow-replay",
 ]
 
 [[package]]

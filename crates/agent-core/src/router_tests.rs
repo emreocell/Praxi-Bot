@@ -326,6 +326,42 @@ async fn workflow_command_replays_through_the_gate_without_a_model() {
 }
 
 #[tokio::test]
+async fn scheduled_workflow_run_replays_through_the_gate_without_a_model() {
+    let env = setup();
+    let log = Arc::new(tool("t_log", Effect::Write, "logged"));
+    let script = Script::new(vec![]);
+    let (lp, store) = with_store(&env, make(&env, &script, &[as_tool(&log)], ""));
+    store
+        .save(&wf_tool_step("log_it", "t_log", "write a log line"))
+        .unwrap();
+    let mut rx = lp.subscribe();
+    let sid = protocol::TaskId::new();
+    let run = lp
+        .run_scheduled(
+            env.chat,
+            sid,
+            crate::ScheduleWork::Workflow {
+                name: "log_it".into(),
+                params: std::collections::BTreeMap::new(),
+            },
+        )
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(log.count.load(Ordering::SeqCst), 1);
+    assert_eq!(script.requests.lock().len(), 0, "zero model calls");
+    let evs = drain(&mut rx);
+    let started = evs.iter().find_map(|e| match e {
+        Event::RunStarted(r) => Some(r.clone()),
+        _ => None,
+    });
+    assert_eq!(started.unwrap().schedule_id, Some(sid));
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, Event::WorkflowStepStarted(s) if s.workflow == "log_it"))
+    );
+}
+
+#[tokio::test]
 async fn workflow_replay_asks_the_loops_approval_flow() {
     let env = setup();
     let log = Arc::new(tool("t_log", Effect::Write, "logged"));

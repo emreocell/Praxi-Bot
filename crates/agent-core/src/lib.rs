@@ -30,7 +30,10 @@ mod subagent_tests;
 mod tests;
 
 pub use agent::AgentLoop;
-pub use config::{DEFAULT_DIRECT_TOOL_LIMIT, Guards, LoopConfig, MemoryConfig, ModelPrice};
+pub use config::{
+    DEFAULT_DIRECT_TOOL_LIMIT, DEFAULT_SCHEDULE_APPROVAL_TIMEOUT, Guards, LoopConfig, MemoryConfig,
+    ModelPrice,
+};
 pub use control::{ControlGate, ControlRequest};
 pub use permission_engine::Decision as PolicyDecision;
 pub use profile::{
@@ -38,7 +41,7 @@ pub use profile::{
 };
 pub use shared::{
     ApprovalScope, CategoryDecision, Delivery, EffectivePolicy, Grant, GrantTarget, LoopError,
-    MessageMode, Providers, SkillHintFn, SkillHints, StreamItem,
+    MessageMode, Providers, ScheduleWork, SkillHintFn, SkillHints, StreamItem,
 };
 
 /// Audit-log action recording an "always allow" grant rule for a bot.
