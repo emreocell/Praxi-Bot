@@ -146,6 +146,23 @@
       "enable": "Enable autostart",
       "disable": "Disable autostart",
       "error": "Could not update Windows autostart setting."
+    },
+    "notifications": {
+      "title": "Notifications",
+      "description": "Desktop notifications, shown only while the app window is not in front.",
+      "notifyNeedsYou": "Something needs you",
+      "notifyNeedsYouHint": "An approval or a question is waiting.",
+      "notifyLongRun": "A long run finished",
+      "notifyLongRunHint": "A run that took more than 30 seconds is done.",
+      "notifyFailed": "A run failed",
+      "notifyFailedHint": "A run ended with an error.",
+      "notifyPrivate": "Private notifications",
+      "notifyPrivateHint": "Show only the bot name and a short generic text, never the content.",
+      "showAgentRoute": "Show every routing decision",
+      "showAgentRouteHint": "Also show a chip when the bot simply handled the turn itself (for debugging)."
+    },
+    "route": {
+      "title": "Routing"
     }
   },
   "overlay": {
@@ -291,7 +308,25 @@
       "modelFallback": "Switched model from {{from}} to {{to}}: {{reason}}",
       "error": "{{message}}",
       "workflowDrift": "Workflow {{workflow}} drifted: {{reason}}"
-    }
+    },
+    "route": {
+      "workflow": "Workflow: {{name}} (0 LLM calls)",
+      "command": "Command /{{name}}",
+      "toolHint": "Tool hint",
+      "skillHint": "Skill hint",
+      "agent": "Agent ({{level}})",
+      "hover": "Level {{level}} · confidence {{confidence}}% · {{latency}} ms · {{reason}}"
+    },
+    "remember": {
+      "button": "Remember this",
+      "hint": "Next time this request is routed here directly, without asking the model.",
+      "done": "Remembered. This request now skips the model.",
+      "saved": "Remembered",
+      "notEligible": "This run cannot be remembered.",
+      "failed": "Could not remember this run: {{message}}"
+    },
+    "stopped": "Stopped the running turn.",
+    "newChatStarted": "Started a new chat."
   },
   "botForm": {
     "createTitle": "New bot",
@@ -532,5 +567,25 @@
       "openFullChat": "Open in full chat",
       "retryPrompt": "Retry prompt"
     }
+  },
+  "notify": {
+    "generic": {
+      "needsYou": "Needs your attention.",
+      "longRun": "Finished a long task.",
+      "failed": "A run failed."
+    },
+    "detail": {
+      "needsYou": "{{detail}}",
+      "longRun": "{{detail}}",
+      "failed": "Failed: {{detail}}"
+    }
+  },
+  "tray": {
+    "toggle": "Show / hide window",
+    "needs": "Needs you ({n})",
+    "stopAll": "Stop all",
+    "quit": "Quit",
+    "tooltip": "Praxi-Bot",
+    "tooltipNeeds": "Praxi-Bot: {n} need you"
   }
 }

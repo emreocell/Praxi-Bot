@@ -24,12 +24,14 @@ parking_lot.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 storage.workspace = true
-tauri = { version = "2", features = ["macos-private-api"] }
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
+tauri-plugin-notification = "2"
 tauri-plugin-store = "2"
 thiserror.workspace = true
 tokio.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "0.7"
 windows = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_UI_Input_KeyboardAndMouse",

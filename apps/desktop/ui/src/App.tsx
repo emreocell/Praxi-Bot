@@ -28,12 +28,15 @@ import {
 import { HealthIndicator } from "./components/HealthIndicator";
 import { botView } from "./lib/botProfile";
 import { getAutostart, setAutostart } from "./lib/providers";
+import { ToastProvider } from "./components/Toast";
 import { ControlBridgeHost } from "./state/ControlBridgeHost";
+import { ShellBridgeHost } from "./state/ShellBridgeHost";
 import { DaemonProvider, useDaemon } from "./state/DaemonContext";
 import { BotFormView } from "./views/BotFormView";
 import { BotHomeView } from "./views/BotHomeView";
 import { ChatView } from "./views/ChatView";
 import { NeedsYouView } from "./views/NeedsYouView";
+import { NotificationSettings } from "./views/NotificationSettings";
 import { OnboardingView } from "./views/OnboardingView";
 import { PermissionsSection, ProvidersSection } from "./views/SettingsSections";
 import { UsageView } from "./views/UsageView";
@@ -309,6 +312,7 @@ function AppShell() {
     const chat = chats.find((c) => c.id === chatId);
     setRoute({ kind: "chat", chatId, botId: chat?.bot_id ?? "" });
   };
+  const openNeeds = () => setRoute({ kind: "needs" });
 
   const isRunActive = controlState.mode !== "idle";
   const isHumanDriving = controlState.mode === "human_driving";
@@ -482,6 +486,11 @@ function AppShell() {
       }
     >
       <div className={styles.mainColumn}>
+        <ShellBridgeHost
+          settings={settings}
+          onOpenChat={openChat}
+          onOpenNeeds={openNeeds}
+        />
         {runBanner}
         {route.kind === "onboarding" ? (
           <OnboardingView
@@ -633,6 +642,8 @@ function AppShell() {
             key={route.chatId}
             chatId={route.chatId}
             onBack={() => setRoute({ kind: "bot", botId: route.botId })}
+            onSwitchChat={openChat}
+            showAgentRoute={settings.showAgentRoute}
           />
         ) : null}
         {route.kind === "needs" ? <NeedsYouView onOpenChat={openChat} /> : null}
@@ -950,6 +961,11 @@ function AppShell() {
               </div>
             </Card>
 
+            <NotificationSettings
+              settings={settings}
+              onChange={updateSettings}
+            />
+
             <ProvidersSection />
             <PermissionsSection />
           </div>
@@ -962,9 +978,11 @@ function AppShell() {
 
 export function App() {
   return (
-    <DaemonProvider>
-      <ControlBridgeHost />
-      <AppShell />
-    </DaemonProvider>
+    <ToastProvider>
+      <DaemonProvider>
+        <ControlBridgeHost />
+        <AppShell />
+      </DaemonProvider>
+    </ToastProvider>
   );
 }

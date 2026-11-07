@@ -21,6 +21,16 @@ export interface AppSettings {
   onboardingPermissionPreset: PermissionPreset;
   onboardingBotId: string;
   autostart: boolean;
+  /** OS notification when an approval or question waits (window unfocused). */
+  notifyNeedsYou: boolean;
+  /** ... when a run longer than 30 s finishes (window unfocused). */
+  notifyLongRun: boolean;
+  /** ... when a run fails. */
+  notifyFailed: boolean;
+  /** Notifications carry only the bot name and a generic text. */
+  notifyPrivate: boolean;
+  /** Debug: also show the route chip for a plain `Agent` decision at K4. */
+  showAgentRoute: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -39,7 +49,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   onboardingModel: "",
   onboardingPermissionPreset: "approve-destructive",
   onboardingBotId: "",
-  autostart: false
+  autostart: false,
+  notifyNeedsYou: true,
+  notifyLongRun: true,
+  notifyFailed: true,
+  notifyPrivate: false,
+  showAgentRoute: false
 };
 
 export function shouldOpenOnboardingOnStart(
@@ -121,6 +136,21 @@ export async function loadSettings(): Promise<AppSettings> {
         DEFAULT_SETTINGS.onboardingBotId;
       const autostart =
         (await store.get<boolean>("autostart")) ?? DEFAULT_SETTINGS.autostart;
+      const notifyNeedsYou =
+        (await store.get<boolean>("notifyNeedsYou")) ??
+        DEFAULT_SETTINGS.notifyNeedsYou;
+      const notifyLongRun =
+        (await store.get<boolean>("notifyLongRun")) ??
+        DEFAULT_SETTINGS.notifyLongRun;
+      const notifyFailed =
+        (await store.get<boolean>("notifyFailed")) ??
+        DEFAULT_SETTINGS.notifyFailed;
+      const notifyPrivate =
+        (await store.get<boolean>("notifyPrivate")) ??
+        DEFAULT_SETTINGS.notifyPrivate;
+      const showAgentRoute =
+        (await store.get<boolean>("showAgentRoute")) ??
+        DEFAULT_SETTINGS.showAgentRoute;
 
       return {
         themeMode,
@@ -138,7 +168,12 @@ export async function loadSettings(): Promise<AppSettings> {
         onboardingModel,
         onboardingPermissionPreset,
         onboardingBotId,
-        autostart
+        autostart,
+        notifyNeedsYou,
+        notifyLongRun,
+        notifyFailed,
+        notifyPrivate,
+        showAgentRoute
       };
     } catch {
       // Fall back to localStorage below if reading from plugin-store fails
@@ -194,6 +229,11 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
       );
       await store.set("onboardingBotId", settings.onboardingBotId);
       await store.set("autostart", settings.autostart);
+      await store.set("notifyNeedsYou", settings.notifyNeedsYou);
+      await store.set("notifyLongRun", settings.notifyLongRun);
+      await store.set("notifyFailed", settings.notifyFailed);
+      await store.set("notifyPrivate", settings.notifyPrivate);
+      await store.set("showAgentRoute", settings.showAgentRoute);
       await store.save();
     } catch {
       // Ignore store write errors in non-Tauri environments
