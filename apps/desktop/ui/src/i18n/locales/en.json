@@ -327,7 +327,19 @@
       "failed": "Could not remember this run: {{message}}"
     },
     "stopped": "Stopped the running turn.",
-    "newChatStarted": "Started a new chat."
+    "newChatStarted": "Started a new chat.",
+    "md": {
+      "copy": "Copy",
+      "copied": "Copied",
+      "code": "code"
+    },
+    "slash": {
+      "new": "Start a new chat",
+      "stop": "Stop the current run",
+      "menu": "Commands",
+      "mentionMenu": "Bots",
+      "noMatch": "No match"
+    }
   },
   "botForm": {
     "createTitle": "New bot",
@@ -683,5 +695,28 @@
         "prompt": "Write what the bot should do."
       }
     }
+  },
+  "palette": {
+    "title": "Command palette",
+    "placeholder": "Type a command…",
+    "empty": "No matching command",
+    "hint": "↑↓ to move · Enter to run · Esc to close",
+    "go": {
+      "home": "Go to overview",
+      "needs": "Go to Needs you",
+      "schedules": "Go to scheduled tasks",
+      "usage": "Go to usage",
+      "settings": "Open settings"
+    },
+    "group": {
+      "navigate": "Navigate",
+      "chat": "Chat",
+      "bot": "Bot",
+      "schedule": "Schedule"
+    },
+    "newChat": "New chat",
+    "switchBot": "Switch to {{name}}",
+    "runSchedule": "Run now: {{name}}",
+    "scheduleStarted": "Schedule started"
   }
 }

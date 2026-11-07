@@ -657,6 +657,26 @@ async fn webhook_delivery_id_replay_is_rejected() {
 }
 
 #[tokio::test]
+async fn webhook_without_any_replay_headers_is_still_deduplicated() {
+    let (_store, exec, scheduler, id) = webhook_fixture(Payload::AgentPrompt { text: "x".into() });
+    let body = "payload";
+    let sig = sign_webhook_body("s3cret", body.as_bytes());
+    let meta = WebhookMeta::default();
+    scheduler
+        .handle_webhook_with_meta(id, body, &sig, &meta)
+        .await
+        .unwrap();
+    assert!(matches!(
+        scheduler
+            .handle_webhook_with_meta(id, body, &sig, &meta)
+            .await,
+        Err(SchedulerError::InvalidSignature)
+    ));
+    assert_eq!(exec.count(), 1);
+    scheduler.shutdown().await;
+}
+
+#[tokio::test]
 async fn replay_is_remembered_until_the_timestamp_leaves_the_window() {
     use crate::webhook::{REPLAY_WINDOW_MS, ReplayGuard, prepare_webhook};
     let (store, _exec, scheduler, id) = webhook_fixture(Payload::AgentPrompt { text: "x".into() });
@@ -672,11 +692,11 @@ async fn replay_is_remembered_until_the_timestamp_leaves_the_window() {
     let (_, pending) = prepare_webhook(&store, id, body, &sig, now, &meta, Some(&guard)).unwrap();
     assert!(guard.commit(pending.unwrap(), now));
     // Just after `now + window` the old logic had forgotten it; the timestamp is still valid.
+    // `prepare_webhook` no longer refuses replays itself (that happens at `commit`, after
+    // the Busy check), so the second attempt authenticates but cannot be committed.
     let later = now + REPLAY_WINDOW_MS + 500;
-    assert!(matches!(
-        prepare_webhook(&store, id, body, &sig, later, &meta, Some(&guard)),
-        Err(SchedulerError::InvalidSignature)
-    ));
+    let (_, pending) = prepare_webhook(&store, id, body, &sig, later, &meta, Some(&guard)).unwrap();
+    assert!(!guard.commit(pending.unwrap(), later));
     // Once the timestamp is out of the window the request fails on staleness anyway.
     let much_later = ts + REPLAY_WINDOW_MS + 1;
     assert!(matches!(

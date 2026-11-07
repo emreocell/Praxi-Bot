@@ -114,7 +114,10 @@ struct ProviderClassifier {
 impl Classifier for ProviderClassifier {
     async fn classify(&self, prompt: &str, max_tokens: u32) -> Result<String, BackendError> {
         let model = ModelRef(self.model.clone());
-        let provider = self.providers.pick(&model);
+        let provider = self
+            .providers
+            .pick(&model)
+            .map_err(|e| BackendError::new(e.to_string()))?;
         let mut req = ChatRequest::new(model, vec![Message::text(MessageRole::User, prompt)]);
         req.max_tokens = Some(max_tokens);
         req.temperature = Some(0.0);
@@ -260,7 +263,7 @@ impl Shared {
     }
 
     /// Everything the ladder may route to, as the bot sees it.
-    fn router_candidates(&self, profile: &BotProfile) -> Vec<Candidate> {
+    pub(crate) fn router_candidates(&self, profile: &BotProfile) -> Vec<Candidate> {
         let mut out = Vec::new();
         if let Some(w) = self.router.workflows.get()
             && let Ok(entries) = w.store.list()
@@ -294,11 +297,23 @@ impl Shared {
             if matches!(spec.name.as_str(), FIND_TOOL | GET_TOOL_DETAILS | USE_TOOL) {
                 continue;
             }
-            out.push(Candidate::new(
-                CandidateKind::Tool,
-                &spec.name,
-                &spec.description,
-            ));
+            let mut c = Candidate::new(CandidateKind::Tool, &spec.name, &spec.description);
+            let required: Vec<&str> = spec
+                .input_schema
+                .get("required")
+                .and_then(serde_json::Value::as_array)
+                .map(|r| r.iter().filter_map(serde_json::Value::as_str).collect())
+                .unwrap_or_default();
+            if let Some(props) = spec
+                .input_schema
+                .get("properties")
+                .and_then(serde_json::Value::as_object)
+            {
+                for name in props.keys() {
+                    c = c.with_param(name, required.contains(&name.as_str()));
+                }
+            }
+            out.push(c);
         }
         out
     }
@@ -315,11 +330,18 @@ impl Shared {
             }
             *cur = Some(fp);
         }
+        let count = candidates.len();
         bl.ladder.set_candidates(candidates);
         if embed && let Ok(handle) = tokio::runtime::Handle::try_current() {
             let ladder = Arc::clone(&bl.ladder);
             let task = handle.spawn(async move {
-                let _ = ladder.refresh_embeddings().await;
+                if let Err(e) = ladder.refresh_embeddings().await {
+                    tracing::warn!(
+                        candidates = count,
+                        error = %e,
+                        "K2 embedding refresh failed; routing falls back to BM25"
+                    );
+                }
             });
             let mut bg = self.bg.lock();
             bg.retain(|h| !h.is_finished());

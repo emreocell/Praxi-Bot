@@ -14,18 +14,23 @@
 //! });
 //! ```
 
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use builtin_tools::ToolGate;
+use parking_lot::Mutex;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tool_registry::{
     Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError, ToolOutput, ToolSpec,
 };
 
-use crate::replay::{Handles, Handover, HandoverReason, ReplayOptions, ReplayReport, Replayer};
+use crate::error::WorkflowError;
+use crate::replay::{
+    Handles, Handover, HandoverReason, MAX_WORKFLOW_DEPTH, ReplayOptions, ReplayReport, Replayer,
+};
 use crate::store::WorkflowStore;
 
 /// Name of the run tool.
@@ -74,6 +79,7 @@ pub fn tools(
             handles,
             gate,
             opts,
+            active: Arc::default(),
         }),
         Arc::new(WorkflowList {
             spec: spec(
@@ -139,6 +145,58 @@ struct WorkflowRun {
     handles: Handles,
     gate: Arc<dyn ToolGate>,
     opts: ReplayOptions,
+    /// Workflows being replayed per run (outermost first). Keyed by run id
+    /// rather than a task-local: a workflow can reach itself again through
+    /// `script_run`, whose engine runs on another thread.
+    active: Arc<Mutex<HashMap<String, Vec<String>>>>,
+}
+
+/// Pops a workflow off the run's active stack on drop.
+struct ActiveGuard {
+    active: Arc<Mutex<HashMap<String, Vec<String>>>>,
+    run_id: String,
+}
+
+impl Drop for ActiveGuard {
+    fn drop(&mut self) {
+        let mut map = self.active.lock();
+        if let Some(stack) = map.get_mut(&self.run_id) {
+            stack.pop();
+            if stack.is_empty() {
+                map.remove(&self.run_id);
+            }
+        }
+    }
+}
+
+impl WorkflowRun {
+    fn enter(&self, run_id: &str, name: &str) -> Result<ActiveGuard, WorkflowError> {
+        let mut map = self.active.lock();
+        let stack = map.entry(run_id.to_owned()).or_default();
+        let err = if stack.iter().any(|n| n == name) {
+            Some(format!(
+                "workflow `{name}` would call itself (active: {})",
+                stack.join(" -> ")
+            ))
+        } else if stack.len() >= MAX_WORKFLOW_DEPTH {
+            Some(format!(
+                "workflows nested deeper than {MAX_WORKFLOW_DEPTH} levels"
+            ))
+        } else {
+            None
+        };
+        if let Some(e) = err {
+            if stack.is_empty() {
+                map.remove(run_id);
+            }
+            return Err(WorkflowError::Invalid(e));
+        }
+        stack.push(name.to_owned());
+        Ok(ActiveGuard {
+            active: self.active.clone(),
+            run_id: run_id.to_owned(),
+        })
+    }
 }
 
 #[async_trait]
@@ -154,8 +212,12 @@ impl Tool for WorkflowRun {
             .store
             .get(&i.name)
             .map_err(|e| ToolError::Execution(e.to_string()))?;
+        let _guard = self
+            .enter(&ctx.run_id, &wf.name)
+            .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
         let mut opts = self.opts.clone();
         opts.run_id.clone_from(&ctx.run_id);
+        opts.bot_id.clone_from(&ctx.bot_id);
         let report = Replayer::new(self.handles.clone(), opts)
             .replay(&wf, &i.params, self.gate.as_ref())
             .await

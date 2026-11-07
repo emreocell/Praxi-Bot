@@ -45,16 +45,43 @@ impl Default for LaunchOptions {
 
 /// Find an installed Chrome or Edge binary.
 pub fn find_browser() -> Result<PathBuf> {
-    if let Ok(p) = std::env::var(BROWSER_ENV) {
+    if let Ok(p) = std::env::var("BOT_BROWSER_PATH").or_else(|_| std::env::var(BROWSER_ENV)) {
         let p = PathBuf::from(p);
+        if is_snap_browser(&p) {
+            return Err(Error::Launch("snap-only browser is unsupported under the hardened service; install a non-snap browser and set BOT_BROWSER_PATH".into()));
+        }
         if p.is_file() {
             return Ok(p);
         }
+        return Err(Error::Launch(format!(
+            "browser override does not exist: {}",
+            p.display()
+        )));
     }
     candidate_paths()
         .into_iter()
-        .find(|p| p.is_file())
-        .ok_or(Error::BrowserNotFound)
+        .find(|p| p.is_file() && !is_snap_browser(p))
+        .ok_or_else(|| {
+            if candidate_paths().iter().any(|p| p.is_file() && is_snap_browser(p)) {
+                Error::Launch("only snap browsers found; unsupported under the hardened service; install non-snap Chrome/Chromium or set BOT_BROWSER_PATH".into())
+            } else { Error::BrowserNotFound }
+        })
+}
+
+/// Known snap executables and distro wrappers cannot run in the hardened unit.
+#[must_use]
+pub fn is_snap_browser(path: &Path) -> bool {
+    use std::io::Read;
+    if path.starts_with("/snap") || path.canonicalize().is_ok_and(|p| p.starts_with("/snap")) {
+        return true;
+    }
+    let mut header = Vec::new();
+    if let Ok(file) = std::fs::File::open(path) {
+        let _ = file.take(8192).read_to_end(&mut header);
+    }
+    header.starts_with(b"#!")
+        && (String::from_utf8_lossy(&header).contains("snap run")
+            || String::from_utf8_lossy(&header).contains("/snap/"))
 }
 
 fn candidate_paths() -> Vec<PathBuf> {
@@ -74,6 +101,7 @@ fn candidate_paths() -> Vec<PathBuf> {
         v.push("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".into());
         v.push("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge".into());
     } else {
+        v.push("/opt/praxi-browser/chrome".into());
         let names = [
             "google-chrome",
             "google-chrome-stable",
@@ -108,6 +136,8 @@ pub fn build_args(opts: &LaunchOptions, profile: &Path) -> Vec<String> {
         "--disable-popup-blocking".into(),
         "--disable-default-apps".into(),
         "--disable-sync".into(),
+        "--disable-dev-shm-usage".into(),
+        "--disable-gpu".into(),
         "--password-store=basic".into(),
         "--use-mock-keychain".into(),
         format!(
@@ -200,6 +230,21 @@ async fn http_get(hostport: &str, path: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recognizes_snap_wrappers_without_launching_them() {
+        let path =
+            std::env::temp_dir().join(format!("praxi-snap-wrapper-test-{}", std::process::id()));
+        std::fs::write(&path, b"#!/bin/sh\nexec /snap/bin/chromium \"$@\"\n").unwrap();
+        assert!(is_snap_browser(&path));
+        std::fs::write(
+            &path,
+            b"#!/bin/sh\nexec /usr/lib/chromium/chromium \"$@\"\n",
+        )
+        .unwrap();
+        assert!(!is_snap_browser(&path));
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn parses_active_port_file() {

@@ -1,0 +1,471 @@
+[
+  {
+    "id": "filesystem",
+    "name": "Filesystem",
+    "description": "Read, write and search files inside a folder you choose (edit the last argument).",
+    "category": "fs",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+    "icon": null,
+    "install": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem@2.2.0",
+        "."
+      ],
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "github",
+    "name": "GitHub",
+    "description": "Repositories, issues, pull requests and code search.",
+    "category": "accounts",
+    "homepage": "https://github.com/github/github-mcp-server",
+    "icon": "github",
+    "install": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github@2025.4.8"
+      ],
+      "secret_env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "mcp/github-token"
+      },
+      "required_secrets": [
+        {
+          "name": "mcp/github-token",
+          "label": "GitHub personal access token",
+          "help_url": "https://github.com/settings/tokens"
+        }
+      ]
+    }
+  },
+  {
+    "id": "gitlab",
+    "name": "GitLab",
+    "description": "Projects, issues and merge requests on GitLab.",
+    "category": "accounts",
+    "homepage": "https://gitlab.com/gitlab-org/gitlab",
+    "icon": "gitlab",
+    "install": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-gitlab@2025.4.25"
+      ],
+      "secret_env": {
+        "GITLAB_PERSONAL_ACCESS_TOKEN": "mcp/gitlab-token"
+      },
+      "required_secrets": [
+        {
+          "name": "mcp/gitlab-token",
+          "label": "GitLab personal access token",
+          "help_url": "https://gitlab.com/-/user_settings/personal_access_tokens"
+        }
+      ]
+    }
+  },
+  {
+    "id": "slack",
+    "name": "Slack",
+    "description": "Read channels and post messages as a Slack bot.",
+    "category": "messaging",
+    "homepage": "https://github.com/modelcontextprotocol/servers-archived/tree/main/src/slack",
+    "icon": "slack",
+    "install": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-slack@2025.4.25"
+      ],
+      "secret_env": {
+        "SLACK_BOT_TOKEN": "mcp/slack-bot-token",
+        "SLACK_TEAM_ID": "mcp/slack-team-id"
+      },
+      "required_secrets": [
+        {
+          "name": "mcp/slack-bot-token",
+          "label": "Slack bot token (xoxb-...)",
+          "help_url": "https://api.slack.com/apps"
+        },
+        {
+          "name": "mcp/slack-team-id",
+          "label": "Slack workspace (team) id, e.g. T01234567",
+          "help_url": "https://api.slack.com/apps"
+        }
+      ]
+    }
+  },
+  {
+    "id": "notion",
+    "name": "Notion",
+    "description": "Search, read and edit Notion pages and databases.",
+    "category": "accounts",
+    "homepage": "https://github.com/makenotion/notion-mcp-server",
+    "icon": "notion",
+    "install": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@notionhq/notion-mcp-server@2.6.1"
+      ],
+      "secret_env": {
+        "NOTION_TOKEN": "mcp/notion-token"
+      },
+      "required_secrets": [
+        {
+          "name": "mcp/notion-token",
+          "label": "Notion integration token",
+          "help_url": "https://www.notion.so/profile/integrations"
+        }
+      ]
+    }
+  },
+  {
+    "id": "google-drive",
+    "name": "Google Drive",
+    "description": "Search and read files in Google Drive. Needs a one-time OAuth setup, see the homepage.",
+    "category": "accounts",
+    "homepage": "https://github.com/modelcontextprotocol/servers-archived/tree/main/src/gdrive",
+    "icon": "googledrive",
+    "install": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-gdrive@2025.1.14"
+      ],
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "postgres",
+    "name": "PostgreSQL",
+    "description": "Inspect schemas and run queries (restricted, read-only mode) on a Postgres database.",
+    "category": "accounts",
+    "homepage": "https://github.com/crystaldba/postgres-mcp",
+    "icon": "postgresql",
+    "install": {
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "postgres-mcp==0.3.0",
+        "--access-mode=restricted"
+      ],
+      "secret_env": {
+        "DATABASE_URI": "mcp/postgres-token"
+      },
+      "required_secrets": [
+        {
+          "name": "mcp/postgres-token",
+          "label": "PostgreSQL connection URI (postgresql://user:pass@host:5432/db)"
+        }
+      ]
+    }
+  },
+  {
+    "id": "sqlite",
+    "name": "SQLite",
+    "description": "Query and analyse a local SQLite database file (edit the path argument).",
+    "category": "fs",
+    "homepage": "https://github.com/modelcontextprotocol/servers-archived/tree/main/src/sqlite",
+    "icon": "sqlite",
+    "install": {
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-server-sqlite==2025.4.25",
+        "--db-path",
+        "./data.db"
+      ],
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "brave-search",
+    "name": "Brave Search",
+    "description": "Web and local search through the Brave Search API.",
+    "category": "remote",
+    "homepage": "https://github.com/brave/brave-search-mcp-server",
+    "icon": "brave",
+    "install": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-brave-search@0.6.2"
+      ],
+      "secret_env": {
+        "BRAVE_API_KEY": "mcp/brave-token"
+      },
+      "required_secrets": [
+        {
+          "name": "mcp/brave-token",
+          "label": "Brave Search API key",
+          "help_url": "https://api-dashboard.search.brave.com/"
+        }
+      ]
+    }
+  },
+  {
+    "id": "fetch",
+    "name": "Fetch",
+    "description": "Fetch a web page and convert it to Markdown for the model.",
+    "category": "remote",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
+    "icon": null,
+    "install": {
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-server-fetch==2026.11.4"
+      ],
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "playwright",
+    "name": "Playwright",
+    "description": "Drive a real browser: navigate, click, fill forms and take snapshots.",
+    "category": "browser",
+    "homepage": "https://github.com/microsoft/playwright-mcp",
+    "icon": null,
+    "install": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@0.0.84"
+      ],
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "sentry",
+    "name": "Sentry",
+    "description": "Look into Sentry issues, events and projects.",
+    "category": "accounts",
+    "homepage": "https://github.com/getsentry/sentry-mcp",
+    "icon": "sentry",
+    "install": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@sentry/mcp-server@0.49.0"
+      ],
+      "secret_env": {
+        "SENTRY_ACCESS_TOKEN": "mcp/sentry-token"
+      },
+      "required_secrets": [
+        {
+          "name": "mcp/sentry-token",
+          "label": "Sentry user auth token",
+          "help_url": "https://sentry.io/settings/account/api/auth-tokens/"
+        }
+      ]
+    }
+  },
+  {
+    "id": "linear",
+    "name": "Linear",
+    "description": "Issues, projects and cycles in Linear (remote server).",
+    "category": "accounts",
+    "homepage": "https://linear.app/docs/mcp",
+    "icon": "linear",
+    "install": {
+      "transport": "http",
+      "url": "https://mcp.linear.app/mcp",
+      "secret_headers": {
+        "Authorization": "mcp/linear-auth"
+      },
+      "required_secrets": [
+        {
+          "name": "mcp/linear-auth",
+          "label": "Authorization header value: the word Bearer, a space, then your Linear API key",
+          "help_url": "https://linear.app/settings/account/security"
+        }
+      ]
+    }
+  },
+  {
+    "id": "todoist",
+    "name": "Todoist",
+    "description": "Manage Todoist tasks and projects.",
+    "category": "accounts",
+    "homepage": "https://github.com/Doist/todoist-ai",
+    "icon": "todoist",
+    "install": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@doist/todoist-ai@9.0.0"
+      ],
+      "secret_env": {
+        "TODOIST_API_KEY": "mcp/todoist-token"
+      },
+      "required_secrets": [
+        {
+          "name": "mcp/todoist-token",
+          "label": "Todoist API token",
+          "help_url": "https://app.todoist.com/app/settings/integrations/developer"
+        }
+      ]
+    }
+  },
+  {
+    "id": "obsidian",
+    "name": "Obsidian",
+    "description": "Read and write notes in your vault (needs the Local REST API plugin).",
+    "category": "fs",
+    "homepage": "https://github.com/MarkusPfundstein/mcp-obsidian",
+    "icon": "obsidian",
+    "install": {
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-obsidian==0.2.3"
+      ],
+      "secret_env": {
+        "OBSIDIAN_API_KEY": "mcp/obsidian-token"
+      },
+      "required_secrets": [
+        {
+          "name": "mcp/obsidian-token",
+          "label": "Obsidian Local REST API key (plugin setting)",
+          "help_url": "https://github.com/coddingtonbear/obsidian-local-rest-api"
+        }
+      ]
+    }
+  },
+  {
+    "id": "home-assistant",
+    "name": "Home Assistant",
+    "description": "Read states and control devices in your smart home. Edit HA_URL for your instance.",
+    "category": "accounts",
+    "homepage": "https://github.com/voska/hass-mcp",
+    "icon": "homeassistant",
+    "install": {
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "hass-mcp==0.6.1"
+      ],
+      "env": {
+        "HA_URL": "http://homeassistant.local:8123"
+      },
+      "secret_env": {
+        "HA_TOKEN": "mcp/home-assistant-token"
+      },
+      "required_secrets": [
+        {
+          "name": "mcp/home-assistant-token",
+          "label": "Home Assistant long-lived access token",
+          "help_url": "https://www.home-assistant.io/docs/authentication/#your-account-profile"
+        }
+      ]
+    }
+  },
+  {
+    "id": "exa",
+    "name": "Exa",
+    "description": "Neural web search and content retrieval.",
+    "category": "remote",
+    "homepage": "https://github.com/exa-labs/exa-mcp-server",
+    "icon": null,
+    "install": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "exa-mcp-server@3.4.3"
+      ],
+      "secret_env": {
+        "EXA_API_KEY": "mcp/exa-token"
+      },
+      "required_secrets": [
+        {
+          "name": "mcp/exa-token",
+          "label": "Exa API key",
+          "help_url": "https://dashboard.exa.ai/api-keys"
+        }
+      ]
+    }
+  },
+  {
+    "id": "tavily",
+    "name": "Tavily",
+    "description": "Web search, extract and crawl built for agents.",
+    "category": "remote",
+    "homepage": "https://github.com/tavily-ai/tavily-mcp",
+    "icon": null,
+    "install": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "tavily-mcp@0.2.22"
+      ],
+      "secret_env": {
+        "TAVILY_API_KEY": "mcp/tavily-token"
+      },
+      "required_secrets": [
+        {
+          "name": "mcp/tavily-token",
+          "label": "Tavily API key",
+          "help_url": "https://app.tavily.com/home"
+        }
+      ]
+    }
+  },
+  {
+    "id": "firecrawl",
+    "name": "Firecrawl",
+    "description": "Scrape, crawl and extract structured data from websites.",
+    "category": "remote",
+    "homepage": "https://github.com/firecrawl/firecrawl-mcp-server",
+    "icon": null,
+    "install": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "firecrawl-mcp@3.38.0"
+      ],
+      "secret_env": {
+        "FIRECRAWL_API_KEY": "mcp/firecrawl-token"
+      },
+      "required_secrets": [
+        {
+          "name": "mcp/firecrawl-token",
+          "label": "Firecrawl API key",
+          "help_url": "https://www.firecrawl.dev/app/api-keys"
+        }
+      ]
+    }
+  },
+  {
+    "id": "context7",
+    "name": "Context7",
+    "description": "Up-to-date library documentation and code examples.",
+    "category": "remote",
+    "homepage": "https://github.com/upstash/context7",
+    "icon": null,
+    "install": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp@4.5.1"
+      ],
+      "required_secrets": []
+    }
+  }
+]

@@ -30,6 +30,7 @@ import { botView } from "./lib/botProfile";
 import { getAutostart, setAutostart } from "./lib/providers";
 import { ToastProvider } from "./components/Toast";
 import { ControlBridgeHost } from "./state/ControlBridgeHost";
+import { PaletteHost } from "./state/PaletteHost";
 import { ShellBridgeHost } from "./state/ShellBridgeHost";
 import { DaemonProvider, useDaemon } from "./state/DaemonContext";
 import { BotFormView } from "./views/BotFormView";
@@ -984,6 +985,12 @@ function AppShell() {
         </div>
         ) : null}
       </div>
+      <PaletteHost
+        currentBotId={routeBotId}
+        onScreen={(screen) => setRoute({ kind: screen })}
+        onBot={(botId) => setRoute({ kind: "bot", botId })}
+        onChat={(chatId, botId) => setRoute({ kind: "chat", chatId, botId })}
+      />
     </SidebarLayout>
   );
 }

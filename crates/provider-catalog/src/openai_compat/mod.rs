@@ -166,6 +166,12 @@ fn classify(status: u16, headers: &HeaderMap, body: &str) -> ProviderError {
             retry_after: retry_after(headers),
         },
         s @ 500..=599 => ProviderError::Upstream { status: s, message },
+        // Ollama (`"<model> does not support tools"`) and LM Studio
+        // (`"The model does not support tools."`, code `model_not_support_tools`)
+        // both refuse tool calls with HTTP 400. Any other 400 stays `Api`.
+        400 if message.contains("does not support tools") => ProviderError::Unsupported {
+            capability: "tools".into(),
+        },
         s => ProviderError::Api { status: s, message },
     }
 }
@@ -227,8 +233,9 @@ impl ChatProvider for OpenAiCompatProvider {
         &self,
         req: ChatRequest,
     ) -> Result<BoxStream<'static, Result<ChatChunk, ProviderError>>, ProviderError> {
-        let streaming = self.entry.capabilities.streaming;
-        let body = request::build_body(&self.entry, self.model_name(&req), &req, streaming)?;
+        let model = self.model_name(&req);
+        let streaming = self.entry.caps_for(model).streaming;
+        let body = request::build_body(&self.entry, model, &req, streaming)?;
         let url = format!(
             "{}/chat/completions",
             self.entry.base_url.trim_end_matches('/')

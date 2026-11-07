@@ -81,6 +81,10 @@ struct LinkRecord {
 
 const LINKS_FILE: &str = "links.json";
 
+/// Largest link target that may be copied when the link itself cannot be
+/// recreated (same bound as `fs_read`).
+const MAX_LINK_COPY_BYTES: u64 = 16 * 1024 * 1024;
+
 fn is_link(m: &fs::Metadata) -> bool {
     // On Windows `is_symlink` is true for symlinks and junctions alike.
     m.file_type().is_symlink()
@@ -179,13 +183,24 @@ fn restore_link(target: &Path, at: &Path, dir: bool) -> Option<String> {
         Ok(()) => return None,
         Err(e) => e,
     };
-    let copied = match fs::metadata(target) {
-        Ok(m) if m.is_file() => fs::copy(target, at).is_ok(),
-        Ok(m) if m.is_dir() => {
-            let mut ignored = Vec::new();
-            copy_recursive(target, at, "", &mut ignored).is_ok()
-        }
-        _ => false,
+    // A relative link target is relative to the link's own directory.
+    let resolved = if target.is_relative() {
+        at.parent()
+            .map_or_else(|| target.to_path_buf(), |p| p.join(target))
+    } else {
+        target.to_path_buf()
+    };
+    let (copied, skip_reason) = match fs::metadata(&resolved) {
+        Ok(m) if m.is_file() && m.len() > MAX_LINK_COPY_BYTES => (
+            false,
+            Some(format!(
+                "target is larger than {} MiB",
+                MAX_LINK_COPY_BYTES / (1024 * 1024)
+            )),
+        ),
+        Ok(m) if m.is_file() => (fs::copy(&resolved, at).is_ok(), None),
+        Ok(m) if m.is_dir() => (false, Some("target is a directory (not copied)".to_owned())),
+        _ => (false, None),
     };
     Some(if copied {
         format!(
@@ -194,8 +209,9 @@ fn restore_link(target: &Path, at: &Path, dir: bool) -> Option<String> {
             target.display()
         )
     } else {
+        let why = skip_reason.map_or_else(String::new, |r| format!(": {r}"));
         format!(
-            "link {} -> {} could not be recreated ({err}); skipped",
+            "link {} -> {} could not be recreated ({err}); skipped{why}",
             at.display(),
             target.display()
         )
@@ -522,6 +538,42 @@ mod tests {
         assert_eq!(fs::read_to_string(d.join("f")).unwrap(), "x");
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(warnings[0].contains("skipped"), "{warnings:?}");
+    }
+
+    #[test]
+    fn link_fallback_copy_is_bounded_relative_and_skips_directories() {
+        let w = tempfile::tempdir().unwrap();
+        // `at` already exists, so creating the link fails and the fallback runs.
+        let at = w.path().join("at");
+        fs::write(&at, "old").unwrap();
+
+        // Relative target resolves against the link's directory.
+        fs::write(w.path().join("src.txt"), "new").unwrap();
+        let msg = restore_link(Path::new("src.txt"), &at, false).unwrap();
+        assert!(msg.contains("restored a copy"), "{msg}");
+        assert_eq!(fs::read_to_string(&at).unwrap(), "new");
+
+        // Oversized targets are skipped with a warning.
+        let big = w.path().join("big.bin");
+        fs::File::create(&big)
+            .unwrap()
+            .set_len(MAX_LINK_COPY_BYTES + 1)
+            .unwrap();
+        fs::write(&at, "old").unwrap();
+        let msg = restore_link(&big, &at, false).unwrap();
+        assert!(msg.contains("skipped") && msg.contains("larger"), "{msg}");
+        assert_eq!(fs::read_to_string(&at).unwrap(), "old");
+
+        // Directories are not copied.
+        let dir = w.path().join("dir");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("f"), "x").unwrap();
+        let msg = restore_link(&dir, &at, true).unwrap();
+        assert!(
+            msg.contains("skipped") && msg.contains("directory"),
+            "{msg}"
+        );
+        assert!(!at.join("f").exists());
     }
 
     #[test]

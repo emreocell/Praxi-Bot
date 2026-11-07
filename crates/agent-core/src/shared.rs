@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
-use agent_router::{SurfaceMode, ToolSurface};
+use agent_router::ToolSurface;
 use parking_lot::{Mutex, RwLock};
 use permission_engine::{Decision, PermissionResolver, Policy};
 use protocol::event::TodoItem;
@@ -30,6 +30,9 @@ use crate::subagent::SubSpec;
 /// Errors of the public loop API.
 #[derive(Debug, thiserror::Error)]
 pub enum LoopError {
+    /// Configure a provider before starting inference.
+    #[error("setup required; run `bot setup` or `bot providers add`")]
+    SetupRequired,
     /// Storage failure.
     #[error(transparent)]
     Storage(#[from] storage::StorageError),
@@ -156,7 +159,7 @@ pub struct StreamItem {
 /// Chat providers by id, with a default.
 #[derive(Clone)]
 pub struct Providers {
-    default: Arc<dyn ChatProvider>,
+    default: Option<Arc<dyn ChatProvider>>,
     by_id: HashMap<String, Arc<dyn ChatProvider>>,
     /// Catalog prices keyed by the full model reference (`provider/model`).
     prices: HashMap<String, ModelPrice>,
@@ -165,13 +168,30 @@ pub struct Providers {
 }
 
 impl Providers {
+    /// No configured providers. Setup APIs remain available; inference is rejected.
+    #[must_use]
+    pub fn unconfigured() -> Self {
+        Self {
+            default: None,
+            by_id: HashMap::new(),
+            prices: HashMap::new(),
+            embedder: None,
+        }
+    }
+
+    /// Whether inference needs provider setup.
+    #[must_use]
+    pub fn setup_required(&self) -> bool {
+        self.default.is_none()
+    }
+
     /// A set whose only (and default) provider is `p`.
     #[must_use]
     pub fn single(p: Arc<dyn ChatProvider>) -> Self {
         let mut by_id = HashMap::new();
         by_id.insert(p.id().to_owned(), Arc::clone(&p));
         Self {
-            default: p,
+            default: Some(p),
             by_id,
             prices: HashMap::new(),
             embedder: None,
@@ -226,14 +246,18 @@ impl Providers {
     /// Add a provider, addressable by its `id()` (the `provider/` prefix of a model ref).
     #[must_use]
     pub fn with(mut self, p: Arc<dyn ChatProvider>) -> Self {
+        if self.default.is_none() {
+            self.default = Some(Arc::clone(&p));
+        }
         self.by_id.insert(p.id().to_owned(), p);
         self
     }
 
-    /// Id of the default provider (used for models without a `provider/` prefix).
+    /// Id of the default provider (used for models without a `provider/` prefix),
+    /// or an empty string when setup is required.
     #[must_use]
     pub fn default_id(&self) -> &str {
-        self.default.id()
+        self.default.as_ref().map_or("", |p| p.id())
     }
 
     /// Ids of all providers, sorted.
@@ -250,11 +274,20 @@ impl Providers {
         self.by_id.get(id).cloned()
     }
 
-    pub(crate) fn pick(&self, model: &ModelRef) -> Arc<dyn ChatProvider> {
+    pub(crate) fn pick(
+        &self,
+        model: &ModelRef,
+    ) -> Result<Arc<dyn ChatProvider>, provider_catalog::ProviderError> {
         model
             .provider()
             .and_then(|p| self.by_id.get(p))
-            .map_or_else(|| Arc::clone(&self.default), Arc::clone)
+            .or(self.default.as_ref())
+            .cloned()
+            .ok_or_else(|| {
+                provider_catalog::ProviderError::NoProvider(
+                    "setup required; run `bot setup` or `bot providers add`".into(),
+                )
+            })
     }
 }
 
@@ -614,10 +647,11 @@ impl Shared {
                 return narrowed;
             }
         }
-        match self.surface.mode() {
-            SurfaceMode::Discovery => self.surface.specs(),
-            SurfaceMode::Direct => self.visible_specs(profile),
-        }
+        // Only profile-visible, non-namespaced tools count against the
+        // threshold; `mcp:` tools are reached via `use_tool` and never push
+        // native tools behind it.
+        self.surface
+            .specs_for(&|s| profile.tool_visible(&s.name) && platform_ok(&s.platforms))
     }
 
     /// Resolve a model-requested call to the tool to run plus the spec and name
@@ -631,9 +665,13 @@ impl Shared {
         hints: &[String],
     ) -> Option<Resolved> {
         let tool = if hints.is_empty() {
-            self.surface.resolve(name)?
+            self.surface.resolve_with(name, &|s| {
+                profile.tool_visible(&s.name) && platform_ok(&s.platforms)
+            })?
         } else {
-            self.surface.resolve_hinted(name, hints)?
+            self.surface.resolve_hinted(name, hints, &|s| {
+                profile.tool_visible(&s.name) && platform_ok(&s.platforms)
+            })?
         };
         let own = tool.spec().clone();
         let mut eff_input = input.clone();
@@ -656,12 +694,14 @@ impl Shared {
         } else if matches!(
             name,
             agent_router::FIND_TOOL | agent_router::GET_TOOL_DETAILS
-        ) && (self.surface.mode() == SurfaceMode::Discovery || !hints.is_empty())
-        {
-            // find_tool / get_tool_details: always available to the model.
+        ) {
+            // find_tool / get_tool_details: the surface only resolves them when
+            // it exposed them, and then they are always available.
             (Some(own), name.to_owned())
         } else {
-            if !profile.tool_visible(name) {
+            // Same gate as the spec list: a hidden or wrong-platform tool must
+            // not run just because the model named it.
+            if !profile.tool_visible(name) || !platform_ok(&own.platforms) {
                 return None;
             }
             (Some(own), name.to_owned())

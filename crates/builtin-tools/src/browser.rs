@@ -5,14 +5,15 @@
 //! lazily on first use. The profile follows the runtime setting in
 //! [`BrowserSettings`] (isolated temporary profile by default).
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use browser_cdp::{
-    ActionResult, Browser, LaunchOptions, Page, ScreenshotOptions, ScreenshotTarget,
-    SnapshotOptions, WaitCondition,
+    ActionResult, Browser, DialogAction, DialogOptions, LaunchOptions, Page, ScreenshotOptions,
+    ScreenshotTarget, SnapshotOptions, WaitCondition,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -47,10 +48,31 @@ pub trait BrowserDriver: Send + Sync {
     }
     /// Navigate to `url` (starting the browser if needed); returns the page snapshot.
     async fn open(&self, url: &str, profile: Option<&str>) -> Result<String, String>;
+    /// Navigate to `url` with dialog options.
+    async fn open_opts(
+        &self,
+        url: &str,
+        profile: Option<&str>,
+        dialog: Option<&str>,
+        prompt_text: Option<&str>,
+    ) -> Result<String, String> {
+        let _ = (dialog, prompt_text);
+        self.open(url, profile).await
+    }
     /// Current page snapshot with element refs.
     async fn snapshot(&self, interactive_only: bool) -> Result<String, String>;
     /// Click the element `r`.
     async fn click(&self, r: &str) -> Result<String, String>;
+    /// Click the element `r` with dialog options.
+    async fn click_opts(
+        &self,
+        r: &str,
+        dialog: Option<&str>,
+        prompt_text: Option<&str>,
+    ) -> Result<String, String> {
+        let _ = (dialog, prompt_text);
+        self.click(r).await
+    }
     /// Replace the text of input `r`.
     async fn fill(&self, r: &str, text: &str) -> Result<String, String>;
     /// Choose option `value` in select `r`.
@@ -63,6 +85,11 @@ pub trait BrowserDriver: Send + Sync {
     async fn wait(&self, cond: Wait, timeout: Option<Duration>) -> Result<String, String>;
     /// Go back in history.
     async fn back(&self) -> Result<String, String>;
+    /// Go back in history with dialog options.
+    async fn back_opts(&self, dialog: Option<&str>) -> Result<String, String> {
+        let _ = dialog;
+        self.back().await
+    }
     /// List tabs; with `switch_to` make that tab (by listed number) current.
     async fn tabs(&self, switch_to: Option<usize>) -> Result<String, String>;
     /// Screenshot bytes and file extension.
@@ -125,16 +152,70 @@ fn s<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
+/// Sanitize untrusted dialog message: strip control chars, cap at 300 chars with ellipsis, and escape quotes.
+pub(crate) fn sanitize_dialog_message(msg: &str) -> String {
+    const MAX_CHARS: usize = 300;
+    let stripped: String = msg
+        .replace(['\r', '\n', '\t'], " ")
+        .chars()
+        .filter(|c| !c.is_control())
+        .collect();
+    let mut out = if stripped.chars().count() > MAX_CHARS {
+        let mut truncated: String = stripped.chars().take(MAX_CHARS).collect();
+        truncated.push_str("...");
+        truncated
+    } else {
+        stripped
+    };
+    out = out.replace('"', "\\\"");
+    out
+}
+
 fn render_action(r: &ActionResult) -> Result<String, String> {
     if !r.ok {
-        return Err(r.error.clone().unwrap_or_else(|| "action failed".into()));
+        let mut err = r.error.clone().unwrap_or_else(|| "action failed".into());
+        for dl in &r.dialogs {
+            let clean = sanitize_dialog_message(&dl.message);
+            let status = if dl.accepted { "accepted" } else { "dismissed" };
+            let _ = write!(
+                err,
+                "\n~ dialog({}) {status} page content: \"{clean}\"",
+                dl.kind
+            );
+        }
+        if let Some(n) = &r.settle_note {
+            let _ = write!(err, "\n~ {n}");
+        }
+        return Err(err);
     }
-    Ok(format!(
-        "# {} ({})\n{}",
-        r.snapshot.title,
-        r.snapshot.url,
-        r.new_snapshot_diff.render()
-    ))
+    let d = &r.new_snapshot_diff;
+    let body = if d.url_changed.is_some()
+        || (!d.is_empty() && d.render().len() >= r.snapshot.to_text().len())
+    {
+        // A navigation, or a diff no shorter than the page: show the page itself.
+        r.snapshot.render()
+    } else {
+        format!(
+            "# {} ({})\n{}",
+            r.snapshot.title,
+            r.snapshot.url,
+            d.render()
+        )
+    };
+    let mut out = body;
+    for dl in &r.dialogs {
+        let clean = sanitize_dialog_message(&dl.message);
+        let status = if dl.accepted { "accepted" } else { "dismissed" };
+        let _ = write!(
+            out,
+            "\n~ dialog({}) {status} page content: \"{clean}\"",
+            dl.kind
+        );
+    }
+    if let Some(n) = &r.settle_note {
+        let _ = write!(out, "\n~ {n}");
+    }
+    Ok(out)
 }
 
 impl CdpDriver {
@@ -209,15 +290,29 @@ impl BrowserDriver for CdpDriver {
         !self.settings.headless
     }
 
-    async fn open(&self, url: &str, profile: Option<&str>) -> Result<String, String> {
+    async fn open_opts(
+        &self,
+        url: &str,
+        profile: Option<&str>,
+        dialog: Option<&str>,
+        prompt_text: Option<&str>,
+    ) -> Result<String, String> {
         let mut g = self.session.lock().await;
         let sess = self.ensure(&mut g, profile).await?;
-        let r = sess.page.navigate(url).await.map_err(s)?;
-        if !r.ok {
-            return Err(r.error.unwrap_or_else(|| "navigation failed".into()));
-        }
-        let snap = sess.page.snapshot(&snap_opts(false)).await.map_err(s)?;
-        Ok(snap.render())
+        let dialog_opts = DialogOptions {
+            action: DialogAction::from_str_opt(dialog),
+            prompt_text: prompt_text.map(str::to_string),
+        };
+        let r = sess
+            .page
+            .navigate_snapshot_with(url, &snap_opts(false), &dialog_opts)
+            .await
+            .map_err(s)?;
+        render_action(&r)
+    }
+
+    async fn open(&self, url: &str, profile: Option<&str>) -> Result<String, String> {
+        self.open_opts(url, profile, None, None).await
     }
 
     async fn snapshot(&self, interactive_only: bool) -> Result<String, String> {
@@ -231,10 +326,23 @@ impl BrowserDriver for CdpDriver {
         Ok(snap.render())
     }
 
-    async fn click(&self, r: &str) -> Result<String, String> {
+    async fn click_opts(
+        &self,
+        r: &str,
+        dialog: Option<&str>,
+        prompt_text: Option<&str>,
+    ) -> Result<String, String> {
         let mut g = self.session.lock().await;
         let sess = self.ensure(&mut g, None).await?;
-        render_action(&sess.page.click(r).await.map_err(s)?)
+        let dialog_opts = DialogOptions {
+            action: DialogAction::from_str_opt(dialog),
+            prompt_text: prompt_text.map(str::to_string),
+        };
+        render_action(&sess.page.click_with(r, &dialog_opts).await.map_err(s)?)
+    }
+
+    async fn click(&self, r: &str) -> Result<String, String> {
+        self.click_opts(r, None, None).await
     }
 
     async fn fill(&self, r: &str, text: &str) -> Result<String, String> {
@@ -272,10 +380,18 @@ impl BrowserDriver for CdpDriver {
         render_action(&sess.page.wait_for(&c, timeout).await.map_err(s)?)
     }
 
-    async fn back(&self) -> Result<String, String> {
+    async fn back_opts(&self, dialog: Option<&str>) -> Result<String, String> {
         let mut g = self.session.lock().await;
         let sess = self.ensure(&mut g, None).await?;
-        render_action(&sess.page.back().await.map_err(s)?)
+        let dialog_opts = DialogOptions {
+            action: DialogAction::from_str_opt(dialog),
+            prompt_text: None,
+        };
+        render_action(&sess.page.back_with(&dialog_opts).await.map_err(s)?)
+    }
+
+    async fn back(&self) -> Result<String, String> {
+        self.back_opts(None).await
     }
 
     async fn tabs(&self, switch_to: Option<usize>) -> Result<String, String> {
@@ -389,7 +505,9 @@ pub fn tools(
                 "Open a URL in the browser and return the page snapshot. Example: {\"url\":\"https://example.com\"}",
                 json!({"type":"object","properties":{
                     "url":{"type":"string","description":"Full URL."},
-                    "profile":{"type":"string","description":"Profile name; default is the isolated profile. Only honoured when the browser starts."}
+                    "profile":{"type":"string","description":"Profile name; default is the isolated profile. Only honoured when the browser starts."},
+                    "dialog":{"type":"string","enum":["accept","dismiss"],"description":"How to handle any dialog (e.g. beforeunload) during navigation. Default is dismiss (alerts are still accepted)."},
+                    "prompt_text":{"type":"string","description":"Optional text to enter when accepting a prompt dialog."}
                 },"required":["url"]}),
                 Effect::Write,
                 b,
@@ -412,7 +530,11 @@ pub fn tools(
             spec(
                 "browser_click",
                 "Click an element. Returns what changed. Example: {\"ref\":\"e12\"}",
-                json!({"type":"object","properties":{"ref":ref_prop},"required":["ref"]}),
+                json!({"type":"object","properties":{
+                    "ref":ref_prop,
+                    "dialog":{"type":"string","enum":["accept","dismiss"],"description":"How to handle any dialog (e.g. confirm, prompt, beforeunload) during click. Default is dismiss (alerts are still accepted)."},
+                    "prompt_text":{"type":"string","description":"Optional text to enter when accepting a prompt dialog."}
+                },"required":["ref"]}),
                 Effect::Write,
                 b,
             ),
@@ -489,7 +611,9 @@ pub fn tools(
             spec(
                 "browser_back",
                 "Go back one page. Example: {}",
-                json!({"type":"object","properties":{}}),
+                json!({"type":"object","properties":{
+                    "dialog":{"type":"string","enum":["accept","dismiss"],"description":"How to handle any dialog (e.g. beforeunload) during back navigation. Default is dismiss."}
+                }}),
                 Effect::Write,
                 b,
             ),
@@ -547,6 +671,8 @@ pub fn tools(
 struct OpenIn {
     url: String,
     profile: Option<String>,
+    dialog: Option<String>,
+    prompt_text: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -558,6 +684,13 @@ struct SnapIn {
 #[derive(Deserialize)]
 struct RefIn {
     r#ref: String,
+    dialog: Option<String>,
+    prompt_text: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct BackIn {
+    dialog: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -666,7 +799,13 @@ impl BrowserTool {
                 let i: OpenIn = parse(input)?;
                 check_open_url(&i.url)?;
                 self.gate(run_id, "open", i.url.clone()).await?;
-                d.open(&i.url, i.profile.as_deref()).await
+                d.open_opts(
+                    &i.url,
+                    i.profile.as_deref(),
+                    i.dialog.as_deref(),
+                    i.prompt_text.as_deref(),
+                )
+                .await
             }
             Op::Snapshot => {
                 let i: SnapIn = parse(input)?;
@@ -675,7 +814,8 @@ impl BrowserTool {
             Op::Click => {
                 let i: RefIn = parse(input)?;
                 self.gate(run_id, "click", i.r#ref.clone()).await?;
-                d.click(&i.r#ref).await
+                d.click_opts(&i.r#ref, i.dialog.as_deref(), i.prompt_text.as_deref())
+                    .await
             }
             Op::Fill => {
                 let i: FillIn = parse(input)?;
@@ -718,8 +858,9 @@ impl BrowserTool {
                 d.wait(cond, i.timeout_secs.map(Duration::from_secs)).await
             }
             Op::Back => {
+                let i: BackIn = parse(input)?;
                 self.gate(run_id, "key", "back".to_owned()).await?;
-                d.back().await
+                d.back_opts(i.dialog.as_deref()).await
             }
             Op::Tabs => {
                 let i: TabsIn = parse(input)?;
@@ -779,14 +920,45 @@ pub(crate) mod fake {
 
     #[async_trait]
     impl BrowserDriver for FakeBrowser {
+        async fn open_opts(
+            &self,
+            url: &str,
+            profile: Option<&str>,
+            dialog: Option<&str>,
+            prompt_text: Option<&str>,
+        ) -> Result<String, String> {
+            let mut s = format!("open:{url}:{}", profile.unwrap_or("-"));
+            if let Some(d) = dialog {
+                let _ = write!(s, ":{d}");
+            }
+            if let Some(p) = prompt_text {
+                let _ = write!(s, ":{p}");
+            }
+            self.rec(&s)
+        }
         async fn open(&self, url: &str, profile: Option<&str>) -> Result<String, String> {
-            self.rec(&format!("open:{url}:{}", profile.unwrap_or("-")))
+            self.open_opts(url, profile, None, None).await
         }
         async fn snapshot(&self, i: bool) -> Result<String, String> {
             self.rec(&format!("snapshot:{i}"))
         }
+        async fn click_opts(
+            &self,
+            r: &str,
+            dialog: Option<&str>,
+            prompt_text: Option<&str>,
+        ) -> Result<String, String> {
+            let mut s = format!("click:{r}");
+            if let Some(d) = dialog {
+                let _ = write!(s, ":{d}");
+            }
+            if let Some(p) = prompt_text {
+                let _ = write!(s, ":{p}");
+            }
+            self.rec(&s)
+        }
         async fn click(&self, r: &str) -> Result<String, String> {
-            self.rec(&format!("click:{r}"))
+            self.click_opts(r, None, None).await
         }
         async fn fill(&self, r: &str, t: &str) -> Result<String, String> {
             self.rec(&format!("fill:{r}:{t}"))
@@ -803,8 +975,15 @@ pub(crate) mod fake {
         async fn wait(&self, c: Wait, _t: Option<Duration>) -> Result<String, String> {
             self.rec(&format!("wait:{c:?}"))
         }
+        async fn back_opts(&self, dialog: Option<&str>) -> Result<String, String> {
+            let mut s = "back".to_string();
+            if let Some(d) = dialog {
+                let _ = write!(s, ":{d}");
+            }
+            self.rec(&s)
+        }
         async fn back(&self) -> Result<String, String> {
-            self.rec("back")
+            self.back_opts(None).await
         }
         async fn tabs(&self, s: Option<usize>) -> Result<String, String> {
             self.rec(&format!("tabs:{s:?}"))
@@ -846,6 +1025,103 @@ mod tests {
             ContentPart::Text { text } => text.clone(),
             _ => panic!(),
         }
+    }
+
+    fn snap(url: &str, lines: &[(&str, &str)]) -> browser_cdp::Snapshot {
+        browser_cdp::Snapshot {
+            url: url.into(),
+            title: "T".into(),
+            nodes: lines
+                .iter()
+                .map(|(r, name)| browser_cdp::SnapNode {
+                    ref_id: Some((*r).into()),
+                    role: "button".into(),
+                    name: (*name).into(),
+                    depth: 0,
+                    value: None,
+                    states: Vec::new(),
+                })
+                .collect(),
+        }
+    }
+
+    fn result(before: &browser_cdp::Snapshot, after: browser_cdp::Snapshot) -> ActionResult {
+        ActionResult {
+            ok: true,
+            error: None,
+            new_snapshot_diff: browser_cdp::diff(before, &after),
+            snapshot: after,
+            dialogs: Vec::new(),
+            settle_note: None,
+        }
+    }
+
+    #[test]
+    fn navigating_click_renders_full_snapshot_without_minus_lines() {
+        let before = snap("http://a/", &[("e1", "Old one"), ("e2", "Old two")]);
+        let after = snap(
+            "http://a/next",
+            &[("e1", "New one"), ("e2", "New two"), ("e3", "New three")],
+        );
+        let out = render_action(&result(&before, after)).unwrap();
+        assert!(!out.lines().any(|l| l.starts_with("- ")), "{out}");
+        assert!(!out.lines().any(|l| l.starts_with("+ ")), "{out}");
+        for r in ["[e1]", "[e2]", "[e3]"] {
+            assert!(out.contains(r), "{out}");
+        }
+        assert!(out.starts_with("# T (http://a/next)"));
+    }
+
+    #[test]
+    fn small_in_page_change_keeps_the_diff() {
+        let names: Vec<(String, String)> = (0..20)
+            .map(|i| (format!("e{i}"), format!("Item {i}")))
+            .collect();
+        let lines: Vec<(&str, &str)> = names
+            .iter()
+            .map(|(a, b)| (a.as_str(), b.as_str()))
+            .collect();
+        let before = snap("http://a/", &lines);
+        let mut changed = lines.clone();
+        changed[3] = ("e3", "Changed");
+        let after = snap("http://a/", &changed);
+        let want = format!(
+            "# T (http://a/)\n{}",
+            browser_cdp::diff(&before, &after).render()
+        );
+        let out = render_action(&result(&before, after)).unwrap();
+        assert_eq!(out, want);
+        assert!(out.contains("- ") && out.contains("+ "));
+    }
+
+    #[test]
+    fn dialog_and_settle_note_are_appended() {
+        let a = snap("http://a/", &[("e1", "Go")]);
+        let mut r = result(&a, a.clone());
+        let long_msg = format!("hello\x00\x07world\n{}", "a".repeat(350));
+        r.dialogs = vec![
+            browser_cdp::DialogInfo {
+                kind: "confirm".into(),
+                message: "sure?".into(),
+                accepted: false,
+            },
+            browser_cdp::DialogInfo {
+                kind: "alert".into(),
+                message: long_msg,
+                accepted: true,
+            },
+        ];
+        r.settle_note = Some("network still busy: 2 requests".into());
+        let out = render_action(&r).unwrap();
+        assert!(
+            out.contains("\n~ dialog(confirm) dismissed page content: \"sure?\""),
+            "{out}"
+        );
+        let alert_line = out.lines().find(|l| l.contains("dialog(alert)")).unwrap();
+        assert!(alert_line.contains("accepted page content: \"helloworld "));
+        assert!(alert_line.ends_with("...\""));
+        assert!(!alert_line.contains('\x00') && !alert_line.contains('\x07'));
+        assert!(out.ends_with("\n~ network still busy: 2 requests"), "{out}");
     }
 
     #[tokio::test]
@@ -921,6 +1197,39 @@ mod tests {
                 "fill:e2:hi",
                 "wait:Text(\"Welcome\")",
                 "scroll:-:0:100"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn tools_forward_dialog_options_to_the_driver() {
+        let (_d, fake, t) = build();
+        let ctx = ToolContext::default();
+        get(&t, "browser_click")
+            .call(
+                &ctx,
+                json!({"ref": "e1", "dialog": "accept", "prompt_text": "hello"}),
+            )
+            .await
+            .unwrap();
+        get(&t, "browser_open")
+            .call(
+                &ctx,
+                json!({"url": "https://example.com", "dialog": "dismiss"}),
+            )
+            .await
+            .unwrap();
+        get(&t, "browser_back")
+            .call(&ctx, json!({"dialog": "accept"}))
+            .await
+            .unwrap();
+        let calls = fake.calls.lock().clone();
+        assert_eq!(
+            calls,
+            vec![
+                "click:e1:accept:hello",
+                "open:https://example.com:-:dismiss",
+                "back:accept",
             ]
         );
     }

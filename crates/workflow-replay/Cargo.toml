@@ -26,6 +26,7 @@ toml.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+script-runtime = { path = "../script-runtime", version = "0.1.0" }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 

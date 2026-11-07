@@ -6,7 +6,7 @@ use mcp_bridge::{
     Backoff, McpManager, McpPolicy, McpServerConfig, McpTransport, OS_ESSENTIAL_ENV, ServerStatus,
 };
 use serde_json::json;
-use tool_registry::{ContentPart, Effect, ToolContext, ToolRegistry};
+use tool_registry::{ContentPart, Effect, ToolContext, ToolError, ToolRegistry};
 
 fn server_exe() -> PathBuf {
     // target/debug/deps/<test>.exe -> target/debug/examples/test_server[.exe]
@@ -20,7 +20,9 @@ fn server_exe() -> PathBuf {
 }
 
 fn config(id: &str) -> McpServerConfig {
-    McpServerConfig::stdio(id, server_exe().to_string_lossy(), [""; 0])
+    let mut c = McpServerConfig::stdio(id, server_exe().to_string_lossy(), [""; 0]);
+    c.trust_hints = true; // the test server's `readOnlyHint`s are honest
+    c
 }
 
 fn fast_policy(quarantine_after: u32) -> McpPolicy {
@@ -235,15 +237,12 @@ async fn discovery_surface_fronts_a_large_mcp_server() {
     let mgr = McpManager::with_policy(reg.clone(), fast_policy(3));
     mgr.add_server(config("d")).await.unwrap();
 
-    // 6 MCP tools: above a threshold of 3 the model only sees the meta-tools.
+    // MCP tools are namespaced: they never count against the threshold and
+    // are never passed directly, so the model only sees the meta-tools.
     let surface = ToolSurface::new(reg.clone(), 3);
-    assert_eq!(surface.mode(), SurfaceMode::Discovery);
+    assert_eq!(surface.mode(), SurfaceMode::Direct);
     assert_eq!(surface.specs().len(), 3);
-    // Below the threshold they would be passed directly.
-    assert_eq!(
-        ToolSurface::new(reg.clone(), 10).mode(),
-        SurfaceMode::Direct
-    );
+    assert!(surface.resolve("mcp:d/echo").is_none());
 
     let ctx = ToolContext::default();
     let find = surface.resolve(FIND_TOOL).unwrap();
@@ -254,7 +253,7 @@ async fn discovery_surface_fronts_a_large_mcp_server() {
     let ContentPart::Json { data } = &hits.content[0] else {
         panic!("expected json")
     };
-    assert_eq!(data[0]["name"], "mcp:d/echo");
+    assert_eq!(data["results"][0]["name"], "mcp:d/echo");
 
     let out = surface
         .resolve(USE_TOOL)
@@ -266,4 +265,233 @@ async fn discovery_surface_fronts_a_large_mcp_server() {
         .await
         .unwrap();
     assert_eq!(text_of(&out.content), "via meta");
+}
+
+fn process_alive(pid: u32) -> bool {
+    #[cfg(windows)]
+    {
+        let out = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
+            .output();
+        match out {
+            Ok(o) => String::from_utf8_lossy(&o.stdout).contains(&format!("\"{pid}\"")),
+            Err(_) => false,
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bots_allowlist_is_enforced_on_call() {
+    let reg = ToolRegistry::new();
+    let mgr = McpManager::with_policy(reg.clone(), fast_policy(3));
+    let mut cfg = config("b");
+    cfg.bots = Some(vec!["bot-a".into()]);
+    mgr.add_server(cfg).await.unwrap();
+    let tool = reg.get("mcp:b/echo").unwrap();
+    let input = json!({"text": "hi"});
+    let allowed = ToolContext {
+        bot_id: Some("bot-a".into()),
+        ..ToolContext::default()
+    };
+    assert_eq!(
+        text_of(&tool.call(&allowed, input.clone()).await.unwrap().content),
+        "hi"
+    );
+    let other = ToolContext {
+        bot_id: Some("bot-b".into()),
+        ..ToolContext::default()
+    };
+    let err = tool.call(&other, input.clone()).await.unwrap_err();
+    assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+    let err = tool.call(&ToolContext::default(), input).await.unwrap_err();
+    assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+
+    let mut open = config("open");
+    open.bots = None;
+    mgr.add_server(open).await.unwrap();
+    let any = reg.get("mcp:open/echo").unwrap();
+    assert!(
+        any.call(&ToolContext::default(), json!({"text": "x"}))
+            .await
+            .is_ok()
+    );
+    mgr.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn shutdown_reaps_stdio_child_tree() {
+    let dir = tempfile::tempdir().unwrap();
+    let pidfile = dir.path().join("orphan.pid");
+    let reg = ToolRegistry::new();
+    let mgr = McpManager::with_policy(reg, fast_policy(3));
+    let mut cfg = config("tree");
+    if let McpTransport::Stdio { env, .. } = &mut cfg.transport {
+        env.insert("MCP_ORPHAN_PIDFILE".into(), pidfile.display().to_string());
+    }
+    mgr.add_server(cfg).await.unwrap();
+    let mut pid = None;
+    for _ in 0..50 {
+        if let Ok(text) = std::fs::read_to_string(&pidfile)
+            && let Ok(n) = text.trim().parse::<u32>()
+        {
+            pid = Some(n);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let pid = pid.expect("orphan pidfile");
+    assert!(process_alive(pid), "orphan {pid} was not alive");
+    mgr.shutdown().await;
+    let mut dead = false;
+    for _ in 0..40 {
+        if !process_alive(pid) {
+            dead = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(dead, "orphan {pid} survived MCP shutdown");
+}
+
+// ── fail-closed hardening (task 042) ────────────────────────────────────────
+
+mod hardening {
+    use std::fmt::Write as _;
+
+    use std::{
+        collections::BTreeMap,
+        sync::{Arc, Mutex, atomic::AtomicU64},
+    };
+
+    use secret_store::{MemoryStore, SecretStore};
+    use tool_registry::PermissionCategory;
+    use tracing::{
+        Event, Metadata, Subscriber,
+        field::{Field, Visit},
+        span,
+    };
+
+    use super::*;
+
+    /// Collects every event/span field as text.
+    #[derive(Clone, Default)]
+    struct Capture(Arc<Mutex<String>>, Arc<AtomicU64>);
+
+    struct Rec<'a>(&'a mut String);
+    impl Visit for Rec<'_> {
+        fn record_debug(&mut self, f: &Field, v: &dyn std::fmt::Debug) {
+            let _ = write!(self.0, "{}={v:?} ", f.name());
+        }
+    }
+
+    impl Subscriber for Capture {
+        fn enabled(&self, _: &Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, a: &span::Attributes<'_>) -> span::Id {
+            a.record(&mut Rec(&mut self.0.lock().unwrap()));
+            span::Id::from_u64(self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1)
+        }
+        fn record(&self, _: &span::Id, _: &span::Record<'_>) {}
+        fn record_follows_from(&self, _: &span::Id, _: &span::Id) {}
+        fn event(&self, e: &Event<'_>) {
+            e.record(&mut Rec(&mut self.0.lock().unwrap()));
+        }
+        fn enter(&self, _: &span::Id) {}
+        fn exit(&self, _: &span::Id) {}
+    }
+
+    fn store_with(name: &str, value: &str) -> Arc<dyn SecretStore> {
+        let s = MemoryStore::new();
+        s.set(name, value).unwrap();
+        Arc::new(s)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn secret_env_is_resolved_at_connect_and_not_leaked() {
+        const VALUE: &str = "hunter2-very-secret";
+        let capture = Capture::default();
+        let _guard = tracing::subscriber::set_default(capture.clone());
+        let reg = ToolRegistry::new();
+        let mgr = McpManager::with_policy(reg.clone(), fast_policy(3))
+            .with_secret_store(store_with("mcp/key", VALUE));
+        let mut cfg = config("sec");
+        cfg.secret_env
+            .insert("MCP_TEST_SECRET".into(), "mcp/key".into());
+        let serialized = toml::to_string(&cfg).unwrap();
+        assert!(!serialized.contains(VALUE) && serialized.contains("mcp/key"));
+        assert!(!format!("{cfg:?}").contains(VALUE));
+        mgr.add_server(cfg).await.unwrap();
+        let keys = call(&reg, "mcp:sec/env_keys", json!({})).await.unwrap();
+        assert!(keys.split(',').any(|k| k == "MCP_TEST_SECRET"), "{keys}");
+        assert!(!format!("{:?}", mgr.snapshots()).contains(VALUE));
+        assert!(!capture.0.lock().unwrap().contains(VALUE));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn missing_secret_means_the_server_is_not_spawned() {
+        let reg = ToolRegistry::new();
+        let mgr = McpManager::with_policy(reg.clone(), fast_policy(3))
+            .with_secret_store(store_with("other", "x"));
+        let mut cfg = config("nosec");
+        cfg.secret_env.insert("K".into(), "mcp/absent".into());
+        let err = mgr.add_server(cfg).await.unwrap_err();
+        assert!(err.to_string().contains("mcp/absent"), "{err}");
+        assert_eq!(mgr.stderr_tail("nosec").len(), 0);
+        let snap = mgr.snapshot("nosec").unwrap();
+        assert_eq!(snap.tools.len(), 0);
+        assert_eq!(snap.status, ServerStatus::Disconnected);
+        assert!(reg.get("mcp:nosec/echo").is_none());
+
+        // No store at all: same outcome.
+        let mgr = McpManager::with_policy(ToolRegistry::new(), fast_policy(3));
+        let mut cfg = config("nostore");
+        cfg.secret_env.insert("K".into(), "mcp/absent".into());
+        assert!(mgr.add_server(cfg).await.is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn untrusted_hints_and_category_from_config() {
+        // Untrusted (default): the honest `readOnlyHint` is ignored.
+        let reg = ToolRegistry::new();
+        let mgr = McpManager::with_policy(reg.clone(), fast_policy(3));
+        let mut cfg = config("u");
+        cfg.trust_hints = false;
+        cfg.category = Some(PermissionCategory::Fs);
+        mgr.add_server(cfg).await.unwrap();
+        let echo = reg.get("mcp:u/echo").unwrap();
+        assert_eq!(echo.spec().effect, Effect::Destructive);
+        let mut cats = BTreeMap::new();
+        for n in mgr.snapshot("u").unwrap().tools {
+            cats.insert(n.clone(), reg.get(&n).unwrap().spec().category);
+        }
+        assert!(
+            cats.values().all(|c| *c == PermissionCategory::Fs),
+            "{cats:?}"
+        );
+
+        // Trusted: Read.
+        let reg = ToolRegistry::new();
+        let mgr = McpManager::with_policy(reg.clone(), fast_policy(3));
+        let mut cfg = config("t");
+        cfg.trust_hints = true;
+        mgr.add_server(cfg).await.unwrap();
+        let echo = reg.get("mcp:t/echo").unwrap();
+        assert_eq!(echo.spec().effect, Effect::Read);
+        assert_eq!(echo.spec().category, PermissionCategory::Accounts);
+
+        // `meta` is rejected before anything starts.
+        let mut cfg = config("m");
+        cfg.category = Some(PermissionCategory::Meta);
+        assert!(mgr.add_server(cfg).await.is_err());
+    }
 }

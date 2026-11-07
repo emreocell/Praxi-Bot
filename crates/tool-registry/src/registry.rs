@@ -85,36 +85,6 @@ impl ToolRegistry {
             .map(|e| e.tool.spec().clone())
             .collect()
     }
-
-    /// Return the top-`k` tools whose name or description contains `query` as a
-    /// case-insensitive substring.
-    ///
-    /// Scoring: name match = 2 points, description match = 1 point.
-    /// Results are sorted descending by score, then alphabetically by name.
-    ///
-    /// A BM25 implementation will replace this stub in `agent-router`.
-    #[must_use]
-    pub fn search(&self, query: &str, k: usize) -> Vec<ToolSpec> {
-        if query.is_empty() || k == 0 {
-            return Vec::new();
-        }
-        let q = query.to_lowercase();
-        let map = self.tools.read();
-
-        let mut scored: Vec<(u32, &ToolSpec)> = map
-            .values()
-            .filter_map(|e| {
-                let spec = e.tool.spec();
-                let name_hit = u32::from(spec.name.to_lowercase().contains(&q));
-                let desc_hit = u32::from(spec.description.to_lowercase().contains(&q));
-                let score = name_hit * 2 + desc_hit;
-                if score > 0 { Some((score, spec)) } else { None }
-            })
-            .collect();
-
-        scored.sort_by(|(sa, a), (sb, b)| sb.cmp(sa).then(a.name.cmp(&b.name)));
-        scored.into_iter().take(k).map(|(_, s)| s.clone()).collect()
-    }
 }
 
 #[cfg(test)]
@@ -191,42 +161,6 @@ mod tests {
         reg.register(Arc::new(EchoTool));
         reg.register(Arc::new(FileTool));
         assert_eq!(reg.list().len(), 2);
-    }
-
-    #[test]
-    fn search_finds_by_name_substring() {
-        let reg = ToolRegistry::new();
-        reg.register(Arc::new(EchoTool));
-        reg.register(Arc::new(FileTool));
-        let results = reg.search("echo", 10);
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].name, "echo");
-    }
-
-    #[test]
-    fn search_finds_by_description_substring() {
-        let reg = ToolRegistry::new();
-        reg.register(Arc::new(EchoTool));
-        reg.register(Arc::new(FileTool));
-        let results = reg.search("bytes", 10);
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].name, "fs.read_file");
-    }
-
-    #[test]
-    fn search_respects_k_limit() {
-        let reg = ToolRegistry::new();
-        reg.register(Arc::new(EchoTool));
-        reg.register(Arc::new(FileTool));
-        let results = reg.search("e", 1);
-        assert_eq!(results.len(), 1);
-    }
-
-    #[test]
-    fn search_empty_query_returns_nothing() {
-        let reg = ToolRegistry::new();
-        reg.register(Arc::new(EchoTool));
-        assert!(reg.search("", 10).is_empty());
     }
 
     #[test]

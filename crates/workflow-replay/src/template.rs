@@ -221,6 +221,12 @@ fn reject_quoted_placeholders(t: &str, dialect: ShellDialect) -> Result<(), Work
         }
         ShellDialect::Cmd => false,
     };
+    // Typographic double quotes are quote characters for PowerShell and are
+    // treated as such for cmd.exe too (programs there may re-parse them).
+    let is_double = |c: char| {
+        c == '"'
+            || (dialect != ShellDialect::Posix && matches!(c, '\u{201C}' | '\u{201D}' | '\u{201E}'))
+    };
     let mut q = Q::None;
     for p in parse(t)? {
         match p {
@@ -242,9 +248,17 @@ fn reject_quoted_placeholders(t: &str, dialect: ShellDialect) -> Result<(), Work
                             }
                         }
                         Q::Double | Q::None => {
-                            if Some(c) == escape {
+                            if dialect == ShellDialect::Cmd
+                                && c == '^'
+                                && chars.as_str().starts_with('"')
+                            {
+                                // `^"` is a quote cmd.exe may or may not honour: treat it
+                                // as a quoting context so nothing is substituted in it.
                                 chars.next();
-                            } else if c == '"' {
+                                q = if q == Q::Double { Q::None } else { Q::Double };
+                            } else if Some(c) == escape {
+                                chars.next();
+                            } else if is_double(c) {
                                 q = if q == Q::Double { Q::None } else { Q::Double };
                             } else if q == Q::None && is_single(c) {
                                 q = Q::Single;
@@ -381,6 +395,21 @@ mod tests {
     #[test]
     fn referenced_lists_names() {
         assert_eq!(referenced("{a} and {b} {{c}}").unwrap(), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn cmd_caret_quote_and_typographic_quotes_are_quoting_contexts() {
+        let v = vars(&[("x", "a")]);
+        for t in [
+            "echo ^\"{x}^\"",
+            "echo ^\"{x}",
+            "echo \u{201C}{x}\u{201D}",
+            "echo \u{201E}{x}",
+        ] {
+            assert!(render_shell(t, &v, ShellDialect::Cmd).is_err(), "{t}");
+        }
+        assert!(render_shell("echo \u{201C}{x}\u{201D}", &v, ShellDialect::PowerShell).is_err());
+        assert!(render_shell("echo {x}", &v, ShellDialect::Cmd).is_ok());
     }
 
     #[test]

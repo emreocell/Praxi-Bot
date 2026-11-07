@@ -30,7 +30,12 @@ impl LoopMemoryModel {
             self.model.clone(),
             vec![Message::text(MessageRole::User, prompt)],
         );
-        let provider = self.sh.providers.read().pick(&self.model);
+        let provider = self
+            .sh
+            .providers
+            .read()
+            .pick(&self.model)
+            .map_err(|e| MemoryError::Model(e.to_string()))?;
         let mut stream = provider
             .stream(req)
             .await

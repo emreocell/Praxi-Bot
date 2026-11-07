@@ -48,9 +48,9 @@ fn map_message(
     bad_args: &HashMap<&str, &str>,
 ) -> Result<Value, ProviderError> {
     if !vision && has_image(&m.content) {
-        return Err(ProviderError::InvalidRequest(
-            "image content sent to a model without vision capability".into(),
-        ));
+        return Err(ProviderError::Unsupported {
+            capability: "vision".into(),
+        });
     }
     let mut obj = Map::new();
     obj.insert("role".into(), role.into());
@@ -94,9 +94,12 @@ fn map_message(
     Ok(Value::Object(obj))
 }
 
-fn map_messages(entry: &ProviderEntry, req: &ChatRequest) -> Result<Vec<Value>, ProviderError> {
+fn map_messages(
+    entry: &ProviderEntry,
+    req: &ChatRequest,
+    vision: bool,
+) -> Result<Vec<Value>, ProviderError> {
     let flags = &entry.compat_flags;
-    let vision = entry.capabilities.vision;
     let bad_args = invalid_arg_calls(&req.messages);
 
     if flags.strip_system_role {
@@ -174,9 +177,8 @@ fn map_tools(entry: &ProviderEntry, tools: &[Value]) -> Vec<Value> {
 ///
 /// # Errors
 ///
-/// [`ProviderError::InvalidRequest`] when the request needs a capability the
-/// model entry does not declare (images without `vision`, tools without
-/// `tools`).
+/// [`ProviderError::Unsupported`] when the request needs a capability `model`
+/// does not have (images without `vision`, tools without `tools`).
 pub(super) fn build_body(
     entry: &ProviderEntry,
     model: &str,
@@ -184,15 +186,19 @@ pub(super) fn build_body(
     stream: bool,
 ) -> Result<Value, ProviderError> {
     let flags = &entry.compat_flags;
-    if !req.tools.is_empty() && !entry.capabilities.tools {
-        return Err(ProviderError::InvalidRequest(
-            "tools sent to a model without tool-calling capability".into(),
-        ));
+    let caps = entry.caps_for(model);
+    if !req.tools.is_empty() && !caps.tools {
+        return Err(ProviderError::Unsupported {
+            capability: "tools".into(),
+        });
     }
 
     let mut body = Map::new();
     body.insert("model".into(), model.into());
-    body.insert("messages".into(), Value::Array(map_messages(entry, req)?));
+    body.insert(
+        "messages".into(),
+        Value::Array(map_messages(entry, req, caps.vision)?),
+    );
     body.insert("stream".into(), Value::Bool(stream));
     if stream && !flags.no_stream_usage {
         body.insert("stream_options".into(), json!({"include_usage": true}));
@@ -228,7 +234,7 @@ pub(super) fn build_body(
             }
         }
     }
-    if req.json_mode && entry.capabilities.json_mode {
+    if req.json_mode && caps.json_mode {
         body.insert("response_format".into(), json!({"type": "json_object"}));
     }
     Ok(Value::Object(body))

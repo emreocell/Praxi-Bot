@@ -19,6 +19,8 @@ use super::semantic::{EmbedTask, Embedder};
 pub const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 /// Default embedding model.
 pub const DEFAULT_EMBED_MODEL: &str = "gemini-embedding-001";
+/// Maximum requests per `batchEmbedContents` call (Gemini API limit).
+const MAX_BATCH: usize = 100;
 
 fn http() -> reqwest::Client {
     reqwest::Client::builder()
@@ -111,6 +113,35 @@ impl Embedder for GeminiEmbedder {
             EmbedTask::Document => "RETRIEVAL_DOCUMENT",
             EmbedTask::Query => "RETRIEVAL_QUERY",
         };
+        let url = format!("{}/models/{}:batchEmbedContents", self.base_url, self.model);
+        let mut out = Vec::with_capacity(texts.len());
+        // `batchEmbedContents` accepts at most `MAX_BATCH` requests per call;
+        // chunks are sent in order so the output keeps the input order.
+        for chunk in texts.chunks(MAX_BATCH) {
+            match self.embed_chunk(&url, chunk, task_type).await {
+                Ok(mut v) => out.append(&mut v),
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        chunk_size = chunk.len(),
+                        total = texts.len(),
+                        "Gemini embedding chunk failed"
+                    );
+                    return Err(e);
+                }
+            }
+        }
+        Ok(out)
+    }
+}
+
+impl GeminiEmbedder {
+    async fn embed_chunk(
+        &self,
+        url: &str,
+        texts: &[String],
+        task_type: &str,
+    ) -> Result<Vec<Vec<f32>>, BackendError> {
         let requests: Vec<Value> = texts
             .iter()
             .map(|t| {
@@ -125,10 +156,9 @@ impl Embedder for GeminiEmbedder {
                 r
             })
             .collect();
-        let url = format!("{}/models/{}:batchEmbedContents", self.base_url, self.model);
         let v = post(
             &self.client,
-            &url,
+            url,
             &self.api_key,
             &json!({ "requests": requests }),
         )
@@ -224,5 +254,81 @@ impl Classifier for GeminiClassifier {
             return Err(BackendError::new("empty candidate text"));
         }
         Ok(text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+    use super::*;
+
+    /// Echoes one 1-d vector per request: the number in the request text.
+    struct Echo;
+
+    impl Respond for Echo {
+        fn respond(&self, req: &Request) -> ResponseTemplate {
+            let body: Value = serde_json::from_slice(&req.body).unwrap();
+            let embeddings: Vec<Value> = body["requests"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| {
+                    let n: f64 = r["content"]["parts"][0]["text"]
+                        .as_str()
+                        .unwrap()
+                        .parse()
+                        .unwrap();
+                    json!({ "values": [n] })
+                })
+                .collect();
+            ResponseTemplate::new(200).set_body_json(json!({ "embeddings": embeddings }))
+        }
+    }
+
+    #[tokio::test]
+    async fn embeds_250_texts_in_three_ordered_requests() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/models/m:batchEmbedContents"))
+            .respond_with(Echo)
+            .mount(&server)
+            .await;
+        let e = GeminiEmbedder::new("k", "m").with_base_url(server.uri());
+        let texts: Vec<String> = (0..250).map(|i| i.to_string()).collect();
+        let out = e.embed(&texts, EmbedTask::Document).await.unwrap();
+        assert_eq!(out.len(), 250);
+        for (i, v) in out.iter().enumerate() {
+            #[allow(clippy::cast_precision_loss)]
+            let want = i as f32;
+            assert_eq!(v, &vec![want]);
+        }
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(reqs.len(), 3);
+        let sizes: Vec<usize> = reqs
+            .iter()
+            .map(|r| {
+                let b: Value = serde_json::from_slice(&r.body).unwrap();
+                b["requests"].as_array().unwrap().len()
+            })
+            .collect();
+        assert_eq!(sizes, [100, 100, 50]);
+    }
+
+    #[tokio::test]
+    async fn a_failing_chunk_fails_the_whole_call() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        let e = GeminiEmbedder::new("k", "m").with_base_url(server.uri());
+        let texts: Vec<String> = (0..150).map(|i| i.to_string()).collect();
+        let err = e.embed(&texts, EmbedTask::Document).await.unwrap_err();
+        assert!(err.to_string().contains("500"));
+        // Stops at the first failing chunk.
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
     }
 }

@@ -9,7 +9,9 @@ use std::time::Duration;
 use agent_core::{AgentLoop, LoopConfig, Providers};
 use agent_router::ladder::{GeminiEmbedder, gemini};
 use builtin_tools::{BuiltinConfig, ResolverGate};
-use daemon_api::{AppState, DaemonConfig, ProviderHost, load_or_create_token, token_path};
+use daemon_api::{
+    AppState, DaemonConfig, McpControl, ProviderHost, load_or_create_token, token_path,
+};
 use desktop_api::DesktopBackend;
 use permission_engine::{PermissionResolver, Policy};
 use protocol::InitiatorKind;
@@ -30,7 +32,7 @@ use crate::channels::{self, TelegramRuntime};
 /// effective default first.
 ///
 /// # Errors
-/// No usable provider.
+/// Provider configuration cannot be read or parsed.
 pub fn build_providers(
     data_dir: &Path,
     catalog: &Catalog,
@@ -51,7 +53,8 @@ pub fn build_providers(
         .position(|(id, _, _)| Some(id) == default_id.as_ref())
         .unwrap_or(0);
     if built.is_empty() {
-        return Err("no usable provider; run `bot setup` or `bot providers add`".into());
+        warn("setup required; run `bot setup` or `bot providers add`");
+        return Ok(Providers::unconfigured());
     }
     // The catalog's prices go with the providers, so a reload refreshes them
     // too and `/v1/usage` can report `cost_usd`.
@@ -291,6 +294,8 @@ pub fn serve(
     let (port, json, grace) = (*port, *json, *grace);
     let storage = Arc::new(Storage::open(data_dir)?);
     let agent = build_agent(&storage, providers, data_dir, desktop);
+    // Same registry the loop calls tools from: MCP servers register into it.
+    let mcp_tools = agent.tool_registry();
     let recovered = agent.recover()?;
     let token = load_or_create_token(data_dir)?;
     if !token.restricted {
@@ -315,6 +320,17 @@ pub fn serve(
         .enable_all()
         .build()?;
     rt.block_on(async {
+        // Connect in the background (a slow `npx` must not delay the listener)
+        // and expose `/v1/mcp/*` plus the write-only secrets route.
+        let mcp = crate::mcp_host::McpHost::start(data_dir, mcp_tools, telegram_store.clone());
+        state.set_mcp(Arc::clone(&mcp) as Arc<dyn McpControl>);
+        if let Some(store) = telegram_store.clone() {
+            state.set_secret_store(store);
+        }
+        let configured = mcp.list().len();
+        if configured > 0 {
+            eprintln!("mcp: {configured} server(s) configured");
+        }
         // Loopback only: never bind another interface.
         let listener =
             tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).await?;
@@ -361,7 +377,11 @@ pub fn serve(
                 );
             }
         }
-        let paused = run_daemon(listener, state, telegram, shutdown_signal()).await?;
+        // MCP children stay up through the agent grace period (a running tool
+        // call may still need them) and are stopped once the loop has paused.
+        let outcome = run_daemon(listener, state, telegram, shutdown_signal()).await;
+        mcp.shutdown().await;
+        let paused = outcome?;
         if json {
             println!(
                 "{}",
@@ -403,6 +423,23 @@ cached_per_mtok = 0.5
 [[models]]
 id = "unpriced"
 "#;
+
+    #[test]
+    fn fresh_install_builds_unconfigured_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let providers = build_providers(
+            dir.path(),
+            &Catalog::from_entries([]),
+            &MemoryStore::new(),
+            &mut |_| {},
+        )
+        .unwrap();
+        assert!(providers.setup_required());
+        assert_eq!(providers.ids(), Vec::<String>::new());
+        let storage = Arc::new(Storage::open(dir.path()).unwrap());
+        let agent = build_agent(&storage, providers, dir.path(), None);
+        assert!(agent.providers().setup_required());
+    }
 
     #[test]
     fn providers_carry_the_catalog_prices_and_a_reload_refreshes_them() {

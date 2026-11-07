@@ -1,0 +1,92 @@
+.backdrop {
+  position: fixed;
+  inset: var(--space-0);
+  z-index: 60;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: var(--space-12) var(--space-5);
+  background-color: var(--color-surface-overlay);
+}
+
+.dialog {
+  width: min(100%, var(--size-content-max));
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  border: var(--size-border) solid var(--color-border-strong);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-elevated);
+  box-shadow: var(--shadow-overlay);
+  overflow: hidden;
+}
+
+.input {
+  padding: var(--space-3) var(--space-4);
+  border: none;
+  border-bottom: var(--size-border) solid var(--color-border);
+  background-color: transparent;
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: var(--font-size-md);
+}
+
+.input:focus-visible {
+  outline: none;
+  box-shadow: inset 0 calc(-1 * var(--size-border-thick)) 0 var(--color-accent);
+}
+
+.list {
+  margin: var(--space-0);
+  padding: var(--space-1);
+  list-style: none;
+  overflow-y: auto;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.rowActive {
+  background-color: var(--color-accent-subtle);
+}
+
+.rowTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowGroup {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.mark {
+  background-color: transparent;
+  color: var(--color-accent);
+  font-weight: var(--font-weight-semibold);
+}
+
+.empty {
+  padding: var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+.footer {
+  padding: var(--space-2) var(--space-4);
+  border-top: var(--size-border) solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
