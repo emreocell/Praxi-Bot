@@ -641,7 +641,7 @@ fn debug_output_redacts_key() {
 // ---- request building ----
 
 fn body(r: &ChatRequest) -> Value {
-    build_body(&entry("http://x"), r).unwrap()
+    build_body(&entry("http://x"), "m", r).unwrap()
 }
 
 fn tool_def(name: &str, params: &Value) -> Value {
@@ -757,7 +757,7 @@ fn tool_round_trip_maps_ids_to_names_and_merges_responses() {
 
     r.messages.push(Message::tool_result("unknown", "x"));
     assert!(matches!(
-        build_body(&entry("http://x"), &r),
+        build_body(&entry("http://x"), "m", &r),
         Err(ProviderError::InvalidRequest(_))
     ));
 }
@@ -780,14 +780,37 @@ fn images_become_inline_data_and_plain_urls_are_rejected() {
     );
     r.messages[0].content = json!([{"type":"image_url","image_url":{"url":"https://x/a.png"}}]);
     assert!(matches!(
-        build_body(&entry("http://x"), &r),
+        build_body(&entry("http://x"), "m", &r),
         Err(ProviderError::InvalidRequest(_))
     ));
     let mut e = entry("http://x");
     e.capabilities.vision = false;
     r.messages[0].content =
         json!([{"type":"image_url","image_url":{"url":"data:image/png;base64,AA"}}]);
-    assert!(build_body(&e, &r).is_err());
+    assert!(matches!(
+        build_body(&e, "m", &r),
+        Err(ProviderError::Unsupported { capability }) if capability == "vision"
+    ));
+}
+
+#[test]
+fn per_model_tool_override_is_unsupported_for_that_model_only() {
+    let mut e = entry("http://x");
+    e.models.push(crate::entry::ModelInfo {
+        id: "weak".into(),
+        capabilities: Some(crate::entry::CapabilityOverrides {
+            tools: Some(false),
+            ..crate::entry::CapabilityOverrides::default()
+        }),
+        ..crate::entry::ModelInfo::default()
+    });
+    let mut r = req();
+    r.tools = vec![tool_def("t", &json!({"type": "object"}))];
+    assert!(matches!(
+        build_body(&e, "weak", &r),
+        Err(ProviderError::Unsupported { capability }) if capability == "tools"
+    ));
+    assert!(build_body(&e, "strong", &r).is_ok());
 }
 
 // ---- schema conversion ----

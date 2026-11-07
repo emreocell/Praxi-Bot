@@ -161,13 +161,19 @@ fn tool_config(choice: &ToolChoice) -> Value {
 /// Build the JSON request body.
 ///
 /// # Errors
-/// [`ProviderError::InvalidRequest`] for images without `vision`, tools without
-/// `tools`, non-`data:` image URLs, or a tool result with an unknown call id.
-pub(super) fn build_body(entry: &ProviderEntry, req: &ChatRequest) -> Result<Value, ProviderError> {
-    if !req.tools.is_empty() && !entry.capabilities.tools {
-        return Err(ProviderError::InvalidRequest(
-            "tools sent to a model without tool-calling capability".into(),
-        ));
+/// [`ProviderError::Unsupported`] for images without `vision` or tools without
+/// `tools`. [`ProviderError::InvalidRequest`] for non-`data:` image URLs or a
+/// tool result with an unknown call id.
+pub(super) fn build_body(
+    entry: &ProviderEntry,
+    model: &str,
+    req: &ChatRequest,
+) -> Result<Value, ProviderError> {
+    let caps = entry.caps_for(model);
+    if !req.tools.is_empty() && !caps.tools {
+        return Err(ProviderError::Unsupported {
+            capability: "tools".into(),
+        });
     }
     let names: HashMap<&str, &str> = req
         .messages
@@ -180,10 +186,10 @@ pub(super) fn build_body(entry: &ProviderEntry, req: &ChatRequest) -> Result<Val
     let mut system = Vec::new();
     let mut contents: Vec<(&'static str, Vec<Value>)> = Vec::new();
     for m in &req.messages {
-        if !entry.capabilities.vision && has_image(&m.content) {
-            return Err(ProviderError::InvalidRequest(
-                "image content sent to a model without vision capability".into(),
-            ));
+        if !caps.vision && has_image(&m.content) {
+            return Err(ProviderError::Unsupported {
+                capability: "vision".into(),
+            });
         }
         match m.role {
             MessageRole::System => {
@@ -225,7 +231,7 @@ pub(super) fn build_body(entry: &ProviderEntry, req: &ChatRequest) -> Result<Val
     if let Some(n) = req.max_tokens {
         gen_cfg.insert("maxOutputTokens".into(), n.into());
     }
-    if req.json_mode && entry.capabilities.json_mode {
+    if req.json_mode && caps.json_mode {
         gen_cfg.insert("responseMimeType".into(), "application/json".into());
     }
     if !gen_cfg.is_empty() {
