@@ -12,7 +12,9 @@ use serde_json::{Value, json};
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, broadcast, oneshot};
 use tokio::task::JoinHandle;
+use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use crate::error::{Error, Result};
@@ -48,7 +50,12 @@ pub struct CdpClient {
 impl CdpClient {
     /// Connect to a `ws://` debugging endpoint.
     pub async fn connect(url: &str) -> Result<Arc<Self>> {
-        let (ws, _) = tokio_tungstenite::connect_async(url)
+        // CDP replies (full-page screenshots, AX trees) routinely exceed tungstenite's 16 MiB
+        // default; an oversized frame must not kill the connection shared by every tab.
+        let config = WebSocketConfig::default()
+            .max_message_size(None)
+            .max_frame_size(None);
+        let (ws, _) = tokio_tungstenite::connect_async_with_config(url, Some(config), false)
             .await
             .map_err(|e| Error::WebSocket(e.to_string()))?;
         let (sink, mut stream) = ws.split();
@@ -61,9 +68,18 @@ impl CdpClient {
             let events = events.clone();
             let closed = closed.clone();
             tokio::spawn(async move {
+                let mut capacity_errors = 0u32;
                 while let Some(msg) = stream.next().await {
                     let text = match msg {
-                        Ok(Message::Text(t)) => t,
+                        Ok(Message::Text(t)) => {
+                            capacity_errors = 0;
+                            t
+                        }
+                        // A single oversized message is dropped; the connection survives.
+                        Err(WsError::Capacity(_)) if capacity_errors < 8 => {
+                            capacity_errors += 1;
+                            continue;
+                        }
                         Ok(Message::Close(_)) | Err(_) => break,
                         Ok(_) => continue,
                     };
@@ -242,6 +258,21 @@ mod tests {
         let ev = rx.recv().await.unwrap();
         assert_eq!(ev.method, "Test.event");
         assert_eq!(ev.session_id.as_deref(), Some("S1"));
+    }
+
+    #[tokio::test]
+    async fn oversized_message_does_not_kill_connection() {
+        let url = server(|req| {
+            let big = "x".repeat(20 * 1024 * 1024);
+            vec![json!({"id": req["id"], "result": {"big": big}})]
+        })
+        .await;
+        let c = CdpClient::connect(&url).await.unwrap();
+        let r = c.send("Page.captureScreenshot", json!({})).await.unwrap();
+        assert_eq!(r["big"].as_str().unwrap().len(), 20 * 1024 * 1024);
+        assert!(!c.is_closed());
+        let r = c.send("Again", json!({})).await.unwrap();
+        assert!(r["big"].is_string());
     }
 
     #[tokio::test]
