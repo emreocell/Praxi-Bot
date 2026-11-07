@@ -22,11 +22,44 @@ use crate::shared::{ApprovalScope, Grant, GrantTarget, Pending, RunCtx, Shared, 
 struct PendingGuard {
     sh: Arc<Shared>,
     id: ToolCallId,
+    run_id: RunId,
+    released: bool,
+}
+
+impl PendingGuard {
+    /// This park is over: the run goes back to `Running` only when it was the
+    /// last one parked (parallel `ask_user` calls share one run).
+    fn resume(&mut self) {
+        if self.release() {
+            self.sh.set_state(self.run_id, RunState::Running);
+        }
+    }
+
+    /// Decrement the run's park counter once; `true` when it reached zero.
+    fn release(&mut self) -> bool {
+        if std::mem::replace(&mut self.released, true) {
+            return false;
+        }
+        let mut parked = self.sh.parked.lock();
+        match parked.get_mut(&self.run_id) {
+            Some(n) if *n > 1 => {
+                *n -= 1;
+                false
+            }
+            _ => {
+                parked.remove(&self.run_id);
+                true
+            }
+        }
+    }
 }
 
 impl Drop for PendingGuard {
     fn drop(&mut self) {
         self.sh.pending.lock().remove(&self.id);
+        // A dropped (cancelled) wait only releases its slot; the run's own
+        // state is settled by whoever cancelled it.
+        self.release();
     }
 }
 
@@ -147,9 +180,12 @@ impl Shared {
     ) -> (Uuid, PendingGuard, oneshot::Receiver<Verdict>) {
         let (tx, rx) = oneshot::channel();
         self.pending.lock().insert(call_id, Pending { tx });
+        *self.parked.lock().entry(ctx.run_id).or_insert(0) += 1;
         let guard = PendingGuard {
             sh: Arc::clone(self),
             id: call_id,
+            run_id: ctx.run_id,
+            released: false,
         };
         let approval_id = Uuid::now_v7();
         let _ = self.storage.insert_approval(&Approval {
@@ -206,7 +242,7 @@ impl Shared {
     ) -> Result<(), Option<String>> {
         let args = input.to_string();
         let summary = self.redact(format!("{name} {}", truncate_utf8(&args, 300)));
-        let (approval_id, _guard, rx) = self.park(ctx, call_id, &summary);
+        let (approval_id, mut guard, rx) = self.park(ctx, call_id, &summary);
         self.emit(
             ctx,
             Event::ApprovalNeeded(ApprovalNeeded {
@@ -218,7 +254,7 @@ impl Shared {
             }),
         );
         let verdict = self.wait_verdict(ctx, rx).await;
-        self.set_state(ctx.run_id, RunState::Running);
+        guard.resume();
         let Some(verdict) = verdict else {
             let _ = self.storage.decide_approval(approval_id, "expired");
             return Err(Some("nobody approved in time; the run is paused".into()));
@@ -315,7 +351,7 @@ impl Shared {
     ) -> Result<String, Option<String>> {
         let question = self.redact(question.to_owned());
         let summary = format!("question: {}", truncate_utf8(&question, 300));
-        let (approval_id, _guard, rx) = self.park(ctx, call_id, &summary);
+        let (approval_id, mut guard, rx) = self.park(ctx, call_id, &summary);
         self.emit(
             ctx,
             Event::QuestionAsked(QuestionAsked {
@@ -326,7 +362,7 @@ impl Shared {
             }),
         );
         let verdict = self.wait_verdict(ctx, rx).await;
-        self.set_state(ctx.run_id, RunState::Running);
+        guard.resume();
         let Some(verdict) = verdict else {
             let _ = self.storage.decide_approval(approval_id, "expired");
             return Err(Some("nobody answered in time; the run is paused".into()));

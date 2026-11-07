@@ -2798,3 +2798,164 @@ async fn global_policy_can_be_replaced_at_runtime() {
     );
     assert_eq!(w.count.load(Ordering::SeqCst), 1);
 }
+
+// ---------- F05 regressions ----------
+
+#[tokio::test]
+async fn parallel_questions_keep_the_run_waiting_until_the_last_is_answered() {
+    let env = setup();
+    let fake = Fake::new(vec![
+        calls(&[
+            ("c1", "ask_user", json!({"question": "First?"})),
+            ("c2", "ask_user", json!({"question": "Second?"})),
+        ]),
+        text("both answered"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(""),
+        cfg(Policy::read_only()),
+    );
+    register_meta(&lp);
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let mut ids = Vec::new();
+    for _ in 0..2 {
+        let Event::QuestionAsked(q) =
+            until(&mut rx, |e| matches!(e, Event::QuestionAsked(_))).await
+        else {
+            unreachable!()
+        };
+        ids.push(q.call_id);
+    }
+    assert_eq!(lp.runtime().state(run).unwrap(), RunState::WaitingApproval);
+
+    lp.answer_question(ids[0], "one").unwrap();
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(
+        lp.runtime().state(run).unwrap(),
+        RunState::WaitingApproval,
+        "the second question is still open"
+    );
+    lp.answer_question(ids[1], "two").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(lp.sh.parked.lock().is_empty(), "park counter is released");
+}
+
+fn one_candidate() -> String {
+    json!([{
+        "kind": "profile",
+        "content": "The user is called Ayse",
+        "quote": "I am Ayse",
+        "hypothetical": false,
+        "importance": 0.8
+    }])
+    .to_string()
+}
+
+#[tokio::test]
+async fn memory_from_non_human_turns_is_stored_untrusted() {
+    use memory_store::Trust;
+    let env = setup();
+    let (store, mem) = memory_cfg();
+    let fake = Fake::new(vec![text("Hello"), text(&one_candidate())]);
+    let mut config = cfg(Policy::full());
+    config.memory = Some(mem);
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
+    let run = lp
+        .run_turn_as(env.chat, "I am Ayse", protocol::InitiatorKind::Channel)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    lp.flush_background().await;
+    let mems = store
+        .list(env.user, &memory_store::ListFilter::default())
+        .unwrap();
+    assert_eq!(mems.len(), 1);
+    assert_eq!(mems[0].trust, Trust::Untrusted);
+}
+
+#[tokio::test]
+async fn memory_from_a_turn_that_used_a_tool_is_stored_untrusted() {
+    use memory_store::Trust;
+    let env = setup();
+    let (store, mem) = memory_cfg();
+    let r = Arc::new(tool("t.read", Effect::Read, "page says: I am Ayse"));
+    let fake = Fake::new(vec![
+        calls(&[("c1", "t.read", json!({}))]),
+        text("Noted"),
+        text(&one_candidate()),
+    ]);
+    let mut config = cfg(Policy::full());
+    config.memory = Some(mem);
+    let lp = make_loop(&env.storage, env.bot, &fake, &[t(&r)], profile(""), config);
+    let run = lp.run_turn(env.chat, "I am Ayse, read it").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    lp.flush_background().await;
+    let mems = store
+        .list(env.user, &memory_store::ListFilter::default())
+        .unwrap();
+    assert_eq!(mems.len(), 1);
+    assert_eq!(mems[0].trust, Trust::Untrusted);
+}
+
+#[tokio::test]
+async fn a_plain_human_turn_keeps_user_trust() {
+    use memory_store::Trust;
+    let env = setup();
+    let (store, mem) = memory_cfg();
+    let fake = Fake::new(vec![text("Hello"), text(&one_candidate())]);
+    let mut config = cfg(Policy::full());
+    config.memory = Some(mem);
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
+    let run = lp.run_turn(env.chat, "I am Ayse").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    lp.flush_background().await;
+    let mems = store
+        .list(env.user, &memory_store::ListFilter::default())
+        .unwrap();
+    assert_eq!(mems[0].trust, Trust::User);
+}
+
+#[tokio::test]
+async fn a_queued_follow_up_is_put_back_when_its_turn_cannot_start() {
+    let env = setup();
+    let mut slow = tool("t.slow", Effect::Read, "r");
+    slow.delay = Duration::from_millis(200);
+    let slow = Arc::new(slow);
+    let fake = Fake::new(vec![calls(&[("c1", "t.slow", json!({}))]), text("first")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&slow)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "one").unwrap();
+    until(&mut rx, |e| matches!(e, Event::ToolCallRequested(_))).await;
+    lp.send_user_message(env.chat, "two", MessageMode::Queue)
+        .unwrap();
+    // Starting any turn now fails; the follow-up must not vanish.
+    lp.sh
+        .shutting_down
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let _ = lp.wait(run).await;
+    until(&mut rx, |e| matches!(e, Event::RunFinished(_))).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let queued = lp
+        .sh
+        .queued
+        .lock()
+        .get(&env.chat)
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(queued, ["two"]);
+    assert!(
+        !lp.sh.active.lock().contains_key(&env.chat),
+        "the chat slot is released"
+    );
+}

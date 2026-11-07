@@ -1097,3 +1097,40 @@ async fn live_gemini_parent_spawns_two_subagents() {
     assert_eq!(kids.len(), 2, "two subagents were spawned");
     assert!(kids.iter().all(|k| k.state == "succeeded"));
 }
+
+#[tokio::test]
+async fn finished_children_are_charged_against_the_parents_budget() {
+    let env = setup();
+    let brain = Brain::new(|req| {
+        if is_child(req) {
+            Some(vec![
+                ChatChunk::TextDelta("ok".to_owned()),
+                ChatChunk::Usage(Usage {
+                    prompt_tokens: 2_000,
+                    completion_tokens: 1_000,
+                    cached_tokens: None,
+                    cache_write_tokens: None,
+                }),
+                ChatChunk::Done {
+                    finish_reason: FinishReason::Stop,
+                },
+            ])
+        } else {
+            match results(req).len() {
+                0 => calls_owned(vec![spawn("c1", "first")]),
+                1 => calls_owned(vec![spawn("c2", "second")]),
+                _ => say("fin"),
+            }
+        }
+    });
+    let mut config = cfg(Policy::full());
+    config.guards.max_tokens_per_turn = 4_000;
+    let lp = make(&env.storage, env.bot, &brain, &[], profile(""), config);
+    let parent = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(parent).await.unwrap(), RunState::Succeeded);
+    let kids = children(&env, parent);
+    assert_eq!(kids.len(), 2);
+    assert_eq!(kids[0].spec.as_ref().unwrap()["token_budget"], 1_000);
+    // The first child burned 3000 of the parent's 4000.
+    assert_eq!(kids[1].spec.as_ref().unwrap()["token_budget"], 250);
+}
