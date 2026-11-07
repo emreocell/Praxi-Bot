@@ -1,4 +1,5 @@
 import type { DaemonEvent, GlobalEnvelope, TodoItem } from "../api/types";
+import { parseRoute, type RouteState } from "../lib/route.ts";
 
 export type ToolStatus =
   | "requested"
@@ -91,6 +92,8 @@ export interface RunState {
   subagentState?: SubagentState;
   /** Final summary of a finished subagent. */
   summary?: string;
+  /** How the turn was routed (`route_decided`), when the router is on. */
+  route?: RouteState;
 }
 
 export type SubagentState =
@@ -445,6 +448,17 @@ function reduce(
           }
         ]
       }));
+    case "route_decided":
+      return withRun(state, e.run_id, ts, (r) => ({
+        ...r,
+        route: {
+          level: e.level,
+          route: parseRoute(e.route),
+          confidence: e.confidence,
+          latencyMs: e.latency_ms,
+          reason: e.reason
+        }
+      }));
     case "workflow_step_started":
     case "workflow_step_completed":
     case "control_requested":
@@ -659,4 +673,12 @@ export function isOutboundSend(name: string): boolean {
   return /(^|_)(send|post|reply|publish|email|mail|message|dm|tweet)(_|$)/.test(
     name
   );
+}
+
+/** The text the assistant produced in `run` (its top-level text items). */
+export function runText(run: RunState): string {
+  return run.items
+    .filter((i): i is TextItem => i.kind === "text")
+    .map((i) => i.text)
+    .join("\n");
 }

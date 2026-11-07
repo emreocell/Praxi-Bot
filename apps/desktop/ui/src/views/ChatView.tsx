@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Avatar, Button } from "ui";
+import { ApiError } from "../api/client";
 import type { Message, SendMode } from "../api/types";
 import {
   ApprovalCard,
@@ -18,12 +19,19 @@ import {
   TodoCard,
   ToolCard
 } from "../components/ChatCards";
+import { useToast } from "../components/Toast";
 import { botView } from "../lib/botProfile";
+import {
+  newChatIdFromText,
+  routeChip,
+  routeHoverValues
+} from "../lib/route";
 import { useDaemon } from "../state/DaemonContext";
 import {
   assignChildRuns,
   itemTs,
   type RunState,
+  runText,
   type TimelineItem,
   topLevelRuns
 } from "../state/timeline";
@@ -36,18 +44,47 @@ type Entry =
   | { kind: "user"; key: string; ts: number; text: string }
   | { kind: "assistant"; key: string; ts: number; text: string; live: boolean }
   | { kind: "item"; key: string; ts: number; item: TimelineItem; runId: string }
-  | { kind: "runError"; key: string; ts: number; message: string };
+  | { kind: "runError"; key: string; ts: number; message: string }
+  | { kind: "route"; key: string; ts: number; run: RunState }
+  | { kind: "remember"; key: string; ts: number; run: RunState };
+
+/** `idle` = offer the button; `saved` = done; `hidden` = the daemon said no (409). */
+type RememberState = "idle" | "busy" | "saved" | "hidden";
+
+/** A finished, successful turn that did not just run a command (`/new`). */
+function canOfferRemember(run: RunState): boolean {
+  return (
+    run.finishedMs !== undefined &&
+    run.error === null &&
+    run.route?.route.kind !== "command"
+  );
+}
 
 export function ChatView({
   chatId,
-  onBack
+  onBack,
+  onSwitchChat,
+  showAgentRoute = false
 }: {
   chatId: string;
   onBack: () => void;
+  /** Open another chat (after a `/new` turn created one). */
+  onSwitchChat?: (chatId: string) => void;
+  /** Debug: also show the chip for a plain `Agent` decision at K4. */
+  showAgentRoute?: boolean;
 }) {
   const { t } = useTranslation();
-  const { client, chats, bots, events, runs, recordAnswer, refreshRuns } =
-    useDaemon();
+  const toast = useToast();
+  const {
+    client,
+    chats,
+    bots,
+    events,
+    runs,
+    recordAnswer,
+    refreshRuns,
+    refreshChats
+  } = useDaemon();
   const chat = chats.find((c) => c.id === chatId);
   const bot = bots.find((b) => b.id === chat?.bot_id);
   const view = bot ? botView(bot) : null;
@@ -59,6 +96,9 @@ export function ChatView({
   const [error, setError] = useState<string | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const stickToBottom = useRef(true);
+  const [remember, setRemember] = useState<Record<string, RememberState>>({});
+  const mountedAt = useRef(Date.now());
+  const switchedFor = useRef(new Set<string>());
 
   const chatRuns = useMemo(
     () => topLevelRuns(events, chatId),
@@ -67,6 +107,34 @@ export function ChatView({
   const finishedCount = chatRuns.filter(
     (r) => r.finishedMs !== undefined
   ).length;
+
+  // `/new` typed in the chat: the daemon starts a new chat and says so in its
+  // reply; follow it (only for turns that finish while this view is open).
+  useEffect(() => {
+    for (const run of chatRuns) {
+      const r = run.route?.route;
+      if (
+        r?.kind !== "command" ||
+        r.name !== "new" ||
+        run.finishedMs === undefined ||
+        run.finishedMs < mountedAt.current ||
+        run.error !== null ||
+        switchedFor.current.has(run.id)
+      ) {
+        continue;
+      }
+      switchedFor.current.add(run.id);
+      const id = newChatIdFromText(runText(run));
+      if (id && onSwitchChat) {
+        void refreshChats()
+          .catch(() => {})
+          .then(() => {
+            toast.show(t("chat.newChatStarted"), "success");
+            onSwitchChat(id);
+          });
+      }
+    }
+  }, [chatRuns, onSwitchChat, refreshChats, toast, t]);
 
   const loadMessages = useCallback(async () => {
     if (!client) {
@@ -123,7 +191,18 @@ export function ChatView({
         });
       }
     }
+    const lastFinished = [...chatRuns]
+      .reverse()
+      .find((r) => r.finishedMs !== undefined);
     for (const run of chatRuns) {
+      if (run.route && routeChip(run.route, showAgentRoute)) {
+        out.push({
+          kind: "route",
+          key: `${run.id}-route`,
+          ts: run.startedMs,
+          run
+        });
+      }
       for (const item of run.items) {
         out.push({
           kind: "item",
@@ -141,10 +220,22 @@ export function ChatView({
           message: run.error
         });
       }
+      if (
+        run === lastFinished &&
+        canOfferRemember(run) &&
+        remember[run.id] !== "hidden"
+      ) {
+        out.push({
+          kind: "remember",
+          key: `${run.id}-remember`,
+          ts: run.finishedMs ?? run.startedMs,
+          run
+        });
+      }
     }
     // Array.prototype.sort is stable: equal timestamps keep insertion order.
     return out.sort((a, b) => a.ts - b.ts);
-  }, [messages, chatRuns]);
+  }, [messages, chatRuns, showAgentRoute, remember]);
 
   const lastItem = entries[entries.length - 1];
   const streaming =
@@ -180,7 +271,14 @@ export function ChatView({
     setSending(true);
     setError(null);
     try {
-      await client.sendMessage(chatId, body, active ? mode : undefined);
+      const res = await client.sendMessage(
+        chatId,
+        body,
+        active ? mode : undefined
+      );
+      if (res.delivery === "stopped") {
+        toast.show(t("chat.stopped"), "info");
+      }
       setText("");
       stickToBottom.current = true;
       await Promise.all([loadMessages(), refreshRuns()]);
@@ -230,6 +328,32 @@ export function ChatView({
       size="sm"
     />
   );
+
+  const rememberRun = async (runId: string) => {
+    if (!client) {
+      return;
+    }
+    setRemember((m) => ({ ...m, [runId]: "busy" }));
+    try {
+      await client.rememberRun(runId);
+      setRemember((m) => ({ ...m, [runId]: "saved" }));
+      toast.show(t("chat.remember.done"), "success");
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        // not eligible: the button goes away
+        setRemember((m) => ({ ...m, [runId]: "hidden" }));
+        toast.show(t("chat.remember.notEligible"), "info");
+      } else {
+        setRemember((m) => ({ ...m, [runId]: "idle" }));
+        toast.show(
+          t("chat.remember.failed", {
+            message: e instanceof Error ? e.message : String(e)
+          }),
+          "danger"
+        );
+      }
+    }
+  };
 
   const cancelChild = async (childRunId: string) => {
     if (!client) {
@@ -370,6 +494,68 @@ export function ChatView({
                     {t("chat.runFailed", { message: e.message })}
                   </p>
                 );
+              case "route": {
+                const route = e.run.route;
+                const chip = route ? routeChip(route, showAgentRoute) : null;
+                if (!route || !chip) {
+                  return null;
+                }
+                const hover = t("chat.route.hover", routeHoverValues(route));
+                const label = t(chip.i18nKey, chip.values);
+                return (
+                  <div key={e.key} className={styles.routeRow}>
+                    <span
+                      className={[
+                        styles.routeChip,
+                        chip.cheap ? styles.routeChipCheap : ""
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                      title={hover}
+                      aria-label={`${label}. ${hover}`}
+                      tabIndex={0}
+                      data-testid="route-chip"
+                    >
+                      {chip.cheap ? (
+                        <svg
+                          className={styles.routeIcon}
+                          viewBox="0 0 16 16"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M9 1 3 9h4l-1 6 6-8H8z"
+                            fill="currentColor"
+                          />
+                        </svg>
+                      ) : null}
+                      <span className={styles.routeLabel}>{label}</span>
+                    </span>
+                  </div>
+                );
+              }
+              case "remember": {
+                const st = remember[e.run.id] ?? "idle";
+                return (
+                  <div key={e.key} className={styles.rememberRow}>
+                    {st === "saved" ? (
+                      <span className={styles.rememberDone} role="status">
+                        {t("chat.remember.saved")}
+                      </span>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={st === "busy"}
+                        title={t("chat.remember.hint")}
+                        onClick={() => void rememberRun(e.run.id)}
+                        data-testid="remember-run"
+                      >
+                        {t("chat.remember.button")}
+                      </Button>
+                    )}
+                  </div>
+                );
+              }
               case "item":
                 return (
                   <div key={e.key} className={styles.itemRow}>
