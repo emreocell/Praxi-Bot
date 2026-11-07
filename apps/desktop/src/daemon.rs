@@ -17,6 +17,8 @@ use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
+use crate::listener::{self, Expect};
+
 /// Default TCP port of `bot serve` (mirrors `daemon_api::DEFAULT_PORT`).
 pub const DEFAULT_PORT: u16 = 47821;
 /// Token file name inside the data directory (mirrors `daemon_api::TOKEN_FILE_NAME`).
@@ -48,6 +50,8 @@ pub struct DaemonHandle {
     connecting: tokio::sync::Mutex<()>,
     child: Mutex<Option<Child>>,
     fake: Mutex<bool>,
+    /// Daemon log length when the current child was spawned.
+    log_offset: Mutex<u64>,
 }
 
 impl DaemonHandle {
@@ -245,6 +249,103 @@ fn spawn_daemon(data_dir: &Path, fake: bool) -> Result<Child, String> {
     })
 }
 
+/// Marker `bot serve` prints (to the daemon log) when it cannot build a single
+/// provider: none configured, all disabled, or the key is missing from the
+/// secret store.  These are onboarding states in which the app must still open
+/// (with the fake provider) so the user can fix them in the UI.
+const NO_PROVIDER_MARKER: &str = "no usable provider";
+
+fn log_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("desktop-daemon.log")
+}
+
+fn log_len(data_dir: &Path) -> u64 {
+    std::fs::metadata(log_path(data_dir)).map_or(0, |m| m.len())
+}
+
+/// Whether the daemon log, from byte `offset` on (what the just-exited child
+/// wrote), reports the "no usable provider" start failure.  Any other early
+/// exit (corrupt config, DB error, port clash) is a real failure and is not
+/// masked by the fake fallback.
+fn no_usable_provider_since(data_dir: &Path, offset: u64) -> bool {
+    std::fs::read(log_path(data_dir)).is_ok_and(|b| {
+        let from = usize::try_from(offset).unwrap_or(usize::MAX).min(b.len());
+        String::from_utf8_lossy(&b[from..]).contains(NO_PROVIDER_MARKER)
+    })
+}
+
+/// Spawn the daemon and remember where its log output will start.
+fn spawn_tracked(handle: &DaemonHandle, data: &Path, fake: bool) -> Result<(), String> {
+    let offset = log_len(data);
+    let child = spawn_daemon(data, fake)?;
+    *handle.log_offset.lock() = offset;
+    *handle.child.lock() = Some(child);
+    *handle.fake.lock() = fake;
+    Ok(())
+}
+
+/// PID of the app-owned child while it runs.
+fn child_pid(handle: &DaemonHandle) -> Option<u32> {
+    let mut g = handle.child.lock();
+    let c = g.as_mut()?;
+    matches!(c.try_wait(), Ok(None)).then(|| c.id())
+}
+
+fn child_exited(handle: &DaemonHandle) -> bool {
+    handle
+        .child
+        .lock()
+        .as_mut()
+        .is_some_and(|c| !matches!(c.try_wait(), Ok(None)))
+}
+
+/// Loopback port of `url` when its host is a local one (remote `BOT_URL`s are
+/// the user's explicit choice and cannot be checked by socket owner).
+fn loopback_port(url: &str) -> Option<u16> {
+    let hp = host_port(url)?;
+    let (host, port) = hp.rsplit_once(':')?;
+    matches!(host, "127.0.0.1" | "localhost")
+        .then(|| port.parse().ok())
+        .flatten()
+}
+
+/// Identity gate run before the bearer token is handed out.  The health probe
+/// is unauthenticated, so an answer only proves "something listens".  The
+/// owning process of the socket must be the child this app spawned (exact PID),
+/// or, when the app has no running child and did not just spawn one, a process
+/// of the same OS user.  After our own spawn with no running child the
+/// listener is a squatter that won the bind race.
+async fn check_listener(handle: &DaemonHandle, url: &str, after_spawn: bool) -> Result<(), String> {
+    let Some(port) = loopback_port(url) else {
+        return Ok(());
+    };
+    let expect = match child_pid(handle) {
+        Some(pid) => Expect::Child(pid),
+        None if after_spawn => {
+            return Err(format!(
+                "something other than the daemon this app started answers at {url}; \
+                 refusing to send the API token"
+            ));
+        }
+        None => Expect::SameUser,
+    };
+    tokio::task::spawn_blocking(move || listener::verify(port, expect))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("{e}; refusing to send the API token to {url}"))
+}
+
+fn connection(handle: &DaemonHandle, url: String, data: &Path) -> Result<Connection, String> {
+    let token = read_token(data)?;
+    Ok(Connection {
+        base_url: url,
+        token,
+        started_by_app: handle.started_by_app(),
+        fake_provider: *handle.fake.lock(),
+        data_dir: data.display().to_string(),
+    })
+}
+
 /// Make sure a daemon is reachable (starting one when needed) and return the
 /// connection details.
 ///
@@ -253,92 +354,75 @@ fn spawn_daemon(data_dir: &Path, fake: bool) -> Result<Child, String> {
 /// cannot be read.
 pub async fn connect(handle: &DaemonHandle) -> Result<Connection, String> {
     let _one_at_a_time = handle.connecting.lock().await;
+    connect_locked(handle).await
+}
+
+/// Stop a daemon this app started and connect again.  The `connecting` lock is
+/// held across stop + connect so a concurrent [`connect`] can neither observe
+/// the half-stopped state nor race the restart.
+///
+/// # Errors
+/// Same as [`connect`].
+pub async fn restart(handle: &DaemonHandle) -> Result<Connection, String> {
+    let _one_at_a_time = handle.connecting.lock().await;
+    handle.stop();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    connect_locked(handle).await
+}
+
+/// [`connect`] with the `connecting` lock already held by the caller.
+async fn connect_locked(handle: &DaemonHandle) -> Result<Connection, String> {
     let url = base_url();
     let data = data_dir()?;
-    if !healthy(&url).await {
-        // A previously started child that died is dropped first.
-        if !handle.started_by_app() {
-            handle.stop();
-            if std::env::var_os("BOT_URL").is_some() {
-                return Err(format!("no daemon answers at {url}"));
-            }
-            let mut fake = wants_fake();
-            *handle.child.lock() = Some(spawn_daemon(&data, fake)?);
-            *handle.fake.lock() = fake;
-            let deadline = tokio::time::Instant::now() + START_TIMEOUT;
-            while !healthy(&url).await {
-                if tokio::time::Instant::now() >= deadline {
-                    return Err(format!(
-                        "the daemon did not become healthy at {url} (see {})",
-                        data.join("desktop-daemon.log").display()
-                    ));
-                }
-                // A child that already exited will never answer.
-                let exited = handle
-                    .child
-                    .lock()
-                    .as_mut()
-                    .is_some_and(|c| matches!(c.try_wait(), Ok(Some(_))));
-                if exited {
-                    // On first run before any provider is configured in `providers.toml`,
-                    // `bot serve` exits immediately. Retry once with `--fake-provider` if
-                    // we haven't already so the UI can still connect during onboarding.
-                    if !fake {
-                        fake = true;
-                        if let Ok(child) = spawn_daemon(&data, true) {
-                            *handle.child.lock() = Some(child);
-                            *handle.fake.lock() = true;
-                            tokio::time::sleep(Duration::from_millis(250)).await;
-                            continue;
-                        }
-                    }
-                    return Err(format!(
-                        "the daemon exited right after start (see {})",
-                        data.join("desktop-daemon.log").display()
-                    ));
-                }
-                tokio::time::sleep(Duration::from_millis(250)).await;
-            }
-            let token = read_token(&data)?;
-            return Ok(Connection {
-                base_url: url,
-                token,
-                started_by_app: handle.started_by_app(),
-                fake_provider: *handle.fake.lock(),
-                data_dir: data.display().to_string(),
-            });
-        }
-        let deadline = tokio::time::Instant::now() + START_TIMEOUT;
-        while !healthy(&url).await {
-            if tokio::time::Instant::now() >= deadline {
-                return Err(format!(
-                    "the daemon did not become healthy at {url} (see {})",
-                    data.join("desktop-daemon.log").display()
-                ));
-            }
-            // A child that already exited will never answer.
-            if handle
-                .child
-                .lock()
-                .as_mut()
-                .is_some_and(|c| matches!(c.try_wait(), Ok(Some(_))))
-            {
-                return Err(format!(
-                    "the daemon exited right after start (see {})",
-                    data.join("desktop-daemon.log").display()
-                ));
-            }
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        }
+    if healthy(&url).await {
+        check_listener(handle, &url, false).await?;
+        return connection(handle, url, &data);
     }
-    let token = read_token(&data)?;
-    Ok(Connection {
-        base_url: url,
-        token,
-        started_by_app: handle.started_by_app(),
-        fake_provider: *handle.fake.lock(),
-        data_dir: data.display().to_string(),
-    })
+    // A previously started child that died is dropped first.
+    if !handle.started_by_app() {
+        handle.stop();
+        if std::env::var_os("BOT_URL").is_some() {
+            return Err(format!("no daemon answers at {url}"));
+        }
+        let fake = wants_fake();
+        spawn_tracked(handle, &data, fake)?;
+    }
+    let mut fake = *handle.fake.lock();
+    let deadline = tokio::time::Instant::now() + START_TIMEOUT;
+    loop {
+        if healthy(&url).await {
+            check_listener(handle, &url, true).await?;
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(format!(
+                "the daemon did not become healthy at {url} (see {})",
+                data.join("desktop-daemon.log").display()
+            ));
+        }
+        // A child that already exited will never answer.
+        if child_exited(handle) {
+            // No usable provider (none configured, all disabled, key missing):
+            // `bot serve` exits immediately.  Retry once with `--fake-provider`
+            // so the UI can still connect and the user can fix it, but only
+            // for that reason.
+            let offset = *handle.log_offset.lock();
+            if !fake
+                && no_usable_provider_since(&data, offset)
+                && spawn_tracked(handle, &data, true).is_ok()
+            {
+                fake = true;
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                continue;
+            }
+            return Err(format!(
+                "the daemon exited right after start (see {})",
+                data.join("desktop-daemon.log").display()
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    connection(handle, url, &data)
 }
 
 /// Output of a `bot` CLI invocation.
@@ -432,6 +516,89 @@ mod tests {
             s.write_all(resp.as_bytes()).await.unwrap();
         });
         assert!(healthy(&format!("http://{addr}")).await);
+    }
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "praxibot-daemon-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn fake_fallback_only_for_the_no_usable_provider_exit() {
+        let d = temp_dir("fake");
+        let log = d.join("desktop-daemon.log");
+        // Old output before the offset is ignored.
+        std::fs::write(&log, "Error: no usable provider; run `bot setup`\n").unwrap();
+        let off = log_len(&d);
+        assert!(!no_usable_provider_since(&d, off));
+        // Disabled-only / missing-key onboarding exit: fall back.
+        let mut f = std::fs::OpenOptions::new().append(true).open(&log).unwrap();
+        std::io::Write::write_all(&mut f, b"Error: no usable provider; run `bot setup`\n").unwrap();
+        assert!(no_usable_provider_since(&d, off));
+        // A different failure (corrupt config) is a real error.
+        std::fs::write(&log, "Error: providers.toml: parse error\n").unwrap();
+        assert!(!no_usable_provider_since(&d, 0));
+        // No log at all.
+        let _ = std::fs::remove_file(&log);
+        assert!(!no_usable_provider_since(&d, 0));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    async fn ok_daemon() -> u16 {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut s, _)) = l.accept().await {
+                let mut b = [0u8; 512];
+                let _ = s.read(&mut b).await;
+                let body = r#"{"status":"ok"}"#;
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = s.write_all(resp.as_bytes()).await;
+            }
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn token_is_withheld_from_a_foreign_listener() {
+        // This test process plays the squatter: it answers a healthy probe.
+        let port = ok_daemon().await;
+        let url = format!("http://127.0.0.1:{port}");
+        assert!(healthy(&url).await);
+
+        // The app spawned a child (any process that is not the listener).
+        let handle = DaemonHandle::default();
+        let mut cmd = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "ping -n 30 127.0.0.1 >NUL"]);
+            c
+        } else {
+            let mut c = Command::new("sleep");
+            c.arg("30");
+            c
+        };
+        *handle.child.lock() = Some(cmd.stdout(Stdio::null()).spawn().unwrap());
+        let err = check_listener(&handle, &url, true).await.unwrap_err();
+        assert!(err.contains("refusing to send the API token"), "{err}");
+
+        // Squatter wins the race and our child is gone: still refused.
+        handle.stop();
+        assert!(check_listener(&handle, &url, true).await.is_err());
+
+        // Control: the check passes for the real owner of the socket.
+        assert!(listener::verify(port, Expect::Child(std::process::id())).is_ok());
+        // A pre-existing daemon of the same user is accepted.
+        assert!(check_listener(&handle, &url, false).await.is_ok());
     }
 
     #[test]
