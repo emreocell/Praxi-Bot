@@ -5,6 +5,7 @@
 //! lazily on first use. The profile follows the runtime setting in
 //! [`BrowserSettings`] (isolated temporary profile by default).
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -129,12 +130,34 @@ fn render_action(r: &ActionResult) -> Result<String, String> {
     if !r.ok {
         return Err(r.error.clone().unwrap_or_else(|| "action failed".into()));
     }
-    Ok(format!(
-        "# {} ({})\n{}",
-        r.snapshot.title,
-        r.snapshot.url,
-        r.new_snapshot_diff.render()
-    ))
+    let d = &r.new_snapshot_diff;
+    let body = if d.url_changed.is_some()
+        || (!d.is_empty() && d.render().len() >= r.snapshot.to_text().len())
+    {
+        // A navigation, or a diff no shorter than the page: show the page itself.
+        r.snapshot.render()
+    } else {
+        format!(
+            "# {} ({})\n{}",
+            r.snapshot.title,
+            r.snapshot.url,
+            d.render()
+        )
+    };
+    let mut out = body;
+    if let Some(dl) = &r.dialog {
+        let _ = write!(
+            out,
+            "\n~ dialog({}) \"{}\" {}",
+            dl.kind,
+            dl.message.replace('\n', " "),
+            if dl.accepted { "accepted" } else { "dismissed" }
+        );
+    }
+    if let Some(n) = &r.settle_note {
+        let _ = write!(out, "\n~ {n}");
+    }
+    Ok(out)
 }
 
 impl CdpDriver {
@@ -212,12 +235,16 @@ impl BrowserDriver for CdpDriver {
     async fn open(&self, url: &str, profile: Option<&str>) -> Result<String, String> {
         let mut g = self.session.lock().await;
         let sess = self.ensure(&mut g, profile).await?;
-        let r = sess.page.navigate(url).await.map_err(s)?;
+        // One snapshot, taken with the caller's options (no baseline, no second capture).
+        let r = sess
+            .page
+            .navigate_snapshot(url, &snap_opts(false))
+            .await
+            .map_err(s)?;
         if !r.ok {
             return Err(r.error.unwrap_or_else(|| "navigation failed".into()));
         }
-        let snap = sess.page.snapshot(&snap_opts(false)).await.map_err(s)?;
-        Ok(snap.render())
+        Ok(r.snapshot.render())
     }
 
     async fn snapshot(&self, interactive_only: bool) -> Result<String, String> {
@@ -846,6 +873,91 @@ mod tests {
             ContentPart::Text { text } => text.clone(),
             _ => panic!(),
         }
+    }
+
+    fn snap(url: &str, lines: &[(&str, &str)]) -> browser_cdp::Snapshot {
+        browser_cdp::Snapshot {
+            url: url.into(),
+            title: "T".into(),
+            nodes: lines
+                .iter()
+                .map(|(r, name)| browser_cdp::SnapNode {
+                    ref_id: Some((*r).into()),
+                    role: "button".into(),
+                    name: (*name).into(),
+                    depth: 0,
+                    value: None,
+                    states: Vec::new(),
+                })
+                .collect(),
+        }
+    }
+
+    fn result(before: &browser_cdp::Snapshot, after: browser_cdp::Snapshot) -> ActionResult {
+        ActionResult {
+            ok: true,
+            error: None,
+            new_snapshot_diff: browser_cdp::diff(before, &after),
+            snapshot: after,
+            dialog: None,
+            settle_note: None,
+        }
+    }
+
+    #[test]
+    fn navigating_click_renders_full_snapshot_without_minus_lines() {
+        let before = snap("http://a/", &[("e1", "Old one"), ("e2", "Old two")]);
+        let after = snap(
+            "http://a/next",
+            &[("e1", "New one"), ("e2", "New two"), ("e3", "New three")],
+        );
+        let out = render_action(&result(&before, after)).unwrap();
+        assert!(!out.lines().any(|l| l.starts_with("- ")), "{out}");
+        assert!(!out.lines().any(|l| l.starts_with("+ ")), "{out}");
+        for r in ["[e1]", "[e2]", "[e3]"] {
+            assert!(out.contains(r), "{out}");
+        }
+        assert!(out.starts_with("# T (http://a/next)"));
+    }
+
+    #[test]
+    fn small_in_page_change_keeps_the_diff() {
+        let names: Vec<(String, String)> = (0..20)
+            .map(|i| (format!("e{i}"), format!("Item {i}")))
+            .collect();
+        let lines: Vec<(&str, &str)> = names
+            .iter()
+            .map(|(a, b)| (a.as_str(), b.as_str()))
+            .collect();
+        let before = snap("http://a/", &lines);
+        let mut changed = lines.clone();
+        changed[3] = ("e3", "Changed");
+        let after = snap("http://a/", &changed);
+        let want = format!(
+            "# T (http://a/)\n{}",
+            browser_cdp::diff(&before, &after).render()
+        );
+        let out = render_action(&result(&before, after)).unwrap();
+        assert_eq!(out, want);
+        assert!(out.contains("- ") && out.contains("+ "));
+    }
+
+    #[test]
+    fn dialog_and_settle_note_are_appended() {
+        let a = snap("http://a/", &[("e1", "Go")]);
+        let mut r = result(&a, a.clone());
+        r.dialog = Some(browser_cdp::DialogInfo {
+            kind: "confirm".into(),
+            message: "sure?".into(),
+            accepted: false,
+        });
+        r.settle_note = Some("network still busy: 2 requests".into());
+        let out = render_action(&r).unwrap();
+        assert!(
+            out.contains("\n~ dialog(confirm) \"sure?\" dismissed"),
+            "{out}"
+        );
+        assert!(out.ends_with("\n~ network still busy: 2 requests"), "{out}");
     }
 
     #[tokio::test]

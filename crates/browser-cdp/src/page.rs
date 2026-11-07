@@ -21,6 +21,25 @@ use crate::snapshot::{
 /// Default navigation / wait timeout.
 pub const DEFAULT_WAIT: Duration = Duration::from_secs(30);
 
+/// Requests in flight longer than this (long-poll, `EventSource`) do not block network idle.
+pub(crate) const INFLIGHT_CAP: Duration = Duration::from_secs(10);
+
+/// A JavaScript dialog the page watcher answered on its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DialogInfo {
+    /// `alert`, `confirm`, `prompt` or `beforeunload`.
+    pub kind: String,
+    /// The dialog message.
+    pub message: String,
+    /// True when it was accepted, false when dismissed.
+    pub accepted: bool,
+}
+
+/// Policy: only `alert` and `beforeunload` are accepted; `confirm`/`prompt` are dismissed.
+pub(crate) fn accepts_dialog(kind: &str) -> bool {
+    matches!(kind, "alert" | "beforeunload")
+}
+
 /// Shared with the background event watcher.
 #[derive(Default)]
 pub(crate) struct Shared {
@@ -28,8 +47,13 @@ pub(crate) struct Shared {
     pub oopif: StdMutex<HashMap<String, String>>,
     /// Sessions whose domains are already enabled.
     pub ready: StdMutex<HashSet<String>>,
-    /// In-flight network request ids of the main session (a redirect chain reuses one id).
-    pub inflight: StdMutex<HashSet<String>>,
+    /// In-flight network requests of the main session, id -> first seen (a redirect chain reuses
+    /// one id, so inserts are idempotent). Entries older than [`INFLIGHT_CAP`] are ignored.
+    pub inflight: StdMutex<HashMap<String, Instant>>,
+    /// JS dialogs handled by the watcher since the current action started.
+    pub dialogs: StdMutex<Vec<DialogInfo>>,
+    /// Number of AX/DOMSnapshot rounds taken (diagnostics, used by tests).
+    pub snap_rounds: AtomicU64,
     /// Last network activity.
     pub last_net: StdMutex<Option<Instant>>,
     /// Incremented on every main-frame navigation; invalidates refs.
@@ -86,7 +110,12 @@ impl Page {
             .ok_or_else(|| Error::Json("attachToTarget returned no sessionId".into()))?
             .to_string();
         let shared = Arc::new(Shared::default());
-        let watcher = tokio::spawn(watch(rx, session.clone(), shared.clone()));
+        let watcher = tokio::spawn(watch(
+            rx,
+            session.clone(),
+            shared.clone(),
+            Some(client.clone()),
+        ));
         let page = Self {
             client,
             session,
@@ -228,12 +257,14 @@ impl Page {
     // -- frames ---------------------------------------------------------------------------------
 
     /// Walk the frame tree, hopping into out-of-process iframe sessions, and fetch AX data.
-    async fn collect_frames(&self) -> Result<Vec<FrameInput>> {
+    async fn collect_frames(&self) -> Result<(Vec<FrameInput>, String)> {
         struct Job {
             session: Option<String>,
             parent: Option<String>,
             owner: Option<i64>,
         }
+        self.shared.snap_rounds.fetch_add(1, Ordering::SeqCst);
+        let mut main_url = String::new();
         let mut frames: Vec<FrameInput> = Vec::new();
         let mut visited: HashSet<String> = HashSet::new();
         let mut queue = vec![Job {
@@ -255,6 +286,14 @@ impl Page {
                     Err(e) if job.session.is_none() || e.is_fatal() => return Err(e),
                     Err(_) => continue,
                 };
+                if job.session.is_none() {
+                    let f = &tree["frameTree"]["frame"];
+                    main_url = format!(
+                        "{}{}",
+                        f["url"].as_str().unwrap_or_default(),
+                        f["urlFragment"].as_str().unwrap_or_default()
+                    );
+                }
                 // Depth-first walk of this session's tree: (node, is_session_root, parent, owner)
                 let mut stack: Vec<(Value, bool, Option<String>, Option<i64>)> = vec![(
                     tree["frameTree"].clone(),
@@ -352,7 +391,7 @@ impl Page {
         // Main frame first.
         frames.sort_by_key(|f| f.parent_frame_id.is_some());
         self.attach_dom_extras(&mut frames).await;
-        Ok(frames)
+        Ok((frames, main_url))
     }
 
     async fn frame_owner(&self, session: Option<&str>, frame_id: &str) -> Option<i64> {
@@ -412,12 +451,44 @@ impl Page {
 
     // -- snapshots ------------------------------------------------------------------------------
 
+    /// Title from `Target.getTargetInfo` (falls back to `document.title`). Chrome reports the URL
+    /// as the title of untitled pages; that is mapped back to an empty title.
+    async fn target_title(&self, url: &str) -> String {
+        let info = self
+            .client
+            .send("Target.getTargetInfo", json!({"targetId": self.target_id}))
+            .await
+            .ok()
+            .and_then(|v| v.pointer("/targetInfo/title")?.as_str().map(str::to_string));
+        match info {
+            Some(t) => {
+                let bare = url.split_once("://").map_or(url, |(_, r)| r);
+                if t == url || t == bare {
+                    String::new()
+                } else {
+                    t
+                }
+            }
+            None => self.title().await.unwrap_or_default(),
+        }
+    }
+
+    /// Set the options later actions use for their post-action snapshot.
+    pub async fn set_snapshot_options(&self, opts: &SnapshotOptions) {
+        self.state.lock().await.opts = opts.clone();
+    }
+
+    /// Number of AX/DOMSnapshot rounds taken so far (diagnostics).
+    #[doc(hidden)]
+    pub fn snapshot_rounds(&self) -> u64 {
+        self.shared.snap_rounds.load(Ordering::SeqCst)
+    }
+
     /// Capture a snapshot with the given options and remember it as the baseline for diffs.
     pub async fn snapshot(&self, opts: &SnapshotOptions) -> Result<Snapshot> {
         let gen_now = self.shared.nav_gen.load(Ordering::SeqCst);
-        let frames = self.collect_frames().await?;
-        let url = self.url().await.unwrap_or_default();
-        let title = self.title().await.unwrap_or_default();
+        let (frames, url) = self.collect_frames().await?;
+        let title = self.target_title(&url).await;
         let mut st = self.state.lock().await;
         if st.gen_seen != gen_now {
             st.refs.clear();
@@ -480,11 +551,22 @@ impl Page {
         rx: &mut broadcast::Receiver<CdpEvent>,
         timeout: Duration,
     ) -> Result<()> {
+        self.wait_events(rx, &["Page.loadEventFired"], timeout)
+            .await
+    }
+
+    /// Wait for the next of `methods` on the main session.
+    pub(crate) async fn wait_events(
+        &self,
+        rx: &mut broadcast::Receiver<CdpEvent>,
+        methods: &[&str],
+        timeout: Duration,
+    ) -> Result<()> {
         let fut = async {
             loop {
                 match rx.recv().await {
                     Ok(ev)
-                        if ev.method == "Page.loadEventFired"
+                        if methods.contains(&ev.method.as_str())
                             && ev.session_id.as_deref() == Some(&self.session) =>
                     {
                         return Ok(());
@@ -499,11 +581,16 @@ impl Page {
             .map_err(|_| Error::Timeout("page load".into()))?
     }
 
+    /// Requests in flight that are younger than [`INFLIGHT_CAP`].
+    pub(crate) fn busy_requests(&self) -> usize {
+        busy_count(&self.shared)
+    }
+
     /// Wait until no network request has been in flight for `quiet`, up to `timeout`.
     pub(crate) async fn wait_network_idle(&self, quiet: Duration, timeout: Duration) -> Result<()> {
         let deadline = Instant::now() + timeout;
         loop {
-            let inflight = self.shared.inflight.lock().map_or(0, |s| s.len());
+            let inflight = self.busy_requests();
             let last = self.shared.last_net.lock().ok().and_then(|l| *l);
             let idle_for = last.map_or(quiet, |t| t.elapsed());
             if inflight == 0 && idle_for >= quiet {
@@ -518,7 +605,12 @@ impl Page {
 }
 
 /// Background task: tracks OOPIF sessions, network activity and navigations for one page.
-async fn watch(mut rx: broadcast::Receiver<CdpEvent>, session: String, shared: Arc<Shared>) {
+async fn watch(
+    mut rx: broadcast::Receiver<CdpEvent>,
+    session: String,
+    shared: Arc<Shared>,
+    client: Option<Arc<CdpClient>>,
+) {
     loop {
         let ev = match rx.recv().await {
             Ok(ev) => ev,
@@ -559,19 +651,48 @@ async fn watch(mut rx: broadcast::Receiver<CdpEvent>, session: String, shared: A
             }
             "Network.requestWillBeSent" if sid == session => {
                 if let Some(id) = ev.params["requestId"].as_str()
-                    && let Ok(mut set) = shared.inflight.lock()
+                    && let Ok(mut map) = shared.inflight.lock()
                 {
-                    set.insert(id.to_string());
+                    map.entry(id.to_string()).or_insert_with(Instant::now);
                 }
                 touch(&shared);
             }
             "Network.loadingFinished" | "Network.loadingFailed" if sid == session => {
                 if let Some(id) = ev.params["requestId"].as_str()
-                    && let Ok(mut set) = shared.inflight.lock()
+                    && let Ok(mut map) = shared.inflight.lock()
                 {
-                    set.remove(id);
+                    map.remove(id);
                 }
                 touch(&shared);
+            }
+            "Page.javascriptDialogOpening" => {
+                let kind = ev.params["type"].as_str().unwrap_or("alert").to_string();
+                let accept = accepts_dialog(&kind);
+                if let Ok(mut d) = shared.dialogs.lock() {
+                    d.push(DialogInfo {
+                        kind,
+                        message: ev.params["message"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_string(),
+                        accepted: accept,
+                    });
+                }
+                if let Some(c) = &client {
+                    // Spawned: the dialog blocks the page command that caused it, and the
+                    // watcher must keep draining events meanwhile.
+                    let c = c.clone();
+                    let sid = sid.to_string();
+                    tokio::spawn(async move {
+                        let _ = c
+                            .send_on(
+                                Some(&sid),
+                                "Page.handleJavaScriptDialog",
+                                json!({"accept": accept}),
+                            )
+                            .await;
+                    });
+                }
             }
             "Page.frameNavigated"
                 if sid == session && ev.params["frame"].get("parentId").is_none() =>
@@ -584,6 +705,12 @@ async fn watch(mut rx: broadcast::Receiver<CdpEvent>, session: String, shared: A
             _ => {}
         }
     }
+}
+
+fn busy_count(shared: &Shared) -> usize {
+    shared.inflight.lock().map_or(0, |m| {
+        m.values().filter(|t| t.elapsed() < INFLIGHT_CAP).count()
+    })
 }
 
 fn touch(shared: &Shared) {
@@ -608,7 +735,7 @@ mod tests {
     async fn redirect_chain_does_not_leak_inflight() {
         let (tx, rx) = broadcast::channel(64);
         let shared = Arc::new(Shared::default());
-        let task = tokio::spawn(watch(rx, "S".into(), shared.clone()));
+        let task = tokio::spawn(watch(rx, "S".into(), shared.clone(), None));
         // Three hops share one requestId, then a single loadingFinished.
         for _ in 0..3 {
             tx.send(ev("Network.requestWillBeSent", json!({"requestId": "R1"})))
@@ -619,5 +746,76 @@ mod tests {
         drop(tx);
         task.await.unwrap();
         assert!(shared.inflight.lock().unwrap().is_empty());
+        assert_eq!(busy_count(&shared), 0);
+    }
+
+    #[tokio::test]
+    async fn old_long_poll_does_not_block_idle() {
+        let (tx, rx) = broadcast::channel(64);
+        let shared = Arc::new(Shared::default());
+        let task = tokio::spawn(watch(rx, "S".into(), shared.clone(), None));
+        tx.send(ev(
+            "Network.requestWillBeSent",
+            json!({"requestId": "poll"}),
+        ))
+        .unwrap();
+        drop(tx);
+        task.await.unwrap();
+        assert_eq!(busy_count(&shared), 1, "a fresh request is busy");
+        let old = Instant::now()
+            .checked_sub(INFLIGHT_CAP + Duration::from_secs(1))
+            .unwrap();
+        shared.inflight.lock().unwrap().insert("poll".into(), old);
+        assert_eq!(busy_count(&shared), 0, "an old long-poll is ignored");
+    }
+
+    #[tokio::test]
+    async fn redirect_hops_keep_first_seen_time() {
+        let (tx, rx) = broadcast::channel(64);
+        let shared = Arc::new(Shared::default());
+        let task = tokio::spawn(watch(rx, "S".into(), shared.clone(), None));
+        tx.send(ev("Network.requestWillBeSent", json!({"requestId": "R"})))
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        let first = *shared.inflight.lock().unwrap().get("R").unwrap();
+        tx.send(ev("Network.requestWillBeSent", json!({"requestId": "R"})))
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        drop(tx);
+        task.await.unwrap();
+        assert_eq!(*shared.inflight.lock().unwrap().get("R").unwrap(), first);
+    }
+
+    #[tokio::test]
+    async fn dialog_events_are_recorded_with_policy() {
+        let (tx, rx) = broadcast::channel(64);
+        let shared = Arc::new(Shared::default());
+        let task = tokio::spawn(watch(rx, "S".into(), shared.clone(), None));
+        for (t, m) in [
+            ("alert", "a"),
+            ("confirm", "c"),
+            ("prompt", "p"),
+            ("beforeunload", "b"),
+        ] {
+            tx.send(ev(
+                "Page.javascriptDialogOpening",
+                json!({"type": t, "message": m}),
+            ))
+            .unwrap();
+        }
+        drop(tx);
+        task.await.unwrap();
+        let d = shared.dialogs.lock().unwrap().clone();
+        let got: Vec<(&str, bool)> = d.iter().map(|x| (x.kind.as_str(), x.accepted)).collect();
+        assert_eq!(
+            got,
+            [
+                ("alert", true),
+                ("confirm", false),
+                ("prompt", false),
+                ("beforeunload", true)
+            ]
+        );
+        assert_eq!(d[1].message, "c");
     }
 }

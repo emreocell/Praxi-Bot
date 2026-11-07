@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 use crate::diff::{self, SnapshotDiff};
 use crate::error::{Error, Result};
-use crate::page::{DEFAULT_WAIT, Page};
+use crate::page::{DEFAULT_WAIT, DialogInfo, Page};
 use crate::snapshot::{RefEntry, Snapshot};
 
 /// Result of an action: success flag, refreshed view as a diff against what the agent saw before.
@@ -24,6 +24,10 @@ pub struct ActionResult {
     pub new_snapshot_diff: SnapshotDiff,
     /// The full post-action snapshot (new baseline).
     pub snapshot: Snapshot,
+    /// A JS dialog that opened during the action and was answered automatically.
+    pub dialog: Option<DialogInfo>,
+    /// Set when the page did not settle (for example `network still busy: 2 requests`).
+    pub settle_note: Option<String>,
 }
 
 /// Condition for [`Page::wait_for`].
@@ -180,6 +184,9 @@ impl Page {
 
     /// Baseline for diffing: the last snapshot the agent saw (taking one if there is none yet).
     async fn baseline(&self) -> Result<Snapshot> {
+        if let Ok(mut d) = self.shared.dialogs.lock() {
+            d.clear();
+        }
         let last = self.state.lock().await.last.clone();
         if let Some(s) = last {
             return Ok(s);
@@ -190,36 +197,60 @@ impl Page {
 
     /// Wait for the page to settle after an action, take a new snapshot, diff, and package.
     async fn finish(&self, before: Snapshot, outcome: Result<()>) -> Result<ActionResult> {
+        self.finish_with(before, outcome, true).await
+    }
+
+    /// Like [`Page::finish`]; `settle = false` skips the settle wait (the caller already knows
+    /// the page is in the wanted state).
+    async fn finish_with(
+        &self,
+        before: Snapshot,
+        outcome: Result<()>,
+        settle: bool,
+    ) -> Result<ActionResult> {
         if let Err(e) = &outcome
             && e.is_fatal()
         {
             return Err(outcome.unwrap_err());
         }
-        self.settle().await;
+        let settle_note = if settle { self.settle().await } else { None };
         let opts = self.state.lock().await.opts.clone();
         let snapshot = self.snapshot(&opts).await?;
         let new_snapshot_diff = diff::diff(&before, &snapshot);
+        let dialog = self
+            .shared
+            .dialogs
+            .lock()
+            .ok()
+            .and_then(|mut d| (!d.is_empty()).then(|| d.remove(0)));
         Ok(ActionResult {
             ok: outcome.is_ok(),
             error: outcome.err().map(|e| e.to_string()),
             new_snapshot_diff,
             snapshot,
+            dialog,
+            settle_note,
         })
     }
 
-    /// Give navigation, rendering and XHRs a chance to finish (best effort).
-    async fn settle(&self) {
+    /// Give navigation, rendering and XHRs a chance to finish (best effort). Returns a note when
+    /// the network was still busy at the end.
+    async fn settle(&self) -> Option<String> {
         tokio::time::sleep(Duration::from_millis(100)).await;
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
-            match self.evaluate("document.readyState").await {
-                Ok(v) if v.as_str() == Some("complete") => break,
+            let ready =
+                tokio::time::timeout(Duration::from_secs(2), self.evaluate("document.readyState"))
+                    .await;
+            match ready {
+                Ok(Ok(v)) if v.as_str() == Some("complete") => break,
                 _ => tokio::time::sleep(Duration::from_millis(50)).await,
             }
         }
-        let _ = self
-            .wait_network_idle(Duration::from_millis(250), Duration::from_secs(2))
-            .await;
+        self.wait_network_idle(Duration::from_millis(250), Duration::from_secs(2))
+            .await
+            .err()
+            .map(|_| format!("network still busy: {} requests", self.busy_requests()))
     }
 
     // -- geometry -------------------------------------------------------------------------------
@@ -577,7 +608,8 @@ impl Page {
                 self.poll_true(&js, timeout, "text").await
             }
         };
-        self.finish(before, res).await
+        // The wanted condition already holds (or timed out): snapshot only, no settle.
+        self.finish_with(before, res, false).await
     }
 
     async fn poll_true(&self, js: &str, timeout: Duration, what: &str) -> Result<()> {
@@ -607,6 +639,21 @@ impl Page {
         Ok(())
     }
 
+    /// Navigate and return the first view of the page: one snapshot taken with `opts` (no
+    /// baseline snapshot, so the diff is against an empty page). Used by `browser_open`.
+    pub async fn navigate_snapshot(
+        &self,
+        url: &str,
+        opts: &crate::snapshot::SnapshotOptions,
+    ) -> Result<ActionResult> {
+        if let Ok(mut d) = self.shared.dialogs.lock() {
+            d.clear();
+        }
+        self.set_snapshot_options(opts).await;
+        let res = self.navigate_inner(url).await;
+        self.finish(Snapshot::default(), res).await
+    }
+
     /// Navigate to a URL and wait for the load event.
     pub async fn navigate(&self, url: &str) -> Result<ActionResult> {
         let before = self.baseline().await?;
@@ -628,8 +675,14 @@ impl Page {
             json!({"entryId": target["id"]}),
         )
         .await?;
-        // Same-document entries fire no load event; do not fail on timeout.
-        let _ = self.wait_load(&mut rx, Duration::from_secs(5)).await;
+        // Same-document entries fire `navigatedWithinDocument` instead of a load event.
+        let _ = self
+            .wait_events(
+                &mut rx,
+                &["Page.loadEventFired", "Page.navigatedWithinDocument"],
+                Duration::from_secs(5),
+            )
+            .await;
         Ok(())
     }
 

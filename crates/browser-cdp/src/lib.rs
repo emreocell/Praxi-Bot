@@ -35,5 +35,5 @@ pub use client::{CdpClient, CdpEvent};
 pub use diff::{SnapshotDiff, diff, diff_text};
 pub use error::{Error, Result};
 pub use launch::{LaunchOptions, find_browser};
-pub use page::Page;
+pub use page::{DialogInfo, Page};
 pub use snapshot::{RefEntry, RefMap, SnapNode, Snapshot, SnapshotOptions, build_snapshot};
