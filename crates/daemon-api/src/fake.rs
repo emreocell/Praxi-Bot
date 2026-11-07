@@ -20,6 +20,7 @@ fn usage() -> ChatChunk {
         prompt_tokens: 10,
         completion_tokens: 5,
         cached_tokens: None,
+        cache_write_tokens: None,
     })
 }
 

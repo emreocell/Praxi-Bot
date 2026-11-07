@@ -1,0 +1,47 @@
+# Anthropic — native Messages API (streaming, tools, vision, prompt caching).
+# Source: https://docs.anthropic.com/en/api/messages
+# Prices: USD per million tokens, first-party API list prices as of prices_as_of.
+# cache_write_per_mtok is the 5-minute-TTL write price (1.25x input). Haiku 5.5
+# is priced for prompts up to 100K tokens (higher beyond); its cache prices are
+# unknown and left out.
+id = "anthropic"
+kind = "anthropic"
+base_url = "https://api.anthropic.com"
+auth = { ApiKeyEnv = "ANTHROPIC_API_KEY" }
+models_endpoint = "https://api.anthropic.com/v1/models?limit=1000"
+
+[capabilities]
+tools = true
+vision = true
+streaming = true
+json_mode = false
+
+[compat_flags]
+
+[[models]]
+id = "claude-opus-5-5"
+context_window = 1000000
+max_output_tokens = 128000
+input_per_mtok = 4.0
+output_per_mtok = 20.0
+cached_per_mtok = 0.20
+cache_write_per_mtok = 5.0
+prices_as_of = "2026-10-06"
+
+[[models]]
+id = "claude-sonnet-5-5"
+context_window = 1000000
+max_output_tokens = 128000
+input_per_mtok = 2.0
+output_per_mtok = 10.0
+cached_per_mtok = 0.20
+cache_write_per_mtok = 2.5
+prices_as_of = "2026-10-06"
+
+[[models]]
+id = "claude-haiku-5-5"
+context_window = 1000000
+max_output_tokens = 128000
+input_per_mtok = 0.10
+output_per_mtok = 0.50
+prices_as_of = "2026-10-06"

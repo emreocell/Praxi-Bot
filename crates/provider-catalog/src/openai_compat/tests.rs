@@ -32,6 +32,7 @@ fn entry(base_url: &str) -> ProviderEntry {
         },
         compat_flags: CompatFlags::default(),
         models_endpoint: Some(format!("{base_url}/models")),
+        models: Vec::new(),
     }
 }
 
@@ -109,7 +110,8 @@ async fn plain_text_stream_with_usage() {
         ChatChunk::Usage(Usage {
             prompt_tokens: 10,
             completion_tokens: 2,
-            cached_tokens: Some(4)
+            cached_tokens: Some(4),
+            cache_write_tokens: None,
         })
     )));
     assert!(matches!(
@@ -303,7 +305,8 @@ async fn non_streaming_fallback_maps_full_response() {
         ChatChunk::Usage(Usage {
             prompt_tokens: 3,
             completion_tokens: 4,
-            cached_tokens: None
+            cached_tokens: None,
+            cache_write_tokens: None,
         })
     ));
     assert!(matches!(

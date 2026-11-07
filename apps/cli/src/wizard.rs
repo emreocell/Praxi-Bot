@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 
 use protocol::{BotId, UserId};
 use provider_catalog::{
-    Auth, Catalog, CompatFlags, ModelCapabilities, ModelRef, OpenAiCompatConfig,
-    OpenAiCompatProvider, ProviderConfig, ProviderEntry, ProviderKind, ProviderSettings,
-    api_key_secret_name, config_path, test_connection,
+    Auth, Catalog, CompatFlags, ModelCapabilities, ModelRef, OpenAiCompatConfig, ProviderConfig,
+    ProviderEntry, ProviderKind, ProviderSettings, api_key_secret_name, build_chat_provider,
+    config_path, test_connection,
 };
 use secret_store::{SecretRef, SecretStore, SecretValue};
 use storage::{Bot, Storage, User, now_ms};
@@ -97,8 +97,8 @@ impl Connector for NetConnector {
         key: Option<&SecretValue>,
         model: Option<&ModelRef>,
     ) -> std::result::Result<Vec<String>, String> {
-        let provider = OpenAiCompatProvider::with_api_key(
-            entry.clone(),
+        let provider = build_chat_provider(
+            entry,
             OpenAiCompatConfig::default(),
             key.map(|k| k.expose().to_string()),
         )
@@ -107,7 +107,7 @@ impl Connector for NetConnector {
             .enable_all()
             .build()
             .map_err(|e| e.to_string())?;
-        rt.block_on(test_connection(&provider, model))
+        rt.block_on(test_connection(&*provider, model))
             .map(|r| r.models)
             .map_err(|e| e.to_string())
     }
@@ -146,6 +146,7 @@ pub fn custom_entry(id: &str, base_url: &str) -> ProviderEntry {
         id: id.to_string(),
         kind: ProviderKind::OpenAiCompatible,
         models_endpoint: Some(format!("{base}/models")),
+        models: Vec::new(),
         base_url: base,
         auth: Auth::None,
         capabilities: ModelCapabilities {
@@ -530,6 +531,7 @@ mod tests {
             },
             compat_flags: CompatFlags::default(),
             models_endpoint: None,
+            models: Vec::new(),
         };
         Catalog::from_entries([
             mk("alpha", Auth::ApiKeyEnv("ALPHA_KEY".into())),
