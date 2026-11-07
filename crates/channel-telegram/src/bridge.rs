@@ -1,10 +1,12 @@
 //! Telegram ↔ Daemon bridge (`TelegramConfig`, `TelegramChannel`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use futures::FutureExt;
@@ -13,7 +15,7 @@ use parking_lot::Mutex;
 use protocol::{BotId, ChatId, Envelope, Event, RunId, ToolCallId};
 use secret_store::{MemoryStore, Redactor, SecretRef, SecretStore};
 use serde_json::Value;
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{Mutex as AsyncMutex, Notify};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -36,8 +38,25 @@ use crate::pairing::{
 /// Default `getUpdates` long-polling timeout in seconds.
 pub const DEFAULT_POLL_TIMEOUT_SECS: u64 = 25;
 
-/// Default backoff between `getUpdates` polls on error or when active streams are open.
+/// Default base interval between local drains of the active run streams (and base of the
+/// `getUpdates` error backoff). It never shortens the `getUpdates` long poll itself.
 pub const DEFAULT_POLL_BACKOFF: Duration = Duration::from_millis(100);
+
+/// Upper bound of the drain interval while active runs produce no events (e.g. waiting
+/// for an approval for hours).
+const MAX_IDLE_DRAIN_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Maximum number of simultaneously tracked run streams (parents plus subagent children).
+const MAX_ACTIVE_RUNS: usize = 64;
+
+/// Bound of the remembered "already attached" run ids.
+const MAX_ATTACHED_RUNS: usize = 4096;
+
+/// How long a message queued behind another run is searched for its own run.
+const QUEUED_TTL: Duration = Duration::from_secs(30 * 60);
+
+/// Minimum interval between daemon lookups for a queued message's run.
+const QUEUED_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Longest incoming text forwarded to the daemon (Telegram itself caps at 4096).
 const MAX_INCOMING_CHARS: usize = 8192;
@@ -79,7 +98,7 @@ pub struct TelegramConfig {
     pub api_base_url: String,
     /// Long-polling timeout passed to `getUpdates` when idle.
     pub poll_timeout_secs: u64,
-    /// Short sleep interval between poll ticks when active runs are streaming or after errors.
+    /// Base interval for draining active run streams and for the `getUpdates` error backoff.
     pub poll_backoff: Duration,
     /// Minimum interval between `editMessageText` calls for streaming answers (default 1 s).
     pub edit_interval: Duration,
@@ -214,6 +233,46 @@ struct ActiveRun {
     answer_buf: String,
     tool_names: HashMap<ToolCallId, String>,
     finished: bool,
+    /// Subagent run: only approvals, questions and errors are surfaced for it.
+    is_child: bool,
+}
+
+/// Result of [`TelegramChannel::attach_run`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AttachOutcome {
+    Attached,
+    /// The run is already streamed (a steered message returned the same run id).
+    AlreadyFollowed,
+    /// `MAX_ACTIVE_RUNS` is reached; nothing was subscribed.
+    Full,
+}
+
+/// A user message queued behind an active run; its own run is attached once it starts.
+struct QueuedTurn {
+    daemon_chat: ChatId,
+    /// Unix ms when the first still-unattached message was queued.
+    queued_at_ms: i64,
+    queued_at: Instant,
+    last_check: Option<Instant>,
+    count: usize,
+}
+
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+}
+
+/// The part of a streamed answer that is safe to show while it is still growing.
+///
+/// A secret split across two deltas has no complete match yet, so its leading characters
+/// would slip through redaction and stay visible in Telegram. Withhold the trailing
+/// (possibly unfinished) whitespace-delimited token; the full text is sent at the end.
+pub(crate) fn safe_stream_prefix(text: &str) -> &str {
+    text.char_indices()
+        .rev()
+        .find(|(_, c)| c.is_whitespace())
+        .map_or("", |(i, c)| &text[..i + c.len_utf8()])
 }
 
 #[derive(Debug, Clone)]
@@ -229,6 +288,10 @@ struct RuntimeState {
     chat_active_run: HashMap<i64, RunId>,
     pending_questions: HashMap<ToolCallId, PendingQuestion>,
     chat_pending_question: HashMap<i64, ToolCallId>,
+    /// Runs this bridge already attached to (never subscribe to the same run twice).
+    attached_runs: HashSet<RunId>,
+    /// Telegram chat -> messages queued behind a run, still waiting for their own run.
+    queued: HashMap<i64, QueuedTurn>,
 }
 
 struct Inner {
@@ -244,6 +307,8 @@ struct Inner {
     /// Key identifying the bot the persisted polling offset belongs to.
     offset_key: String,
     cancel: CancellationToken,
+    /// Wakes the run loop when a run stream was added.
+    wake: Notify,
 }
 
 /// Telegram channel bridge implementing [`Channel`] and driving the long-polling loop.
@@ -350,6 +415,7 @@ impl TelegramChannel {
             pending_approvals: Mutex::new(HashMap::new()),
             offset_key,
             cancel: CancellationToken::new(),
+            wake: Notify::new(),
         });
 
         Ok(Self {
@@ -435,32 +501,105 @@ impl TelegramChannel {
         }
     }
 
+    /// Handle a batch of updates returned by `getUpdates` (never touches run streams).
+    async fn handle_updates(&self, updates: Vec<Update>) -> Result<usize> {
+        let count = updates.len();
+        let mut first_err: Option<TelegramError> = None;
+        for update in updates {
+            self.advance_offset(update.update_id).await;
+            if let Some(incoming) = update.into_incoming()
+                && let Err(e) = self.handle_incoming(incoming).await
+            {
+                first_err.get_or_insert(e);
+            }
+        }
+        match first_err {
+            Some(e) => Err(e),
+            None => Ok(count),
+        }
+    }
+
+    /// The persistent long-poll future: only the `getUpdates` HTTP call (after an optional
+    /// delay). It must never take the runtime mutex: it stays suspended while the loop drains
+    /// run streams (which lock it), and a suspended-but-unpolled waiter on that fair mutex
+    /// would deadlock the drain. The offset is therefore read by the caller.
+    fn new_poll(
+        &self,
+        offset: Option<i64>,
+        delay: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Update>>> + Send + '_>> {
+        Box::pin(async move {
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+            self.inner
+                .bot_api
+                .get_updates(offset, self.inner.config.poll_timeout_secs)
+                .await
+        })
+    }
+
+    /// The `getUpdates` long poll lives in one persistent future so it keeps its full
+    /// timeout, while active runs are drained on their own backed-off schedule. (It used to
+    /// call `getUpdates` with `timeout=0` every 100 ms for as long as a run was open, e.g.
+    /// while waiting hours for an approval.) Updates are handled in the loop body, outside
+    /// the persistent future.
     async fn run_loop(&self) {
+        let base = self.inner.config.poll_backoff;
         let mut failures: u32 = 0;
+        let mut drain_interval = base;
+        let mut drain_paused_until: Option<Instant> = None;
+        let offset = self.inner.runtime.lock().await.next_offset;
+        let mut poll = self.new_poll(offset, Duration::ZERO);
         while !self.inner.cancel.is_cancelled() {
-            let poll_res = tokio::select! {
-                () = self.inner.cancel.cancelled() => break,
-                r = self.poll_once() => r,
-            };
-            let has_active = {
+            // Queued messages also need draining: their run is attached by the drain pass,
+            // and it may not exist yet when the previous run finishes.
+            let needs_drain = {
                 let rt = self.inner.runtime.lock().await;
-                !rt.active_runs.is_empty()
+                !rt.active_runs.is_empty() || !rt.queued.is_empty()
             };
-            let delay = if let Err(e) = &poll_res {
-                failures = failures.saturating_add(1);
-                Some(poll_error_delay(
-                    e,
-                    failures,
-                    self.inner.config.poll_backoff,
-                ))
+            let wait = if needs_drain {
+                let paused = drain_paused_until.map_or(Duration::ZERO, |t| {
+                    t.saturating_duration_since(Instant::now())
+                });
+                drain_interval.max(paused)
             } else {
-                failures = 0;
-                has_active.then_some(self.inner.config.poll_backoff)
+                drain_interval = base;
+                Duration::from_secs(3600)
             };
-            if let Some(delay) = delay {
-                tokio::select! {
-                    () = self.inner.cancel.cancelled() => break,
-                    () = tokio::time::sleep(delay) => {}
+            tokio::select! {
+                () = self.inner.cancel.cancelled() => break,
+                res = &mut poll => {
+                    let handled = match res {
+                        Ok(updates) => self.handle_updates(updates).await.map(|_| ()),
+                        Err(e) => Err(e),
+                    };
+                    let delay = if let Err(e) = handled {
+                        failures = failures.saturating_add(1);
+                        poll_error_delay(&e, failures, base)
+                    } else {
+                        failures = 0;
+                        Duration::ZERO
+                    };
+                    let offset = self.inner.runtime.lock().await.next_offset;
+                    poll = self.new_poll(offset, delay);
+                    // A handled update may have started a run.
+                    drain_interval = base;
+                    let _ = self.drain_active_runs().await;
+                }
+                () = self.inner.wake.notified() => {
+                    drain_interval = base;
+                }
+                () = tokio::time::sleep(wait) => {
+                    match self.drain_active_runs().await {
+                        Ok(0) => drain_interval = (drain_interval * 2).min(MAX_IDLE_DRAIN_INTERVAL),
+                        Ok(_) => drain_interval = base,
+                        Err(e) => {
+                            drain_interval = base;
+                            drain_paused_until =
+                                Some(Instant::now() + poll_error_delay(&e, 1, base));
+                        }
+                    }
                 }
             }
         }
@@ -528,7 +667,7 @@ impl TelegramChannel {
             return Ok(());
         };
         self.handle_incoming(incoming).await?;
-        self.drain_active_runs().await
+        self.drain_active_runs().await.map(|_| ())
     }
 
     async fn send_redacted(
@@ -743,8 +882,11 @@ impl TelegramChannel {
             let mut rt = self.inner.runtime.lock().await;
             let run_id = rt.chat_active_run.remove(&chat_id);
             if let Some(rid) = run_id {
-                rt.active_runs.retain(|r| r.run_id != rid);
+                // Subagent children of the stopped chat go with it.
+                rt.active_runs
+                    .retain(|r| r.run_id != rid && !(r.is_child && r.telegram_chat_id == chat_id));
             }
+            rt.queued.remove(&chat_id);
             run_id
         };
 
@@ -828,6 +970,7 @@ impl TelegramChannel {
             Err(e) => return Err(e),
         };
         let daemon_chat_id = self.resolve_daemon_chat(telegram_chat_id, bot_id).await?;
+        let sent_at_ms = now_ms();
         let outcome: SendOutcome = self
             .inner
             .api_client
@@ -844,11 +987,29 @@ impl TelegramChannel {
                     rt.chat_active_run.remove(&telegram_chat_id);
                     rt.active_runs.retain(|r| r.run_id != rid);
                 }
+                rt.queued.remove(&telegram_chat_id);
                 drop(rt);
                 self.send_redacted(telegram_chat_id, "🛑 Run stopped.", None)
                     .await?;
             }
             DeliveryKind::Queued if outcome.run_id.is_none() => {
+                // The daemon starts this turn later as a brand-new run nobody subscribed to;
+                // remember it so `attach_queued_runs` can find and follow that run.
+                {
+                    let mut rt = self.inner.runtime.lock().await;
+                    let entry = rt
+                        .queued
+                        .entry(telegram_chat_id)
+                        .or_insert_with(|| QueuedTurn {
+                            daemon_chat: daemon_chat_id,
+                            queued_at_ms: sent_at_ms,
+                            queued_at: Instant::now(),
+                            last_check: None,
+                            count: 0,
+                        });
+                    entry.daemon_chat = daemon_chat_id;
+                    entry.count += 1;
+                }
                 self.send_redacted(
                     telegram_chat_id,
                     "⏳ Message queued behind the active run.",
@@ -857,26 +1018,138 @@ impl TelegramChannel {
                 .await?;
             }
             _ => {
-                if let Some(run_id) = outcome.run_id {
-                    let stream = self.inner.api_client.subscribe_run(run_id).await?;
-                    let mut rt = self.inner.runtime.lock().await;
-                    rt.chat_active_run.insert(telegram_chat_id, run_id);
-                    rt.active_runs.push(ActiveRun {
+                if let Some(run_id) = outcome.run_id
+                    && self.attach_run(telegram_chat_id, run_id, false).await?
+                        == AttachOutcome::Full
+                {
+                    self.send_redacted(
                         telegram_chat_id,
-                        run_id,
-                        stream,
-                        editor: ThrottledEditor::new(
-                            telegram_chat_id,
-                            self.inner.config.edit_interval,
-                        ),
-                        answer_buf: String::new(),
-                        tool_names: HashMap::new(),
-                        finished: false,
-                    });
+                        "⚠️ Too many runs are being followed right now; this run's output will not be streamed here. Try again in a moment.",
+                        None,
+                    )
+                    .await?;
                 }
             }
         }
         Ok(())
+    }
+
+    /// Subscribe to `run_id` and start streaming it into `telegram_chat_id`.
+    ///
+    /// Does nothing if the run is already followed (a steered message returns the
+    /// already-attached run id) or the run table is full; see [`AttachOutcome`].
+    async fn attach_run(
+        &self,
+        telegram_chat_id: i64,
+        run_id: RunId,
+        is_child: bool,
+    ) -> Result<AttachOutcome> {
+        {
+            let mut rt = self.inner.runtime.lock().await;
+            if rt.attached_runs.contains(&run_id) {
+                return Ok(AttachOutcome::AlreadyFollowed);
+            }
+            if rt.active_runs.len() >= MAX_ACTIVE_RUNS {
+                return Ok(AttachOutcome::Full);
+            }
+            if rt.attached_runs.len() >= MAX_ATTACHED_RUNS {
+                rt.attached_runs.clear();
+            }
+            rt.attached_runs.insert(run_id);
+        }
+        let stream = match self.inner.api_client.subscribe_run(run_id).await {
+            Ok(s) => s,
+            Err(e) => {
+                self.inner
+                    .runtime
+                    .lock()
+                    .await
+                    .attached_runs
+                    .remove(&run_id);
+                return Err(e);
+            }
+        };
+        {
+            let mut rt = self.inner.runtime.lock().await;
+            if !is_child {
+                rt.chat_active_run.insert(telegram_chat_id, run_id);
+            }
+            rt.active_runs.push(ActiveRun {
+                telegram_chat_id,
+                run_id,
+                // A finished stream must never be polled again (unfold panics).
+                stream: stream.fuse().boxed(),
+                editor: ThrottledEditor::new(telegram_chat_id, self.inner.config.edit_interval),
+                answer_buf: String::new(),
+                tool_names: HashMap::new(),
+                finished: false,
+                is_child,
+            });
+        }
+        self.inner.wake.notify_one();
+        Ok(AttachOutcome::Attached)
+    }
+
+    /// Follow runs the daemon started for messages that were queued behind another run.
+    async fn attach_queued_runs(&self) -> Result<()> {
+        let candidates: Vec<(i64, ChatId, i64, Vec<RunId>)> = {
+            let mut rt = self.inner.runtime.lock().await;
+            rt.queued.retain(|_, q| q.queued_at.elapsed() < QUEUED_TTL);
+            let busy: HashSet<i64> = rt
+                .active_runs
+                .iter()
+                .filter(|r| !r.is_child)
+                .map(|r| r.telegram_chat_id)
+                .collect();
+            let exclude: Vec<RunId> = rt.attached_runs.iter().copied().collect();
+            let now = Instant::now();
+            rt.queued
+                .iter_mut()
+                .filter(|(chat, q)| {
+                    !busy.contains(chat)
+                        && q.last_check
+                            .is_none_or(|t| now.duration_since(t) >= QUEUED_CHECK_INTERVAL)
+                })
+                .map(|(chat, q)| {
+                    q.last_check = Some(now);
+                    (*chat, q.daemon_chat, q.queued_at_ms, exclude.clone())
+                })
+                .collect()
+        };
+        let mut first_err: Option<TelegramError> = None;
+        for (tg_chat, daemon_chat, since_ms, exclude) in candidates {
+            let found = match self
+                .inner
+                .api_client
+                .find_chat_run(daemon_chat, &exclude, since_ms)
+                .await
+            {
+                Ok(f) => f,
+                Err(e) => {
+                    first_err.get_or_insert(e);
+                    continue;
+                }
+            };
+            let Some(run_id) = found else { continue };
+            match self.attach_run(tg_chat, run_id, false).await {
+                // Run table full: keep the entry and retry on the next pass.
+                Ok(AttachOutcome::Full) => {}
+                Ok(_) => {
+                    let mut rt = self.inner.runtime.lock().await;
+                    if let Some(q) = rt.queued.get_mut(&tg_chat) {
+                        q.count = q.count.saturating_sub(1);
+                        q.queued_at_ms = now_ms();
+                        if q.count == 0 {
+                            rt.queued.remove(&tg_chat);
+                        }
+                    }
+                }
+                Err(e) => {
+                    first_err.get_or_insert(e);
+                }
+            }
+        }
+        first_err.map_or(Ok(()), Err)
     }
 
     async fn handle_callback(&self, chat_id: i64, query_id: &str, data: &str) -> Result<()> {
@@ -968,52 +1241,144 @@ impl TelegramChannel {
         Ok(())
     }
 
-    async fn drain_active_runs(&self) -> Result<()> {
-        let mut rt = self.inner.runtime.lock().await;
-        let mut pending_questions_to_insert: Vec<(ToolCallId, PendingQuestion)> = Vec::new();
-        let mut finished_chats: Vec<(i64, RunId)> = Vec::new();
+    /// Advance every active run stream. Returns the number of events processed.
+    ///
+    /// One run's Telegram failure (403/429) never aborts the pass: errors are collected per
+    /// run, finished runs are always cleaned up, pending questions are always registered,
+    /// and a finished stream is never polled again.
+    async fn drain_active_runs(&self) -> Result<usize> {
+        let mut first_err: Option<TelegramError> = None;
+        let mut events = 0usize;
+        let mut spawned: Vec<(i64, RunId)> = Vec::new();
+        {
+            let mut rt = self.inner.runtime.lock().await;
+            let mut pending_questions_to_insert: Vec<(ToolCallId, PendingQuestion)> = Vec::new();
+            let mut finished_chats: Vec<(i64, RunId)> = Vec::new();
 
-        for run in &mut rt.active_runs {
-            loop {
-                let next_env = if let Some(ready) = run.stream.next().now_or_never() {
-                    ready
-                } else if let Ok(item) =
-                    tokio::time::timeout(Duration::from_millis(15), run.stream.next()).await
+            for run in &mut rt.active_runs {
+                if !run.finished
+                    && let Err(e) = self
+                        .drain_one_run(
+                            run,
+                            &mut pending_questions_to_insert,
+                            &mut spawned,
+                            &mut events,
+                        )
+                        .await
                 {
-                    item
-                } else {
-                    // Stream is still open and waiting; flush throttled text if due.
-                    run.editor.flush_if_due(&self.inner.bot_api).await?;
-                    break;
-                };
-
-                let Some(env) = next_env else {
-                    run.finished = true;
-                    finished_chats.push((run.telegram_chat_id, run.run_id));
-                    break;
-                };
-
-                self.process_run_event(run, env.event, &mut pending_questions_to_insert)
-                    .await?;
-
+                    first_err.get_or_insert(e);
+                }
                 if run.finished {
                     finished_chats.push((run.telegram_chat_id, run.run_id));
-                    break;
                 }
             }
+
+            for (call_id, pq) in pending_questions_to_insert {
+                rt.chat_pending_question
+                    .insert(pq.telegram_chat_id, call_id);
+                rt.pending_questions.insert(call_id, pq);
+            }
+            for (chat_id, run_id) in finished_chats {
+                if rt.chat_active_run.get(&chat_id) == Some(&run_id) {
+                    rt.chat_active_run.remove(&chat_id);
+                }
+            }
+            rt.active_runs.retain(|r| !r.finished);
         }
 
-        for (call_id, pq) in pending_questions_to_insert {
-            rt.chat_pending_question
-                .insert(pq.telegram_chat_id, call_id);
-            rt.pending_questions.insert(call_id, pq);
-        }
-        for (chat_id, run_id) in finished_chats {
-            if rt.chat_active_run.get(&chat_id) == Some(&run_id) {
-                rt.chat_active_run.remove(&chat_id);
+        // Subagent runs announced by their parent: follow them too, so their approvals and
+        // questions reach the same Telegram chat.
+        for (chat_id, child) in spawned {
+            if let Err(e) = self.attach_run(chat_id, child, true).await {
+                first_err.get_or_insert(e);
             }
         }
-        rt.active_runs.retain(|r| !r.finished);
+        if let Err(e) = self.attach_queued_runs().await {
+            first_err.get_or_insert(e);
+        }
+        first_err.map_or(Ok(events), Err)
+    }
+
+    async fn drain_one_run(
+        &self,
+        run: &mut ActiveRun,
+        pending_questions: &mut Vec<(ToolCallId, PendingQuestion)>,
+        spawned: &mut Vec<(i64, RunId)>,
+        events: &mut usize,
+    ) -> Result<()> {
+        loop {
+            let next_env = if let Some(ready) = run.stream.next().now_or_never() {
+                ready
+            } else if let Ok(item) =
+                tokio::time::timeout(Duration::from_millis(15), run.stream.next()).await
+            {
+                item
+            } else {
+                // Stream is still open and waiting; flush throttled text if due.
+                run.editor.flush_if_due(&self.inner.bot_api).await?;
+                return Ok(());
+            };
+
+            let Some(env) = next_env else {
+                // The stream ended without `RunFinished` (connection drop): still show what
+                // was held back by `safe_stream_prefix`.
+                return self.finish_dropped_run(run).await;
+            };
+            *events += 1;
+
+            self.process_run_event(run, env.event, pending_questions, spawned)
+                .await?;
+
+            if run.finished {
+                return Ok(());
+            }
+        }
+    }
+
+    /// A run stream that ended without `RunFinished`: mark it finished, flush the full
+    /// answer (including the last word held back while streaming) and warn the user.
+    async fn finish_dropped_run(&self, run: &mut ActiveRun) -> Result<()> {
+        run.finished = true;
+        if run.is_child {
+            return Ok(());
+        }
+        let chat_id = run.telegram_chat_id;
+        if !run.answer_buf.is_empty() {
+            let clean = self.redact(&run.answer_buf);
+            run.editor.push(&self.inner.bot_api, &clean).await?;
+            run.editor.flush_final(&self.inner.bot_api).await?;
+        }
+        self.send_redacted(
+            chat_id,
+            "⚠️ Lost the connection to the run's event stream; it may still be running.",
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Deliver the end of a run. The run is marked finished first: the stream has ended, so
+    /// even if delivering the final text fails (blocked bot, 429) it must still be cleaned up.
+    async fn finish_run(&self, run: &mut ActiveRun, error: Option<String>) -> Result<()> {
+        run.finished = true;
+        let chat_id = run.telegram_chat_id;
+        if run.is_child {
+            if let Some(err) = error {
+                let text = format!("❌ Subagent failed: {err}");
+                self.send_redacted(chat_id, &text, None).await?;
+            }
+            return Ok(());
+        }
+        let clean = self.redact(&run.answer_buf);
+        run.editor.push(&self.inner.bot_api, &clean).await?;
+        run.editor.flush_final(&self.inner.bot_api).await?;
+        if let Some(err) = error {
+            let text = format!("❌ Run failed: {err}");
+            self.send_redacted(chat_id, &text, None).await?;
+        } else if run.editor.message_id().is_none() {
+            self.send_redacted(chat_id, "✅ Run finished.", None)
+                .await?;
+        }
         Ok(())
     }
 
@@ -1022,15 +1387,18 @@ impl TelegramChannel {
         run: &mut ActiveRun,
         event: Event,
         pending_questions: &mut Vec<(ToolCallId, PendingQuestion)>,
+        spawned: &mut Vec<(i64, RunId)>,
     ) -> Result<()> {
         let chat_id = run.telegram_chat_id;
         match event {
-            Event::MessageDelta(d) => {
+            Event::MessageDelta(d) if !run.is_child => {
                 run.answer_buf.push_str(&d.text);
-                let clean = self.redact(&run.answer_buf);
+                // Only the redaction-safe part is shown while streaming; the complete text is
+                // pushed when the run finishes (see `safe_stream_prefix`).
+                let clean = self.redact(safe_stream_prefix(&run.answer_buf));
                 run.editor.push(&self.inner.bot_api, &clean).await?;
             }
-            Event::ToolCallRequested(t) => {
+            Event::ToolCallRequested(t) if !run.is_child => {
                 run.tool_names.insert(t.call_id, t.tool_name.clone());
                 // Redact BEFORE truncating, so a secret cut in half cannot slip through.
                 let args = compact_json(&self.redact_value(&t.input), 160);
@@ -1041,7 +1409,7 @@ impl TelegramChannel {
                 };
                 self.send_redacted(chat_id, &line, None).await?;
             }
-            Event::ToolCallCompleted(t) => {
+            Event::ToolCallCompleted(t) if !run.is_child => {
                 let name = run
                     .tool_names
                     .get(&t.call_id)
@@ -1071,7 +1439,11 @@ impl TelegramChannel {
                     InlineButton::new("Deny", format_approval_callback(a.call_id, "deny")),
                 ]];
                 let markup = InlineKeyboardMarkup::from_rows(rows);
-                let text = format!("⚠️ Approval needed ({})\n{}", a.tool_name, a.summary);
+                let prefix = if run.is_child { "subagent: " } else { "" };
+                let text = format!(
+                    "⚠️ Approval needed ({prefix}{})\n{}",
+                    a.tool_name, a.summary
+                );
                 self.send_redacted(chat_id, &text, markup.as_ref()).await?;
             }
             Event::QuestionAsked(q) => {
@@ -1101,17 +1473,10 @@ impl TelegramChannel {
                 let text = format!("⚠️ Error: {}", e.message);
                 self.send_redacted(chat_id, &text, None).await?;
             }
-            Event::RunFinished(f) => {
-                run.editor.flush_final(&self.inner.bot_api).await?;
-                if let Some(err) = f.error {
-                    let text = format!("❌ Run failed: {err}");
-                    self.send_redacted(chat_id, &text, None).await?;
-                } else if run.editor.message_id().is_none() {
-                    self.send_redacted(chat_id, "✅ Run finished.", None)
-                        .await?;
-                }
-                run.finished = true;
+            Event::SubagentStarted(s) => {
+                spawned.push((chat_id, s.run_id));
             }
+            Event::RunFinished(f) => self.finish_run(run, f.error).await?,
             _ => {}
         }
         Ok(())

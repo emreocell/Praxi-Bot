@@ -132,6 +132,22 @@ pub trait DaemonClient: Send + Sync {
 
     /// `GET /v1/events?run_id={run_id}`: subscribe to the event stream of `run_id`.
     async fn subscribe_run(&self, run_id: RunId) -> Result<BoxStream<'static, Envelope>>;
+
+    /// Find the oldest top-level (non-subagent) run of daemon chat `chat_id` that was
+    /// created at or after `created_after_ms` (Unix ms) and is not in `exclude`, in any
+    /// state (`queued`, `running`, ... or already ended: `subscribe_run` replays the log,
+    /// so a queued turn that finished before it was found is still shown).
+    ///
+    /// Used to attach to a turn that was queued behind another run: the daemon starts it
+    /// later as a new run nobody subscribed to. The default implementation reports nothing.
+    async fn find_chat_run(
+        &self,
+        _chat_id: ChatId,
+        _exclude: &[RunId],
+        _created_after_ms: i64,
+    ) -> Result<Option<RunId>> {
+        Ok(None)
+    }
 }
 
 /// Alias for [`DaemonClient`] matching `TelegramChannel::start(config, api_client)`.
@@ -192,6 +208,53 @@ impl HttpDaemonClient {
             return Err(TelegramError::Daemon(format!("{status}: {msg}")));
         }
         Ok(val)
+    }
+}
+
+/// Upper bound for one unterminated SSE block (protects against a misbehaving peer).
+const MAX_SSE_BLOCK_BYTES: usize = 4 * 1024 * 1024;
+
+/// Byte-level SSE block splitter.
+///
+/// Network chunks may cut a multi-byte UTF-8 character (or a CR LF pair) in half, so
+/// the buffer holds raw bytes and a block is decoded only once it is complete.
+#[derive(Debug, Default)]
+pub(crate) struct SseBuffer {
+    buf: Vec<u8>,
+}
+
+impl SseBuffer {
+    /// Append a raw network chunk.
+    pub(crate) fn push(&mut self, chunk: &[u8]) {
+        self.buf.extend_from_slice(chunk);
+    }
+
+    /// Whether more than [`MAX_SSE_BLOCK_BYTES`] are buffered without a block boundary.
+    pub(crate) fn overflowed(&self) -> bool {
+        self.buf.len() > MAX_SSE_BLOCK_BYTES
+    }
+
+    /// Remove and decode the next complete block (terminated by a blank line), if any.
+    pub(crate) fn next_block(&mut self) -> Option<String> {
+        let end = Self::block_end(&self.buf)?;
+        let raw: Vec<u8> = self.buf.drain(..end).collect();
+        Some(String::from_utf8_lossy(&raw).into_owned())
+    }
+
+    /// Index just past the first blank line (LF LF, CR LF CR LF, or a mix).
+    fn block_end(buf: &[u8]) -> Option<usize> {
+        let mut i = 0;
+        while i < buf.len() {
+            if buf[i] == b'\n' {
+                match buf.get(i + 1) {
+                    Some(b'\n') => return Some(i + 2),
+                    Some(b'\r') if buf.get(i + 2) == Some(&b'\n') => return Some(i + 3),
+                    _ => {}
+                }
+            }
+            i += 1;
+        }
+        None
     }
 }
 
@@ -294,6 +357,35 @@ impl DaemonClient for HttpDaemonClient {
         })
     }
 
+    async fn find_chat_run(
+        &self,
+        chat_id: ChatId,
+        exclude: &[RunId],
+        created_after_ms: i64,
+    ) -> Result<Option<RunId>> {
+        let v = self.request(Method::GET, "/v1/runs", None).await?;
+        let runs = v.as_array().map_or(&[][..], Vec::as_slice);
+        let mut best: Option<(i64, RunId)> = None;
+        for r in runs {
+            let Some(id) = r["id"].as_str().and_then(|s| Uuid::parse_str(s).ok()) else {
+                continue;
+            };
+            let run_id = RunId(id);
+            let same_chat =
+                r["chat_id"].as_str().and_then(|s| Uuid::parse_str(s).ok()) == Some(chat_id.0);
+            let created = r["created_at_ms"].as_i64().unwrap_or(0);
+            if same_chat
+                && r["parent_run_id"].is_null()
+                && created >= created_after_ms
+                && !exclude.contains(&run_id)
+                && best.is_none_or(|(c, _)| created < c)
+            {
+                best = Some((created, run_id));
+            }
+        }
+        Ok(best.map(|(_, id)| id))
+    }
+
     async fn subscribe_run(&self, run_id: RunId) -> Result<BoxStream<'static, Envelope>> {
         let resp = self
             .http
@@ -311,14 +403,13 @@ impl DaemonClient for HttpDaemonClient {
 
         let byte_stream = resp.bytes_stream();
         let stream = futures::stream::unfold(
-            (byte_stream, String::new(), false),
+            (byte_stream, SseBuffer::default(), false),
             |(mut bytes, mut buf, mut done)| async move {
                 if done {
                     return None;
                 }
                 loop {
-                    if let Some(idx) = buf.find("\n\n") {
-                        let block: String = buf.drain(..idx + 2).collect();
+                    if let Some(block) = buf.next_block() {
                         if let Some(data) = sse_data(&block)
                             && let Ok(env) = serde_json::from_str::<Envelope>(&data)
                         {
@@ -329,16 +420,18 @@ impl DaemonClient for HttpDaemonClient {
                         }
                         continue;
                     }
+                    if buf.overflowed() {
+                        return None;
+                    }
                     match bytes.next().await {
-                        Some(Ok(chunk)) => {
-                            let s = String::from_utf8_lossy(&chunk).replace("\r\n", "\n");
-                            buf.push_str(&s);
-                        }
+                        Some(Ok(chunk)) => buf.push(&chunk),
                         _ => return None,
                     }
                 }
             },
         );
+        // `fuse`: the unfold above must never be polled again after it ended.
+        let stream = stream.fuse();
         Ok(Box::pin(stream))
     }
 }

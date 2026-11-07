@@ -294,7 +294,7 @@ pub struct RunDto {
     pub chat_id: Option<Uuid>,
     /// `turn`, `turn:routine`, ...
     pub kind: String,
-    /// `pending` / `running` / `waiting_approval` / `paused` / `succeeded` / `failed` / `cancelled`.
+    /// `queued` / `running` / `waiting_approval` / `paused` / `succeeded` / `failed` / `cancelled`.
     pub state: String,
     /// Failure message.
     pub error: Option<String>,
