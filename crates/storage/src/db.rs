@@ -331,7 +331,7 @@ impl Storage {
     /// Fails on SQLite errors.
     pub fn insert_run(&self, r: &Run) -> Result<()> {
         self.conn().execute(
-            "INSERT INTO runs (id, user_id, bot_id, chat_id, kind, state, error, created_at_ms, updated_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO runs (id, user_id, bot_id, chat_id, kind, state, error, created_at_ms, updated_at_ms, parent_run_id, spec_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 r.id.to_string(),
                 r.user_id.to_string(),
@@ -341,7 +341,9 @@ impl Storage {
                 r.state,
                 r.error,
                 r.created_at_ms,
-                r.updated_at_ms
+                r.updated_at_ms,
+                r.parent_run_id.map(|p| p.to_string()),
+                r.spec.as_ref().map(serde_json::to_string).transpose()?,
             ],
         )?;
         Ok(())
@@ -371,6 +373,20 @@ impl Storage {
         let mut st = conn.prepare(&format!("{RUN_SELECT} WHERE user_id = ?1 ORDER BY id"))?;
         Ok(st
             .query_map([user_id.to_string()], run_row)?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// The direct children (subagent runs) of a run, oldest first.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn list_child_runs(&self, parent: RunId) -> Result<Vec<Run>> {
+        let conn = self.conn();
+        let mut st = conn.prepare(&format!(
+            "{RUN_SELECT} WHERE parent_run_id = ?1 ORDER BY id"
+        ))?;
+        Ok(st
+            .query_map([parent.to_string()], run_row)?
             .collect::<rusqlite::Result<_>>()?)
     }
 
@@ -671,7 +687,7 @@ impl Storage {
     }
 }
 
-const RUN_SELECT: &str = "SELECT id, user_id, bot_id, chat_id, kind, state, error, created_at_ms, updated_at_ms FROM runs";
+const RUN_SELECT: &str = "SELECT id, user_id, bot_id, chat_id, kind, state, error, created_at_ms, updated_at_ms, parent_run_id, spec_json FROM runs";
 const STEP_SELECT: &str = "SELECT id, run_id, user_id, idx, name, input_json, idempotent, retry_json, status, attempt, output_json, error, started_at_ms, finished_at_ms FROM run_steps";
 const APPROVAL_SELECT: &str = "SELECT id, user_id, run_id, step_id, summary, decision, requested_at_ms, decided_at_ms FROM approvals";
 
@@ -726,6 +742,8 @@ fn run_row(r: &Row<'_>) -> rusqlite::Result<Run> {
         error: r.get(6)?,
         created_at_ms: r.get(7)?,
         updated_at_ms: r.get(8)?,
+        parent_run_id: opt_uuid_at(r, 9)?.map(RunId),
+        spec: opt_json_at(r, 10)?,
     })
 }
 
@@ -828,6 +846,8 @@ mod tests {
             error: None,
             created_at_ms: 4,
             updated_at_ms: 4,
+            parent_run_id: None,
+            spec: None,
         };
         f.st.insert_run(&r).unwrap();
         r
@@ -911,6 +931,27 @@ mod tests {
         f.st.insert_bot(&spare).unwrap();
         assert!(f.st.delete_bot(spare.id).unwrap());
         assert!(!f.st.delete_bot(spare.id).unwrap());
+    }
+
+    #[test]
+    fn child_runs_persist_parent_and_spec() {
+        let f = fx();
+        let parent = run(&f);
+        let mut child = run(&f);
+        // `run` already inserted a copy; build a second, linked one.
+        child.id = RunId::new();
+        child.parent_run_id = Some(parent.id);
+        child.spec = Some(serde_json::json!({ "task": "t", "depth": 1 }));
+        f.st.insert_run(&child).unwrap();
+        assert_eq!(f.st.get_run(child.id).unwrap().unwrap(), child);
+        assert_eq!(f.st.list_child_runs(parent.id).unwrap(), vec![child]);
+        assert!(
+            f.st.get_run(parent.id)
+                .unwrap()
+                .unwrap()
+                .parent_run_id
+                .is_none()
+        );
     }
 
     #[test]

@@ -82,7 +82,23 @@ export interface RunState {
   /** `undefined` while running; `null` = finished fine. */
   error?: string | null;
   items: TimelineItem[];
+  /** Set on child (subagent) runs: the run that spawned this one. */
+  parentRunId?: string;
+  /** Subagent task description. */
+  task?: string;
+  /** The parent's `spawn_subagent` tool call id. */
+  callId?: string;
+  subagentState?: SubagentState;
+  /** Final summary of a finished subagent. */
+  summary?: string;
 }
+
+export type SubagentState =
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "paused";
 
 export interface EventsState {
   runs: Record<string, RunState>;
@@ -99,7 +115,7 @@ export function itemTs(i: TimelineItem): number {
 
 /** Tool names that spawn another agent (rendered as a subagent card). */
 export function isSubagentTool(name: string): boolean {
-  return /^(subagent|spawn_agent|delegate)/.test(name);
+  return /^(subagent|spawn_agent|spawn_subagent|delegate)/.test(name);
 }
 
 function withRun(
@@ -164,8 +180,55 @@ export function applyEvent(
   if (env.gseq > 0 && env.gseq <= state.lastGseq) {
     return state; // duplicate delivered across a reconnect
   }
-  const next = reduce(state, env.event, env.ts_ms, env.seq);
+  const next = adoptParent(
+    reduce(state, env.event, env.ts_ms, env.seq),
+    env
+  );
   return env.gseq > next.lastGseq ? { ...next, lastGseq: env.gseq } : next;
+}
+
+/**
+ * Child-run events may arrive before `subagent_started`: record the parent
+ * link from the envelope and inherit chat / bot from the parent run.
+ */
+function adoptParent(state: EventsState, env: GlobalEnvelope): EventsState {
+  const parentId = env.parent_run_id;
+  const e = env.event as { run_id?: string | null };
+  if (!parentId || !e.run_id) {
+    return state;
+  }
+  const run = state.runs[e.run_id];
+  if (!run) {
+    return state;
+  }
+  const parent = state.runs[parentId];
+  const chatId = run.chatId || parent?.chatId || "";
+  const botId = run.botId || parent?.botId || "";
+  if (
+    run.parentRunId === parentId &&
+    run.chatId === chatId &&
+    run.botId === botId
+  ) {
+    return state;
+  }
+  return {
+    ...state,
+    runs: {
+      ...state.runs,
+      [e.run_id]: { ...run, parentRunId: parentId, chatId, botId }
+    }
+  };
+}
+
+function closeOpenItems(items: TimelineItem[]): TimelineItem[] {
+  return items.map((i) =>
+    i.kind === "question" && i.answer === undefined
+      ? { ...i, closed: true }
+      : i.kind === "tool" &&
+          (i.status === "awaiting_approval" || i.status === "requested")
+        ? { ...i, status: "expired" as const }
+        : i
+  );
 }
 
 function reduce(
@@ -188,15 +251,40 @@ function reduce(
         finishedMs: ts,
         error: e.error,
         // an unanswered question cannot be answered once the run is over
-        items: r.items.map((i) =>
-          i.kind === "question" && i.answer === undefined
-            ? { ...i, closed: true }
-            : i.kind === "tool" &&
-                (i.status === "awaiting_approval" || i.status === "requested")
-              ? { ...i, status: "expired" as const }
-              : i
-        )
+        items: closeOpenItems(r.items)
       }));
+    case "subagent_started":
+      return withRun(state, e.run_id, ts, (r) => {
+        const parent = state.runs[e.parent_run_id];
+        return {
+          ...r,
+          chatId: r.chatId || parent?.chatId || "",
+          botId: r.botId || parent?.botId || "",
+          parentRunId: e.parent_run_id,
+          task: e.task,
+          callId: e.call_id ?? r.callId,
+          // A restart re-announces an adopted child: it runs again.
+          subagentState: "running" as const,
+          finishedMs: undefined,
+          summary: undefined,
+          startedMs: r.items.length === 0 ? ts : r.startedMs
+        };
+      });
+    case "subagent_finished":
+      return withRun(state, e.run_id, ts, (r) => {
+        const parent = state.runs[e.parent_run_id];
+        return {
+          ...r,
+          chatId: r.chatId || parent?.chatId || "",
+          botId: r.botId || parent?.botId || "",
+          parentRunId: e.parent_run_id,
+          callId: e.call_id ?? r.callId,
+          finishedMs: ts,
+          subagentState: e.state,
+          summary: e.summary,
+          items: closeOpenItems(r.items)
+        };
+      });
     case "message_delta":
       return withRun(state, e.run_id, ts, (r) => {
         const last = r.items[r.items.length - 1];
@@ -362,6 +450,86 @@ function reduce(
     case "control_requested":
       return state;
   }
+}
+
+/** Child runs of `parentRunId` (optionally only those for one tool call). */
+export function childRunsOf(
+  state: EventsState,
+  parentRunId: string,
+  callId?: string
+): RunState[] {
+  return Object.values(state.runs)
+    .filter(
+      (r) =>
+        r.parentRunId === parentRunId &&
+        (callId === undefined || r.callId === callId)
+    )
+    .sort((a, b) => a.startedMs - b.startedMs);
+}
+
+/**
+ * Match each subagent tool call of `run` to its child run: by `callId`, then
+ * (old logs) the unmatched children in order. Keyed by tool call id.
+ */
+export function assignChildRuns(
+  state: EventsState,
+  run: RunState
+): Record<string, RunState> {
+  const children = childRunsOf(state, run.id);
+  const out: Record<string, RunState> = {};
+  const tools = run.items.filter(
+    (i): i is ToolItem => i.kind === "tool" && isSubagentTool(i.name)
+  );
+  const used = new Set<string>();
+  for (const t of tools) {
+    const m = children.find((c) => c.callId === t.callId);
+    if (m) {
+      out[t.callId] = m;
+      used.add(m.id);
+    }
+  }
+  const toolCallIds = new Set(tools.map((t) => t.callId));
+  const spare = children.filter(
+    (c) =>
+      !used.has(c.id) && (c.callId === undefined || !toolCallIds.has(c.callId))
+  );
+  for (const t of tools) {
+    if (!out[t.callId] && spare.length > 0) {
+      out[t.callId] = spare.shift() as RunState;
+    }
+  }
+  return out;
+}
+
+/** Runs shown as top-level chat runs (children render inside their card). */
+export function topLevelRuns(state: EventsState, chatId: string): RunState[] {
+  return Object.values(state.runs)
+    .filter((r) => r.chatId === chatId && r.parentRunId === undefined)
+    .sort((a, b) => a.startedMs - b.startedMs);
+}
+
+/** Live status of a subagent run for its card chip. */
+export type SubagentStatus =
+  | "running"
+  | "waiting_approval"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "paused";
+
+export function subagentStatus(run: RunState): SubagentStatus {
+  if (run.finishedMs !== undefined) {
+    const s = run.subagentState;
+    if (s && s !== "running") {
+      return s;
+    }
+    return run.error ? "failed" : "succeeded";
+  }
+  return run.items.some(
+    (i) => i.kind === "tool" && i.status === "awaiting_approval"
+  )
+    ? "waiting_approval"
+    : "running";
 }
 
 /** Record the user's answer to a question card locally (optimistic). */

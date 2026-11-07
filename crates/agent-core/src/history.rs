@@ -24,7 +24,11 @@ const GUIDANCE: &str = "You are an agent that can call tools. Call a tool when y
 need to act; when the task is done, answer the user in plain text. If a tool result says it was \
 denied, interrupted or truncated, adapt instead of repeating the same call.";
 
-pub(crate) fn system_prompt(profile: &BotProfile) -> String {
+const SUBAGENT_GUIDANCE: &str = "\n\nYou are a subagent: another agent delegated one task to you. \
+Do exactly that task with your tools, then reply with a concise final answer; the parent receives \
+your final text as-is and nothing else.";
+
+pub(crate) fn system_prompt(profile: &BotProfile, subagent: bool, skills: Option<&str>) -> String {
     let mut s = String::new();
     if !profile.persona.is_empty() {
         s.push_str(&profile.persona);
@@ -34,6 +38,13 @@ pub(crate) fn system_prompt(profile: &BotProfile) -> String {
         let _ = write!(s, "Reply in the user's language (default: {l}).\n\n");
     }
     s.push_str(GUIDANCE);
+    if subagent {
+        s.push_str(SUBAGENT_GUIDANCE);
+    }
+    if let Some(block) = skills.filter(|b| !b.is_empty()) {
+        s.push_str("\n\n");
+        s.push_str(block);
+    }
     s
 }
 
@@ -59,16 +70,23 @@ pub(crate) const GUARD_NOTE: &str = "The turn was stopped by a safety limit ({re
 const NOT_EXECUTED: &str = "[not executed: the turn was stopped by a safety limit]";
 
 /// Full provider conversation for the next model call of `run`.
-/// `final_note` (guard stop) is appended as a closing system message.
+/// `final_note` (guard stop) is appended as a closing system message;
+/// `skills` is the skills index block of the system prompt.  A subagent run
+/// starts from a fresh history: no chat messages.
 pub(crate) fn build_messages(
     storage: &Storage,
     run: &Run,
     steps: &[RunStep],
     profile: &BotProfile,
     final_note: Option<&str>,
+    skills: Option<&str>,
 ) -> Result<Vec<Message>, storage::StorageError> {
-    let mut out = vec![Message::text(MessageRole::System, system_prompt(profile))];
-    if let Some(chat) = run.chat_id {
+    let subagent = run.parent_run_id.is_some();
+    let mut out = vec![Message::text(
+        MessageRole::System,
+        system_prompt(profile, subagent, skills),
+    )];
+    if let Some(chat) = run.chat_id.filter(|_| !subagent) {
         for m in storage.list_messages(chat)? {
             if m.run_id == Some(run.id) {
                 continue;

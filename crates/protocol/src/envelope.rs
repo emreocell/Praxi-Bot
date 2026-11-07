@@ -4,6 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::event::Event;
+use crate::ids::RunId;
 
 /// A versioned, sequenced wrapper around a single [`Event`].
 ///
@@ -18,6 +19,10 @@ pub struct Envelope {
     pub ts_ms: u64,
     /// The event payload.
     pub event: Event,
+    /// Set on every event emitted by a subagent (child) run: the run that
+    /// spawned it.  Absent on top-level runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_run_id: Option<RunId>,
 }
 
 impl Envelope {
@@ -36,7 +41,15 @@ impl Envelope {
             seq,
             ts_ms,
             event,
+            parent_run_id: None,
         }
+    }
+
+    /// Mark the envelope as coming from a child run of `parent`.
+    #[must_use]
+    pub fn with_parent(mut self, parent: Option<RunId>) -> Self {
+        self.parent_run_id = parent;
+        self
     }
 }
 

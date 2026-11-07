@@ -2194,6 +2194,14 @@
             "type": "string",
             "description": "`turn`, `turn:routine`, ..."
           },
+          "parent_run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The run that spawned this one when it is a subagent run."
+          },
           "state": {
             "type": "string",
             "description": "`pending` / `running` / `waiting_approval` / `paused` / `succeeded` / `failed` / `cancelled`."

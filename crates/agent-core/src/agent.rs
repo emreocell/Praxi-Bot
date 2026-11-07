@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
 use agent_router::{ToolSurface, ToolVisibility};
@@ -36,7 +36,7 @@ use crate::{AUDIT_GRANT_ALWAYS, AUDIT_GRANT_REVOKED};
 type Result<T> = std::result::Result<T, LoopError>;
 
 #[derive(Clone, Copy)]
-enum Start {
+pub(crate) enum Start {
     Fresh,
     Resume,
 }
@@ -48,7 +48,7 @@ enum Start {
 #[derive(Clone)]
 pub struct AgentLoop {
     pub(crate) sh: Arc<Shared>,
-    rt: Arc<Runtime>,
+    pub(crate) rt: Arc<Runtime>,
 }
 
 impl AgentLoop {
@@ -95,6 +95,10 @@ impl AgentLoop {
                 gseq: AtomicU64::new(first_gseq),
                 emit_gate: Mutex::new(()),
                 shutting_down: AtomicBool::new(false),
+                rt: OnceLock::new(),
+                spawn_gate: Mutex::new(()),
+                skills: OnceLock::new(),
+                skill_hints: RwLock::new(None),
             }
         });
         let rt = Arc::new(Runtime::new(
@@ -103,7 +107,39 @@ impl AgentLoop {
                 sh: Arc::clone(&sh),
             }),
         ));
+        let _ = sh.rt.set(Arc::downgrade(&rt));
         Self { sh, rt }
+    }
+
+    pub(crate) fn from_parts(sh: Arc<Shared>, rt: Arc<Runtime>) -> Self {
+        Self { sh, rt }
+    }
+
+    /// Register `spawn_subagent` (see the `subagent` module): the model can
+    /// delegate tasks to child runs of its own bot.
+    #[must_use]
+    pub fn with_subagents(self) -> Self {
+        let _ = self.sh.tools.register(crate::subagent::tool());
+        self
+    }
+
+    /// Register the `skill_*` tools over `index` and put the skills index
+    /// (suggested skills first, see [`skills::SkillIndex::prompt_block`]) into
+    /// the system prompt of every model call.
+    #[must_use]
+    pub fn with_skills(self, index: skills::SkillIndex) -> Self {
+        for tool in skills::tools(&index) {
+            let _ = self.sh.tools.register(tool);
+        }
+        let _ = self.sh.skills.set(index);
+        self
+    }
+
+    /// Tell the loop what is in the foreground (browser page host, application)
+    /// so skills that match it are listed as suggested; without a source the
+    /// turn's text is matched against skill keywords instead.
+    pub fn set_skill_hints(&self, hints: crate::SkillHintFn) {
+        *self.sh.skill_hints.write() = Some(hints);
     }
 
     /// Register the built-in tools (desktop, browser, files, shell, script,
@@ -146,6 +182,14 @@ impl AgentLoop {
         *self.sh.control.write() = Some(gate);
     }
 
+    /// Names of the registered tools, sorted.
+    #[must_use]
+    pub fn tool_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.sh.tools.list().into_iter().map(|s| s.name).collect();
+        names.sort();
+        names
+    }
+
     /// The loop's providers (cheap clone).
     #[must_use]
     pub fn providers(&self) -> Providers {
@@ -170,10 +214,11 @@ impl AgentLoop {
         *self.sh.global_policy.write() = policy;
     }
 
-    /// Configured USD price of `model` (full `provider/model` reference).
+    /// USD price of `model` (full `provider/model` reference): the loop config's
+    /// override, else the price the providers' catalog carries.
     #[must_use]
     pub fn price_for(&self, model: &str) -> Option<ModelPrice> {
-        self.sh.cfg.prices.get(model).copied()
+        self.sh.price_for(model)
     }
 
     /// Register the profile used by `bot_id` (otherwise the bot row's JSON
@@ -400,12 +445,16 @@ impl AgentLoop {
             .ok_or(LoopError::NoPendingApproval(call_id))
     }
 
-    /// Cancel a run (in-flight step becomes `Interrupted`).
+    /// Cancel a run (in-flight step becomes `Interrupted`); unfinished
+    /// subagents of the run are cancelled too.
     ///
     /// # Errors
     /// Fails if the run is terminal or storage fails.
     pub fn cancel(&self, run_id: RunId) -> Result<()> {
-        Ok(self.rt.cancel(run_id)?)
+        self.rt.cancel(run_id)?;
+        // A cancelled parent takes its subagents with it.
+        self.cancel_descendants(run_id);
+        Ok(())
     }
 
     /// Startup recovery: every run left `Running` **or** `WaitingApproval` gets
@@ -464,7 +513,10 @@ impl AgentLoop {
             }
             .into());
         }
-        if let Some(chat) = run.chat_id {
+        // A subagent is not the chat's turn; its parent is.
+        if run.parent_run_id.is_none()
+            && let Some(chat) = run.chat_id
+        {
             let mut active = self.sh.active.lock();
             if active.contains_key(&chat) {
                 return Err(LoopError::Busy(chat));
@@ -647,7 +699,7 @@ impl AgentLoop {
         Ok(())
     }
 
-    fn spawn(&self, run_id: RunId, start: Start) {
+    pub(crate) fn spawn(&self, run_id: RunId, start: Start) {
         let handle = tokio::spawn(self.clone().drive(run_id, start));
         self.sh.tasks.lock().insert(run_id, handle);
     }
@@ -657,7 +709,15 @@ impl AgentLoop {
         Box::pin(async move {
             let res = match start {
                 Start::Fresh => {
-                    if let Some(ctx) = self.ctx_of(run_id) {
+                    let is_child = self
+                        .sh
+                        .storage
+                        .get_run(run_id)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|r| r.parent_run_id.is_some());
+                    // A child announces itself with `subagent_started` instead.
+                    if !is_child && let Some(ctx) = self.ctx_of(run_id) {
                         self.sh.emit(
                             &ctx,
                             Event::RunStarted(RunStarted {
@@ -680,7 +740,7 @@ impl AgentLoop {
         })
     }
 
-    fn ctx_of(&self, run_id: RunId) -> Option<Arc<crate::shared::RunCtx>> {
+    pub(crate) fn ctx_of(&self, run_id: RunId) -> Option<Arc<crate::shared::RunCtx>> {
         let run = self.sh.storage.get_run(run_id).ok().flatten()?;
         self.sh.ctx(&run).ok()
     }
@@ -688,6 +748,10 @@ impl AgentLoop {
     /// Persist the final answer, emit the closing events and start any queued turn.
     fn conclude(&self, run_id: RunId, res: &std::result::Result<RunState, RuntimeError>) {
         let run = self.sh.storage.get_run(run_id).ok().flatten();
+        if let Some(parent) = run.as_ref().and_then(|r| r.parent_run_id) {
+            self.conclude_child(run_id, parent, res);
+            return;
+        }
         let ctx = self.ctx_of(run_id);
         if matches!(res, Ok(RunState::Paused)) {
             // Paused by `shutdown`: no `run_finished` (the run is resumable and

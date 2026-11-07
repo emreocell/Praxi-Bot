@@ -147,12 +147,29 @@ export type DaemonEvent =
       label: string;
       action: string;
     }
-  | { type: "error"; run_id: string; message: string; recoverable: boolean };
+  | { type: "error"; run_id: string; message: string; recoverable: boolean }
+  | {
+      type: "subagent_started";
+      run_id: string;
+      parent_run_id: string;
+      task: string;
+      call_id?: string;
+    }
+  | {
+      type: "subagent_finished";
+      run_id: string;
+      parent_run_id: string;
+      state: "succeeded" | "failed" | "cancelled" | "paused";
+      summary: string;
+      call_id?: string;
+    };
 
 export interface Envelope {
   v: number;
   seq: number;
   ts_ms: number;
+  /** Present on every event emitted by a child (subagent) run. */
+  parent_run_id?: string;
   event: DaemonEvent;
 }
 

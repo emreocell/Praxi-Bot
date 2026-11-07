@@ -95,6 +95,8 @@ pub struct BotProfile {
     pub tools: ToolFilter,
     allow: GlobSet,
     exclude: GlobSet,
+    /// Extra allow-lists a tool must also match (subagent narrowing).
+    restrict: Vec<GlobSet>,
 }
 
 fn globs(patterns: &[String]) -> Result<GlobSet, String> {
@@ -127,6 +129,7 @@ impl TryFrom<Raw> for BotProfile {
         Ok(Self {
             allow: globs(&r.tools.allow)?,
             exclude: globs(&r.tools.exclude)?,
+            restrict: Vec::new(),
             id: r.bot.id,
             name: r.bot.name,
             persona: r.bot.persona,
@@ -168,6 +171,34 @@ impl BotProfile {
     pub fn tool_visible(&self, tool_name: &str) -> bool {
         (self.tools.allow.is_empty() || self.allow.is_match(tool_name))
             && !self.exclude.is_match(tool_name)
+            && self.restrict.iter().all(|g| g.is_match(tool_name))
+    }
+
+    /// The profile a subagent runs with: the same bot (persona, permissions,
+    /// fallbacks), a tool surface that is the **intersection** of this
+    /// profile's visible tools and `tools` (`None` = no narrowing; `Some([])`
+    /// = no tools), and `executor` as its model when given.
+    ///
+    /// # Errors
+    /// A malformed tool glob.
+    pub(crate) fn narrowed(
+        &self,
+        tools: Option<&[String]>,
+        executor: Option<&str>,
+    ) -> Result<Self, String> {
+        let mut p = self.clone();
+        if let Some(tools) = tools {
+            // The model sees dotted names with `.` replaced by `__`.
+            let patterns: Vec<String> = tools
+                .iter()
+                .flat_map(|t| [t.clone(), t.replace("__", ".")])
+                .collect();
+            p.restrict.push(globs(&patterns)?);
+        }
+        if let Some(m) = executor {
+            m.clone_into(&mut p.models.executor);
+        }
+        Ok(p)
     }
 
     /// The bot's own permission policy; `None` when the profile defines none

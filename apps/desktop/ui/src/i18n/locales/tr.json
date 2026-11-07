@@ -206,6 +206,22 @@
     "placeholder": "Bota mesaj yaz…",
     "placeholderBusy": "Bot çalışıyor — sıraya al veya yönlendir…",
     "send": "Gönder",
+    "subagent": {
+      "title": "Alt ajan",
+      "task": "Görev",
+      "summary": "Özet",
+      "toggle": "Alt ajan: {{task}}",
+      "cancel": "İptal",
+      "cancelLabel": "Alt ajanı iptal et: {{task}}",
+      "status": {
+        "running": "Çalışıyor",
+        "waiting_approval": "Onay bekliyor",
+        "succeeded": "Bitti",
+        "failed": "Başarısız",
+        "cancelled": "İptal edildi",
+        "paused": "Duraklatıldı"
+      }
+    },
     "tool": {
       "subagent": "Alt ajan",
       "input": "Girdi",

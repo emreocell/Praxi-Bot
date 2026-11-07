@@ -3,6 +3,11 @@ import { test } from "node:test";
 import type { DaemonEvent, GlobalEnvelope } from "../api/types.ts";
 import {
   applyEvent,
+  assignChildRuns,
+  childRunsOf,
+  isSubagentTool,
+  subagentStatus,
+  topLevelRuns,
   EMPTY_EVENTS,
   type EventsState,
   needsYou,
@@ -167,4 +172,193 @@ test("reconcile expires approvals the daemon no longer knows", () => {
       .items[0] as ToolItem).status,
     "awaiting_approval"
   );
+});
+
+// ------------------------------------------------------------- subagents
+
+function feedChild(
+  state: EventsState,
+  parent: string,
+  event: DaemonEvent,
+  ts = 1000
+): EventsState {
+  gseq += 1;
+  const env: GlobalEnvelope = {
+    v: 1,
+    seq: gseq,
+    ts_ms: ts,
+    gseq,
+    parent_run_id: parent,
+    event
+  };
+  return applyEvent(state, env);
+}
+
+test("isSubagentTool matches spawn_subagent", () => {
+  assert.equal(isSubagentTool("spawn_subagent"), true);
+  assert.equal(isSubagentTool("fs_write"), false);
+});
+
+test("subagent_started / finished fold into the child run", () => {
+  let s = started();
+  s = feed(s, {
+    type: "subagent_started",
+    run_id: "child-1",
+    parent_run_id: RUN,
+    task: "research",
+    call_id: "c1"
+  });
+  const child = s.runs["child-1"];
+  assert.equal(child.parentRunId, RUN);
+  assert.equal(child.chatId, "chat-1");
+  assert.equal(child.botId, "bot-1");
+  assert.equal(child.task, "research");
+  assert.equal(child.callId, "c1");
+  assert.equal(child.subagentState, "running");
+  assert.equal(subagentStatus(child), "running");
+  assert.equal(childRunsOf(s, RUN, "c1").length, 1);
+  assert.equal(childRunsOf(s, RUN, "other").length, 0);
+
+  s = feed(s, {
+    type: "subagent_finished",
+    run_id: "child-1",
+    parent_run_id: RUN,
+    state: "failed",
+    summary: "boom",
+    call_id: "c1"
+  });
+  const done = s.runs["child-1"];
+  assert.equal(done.subagentState, "failed");
+  assert.equal(done.summary, "boom");
+  assert.notEqual(done.finishedMs, undefined);
+  assert.equal(subagentStatus(done), "failed");
+});
+
+test("a restart re-announces a paused subagent: it runs again", () => {
+  let s = started();
+  const base = { run_id: "child-1", parent_run_id: RUN, call_id: "c1" };
+  s = feed(s, { type: "subagent_started", task: "research", ...base });
+  s = feed(s, {
+    type: "subagent_finished",
+    state: "paused",
+    summary: "paused: the run was interrupted",
+    ...base
+  });
+  assert.equal(subagentStatus(s.runs["child-1"]), "paused");
+  s = feed(s, { type: "subagent_started", task: "research", ...base });
+  assert.equal(s.runs["child-1"].finishedMs, undefined);
+  assert.equal(subagentStatus(s.runs["child-1"]), "running");
+});
+
+test("child events before subagent_started land via parent_run_id", () => {
+  let s = started();
+  s = feedChild(s, RUN, {
+    type: "message_delta",
+    run_id: "child-1",
+    text: "hi"
+  });
+  assert.equal(s.runs["child-1"].parentRunId, RUN);
+  assert.equal(s.runs["child-1"].chatId, "chat-1");
+  assert.equal(s.runs["child-1"].items.length, 1);
+  s = feed(s, {
+    type: "subagent_started",
+    run_id: "child-1",
+    parent_run_id: RUN,
+    task: "t"
+  });
+  assert.equal(s.runs["child-1"].items.length, 1);
+  assert.equal(s.runs["child-1"].task, "t");
+});
+
+test("a child approval is listed against the parent chat, finished ones not", () => {
+  let s = started();
+  s = feed(s, {
+    type: "subagent_started",
+    run_id: "child-1",
+    parent_run_id: RUN,
+    task: "t",
+    call_id: "c1"
+  });
+  s = feedChild(s, RUN, {
+    type: "approval_needed",
+    run_id: "child-1",
+    call_id: "k1",
+    tool_name: "shell_run",
+    input: {},
+    summary: "run it"
+  });
+  const list = needsYou(s);
+  assert.equal(list.length, 1);
+  assert.equal(list[0].runId, "child-1");
+  assert.equal(list[0].chatId, "chat-1");
+  assert.equal(subagentStatus(s.runs["child-1"]), "waiting_approval");
+  s = feed(s, {
+    type: "subagent_finished",
+    run_id: "child-1",
+    parent_run_id: RUN,
+    state: "cancelled",
+    summary: ""
+  });
+  assert.equal(needsYou(s).length, 0);
+  assert.equal(
+    (s.runs["child-1"].items[0] as ToolItem).status,
+    "expired"
+  );
+});
+
+test("topLevelRuns excludes children; grandchildren nest", () => {
+  let s = started();
+  s = feed(s, {
+    type: "tool_call_requested",
+    run_id: RUN,
+    call_id: "c1",
+    tool_name: "spawn_subagent",
+    input: {}
+  });
+  s = feed(s, {
+    type: "subagent_started",
+    run_id: "child-1",
+    parent_run_id: RUN,
+    task: "a",
+    call_id: "c1"
+  });
+  s = feedChild(s, RUN, {
+    type: "tool_call_requested",
+    run_id: "child-1",
+    call_id: "g1",
+    tool_name: "spawn_subagent",
+    input: {}
+  });
+  s = feedChild(s, "child-1", {
+    type: "subagent_started",
+    run_id: "grand-1",
+    parent_run_id: "child-1",
+    task: "b",
+    call_id: "g1"
+  });
+  assert.deepEqual(
+    topLevelRuns(s, "chat-1").map((r) => r.id),
+    [RUN]
+  );
+  assert.equal(s.runs["grand-1"].chatId, "chat-1");
+  assert.equal(assignChildRuns(s, s.runs[RUN])["c1"].id, "child-1");
+  assert.equal(assignChildRuns(s, s.runs["child-1"])["g1"].id, "grand-1");
+});
+
+test("assignChildRuns falls back to unmatched children in order", () => {
+  let s = started();
+  s = feed(s, {
+    type: "tool_call_requested",
+    run_id: RUN,
+    call_id: "c1",
+    tool_name: "spawn_subagent",
+    input: {}
+  });
+  s = feed(s, {
+    type: "subagent_started",
+    run_id: "child-1",
+    parent_run_id: RUN,
+    task: "a"
+  });
+  assert.equal(assignChildRuns(s, s.runs[RUN])["c1"].id, "child-1");
 });
