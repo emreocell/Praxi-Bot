@@ -7,7 +7,9 @@ mod common;
 use std::future::Future;
 use std::time::{Duration, Instant};
 
-use browser_cdp::{Browser, LaunchOptions, Page, Snapshot, SnapshotOptions, WaitCondition};
+use browser_cdp::{
+    Browser, DialogOptions, LaunchOptions, Page, Snapshot, SnapshotOptions, WaitCondition,
+};
 
 const RUNS: usize = 8;
 const CAP: Duration = Duration::from_secs(10);
@@ -131,7 +133,8 @@ async fn bench_browser_actions() {
         let snap = p.last_snapshot().await.unwrap_or_default();
         let r = ref_of(&snap, "button").expect("button ref");
         let _ = p.click(&r).await; // user activation so the handler is armed
-        unload.push(timed(p.navigate(&format!("{base}/form"))).await);
+        unload
+            .push(timed(p.navigate_with(&format!("{base}/form"), &DialogOptions::accept())).await);
         let _ = p.close().await;
     }
     unload.print();

@@ -17,6 +17,10 @@ const SPA: &str = "<title>Spa</title><h1>Spa</h1><button id=n onclick=\"location
 
 const ALERT: &str = "<title>Alert</title><button onclick=\"alert('hello');document.title='after-alert'\">Alert</button>";
 
+const TWO: &str = "<title>Two</title><button onclick=\"alert('first');alert('second');document.title='both'\">Two</button>";
+
+const PROMPT: &str = "<title>Prompt</title><button onclick=\"document.title='prompt:'+prompt('name?','default')\">Prompt</button>";
+
 const CONFIRM: &str = "<title>Confirm</title><button onclick=\"document.title='confirm:'+confirm('sure?')\">Confirm</button>";
 
 const BEFOREUNLOAD: &str = "<title>Unload</title><button>Stay</button>\
@@ -63,6 +67,8 @@ pub async fn serve() -> u16 {
                             "/poll" => POLL,
                             "/spa" => SPA,
                             "/alert" => ALERT,
+                            "/two" => TWO,
+                            "/prompt" => PROMPT,
                             "/confirm" => CONFIRM,
                             "/beforeunload" => BEFOREUNLOAD,
                             "/heavy" => HEAVY,

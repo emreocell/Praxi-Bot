@@ -5,7 +5,7 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use browser_cdp::{Browser, LaunchOptions, Page, Snapshot, SnapshotOptions};
+use browser_cdp::{Browser, DialogOptions, LaunchOptions, Page, Snapshot, SnapshotOptions};
 
 fn button(snap: &Snapshot) -> String {
     snap.nodes
@@ -36,13 +36,46 @@ async fn alert_is_accepted_quickly_and_reported() {
         "{:?}",
         start.elapsed()
     );
-    let dialog = res.dialog.expect("dialog reported");
+    assert_eq!(res.dialogs.len(), 1);
+    let dialog = &res.dialogs[0];
     assert_eq!(
         (dialog.kind.as_str(), dialog.message.as_str()),
         ("alert", "hello")
     );
     assert!(dialog.accepted);
     assert_eq!(page.title().await.unwrap(), "after-alert");
+    browser.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn two_dialogs_during_one_action_are_all_reported() {
+    let (browser, page, button_ref) = setup("/two").await;
+    let start = Instant::now();
+    let res = page.click(&button_ref).await.unwrap();
+    assert!(
+        start.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        start.elapsed()
+    );
+    assert_eq!(res.dialogs.len(), 2, "must report all dialogs");
+    assert_eq!(
+        (
+            res.dialogs[0].kind.as_str(),
+            res.dialogs[0].message.as_str(),
+            res.dialogs[0].accepted
+        ),
+        ("alert", "first", true)
+    );
+    assert_eq!(
+        (
+            res.dialogs[1].kind.as_str(),
+            res.dialogs[1].message.as_str(),
+            res.dialogs[1].accepted
+        ),
+        ("alert", "second", true)
+    );
+    assert_eq!(page.title().await.unwrap(), "both");
     browser.close().await.unwrap();
 }
 
@@ -57,7 +90,8 @@ async fn confirm_is_dismissed_and_page_sees_false() {
         "{:?}",
         start.elapsed()
     );
-    let dialog = res.dialog.expect("dialog reported");
+    assert_eq!(res.dialogs.len(), 1);
+    let dialog = &res.dialogs[0];
     assert_eq!(dialog.kind, "confirm");
     assert!(!dialog.accepted);
     assert_eq!(page.title().await.unwrap(), "confirm:false");
@@ -66,7 +100,49 @@ async fn confirm_is_dismissed_and_page_sees_false() {
 
 #[tokio::test]
 #[ignore = "needs Chrome/Edge"]
-async fn navigating_away_from_beforeunload_succeeds() {
+async fn confirm_is_accepted_with_option() {
+    let (browser, page, button_ref) = setup("/confirm").await;
+    let res = page
+        .click_with(&button_ref, &DialogOptions::accept())
+        .await
+        .unwrap();
+    assert_eq!(res.dialogs.len(), 1);
+    assert_eq!(res.dialogs[0].kind, "confirm");
+    assert!(res.dialogs[0].accepted);
+    assert_eq!(page.title().await.unwrap(), "confirm:true");
+    browser.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn prompt_is_dismissed_by_default() {
+    let (browser, page, button_ref) = setup("/prompt").await;
+    let res = page.click(&button_ref).await.unwrap();
+    assert_eq!(res.dialogs.len(), 1);
+    assert_eq!(res.dialogs[0].kind, "prompt");
+    assert!(!res.dialogs[0].accepted);
+    assert_eq!(page.title().await.unwrap(), "prompt:null");
+    browser.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn prompt_is_accepted_with_prompt_text() {
+    let (browser, page, button_ref) = setup("/prompt").await;
+    let res = page
+        .click_with(&button_ref, &DialogOptions::accept_prompt("Alice"))
+        .await
+        .unwrap();
+    assert_eq!(res.dialogs.len(), 1);
+    assert_eq!(res.dialogs[0].kind, "prompt");
+    assert!(res.dialogs[0].accepted);
+    assert_eq!(page.title().await.unwrap(), "prompt:Alice");
+    browser.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn navigating_away_from_beforeunload_dismissed_by_default() {
     let (browser, page, button_ref) = setup("/beforeunload").await;
     let _ = page.click(&button_ref).await.unwrap(); // user activation arms the handler
     let form_url = format!(
@@ -74,7 +150,38 @@ async fn navigating_away_from_beforeunload_succeeds() {
         page.url().await.unwrap().trim_end_matches("/beforeunload")
     );
     let res = page.navigate(&form_url).await.unwrap();
+    assert!(
+        !res.ok,
+        "default dismisses beforeunload so navigation aborts"
+    );
+    assert_eq!(res.dialogs.len(), 1);
+    assert_eq!(res.dialogs[0].kind, "beforeunload");
+    assert!(!res.dialogs[0].accepted);
+    assert!(
+        res.snapshot.url.ends_with("/beforeunload"),
+        "stays on beforeunload page: {}",
+        res.snapshot.url
+    );
+    browser.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn navigating_away_from_beforeunload_accepted_with_option() {
+    let (browser, page, button_ref) = setup("/beforeunload").await;
+    let _ = page.click(&button_ref).await.unwrap(); // user activation arms the handler
+    let form_url = format!(
+        "{}/form",
+        page.url().await.unwrap().trim_end_matches("/beforeunload")
+    );
+    let res = page
+        .navigate_with(&form_url, &DialogOptions::accept())
+        .await
+        .unwrap();
     assert!(res.ok, "{:?}", res.error);
+    assert_eq!(res.dialogs.len(), 1);
+    assert_eq!(res.dialogs[0].kind, "beforeunload");
+    assert!(res.dialogs[0].accepted);
     assert!(res.snapshot.url.ends_with("/form"), "{}", res.snapshot.url);
     browser.close().await.unwrap();
 }

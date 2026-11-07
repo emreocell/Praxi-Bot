@@ -27,7 +27,7 @@ pub(crate) const INFLIGHT_CAP: Duration = Duration::from_secs(10);
 /// A JavaScript dialog the page watcher answered on its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DialogInfo {
-    /// `alert`, `confirm`, `prompt` or `beforeunload`.
+    /// `alert`, `confirm`, `prompt`, `beforeunload`, or `unknown`.
     pub kind: String,
     /// The dialog message.
     pub message: String,
@@ -35,9 +35,66 @@ pub struct DialogInfo {
     pub accepted: bool,
 }
 
-/// Policy: only `alert` and `beforeunload` are accepted; `confirm`/`prompt` are dismissed.
-pub(crate) fn accepts_dialog(kind: &str) -> bool {
-    matches!(kind, "alert" | "beforeunload")
+/// How to handle a JavaScript dialog that opens during an action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DialogAction {
+    /// Alerts are accepted; confirm, prompt, beforeunload, and unknown dialogs are dismissed.
+    #[default]
+    Auto,
+    /// Explicitly accept dialogs (including confirm, prompt, beforeunload).
+    Accept,
+    /// Explicitly dismiss dialogs.
+    Dismiss,
+}
+
+impl DialogAction {
+    /// Parse from an optional `"accept"` | `"dismiss"` string; anything else defaults to Auto.
+    pub fn from_str_opt(s: Option<&str>) -> Self {
+        match s {
+            Some("accept") => Self::Accept,
+            Some("dismiss") => Self::Dismiss,
+            _ => Self::Auto,
+        }
+    }
+}
+
+/// Options controlling JavaScript dialog handling during an action.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DialogOptions {
+    pub action: DialogAction,
+    pub prompt_text: Option<String>,
+}
+
+impl DialogOptions {
+    pub fn auto() -> Self {
+        Self::default()
+    }
+
+    pub fn accept() -> Self {
+        Self {
+            action: DialogAction::Accept,
+            prompt_text: None,
+        }
+    }
+
+    pub fn dismiss() -> Self {
+        Self {
+            action: DialogAction::Dismiss,
+            prompt_text: None,
+        }
+    }
+
+    pub fn accept_prompt(text: impl Into<String>) -> Self {
+        Self {
+            action: DialogAction::Accept,
+            prompt_text: Some(text.into()),
+        }
+    }
+}
+
+/// Policy: only `alert` is accepted under Auto; `confirm`/`prompt`/`beforeunload`/`unknown` are dismissed.
+pub(crate) fn default_accepts_dialog(kind: &str) -> bool {
+    matches!(kind, "alert")
 }
 
 /// Shared with the background event watcher.
@@ -48,10 +105,12 @@ pub(crate) struct Shared {
     /// Sessions whose domains are already enabled.
     pub ready: StdMutex<HashSet<String>>,
     /// In-flight network requests of the main session, id -> first seen (a redirect chain reuses
-    /// one id, so inserts are idempotent). Entries older than [`INFLIGHT_CAP`] are ignored.
+    /// one id, so inserts are idempotent). Entries older than [`INFLIGHT_CAP`] are pruned.
     pub inflight: StdMutex<HashMap<String, Instant>>,
     /// JS dialogs handled by the watcher since the current action started.
     pub dialogs: StdMutex<Vec<DialogInfo>>,
+    /// Policy for dialogs that open during the current action.
+    pub dialog_policy: StdMutex<DialogOptions>,
     /// Number of AX/DOMSnapshot rounds taken (diagnostics, used by tests).
     pub snap_rounds: AtomicU64,
     /// Last network activity.
@@ -650,24 +709,36 @@ async fn watch(
                 }
             }
             "Network.requestWillBeSent" if sid == session => {
-                if let Some(id) = ev.params["requestId"].as_str()
-                    && let Ok(mut map) = shared.inflight.lock()
-                {
-                    map.entry(id.to_string()).or_insert_with(Instant::now);
+                if let Ok(mut map) = shared.inflight.lock() {
+                    map.retain(|_, t| t.elapsed() < INFLIGHT_CAP);
+                    if let Some(id) = ev.params["requestId"].as_str() {
+                        map.entry(id.to_string()).or_insert_with(Instant::now);
+                    }
                 }
                 touch(&shared);
             }
             "Network.loadingFinished" | "Network.loadingFailed" if sid == session => {
-                if let Some(id) = ev.params["requestId"].as_str()
-                    && let Ok(mut map) = shared.inflight.lock()
-                {
-                    map.remove(id);
+                if let Ok(mut map) = shared.inflight.lock() {
+                    map.retain(|_, t| t.elapsed() < INFLIGHT_CAP);
+                    if let Some(id) = ev.params["requestId"].as_str() {
+                        map.remove(id);
+                    }
                 }
                 touch(&shared);
             }
             "Page.javascriptDialogOpening" => {
-                let kind = ev.params["type"].as_str().unwrap_or("alert").to_string();
-                let accept = accepts_dialog(&kind);
+                let raw_type = ev.params.get("type").and_then(Value::as_str);
+                let kind = raw_type.unwrap_or("unknown").to_string();
+                let policy = shared
+                    .dialog_policy
+                    .lock()
+                    .map(|p| p.clone())
+                    .unwrap_or_default();
+                let (accept, prompt_text) = match policy.action {
+                    DialogAction::Accept => (true, policy.prompt_text.clone()),
+                    DialogAction::Dismiss => (false, None),
+                    DialogAction::Auto => (default_accepts_dialog(&kind), None),
+                };
                 if let Ok(mut d) = shared.dialogs.lock() {
                     d.push(DialogInfo {
                         kind,
@@ -684,12 +755,12 @@ async fn watch(
                     let c = c.clone();
                     let sid = sid.to_string();
                     tokio::spawn(async move {
+                        let mut params = json!({"accept": accept});
+                        if let Some(txt) = prompt_text {
+                            params["promptText"] = json!(txt);
+                        }
                         let _ = c
-                            .send_on(
-                                Some(&sid),
-                                "Page.handleJavaScriptDialog",
-                                json!({"accept": accept}),
-                            )
+                            .send_on(Some(&sid), "Page.handleJavaScriptDialog", params)
                             .await;
                     });
                 }
@@ -708,8 +779,9 @@ async fn watch(
 }
 
 fn busy_count(shared: &Shared) -> usize {
-    shared.inflight.lock().map_or(0, |m| {
-        m.values().filter(|t| t.elapsed() < INFLIGHT_CAP).count()
+    shared.inflight.lock().map_or(0, |mut m| {
+        m.retain(|_, t| t.elapsed() < INFLIGHT_CAP);
+        m.len()
     })
 }
 
@@ -767,6 +839,39 @@ mod tests {
             .unwrap();
         shared.inflight.lock().unwrap().insert("poll".into(), old);
         assert_eq!(busy_count(&shared), 0, "an old long-poll is ignored");
+        assert!(
+            shared.inflight.lock().unwrap().is_empty(),
+            "expired in-flight request must be pruned from map"
+        );
+    }
+
+    #[tokio::test]
+    async fn expired_inflight_is_pruned_on_new_request() {
+        let (tx, rx) = broadcast::channel(64);
+        let shared = Arc::new(Shared::default());
+        let task = tokio::spawn(watch(rx, "S".into(), shared.clone(), None));
+        let old = Instant::now()
+            .checked_sub(INFLIGHT_CAP + Duration::from_secs(1))
+            .unwrap();
+        shared
+            .inflight
+            .lock()
+            .unwrap()
+            .insert("old_poll".into(), old);
+        assert_eq!(shared.inflight.lock().unwrap().len(), 1);
+        tx.send(ev(
+            "Network.requestWillBeSent",
+            json!({"requestId": "new_req"}),
+        ))
+        .unwrap();
+        drop(tx);
+        task.await.unwrap();
+        let map = shared.inflight.lock().unwrap();
+        assert!(
+            !map.contains_key("old_poll"),
+            "expired request was pruned from the map"
+        );
+        assert!(map.contains_key("new_req"));
     }
 
     #[tokio::test]
@@ -787,7 +892,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dialog_events_are_recorded_with_policy() {
+    async fn dialog_events_are_recorded_with_default_policy() {
         let (tx, rx) = broadcast::channel(64);
         let shared = Arc::new(Shared::default());
         let task = tokio::spawn(watch(rx, "S".into(), shared.clone(), None));
@@ -803,6 +908,12 @@ mod tests {
             ))
             .unwrap();
         }
+        // Missing type -> treated as unknown and dismissed
+        tx.send(ev(
+            "Page.javascriptDialogOpening",
+            json!({"message": "mystery"}),
+        ))
+        .unwrap();
         drop(tx);
         task.await.unwrap();
         let d = shared.dialogs.lock().unwrap().clone();
@@ -813,9 +924,34 @@ mod tests {
                 ("alert", true),
                 ("confirm", false),
                 ("prompt", false),
-                ("beforeunload", true)
+                ("beforeunload", false),
+                ("unknown", false),
             ]
         );
         assert_eq!(d[1].message, "c");
+        assert_eq!(d[4].kind, "unknown");
+    }
+
+    #[tokio::test]
+    async fn dialog_events_deliberate_accept() {
+        let (tx, rx) = broadcast::channel(64);
+        let shared = Arc::new(Shared::default());
+        *shared.dialog_policy.lock().unwrap() = DialogOptions::accept_prompt("hello");
+        let task = tokio::spawn(watch(rx, "S".into(), shared.clone(), None));
+        for (t, m) in [("confirm", "c"), ("prompt", "p"), ("beforeunload", "b")] {
+            tx.send(ev(
+                "Page.javascriptDialogOpening",
+                json!({"type": t, "message": m}),
+            ))
+            .unwrap();
+        }
+        drop(tx);
+        task.await.unwrap();
+        let d = shared.dialogs.lock().unwrap().clone();
+        let got: Vec<(&str, bool)> = d.iter().map(|x| (x.kind.as_str(), x.accepted)).collect();
+        assert_eq!(
+            got,
+            [("confirm", true), ("prompt", true), ("beforeunload", true),]
+        );
     }
 }
