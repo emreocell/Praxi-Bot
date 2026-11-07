@@ -81,8 +81,15 @@ const INTERACTIVE_ROLES: &[&str] = &[
 ];
 
 const STALE_HINT: &str = " (the index is stale; call desktop_get_state and use the new indexes)";
+const MISSING_GEN_MSG: &str = "missing required parameter 'gen'; call desktop_get_state first and pass gen from that observation";
 
 /// Desktop state of one run. Runs must never see each other's indexes.
+// NOTE(concurrency): While `State` (`window_id`, `generation`, `targets`, `marks`) is tracked per `run_id`
+// in `RunStates`, the underlying `DesktopBackend` (`desktop-windows` `uia.rs` and `desktop-linux` `atspi_tree.rs`)
+// currently maintains a single global generation and retained element tree. If another run takes
+// a snapshot, any subsequent action using this run's older generation fails closed (stale generation error).
+// See tasks/060-desktop-per-run-trees.md for the planned follow-up (per-run retained trees or
+// single-flight desktop actions).
 #[derive(Default)]
 struct State {
     window_id: Option<u64>,
@@ -93,7 +100,7 @@ struct State {
     targets: BTreeMap<u32, (String, Option<ControlRect>)>,
 }
 
-/// A small capped map of per-run states (oldest run evicted first).
+/// A small capped map of per-run states (LRU eviction: touch on every use).
 #[derive(Default)]
 struct RunStates {
     order: VecDeque<String>,
@@ -101,18 +108,29 @@ struct RunStates {
 }
 
 impl RunStates {
-    fn get(&self, run_id: &str) -> Option<&State> {
+    fn touch(&mut self, run_id: &str) {
+        if self.map.contains_key(run_id) {
+            if let Some(pos) = self.order.iter().position(|r| r == run_id) {
+                self.order.remove(pos);
+            }
+            self.order.push_back(run_id.to_owned());
+        }
+    }
+
+    fn get(&mut self, run_id: &str) -> Option<&State> {
+        self.touch(run_id);
         self.map.get(run_id)
     }
 
     fn entry(&mut self, run_id: &str) -> &mut State {
-        if !self.map.contains_key(run_id) {
+        if self.map.contains_key(run_id) {
+            self.touch(run_id);
+        } else {
             while self.order.len() >= MAX_RUNS {
-                match self.order.pop_front() {
-                    Some(old) => {
-                        self.map.remove(&old);
-                    }
-                    None => break,
+                if let Some(old) = self.order.pop_front() {
+                    self.map.remove(&old);
+                } else {
+                    break;
                 }
             }
             self.order.push_back(run_id.to_owned());
@@ -262,39 +280,52 @@ fn derr(e: &DesktopError) -> ToolError {
 }
 
 impl Shared {
-    /// Resolve a reference against the caller's run state. `expect_gen`, when given,
-    /// must match the run's current generation (otherwise: stale hint).
+    /// Resolve a reference against the caller's run state. `expect_gen` is required
+    /// and must match the run's current generation (otherwise: stale hint).
     fn target(
         &self,
         run_id: &str,
-        r: ElementRef,
+        elem_ref: ElementRef,
         expect_gen: Option<u64>,
     ) -> Result<Target, ToolError> {
-        let states = self.state.lock();
+        let Some(expected_gen) = expect_gen else {
+            return Err(ToolError::InvalidInput(MISSING_GEN_MSG.into()));
+        };
+        let mut states = self.state.lock();
         let st = states.get(run_id);
-        match r {
+        let generation = st
+            .and_then(|s| s.generation)
+            .ok_or_else(|| exec_err("no snapshot yet; call desktop_get_state first"))?;
+        match elem_ref {
             ElementRef::Index(index) => {
-                let generation = st
-                    .and_then(|s| s.generation)
-                    .ok_or_else(|| exec_err("no snapshot yet; call desktop_get_state first"))?;
-                if let Some(g) = expect_gen
-                    && g != generation
-                {
+                if expected_gen != generation {
                     return Err(exec_err(format!(
-                        "index {index} is from generation {g}, but the current generation is {generation}{STALE_HINT}"
+                        "index {index} is from generation {expected_gen}, but the current generation is {generation}{STALE_HINT}"
+                    )));
+                }
+                if !st.is_some_and(|s| s.targets.contains_key(&index)) {
+                    return Err(exec_err(format!(
+                        "index {index} was not shown in the observation (omitted by filter or does not exist); call desktop_get_state{STALE_HINT}"
                     )));
                 }
                 Ok(Target::ByIndex { index, generation })
             }
-            ElementRef::Mark(n) => {
-                let (x, y) = st.and_then(|s| s.marks.get(&n).copied()).ok_or_else(|| {
-                    exec_err(format!(
-                        "mark:{n} is unknown; marks exist only after desktop_get_state on a window with a weak tree"
-                    ))
-                })?;
+            ElementRef::Mark(mark_idx) => {
+                if expected_gen != generation {
+                    return Err(exec_err(format!(
+                        "mark:{mark_idx} is from generation {expected_gen}, but the current generation is {generation}{STALE_HINT}"
+                    )));
+                }
+                let (mark_x, mark_y) = st
+                    .and_then(|s| s.marks.get(&mark_idx).copied())
+                    .ok_or_else(|| {
+                        exec_err(format!(
+                            "mark:{mark_idx} is unknown; marks exist only after desktop_get_state on a window with a weak tree"
+                        ))
+                    })?;
                 Ok(Target::ByCoordinate {
-                    x,
-                    y,
+                    x: mark_x,
+                    y: mark_y,
                     space: CoordinateSpace::Absolute,
                 })
             }
@@ -302,17 +333,17 @@ impl Shared {
     }
 
     /// Label and on-screen bounds of the element a mutating action targets.
-    fn describe(&self, run_id: &str, r: ElementRef) -> (String, Option<ControlRect>) {
-        let states = self.state.lock();
+    fn describe(&self, run_id: &str, elem_ref: ElementRef) -> (String, Option<ControlRect>) {
+        let mut states = self.state.lock();
         let st = states.get(run_id);
-        match r {
-            ElementRef::Index(i) => st
-                .and_then(|s| s.targets.get(&i).cloned())
-                .unwrap_or_else(|| (format!("element {i}"), None)),
-            ElementRef::Mark(n) => (
-                format!("mark {n}"),
-                st.and_then(|s| s.marks.get(&n))
-                    .map(|(x, y)| point_rect(*x, *y)),
+        match elem_ref {
+            ElementRef::Index(idx) => st
+                .and_then(|s| s.targets.get(&idx).cloned())
+                .unwrap_or_else(|| (format!("element {idx}"), None)),
+            ElementRef::Mark(mark_idx) => (
+                format!("mark {mark_idx}"),
+                st.and_then(|s| s.marks.get(&mark_idx))
+                    .map(|(mx, my)| point_rect(*mx, *my)),
             ),
         }
     }
@@ -366,14 +397,23 @@ impl Shared {
         filter: &ObsFilter,
     ) -> Result<String, ToolError> {
         let snap = self.backend.snapshot(scope).await.map_err(|e| derr(&e))?;
+        let rendered_nodes: Vec<_> = if filter.is_active() {
+            snap.nodes
+                .iter()
+                .filter(|n| filter.keeps(n))
+                .cloned()
+                .collect()
+        } else {
+            snap.nodes.clone()
+        };
+        let omitted = snap.nodes.len() - rendered_nodes.len();
         {
             let mut states = self.state.lock();
             let st = states.entry(run_id);
             st.window_id = Some(snap.window.id);
             st.generation = Some(snap.generation);
             st.marks.clear();
-            st.targets = snap
-                .nodes
+            st.targets = rendered_nodes
                 .iter()
                 .map(|n| {
                     let label = if n.name.is_empty() {
@@ -395,16 +435,9 @@ impl Shared {
         }
         let mut text = format!("window_id: {}\n", snap.window.id);
         if filter.is_active() {
-            let nodes: Vec<_> = snap
-                .nodes
-                .iter()
-                .filter(|n| filter.keeps(n))
-                .cloned()
-                .collect();
-            let omitted = snap.nodes.len() - nodes.len();
             let view = Snapshot {
                 window: snap.window.clone(),
-                nodes,
+                nodes: rendered_nodes,
                 generation: snap.generation,
                 quality: snap.quality,
             };
@@ -583,7 +616,7 @@ pub fn tools(
             spec(
                 "desktop_click",
                 "Click a button, link or other element (mouse click). Returns the refreshed UI tree. Pass gen from the observation you read the index from. Example: {\"index\":12,\"gen\":3}",
-                json!({"type":"object","properties":{"index":index_prop,"gen":gen_prop,"method":method_prop},"required":["index"]}),
+                json!({"type":"object","properties":{"index":index_prop,"gen":gen_prop,"method":method_prop},"required":["index","gen"]}),
                 Effect::Write,
                 d,
             ),
@@ -592,12 +625,12 @@ pub fn tools(
             Op::Type,
             spec(
                 "desktop_type",
-                "Click an element to focus it, then type text with the keyboard (enter text). Not for starting apps (use desktop_launch). Returns the refreshed UI tree. Pass gen from the observation you read the index from. Example: {\"index\":5,\"text\":\"hello\"}",
+                "Click an element to focus it, then type text with the keyboard (enter text). Not for starting apps (use desktop_launch). Returns the refreshed UI tree. Pass gen from the observation you read the index from. Example: {\"index\":5,\"gen\":3,\"text\":\"hello\"}",
                 json!({"type":"object","properties":{
                     "index":index_prop,
                     "gen":gen_prop,
                     "text":{"type":"string","description":"Text to type."}
-                },"required":["index","text"]}),
+                },"required":["index","text","gen"]}),
                 Effect::Write,
                 d,
             ),
@@ -606,12 +639,12 @@ pub fn tools(
             Op::SetValue,
             spec(
                 "desktop_set_value",
-                "Replace the value of a text field or combo box. Pass gen from the observation you read the index from. Example: {\"index\":5,\"value\":\"hello\"}",
+                "Replace the value of a text field or combo box. Pass gen from the observation you read the index from. Example: {\"index\":5,\"gen\":3,\"value\":\"hello\"}",
                 json!({"type":"object","properties":{
                     "index":index_prop,
                     "gen":gen_prop,
                     "value":{"type":"string","description":"New value."}
-                },"required":["index","value"]}),
+                },"required":["index","value","gen"]}),
                 Effect::Write,
                 d,
             ),
@@ -652,13 +685,13 @@ pub fn tools(
             Op::Drag,
             spec(
                 "desktop_drag",
-                "Drag from one element to another (moves the real cursor). Pass gen from the observation you read the indexes from. Example: {\"from\":3,\"to\":9}",
+                "Drag from one element to another (moves the real cursor). Pass gen from the observation you read the indexes from. Example: {\"from\":3,\"to\":9,\"gen\":3}",
                 json!({"type":"object","properties":{
                     "from":index_prop,
                     "to":index_prop,
                     "gen":gen_prop,
                     "method":method_prop
-                },"required":["from","to"]}),
+                },"required":["from","to","gen"]}),
                 Effect::Write,
                 d,
             ),
@@ -881,6 +914,9 @@ impl DesktopTool {
             }
             Op::Click => {
                 let i: ClickIn = parse(input)?;
+                if i.expect_gen.is_none() {
+                    return Err(ToolError::InvalidInput(MISSING_GEN_MSG.into()));
+                }
                 let r = parse_ref(&i.index)?;
                 let method = parse_method(i.method.as_deref(), Shared::default_method(r))?;
                 let target = sh.target(run_id, r, i.expect_gen)?;
@@ -891,6 +927,9 @@ impl DesktopTool {
             }
             Op::Type => {
                 let i: TypeIn = parse(input)?;
+                if i.expect_gen.is_none() {
+                    return Err(ToolError::InvalidInput(MISSING_GEN_MSG.into()));
+                }
                 let r = parse_ref(&i.index)?;
                 let target = sh.target(run_id, r, i.expect_gen)?;
                 let (label, rect) = sh.describe(run_id, r);
@@ -906,6 +945,9 @@ impl DesktopTool {
             }
             Op::SetValue => {
                 let i: SetValueIn = parse(input)?;
+                if i.expect_gen.is_none() {
+                    return Err(ToolError::InvalidInput(MISSING_GEN_MSG.into()));
+                }
                 let r = parse_ref(&i.index)?;
                 let target = sh.target(run_id, r, i.expect_gen)?;
                 let (label, rect) = sh.describe(run_id, r);
@@ -922,6 +964,9 @@ impl DesktopTool {
                 let i: KeyIn = parse(input)?;
                 let keys = parse_keys(&i.keys)?;
                 let focus = i.index.as_ref().map(parse_ref).transpose()?;
+                if focus.is_some() && i.expect_gen.is_none() {
+                    return Err(ToolError::InvalidInput(MISSING_GEN_MSG.into()));
+                }
                 let focus_target = focus
                     .map(|r| sh.target(run_id, r, i.expect_gen))
                     .transpose()?;
@@ -945,6 +990,9 @@ impl DesktopTool {
             }
             Op::Scroll => {
                 let i: ScrollIn = parse(input)?;
+                if i.index.is_some() && i.expect_gen.is_none() {
+                    return Err(ToolError::InvalidInput(MISSING_GEN_MSG.into()));
+                }
                 let (label, rect) = match (&i.index, i.x, i.y) {
                     (Some(idx), _, _) => sh.describe(run_id, parse_ref(idx)?),
                     (None, Some(x), Some(y)) => ("point".to_owned(), Some(point_rect(x, y))),
@@ -975,6 +1023,9 @@ impl DesktopTool {
             }
             Op::Drag => {
                 let i: DragIn = parse(input)?;
+                if i.expect_gen.is_none() {
+                    return Err(ToolError::InvalidInput(MISSING_GEN_MSG.into()));
+                }
                 let (a, b) = (parse_ref(&i.from)?, parse_ref(&i.to)?);
                 let method = parse_method(i.method.as_deref(), ClickMethod::Global)?;
                 let (from, to) = (
@@ -1228,7 +1279,7 @@ mod tests {
         let (_d, t) = build(fake.clone(), None);
         let ctx = ToolContext::default();
         let err = get(&t, "desktop_click")
-            .call(&ctx, json!({"index": 1}))
+            .call(&ctx, json!({"index": 1, "gen": 1}))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("desktop_get_state"));
@@ -1238,7 +1289,7 @@ mod tests {
             .await
             .unwrap();
         let out = get(&t, "desktop_click")
-            .call(&ctx, json!({"index": 1}))
+            .call(&ctx, json!({"index": 1, "gen": 1}))
             .await
             .unwrap();
         let s = text(&out);
@@ -1267,7 +1318,7 @@ mod tests {
             .await
             .unwrap();
         let out = get(&t, "desktop_type")
-            .call(&ctx, json!({"index": 3, "text": "hello"}))
+            .call(&ctx, json!({"index": 3, "gen": 1, "text": "hello"}))
             .await
             .unwrap();
         assert!(text(&out).contains("value=\"hello\""), "{}", text(&out));
@@ -1323,7 +1374,7 @@ mod tests {
         assert!(s.contains("(130,230)"), "{s}");
 
         get(&t, "desktop_click")
-            .call(&ctx, json!({"index": "mark:2"}))
+            .call(&ctx, json!({"index": "mark:2", "gen": 1}))
             .await
             .unwrap();
         let actions = fake.actions.lock();
@@ -1350,7 +1401,7 @@ mod tests {
             .await
             .unwrap();
         let err = get(&t, "desktop_click")
-            .call(&ctx, json!({"index": "mark:9"}))
+            .call(&ctx, json!({"index": "mark:9", "gen": 1}))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("mark:9"));
@@ -1436,7 +1487,7 @@ mod tests {
             .unwrap();
         assert!(gate.seen.lock().is_empty(), "reads are not gated");
         get(&t, "desktop_click")
-            .call(&ctx, json!({"index": 2}))
+            .call(&ctx, json!({"index": 2, "gen": 1}))
             .await
             .unwrap();
         get(&t, "desktop_key")
@@ -1475,12 +1526,12 @@ mod tests {
             .await
             .unwrap();
         let err = get(&t, "desktop_click")
-            .call(&ctx, json!({"index": 2}))
+            .call(&ctx, json!({"index": 2, "gen": 1}))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("taken control"), "{err}");
         let err = get(&t, "desktop_type")
-            .call(&ctx, json!({"index": 3, "text": "x"}))
+            .call(&ctx, json!({"index": 3, "gen": 1, "text": "x"}))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("taken control"), "{err}");
@@ -1493,52 +1544,53 @@ mod tests {
 
     #[tokio::test]
     async fn runs_do_not_see_each_others_windows_or_indexes() {
-        let mut f = FakeDesktop::new(false);
-        f.lenient_gen = true;
-        let fake = Arc::new(f);
-        let (_d, t, gate) = gated(fake.clone(), false);
-        let a = ToolContext {
+        let mut fake_desktop = FakeDesktop::new(false);
+        fake_desktop.lenient_gen = true;
+        let fake = Arc::new(fake_desktop);
+        let (_d, tools, gate) = gated(fake.clone(), false);
+        let ctx_a = ToolContext {
             run_id: "run-a".into(),
             ..ToolContext::default()
         };
-        let b = ToolContext {
+        let ctx_b = ToolContext {
             run_id: "run-b".into(),
             ..ToolContext::default()
         };
-        let st = get(&t, "desktop_get_state");
-        st.call(&a, json!({"window_id": 1})).await.unwrap();
-        st.call(&b, json!({"window_id": 2})).await.unwrap();
-        let out = get(&t, "desktop_click")
-            .call(&a, json!({"index": 1}))
+        let st = get(&tools, "desktop_get_state");
+        st.call(&ctx_a, json!({"window_id": 1})).await.unwrap();
+        st.call(&ctx_b, json!({"window_id": 2})).await.unwrap();
+        let out = get(&tools, "desktop_click")
+            .call(&ctx_a, json!({"index": 1, "gen": 1}))
             .await
             .unwrap();
-        let s = text(&out);
+        let out_str = text(&out);
         assert!(
-            s.contains("window_id: 1"),
-            "refresh must stay on A's window: {s}"
+            out_str.contains("window_id: 1"),
+            "refresh must stay on A's window: {out_str}"
         );
         assert_eq!(fake.scopes.lock().last().copied(), Some(Some(1)));
         // A used its own generation (1), not B's (2).
-        let actions = fake.actions.lock();
-        assert!(matches!(
-            &actions[0],
-            Action::Click {
-                target: Target::ByIndex {
-                    index: 1,
-                    generation: 1
-                },
-                ..
-            }
-        ));
-        drop(actions);
+        {
+            let actions = fake.actions.lock();
+            assert!(matches!(
+                &actions[0],
+                Action::Click {
+                    target: Target::ByIndex {
+                        index: 1,
+                        generation: 1
+                    },
+                    ..
+                }
+            ));
+        }
         assert_eq!(gate.seen.lock()[0].label, "button \"w1_el1\"");
         // A run that never observed anything has no state.
-        let c = ToolContext {
+        let ctx_c = ToolContext {
             run_id: "run-c".into(),
             ..ToolContext::default()
         };
-        let err = get(&t, "desktop_click")
-            .call(&c, json!({"index": 1}))
+        let err = get(&tools, "desktop_click")
+            .call(&ctx_c, json!({"index": 1, "gen": 1}))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("desktop_get_state"), "{err}");
@@ -1562,7 +1614,7 @@ mod tests {
         st.call(&a, json!({"window_id": 1})).await.unwrap();
         st.call(&b, json!({"window_id": 2})).await.unwrap();
         let err = get(&t, "desktop_click")
-            .call(&a, json!({"index": 1}))
+            .call(&a, json!({"index": 1, "gen": 1}))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("stale"), "{err}");
@@ -1570,7 +1622,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn old_gen_is_refused_without_dispatch_and_no_gen_is_unchanged() {
+    async fn old_gen_is_refused_without_dispatch_and_missing_gen_errors() {
         let fake = Arc::new(FakeDesktop::new(false));
         let (_d, t) = build(fake.clone(), None);
         let ctx = ToolContext::default();
@@ -1589,16 +1641,29 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("stale"), "{err}");
-        // Current gen and no gen both work.
+        // Missing gen returns error telling the model to call desktop_get_state and pass gen.
+        let err = get(&t, "desktop_click")
+            .call(&ctx, json!({"index": 1}))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("desktop_get_state") && err.to_string().contains("gen"),
+            "{err}"
+        );
+        let err = get(&t, "desktop_key")
+            .call(&ctx, json!({"keys": "enter", "index": 1}))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("desktop_get_state") && err.to_string().contains("gen"),
+            "{err}"
+        );
+        // Current gen works.
         get(&t, "desktop_click")
             .call(&ctx, json!({"index": 1, "gen": 2}))
             .await
             .unwrap();
-        get(&t, "desktop_click")
-            .call(&ctx, json!({"index": 1}))
-            .await
-            .unwrap();
-        assert_eq!(fake.actions.lock().len(), 2);
+        assert_eq!(fake.actions.lock().len(), 1);
     }
 
     #[test]
@@ -1628,7 +1693,7 @@ mod tests {
             ..ToolContext::default()
         };
         let err = get(&t, "desktop_click")
-            .call(&oldest, json!({"index": 1}))
+            .call(&oldest, json!({"index": 1, "gen": 1}))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("desktop_get_state"), "{err}");
@@ -1637,9 +1702,103 @@ mod tests {
             ..ToolContext::default()
         };
         get(&t, "desktop_click")
-            .call(&newest, json!({"index": 1}))
+            .call(
+                &newest,
+                json!({"index": 1, "gen": u64::try_from(MAX_RUNS + 4).unwrap()}),
+            )
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn active_run_is_not_evicted_from_state_map() {
+        let mut f = FakeDesktop::new(false);
+        f.lenient_gen = true;
+        let fake = Arc::new(f);
+        let (_d, t) = build(fake, None);
+        let st = get(&t, "desktop_get_state");
+
+        // Fill up to MAX_RUNS (r0..r15)
+        for n in 0..MAX_RUNS {
+            let ctx = ToolContext {
+                run_id: format!("r{n}"),
+                ..ToolContext::default()
+            };
+            st.call(&ctx, json!({})).await.unwrap();
+        }
+
+        // r0 is active: access it so it becomes MRU
+        let r0 = ToolContext {
+            run_id: "r0".into(),
+            ..ToolContext::default()
+        };
+        get(&t, "desktop_click")
+            .call(&r0, json!({"index": 1, "gen": 1}))
+            .await
+            .unwrap();
+
+        // Add a new run r16: exceeds MAX_RUNS, so the LRU entry (r1) should be evicted, not r0.
+        let r_new = ToolContext {
+            run_id: format!("r{MAX_RUNS}"),
+            ..ToolContext::default()
+        };
+        st.call(&r_new, json!({})).await.unwrap();
+
+        // r1 was inactive and should be evicted
+        let r1 = ToolContext {
+            run_id: "r1".into(),
+            ..ToolContext::default()
+        };
+        let err = get(&t, "desktop_click")
+            .call(&r1, json!({"index": 1, "gen": 2}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("desktop_get_state"), "{err}");
+
+        // r0 was active and must NOT have been evicted (refreshed at gen 17)
+        let out = get(&t, "desktop_click")
+            .call(
+                &r0,
+                json!({"index": 1, "gen": u64::try_from(MAX_RUNS + 1).unwrap()}),
+            )
+            .await
+            .unwrap();
+        assert!(text(&out).contains("dispatched: true"));
+    }
+
+    #[tokio::test]
+    async fn filtered_snapshot_rejects_hidden_indexes_and_allows_shown_indexes() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (_d, t) = build(fake.clone(), None);
+        let ctx = ToolContext::default();
+        let st = get(&t, "desktop_get_state");
+
+        // Query for "edit": only node 3 matches, node 1 and 2 are omitted
+        let out = text(&st.call(&ctx, json!({"query": "edit"})).await.unwrap());
+        assert!(out.contains("[3] edit"));
+        assert!(!out.contains("[1] button"));
+
+        // Trying to click hidden index 1 is rejected before dispatch
+        let err = get(&t, "desktop_click")
+            .call(&ctx, json!({"index": 1, "gen": 1}))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("was not shown in the observation"),
+            "{err}"
+        );
+        assert!(
+            fake.actions.lock().is_empty(),
+            "hidden target must not be dispatched"
+        );
+
+        // Clicking shown index 3 succeeds
+        let out = get(&t, "desktop_click")
+            .call(&ctx, json!({"index": 3, "gen": 1}))
+            .await
+            .unwrap();
+        assert!(text(&out).contains("dispatched: true"));
+        assert_eq!(fake.actions.lock().len(), 1);
     }
 
     #[tokio::test]
