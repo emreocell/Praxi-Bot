@@ -22,6 +22,8 @@ members = [
     "crates/peer-network",
     "crates/script-runtime",
     "crates/builtin-tools",
+    "crates/doc-tools",
+    "crates/dev-tools",
     "crates/plugin-host",
     "crates/storage",
     "crates/skills",
@@ -29,6 +31,8 @@ members = [
     "crates/secret-store",
     "crates/scheduler",
     "crates/daemon-api",
+    "crates/web-tools",
+    "crates/openapi-tools",
     "apps/cli",
     "apps/desktop",
     "apps/node-agent",
@@ -71,6 +75,9 @@ directories = "5"
 rusqlite = { version = "0.32", features = ["bundled"] }
 tempfile = "3"
 tokio-util = "0.7"
+percent-encoding = "2"
+url = "2"
+serde_yaml_ng = "0.10"
 protocol = { path = "crates/protocol", version = "0.1.0" }
 storage = { path = "crates/storage", version = "0.1.0" }
 secret-store = { path = "crates/secret-store", version = "0.1.0" }
