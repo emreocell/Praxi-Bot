@@ -93,11 +93,19 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+
+      # The installer asset must be the script from this tag, so
+      # curl .../releases/download/<tag>/install-linux.sh matches the binaries.
+      - name: Stage installer
+        run: install -m 0755 scripts/install-linux.sh dist/install-linux.sh
 
       - name: Publish
         uses: softprops/action-gh-release@v2
@@ -105,3 +113,4 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256
+            dist/install-linux.sh

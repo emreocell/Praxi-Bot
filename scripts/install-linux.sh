@@ -4,14 +4,18 @@
 #
 # Usage (as root):
 #   sudo ./install-linux.sh [options]
-#   curl -fsSL https://raw.githubusercontent.com/emreocell/Praxi-Bot/main/scripts/install-linux.sh | sudo bash -s -- [options]
+#   # Script and binaries must come from the same release tag:
+#   curl -fsSL https://github.com/emreocell/Praxi-Bot/releases/download/v0.1.0/install-linux.sh | sudo bash -s -- --version v0.1.0
 #
 # Options:
 #   --version <tag>      Release tag to install, e.g. v0.1.0 (default: latest)
 #   --file <tarball>     Install from a local praxi-linux-<arch>.tar.gz instead of downloading
-#   --sha256 <hex>       Expected SHA-256 of the tarball (default: use the .sha256 file next to it / in the release)
+#   --sha256 <hex>       Expected SHA-256 of the tarball (default: sibling .sha256, or the release checksum)
+#   --insecure-skip-verify
+#                        Allow a local --file that has no --sha256 and no sibling .sha256
 #   --port <port>        Daemon port on 127.0.0.1 (default: 47821)
 #   --with-desktop       Also install Xvfb + Chromium and a praxi-xvfb.service virtual display
+#   --without-desktop    Remove an existing praxi-xvfb unit and DISPLAY (updates keep both otherwise)
 #   --display <:N>       X display for --with-desktop (default: :99)
 #   --screen <WxHxD>     Xvfb screen for --with-desktop (default: 1920x1080x24)
 #   --skip-packages      Do not install OS packages (you provide curl, tar, libdbus, libssl, ...)
@@ -27,16 +31,21 @@ PREFIX="/opt/praxi"
 DATA_DIR="/var/lib/praxi"
 CONF_DIR="/etc/praxi"
 ENV_FILE="${CONF_DIR}/praxi.env"
+NODE_ENV_FILE="${CONF_DIR}/praxi-node.env"
 UNIT_DIR="/etc/systemd/system"
 SVC_USER="praxi"
 
 VERSION="latest"
 LOCAL_FILE=""
 EXPECTED_SHA=""
+INSECURE_SKIP_VERIFY=0
 PORT="47821"
 PORT_SET=0
 DISPLAY_SET=0
+SCREEN_SET=0
 WITH_DESKTOP=0
+WITHOUT_DESKTOP=0
+KEEP_DESKTOP=0
 DISPLAY_NUM=":99"
 SCREEN_SPEC="1920x1080x24"
 SKIP_PACKAGES=0
@@ -52,14 +61,20 @@ usage() {
   cat <<'USAGE'
 Usage (as root):
   sudo ./install-linux.sh [options]
-  curl -fsSL https://raw.githubusercontent.com/emreocell/Praxi-Bot/main/scripts/install-linux.sh | sudo bash -s -- [options]
+  curl -fsSL https://github.com/emreocell/Praxi-Bot/releases/download/v0.1.0/install-linux.sh | sudo bash -s -- --version v0.1.0
+
+The curl URL tag and --version must be the same release. The release asset is
+install-linux.sh (not the copy on the main branch).
 
 Options:
   --version <tag>      Release tag to install, e.g. v0.1.0 (default: latest)
   --file <tarball>     Install from a local praxi-linux-<arch>.tar.gz instead of downloading
   --sha256 <hex>       Expected SHA-256 of the tarball
+  --insecure-skip-verify
+                       Allow a local --file with no --sha256 and no sibling .sha256
   --port <port>        Daemon port on 127.0.0.1 (default: 47821; kept on re-install unless given)
   --with-desktop       Also install Xvfb + Chromium and a praxi-xvfb.service virtual display
+  --without-desktop    Remove praxi-xvfb.service and DISPLAY (an update keeps both unless this is set)
   --display <:N>       X display for --with-desktop (default: :99; kept on re-install unless given)
   --screen <WxHxD>     Xvfb screen for --with-desktop (default: 1920x1080x24)
   --skip-packages      Do not install OS packages (you provide curl, tar, libdbus, libssl, ...)
@@ -88,15 +103,40 @@ sha256_hex() {
   printf '%s' "${raw}"
 }
 
+# List archive members with tar -tzf and refuse names that could escape the
+# temp dir: an absolute path, or any path component that is exactly '..'.
+reject_unsafe_tar_members() {
+  local archive="$1" member rel part
+  local -a parts=()
+  tar -tzf "${archive}" > "${WORK}/members.txt" || die "could not list tarball members"
+  while IFS= read -r member || [[ -n "${member}" ]]; do
+    [[ -n "${member}" ]] || continue
+    rel="${member#./}"
+    case "${rel}" in
+      /*)
+        die "tarball member is an absolute path: ${member}"
+        ;;
+    esac
+    IFS='/' read -r -a parts <<< "${rel}"
+    for part in "${parts[@]}"; do
+      if [[ "${part}" == ".." ]]; then
+        die "tarball member contains a '..' component: ${member}"
+      fi
+    done
+  done < "${WORK}/members.txt"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --version) need_arg "$@"; VERSION="$2"; shift 2 ;;
     --file) need_arg "$@"; LOCAL_FILE="$2"; shift 2 ;;
     --sha256) need_arg "$@"; EXPECTED_SHA="$(sha256_hex "$2")"; shift 2 ;;
+    --insecure-skip-verify) INSECURE_SKIP_VERIFY=1; shift ;;
     --port) need_arg "$@"; PORT="$2"; PORT_SET=1; shift 2 ;;
     --with-desktop) WITH_DESKTOP=1; shift ;;
+    --without-desktop) WITHOUT_DESKTOP=1; shift ;;
     --display) need_arg "$@"; DISPLAY_NUM="$2"; DISPLAY_SET=1; shift 2 ;;
-    --screen) need_arg "$@"; SCREEN_SPEC="$2"; shift 2 ;;
+    --screen) need_arg "$@"; SCREEN_SPEC="$2"; SCREEN_SET=1; shift 2 ;;
     --skip-packages) SKIP_PACKAGES=1; shift ;;
     --no-start) NO_START=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
@@ -113,6 +153,9 @@ command -v systemctl >/dev/null 2>&1 || die "systemd is required"
 [[ "${DISPLAY_NUM}" =~ ^:[0-9]+$ ]] || die "invalid --display (expected :N)"
 [[ "${SCREEN_SPEC}" =~ ^[0-9]+x[0-9]+x[0-9]+$ ]] || die "invalid --screen (expected WxHxD)"
 [[ "${PURGE}" -eq 0 || "${UNINSTALL}" -eq 1 ]] || die "--purge only makes sense with --uninstall"
+[[ "${WITH_DESKTOP}" -eq 0 || "${WITHOUT_DESKTOP}" -eq 0 ]] || die "--with-desktop and --without-desktop cannot be used together"
+[[ "${WITHOUT_DESKTOP}" -eq 0 || "${DISPLAY_SET}" -eq 0 ]] || die "--display cannot be combined with --without-desktop"
+[[ "${WITHOUT_DESKTOP}" -eq 0 || "${SCREEN_SET}" -eq 0 ]] || die "--screen cannot be combined with --without-desktop"
 
 # ---------------------------------------------------------------- uninstall
 if [[ "${UNINSTALL}" -eq 1 ]]; then
@@ -135,6 +178,13 @@ if [[ "${UNINSTALL}" -eq 1 ]]; then
   fi
   log "uninstalled"
   exit 0
+fi
+
+# Updates keep an existing virtual display. --without-desktop is the only
+# switch that removes praxi-xvfb.service and DISPLAY.
+if [[ "${WITH_DESKTOP}" -eq 0 && "${WITHOUT_DESKTOP}" -eq 0 && -f "${UNIT_DIR}/praxi-xvfb.service" ]]; then
+  KEEP_DESKTOP=1
+  log "keeping existing praxi-xvfb.service and DISPLAY (pass --without-desktop to remove desktop mode)"
 fi
 
 # ------------------------------------------------------------------- arch
@@ -205,6 +255,9 @@ if [[ -n "${LOCAL_FILE}" ]]; then
   if [[ -z "${EXPECTED_SHA}" && -f "${LOCAL_FILE}.sha256" ]]; then
     EXPECTED_SHA="$(sha256_hex "$(awk 'NR==1 { print; exit }' "${LOCAL_FILE}.sha256")")"
   fi
+  if [[ -z "${EXPECTED_SHA}" && "${INSECURE_SKIP_VERIFY}" -eq 0 ]]; then
+    die "no SHA-256 for local file ${LOCAL_FILE} (pass --sha256, provide ${LOCAL_FILE}.sha256, or pass --insecure-skip-verify)"
+  fi
 else
   if [[ "${VERSION}" == "latest" ]]; then
     BASE="https://github.com/${REPO}/releases/latest/download"
@@ -225,10 +278,15 @@ if [[ -n "${EXPECTED_SHA}" ]]; then
   ACTUAL_SHA="$(sha256_hex "$(sha256sum "${WORK}/${ASSET}")")"
   [[ "${ACTUAL_SHA}" == "${EXPECTED_SHA}" ]] || die "SHA-256 mismatch (expected ${EXPECTED_SHA}, got ${ACTUAL_SHA})"
   log "checksum OK"
+elif [[ "${INSECURE_SKIP_VERIFY}" -eq 1 ]]; then
+  warn "checksum verification skipped (--insecure-skip-verify)"
 else
-  warn "no checksum available for the local file; skipping verification"
+  die "no SHA-256 available to verify the tarball"
 fi
 
+# List members before extracting as root. Absolute paths and '..' components
+# are rejected; the archive is extracted only into the temp dir.
+reject_unsafe_tar_members "${WORK}/${ASSET}"
 mkdir "${WORK}/x"
 tar -xzf "${WORK}/${ASSET}" -C "${WORK}/x"
 SRC="${WORK}/x/praxi-linux-${ARCH}"
@@ -260,21 +318,23 @@ for f in VERSION LICENSE NOTICE THIRD_PARTY_NOTICES.md; do
 done
 log "installed to ${PREFIX} ($(cat "${PREFIX}/VERSION" 2>/dev/null || echo unknown version))"
 
-# Wrapper commands: run a binary as the service user with the service environment.
-write_wrapper() { # <command name> <binary name>
-  cat > "/usr/local/bin/$1" <<WRAP
+# Wrapper commands: run a binary as the service user with that service's env file.
+# praxi-node must source praxi-node.env so it does not receive the daemon passphrase.
+write_wrapper() { # <command name> <binary name> <env file>
+  local cmd="$1" bin="$2" envf="$3"
+  cat > "/usr/local/bin/${cmd}" <<WRAP
 #!/bin/sh
-# Runs ${PREFIX}/bin/$2 as the ${SVC_USER} user with the service environment.
-inner='set -a; . ${ENV_FILE}; set +a; exec "\$@"'
+# Runs ${PREFIX}/bin/${bin} as the ${SVC_USER} user with ${envf}.
+inner='set -a; . ${envf}; set +a; exec "\$@"'
 if [ "\$(id -u)" -eq 0 ]; then
-  exec runuser -u ${SVC_USER} -- sh -c "\$inner" sh ${PREFIX}/bin/$2 "\$@"
+  exec runuser -u ${SVC_USER} -- sh -c "\$inner" sh ${PREFIX}/bin/${bin} "\$@"
 fi
-exec sudo -u ${SVC_USER} sh -c "\$inner" sh ${PREFIX}/bin/$2 "\$@"
+exec sudo -u ${SVC_USER} sh -c "\$inner" sh ${PREFIX}/bin/${bin} "\$@"
 WRAP
-  chmod 0755 "/usr/local/bin/$1"
+  chmod 0755 "/usr/local/bin/${cmd}"
 }
-write_wrapper praxi bot
-write_wrapper praxi-node bot-node
+write_wrapper praxi bot "${ENV_FILE}"
+write_wrapper praxi-node bot-node "${NODE_ENV_FILE}"
 
 # ------------------------------------------------------------ environment
 if [[ ! -f "${ENV_FILE}" ]]; then
@@ -310,11 +370,36 @@ if [[ "${WITH_DESKTOP}" -eq 1 ]]; then
     sed -i '/^DISPLAY=/d' "${ENV_FILE}"
     echo "DISPLAY=${DISPLAY_NUM}" >> "${ENV_FILE}"
   fi
-else
+elif [[ "${KEEP_DESKTOP}" -eq 1 ]]; then
+  # Leave an existing DISPLAY in place unless --display was passed.
+  if [[ "${DISPLAY_SET}" -eq 1 ]]; then
+    sed -i '/^DISPLAY=/d' "${ENV_FILE}"
+    echo "DISPLAY=${DISPLAY_NUM}" >> "${ENV_FILE}"
+  elif grep -q '^DISPLAY=:[0-9][0-9]*$' "${ENV_FILE}"; then
+    DISPLAY_NUM="$(grep '^DISPLAY=' "${ENV_FILE}" | tail -n1 | cut -d= -f2-)"
+  fi
+elif [[ "${WITHOUT_DESKTOP}" -eq 1 ]]; then
   sed -i '/^DISPLAY=/d' "${ENV_FILE}"
 fi
-chown root:"${SVC_USER}" "${ENV_FILE}"
-chmod 0640 "${ENV_FILE}"
+
+# Node-agent environment. Rewritten every run so it cannot carry
+# BOT_SECRETS_PASSPHRASE (that stays in praxi.env for the daemon only).
+log "writing ${NODE_ENV_FILE}"
+(
+  umask 077
+  {
+    echo "BOT_DATA_DIR=${DATA_DIR}"
+    echo "HOME=${DATA_DIR}"
+    if [[ "${WITHOUT_DESKTOP}" -eq 0 ]] && grep -q '^DISPLAY=:[0-9][0-9]*$' "${ENV_FILE}"; then
+      grep '^DISPLAY=' "${ENV_FILE}" | tail -n1
+    fi
+  } > "${NODE_ENV_FILE}"
+)
+if grep -q '^BOT_SECRETS_PASSPHRASE=' "${NODE_ENV_FILE}"; then
+  die "refusing to leave BOT_SECRETS_PASSPHRASE in ${NODE_ENV_FILE}"
+fi
+chown root:"${SVC_USER}" "${ENV_FILE}" "${NODE_ENV_FILE}"
+chmod 0640 "${ENV_FILE}" "${NODE_ENV_FILE}"
 
 # ------------------------------------------------------------------ units
 HARDENING="NoNewPrivileges=true
@@ -369,7 +454,7 @@ Type=simple
 User=${SVC_USER}
 Group=${SVC_USER}
 WorkingDirectory=${DATA_DIR}
-EnvironmentFile=${ENV_FILE}
+EnvironmentFile=${NODE_ENV_FILE}
 ExecStart=${PREFIX}/bin/bot-node run
 Restart=on-failure
 RestartSec=10
@@ -379,14 +464,28 @@ ${HARDENING}
 WantedBy=multi-user.target
 UNIT
 
-rm -rf "${UNIT_DIR:?}/praxi.service.d" "${UNIT_DIR:?}/praxi-node.service.d"
-if [[ "${WITH_DESKTOP}" -eq 0 && -f "${UNIT_DIR}/praxi-xvfb.service" ]]; then
-  systemctl disable --now praxi-xvfb.service >/dev/null 2>&1 || true
-  rm -f "${UNIT_DIR:?}/praxi-xvfb.service"
-fi
-if [[ "${WITH_DESKTOP}" -eq 1 ]]; then
-  XVFB_BIN="$(command -v Xvfb || true)"
-  [[ -n "${XVFB_BIN}" ]] || die "Xvfb not found (install it or drop --skip-packages)"
+# Only desktop.conf belongs to the installer. Other drop-ins (for example a
+# Chromium relaxation; see docs/guide/remote-host.md) are left in place.
+rm -f "${UNIT_DIR}/praxi.service.d/desktop.conf" "${UNIT_DIR}/praxi-node.service.d/desktop.conf"
+
+write_desktop_dropins() {
+  local svc
+  for svc in praxi praxi-node; do
+    install -d "${UNIT_DIR}/${svc}.service.d"
+    # Share the private /tmp (X11 socket) with the display service.
+    cat > "${UNIT_DIR}/${svc}.service.d/desktop.conf" <<UNIT
+[Unit]
+Requires=praxi-xvfb.service
+After=praxi-xvfb.service
+JoinsNamespaceOf=praxi-xvfb.service
+UNIT
+  done
+}
+
+write_xvfb_unit() {
+  local xvfb_bin
+  xvfb_bin="$(command -v Xvfb || true)"
+  [[ -n "${xvfb_bin}" ]] || die "Xvfb not found (install it or drop --skip-packages)"
   cat > "${UNIT_DIR}/praxi-xvfb.service" <<UNIT
 [Unit]
 Description=Praxi virtual display (Xvfb ${DISPLAY_NUM})
@@ -395,7 +494,7 @@ Description=Praxi virtual display (Xvfb ${DISPLAY_NUM})
 Type=simple
 User=${SVC_USER}
 Group=${SVC_USER}
-ExecStart=${XVFB_BIN} ${DISPLAY_NUM} -screen 0 ${SCREEN_SPEC} -nolisten tcp +extension RANDR +extension XTEST
+ExecStart=${xvfb_bin} ${DISPLAY_NUM} -screen 0 ${SCREEN_SPEC} -nolisten tcp +extension RANDR +extension XTEST
 Restart=on-failure
 RestartSec=3
 ${HARDENING}
@@ -403,21 +502,43 @@ ${HARDENING}
 [Install]
 WantedBy=multi-user.target
 UNIT
-  # Share the private /tmp (X11 socket) with the display service.
-  for svc in praxi praxi-node; do
-    install -d "${UNIT_DIR}/${svc}.service.d"
-    cat > "${UNIT_DIR}/${svc}.service.d/desktop.conf" <<UNIT
-[Unit]
-Requires=praxi-xvfb.service
-After=praxi-xvfb.service
-JoinsNamespaceOf=praxi-xvfb.service
-UNIT
-  done
+}
+
+if [[ "${WITHOUT_DESKTOP}" -eq 1 && -f "${UNIT_DIR}/praxi-xvfb.service" ]]; then
+  log "removing praxi-xvfb.service and DISPLAY (--without-desktop)"
+  systemctl disable --now praxi-xvfb.service >/dev/null 2>&1 || true
+  rm -f "${UNIT_DIR}/praxi-xvfb.service"
+fi
+if [[ "${WITH_DESKTOP}" -eq 1 ]]; then
+  write_xvfb_unit
+  write_desktop_dropins
+elif [[ "${KEEP_DESKTOP}" -eq 1 ]]; then
+  if [[ "${DISPLAY_SET}" -eq 1 || "${SCREEN_SET}" -eq 1 ]]; then
+    if [[ -f "${UNIT_DIR}/praxi-xvfb.service" ]]; then
+      xvfb_line="$(grep '^ExecStart=' "${UNIT_DIR}/praxi-xvfb.service" | tail -n1 || true)"
+      if [[ "${SCREEN_SET}" -eq 0 && "${xvfb_line}" =~ -screen[[:space:]]+0[[:space:]]+([0-9]+x[0-9]+x[0-9]+) ]]; then
+        SCREEN_SPEC="${BASH_REMATCH[1]}"
+      fi
+      # DISPLAY in the env file wins. If it was never recorded, keep the
+      # display number already on the unit and copy it into both env files.
+      if [[ "${DISPLAY_SET}" -eq 0 ]] && ! grep -q '^DISPLAY=:[0-9][0-9]*$' "${ENV_FILE}"; then
+        if [[ "${xvfb_line}" =~ (^|[[:space:]])(:[0-9]+)([[:space:]]|$) ]]; then
+          DISPLAY_NUM="${BASH_REMATCH[2]}"
+          echo "DISPLAY=${DISPLAY_NUM}" >> "${ENV_FILE}"
+          echo "DISPLAY=${DISPLAY_NUM}" >> "${NODE_ENV_FILE}"
+        fi
+      fi
+    fi
+    write_xvfb_unit
+  fi
+  write_desktop_dropins
 fi
 
 systemctl daemon-reload
 systemctl enable praxi.service >/dev/null
-if [[ "${WITH_DESKTOP}" -eq 1 ]]; then systemctl enable praxi-xvfb.service >/dev/null; fi
+if [[ "${WITH_DESKTOP}" -eq 1 || "${KEEP_DESKTOP}" -eq 1 ]]; then
+  systemctl enable praxi-xvfb.service >/dev/null
+fi
 
 if [[ "${NO_START}" -eq 0 ]]; then
   # restart returns non-zero when the start job fails. Under `set -e` that
@@ -444,7 +565,8 @@ Praxi-Bot is installed.
 
   Daemon:   praxi.service, listening on 127.0.0.1:${PORT} only (never expose this port)
   Data:     ${DATA_DIR}
-  Config:   ${ENV_FILE} (contains the secret-store passphrase; keep it private)
+  Env:      ${ENV_FILE} (mode 0640; daemon, contains the secret-store passphrase)
+            ${NODE_ENV_FILE} (mode 0640; node-agent, no BOT_SECRETS_PASSPHRASE)
   Logs:     journalctl -u praxi -f
   CLI:      praxi <command>        (wrapper for 'bot' running as the ${SVC_USER} user)
 
@@ -459,7 +581,9 @@ Next steps:
      praxi-node.service would restart every 10s. Leave that unit disabled.
      Pairing, once the backend ships:
        sudo praxi-node join '<bot-pair:...ticket>'
-  5. Update later by re-running this script. Remove with: install-linux.sh --uninstall
+  5. Update later by re-running this script. An existing praxi-xvfb unit and
+     DISPLAY stay in place; pass --without-desktop to remove them.
+     Remove the install with: install-linux.sh --uninstall
 
 See docs/guide/remote-host.md for firewall notes (Oracle Cloud) and security guidance.
 EOF
