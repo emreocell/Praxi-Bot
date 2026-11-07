@@ -14,7 +14,7 @@
 #   --with-desktop       Also install Xvfb + Chromium and a praxi-xvfb.service virtual display
 #   --display <:N>       X display for --with-desktop (default: :99)
 #   --screen <WxHxD>     Xvfb screen for --with-desktop (default: 1920x1080x24)
-#   --skip-packages      Do not install OS packages (you provide curl, tar, libdbus, ...)
+#   --skip-packages      Do not install OS packages (you provide curl, tar, libdbus, libssl, ...)
 #   --no-start           Install and enable, but do not start the services
 #   --uninstall          Remove the services and /opt/praxi (keeps data and the praxi user)
 #   --purge              With --uninstall: also delete /var/lib/praxi, /etc/praxi and the praxi user
@@ -62,7 +62,7 @@ Options:
   --with-desktop       Also install Xvfb + Chromium and a praxi-xvfb.service virtual display
   --display <:N>       X display for --with-desktop (default: :99; kept on re-install unless given)
   --screen <WxHxD>     Xvfb screen for --with-desktop (default: 1920x1080x24)
-  --skip-packages      Do not install OS packages
+  --skip-packages      Do not install OS packages (you provide curl, tar, libdbus, libssl, ...)
   --no-start           Install and enable, but do not start the services
   --uninstall          Remove the services and /opt/praxi (keeps data and the praxi user)
   --purge              With --uninstall: also delete /var/lib/praxi, /etc/praxi and the praxi user
@@ -72,11 +72,27 @@ USAGE
 
 need_arg() { [[ $# -ge 2 && -n "$2" ]] || die "$1 requires a value"; }
 
+# First 64 hex digits, lowercased. Accepts a bare hex string, GNU
+# "hex  filename", BSD "SHA256 (file) = hex", and a trailing CR.
+sha256_hex() {
+  local raw="${1//$'\r'/}"
+  raw="${raw,,}"
+  if [[ "${raw}" =~ =[[:space:]]*([0-9a-f]{64})[[:space:]]*$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return
+  fi
+  if [[ "${raw}" =~ ^[[:space:]]*([0-9a-f]{64})([^0-9a-f]|$) ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return
+  fi
+  printf '%s' "${raw}"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --version) need_arg "$@"; VERSION="$2"; shift 2 ;;
     --file) need_arg "$@"; LOCAL_FILE="$2"; shift 2 ;;
-    --sha256) need_arg "$@"; EXPECTED_SHA="${2,,}"; shift 2 ;;
+    --sha256) need_arg "$@"; EXPECTED_SHA="$(sha256_hex "$2")"; shift 2 ;;
     --port) need_arg "$@"; PORT="$2"; PORT_SET=1; shift 2 ;;
     --with-desktop) WITH_DESKTOP=1; shift ;;
     --display) need_arg "$@"; DISPLAY_NUM="$2"; DISPLAY_SET=1; shift 2 ;;
@@ -133,7 +149,9 @@ ASSET="praxi-linux-${ARCH}.tar.gz"
 # --------------------------------------------------------------- packages
 install_packages() {
   local pkgs_apt=(curl ca-certificates tar libdbus-1-3)
-  local pkgs_dnf=(curl ca-certificates tar dbus-libs)
+  # bot and bot-node link libssl.so.3 (native-tls via iroh/rmcp). curl usually
+  # pulls it in; openssl-libs is the dnf name. The apt name is chosen below.
+  local pkgs_dnf=(curl ca-certificates tar dbus-libs openssl-libs)
   if [[ "${WITH_DESKTOP}" -eq 1 ]]; then
     pkgs_apt+=(xvfb at-spi2-core fonts-liberation fonts-noto-core)
     pkgs_dnf+=(xorg-x11-server-Xvfb at-spi2-core liberation-fonts)
@@ -142,6 +160,14 @@ install_packages() {
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -y
     apt-get install -y --no-install-recommends "${pkgs_apt[@]}"
+    # Debian 12 / Ubuntu: libssl3. Debian 13 renamed it to libssl3t64.
+    if apt-cache show libssl3 >/dev/null 2>&1; then
+      apt-get install -y --no-install-recommends libssl3
+    elif apt-cache show libssl3t64 >/dev/null 2>&1; then
+      apt-get install -y --no-install-recommends libssl3t64
+    else
+      warn "no libssl3 package found; the binaries need libssl.so.3"
+    fi
     if [[ "${WITH_DESKTOP}" -eq 1 ]]; then
       # Ubuntu's chromium-browser is a snap stub; snap confinement does not
       # work well under a hardened system service. Prefer a real deb.
@@ -160,7 +186,7 @@ install_packages() {
       dnf install -y chromium || warn "chromium is not in your enabled repos (on Oracle Linux enable EPEL); install a Chromium-family browser yourself"
     fi
   else
-    warn "unknown package manager; install curl, tar, libdbus (and Xvfb + Chromium for --with-desktop) yourself"
+    warn "unknown package manager; install curl, tar, libdbus, libssl.so.3 (and Xvfb + Chromium for --with-desktop) yourself"
   fi
 }
 
@@ -177,7 +203,7 @@ if [[ -n "${LOCAL_FILE}" ]]; then
   [[ -f "${LOCAL_FILE}" ]] || die "file not found: ${LOCAL_FILE}"
   cp "${LOCAL_FILE}" "${WORK}/${ASSET}"
   if [[ -z "${EXPECTED_SHA}" && -f "${LOCAL_FILE}.sha256" ]]; then
-    EXPECTED_SHA="$(awk '{print tolower($1); exit}' "${LOCAL_FILE}.sha256")"
+    EXPECTED_SHA="$(sha256_hex "$(awk 'NR==1 { print; exit }' "${LOCAL_FILE}.sha256")")"
   fi
 else
   if [[ "${VERSION}" == "latest" ]]; then
@@ -191,13 +217,12 @@ else
   if [[ -z "${EXPECTED_SHA}" ]]; then
     curl -fSL --proto '=https' --tlsv1.2 -o "${WORK}/${ASSET}.sha256" "${BASE}/${ASSET}.sha256" \
       || die "could not fetch the checksum file"
-    EXPECTED_SHA="$(awk '{print tolower($1); exit}' "${WORK}/${ASSET}.sha256")"
+    EXPECTED_SHA="$(sha256_hex "$(awk 'NR==1 { print; exit }' "${WORK}/${ASSET}.sha256")")"
   fi
 fi
 
 if [[ -n "${EXPECTED_SHA}" ]]; then
-  ACTUAL_SHA="$(sha256sum "${WORK}/${ASSET}" | awk '{print tolower($1)}')"
-  EXPECTED_SHA="${EXPECTED_SHA,,}"
+  ACTUAL_SHA="$(sha256_hex "$(sha256sum "${WORK}/${ASSET}")")"
   [[ "${ACTUAL_SHA}" == "${EXPECTED_SHA}" ]] || die "SHA-256 mismatch (expected ${EXPECTED_SHA}, got ${ACTUAL_SHA})"
   log "checksum OK"
 else
@@ -272,7 +297,8 @@ else
     sed -i '/^BOT_PORT=/d' "${ENV_FILE}"
     echo "BOT_PORT=${PORT}" >> "${ENV_FILE}"
   elif grep -q '^BOT_PORT=' "${ENV_FILE}"; then
-    PORT="$(grep '^BOT_PORT=' "${ENV_FILE}" | tail -n1 | cut -d= -f2-)"
+    PORT="$(grep '^BOT_PORT=' "${ENV_FILE}" | tail -n1 | cut -d= -f2- | tr -d '[:space:]')"
+    [[ "${PORT}" =~ ^[0-9]+$ && "${PORT}" -ge 1 && "${PORT}" -le 65535 ]] || die "invalid BOT_PORT in ${ENV_FILE}"
   else
     echo "BOT_PORT=${PORT}" >> "${ENV_FILE}"
   fi
@@ -394,15 +420,20 @@ systemctl enable praxi.service >/dev/null
 if [[ "${WITH_DESKTOP}" -eq 1 ]]; then systemctl enable praxi-xvfb.service >/dev/null; fi
 
 if [[ "${NO_START}" -eq 0 ]]; then
-  systemctl restart praxi.service
-  sleep 2
-  if systemctl is-active --quiet praxi.service; then
-    log "praxi.service is running"
+  # restart returns non-zero when the start job fails. Under `set -e` that
+  # would abort before the warning and before praxi-node is brought back.
+  if systemctl restart praxi.service; then
+    sleep 2
+    if systemctl is-active --quiet praxi.service; then
+      log "praxi.service is running"
+    else
+      warn "praxi.service did not stay up; see: journalctl -u praxi -n 50"
+    fi
   else
     warn "praxi.service did not start; see: journalctl -u praxi -n 50"
   fi
   if [[ "${NODE_WAS_ACTIVE}" -eq 1 ]]; then
-    systemctl restart praxi-node.service || warn "praxi-node.service did not restart"
+    systemctl restart praxi-node.service || warn "praxi-node.service did not restart; see: journalctl -u praxi-node -n 50"
   fi
 fi
 
@@ -423,12 +454,11 @@ Next steps:
   3. Remote access: use an SSH tunnel, do not open the port:
        ssh -L ${PORT}:127.0.0.1:${PORT} user@<this-host>
      or pair a Telegram account:                 sudo praxi telegram pair
-  4. Controlling this machine from another core (experimental, iroh dial-out).
-     NOT functional on Linux yet: bot-node has no Linux desktop backend, so
-     'bot-node run' exits with an error. Do not enable praxi-node.service until
-     that backend ships. Pairing, for later:
+  4. Controlling this machine from another core is not functional on Linux yet.
+     bot-node has no Linux desktop backend, so 'bot-node run' exits and
+     praxi-node.service would restart every 10s. Leave that unit disabled.
+     Pairing, once the backend ships:
        sudo praxi-node join '<bot-pair:...ticket>'
-       sudo systemctl enable --now praxi-node
   5. Update later by re-running this script. Remove with: install-linux.sh --uninstall
 
 See docs/guide/remote-host.md for firewall notes (Oracle Cloud) and security guidance.

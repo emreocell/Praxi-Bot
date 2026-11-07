@@ -48,10 +48,14 @@ sudo ./scripts/install-linux.sh --file ./praxi-linux-aarch64.tar.gz --with-deskt
 
 Other options: `--port`, `--display`, `--screen`, `--skip-packages`,
 `--no-start`. Run it with `--help` for the full list. Re-running upgrades the
-binaries and keeps your data and configuration.
+binaries and keeps `/var/lib/praxi` and `/etc/praxi/praxi.env` (a custom
+`BOT_PORT` stays unless you pass `--port` again). Pass `--with-desktop` on
+that re-run to keep the virtual display; omitting it stops `praxi-xvfb` and
+removes `DISPLAY`.
 
 The script:
 
+- installs the runtime libraries the binaries link (`libdbus`, `libssl.so.3`);
 - creates a `praxi` system user with no login shell;
 - installs binaries to `/opt/praxi` and keeps data in `/var/lib/praxi`;
 - writes `/etc/praxi/praxi.env` (mode 0640) with the data dir, port and a
@@ -88,16 +92,21 @@ the tunnel authenticate with it like on a local install.
 
 ### Letting another core control this machine (experimental)
 
-`bot-node` connects **outward** over iroh (QUIC with relay fallback), so no
-inbound port is needed. On the machine that should be controlled:
+This is **not functional on Linux yet**. `bot-node run` exits because there is
+no Linux desktop backend, and enabling `praxi-node.service` would restart it
+every 10 seconds. Leave that unit disabled.
+
+When the backend exists, `bot-node` connects **outward** over iroh (QUIC with
+relay fallback), so no inbound port is needed. On the machine that should be
+controlled:
 
 ```sh
 sudo praxi-node join '<bot-pair:...>'     # one-time ticket from the core
-sudo systemctl enable --now praxi-node
 ```
 
 The ticket is single-use; afterwards the devices use stored keys. See ADR-0006
-in the design documents for the model.
+in the design documents for the model. Enable `praxi-node.service` only after
+`bot-node run` works on Linux.
 
 ## 4. Firewall notes (Oracle Cloud)
 
@@ -135,6 +144,7 @@ You do **not** need to open any port for Praxi. Keep it that way.
 
 ```sh
 sudo ./scripts/install-linux.sh --file ./praxi-linux-aarch64.tar.gz   # update
+# pass --with-desktop again if this host should keep the virtual display
 journalctl -u praxi -n 100
 sudo ./scripts/install-linux.sh --uninstall           # keeps data and user
 sudo ./scripts/install-linux.sh --uninstall --purge   # deletes data too
