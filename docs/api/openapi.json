@@ -1055,6 +1055,49 @@
         ]
       }
     },
+    "/v1/providers/detected": {
+      "get": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Detect installed, signed-in coding CLIs.",
+        "operationId": "detect_providers",
+        "parameters": [
+          {
+            "name": "refresh",
+            "in": "path",
+            "description": "When set to 1, bypasses the in-process 60-second cache.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DetectedProviderDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/providers/reload": {
       "post": {
         "tags": [
@@ -2217,6 +2260,15 @@
           }
         }
       },
+      "CliAuthState": {
+        "type": "string",
+        "description": "Authentication status reported by a CLI provider (`GET /v1/providers/detected`).",
+        "enum": [
+          "signed_in",
+          "signed_out",
+          "unknown"
+        ]
+      },
       "ConfiguredProviderDto": {
         "type": "object",
         "description": "A configured provider (never carries a key).",
@@ -2459,6 +2511,60 @@
           "queued",
           "stopped"
         ]
+      },
+      "DetectedProviderDto": {
+        "type": "object",
+        "description": "A detected coding CLI engine (`GET /v1/providers/detected`).",
+        "required": [
+          "id",
+          "display_name",
+          "installed",
+          "auth",
+          "runnable"
+        ],
+        "properties": {
+          "account_label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Account label (email or org name, max 160 chars, or null)."
+          },
+          "auth": {
+            "$ref": "#/components/schemas/CliAuthState",
+            "description": "Authentication status (`signed_in`, `signed_out`, `unknown`)."
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable detail code (`not_on_path`, `timeout`, `auth_unparsed`, etc., or null)."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "id": {
+            "type": "string",
+            "description": "Engine id (`claude`, `codex`, `cursor`, `opencode`, `gemini`, `chatgpt-plan`)."
+          },
+          "installed": {
+            "type": "boolean",
+            "description": "Whether the CLI binary was found on PATH and `--version` succeeded."
+          },
+          "runnable": {
+            "type": "boolean",
+            "description": "Whether this engine can currently run turns (always false in this task)."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "CLI version (first line, trimmed, max 80 chars, or null)."
+          }
+        }
       },
       "EffectivePolicyDto": {
         "type": "object",

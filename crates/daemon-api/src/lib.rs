@@ -128,6 +128,8 @@ struct Inner {
     schedules: parking_lot::Mutex<Option<Arc<ScheduleStore>>>,
     /// Serialises `PUT /v1/policy` (read-modify-write of memory + `policy.json`).
     policy_lock: parking_lot::Mutex<()>,
+    /// CLI provider detector (`GET /v1/providers/detected`).
+    detector: parking_lot::RwLock<Arc<cli_provider::Detector>>,
     /// The running scheduler (see [`AppState::start_scheduler`]).
     scheduler: OnceLock<Scheduler>,
     /// Shutdown steps in the order they ran (tests only).
@@ -179,6 +181,7 @@ impl AppState {
             provider_host: OnceLock::new(),
             schedules: parking_lot::Mutex::new(None),
             policy_lock: parking_lot::Mutex::new(()),
+            detector: parking_lot::RwLock::new(Arc::new(cli_provider::Detector::new())),
             scheduler: OnceLock::new(),
             #[cfg(test)]
             order: parking_lot::Mutex::new(Vec::new()),
@@ -271,6 +274,14 @@ impl AppState {
 
     pub(crate) fn provider_host(&self) -> Option<&ProviderHost> {
         self.0.provider_host.get()
+    }
+    pub(crate) fn detector(&self) -> Arc<cli_provider::Detector> {
+        Arc::clone(&*self.0.detector.read())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_detector(&self, detector: Arc<cli_provider::Detector>) {
+        *self.0.detector.write() = detector;
     }
     pub(crate) fn hub(&self) -> &Arc<ControlHub> {
         &self.0.hub
@@ -389,6 +400,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/control/{request_id}", post(r::decide_control))
         .route("/v1/policy", get(r::get_policy).put(r::put_policy))
         .route("/v1/providers", get(r::list_providers))
+        .route("/v1/providers/detected", get(r::detect_providers))
         .route("/v1/providers/reload", post(r::reload_providers))
         .route(
             "/v1/schedules",

@@ -1380,6 +1380,7 @@ fn openapi_snapshot() {
         "/v1/control/{request_id}",
         "/v1/policy",
         "/v1/providers",
+        "/v1/providers/detected",
         "/v1/providers/reload",
     ] {
         assert!(v["paths"].get(p).is_some(), "{p}");
@@ -1545,7 +1546,7 @@ async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
     assert!(r.contains("Button 2"), "{r}");
 
     // Nobody registered: the click just runs.
-    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 2}"#).await;
+    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 2, "gen": 1}"#).await;
     assert!(r.contains("dispatched"), "{r}");
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
 
@@ -1559,7 +1560,8 @@ async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
     .await;
     let r = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
     assert!(r.contains("Button 2"), "reads are not gated: {r}");
-    let (r, events) = run_and_reply_seen(&t, &chat, r#"call:desktop_click {"index": 3}"#).await;
+    let (r, events) =
+        run_and_reply_seen(&t, &chat, r#"call:desktop_click {"index": 3, "gen": 3}"#).await;
     assert!(r.contains("taken control of the desktop"), "{r}");
     // "At once" means no round trip to the app (which would have emitted a
     // `control_requested` and waited for its answer), not a wall-clock bound.
@@ -1584,7 +1586,7 @@ async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
     // Registered but silent: refused after the long timeout (600 ms here).
     let r = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
     assert!(r.contains("Button"), "{r}");
-    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 3}"#).await;
+    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 3, "gen": 4}"#).await;
     assert!(r.contains("did not confirm"), "{r}");
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
@@ -1633,7 +1635,7 @@ async fn a_registered_app_confirms_each_click_before_it_runs() {
     .await;
     let seen = auto_answer(&t, "proceed", None);
     run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
-    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 2}"#).await;
+    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 2, "gen": 1}"#).await;
     assert!(r.contains("dispatched"), "{r}");
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
 
@@ -1658,7 +1660,7 @@ async fn an_app_refusal_reaches_the_model_and_nothing_is_dispatched() {
     .await;
     let _seen = auto_answer(&t, "refuse", Some("the user pressed Stop"));
     run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
-    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 1}"#).await;
+    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 1, "gen": 1}"#).await;
     assert!(r.contains("the user pressed Stop"), "{r}");
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 0);
 }
@@ -2017,6 +2019,80 @@ async fn providers_are_listed_with_models_and_reload_swaps_them() {
     assert_eq!(conf[0]["models"], json!(["m1", "m2"]));
     assert_eq!(conf[1]["active"], false);
     assert_eq!(p["default_provider"], "second");
+}
+
+#[tokio::test]
+async fn providers_detected_requires_auth() {
+    let t = setup();
+    let r = send(&t.app, Method::GET, "/v1/providers/detected", None, &[]).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn providers_detected_reports_six_rows() {
+    let t = setup();
+    let r = call(&t, Method::GET, "/v1/providers/detected", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let list = r.json();
+    let items = list.as_array().unwrap();
+    assert_eq!(items.len(), 6);
+    let ids: Vec<&str> = items
+        .iter()
+        .map(|item| item["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![
+            "claude",
+            "codex",
+            "cursor",
+            "opencode",
+            "gemini",
+            "chatgpt-plan"
+        ]
+    );
+    for row in items {
+        assert_eq!(row["runnable"], false);
+    }
+}
+
+#[tokio::test]
+async fn providers_detected_sentinel_token_is_never_leaked_or_read() {
+    let t = setup();
+    let temp = tempfile::tempdir().unwrap();
+
+    let opencode_dir = temp.path().join("local_app").join("opencode");
+    std::fs::create_dir_all(&opencode_dir).unwrap();
+    let sentinel = "SENTINEL_TOKEN_SECRET_NEVER_LEAK";
+    std::fs::write(opencode_dir.join("auth.json"), sentinel).unwrap();
+
+    let gemini_dir = temp.path().join("home").join(".gemini");
+    std::fs::create_dir_all(&gemini_dir).unwrap();
+    std::fs::write(gemini_dir.join("oauth_creds.json"), sentinel).unwrap();
+
+    let env = cli_provider::PathEnv::for_test(temp.path().to_path_buf())
+        .with_local_app_data(temp.path().join("local_app"))
+        .with_home(temp.path().join("home"));
+
+    t.state
+        .set_detector(Arc::new(cli_provider::Detector::with_env(env)));
+
+    let r = call(&t, Method::GET, "/v1/providers/detected?refresh=1", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+
+    let body_str = String::from_utf8(r.body.clone()).unwrap();
+    assert!(
+        !body_str.contains(sentinel),
+        "response body must never contain sentinel token from auth files"
+    );
+
+    let list = r.json();
+    let items = list.as_array().unwrap();
+    let opencode = items.iter().find(|x| x["id"] == "opencode").unwrap();
+    let gemini = items.iter().find(|x| x["id"] == "gemini").unwrap();
+
+    assert_eq!(opencode["auth"], "unknown");
+    assert_eq!(gemini["auth"], "unknown");
 }
 
 // ----------------------------------------------------------- usage cost
