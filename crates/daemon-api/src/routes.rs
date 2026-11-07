@@ -138,6 +138,10 @@ fn chat_dto(c: Chat) -> ChatDto {
 
 fn run_dto(s: &AppState, r: storage::Run) -> RunDto {
     let can_remember = s.agent().can_remember(r.id);
+    run_dto_with(r, can_remember)
+}
+
+fn run_dto_with(r: storage::Run, can_remember: bool) -> RunDto {
     let schedule_id = agent_core::schedule_id_of(&r.kind).map(|t| t.0);
     RunDto {
         id: r.id.0,
@@ -551,11 +555,14 @@ pub(crate) async fn answer_question(
 #[utoipa::path(get, path = "/v1/runs", tag = "runs", security(("bearer" = [])),
     responses((status = 200, body = Vec<RunDto>)))]
 pub(crate) async fn list_runs(State(s): State<AppState>) -> Result<Json<Vec<RunDto>>, ApiError> {
+    // `can_remember` may open the per-bot router cache (a sqlite file), so a
+    // read-only listing does not ask: it reports `false`; `GET /v1/runs/{id}`
+    // has the real answer.
     Ok(Json(
         s.storage()
             .list_runs(s.user_id())?
             .into_iter()
-            .map(|r| run_dto(&s, r))
+            .map(|r| run_dto_with(r, false))
             .collect(),
     ))
 }
@@ -755,11 +762,21 @@ pub(crate) fn load_policy(data_dir: &std::path::Path) -> Option<Policy> {
     serde_json::from_str(&text).ok()
 }
 
+/// Counter that keeps the temp file names of concurrent saves apart.
+static POLICY_TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 fn save_policy(data_dir: &std::path::Path, policy: &Policy) -> std::io::Result<()> {
     let path = data_dir.join(POLICY_FILE);
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(policy)?)?;
-    std::fs::rename(&tmp, &path)
+    // A unique temp name per call: even without the caller's lock two writers
+    // never share (and then lose) one temp file.
+    let n = POLICY_TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("json.{}.{n}.tmp", std::process::id()));
+    let result = std::fs::write(&tmp, serde_json::to_vec_pretty(policy)?)
+        .and_then(|()| std::fs::rename(&tmp, &path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
 fn named_preset(name: &str) -> Option<Policy> {
@@ -814,6 +831,9 @@ pub(crate) async fn put_policy(
     State(s): State<AppState>,
     ApiJson(input): ApiJson<PolicyInput>,
 ) -> Result<Json<PolicyDto>, ApiError> {
+    // Read-modify-write of the global policy and its file: one writer at a time
+    // (no `.await` below, so the guard is never held across a suspension point).
+    let _guard = s.policy_lock();
     let mut policy = match input.preset.as_deref() {
         Some(name) => named_preset(name)
             .ok_or_else(|| ApiError::bad_request(format!("unknown preset {name:?}")))?,

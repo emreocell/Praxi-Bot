@@ -1739,6 +1739,123 @@ async fn global_policy_is_editable_and_persisted() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_policy_updates_are_not_lost_and_leave_no_temp_files() {
+    let t = setup();
+    let cats = ["fs", "shell", "money", "accounts", "desktop", "browser"];
+    let mut tasks = Vec::new();
+    for round in 0..4 {
+        for cat in cats {
+            let app = t.app.clone();
+            tasks.push(tokio::spawn(async move {
+                let (k, v) = auth();
+                let level = if round % 2 == 0 { "deny" } else { "allow" };
+                send(
+                    &app,
+                    Method::PUT,
+                    "/v1/policy",
+                    Some(json!({"categories": {cat: level}})),
+                    &[(k, v.as_str())],
+                )
+                .await
+                .status
+            }));
+        }
+    }
+    for task in tasks {
+        assert_eq!(
+            task.await.unwrap(),
+            StatusCode::OK,
+            "no 500 from a shared temp file"
+        );
+    }
+    // Memory and the persisted file agree (no diverging write order).
+    let saved = crate::routes::load_policy(t._dir.path()).expect("policy.json parses");
+    assert_eq!(saved.categories, t.agent.global_policy().categories);
+    let leftovers: Vec<_> = std::fs::read_dir(t._dir.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("policy.") && n != "policy.json")
+        .collect();
+    assert!(leftovers.is_empty(), "temp files left: {leftovers:?}");
+}
+
+#[tokio::test]
+async fn listing_runs_writes_nothing_to_disk() {
+    let t = setup();
+    let (bot, chat) = make_chat(&t).await;
+    // A succeeded run that followed a route (so `can_remember` gets as far as
+    // the bot's ladder) for a bot whose ladder has not been built yet: no run
+    // was executed, so `router/<bot>.sqlite` does not exist. Only the ladder
+    // lookup (`ladder_for`) could create it.
+    let st = t.state.storage();
+    let user_id = t.state.user_id();
+    let run_id = protocol::RunId(uuid::Uuid::now_v7());
+    let chat_id = protocol::ChatId(chat.parse().unwrap());
+    let now = 1_000;
+    st.insert_run(&storage::Run {
+        id: run_id,
+        user_id,
+        bot_id: protocol::BotId(bot.parse().unwrap()),
+        chat_id: Some(chat_id),
+        kind: "turn".to_owned(),
+        state: task_runtime::RunState::Succeeded.as_str().to_owned(),
+        error: None,
+        created_at_ms: now,
+        updated_at_ms: now,
+        parent_run_id: None,
+        spec: None,
+    })
+    .unwrap();
+    st.insert_message(&storage::Message {
+        id: uuid::Uuid::now_v7(),
+        user_id,
+        chat_id,
+        run_id: Some(run_id),
+        role: "user".to_owned(),
+        content: "hello".to_owned(),
+        created_at_ms: now,
+    })
+    .unwrap();
+    st.insert_step(&storage::RunStep {
+        id: uuid::Uuid::now_v7(),
+        run_id,
+        user_id,
+        idx: 0,
+        name: "user_message".to_owned(),
+        input: json!({
+            "text": "hello",
+            "route": {
+                "route": {"kind": "tool_hint", "tools": ["danger_run"]},
+                "level": "K0",
+                "confidence": 1.0,
+                "latency_ms": 0,
+                "reason": "test"
+            }
+        }),
+        idempotent: true,
+        retry: None,
+        status: "succeeded".to_owned(),
+        attempt: 1,
+        output: None,
+        error: None,
+        started_at_ms: now,
+        finished_at_ms: Some(now),
+    })
+    .unwrap();
+    let router_dir = t._dir.path().join("router");
+    assert!(!router_dir.exists(), "precondition: no ladder built yet");
+
+    let r = call(&t, Method::GET, "/v1/runs", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json().as_array().unwrap().len(), 1);
+    assert!(
+        !router_dir.exists(),
+        "GET /v1/runs must not create router/ (the ladder cache)"
+    );
+}
+
 #[tokio::test]
 async fn the_persisted_policy_changes_what_asks() {
     let t = setup();

@@ -145,6 +145,23 @@ impl Client {
         self.check(resp).await
     }
 
+    /// The outcome of a run that has already ended, from `GET /v1/runs/{id}`
+    /// (`None` while it is still running or the lookup fails).  The outer
+    /// `Option` is "finished?", the inner one the run's error.
+    async fn finished_result(&self, run_id: &str) -> Option<Option<String>> {
+        let run = self
+            .request(Method::GET, &format!("/v1/runs/{run_id}"), None)
+            .await
+            .ok()?;
+        let error = run["error"].as_str().map(str::to_owned);
+        match run["state"].as_str()? {
+            "succeeded" => Some(error),
+            "failed" => Some(Some(error.unwrap_or_else(|| "run failed".to_owned()))),
+            "cancelled" => Some(Some(error.unwrap_or_else(|| "run cancelled".to_owned()))),
+            _ => None,
+        }
+    }
+
     /// Follow a run **and its subagents** on the global stream `first` (from
     /// [`Self::open_events`]), reconnecting with the daemon-wide
     /// `Last-Event-ID`.  Returns the root run's final error (`None` = success).
@@ -162,6 +179,7 @@ impl Client {
         let mut failures = 0u32;
         let mut resp = Some(first);
         loop {
+            let reconnecting = resp.is_none();
             let current = if let Some(r) = resp.take() {
                 r
             } else {
@@ -177,13 +195,22 @@ impl Client {
                     Err(e) => return Err(self.unreachable(&e)),
                 }
             };
+            // Reconnected without a cursor (the first stream ended before it
+            // delivered anything): the daemon only sends live events now, so a
+            // run that finished in between would never report.  The stream is
+            // already open, hence anything after this check arrives live.
+            if reconnecting
+                && last.is_none()
+                && let Some(result) = self.finished_result(run_id).await
+            {
+                return Ok(result);
+            }
             let mut stream = current.bytes_stream();
-            let mut buf = String::new();
+            let mut buf = SseBuf::default();
             while let Some(chunk) = stream.next().await {
                 let Ok(chunk) = chunk else { break };
-                buf.push_str(&String::from_utf8_lossy(&chunk).replace("\r\n", "\n"));
-                while let Some(i) = buf.find("\n\n") {
-                    let block: String = buf.drain(..i + 2).collect();
+                buf.push(&chunk);
+                while let Some(block) = buf.next_block() {
                     if let Some(id) = sse_id(&block) {
                         last = Some(id);
                     }
@@ -239,13 +266,12 @@ impl Client {
                 Ok(resp) => {
                     let resp = self.check(resp).await?;
                     let mut stream = resp.bytes_stream();
-                    let mut buf = String::new();
+                    let mut buf = SseBuf::default();
                     let mut finished = None;
                     'read: while let Some(chunk) = stream.next().await {
                         let Ok(chunk) = chunk else { break };
-                        buf.push_str(&String::from_utf8_lossy(&chunk).replace("\r\n", "\n"));
-                        while let Some(i) = buf.find("\n\n") {
-                            let block: String = buf.drain(..i + 2).collect();
+                        buf.push(&chunk);
+                        while let Some(block) = buf.next_block() {
                             let Some(data) = sse_data(&block) else {
                                 continue;
                             };
@@ -328,6 +354,43 @@ impl RunTree {
     }
 }
 
+/// Receive buffer of an SSE stream.  It holds *bytes*: a network chunk may end
+/// in the middle of a multi-byte character, so text is only decoded once a
+/// whole block (terminated by a blank line, `\n` or `\r\n`) is there.
+#[derive(Debug, Default)]
+pub struct SseBuf {
+    buf: Vec<u8>,
+}
+
+impl SseBuf {
+    /// Append a network chunk.
+    pub fn push(&mut self, chunk: &[u8]) {
+        self.buf.extend_from_slice(chunk);
+    }
+
+    /// The next complete block (line endings normalised to `\n`, ending in a
+    /// blank line), if one is buffered.
+    pub fn next_block(&mut self) -> Option<String> {
+        let mut line_start = 0;
+        while let Some(rel) = self.buf[line_start..].iter().position(|b| *b == b'\n') {
+            let end = line_start + rel;
+            let line = &self.buf[line_start..end];
+            let blank = line.is_empty() || line == b"\r";
+            if blank && line_start == 0 {
+                // Stray blank line between blocks.
+                self.buf.drain(..=end);
+                continue;
+            }
+            if blank {
+                let raw: Vec<u8> = self.buf.drain(..=end).collect();
+                return Some(String::from_utf8_lossy(&raw).replace("\r\n", "\n"));
+            }
+            line_start = end + 1;
+        }
+        None
+    }
+}
+
 /// The `id:` of an SSE block.
 fn sse_id(block: &str) -> Option<u64> {
     block
@@ -405,6 +468,68 @@ mod tests {
         };
         assert!(!t.is_root_finished(&env(fin(child), Some(root))));
         assert!(t.is_root_finished(&env(fin(root), None)));
+    }
+
+    #[test]
+    fn sse_buffer_keeps_multibyte_characters_split_across_chunks() {
+        let block = "id: 1\ndata: {\"t\":\"şğ😀\"}\n\n";
+        let bytes = block.as_bytes();
+        // Every possible split point, including inside each character.
+        for cut in 0..=bytes.len() {
+            let mut b = SseBuf::default();
+            b.push(&bytes[..cut]);
+            let early = b.next_block();
+            b.push(&bytes[cut..]);
+            let got = early.or_else(|| b.next_block()).unwrap();
+            assert_eq!(got, block, "cut at {cut}");
+            assert_eq!(b.next_block(), None);
+        }
+    }
+
+    #[test]
+    fn sse_buffer_handles_crlf_and_several_blocks() {
+        let mut b = SseBuf::default();
+        b.push(b"id: 1\r\ndata: a\r\n\r\nid: 2\r\ndata: b\r\n\r\nid: 3\r\nda");
+        assert_eq!(b.next_block().as_deref(), Some("id: 1\ndata: a\n\n"));
+        assert_eq!(b.next_block().as_deref(), Some("id: 2\ndata: b\n\n"));
+        assert_eq!(b.next_block(), None, "the third block is incomplete");
+        b.push(b"ta: c\n\n");
+        assert_eq!(b.next_block().as_deref(), Some("id: 3\ndata: c\n\n"));
+    }
+
+    #[tokio::test]
+    async fn follow_tree_polls_the_run_when_it_reconnects_without_a_cursor() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let run = "11111111-1111-1111-1111-111111111111";
+        let server = MockServer::start().await;
+        // Every event stream ends at once, without a single event.
+        Mock::given(method("GET"))
+            .and(path("/v1/events"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                ": keep-alive
+
+",
+            ))
+            .mount(&server)
+            .await;
+        // The run finished while no stream was connected.
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/runs/{run}")))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"id": run, "state": "failed", "error": "boom"})),
+            )
+            .mount(&server)
+            .await;
+        let c = Client::new(&server.uri(), "t".into());
+        let first = c.open_events().await.unwrap();
+        let got =
+            tokio::time::timeout(Duration::from_secs(5), c.follow_tree(first, run, |_, _| {}))
+                .await
+                .expect("must not hang or retry forever")
+                .unwrap();
+        assert_eq!(got.as_deref(), Some("boom"));
     }
 
     #[test]

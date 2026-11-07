@@ -126,6 +126,8 @@ struct Inner {
     provider_host: OnceLock<ProviderHost>,
     /// `schedules.db`, opened on first use.
     schedules: parking_lot::Mutex<Option<Arc<ScheduleStore>>>,
+    /// Serialises `PUT /v1/policy` (read-modify-write of memory + `policy.json`).
+    policy_lock: parking_lot::Mutex<()>,
     /// The running scheduler (see [`AppState::start_scheduler`]).
     scheduler: OnceLock<Scheduler>,
     /// Shutdown steps in the order they ran (tests only).
@@ -176,6 +178,7 @@ impl AppState {
             hub,
             provider_host: OnceLock::new(),
             schedules: parking_lot::Mutex::new(None),
+            policy_lock: parking_lot::Mutex::new(()),
             scheduler: OnceLock::new(),
             #[cfg(test)]
             order: parking_lot::Mutex::new(Vec::new()),
@@ -290,6 +293,9 @@ impl AppState {
     }
     pub(crate) fn origin_allowed(&self, origin: &str) -> bool {
         self.0.cfg.allowed_origins.iter().any(|o| o == origin)
+    }
+    pub(crate) fn policy_lock(&self) -> parking_lot::MutexGuard<'_, ()> {
+        self.0.policy_lock.lock()
     }
     pub(crate) fn data_dir(&self) -> PathBuf {
         self.0.storage.data_dir().to_path_buf()

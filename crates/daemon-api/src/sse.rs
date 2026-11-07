@@ -21,6 +21,7 @@ use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use agent_core::StreamItem;
 use axum::extract::{Query, State};
@@ -41,6 +42,18 @@ use crate::error::ApiError;
 
 /// Index rows replayed per batch (bounds memory of a long replay).
 const REPLAY_CHUNK: u32 = 500;
+
+/// How long the global replay waits for an index row whose log line is not on
+/// disk yet (the writer indexes first, then appends) before it treats the line
+/// as lost to a crash and moves on.
+const PENDING_LINE_GRACE: Duration = Duration::from_secs(3);
+
+/// Pause between re-reads while waiting for such a line.
+const PENDING_RETRY: Duration = Duration::from_millis(50);
+
+/// Attempts to read a run's log before the stream gives up and closes (the
+/// client then reconnects with its cursor).
+const LOG_READ_ATTEMPTS: u32 = 3;
 
 /// Query of `GET /v1/events`.
 #[derive(Debug, Deserialize)]
@@ -92,6 +105,8 @@ struct Feed {
     scan: u64,
     /// More index rows may be pending (replay in progress).
     replaying: bool,
+    /// Since when the replay waits for an index row whose log line is missing.
+    stalled_since: Option<Instant>,
     // ---- global form ----
     /// `schedule_changed` notifications (global stream only).
     sched_rx: Option<broadcast::Receiver<ScheduleChanged>>,
@@ -104,16 +119,25 @@ struct Feed {
 }
 
 impl Feed {
-    /// Per-run form: reload the run's log after the delivered `seq`.
-    async fn reload_run(&mut self) {
-        let Some(run) = self.run else { return };
-        let dir = self.data_dir.clone();
+    /// Per-run form: reload the run's log after the delivered `seq`.  Returns
+    /// `false` when the log stays unreadable (the caller ends the stream so the
+    /// client resumes from its cursor instead of silently missing events).
+    async fn reload_run(&mut self) -> bool {
+        let Some(run) = self.run else { return true };
         let after = self.last;
-        let logged = tokio::task::spawn_blocking(move || read_event_log(&dir, run))
-            .await
-            .ok()
-            .and_then(Result::ok)
-            .unwrap_or_default();
+        let mut logged = None;
+        for attempt in 0..LOG_READ_ATTEMPTS {
+            let dir = self.data_dir.clone();
+            match tokio::task::spawn_blocking(move || read_event_log(&dir, run)).await {
+                Ok(Ok(l)) => {
+                    logged = Some(l);
+                    break;
+                }
+                _ if attempt + 1 < LOG_READ_ATTEMPTS => tokio::time::sleep(PENDING_RETRY).await,
+                _ => {}
+            }
+        }
+        let Some(logged) = logged else { return false };
         self.finished_in_log |= logged
             .iter()
             .any(|e| matches!(e.event, Event::RunFinished(_)));
@@ -126,20 +150,30 @@ impl Feed {
                 envelope,
             })
             .collect();
+        true
     }
 
     /// Global form: load the next chunk of index rows after `scan`.
     async fn replay_chunk(&mut self) {
         let (st, dir, after) = (Arc::clone(&self.storage), self.data_dir.clone(), self.scan);
-        let loaded = tokio::task::spawn_blocking(move || load_global(&st, &dir, after)).await;
-        match loaded {
-            Ok(Some(chunk)) => {
-                self.scan = self.scan.max(chunk.max_gseq);
-                self.replaying = chunk.more;
-                self.backlog.extend(chunk.items);
+        let force = self
+            .stalled_since
+            .is_some_and(|t| t.elapsed() >= PENDING_LINE_GRACE);
+        let loaded =
+            tokio::task::spawn_blocking(move || load_global(&st, &dir, after, force)).await;
+        if let Ok(Some(chunk)) = loaded {
+            self.scan = self.scan.max(chunk.max_gseq);
+            self.replaying = chunk.more;
+            if chunk.stalled {
+                self.stalled_since.get_or_insert_with(Instant::now);
+            } else {
+                self.stalled_since = None;
             }
+            self.backlog.extend(chunk.items);
+        } else {
             // Storage trouble: carry on live rather than stall the stream.
-            _ => self.replaying = false,
+            self.replaying = false;
+            self.stalled_since = None;
         }
     }
 
@@ -179,7 +213,11 @@ impl Feed {
                         return Some(item);
                     }
                 }
-                Err(RecvError::Lagged(_)) => self.reload_run().await,
+                Err(RecvError::Lagged(_)) => {
+                    if !self.reload_run().await {
+                        return None;
+                    }
+                }
                 Err(RecvError::Closed) => return None,
             }
         }
@@ -208,6 +246,22 @@ impl Feed {
             }
             if self.replaying {
                 self.replay_chunk().await;
+                continue;
+            }
+            if self.stalled_since.is_some() {
+                // The next index row's log line is not on disk yet.  Delivering
+                // a later live event would move the cursor past it for good, so
+                // wait (live events are re-read from the index) and retry.
+                tokio::select! {
+                    () = self.cancel.cancelled() => return None,
+                    () = tokio::time::sleep(PENDING_RETRY) => {}
+                    r = self.rx.recv() => {
+                        if matches!(r, Err(RecvError::Closed)) {
+                            return None;
+                        }
+                    }
+                }
+                self.replaying = true;
                 continue;
             }
             let (rx, sched_rx) = (&mut self.rx, &mut self.sched_rx);
@@ -259,38 +313,63 @@ struct Chunk {
     max_gseq: u64,
     /// The batch was full: more rows may follow.
     more: bool,
+    /// The batch stopped before an index row whose log line may still be
+    /// written (or whose log could not be read): retry from `max_gseq`.
+    stalled: bool,
 }
 
-/// Index rows `> after` joined with the runs' NDJSON logs.  A row whose log
-/// line is missing (crash between the index insert and the log append) is
-/// skipped.
-fn load_global(st: &Storage, dir: &std::path::Path, after: u64) -> Option<Chunk> {
+/// One run's log as the replay sees it (`None`: it could not be read).
+type RunLog = Option<HashMap<u64, Envelope>>;
+
+/// Index rows `> after` joined with the runs' NDJSON logs.
+///
+/// The writer indexes a row *before* it appends the log line, and this reader
+/// takes no lock, so a missing line is usually just "not written yet".  The
+/// batch then stops *before* that row (the cursor must not pass it) and sets
+/// `stalled`.  A row is skipped only when its loss is certain: a later line of
+/// the same run is on disk (lines of a run are appended in order), or `force`
+/// is set because the grace period for a crash gap ran out.  An unreadable log
+/// stalls the same way.
+fn load_global(st: &Storage, dir: &std::path::Path, after: u64, force: bool) -> Option<Chunk> {
     let rows = st.list_event_index(after, REPLAY_CHUNK).ok()?;
     let more = rows.len() >= REPLAY_CHUNK as usize;
-    let mut logs: HashMap<RunId, HashMap<u64, Envelope>> = HashMap::new();
+    let mut logs: HashMap<RunId, RunLog> = HashMap::new();
     let mut items = Vec::with_capacity(rows.len());
     let mut max_gseq = after;
+    let mut stalled = false;
     for row in rows {
-        max_gseq = max_gseq.max(row.gseq);
         let log = logs.entry(row.run_id).or_insert_with(|| {
             read_event_log(dir, row.run_id)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|e| (e.seq, e))
-                .collect()
+                .ok()
+                .map(|l| l.into_iter().map(|e| (e.seq, e)).collect())
         });
-        if let Some(env) = log.get(&row.seq) {
-            items.push(StreamItem {
-                gseq: row.gseq,
-                run_id: row.run_id,
-                envelope: env.clone(),
-            });
+        match log {
+            Some(m) => {
+                if let Some(env) = m.get(&row.seq) {
+                    items.push(StreamItem {
+                        gseq: row.gseq,
+                        run_id: row.run_id,
+                        envelope: env.clone(),
+                    });
+                } else if !force && !m.keys().any(|s| *s > row.seq) {
+                    stalled = true;
+                    break;
+                }
+            }
+            None if force => {}
+            None => {
+                stalled = true;
+                break;
+            }
         }
+        max_gseq = max_gseq.max(row.gseq);
     }
     Some(Chunk {
         items,
         max_gseq,
-        more,
+        // Stopped early: the rest is re-read from the cursor after the pause.
+        more: more && !stalled,
+        stalled,
     })
 }
 
@@ -352,6 +431,7 @@ pub(crate) async fn events(
         finished_in_log: false,
         scan: 0,
         replaying: false,
+        stalled_since: None,
         sched_rx: scoped_run
             .is_none()
             .then(|| state.subscribe_schedule_events()),
@@ -365,7 +445,9 @@ pub(crate) async fn events(
             feed.scoped = true;
             feed.run = Some(run);
             feed.last = last;
-            feed.reload_run().await;
+            if !feed.reload_run().await {
+                return Err(ApiError::internal("the run's event log is unreadable"));
+            }
         }
         Cursor::Global(resume) => {
             let st = Arc::clone(&feed.storage);
@@ -441,19 +523,89 @@ mod tests {
         for (g, run, seq) in [(1, a, 0), (2, b, 0), (3, a, 1), (4, b, 1), (5, a, 2)] {
             st.index_event(g, run, seq).unwrap();
         }
-        let chunk = load_global(&st, dir.path(), 0).unwrap();
+        let chunk = load_global(&st, dir.path(), 0, false).unwrap();
         let got: Vec<(u64, RunId, u64)> = chunk
             .items
             .iter()
             .map(|i| (i.gseq, i.run_id, i.envelope.seq))
             .collect();
-        assert_eq!(got, [(1, a, 0), (2, b, 0), (3, a, 1), (5, a, 2)]);
-        assert_eq!(chunk.max_gseq, 5, "skipped rows still advance the cursor");
-        assert!(!chunk.more);
-        let rest = load_global(&st, dir.path(), 3).unwrap();
-        assert_eq!(rest.items.len(), 1);
-        assert_eq!(rest.items[0].gseq, 5);
-        let none = load_global(&st, dir.path(), 5).unwrap();
-        assert!(none.items.is_empty() && none.max_gseq == 5);
+        // b1 may still be written: the batch stops before it, the cursor too.
+        assert_eq!(got, [(1, a, 0), (2, b, 0), (3, a, 1)]);
+        assert_eq!(chunk.max_gseq, 3, "the cursor must not pass a pending row");
+        assert!(chunk.stalled && !chunk.more);
+        // Once the grace period is over the line counts as lost to a crash.
+        let forced = load_global(&st, dir.path(), 3, true).unwrap();
+        assert_eq!(forced.items.len(), 1);
+        assert_eq!(forced.items[0].gseq, 5);
+        assert!(!forced.stalled);
+        assert_eq!(forced.max_gseq, 5);
+        let none = load_global(&st, dir.path(), 5, false).unwrap();
+        assert!(none.items.is_empty() && none.max_gseq == 5 && !none.stalled);
+    }
+
+    fn msg(run: RunId, seq: u64) -> Envelope {
+        use protocol::event::MessageDelta;
+        Envelope::new(
+            seq,
+            Event::MessageDelta(MessageDelta {
+                run_id: run,
+                text: format!("{seq}"),
+            }),
+        )
+    }
+
+    #[test]
+    fn replay_does_not_skip_a_row_whose_log_line_arrives_later() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = Storage::open(dir.path()).unwrap();
+        let a = RunId::new();
+        let mut w = storage::EventLogWriter::open(dir.path(), a).unwrap();
+        w.append(&msg(a, 0)).unwrap();
+        // The writer has indexed seq 1 but not appended it yet.
+        st.index_event(1, a, 0).unwrap();
+        st.index_event(2, a, 1).unwrap();
+        let first = load_global(&st, dir.path(), 0, false).unwrap();
+        assert_eq!(first.items.len(), 1);
+        assert_eq!((first.max_gseq, first.stalled), (1, true));
+        // The line lands; resuming from the stalled cursor delivers it.
+        w.append(&msg(a, 1)).unwrap();
+        let second = load_global(&st, dir.path(), first.max_gseq, false).unwrap();
+        assert_eq!(second.items.len(), 1);
+        assert_eq!(second.items[0].gseq, 2);
+        assert!(!second.stalled);
+    }
+
+    #[test]
+    fn replay_skips_a_row_that_is_provably_lost() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = Storage::open(dir.path()).unwrap();
+        let a = RunId::new();
+        let mut w = storage::EventLogWriter::open(dir.path(), a).unwrap();
+        // seq 1 never reached the log (crash), seq 2 did.
+        w.append(&msg(a, 0)).unwrap();
+        w.append(&msg(a, 2)).unwrap();
+        for (g, seq) in [(1, 0), (2, 1), (3, 2)] {
+            st.index_event(g, a, seq).unwrap();
+        }
+        let chunk = load_global(&st, dir.path(), 0, false).unwrap();
+        let got: Vec<u64> = chunk.items.iter().map(|i| i.gseq).collect();
+        assert_eq!(got, [1, 3]);
+        assert!(!chunk.stalled);
+        assert_eq!(chunk.max_gseq, 3);
+    }
+
+    #[test]
+    fn replay_stalls_on_an_unreadable_log_instead_of_dropping_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = Storage::open(dir.path()).unwrap();
+        let a = RunId::new();
+        // A malformed non-final line makes read_event_log fail.
+        let path = storage::event_log_path(dir.path(), a);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "not json\n{\"also\": \"bad\"}\n").unwrap();
+        st.index_event(1, a, 0).unwrap();
+        let chunk = load_global(&st, dir.path(), 0, false).unwrap();
+        assert!(chunk.items.is_empty());
+        assert_eq!((chunk.max_gseq, chunk.stalled), (0, true));
     }
 }
