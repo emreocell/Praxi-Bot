@@ -152,6 +152,7 @@ pub type UsageMap = BTreeMap<String, UsageStats>;
 
 /// Read the usage file; missing or corrupt files yield an empty map (counters
 /// are advisory and must never block the hub).
+#[must_use]
 pub fn load_usage(path: &Path) -> UsageMap {
     fs::read_to_string(path)
         .ok()
@@ -160,6 +161,9 @@ pub fn load_usage(path: &Path) -> UsageMap {
 }
 
 /// Write the usage file atomically.
+///
+/// # Errors
+/// Fails on I/O errors during serialization or atomic write.
 pub fn save_usage(path: &Path, usage: &UsageMap) -> Result<(), HubError> {
     let text = serde_json::to_string_pretty(usage)
         .map_err(|e| HubError::Lock(format!("serialize: {e}")))?;

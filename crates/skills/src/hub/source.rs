@@ -140,7 +140,14 @@ impl GitBackend for GitCli {
         git(dest, &["remote", "add", "origin", url])?;
         git(
             dest,
-            &["fetch", "--quiet", "--depth", "1", "origin", rev.unwrap_or("HEAD")],
+            &[
+                "fetch",
+                "--quiet",
+                "--depth",
+                "1",
+                "origin",
+                rev.unwrap_or("HEAD"),
+            ],
         )?;
         git(dest, &["checkout", "--quiet", "--detach", "FETCH_HEAD"])?;
         git(dest, &["rev-parse", "HEAD"])

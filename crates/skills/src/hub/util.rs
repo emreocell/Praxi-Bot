@@ -37,6 +37,7 @@ pub fn hex(bytes: &[u8]) -> String {
 }
 
 /// SHA-256 of `bytes` as lowercase hex.
+#[allow(dead_code)] // Kept for future debugging/inspection tools
 pub fn sha256_hex(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
 }
@@ -115,7 +116,9 @@ fn walk_inner(
                 size: meta.len(),
             });
         } else {
-            return Err(HubError::Unsafe(format!("special file `{rel}` is not allowed")));
+            return Err(HubError::Unsafe(format!(
+                "special file `{rel}` is not allowed"
+            )));
         }
     }
     Ok(())

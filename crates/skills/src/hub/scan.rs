@@ -171,7 +171,12 @@ const RULES: &[Rule] = &[
     ("cmd /c", Script, Warn, "runs a cmd command string"),
     ("powershell -", Script, Warn, "invokes PowerShell"),
     ("start-process", Script, Warn, "starts a process"),
-    ("os.system(", Script, Warn, "runs shell commands from Python"),
+    (
+        "os.system(",
+        Script,
+        Warn,
+        "runs shell commands from Python",
+    ),
     ("subprocess.", Script, Warn, "spawns processes from Python"),
     ("child_process", Script, Warn, "spawns processes from Node"),
     ("eval(", Script, Warn, "evaluates dynamic code"),
@@ -181,7 +186,12 @@ const RULES: &[Rule] = &[
     ("reg add", Script, Warn, "modifies the registry"),
     ("```bash", Script, Info, "contains a shell code block"),
     ("```sh", Script, Info, "contains a shell code block"),
-    ("```powershell", Script, Info, "contains a PowerShell code block"),
+    (
+        "```powershell",
+        Script,
+        Info,
+        "contains a PowerShell code block",
+    ),
     ("```cmd", Script, Info, "contains a cmd code block"),
     // Network.
     ("curl ", Network, Warn, "uses curl"),
@@ -190,7 +200,12 @@ const RULES: &[Rule] = &[
     ("invoke-restmethod", Network, Warn, "uses Invoke-RestMethod"),
     ("netcat", Network, Warn, "uses netcat"),
     ("nc -e", Network, High, "netcat with command execution"),
-    ("/dev/tcp/", Network, High, "opens a raw TCP socket from the shell"),
+    (
+        "/dev/tcp/",
+        Network,
+        High,
+        "opens a raw TCP socket from the shell",
+    ),
     ("requests.post", Network, Warn, "sends HTTP requests"),
     ("requests.get", Network, Warn, "sends HTTP requests"),
     ("urllib", Network, Warn, "uses urllib"),
@@ -201,18 +216,48 @@ const RULES: &[Rule] = &[
     ("https://", Network, Info, "references a URL"),
     // Obfuscation.
     ("base64 -d", Obfuscation, Warn, "decodes base64 in a shell"),
-    ("base64 --decode", Obfuscation, Warn, "decodes base64 in a shell"),
-    ("frombase64string", Obfuscation, Warn, "decodes base64 in PowerShell"),
+    (
+        "base64 --decode",
+        Obfuscation,
+        Warn,
+        "decodes base64 in a shell",
+    ),
+    (
+        "frombase64string",
+        Obfuscation,
+        Warn,
+        "decodes base64 in PowerShell",
+    ),
     ("atob(", Obfuscation, Warn, "decodes base64 in JavaScript"),
     ("b64decode", Obfuscation, Warn, "decodes base64 in Python"),
-    ("fromcharcode", Obfuscation, Warn, "builds text from char codes"),
+    (
+        "fromcharcode",
+        Obfuscation,
+        Warn,
+        "builds text from char codes",
+    ),
     // Credential stores.
     (".ssh/", Credential, Warn, "references SSH keys"),
     ("id_rsa", Credential, Warn, "references an SSH private key"),
-    (".aws/credentials", Credential, High, "references AWS credentials"),
+    (
+        ".aws/credentials",
+        Credential,
+        High,
+        "references AWS credentials",
+    ),
     (".netrc", Credential, Warn, "references .netrc"),
-    ("login data", Credential, Warn, "references a browser password store"),
-    ("cookies.sqlite", Credential, Warn, "references browser cookies"),
+    (
+        "login data",
+        Credential,
+        Warn,
+        "references a browser password store",
+    ),
+    (
+        "cookies.sqlite",
+        Credential,
+        Warn,
+        "references browser cookies",
+    ),
     ("wallet.dat", Credential, High, "references a crypto wallet"),
     // Prompt injection.
     ("ignore previous instructions", Injection, High, IGNORE),
@@ -383,12 +428,7 @@ fn scan_text(file: &str, text: &str, out: &mut Vec<Finding>) {
             );
         }
         if lower.matches("\\x").count() >= 8 || lower.matches("\\u00").count() >= 8 {
-            c.add(
-                Obfuscation,
-                Warn,
-                n,
-                "contains many escaped byte sequences",
-            );
+            c.add(Obfuscation, Warn, n, "contains many escaped byte sequences");
         }
         if line.chars().any(is_invisible) {
             c.add(

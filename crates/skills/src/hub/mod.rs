@@ -222,11 +222,10 @@ impl SkillHub {
         let (root, spec, pin, expect) = self.stage(source, staging.path())?;
 
         let skill_md = root.join(SKILL_FILE);
-        let text = fs::read_to_string(&skill_md).map_err(|e| {
-            HubError::InvalidSkill(format!("cannot read {SKILL_FILE}: {e}"))
-        })?;
-        let skill = skill::parse_skill(&text, skill::Source::User, None)
-            .map_err(HubError::InvalidSkill)?;
+        let text = fs::read_to_string(&skill_md)
+            .map_err(|e| HubError::InvalidSkill(format!("cannot read {SKILL_FILE}: {e}")))?;
+        let skill =
+            skill::parse_skill(&text, skill::Source::User, None).map_err(HubError::InvalidSkill)?;
         let report = scan_dir(&root)?;
         if let Some(expected) = expect
             && !expected.eq_ignore_ascii_case(&report.fingerprint)
@@ -254,11 +253,7 @@ impl SkillHub {
     /// [`HubError::NotAccepted`] when the report needs acceptance and
     /// `opts.accept` does not equal its fingerprint; [`HubError::AlreadyInstalled`];
     /// I/O and lockfile failures.
-    pub fn install(
-        &self,
-        preview: Preview,
-        opts: &InstallOptions,
-    ) -> Result<LockEntry, HubError> {
+    pub fn install(&self, preview: &Preview, opts: &InstallOptions) -> Result<LockEntry, HubError> {
         if preview.report.requires_acceptance()
             && opts.accept.as_deref() != Some(preview.report.fingerprint.as_str())
         {
@@ -267,7 +262,7 @@ impl SkillHub {
                 report: preview.report.render(),
             });
         }
-        self.commit(&preview, opts.replace)
+        self.commit(preview, opts.replace)
     }
 
     /// Re-fetch the skill from its recorded source. Returns `None` when the
@@ -323,6 +318,7 @@ impl SkillHub {
     ///
     /// # Errors
     /// Only lockfile read failures; per-skill failures are in the result.
+    #[allow(clippy::type_complexity)]
     pub fn sync(&self) -> Result<Vec<(String, Result<LockEntry, HubError>)>, HubError> {
         let lock = LockFile::load(&self.paths.lock_file)?;
         Ok(lock
@@ -439,7 +435,8 @@ impl SkillHub {
                 Ok((root, spec, None, None))
             }
             InstallSource::Git { url, rev, subdir } => {
-                let (root, pin) = self.clone_repo(url, rev.as_deref(), subdir.as_deref(), staging)?;
+                let (root, pin) =
+                    self.clone_repo(url, rev.as_deref(), subdir.as_deref(), staging)?;
                 let spec = SourceSpec::Git {
                     url: url.clone(),
                     rev: rev.clone(),
