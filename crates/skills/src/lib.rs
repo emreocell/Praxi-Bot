@@ -8,6 +8,9 @@
 //! Sources, later overriding earlier by `name`: bundled (repo `skills/`),
 //! user (`<data_dir>/skills/`), per-bot (`<data_dir>/bots/<id>/skills/`).
 //!
+//! Third-party skills are installed, scanned, locked and updated through
+//! [`hub::SkillHub`].
+//!
 //! # Wiring (agent-core)
 //! ```ignore
 //! let skills = skills::SkillIndex::load(skills::SkillPaths::from_data_dir(&data_dir, Some(bot_id)));
@@ -18,6 +21,7 @@
 
 mod bundled;
 mod frontmatter;
+pub mod hub;
 mod index;
 mod skill;
 mod tools;
