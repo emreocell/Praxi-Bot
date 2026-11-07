@@ -1003,7 +1003,7 @@
         "tags": [
           "mcp"
         ],
-        "summary": "All configured MCP servers with their live status.",
+        "summary": "All configured MCP servers with their live status and full config.\nSecret values are never included; `secret_env` and `secret_headers` list\nsecret names.",
         "operationId": "list_mcp_servers",
         "responses": {
           "200": {
@@ -1106,7 +1106,7 @@
         "tags": [
           "mcp"
         ],
-        "summary": "Replace the config of a server (it reconnects) and save `mcp.toml`.",
+        "summary": "Merge a partial config onto the stored server (it reconnects) and save\n`mcp.toml`.  Omitted fields keep their previous values.  `bots: null`\nmeans every bot.  Secret values are never accepted or returned; send\nsecret **names** in `secret_env` / `secret_headers`.",
         "operationId": "update_mcp_server",
         "parameters": [
           {
@@ -1123,7 +1123,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/McpServerInput"
+                "$ref": "#/components/schemas/McpServerPatch"
               }
             }
           },
@@ -3224,7 +3224,7 @@
       },
       "McpServerDto": {
         "type": "object",
-        "description": "A configured MCP server (`GET /v1/mcp/servers`).  Secret *values* never\nappear; secrets are referenced by name only.",
+        "description": "A configured MCP server (`GET /v1/mcp/servers`).  The full stored config,\nexcept secret *values*: `secret_env` / `secret_headers` carry secret\n**names** only.",
         "required": [
           "name",
           "transport",
@@ -3266,9 +3266,26 @@
             ],
             "description": "Executable (stdio)."
           },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Working directory (stdio)."
+          },
           "enabled": {
             "type": "boolean",
             "description": "Disabled servers are kept but never connected."
+          },
+          "env": {
+            "type": "object",
+            "description": "Plain environment variables (stdio). Not secrets.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
           },
           "error": {
             "type": [
@@ -3277,19 +3294,63 @@
             ],
             "description": "Most recent error, if any."
           },
+          "headers": {
+            "type": "object",
+            "description": "Plain request headers (http). Not secrets.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
           "name": {
             "type": "string",
             "description": "Server name (the `<server>` of `mcp:<server>/<tool>`)."
           },
+          "secret_env": {
+            "type": "object",
+            "description": "Environment variable -> secret name (stdio).",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "secret_headers": {
+            "type": "object",
+            "description": "HTTP header -> secret name (http).",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
           "status": {
             "$ref": "#/components/schemas/McpStatus",
             "description": "Connection state."
+          },
+          "tool_allow": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Glob allow list over server-side tool names; empty = all."
           },
           "tool_count": {
             "type": "integer",
             "format": "int32",
             "description": "Number of tools currently registered.",
             "minimum": 0
+          },
+          "tool_exclude": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Glob exclude list over server-side tool names."
           },
           "transport": {
             "$ref": "#/components/schemas/McpTransportKind",
@@ -3310,7 +3371,7 @@
       },
       "McpServerInput": {
         "type": "object",
-        "description": "Body of `POST /v1/mcp/servers` and `PUT /v1/mcp/servers/{name}`: the\n`mcp-bridge` server config.  Secrets go in `secret_headers` / `secret_env`\nas secret **names** (store the value with `POST /v1/secrets/{name}`).",
+        "description": "Body of `POST /v1/mcp/servers`: the `mcp-bridge` server config.  Secrets go\nin `secret_headers` / `secret_env` as secret **names** (store the value with\n`POST /v1/secrets/{name}`).",
         "required": [
           "transport"
         ],
@@ -3438,6 +3499,164 @@
               "null"
             ],
             "description": "Endpoint (http, with `transport: \"http\"`)."
+          }
+        }
+      },
+      "McpServerPatch": {
+        "type": "object",
+        "description": "Body of `PUT /v1/mcp/servers/{name}`.  Every field is optional: a field left\nout keeps the stored value.  `bots: null` means every bot.  The handler\nreads the raw JSON so an omitted field is not the same as `null`.",
+        "properties": {
+          "args": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Arguments (stdio)."
+          },
+          "bots": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Bots that may use the server.  Omit to keep the list; `null` = all bots."
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Permission category of the tools; `null` clears it; `meta` is rejected."
+          },
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Executable (stdio)."
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Working directory (stdio).  `null` clears it."
+          },
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Disabled servers are kept but never connected."
+          },
+          "env": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Plain environment variables (stdio).  Present object replaces the map.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "headers": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Plain request headers (http).  Present object replaces the map.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Server name; `id` is accepted as an alias.  The path wins (a different\nname in the body is rejected)."
+          },
+          "secret_env": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Environment variable -> secret name.  Present object replaces the map.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "secret_headers": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "HTTP header -> secret name.  Present object replaces the map.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "tool_allow": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Glob allow list over server-side tool names; empty = all."
+          },
+          "tool_exclude": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Glob exclude list over server-side tool names."
+          },
+          "transport": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/McpTransportInput",
+                "description": "Transport (see [`McpTransportInput`]).  Omit to keep the stored transport."
+              }
+            ]
+          },
+          "trust_hints": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Believe the readOnlyHint annotations of the server."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Endpoint (http)."
           }
         }
       },

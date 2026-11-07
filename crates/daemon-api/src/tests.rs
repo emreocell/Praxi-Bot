@@ -1544,15 +1544,21 @@ async fn control_routes_validate_and_report_the_registration() {
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
 }
 
+/// One run: observe, then click `index` with that observation's generation.
+/// Desktop state is per run, so the click cannot reuse an earlier message.
+fn click_after_state(index: u32) -> String {
+    format!("call:desktop_get_state {{}}\ncall:desktop_click {{\"index\": {index}, \"gen\": $gen}}")
+}
+
 #[tokio::test]
 async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
     let (t, desktop) = setup_desktop();
     let (_, chat) = make_chat(&t).await;
-    let r = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
-    assert!(r.contains("Button 2"), "{r}");
+    let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
+    assert!(state.contains("Button 2"), "{state}");
 
     // Nobody registered: the click just runs.
-    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 2}"#).await;
+    let r = run_and_reply(&t, &chat, &click_after_state(2)).await;
     assert!(r.contains("dispatched"), "{r}");
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
 
@@ -1564,9 +1570,9 @@ async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
         Some(json!({"mode": "human_driving"})),
     )
     .await;
-    let r = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
-    assert!(r.contains("Button 2"), "reads are not gated: {r}");
-    let (r, events) = run_and_reply_seen(&t, &chat, r#"call:desktop_click {"index": 3}"#).await;
+    let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
+    assert!(state.contains("Button 2"), "reads are not gated: {state}");
+    let (r, events) = run_and_reply_seen(&t, &chat, &click_after_state(3)).await;
     assert!(r.contains("taken control of the desktop"), "{r}");
     // "At once" means no round trip to the app (which would have emitted a
     // `control_requested` and waited for its answer), not a wall-clock bound.
@@ -1589,9 +1595,9 @@ async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
     )
     .await;
     // Registered but silent: refused after the long timeout (600 ms here).
-    let r = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
-    assert!(r.contains("Button"), "{r}");
-    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 3}"#).await;
+    let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
+    assert!(state.contains("Button"), "{state}");
+    let r = run_and_reply(&t, &chat, &click_after_state(3)).await;
     assert!(r.contains("did not confirm"), "{r}");
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
@@ -1639,8 +1645,7 @@ async fn a_registered_app_confirms_each_click_before_it_runs() {
     )
     .await;
     let seen = auto_answer(&t, "proceed", None);
-    run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
-    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 2}"#).await;
+    let r = run_and_reply(&t, &chat, &click_after_state(2)).await;
     assert!(r.contains("dispatched"), "{r}");
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
 
@@ -1664,8 +1669,7 @@ async fn an_app_refusal_reaches_the_model_and_nothing_is_dispatched() {
     )
     .await;
     let _seen = auto_answer(&t, "refuse", Some("the user pressed Stop"));
-    run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
-    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 1}"#).await;
+    let r = run_and_reply(&t, &chat, &click_after_state(1)).await;
     assert!(r.contains("the user pressed Stop"), "{r}");
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 0);
 }

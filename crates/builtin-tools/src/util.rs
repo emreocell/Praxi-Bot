@@ -115,6 +115,7 @@ mod tests {
         let ctx = ToolContext {
             run_id: String::new(),
             max_inline_bytes: 1001,
+            bot_id: None,
         };
         let text = "é".repeat(2000);
         let out = finish_text(&ctx, dir.path(), text.clone());
@@ -147,6 +148,7 @@ mod tests {
                 let ctx = ToolContext {
                     run_id: String::new(),
                     max_inline_bytes: max,
+                    bot_id: None,
                 };
                 let out = finish_text(&ctx, dir.path(), text.clone());
                 assert!(out.spill.is_some());
@@ -165,6 +167,7 @@ mod tests {
         let ctx = ToolContext {
             run_id: String::new(),
             max_inline_bytes: 100,
+            bot_id: None,
         };
         let out = finish_text(&ctx, &blocker.join("sub"), "é".repeat(500));
         assert!(out.spill.is_none());

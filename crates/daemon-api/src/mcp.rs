@@ -37,8 +37,9 @@ pub enum McpStatus {
     Quarantined,
 }
 
-/// A configured MCP server (`GET /v1/mcp/servers`).  Secret *values* never
-/// appear; secrets are referenced by name only.
+/// A configured MCP server (`GET /v1/mcp/servers`).  The full stored config,
+/// except secret *values*: `secret_env` / `secret_headers` carry secret
+/// **names** only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct McpServerDto {
     /// Server name (the `<server>` of `mcp:<server>/<tool>`).
@@ -54,6 +55,27 @@ pub struct McpServerDto {
     /// Endpoint (http).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// Plain environment variables (stdio). Not secrets.
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    /// Working directory (stdio).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    /// Plain request headers (http). Not secrets.
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+    /// Glob allow list over server-side tool names; empty = all.
+    #[serde(default)]
+    pub tool_allow: Vec<String>,
+    /// Glob exclude list over server-side tool names.
+    #[serde(default)]
+    pub tool_exclude: Vec<String>,
+    /// Environment variable -> secret name (stdio).
+    #[serde(default)]
+    pub secret_env: BTreeMap<String, String>,
+    /// HTTP header -> secret name (http).
+    #[serde(default)]
+    pub secret_headers: BTreeMap<String, String>,
     /// Disabled servers are kept but never connected.
     pub enabled: bool,
     /// Connection state.
@@ -111,9 +133,9 @@ pub enum McpTransportInput {
     Object(McpTransportObject),
 }
 
-/// Body of `POST /v1/mcp/servers` and `PUT /v1/mcp/servers/{name}`: the
-/// `mcp-bridge` server config.  Secrets go in `secret_headers` / `secret_env`
-/// as secret **names** (store the value with `POST /v1/secrets/{name}`).
+/// Body of `POST /v1/mcp/servers`: the `mcp-bridge` server config.  Secrets go
+/// in `secret_headers` / `secret_env` as secret **names** (store the value with
+/// `POST /v1/secrets/{name}`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct McpServerInput {
     /// Server name; `id` is accepted as an alias.  Required on POST; on PUT the
@@ -163,6 +185,65 @@ pub struct McpServerInput {
     pub secret_env: BTreeMap<String, String>,
     /// Bots that may use the server; absent / `null` = all bots.
     #[serde(default)]
+    pub bots: Option<Vec<String>>,
+}
+
+/// Body of `PUT /v1/mcp/servers/{name}`.  Every field is optional: a field left
+/// out keeps the stored value.  `bots: null` means every bot.  The handler
+/// reads the raw JSON so an omitted field is not the same as `null`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, ToSchema)]
+pub struct McpServerPatch {
+    /// Server name; `id` is accepted as an alias.  The path wins (a different
+    /// name in the body is rejected).
+    #[serde(default, alias = "id")]
+    pub name: Option<String>,
+    /// Transport (see [`McpTransportInput`]).  Omit to keep the stored transport.
+    #[serde(default)]
+    pub transport: Option<McpTransportInput>,
+    /// Executable (stdio).
+    #[serde(default)]
+    pub command: Option<String>,
+    /// Arguments (stdio).
+    #[serde(default)]
+    pub args: Option<Vec<String>>,
+    /// Endpoint (http).
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Plain environment variables (stdio).  Present object replaces the map.
+    #[serde(default)]
+    pub env: Option<BTreeMap<String, String>>,
+    /// Working directory (stdio).  `null` clears it.
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub cwd: Option<String>,
+    /// Plain request headers (http).  Present object replaces the map.
+    #[serde(default)]
+    pub headers: Option<BTreeMap<String, String>>,
+    /// Disabled servers are kept but never connected.
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    /// Glob allow list over server-side tool names; empty = all.
+    #[serde(default)]
+    pub tool_allow: Option<Vec<String>>,
+    /// Glob exclude list over server-side tool names.
+    #[serde(default)]
+    pub tool_exclude: Option<Vec<String>>,
+    /// Believe the readOnlyHint annotations of the server.
+    #[serde(default)]
+    pub trust_hints: Option<bool>,
+    /// Permission category of the tools; `null` clears it; `meta` is rejected.
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub category: Option<String>,
+    /// HTTP header -> secret name.  Present object replaces the map.
+    #[serde(default)]
+    pub secret_headers: Option<BTreeMap<String, String>>,
+    /// Environment variable -> secret name.  Present object replaces the map.
+    #[serde(default)]
+    pub secret_env: Option<BTreeMap<String, String>>,
+    /// Bots that may use the server.  Omit to keep the list; `null` = all bots.
+    #[serde(default)]
+    #[schema(nullable = true)]
     pub bots: Option<Vec<String>>,
 }
 
@@ -299,14 +380,16 @@ pub trait McpControl: Send + Sync {
     /// # Errors
     /// [`McpControlError`].
     async fn add(&self, input: McpServerInput) -> Result<McpServerDto, McpControlError>;
-    /// Replace the config of server `name` (reconnecting it), then persist.
+    /// Merge `patch` onto the stored config of server `name` (omitted fields
+    /// keep their previous values; `bots: null` means all bots), reconnect,
+    /// then persist.
     ///
     /// # Errors
     /// [`McpControlError`].
     async fn update(
         &self,
         name: &str,
-        input: McpServerInput,
+        patch: serde_json::Value,
     ) -> Result<McpServerDto, McpControlError>;
     /// Disconnect and forget a server, then persist.
     ///

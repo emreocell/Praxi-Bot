@@ -40,7 +40,7 @@ const FILE_HEADER: &str = "\
 # [server.transport]\n\
 # type = \"stdio\"\n\
 # command = \"npx\"\n\
-# args = [\"-y\", \"@modelcontextprotocol/server-filesystem\", \".\"]\n\
+# args = [\"-y\", \"@modelcontextprotocol/server-filesystem@2.2.0\", \".\"]\n\
 # [server.secret_env]\n\
 # API_KEY = \"mcp/files-key\"   # name of a secret, never its value\n";
 
@@ -202,16 +202,30 @@ impl McpHost {
 
     fn dto(&self, cfg: &McpServerConfig) -> McpServerDto {
         let snap = self.snapshot(&cfg.id);
-        let (transport, command, args, url) = match &cfg.transport {
-            McpTransport::Stdio { command, args, .. } => (
+        let (transport, command, args, url, env, cwd, headers) = match &cfg.transport {
+            McpTransport::Stdio {
+                command,
+                args,
+                env,
+                cwd,
+            } => (
                 McpTransportKind::Stdio,
                 Some(command.clone()),
                 Some(args.clone()),
                 None,
+                env.clone(),
+                cwd.as_ref().map(|p| p.display().to_string()),
+                BTreeMap::new(),
             ),
-            McpTransport::Http { url, .. } => {
-                (McpTransportKind::Http, None, None, Some(url.clone()))
-            }
+            McpTransport::Http { url, headers } => (
+                McpTransportKind::Http,
+                None,
+                None,
+                Some(url.clone()),
+                BTreeMap::new(),
+                None,
+                headers.clone(),
+            ),
         };
         McpServerDto {
             name: cfg.id.clone(),
@@ -219,6 +233,13 @@ impl McpHost {
             command,
             args,
             url,
+            env,
+            cwd,
+            headers,
+            tool_allow: cfg.tool_allow.clone(),
+            tool_exclude: cfg.tool_exclude.clone(),
+            secret_env: cfg.secret_env.clone(),
+            secret_headers: cfg.secret_headers.clone(),
             enabled: cfg.enabled,
             status: self.status_of(&cfg.id),
             error: snap.as_ref().and_then(|s| s.last_error.clone()),
@@ -303,6 +324,196 @@ fn map_err(e: McpError) -> McpControlError {
         McpError::UnknownServer(n) => McpControlError::NotFound(format!("mcp server {n}")),
         other => McpControlError::Internal(other.to_string()),
     }
+}
+
+fn invalid(m: impl Into<String>) -> McpControlError {
+    McpControlError::Invalid(m.into())
+}
+
+fn json_str(v: &serde_json::Value, field: &str) -> Result<String, McpControlError> {
+    v.as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| invalid(format!("`{field}` must be a string")))
+}
+
+fn json_bool(v: &serde_json::Value, field: &str) -> Result<bool, McpControlError> {
+    v.as_bool()
+        .ok_or_else(|| invalid(format!("`{field}` must be a boolean")))
+}
+
+fn json_strings(v: &serde_json::Value, field: &str) -> Result<Vec<String>, McpControlError> {
+    let arr = v
+        .as_array()
+        .ok_or_else(|| invalid(format!("`{field}` must be an array of strings")))?;
+    arr.iter()
+        .map(|item| {
+            item.as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| invalid(format!("`{field}` must be an array of strings")))
+        })
+        .collect()
+}
+
+fn json_map(
+    v: &serde_json::Value,
+    field: &str,
+) -> Result<BTreeMap<String, String>, McpControlError> {
+    let obj = v
+        .as_object()
+        .ok_or_else(|| invalid(format!("`{field}` must be an object of strings")))?;
+    let mut out = BTreeMap::new();
+    for (k, val) in obj {
+        let s = val
+            .as_str()
+            .ok_or_else(|| invalid(format!("`{field}.{k}` must be a string")))?;
+        out.insert(k.clone(), s.to_owned());
+    }
+    Ok(out)
+}
+
+fn apply_transport_fields(
+    cfg: &mut McpServerConfig,
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), McpControlError> {
+    match &mut cfg.transport {
+        McpTransport::Stdio {
+            command,
+            args,
+            env,
+            cwd,
+        } => {
+            if let Some(v) = obj.get("command") {
+                *command = json_str(v, "command")?;
+            }
+            if let Some(v) = obj.get("args") {
+                *args = json_strings(v, "args")?;
+            }
+            if let Some(v) = obj.get("env") {
+                *env = json_map(v, "env")?;
+            }
+            if let Some(v) = obj.get("cwd") {
+                *cwd = if v.is_null() {
+                    None
+                } else {
+                    Some(json_str(v, "cwd")?.into())
+                };
+            }
+        }
+        McpTransport::Http { url, headers } => {
+            if let Some(v) = obj.get("url") {
+                *url = json_str(v, "url")?;
+            }
+            if let Some(v) = obj.get("headers") {
+                *headers = json_map(v, "headers")?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn set_transport_kind(cfg: &mut McpServerConfig, kind: &str) -> Result<(), McpControlError> {
+    match (kind, &cfg.transport) {
+        ("stdio", McpTransport::Stdio { .. }) | ("http", McpTransport::Http { .. }) => Ok(()),
+        ("stdio", McpTransport::Http { .. }) => {
+            cfg.transport = McpTransport::Stdio {
+                command: String::new(),
+                args: Vec::new(),
+                env: BTreeMap::new(),
+                cwd: None,
+            };
+            cfg.secret_headers.clear();
+            Ok(())
+        }
+        ("http", McpTransport::Stdio { .. }) => {
+            cfg.transport = McpTransport::Http {
+                url: String::new(),
+                headers: BTreeMap::new(),
+            };
+            cfg.secret_env.clear();
+            Ok(())
+        }
+        _ => Err(invalid(format!("unknown transport `{kind}`"))),
+    }
+}
+
+/// Merge a PUT body onto `prev`. Keys that are absent keep the stored value.
+/// `bots: null` clears the allowlist (every bot).
+fn merge_update(
+    prev: &McpServerConfig,
+    patch: &serde_json::Value,
+) -> Result<McpServerConfig, McpControlError> {
+    let obj = patch
+        .as_object()
+        .ok_or_else(|| invalid("body must be a JSON object"))?;
+    if let Some(name) = obj.get("name").or_else(|| obj.get("id"))
+        && !name.is_null()
+    {
+        let name = json_str(name, "name")?;
+        if name != prev.id {
+            return Err(invalid(
+                "the name in the body differs from the one in the path; delete and add to rename",
+            ));
+        }
+    }
+    let mut cfg = prev.clone();
+    if let Some(transport) = obj.get("transport") {
+        match transport {
+            serde_json::Value::String(kind) => set_transport_kind(&mut cfg, kind)?,
+            serde_json::Value::Object(inner) => {
+                let kind = inner
+                    .get("type")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| invalid("transport.type is required"))?;
+                set_transport_kind(&mut cfg, kind)?;
+                apply_transport_fields(&mut cfg, inner)?;
+            }
+            serde_json::Value::Null => return Err(invalid("transport cannot be null")),
+            _ => {
+                return Err(invalid(
+                    "transport must be \"stdio\", \"http\", or an object",
+                ));
+            }
+        }
+    }
+    apply_transport_fields(&mut cfg, obj)?;
+    if let Some(v) = obj.get("enabled") {
+        cfg.enabled = json_bool(v, "enabled")?;
+    }
+    if let Some(v) = obj.get("tool_allow") {
+        cfg.tool_allow = json_strings(v, "tool_allow")?;
+    }
+    if let Some(v) = obj.get("tool_exclude") {
+        cfg.tool_exclude = json_strings(v, "tool_exclude")?;
+    }
+    if let Some(v) = obj.get("trust_hints") {
+        cfg.trust_hints = json_bool(v, "trust_hints")?;
+    }
+    if let Some(v) = obj.get("category") {
+        cfg.category = if v.is_null() {
+            None
+        } else {
+            let c = json_str(v, "category")?;
+            Some(
+                serde_json::from_value(serde_json::Value::String(c.clone()))
+                    .map_err(|_| invalid(format!("unknown category `{c}`")))?,
+            )
+        };
+    }
+    if let Some(v) = obj.get("secret_headers") {
+        cfg.secret_headers = json_map(v, "secret_headers")?;
+    }
+    if let Some(v) = obj.get("secret_env") {
+        cfg.secret_env = json_map(v, "secret_env")?;
+    }
+    if let Some(v) = obj.get("bots") {
+        cfg.bots = if v.is_null() {
+            None
+        } else {
+            Some(json_strings(v, "bots")?)
+        };
+    }
+    cfg.validate().map_err(map_err)?;
+    Ok(cfg)
 }
 
 /// Turn an API body into a validated bridge config.
@@ -426,18 +637,13 @@ impl McpControl for McpHost {
     async fn update(
         &self,
         name: &str,
-        input: McpServerInput,
+        input: serde_json::Value,
     ) -> Result<McpServerDto, McpControlError> {
         let _op = self.ops.lock().await;
         self.check_writable()?;
         self.config_of(name)?;
-        if input.name.as_deref().is_some_and(|n| n != name) {
-            return Err(McpControlError::Invalid(
-                "the name in the body differs from the one in the path; delete and add to rename"
-                    .into(),
-            ));
-        }
-        let cfg = to_config(name, input)?;
+        let prev = self.config_of(name)?;
+        let cfg = merge_update(&prev, &input)?;
         self.persist(|m| {
             m.insert(name.to_owned(), cfg.clone());
         })?;
@@ -655,9 +861,12 @@ mod tests {
             McpControlError::Conflict(_)
         ));
         assert!(matches!(
-            host.update("alpha", stdio("other", false))
-                .await
-                .unwrap_err(),
+            host.update(
+                "alpha",
+                serde_json::to_value(stdio("other", false)).unwrap()
+            )
+            .await
+            .unwrap_err(),
             McpControlError::Invalid(_)
         ));
 
@@ -714,18 +923,135 @@ mod tests {
         let mut upd = stdio("zeta", false);
         upd.trust_hints = true;
         upd.bots = Some(vec!["bot-a".into()]);
-        let updated = host.update("zeta", upd).await.unwrap();
+        let updated = host
+            .update("zeta", serde_json::to_value(upd).unwrap())
+            .await
+            .unwrap();
         assert!(updated.trust_hints);
         assert_eq!(events_of(&mut rx).await, vec![McpStatus::Disconnected]);
 
         host.shutdown().await;
         let again = open(dir.path());
-        let zeta = again.list().into_iter().find(|s| s.name == "zeta").unwrap();
+        assert_reloaded_zeta(&again.list());
+        again.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn put_merges_and_get_returns_config_without_secret_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = open(dir.path());
+        let body: McpServerInput = serde_json::from_value(json!({
+            "name": "files",
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "@scope/pkg@1.2.3"],
+            "env": {"PLAIN": "visible"},
+            "cwd": "work",
+            "tool_allow": ["read_*"],
+            "tool_exclude": ["read_secret"],
+            "secret_env": {"API_KEY": "mcp/files-key"},
+            "category": "fs",
+            "bots": ["bot-a"],
+            "enabled": false,
+        }))
+        .unwrap();
+        let dto = host.add(body).await.unwrap();
+        assert_eq!(dto.tool_allow, ["read_*"]);
+        assert_eq!(dto.tool_exclude, ["read_secret"]);
+        assert_eq!(dto.env.get("PLAIN").map(String::as_str), Some("visible"));
+        assert_eq!(dto.cwd.as_deref(), Some("work"));
+        assert_eq!(
+            dto.secret_env.get("API_KEY").map(String::as_str),
+            Some("mcp/files-key")
+        );
+        assert!(dto.secret_headers.is_empty());
+
+        let updated = host
+            .update("files", json!({"trust_hints": true}))
+            .await
+            .unwrap();
+        assert!(updated.trust_hints);
+        assert_eq!(updated.command.as_deref(), Some("npx"));
+        assert_eq!(
+            updated.args.clone().unwrap(),
+            ["-y".to_owned(), "@scope/pkg@1.2.3".to_owned()]
+        );
+        assert_eq!(updated.tool_allow, ["read_*"]);
+        assert_eq!(updated.tool_exclude, ["read_secret"]);
+        assert_eq!(
+            updated.env.get("PLAIN").map(String::as_str),
+            Some("visible")
+        );
+        assert_eq!(updated.cwd.as_deref(), Some("work"));
+        assert_eq!(
+            updated.secret_env.get("API_KEY").map(String::as_str),
+            Some("mcp/files-key")
+        );
+        assert_eq!(
+            updated.bots.as_deref(),
+            Some(["bot-a".to_owned()].as_slice())
+        );
+        assert!(!updated.enabled);
+        assert_eq!(updated.category, "fs");
+
+        let cleared = host.update("files", json!({"bots": null})).await.unwrap();
+        assert!(cleared.bots.is_none());
+        assert_eq!(cleared.tool_allow, ["read_*"]);
+
+        let bad = host
+            .update("files", json!({"command": "rm", "args": ["-rf", "/"]}))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(bad, McpControlError::Invalid(ref m) if m.contains("never-list")),
+            "{bad:?}"
+        );
+        let still = host.list().into_iter().find(|s| s.name == "files").unwrap();
+        assert_eq!(still.command.as_deref(), Some("npx"));
+        host.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn dangerous_stdio_is_refused_and_mcp_toml_is_not_executed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(MCP_FILE);
+        std::fs::write(
+            &path,
+            "[[server]]\nid = \"evil\"\n[server.transport]\ntype = \"stdio\"\ncommand = \"rm\"\nargs = [\"-rf\", \"/\"]\n",
+        )
+        .unwrap();
+        let host = open(dir.path());
+        assert_eq!(host.list().len(), 0);
+        let err = host.add(stdio("ok", false)).await.unwrap_err();
+        assert!(matches!(err, McpControlError::Internal(_)), "{err:?}");
+        assert!(std::fs::read_to_string(&path).unwrap().contains("evil"));
+        host.shutdown().await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let host = open(dir.path());
+        let evil: McpServerInput = serde_json::from_value(json!({
+            "name": "evil",
+            "transport": "stdio",
+            "command": "rm",
+            "args": ["-rf", "/"],
+            "enabled": false,
+        }))
+        .unwrap();
+        let err = host.add(evil).await.unwrap_err();
+        assert!(
+            matches!(err, McpControlError::Invalid(ref m) if m.contains("never-list")),
+            "{err:?}"
+        );
+        assert_eq!(host.list().len(), 0);
+        host.shutdown().await;
+    }
+
+    fn assert_reloaded_zeta(list: &[McpServerDto]) {
+        let zeta = list.iter().find(|s| s.name == "zeta").unwrap();
         assert!(zeta.trust_hints);
         assert!(!zeta.enabled);
         assert_eq!(zeta.bots, Some(vec!["bot-a".to_owned()]));
         assert_eq!(zeta.category, "fs");
-        again.shutdown().await;
     }
 
     #[tokio::test]

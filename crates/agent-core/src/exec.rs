@@ -787,6 +787,7 @@ impl TurnExecutor {
         let tctx = ToolContext {
             run_id: run.id.to_string(),
             max_inline_bytes: g.spill_threshold_bytes,
+            bot_id: Some(run.bot_id.to_string()),
         };
         // Approval (if any) happened before this point, so the clock only
         // covers the tool itself.

@@ -44,6 +44,13 @@ impl FakeMcp {
             command: input.command.clone(),
             args: input.args.clone(),
             url: input.url.clone(),
+            env: input.env.clone(),
+            cwd: input.cwd.clone(),
+            headers: input.headers.clone(),
+            tool_allow: input.tool_allow.clone(),
+            tool_exclude: input.tool_exclude.clone(),
+            secret_env: input.secret_env.clone(),
+            secret_headers: input.secret_headers.clone(),
             enabled: input.enabled.unwrap_or(true),
             status: McpStatus::Connected,
             error: None,
@@ -52,6 +59,60 @@ impl FakeMcp {
             trust_hints: input.trust_hints,
             bots: input.bots.clone(),
         }
+    }
+
+    fn apply_patch(slot: &mut McpServerDto, patch: &Value) -> Result<(), McpControlError> {
+        let obj = patch
+            .as_object()
+            .ok_or_else(|| McpControlError::Invalid("body must be a JSON object".into()))?;
+        let present = |k: &str| obj.contains_key(k);
+        if present("command") {
+            slot.command = obj["command"].as_str().map(str::to_owned);
+        }
+        if present("args") {
+            slot.args = serde_json::from_value(obj["args"].clone()).ok();
+        }
+        if present("url") {
+            slot.url = obj["url"].as_str().map(str::to_owned);
+        }
+        if present("env") {
+            slot.env = serde_json::from_value(obj["env"].clone()).unwrap_or_default();
+        }
+        if present("cwd") {
+            slot.cwd = obj["cwd"].as_str().map(str::to_owned);
+        }
+        if present("headers") {
+            slot.headers = serde_json::from_value(obj["headers"].clone()).unwrap_or_default();
+        }
+        if present("tool_allow") {
+            slot.tool_allow = serde_json::from_value(obj["tool_allow"].clone()).unwrap_or_default();
+        }
+        if present("tool_exclude") {
+            slot.tool_exclude =
+                serde_json::from_value(obj["tool_exclude"].clone()).unwrap_or_default();
+        }
+        if present("secret_env") {
+            slot.secret_env = serde_json::from_value(obj["secret_env"].clone()).unwrap_or_default();
+        }
+        if present("secret_headers") {
+            slot.secret_headers =
+                serde_json::from_value(obj["secret_headers"].clone()).unwrap_or_default();
+        }
+        if present("enabled") {
+            slot.enabled = obj["enabled"].as_bool().unwrap_or(slot.enabled);
+        }
+        if present("trust_hints") {
+            slot.trust_hints = obj["trust_hints"].as_bool().unwrap_or(slot.trust_hints);
+        }
+        if present("category")
+            && let Some(c) = obj["category"].as_str()
+        {
+            slot.category = c.to_owned();
+        }
+        if present("bots") {
+            slot.bots = serde_json::from_value(obj["bots"].clone()).unwrap_or(None);
+        }
+        Ok(())
     }
 
     fn emit(&self, name: &str, status: McpStatus) {
@@ -82,17 +143,13 @@ impl McpControl for FakeMcp {
         self.emit(&name, McpStatus::Connected);
         Ok(dto)
     }
-    async fn update(
-        &self,
-        name: &str,
-        input: McpServerInput,
-    ) -> Result<McpServerDto, McpControlError> {
+    async fn update(&self, name: &str, patch: Value) -> Result<McpServerDto, McpControlError> {
         let mut all = self.servers.lock();
         let slot = all
             .iter_mut()
             .find(|s| s.name == name)
             .ok_or_else(|| McpControlError::NotFound(format!("mcp server {name}")))?;
-        *slot = Self::dto(name, &input);
+        Self::apply_patch(slot, &patch)?;
         let dto = slot.clone();
         drop(all);
         self.emit(name, McpStatus::Connected);
@@ -234,8 +291,14 @@ async fn server_crud_follows_the_contract() {
     assert_eq!(s["trust_hints"], false);
     assert!(s.get("bots").is_some() && s["bots"].is_null());
     assert!(s.get("url").is_none() && s.get("error").is_none());
-    // Secrets are referenced by name only and never echoed.
-    assert!(!r.body.windows(8).any(|w| w == b"some-key"));
+    assert_eq!(s["tool_allow"], json!([]));
+    assert_eq!(s["tool_exclude"], json!([]));
+    assert_eq!(s["env"], json!({}));
+    assert_eq!(s["secret_env"]["API_KEY"], "mcp/some-key");
+    assert_eq!(s["secret_headers"], json!({}));
+    // The secret name is part of the config; a secret value is not.
+    assert!(r.body.windows(12).any(|w| w == b"mcp/some-key"));
+    assert!(!r.body.windows(16).any(|w| w == b"ghp_super_secret"));
 
     // `id` is an alias of `name`; the nested McpServerConfig transport works too.
     let nested = json!({
@@ -268,10 +331,15 @@ async fn server_crud_follows_the_contract() {
     let mut upd = stdio_body("files");
     upd["trust_hints"] = json!(true);
     upd["bots"] = json!(["bot-1"]);
+    upd["tool_allow"] = json!(["read_*"]);
+    upd["cwd"] = json!("work");
     let r = call(&t, Method::PUT, "/v1/mcp/servers/files", Some(upd.clone())).await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
     assert_eq!(r.json()["trust_hints"], true);
     assert_eq!(r.json()["bots"], json!(["bot-1"]));
+    assert_eq!(r.json()["tool_allow"], json!(["read_*"]));
+    assert_eq!(r.json()["cwd"], "work");
+    assert_eq!(r.json()["secret_env"]["API_KEY"], "mcp/some-key");
     let r = call(&t, Method::PUT, "/v1/mcp/servers/nope", Some(upd)).await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
 
@@ -294,6 +362,53 @@ async fn server_crud_follows_the_contract() {
     assert_eq!(r.status, StatusCode::NO_CONTENT);
     let r = call(&t, Method::DELETE, "/v1/mcp/servers/files", None).await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn put_keeps_omitted_fields_and_null_bots_means_all() {
+    let (t, _) = with_mcp();
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/mcp/servers",
+        Some(stdio_body("files")),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    let mut upd = stdio_body("files");
+    upd["trust_hints"] = json!(true);
+    upd["bots"] = json!(["bot-1"]);
+    upd["tool_allow"] = json!(["read_*"]);
+    upd["cwd"] = json!("work");
+    let r = call(&t, Method::PUT, "/v1/mcp/servers/files", Some(upd)).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/mcp/servers/files",
+        Some(json!({"trust_hints": false})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    let kept = r.json();
+    assert_eq!(kept["trust_hints"], false);
+    assert_eq!(kept["command"], "npx");
+    assert_eq!(kept["args"], json!(["-y", "some-server"]));
+    assert_eq!(kept["tool_allow"], json!(["read_*"]));
+    assert_eq!(kept["cwd"], "work");
+    assert_eq!(kept["secret_env"]["API_KEY"], "mcp/some-key");
+    assert_eq!(kept["bots"], json!(["bot-1"]));
+
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/mcp/servers/files",
+        Some(json!({"bots": null})),
+    )
+    .await;
+    assert!(r.json()["bots"].is_null());
+    assert_eq!(r.json()["tool_allow"], json!(["read_*"]));
 }
 
 #[tokio::test]

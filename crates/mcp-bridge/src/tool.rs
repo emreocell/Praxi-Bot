@@ -81,7 +81,8 @@ impl Tool for McpToolAdapter {
         &self.spec
     }
 
-    async fn call(&self, _ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
+    async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
+        ensure_bot_allowed(self.server.config(), ctx)?;
         let arguments = match input {
             Value::Object(map) => Some(map),
             Value::Null => None,
@@ -97,6 +98,28 @@ impl Tool for McpToolAdapter {
             .await
             .map_err(|e| ToolError::Execution(e.to_string()))?;
         into_output(result)
+    }
+}
+
+/// `bots = None` allows every caller. A list allows only those bot ids;
+/// a call with no bot id is refused (it is not on the list).
+pub(crate) fn ensure_bot_allowed(
+    config: &McpServerConfig,
+    ctx: &ToolContext,
+) -> Result<(), ToolError> {
+    let Some(allowed) = &config.bots else {
+        return Ok(());
+    };
+    match ctx.bot_id.as_deref() {
+        Some(id) if allowed.iter().any(|b| b == id) => Ok(()),
+        Some(id) => Err(ToolError::PermissionDenied(format!(
+            "bot `{id}` is not allowed to use MCP server `{}`",
+            config.id
+        ))),
+        None => Err(ToolError::PermissionDenied(format!(
+            "MCP server `{}` is limited to specific bots and this call has no bot id",
+            config.id
+        ))),
     }
 }
 
@@ -160,6 +183,34 @@ mod tests {
             t.annotations = Some(ToolAnnotations::new().read_only(r));
         }
         t
+    }
+
+    #[test]
+    fn bots_allowlist_allows_listed_ids_and_refuses_the_rest() {
+        let mut cfg = McpServerConfig::stdio("srv", "x", [""; 0]);
+        let anon = ToolContext::default();
+        let listed = ToolContext {
+            bot_id: Some("bot-a".into()),
+            ..ToolContext::default()
+        };
+        let other = ToolContext {
+            bot_id: Some("bot-b".into()),
+            ..ToolContext::default()
+        };
+        assert!(ensure_bot_allowed(&cfg, &anon).is_ok());
+        assert!(ensure_bot_allowed(&cfg, &other).is_ok());
+        cfg.bots = Some(vec!["bot-a".into()]);
+        assert!(ensure_bot_allowed(&cfg, &listed).is_ok());
+        let denied = ensure_bot_allowed(&cfg, &other).unwrap_err();
+        assert!(
+            matches!(denied, ToolError::PermissionDenied(ref m) if m.contains("bot-b")),
+            "{denied}"
+        );
+        let anon_denied = ensure_bot_allowed(&cfg, &anon).unwrap_err();
+        assert!(
+            matches!(anon_denied, ToolError::PermissionDenied(_)),
+            "{anon_denied}"
+        );
     }
 
     #[test]

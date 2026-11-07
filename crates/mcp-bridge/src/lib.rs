@@ -34,7 +34,7 @@
 //! [server.transport]
 //! type = "stdio"
 //! command = "npx"
-//! args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
+//! args = ["-y", "@modelcontextprotocol/server-filesystem@2.2.0", "."]
 //! [server.secret_env]
 //! API_KEY = "mcp/files-key"
 //! ```

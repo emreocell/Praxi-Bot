@@ -11,7 +11,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-filesystem",
+        "@modelcontextprotocol/server-filesystem@2.2.0",
         "."
       ],
       "required_secrets": []
@@ -29,7 +29,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-github"
+        "@modelcontextprotocol/server-github@2025.4.8"
       ],
       "secret_env": {
         "GITHUB_PERSONAL_ACCESS_TOKEN": "mcp/github-token"
@@ -55,7 +55,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-gitlab"
+        "@modelcontextprotocol/server-gitlab@2025.4.25"
       ],
       "secret_env": {
         "GITLAB_PERSONAL_ACCESS_TOKEN": "mcp/gitlab-token"
@@ -81,7 +81,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-slack"
+        "@modelcontextprotocol/server-slack@2025.4.25"
       ],
       "secret_env": {
         "SLACK_BOT_TOKEN": "mcp/slack-bot-token",
@@ -113,7 +113,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@notionhq/notion-mcp-server"
+        "@notionhq/notion-mcp-server@2.6.1"
       ],
       "secret_env": {
         "NOTION_TOKEN": "mcp/notion-token"
@@ -139,7 +139,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-gdrive"
+        "@modelcontextprotocol/server-gdrive@2025.1.14"
       ],
       "required_secrets": []
     }
@@ -155,7 +155,7 @@
       "transport": "stdio",
       "command": "uvx",
       "args": [
-        "postgres-mcp",
+        "postgres-mcp==0.3.0",
         "--access-mode=restricted"
       ],
       "secret_env": {
@@ -180,7 +180,7 @@
       "transport": "stdio",
       "command": "uvx",
       "args": [
-        "mcp-server-sqlite",
+        "mcp-server-sqlite==2025.4.25",
         "--db-path",
         "./data.db"
       ],
@@ -199,7 +199,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-brave-search"
+        "@modelcontextprotocol/server-brave-search@0.6.2"
       ],
       "secret_env": {
         "BRAVE_API_KEY": "mcp/brave-token"
@@ -224,7 +224,7 @@
       "transport": "stdio",
       "command": "uvx",
       "args": [
-        "mcp-server-fetch"
+        "mcp-server-fetch==2026.11.4"
       ],
       "required_secrets": []
     }
@@ -241,7 +241,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@playwright/mcp@latest"
+        "@playwright/mcp@0.0.84"
       ],
       "required_secrets": []
     }
@@ -258,7 +258,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@sentry/mcp-server@latest"
+        "@sentry/mcp-server@0.49.0"
       ],
       "secret_env": {
         "SENTRY_ACCESS_TOKEN": "mcp/sentry-token"
@@ -306,7 +306,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@doist/todoist-ai"
+        "@doist/todoist-ai@9.0.0"
       ],
       "secret_env": {
         "TODOIST_API_KEY": "mcp/todoist-token"
@@ -331,7 +331,7 @@
       "transport": "stdio",
       "command": "uvx",
       "args": [
-        "mcp-obsidian"
+        "mcp-obsidian==0.2.3"
       ],
       "secret_env": {
         "OBSIDIAN_API_KEY": "mcp/obsidian-token"
@@ -356,7 +356,7 @@
       "transport": "stdio",
       "command": "uvx",
       "args": [
-        "hass-mcp"
+        "hass-mcp==0.6.1"
       ],
       "env": {
         "HA_URL": "http://homeassistant.local:8123"
@@ -385,7 +385,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "exa-mcp-server"
+        "exa-mcp-server@3.4.3"
       ],
       "secret_env": {
         "EXA_API_KEY": "mcp/exa-token"
@@ -411,7 +411,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "tavily-mcp@latest"
+        "tavily-mcp@0.2.22"
       ],
       "secret_env": {
         "TAVILY_API_KEY": "mcp/tavily-token"
@@ -437,7 +437,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "firecrawl-mcp"
+        "firecrawl-mcp@3.38.0"
       ],
       "secret_env": {
         "FIRECRAWL_API_KEY": "mcp/firecrawl-token"
@@ -463,7 +463,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@upstash/context7-mcp"
+        "@upstash/context7-mcp@4.5.1"
       ],
       "required_secrets": []
     }

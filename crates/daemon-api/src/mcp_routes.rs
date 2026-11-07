@@ -35,7 +35,9 @@ fn mcp(s: &AppState) -> Result<Arc<dyn McpControl>, ApiError> {
         .ok_or_else(|| ApiError::unavailable("MCP management is not available in this daemon"))
 }
 
-/// All configured MCP servers with their live status.
+/// All configured MCP servers with their live status and full config.
+/// Secret values are never included; `secret_env` and `secret_headers` list
+/// secret names.
 #[utoipa::path(get, path = "/v1/mcp/servers", tag = "mcp", security(("bearer" = [])),
     responses((status = 200, body = Vec<McpServerDto>),
               (status = 503, body = ErrorBody, description = "MCP management is not available")))]
@@ -63,19 +65,22 @@ pub(crate) async fn create_mcp_server(
     Ok((StatusCode::CREATED, Json(server)))
 }
 
-/// Replace the config of a server (it reconnects) and save `mcp.toml`.
+/// Merge a partial config onto the stored server (it reconnects) and save
+/// `mcp.toml`.  Omitted fields keep their previous values.  `bots: null`
+/// means every bot.  Secret values are never accepted or returned; send
+/// secret **names** in `secret_env` / `secret_headers`.
 #[utoipa::path(put, path = "/v1/mcp/servers/{name}", tag = "mcp", security(("bearer" = [])),
     params(("name" = String, Path, description = "Server name")),
-    request_body = McpServerInput,
+    request_body = crate::mcp::McpServerPatch,
     responses((status = 200, body = McpServerDto), (status = 404, body = ErrorBody),
               (status = 422, body = ErrorBody, description = "invalid config"),
               (status = 503, body = ErrorBody, description = "MCP management is not available")))]
 pub(crate) async fn update_mcp_server(
     State(s): State<AppState>,
     Path(name): Path<String>,
-    ApiJson(input): ApiJson<McpServerInput>,
+    ApiJson(patch): ApiJson<serde_json::Value>,
 ) -> Result<Json<McpServerDto>, ApiError> {
-    Ok(Json(mcp(&s)?.update(&name, input).await?))
+    Ok(Json(mcp(&s)?.update(&name, patch).await?))
 }
 
 /// Disconnect and remove a server (its tools disappear) and save `mcp.toml`.

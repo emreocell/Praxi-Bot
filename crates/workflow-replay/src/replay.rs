@@ -73,6 +73,8 @@ pub struct ReplayOptions {
     pub launch_settle: Duration,
     /// Pause after a desktop / browser action.
     pub action_settle: Duration,
+    /// Bot that started the replay, forwarded to tool steps.
+    pub bot_id: Option<String>,
 }
 
 impl Default for ReplayOptions {
@@ -86,6 +88,7 @@ impl Default for ReplayOptions {
             step_timeout: Duration::from_secs(60),
             launch_settle: Duration::from_millis(1500),
             action_settle: Duration::from_millis(300),
+            bot_id: None,
         }
     }
 }
@@ -650,6 +653,7 @@ impl Replayer {
             .await?;
         let ctx = ToolContext {
             run_id: self.opts.run_id.clone(),
+            bot_id: self.opts.bot_id.clone(),
             ..ToolContext::default()
         };
         match tool.call(&ctx, input).await {

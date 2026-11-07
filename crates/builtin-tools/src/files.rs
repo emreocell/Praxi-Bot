@@ -726,6 +726,7 @@ mod tests {
         ToolContext {
             run_id: "run-1".into(),
             max_inline_bytes: 1 << 20,
+            bot_id: None,
         }
     }
 

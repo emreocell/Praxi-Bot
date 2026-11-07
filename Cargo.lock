@@ -4151,6 +4151,8 @@ dependencies = [
  "globset",
  "http",
  "parking_lot",
+ "permission-engine",
+ "process-wrap",
  "rmcp",
  "secret-store",
  "serde",
@@ -4161,6 +4163,7 @@ dependencies = [
  "toml 0.8.2",
  "tool-registry",
  "tracing",
+ "windows 0.62.2",
 ]
 
 [[package]]
