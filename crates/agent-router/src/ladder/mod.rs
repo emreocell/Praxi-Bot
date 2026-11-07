@@ -454,7 +454,7 @@ impl Ladder {
     /// after a successful run that the user explicitly accepted.
     ///
     /// # Errors
-    /// [`RouterError::Rejected`] for `Agent`, an unknown workflow, or when no
+    /// [`RouterError::Rejected`] for `Agent`, a parameterised workflow route, an unknown workflow, or when no
     /// cache is configured; SQLite failures.
     pub fn remember_route(&self, text: &str, route: &Route) -> Result<(), RouterError> {
         let cache = self
@@ -469,7 +469,16 @@ impl Ladder {
             Route::Agent => {
                 return Err(RouterError::Rejected("agent routes are not cached".into()));
             }
-            Route::Workflow { name, .. } => {
+            Route::Workflow { name, params, .. } => {
+                // The cache key is the normalised text, which many different
+                // raw texts share ("a_b.txt" / "a-b.txt"); replaying remembered
+                // params would target the wrong file. Only parameterless
+                // workflow routes are cacheable.
+                if !params.is_empty() {
+                    return Err(RouterError::Rejected(
+                        "workflow routes with parameters are not cached".into(),
+                    ));
+                }
                 let corpus = self.corpus.read().clone();
                 let cand = corpus
                     .find(CandidateKind::Workflow, name)
@@ -556,7 +565,15 @@ impl Ladder {
                 return None;
             }
         };
-        if let Route::Workflow { name, .. } = &hit.route {
+        if let Route::Workflow { name, params, .. } = &hit.route {
+            // Entries written before parameterised routes were refused.
+            if !params.is_empty() {
+                self.counters.k1_stale.fetch_add(1, Ordering::Relaxed);
+                if cache.remove(norm).is_err() {
+                    self.counters.cache_errors.fetch_add(1, Ordering::Relaxed);
+                }
+                return None;
+            }
             let current = corpus
                 .find(CandidateKind::Workflow, name)
                 .map(|c| c.version.as_str());

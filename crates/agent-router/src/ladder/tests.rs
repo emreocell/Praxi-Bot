@@ -560,3 +560,21 @@ async fn gemini_embedder_and_classifier_wire_format() {
     let err = bad.classify("p", 64).await.unwrap_err();
     assert!(err.to_string().contains("404"));
 }
+
+#[tokio::test]
+async fn k1_does_not_cache_parameterised_workflow_routes() {
+    let clock = Arc::new(AtomicI64::new(0));
+    let l = cached_ladder(&clock, 1_000_000);
+    let with_params = Route::Workflow {
+        name: "daily_report".into(),
+        params: BTreeMap::from([("path".to_owned(), "a_b.txt".to_owned())]),
+        confidence: 0.95,
+    };
+    assert!(
+        l.remember_route("delete file a_b.txt", &with_params)
+            .is_err()
+    );
+    // "a-b.txt" normalises to the same key: it must not replay path=a_b.txt
+    let d = decide(&l, "delete file a-b.txt").await;
+    assert_ne!(d.level, Level::K1);
+}

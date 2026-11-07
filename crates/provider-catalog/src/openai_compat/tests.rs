@@ -685,3 +685,54 @@ async fn retry_time_is_capped() {
     assert!(t.elapsed() < Duration::from_secs(2));
     assert!(server.received_requests().await.unwrap().len() < 30);
 }
+
+#[tokio::test]
+async fn parallel_tool_calls_without_index_stay_separate() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(sse(&[
+            r#"{"choices":[{"delta":{"tool_calls":[{"id":"call_a","type":"function","function":{"name":"read_file","arguments":"{\"a\":1}"}}]}}]}"#,
+            r#"{"choices":[{"delta":{"tool_calls":[{"id":"call_b","type":"function","function":{"name":"list_dir","arguments":"{\"b\":"}}]}}]}"#,
+            r#"{"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"2}"}}]}}]}"#,
+            r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+            "[DONE]",
+        ]))
+        .mount(&server)
+        .await;
+    let chunks = collect(&provider(&server), req()).await.unwrap();
+    let calls: Vec<&ToolCall> = chunks
+        .iter()
+        .filter_map(|c| match c {
+            ChatChunk::ToolCall(t) => Some(t),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(
+        (calls[0].id.as_str(), calls[0].name.as_str()),
+        ("call_a", "read_file")
+    );
+    assert_eq!(calls[0].arguments, r#"{"a":1}"#);
+    assert_eq!(
+        (calls[1].id.as_str(), calls[1].name.as_str()),
+        ("call_b", "list_dir")
+    );
+    assert_eq!(calls[1].arguments, r#"{"b":2}"#);
+}
+
+#[tokio::test]
+async fn retry_after_longer_than_max_delay_fails_immediately() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "3600"))
+        .expect(1) // no futile retries
+        .mount(&server)
+        .await;
+    let started = std::time::Instant::now();
+    let err = provider(&server).stream(req()).await.err().unwrap();
+    assert!(matches!(
+        err,
+        ProviderError::RateLimited { retry_after: Some(d) } if d == Duration::from_secs(3600)
+    ));
+    assert!(started.elapsed() < Duration::from_secs(5));
+}

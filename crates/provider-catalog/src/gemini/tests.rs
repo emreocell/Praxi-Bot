@@ -951,3 +951,28 @@ async fn live_gemini_text_and_tool_call() {
     let chunks = collect(&p, r).await.unwrap();
     assert!(chunks.iter().any(|c| matches!(c, ChatChunk::Done { .. })));
 }
+
+#[test]
+fn huge_retry_delay_does_not_panic() {
+    let body = |d: &str| {
+        gerr(
+            429,
+            "RESOURCE_EXHAUSTED",
+            "quota",
+            json!([{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":d}]),
+        )
+        .to_string()
+    };
+    for d in ["1e30s", "1e308s", "inf", "infs", "NaNs", "-5s"] {
+        let r = super::stream::retry_delay(&body(d));
+        assert!(r.is_none_or(|x| x <= Duration::from_secs(24 * 3600)), "{d}");
+    }
+    assert_eq!(
+        super::stream::retry_delay(&body("1e30s")),
+        Some(Duration::from_secs(24 * 3600))
+    );
+    assert_eq!(
+        super::stream::retry_delay(&body("1.5s")),
+        Some(Duration::from_millis(1500))
+    );
+}

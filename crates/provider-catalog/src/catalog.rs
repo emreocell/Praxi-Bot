@@ -14,15 +14,28 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    /// Load all `*.toml` files from `catalog_dir`.
-    ///
-    /// Files that fail to parse are skipped and their errors returned alongside
-    /// the successfully-loaded entries.
+    /// Load all `*.toml` files from `catalog_dir`, fail-fast: if any file
+    /// cannot be read or parsed, no catalog is returned and every error is
+    /// reported. Use [`Catalog::load_dir_lenient`] to keep the valid entries.
     ///
     /// # Errors
     ///
-    /// Returns a vec of errors for any files that could not be parsed.
+    /// Returns a vec of errors for any files that could not be read or parsed
+    /// (or the directory itself).
     pub fn load_dir(catalog_dir: &Path) -> Result<Self, Vec<ProviderError>> {
+        let (catalog, errors) = Self::load_dir_lenient(catalog_dir);
+        if errors.is_empty() {
+            Ok(catalog)
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Load all `*.toml` files from `catalog_dir`, skipping files that fail to
+    /// read or parse. Returns the catalog of every valid entry together with
+    /// one error per skipped file (or for an unreadable directory).
+    #[must_use]
+    pub fn load_dir_lenient(catalog_dir: &Path) -> (Self, Vec<ProviderError>) {
         let mut entries = HashMap::new();
         let mut errors = Vec::new();
 
@@ -33,7 +46,7 @@ impl Catalog {
                     "cannot read catalog directory {}: {e}",
                     catalog_dir.display()
                 )));
-                return Err(errors);
+                return (Self::default(), errors);
             }
         };
 
@@ -65,12 +78,7 @@ impl Catalog {
             }
         }
 
-        if errors.is_empty() {
-            Ok(Self { entries })
-        } else {
-            // Return partial results alongside errors.
-            Err(errors)
-        }
+        (Self { entries }, errors)
     }
 
     /// Build a catalog from an explicit list of entries (useful in tests).
@@ -134,5 +142,30 @@ mod tests {
         assert_eq!(cat.len(), 1);
         assert!(cat.get("test-provider").is_some());
         assert!(cat.get("missing").is_none());
+    }
+
+    #[test]
+    fn load_dir_lenient_keeps_valid_entries() {
+        let dir = std::env::temp_dir().join(format!(
+            "pc-catalog-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("good.toml"), toml::to_string(&sample()).unwrap()).unwrap();
+        std::fs::write(dir.join("bad.toml"), "this is = not [valid").unwrap();
+
+        let (cat, errs) = Catalog::load_dir_lenient(&dir);
+        assert_eq!(cat.len(), 1);
+        assert!(cat.get("test-provider").is_some());
+        assert_eq!(errs.len(), 1);
+
+        // fail-fast variant reports the error and no catalog
+        assert_eq!(Catalog::load_dir(&dir).unwrap_err().len(), 1);
+
+        let (cat, errs) = Catalog::load_dir_lenient(&dir.join("missing"));
+        assert!(cat.is_empty());
+        assert_eq!(errs.len(), 1);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

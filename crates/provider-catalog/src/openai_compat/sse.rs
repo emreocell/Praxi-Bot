@@ -113,6 +113,24 @@ fn error_message(v: &Value) -> Option<String> {
 }
 
 impl Assembler {
+    /// Slot for a streamed tool-call delta. Servers that omit `index` (some
+    /// compat layers) are resolved by `id`: a new id opens a new call, a
+    /// delta without id continues the most recent one.
+    fn call_index(&self, c: &Value, pos: usize) -> u64 {
+        if let Some(i) = c.get("index").and_then(Value::as_u64) {
+            return i;
+        }
+        let next = self.calls.keys().next_back().map_or(0, |k| k + 1);
+        match c.get("id").and_then(Value::as_str) {
+            Some(id) if !id.is_empty() => self
+                .calls
+                .iter()
+                .find(|(_, p)| p.id == id)
+                .map_or(next, |(k, _)| *k),
+            _ => self.calls.keys().next_back().copied().unwrap_or(pos as u64),
+        }
+    }
+
     /// Apply one JSON payload (a streamed chunk or a full non-stream response).
     pub(super) fn feed(&mut self, data: &str) -> Result<Vec<ChatChunk>, ProviderError> {
         let data = data.trim();
@@ -151,7 +169,7 @@ impl Assembler {
             }
             if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
                 for (pos, c) in calls.iter().enumerate() {
-                    let idx = c.get("index").and_then(Value::as_u64).unwrap_or(pos as u64);
+                    let idx = self.call_index(c, pos);
                     let p = self.calls.entry(idx).or_default();
                     if let Some(id) = c.get("id").and_then(Value::as_str)
                         && p.id.is_empty()
