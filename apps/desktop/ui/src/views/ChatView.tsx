@@ -19,8 +19,17 @@ import {
   TodoCard,
   ToolCard
 } from "../components/ChatCards";
+import { Markdown } from "../components/Markdown";
 import { useToast } from "../components/Toast";
 import { botView } from "../lib/botProfile";
+import { rank } from "../lib/fuzzy";
+import {
+  applyCompletion,
+  detectTrigger,
+  mentionHandle,
+  parseLeadingMention,
+  SLASH_COMMANDS
+} from "../lib/slash";
 import {
   newChatIdFromText,
   routeChip,
@@ -93,6 +102,10 @@ export function ChatView({
   const [text, setText] = useState("");
   const [mode, setMode] = useState<SendMode>("queue");
   const [sending, setSending] = useState(false);
+  const [caret, setCaret] = useState(0);
+  const [menuIdx, setMenuIdx] = useState(0);
+  const [menuDismissed, setMenuDismissed] = useState<string | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const stickToBottom = useRef(true);
@@ -263,14 +276,80 @@ export function ChatView({
     }
   };
 
+  // ---- "/" commands and "@" bot mentions in the composer
+  const trigger = detectTrigger(text, caret);
+  const triggerKey = trigger ? `${trigger.kind}:${trigger.start}` : null;
+  const triggerKind = trigger?.kind ?? null;
+  const triggerQuery = trigger?.query ?? "";
+  const menuItems = useMemo(() => {
+    if (!triggerKind || triggerKey === menuDismissed) {
+      return [];
+    }
+    if (triggerKind === "slash") {
+      return rank(SLASH_COMMANDS, triggerQuery, (c) => ({
+        text: c.name,
+        keywords: [t(c.i18nKey)]
+      })).map((r) => ({
+        id: r.item.name,
+        label: `/${r.item.name}`,
+        detail: t(r.item.i18nKey),
+        insert: r.item.name
+      }));
+    }
+    return rank(bots, triggerQuery, (b) => ({
+      text: mentionHandle(botView(b).name)
+    })).map((r) => ({
+      id: r.item.id,
+      label: `@${mentionHandle(botView(r.item).name)}`,
+      detail: "",
+      insert: mentionHandle(botView(r.item).name)
+    }));
+  }, [triggerKind, triggerQuery, triggerKey, menuDismissed, bots, t]);
+  const menuOpen = menuItems.length > 0;
+  const menuActive = Math.min(menuIdx, Math.max(menuItems.length - 1, 0));
+
+  const complete = (i: number) => {
+    const item = menuItems[i];
+    if (!item || !trigger) {
+      return;
+    }
+    const next = applyCompletion(text, trigger, item.insert);
+    setText(next.text);
+    setCaret(next.caret);
+    setMenuIdx(0);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(next.caret, next.caret);
+      }
+    });
+  };
+
   const send = async () => {
-    const body = text.trim();
+    let body = text.trim();
     if (!client || !body || sending) {
       return;
     }
     setSending(true);
     setError(null);
     try {
+      // "@Other do x" starts a chat with that bot; "@ThisBot do x" just sends.
+      const mention = parseLeadingMention(
+        body,
+        bots.map((b) => ({ id: b.id, name: botView(b).name }))
+      );
+      if (mention && mention.bot.id !== chat?.bot_id) {
+        const created = await client.createChat(mention.bot.id);
+        await client.sendMessage(created.id, mention.rest);
+        await refreshChats().catch(() => {});
+        setText("");
+        onSwitchChat?.(created.id);
+        return;
+      }
+      if (mention) {
+        body = mention.rest;
+      }
       const res = await client.sendMessage(
         chatId,
         body,
@@ -290,6 +369,29 @@ export function ChatView({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (menuOpen && !e.nativeEvent.isComposing) {
+      const n = menuItems.length;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMenuIdx((menuActive + 1) % n);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMenuIdx((menuActive - 1 + n) % n);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        complete(menuActive);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMenuDismissed(triggerKey);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       void send();
@@ -374,7 +476,9 @@ export function ChatView({
         return (
           <div className={styles.assistantRow}>
             {botAvatar}
-            <div className={styles.assistantBubble}>{item.text}</div>
+            <div className={styles.assistantBubble}>
+              <Markdown text={item.text} />
+            </div>
           </div>
         );
       case "tool": {
@@ -485,7 +589,9 @@ export function ChatView({
                 return (
                   <div key={e.key} className={styles.assistantRow}>
                     {botAvatar}
-                    <div className={styles.assistantBubble}>{e.text}</div>
+                    <div className={styles.assistantBubble}>
+                      <Markdown text={e.text} />
+                    </div>
                   </div>
                 );
               case "runError":
@@ -602,8 +708,45 @@ export function ChatView({
             ))}
           </div>
         ) : null}
+        {menuOpen ? (
+          <ul
+            className={styles.menu}
+            role="listbox"
+            aria-label={
+              triggerKind === "slash"
+                ? t("chat.slash.menu")
+                : t("chat.slash.mentionMenu")
+            }
+            data-testid="composer-menu"
+          >
+            {menuItems.map((m, i) => (
+              <li
+                key={m.id}
+                role="option"
+                aria-selected={i === menuActive}
+                className={[
+                  styles.menuItem,
+                  i === menuActive ? styles.menuItemActive : ""
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  complete(i);
+                }}
+                onMouseMove={() => setMenuIdx(i)}
+              >
+                <span className={styles.menuLabel}>{m.label}</span>
+                {m.detail ? (
+                  <span className={styles.menuDetail}>{m.detail}</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <div className={styles.inputRow}>
           <textarea
+            ref={inputRef}
             className={styles.input}
             value={text}
             rows={2}
@@ -611,7 +754,12 @@ export function ChatView({
               active ? t("chat.placeholderBusy") : t("chat.placeholder")
             }
             aria-label={t("chat.placeholder")}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value);
+              setCaret(e.target.selectionStart);
+              setMenuIdx(0);
+            }}
+            onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onKeyDown={onKeyDown}
           />
           <Button
