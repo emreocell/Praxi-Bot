@@ -60,6 +60,11 @@ struct Retained {
 pub struct Worker {
     uia: IUIAutomation,
     cache: IUIAutomationCacheRequest,
+    // NOTE(concurrency): The backend currently retains only ONE global generation and element
+    // tree across all runs. If run B takes a snapshot while run A is between get_state and action,
+    // run A's generation will become stale and its action will fail closed with ElementNotFound.
+    // See tasks/060-desktop-per-run-trees.md for the planned follow-up (per-run retained trees or
+    // single-flight desktop actions).
     generation: u64,
     retained: Vec<Retained>,
     hwnd: Option<HWND>,
