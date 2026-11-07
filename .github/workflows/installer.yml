@@ -1,0 +1,116 @@
+name: Windows Installer
+
+# Deliberately NOT triggered on push/PR: a release build + NSIS bundle is slow.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+  schedule:
+    - cron: "0 4 * * 1" # weekly, Mondays 04:00 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-installer:
+    name: Build NSIS installer (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins channel = "stable" (+ rustfmt, clippy); rustup
+      # honours it automatically once this installs stable.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Task 029: tauri.conf.json bundles the `bot` CLI/daemon via
+      # externalBin "binaries/bot", expected as bot-<target-triple>.exe.
+      - name: Build and stage bot sidecar
+        shell: pwsh
+        run: |
+          $triple = (rustc -Vv | Select-String "host:").ToString().Split(":")[1].Trim()
+          Write-Host "Target triple: $triple"
+          cargo build --release -p cli
+          New-Item -ItemType Directory -Force -Path apps/desktop/binaries | Out-Null
+          Copy-Item "target/release/bot.exe" "apps/desktop/binaries/bot-$triple.exe" -Force
+          if ((Get-Item "apps/desktop/binaries/bot-$triple.exe").Length -le 0) { throw "sidecar is empty" }
+
+      # DISABLED until a code-signing certificate exists. To enable: add the
+      # secrets below, set `if: true`, and make sure the thumbprint is applied
+      # (e.g. via bundle.windows.certificateThumbprint or a signCommand).
+      - name: Import signing certificate (disabled, no certificate yet)
+        if: ${{ false }}
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "cert.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $pw = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pw
+          Remove-Item $pfx
+          "WINDOWS_CERTIFICATE_THUMBPRINT=$($cert.Thumbprint)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Build installer (unsigned)
+        run: pnpm build:desktop
+
+      - name: Smoke test installer
+        shell: pwsh
+        run: |
+          $dir = "target/release/bundle/nsis"
+          $installer = Get-ChildItem $dir -Filter "*-setup.exe" | Select-Object -First 1
+          if (-not $installer) { throw "No NSIS installer found in $dir" }
+          $mb = [math]::Round($installer.Length / 1MB, 1)
+          Write-Host "Installer: $($installer.Name) ($mb MB)"
+          if ($installer.Length -lt 5MB -or $installer.Length -gt 500MB) {
+            throw "Installer size $mb MB is outside the sane range (5-500 MB)"
+          }
+
+          # Silent per-user install into a temp dir, then check the bundled sidecar runs.
+          $dest = Join-Path $env:RUNNER_TEMP "praxibot-install"
+          $p = Start-Process -FilePath $installer.FullName -ArgumentList "/S", "/D=$dest" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Silent install failed with exit code $($p.ExitCode)" }
+          Get-ChildItem $dest -Recurse | Select-Object -ExpandProperty FullName
+          if (-not (Test-Path (Join-Path $dest "bot-desktop.exe"))) { throw "bot-desktop.exe missing from install dir" }
+          $sidecar = Get-ChildItem $dest -Recurse -Include "bot.exe", "bot-*.exe" |
+            Where-Object { $_.Name -ne "bot-desktop.exe" -and $_.Length -gt 0 } | Select-Object -First 1
+          if (-not $sidecar) { throw "bot sidecar missing from install dir" }
+          $out = & $sidecar.FullName --version
+          Write-Host "sidecar --version: $out"
+          if ($LASTEXITCODE -ne 0) { throw "sidecar --version exited with $LASTEXITCODE" }
+
+          $un = Get-ChildItem $dest -Filter "uninstall*.exe" | Select-Object -First 1
+          if ($un) { Start-Process -FilePath $un.FullName -ArgumentList "/S" -Wait }
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: praxi-bot-windows-installer
+          path: target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 30

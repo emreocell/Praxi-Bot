@@ -83,6 +83,8 @@ export interface RunState {
   /** `undefined` while running; `null` = finished fine. */
   error?: string | null;
   items: TimelineItem[];
+  /** The schedule that started this run (scheduled runs only). */
+  scheduleId?: string;
   /** Set on child (subagent) runs: the run that spawned this one. */
   parentRunId?: string;
   /** Subagent task description. */
@@ -246,6 +248,7 @@ function reduce(
         ...r,
         chatId: e.chat_id,
         botId: e.bot_id,
+        scheduleId: e.schedule_id ?? undefined,
         startedMs: ts
       }));
     case "run_finished":

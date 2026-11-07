@@ -5,7 +5,8 @@
     "needsYou": "Senden bekleyenler",
     "needsYouCount": "{{count}} öğe senden bekliyor",
     "newBot": "Yeni bot",
-    "usage": "Kullanım"
+    "usage": "Kullanım",
+    "schedules": "Zamanlanmış görevler"
   },
   "main": {
     "selectBotTitle": "Bir bot seçin",
@@ -587,5 +588,100 @@
     "quit": "Çık",
     "tooltip": "Praxi-Bot",
     "tooltipNeeds": "Praxi-Bot: {n} öğe seni bekliyor"
+  },
+  "schedules": {
+    "title": "Zamanlanmış görevler",
+    "subtitle": "Botlarının zamanlayıcıyla yaptığı işler: her sabah, her saat ya da bir kez.",
+    "refresh": "Yenile",
+    "new": "Yeni zamanlama",
+    "loading": "Zamanlamalar yükleniyor…",
+    "empty": {
+      "title": "Henüz zamanlanmış görev yok",
+      "hint": "Bir bot'un bir istemi otomatik çalıştırması için oluştur; örneğin hafta içi her gün 09:00.",
+      "noBots": "Önce bir bot oluştur, sonra onun için bir şey zamanla."
+    },
+    "status": {
+      "enabled": "Etkin",
+      "disabled": "Duraklatıldı",
+      "finished": "Bitti"
+    },
+    "enabled": "Etkin",
+    "bot": "Bot",
+    "deletedBot": "Silinmiş bot",
+    "when": "Ne zaman",
+    "does": "Ne yapar",
+    "nextRun": "Sonraki çalışma",
+    "lastRun": "Son çalışma",
+    "never": "Hiç",
+    "payload": {
+      "workflow": "{{name}} iş akışını çalıştırır",
+      "tool": "{{name}} aracını çağırır",
+      "unknown": "Özel görev"
+    },
+    "spec": {
+      "cron": "Cron: {{cron}}",
+      "at": "Bir kez, {{when}}",
+      "unknown": "Özel zamanlama",
+      "every": {
+        "days": "Her {{count}} günde bir",
+        "hours": "Her {{count}} saatte bir",
+        "minutes": "Her {{count}} dakikada bir",
+        "seconds": "Her {{count}} saniyede bir"
+      }
+    },
+    "runNow": "Şimdi çalıştır",
+    "runNowStarted": "{{name}} başlatıldı.",
+    "edit": "Düzenle",
+    "delete": "Sil",
+    "confirmDelete": "Evet, sil",
+    "cancel": "Vazgeç",
+    "recentRuns": "Son çalışmalar",
+    "noRuns": "Henüz çalışma görülmedi.",
+    "openRun": "Aç",
+    "run": {
+      "running": "Çalışıyor",
+      "succeeded": "Başarılı",
+      "failed": "Başarısız"
+    },
+    "form": {
+      "newTitle": "Yeni zamanlanmış görev",
+      "editTitle": "Zamanlanmış görevi düzenle",
+      "name": "Ad",
+      "botFixed": "Bir zamanlamanın bot'u değiştirilemez.",
+      "when": "Ne zaman",
+      "kind": {
+        "natural": "Cümleyle",
+        "cron": "Cron",
+        "keep": "Mevcut kalsın"
+      },
+      "keepHint": "Şöyle kalır: {{spec}}",
+      "text": "Zamanlama cümlesi",
+      "textPlaceholder": "her gün 09:00, every weekday at 9",
+      "textHint": "Türkçe ya da İngilizce. Saatler {{tz}} diliminde.",
+      "preview": "Önizle",
+      "firstRun": "ilk çalışma {{when}}",
+      "noFirstRun": "yaklaşan çalışma yok",
+      "cannotParse": "Bu cümle anlaşılamadı. \"her gün 09:00\" dene ya da cron kullan.",
+      "cron": "Cron ifadesi",
+      "cronHint": "Beş alan; istersen sonuna bir saat dilimi ekle.",
+      "prompt": "İstem",
+      "promptHint": "Bot'tan her seferinde yapması istenen şey.",
+      "payloadKept": "Bu zamanlama bir iş akışı ya da araç çalıştırır; o kısım değişmez.",
+      "misfire": "Uygulama o saatte kapalıysa",
+      "misfirePolicy": {
+        "skip": "Atla",
+        "run_once": "Dönünce bir kez çalıştır",
+        "run_all": "Kaçan her seferi çalıştır"
+      },
+      "create": "Oluştur",
+      "save": "Kaydet",
+      "invalid": {
+        "name": "Zamanlamaya bir ad ver.",
+        "bot": "Bir bot seç.",
+        "text": "Ne zaman çalışacağını yaz.",
+        "cron": "Bir cron ifadesi gir.",
+        "prompt": "Bot'un ne yapacağını yaz."
+      }
+    }
   }
 }

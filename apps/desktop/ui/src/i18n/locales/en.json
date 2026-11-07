@@ -5,7 +5,8 @@
     "needsYou": "Needs you",
     "needsYouCount": "{{count}} waiting for you",
     "newBot": "New bot",
-    "usage": "Usage"
+    "usage": "Usage",
+    "schedules": "Scheduled tasks"
   },
   "main": {
     "selectBotTitle": "Select a bot",
@@ -587,5 +588,100 @@
     "quit": "Quit",
     "tooltip": "Praxi-Bot",
     "tooltipNeeds": "Praxi-Bot: {n} need you"
+  },
+  "schedules": {
+    "title": "Scheduled tasks",
+    "subtitle": "Things your bots do on a timer: every morning, every hour, or once.",
+    "refresh": "Refresh",
+    "new": "New schedule",
+    "loading": "Loading schedules…",
+    "empty": {
+      "title": "No scheduled tasks yet",
+      "hint": "Create one to have a bot run a prompt automatically, for example every weekday at 9.",
+      "noBots": "Create a bot first, then schedule something for it."
+    },
+    "status": {
+      "enabled": "Active",
+      "disabled": "Paused",
+      "finished": "Finished"
+    },
+    "enabled": "Enabled",
+    "bot": "Bot",
+    "deletedBot": "Deleted bot",
+    "when": "When",
+    "does": "What it does",
+    "nextRun": "Next run",
+    "lastRun": "Last run",
+    "never": "Never",
+    "payload": {
+      "workflow": "Runs workflow {{name}}",
+      "tool": "Calls tool {{name}}",
+      "unknown": "Custom task"
+    },
+    "spec": {
+      "cron": "Cron: {{cron}}",
+      "at": "Once at {{when}}",
+      "unknown": "Custom schedule",
+      "every": {
+        "days": "Every {{count}} days",
+        "hours": "Every {{count}} hours",
+        "minutes": "Every {{count}} minutes",
+        "seconds": "Every {{count}} seconds"
+      }
+    },
+    "runNow": "Run now",
+    "runNowStarted": "{{name}} started.",
+    "edit": "Edit",
+    "delete": "Delete",
+    "confirmDelete": "Yes, delete",
+    "cancel": "Cancel",
+    "recentRuns": "Recent runs",
+    "noRuns": "No runs seen yet.",
+    "openRun": "Open",
+    "run": {
+      "running": "Running",
+      "succeeded": "Succeeded",
+      "failed": "Failed"
+    },
+    "form": {
+      "newTitle": "New scheduled task",
+      "editTitle": "Edit scheduled task",
+      "name": "Name",
+      "botFixed": "The bot of a schedule cannot be changed.",
+      "when": "When",
+      "kind": {
+        "natural": "In words",
+        "cron": "Cron",
+        "keep": "Keep current"
+      },
+      "keepHint": "Stays as: {{spec}}",
+      "text": "Schedule in words",
+      "textPlaceholder": "every weekday at 9, her gün 09:00",
+      "textHint": "English or Turkish. Times use {{tz}}.",
+      "preview": "Preview",
+      "firstRun": "first run {{when}}",
+      "noFirstRun": "no upcoming run",
+      "cannotParse": "That phrase was not understood. Try \"every day at 9\" or use cron.",
+      "cron": "Cron expression",
+      "cronHint": "Five fields, optionally followed by a timezone.",
+      "prompt": "Prompt",
+      "promptHint": "What the bot is asked to do each time.",
+      "payloadKept": "This schedule runs a workflow or tool; that part stays unchanged.",
+      "misfire": "If the app was off at the scheduled time",
+      "misfirePolicy": {
+        "skip": "Skip it",
+        "run_once": "Run once when back",
+        "run_all": "Run every missed time"
+      },
+      "create": "Create",
+      "save": "Save",
+      "invalid": {
+        "name": "Give the schedule a name.",
+        "bot": "Pick a bot.",
+        "text": "Describe when it should run.",
+        "cron": "Enter a cron expression.",
+        "prompt": "Write what the bot should do."
+      }
+    }
   }
 }
