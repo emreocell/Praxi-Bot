@@ -23,6 +23,7 @@ members = [
     "crates/script-runtime",
     "crates/builtin-tools",
     "crates/doc-tools",
+    "crates/dev-tools",
     "crates/plugin-host",
     "crates/storage",
     "crates/skills",
