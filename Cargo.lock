@@ -950,6 +950,28 @@ name = "channel-api"
 version = "0.1.0"
 
 [[package]]
+name = "channel-telegram"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "channel-api",
+ "futures",
+ "futures-util",
+ "parking_lot",
+ "protocol",
+ "reqwest 0.12.28",
+ "secret-store",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
