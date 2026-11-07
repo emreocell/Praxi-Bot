@@ -25,7 +25,18 @@ pub const PAIR_CODE_TTL: Duration = Duration::from_secs(10 * 60);
 pub const REFUSAL_COOLDOWN: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Maximum wrong `/pair` guesses (from anyone) before pending codes are invalidated.
-/// This is the global brute-force cap: a 6-digit code survives at most this many guesses.
+///
+/// This is the global brute-force cap: a 6-digit code survives at most this many wrong
+/// guesses in total, no matter how many Telegram accounts they come from. Because only
+/// one live code exists at a time (see [`PairingStore::create_code`]) the total guessing
+/// budget per code is `MAX_PAIR_ATTEMPTS`, i.e. an attacker's success chance is about
+/// `MAX_PAIR_ATTEMPTS / 1_000_000`.
+///
+/// Known trade-off (accepted): the counter is shared, so any Telegram user can burn the
+/// owner's code with `MAX_PAIR_ATTEMPTS` wrong `/pair` messages. That is only a
+/// denial of pairing, never an authentication bypass; the owner generates a new code, or
+/// pre-pairs through configuration (`TelegramConfig::with_paired_users`), which does not
+/// depend on codes at all and is the fallback path.
 pub const MAX_PAIR_ATTEMPTS: u32 = 5;
 
 /// Maximum wrong `/pair` guesses per Telegram user before that user is locked out.
@@ -235,15 +246,20 @@ impl PairingStore {
     }
 
     /// Generate a new one-time 6-digit pairing code with a custom validity duration.
+    ///
+    /// At most one code is live at a time: creating a new code invalidates every older
+    /// live code, so the shared wrong-guess budget ([`MAX_PAIR_ATTEMPTS`]) always protects
+    /// a single code and cannot be multiplied by generating many codes.
     #[must_use]
     pub fn create_code_with_ttl(&self, ttl: Duration) -> String {
         let code = generate_six_digit_code();
         let now = Instant::now();
         let mut guard = self.inner.lock();
-        // Keep recently expired codes briefly so we can report `Expired` vs `InvalidCode`.
+        // Drop all older live codes; keep recently expired ones briefly so we can report
+        // `Expired` vs `InvalidCode`.
         guard
             .pending_codes
-            .retain(|c| c.expires_at + Duration::from_secs(600) > now);
+            .retain(|c| c.expires_at <= now && c.expires_at + Duration::from_secs(600) > now);
         guard.pending_codes.push(PendingCode {
             code: code.clone(),
             expires_at: now + ttl,

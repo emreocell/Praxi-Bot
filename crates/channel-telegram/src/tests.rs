@@ -50,6 +50,10 @@ struct FakeDaemon {
     answers: Mutex<Vec<RecordedQuestionAnswer>>,
     cancelled_runs: Mutex<Vec<RunId>>,
     run_streams: Mutex<VecDeque<(RunId, BoxStream<'static, Envelope>)>>,
+    /// When set, the next `send_message` answers `Queued` with no run id.
+    queue_next_message: Mutex<bool>,
+    /// Runs `find_chat_run` hands out (the turns the daemon "started later").
+    started_later: Mutex<VecDeque<RunId>>,
 }
 
 impl FakeDaemon {
@@ -62,7 +66,21 @@ impl FakeDaemon {
             answers: Mutex::new(Vec::new()),
             cancelled_runs: Mutex::new(Vec::new()),
             run_streams: Mutex::new(VecDeque::new()),
+            queue_next_message: Mutex::new(false),
+            started_later: Mutex::new(VecDeque::new()),
         }
+    }
+
+    /// Stream fed by the returned sender; stays open until the sender is dropped.
+    fn queue_open_run(&self, run_id: RunId) -> mpsc::UnboundedSender<Envelope> {
+        let (tx, rx) = mpsc::unbounded_channel::<Envelope>();
+        self.queue_run_stream(
+            run_id,
+            Box::pin(futures::stream::unfold(rx, |mut rx| async move {
+                rx.recv().await.map(|i| (i, rx))
+            })),
+        );
+        tx
     }
 
     fn queue_run_events(&self, run_id: RunId, events: Vec<Event>) {
@@ -102,6 +120,12 @@ impl DaemonClient for FakeDaemon {
 
     async fn send_message(&self, chat_id: ChatId, text: &str) -> Result<SendOutcome> {
         self.sent_messages.lock().push((chat_id, text.to_owned()));
+        if std::mem::take(&mut *self.queue_next_message.lock()) {
+            return Ok(SendOutcome {
+                delivery: DeliveryKind::Queued,
+                run_id: None,
+            });
+        }
         let run_id = self
             .run_streams
             .lock()
@@ -148,6 +172,15 @@ impl DaemonClient for FakeDaemon {
             uptime_secs: 120,
             pending_approvals: 1,
         })
+    }
+
+    async fn find_chat_run(
+        &self,
+        _chat_id: ChatId,
+        _exclude: &[RunId],
+        _created_after_ms: i64,
+    ) -> Result<Option<RunId>> {
+        Ok(self.started_later.lock().pop_front())
     }
 
     async fn subscribe_run(&self, run_id: RunId) -> Result<BoxStream<'static, Envelope>> {
@@ -532,8 +565,12 @@ async fn message_and_commands_map_to_daemon_api_calls() {
             .unwrap()
             .contains("Switched active bot to Beta")
     }));
+    // While streaming only the redaction-safe prefix is shown ("Hello from "); the complete
+    // text arrives with the final edit when the run finishes.
+    let edits = edited_messages(&reqs);
     assert!(
         msgs.iter()
+            .chain(edits.iter())
             .any(|m| m["text"].as_str().unwrap() == "Hello from Beta!")
     );
     assert!(msgs.iter().any(|m| {
@@ -1706,4 +1743,652 @@ async fn oversized_incoming_text_is_not_forwarded() {
         .await
         .unwrap();
     assert!(daemon.sent_messages.lock().is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// F04 fix wave
+// ---------------------------------------------------------------------------
+
+fn run_finished(run_id: RunId) -> Envelope {
+    Envelope::new(
+        99,
+        Event::RunFinished(RunFinished {
+            run_id,
+            error: None,
+        }),
+    )
+}
+
+fn sent_texts(reqs: &[Request]) -> Vec<String> {
+    sent_messages(reqs)
+        .iter()
+        .filter_map(|m| m["text"].as_str().map(str::to_owned))
+        .collect()
+}
+
+#[test]
+fn sse_buffer_survives_multibyte_and_crlf_split_across_chunks() {
+    use crate::daemon_client::SseBuffer;
+    let block = "data: {\"t\":\"şğı Türkçe ✓\"}\n\n";
+    let bytes = block.as_bytes();
+    // Split at every possible byte offset: the decoded block must be identical.
+    for cut in 1..bytes.len() {
+        let mut buf = SseBuffer::default();
+        buf.push(&bytes[..cut]);
+        let early = buf.next_block();
+        buf.push(&bytes[cut..]);
+        let got = early.or_else(|| buf.next_block()).expect("block");
+        assert_eq!(got, block, "cut at {cut}");
+        assert!(buf.next_block().is_none());
+    }
+    // CRLF terminators, with the CR LF pair split across chunks.
+    let crlf = "data: a\r\n\r\ndata: b\r\n\r\n";
+    let bytes = crlf.as_bytes();
+    for cut in 1..bytes.len() {
+        let mut buf = SseBuffer::default();
+        buf.push(&bytes[..cut]);
+        buf.push(&bytes[cut..]);
+        let first = buf.next_block().expect("first");
+        let second = buf.next_block().expect("second");
+        assert_eq!(first, "data: a\r\n\r\n");
+        assert_eq!(second, "data: b\r\n\r\n");
+    }
+}
+
+#[test]
+fn safe_stream_prefix_withholds_unfinished_trailing_token() {
+    use crate::bridge::safe_stream_prefix;
+    assert_eq!(safe_stream_prefix("key sk-abc"), "key ");
+    assert_eq!(safe_stream_prefix("key sk-abc "), "key sk-abc ");
+    assert_eq!(safe_stream_prefix("no-whitespace-yet"), "");
+    assert_eq!(safe_stream_prefix("ş ğ"), "ş ");
+    assert_eq!(safe_stream_prefix(""), "");
+}
+
+#[tokio::test]
+async fn streaming_never_shows_a_secret_prefix_in_intermediate_edits() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let daemon = one_bot_daemon();
+    let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+        .with_api_base_url(server.uri())
+        .with_edit_interval(Duration::from_millis(1))
+        .with_paired_users([PAIRED_USER_ID]);
+    let channel = TelegramChannel::new(cfg, daemon.clone()).unwrap();
+
+    let run_id = RunId::new();
+    let tx = daemon.queue_open_run(run_id);
+    channel
+        .handle_update(update(text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, "go")))
+        .await
+        .unwrap();
+
+    let delta = |seq: u64, text: &str| {
+        Envelope::new(
+            seq,
+            Event::MessageDelta(MessageDelta {
+                run_id,
+                text: text.into(),
+            }),
+        )
+    };
+    // The key is 36 chars; the first deltas carry only a prefix that no pattern matches.
+    tx.send(delta(0, "Your key is sk-abcdefghijkl")).unwrap();
+    channel
+        .handle_update(update(text_update(
+            2,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "/status",
+        )))
+        .await
+        .unwrap();
+    tx.send(delta(1, "mnopqrstuvwxyz0123456789 ok")).unwrap();
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    channel
+        .handle_update(update(text_update(
+            3,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "/status",
+        )))
+        .await
+        .unwrap();
+
+    let reqs = server.received_requests().await.unwrap();
+    for t in sent_texts(&reqs).into_iter().chain(
+        edited_messages(&reqs)
+            .iter()
+            .filter_map(|m| m["text"].as_str().map(str::to_owned)),
+    ) {
+        assert!(
+            !t.contains("sk-abc"),
+            "secret prefix leaked mid-stream: {t}"
+        );
+    }
+
+    tx.send(run_finished(run_id)).unwrap();
+    channel
+        .handle_update(update(text_update(
+            4,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "/status",
+        )))
+        .await
+        .unwrap();
+    let reqs = server.received_requests().await.unwrap();
+    let last_edit = edited_messages(&reqs)
+        .last()
+        .and_then(|m| m["text"].as_str().map(str::to_owned))
+        .expect("final edit");
+    assert!(last_edit.contains(REDACTED), "final text: {last_edit}");
+    assert!(last_edit.contains("ok"), "final text complete: {last_edit}");
+    assert!(!last_edit.contains("sk-abc"), "final text: {last_edit}");
+}
+
+#[tokio::test]
+async fn one_runs_telegram_failure_does_not_skip_cleanup_of_finished_runs() {
+    use wiremock::matchers::body_partial_json;
+    let server = MockServer::start().await;
+    // Chat 2 is a user who blocked the bot: every send there fails with 403.
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("sendMessage")))
+        .and(body_partial_json(json!({ "chat_id": OTHER_CHAT_ID })))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({
+            "ok": false, "error_code": 403,
+            "description": "Forbidden: bot was blocked by the user"
+        })))
+        .mount(&server)
+        .await;
+    mount_telegram_mocks(&server).await;
+    let daemon = one_bot_daemon();
+    let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+        .with_api_base_url(server.uri())
+        .with_paired_users([PAIRED_USER_ID, OTHER_PAIRED_USER_ID]);
+    let channel = TelegramChannel::new(cfg, daemon.clone()).unwrap();
+
+    let run_a = RunId::new();
+    let tx_a = daemon.queue_open_run(run_a);
+    channel
+        .handle_update(update(text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, "a")))
+        .await
+        .unwrap();
+
+    let run_b = RunId::new();
+    let tx_b = daemon.queue_open_run(run_b);
+    let _ = channel
+        .handle_update(update(text_update(
+            2,
+            OTHER_PAIRED_USER_ID,
+            OTHER_CHAT_ID,
+            "b",
+        )))
+        .await;
+
+    // A finishes; B's next event cannot be delivered (403).
+    tx_a.send(run_finished(run_a)).unwrap();
+    tx_b.send(Envelope::new(
+        5,
+        Event::ToolCallRequested(ToolCallRequested {
+            run_id: run_b,
+            call_id: ToolCallId::new(),
+            tool_name: "shell".into(),
+            input: json!({}),
+        }),
+    ))
+    .unwrap();
+    let blocked = channel
+        .handle_update(update(text_update(
+            3,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "/status",
+        )))
+        .await;
+    assert!(blocked.is_err(), "B's 403 is still reported");
+
+    // A was cleaned up in spite of the error, and polling further does not panic.
+    for i in 4..7 {
+        let _ = channel
+            .handle_update(update(text_update(
+                i,
+                PAIRED_USER_ID,
+                TEST_CHAT_ID,
+                "/status",
+            )))
+            .await;
+    }
+    let reqs = server.received_requests().await.unwrap();
+    let texts = sent_texts(&reqs);
+    let last_status = texts
+        .iter()
+        .rev()
+        .find(|t| t.starts_with("Daemon:"))
+        .expect("status reply");
+    assert!(last_status.contains("Run: idle"), "{last_status}");
+}
+
+#[tokio::test]
+async fn message_queued_behind_a_run_is_followed_once_it_starts() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let daemon = one_bot_daemon();
+    let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+        .with_api_base_url(server.uri())
+        .with_paired_users([PAIRED_USER_ID]);
+    let channel = TelegramChannel::new(cfg, daemon.clone()).unwrap();
+
+    let run_a = RunId::new();
+    let tx_a = daemon.queue_open_run(run_a);
+    channel
+        .handle_update(update(text_update(
+            1,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "first",
+        )))
+        .await
+        .unwrap();
+
+    *daemon.queue_next_message.lock() = true;
+    channel
+        .handle_update(update(text_update(
+            2,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "second",
+        )))
+        .await
+        .unwrap();
+
+    // The daemon starts the queued turn as run B after A finished.
+    let run_b = RunId::new();
+    daemon.queue_run_events(
+        run_b,
+        vec![
+            Event::MessageDelta(MessageDelta {
+                run_id: run_b,
+                text: "answer to the second message ".into(),
+            }),
+            Event::RunFinished(RunFinished {
+                run_id: run_b,
+                error: None,
+            }),
+        ],
+    );
+    daemon.started_later.lock().push_back(run_b);
+    tx_a.send(run_finished(run_a)).unwrap();
+    for i in 3..8 {
+        channel
+            .handle_update(update(text_update(
+                i,
+                PAIRED_USER_ID,
+                TEST_CHAT_ID,
+                "/status",
+            )))
+            .await
+            .unwrap();
+    }
+    let reqs = server.received_requests().await.unwrap();
+    let all: Vec<String> = sent_texts(&reqs)
+        .into_iter()
+        .chain(
+            edited_messages(&reqs)
+                .iter()
+                .filter_map(|m| m["text"].as_str().map(str::to_owned)),
+        )
+        .collect();
+    assert!(
+        all.iter()
+            .any(|t| t.contains("answer to the second message")),
+        "queued turn output must reach Telegram: {all:?}"
+    );
+}
+
+#[tokio::test]
+async fn subagent_approvals_and_questions_are_shown_in_the_parent_chat() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let daemon = one_bot_daemon();
+    let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+        .with_api_base_url(server.uri())
+        .with_paired_users([PAIRED_USER_ID]);
+    let channel = TelegramChannel::new(cfg, daemon.clone()).unwrap();
+
+    let parent = RunId::new();
+    let child = RunId::new();
+    let child_call = ToolCallId::new();
+    let tx_parent = daemon.queue_open_run(parent);
+    let tx_child = daemon.queue_open_run(child);
+    tx_parent
+        .send(Envelope::new(
+            0,
+            Event::SubagentStarted(protocol::event::SubagentStarted {
+                run_id: child,
+                parent_run_id: parent,
+                task: "dig".into(),
+                call_id: None,
+            }),
+        ))
+        .unwrap();
+    tx_child
+        .send(Envelope::new(
+            0,
+            Event::ApprovalNeeded(ApprovalNeeded {
+                run_id: child,
+                call_id: child_call,
+                tool_name: "shell".into(),
+                input: json!({}),
+                summary: "child wants rm".into(),
+            }),
+        ))
+        .unwrap();
+    channel
+        .handle_update(update(text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, "go")))
+        .await
+        .unwrap();
+    for i in 2..5 {
+        channel
+            .handle_update(update(text_update(
+                i,
+                PAIRED_USER_ID,
+                TEST_CHAT_ID,
+                "/status",
+            )))
+            .await
+            .unwrap();
+    }
+    let reqs = server.received_requests().await.unwrap();
+    let approval = sent_messages(&reqs)
+        .into_iter()
+        .find(|m| {
+            m["text"]
+                .as_str()
+                .is_some_and(|t| t.contains("child wants rm"))
+        })
+        .expect("child approval must be shown");
+    assert!(approval["reply_markup"].is_object(), "buttons attached");
+
+    // The button works: it is bound to the parent's Telegram chat.
+    channel
+        .handle_update(update(callback_update(
+            9,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "q-child",
+            &format_approval_callback(child_call, "once"),
+        )))
+        .await
+        .unwrap();
+    assert_eq!(daemon.approvals.lock().len(), 1);
+}
+
+#[tokio::test]
+async fn active_runs_do_not_shorten_the_get_updates_long_poll() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("getUpdates")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ok": true,
+            "result": [ text_update(10, PAIRED_USER_ID, TEST_CHAT_ID, "go") ]
+        })))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("getUpdates")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_millis(150))
+                .set_body_json(json!({ "ok": true, "result": [] })),
+        )
+        .mount(&server)
+        .await;
+
+    let daemon = one_bot_daemon();
+    let _tx = daemon.queue_open_run(RunId::new());
+    let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+        .with_api_base_url(server.uri())
+        .with_poll_timeout_secs(7)
+        .with_poll_backoff(Duration::from_millis(10))
+        .with_paired_users([PAIRED_USER_ID]);
+    let running = TelegramChannel::start(cfg, daemon).unwrap();
+    tokio::time::sleep(Duration::from_millis(900)).await;
+    running.shutdown().await;
+
+    let reqs = server.received_requests().await.unwrap();
+    let target = tg_endpoint("getUpdates");
+    let timeouts: Vec<i64> = reqs
+        .iter()
+        .filter(|r| r.url.path() == target)
+        .filter_map(|r| serde_json::from_slice::<Value>(&r.body).ok())
+        .filter_map(|b| b["timeout"].as_i64())
+        .collect();
+    assert!(timeouts.len() >= 2, "polled: {timeouts:?}");
+    assert!(
+        timeouts.iter().all(|&t| t == 7),
+        "getUpdates must keep the long-poll timeout while a run is active: {timeouts:?}"
+    );
+}
+
+#[test]
+fn a_new_pair_code_invalidates_older_live_codes() {
+    use crate::pairing::{PairAttempt, PairingStore};
+    let store = PairingStore::in_memory();
+    let mut old = Vec::new();
+    for _ in 0..20 {
+        old.push(store.create_code());
+    }
+    let newest = store.create_code();
+    // Only the newest code is live; the shared guess budget protects a single code.
+    for c in &old {
+        if *c == newest {
+            continue;
+        }
+        let uid = 500 + i64::from(c.as_bytes()[0]);
+        assert_ne!(
+            store.redeem_code(uid, c).unwrap(),
+            PairAttempt::Paired,
+            "older code {c} must be invalid"
+        );
+        assert!(!store.is_paired(uid));
+    }
+    // 5 distinct wrong guesses above burned `newest` only if they reached the global cap;
+    // use a fresh store for the positive path.
+    let store = PairingStore::in_memory();
+    let _older = store.create_code();
+    let newest = store.create_code();
+    assert_eq!(store.redeem_code(1, &newest).unwrap(), PairAttempt::Paired);
+}
+
+#[tokio::test]
+async fn http_find_chat_run_accepts_queued_and_ended_runs_of_the_chat() {
+    use uuid::Uuid;
+    let server = MockServer::start().await;
+    let chat = ChatId::new();
+    let other_chat = ChatId::new();
+    let mk = |id: Uuid, chat: ChatId, state: &str, created: i64, parent: Option<Uuid>| {
+        json!({
+            "id": id.to_string(), "bot_id": Uuid::new_v4().to_string(),
+            "chat_id": chat.0.to_string(), "kind": "turn", "state": state,
+            "created_at_ms": created, "updated_at_ms": created,
+            "parent_run_id": parent.map(|p| p.to_string()),
+        })
+    };
+    let (old, queued, ended, other, child, attached) = (
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+    );
+    Mock::given(method("GET"))
+        .and(path("/v1/runs"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            mk(old, chat, "running", 50, None),
+            mk(attached, chat, "running", 150, None),
+            mk(child, chat, "queued", 160, Some(attached)),
+            mk(other, other_chat, "queued", 170, None),
+            mk(ended, chat, "succeeded", 300, None),
+            mk(queued, chat, "queued", 400, None),
+        ])))
+        .mount(&server)
+        .await;
+    let client = HttpDaemonClient::new(server.uri(), SecretValue::new("tok"));
+
+    // The daemon stores `queued` (never `pending`): a just-started queued run is found.
+    let found = client
+        .find_chat_run(chat, &[RunId(attached), RunId(ended)], 100)
+        .await
+        .unwrap();
+    assert_eq!(found, Some(RunId(queued)));
+    // A run that already ended (subscribe replays its log) is found too, oldest first;
+    // older runs, subagent children, other chats and attached runs are not.
+    let found = client
+        .find_chat_run(chat, &[RunId(attached)], 100)
+        .await
+        .unwrap();
+    assert_eq!(found, Some(RunId(ended)));
+    assert_eq!(client.find_chat_run(chat, &[], 1000).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn run_loop_keeps_draining_queued_turns_while_get_updates_blocks() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let upd = |id: i64, text: &str| json!({ "ok": true, "result": [ text_update(id, PAIRED_USER_ID, TEST_CHAT_ID, text) ] });
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("getUpdates")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(upd(1, "first")))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("getUpdates")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_millis(300))
+                .set_body_json(upd(2, "second")),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    // From then on the long poll blocks far longer than the test runs.
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("getUpdates")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_secs(20))
+                .set_body_json(json!({ "ok": true, "result": [] })),
+        )
+        .mount(&server)
+        .await;
+
+    let daemon = one_bot_daemon();
+    let run_a = RunId::new();
+    let tx_a = daemon.queue_open_run(run_a);
+    let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+        .with_api_base_url(server.uri())
+        .with_poll_timeout_secs(25)
+        .with_poll_backoff(Duration::from_millis(10))
+        .with_paired_users([PAIRED_USER_ID]);
+    let running = TelegramChannel::start(cfg, daemon.clone()).unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    *daemon.queue_next_message.lock() = true;
+
+    // A finishes before the daemon created the queued run: the first lookups find nothing.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    tx_a.send(run_finished(run_a)).unwrap();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let run_b = RunId::new();
+    daemon.queue_run_events(
+        run_b,
+        vec![
+            Event::MessageDelta(MessageDelta {
+                run_id: run_b,
+                text: "late queued answer ".into(),
+            }),
+            Event::RunFinished(RunFinished {
+                run_id: run_b,
+                error: None,
+            }),
+        ],
+    );
+    daemon.started_later.lock().push_back(run_b);
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    running.shutdown().await;
+
+    let reqs = server.received_requests().await.unwrap();
+    let all: Vec<String> = sent_texts(&reqs)
+        .into_iter()
+        .chain(
+            edited_messages(&reqs)
+                .iter()
+                .filter_map(|m| m["text"].as_str().map(str::to_owned)),
+        )
+        .collect();
+    assert!(
+        all.iter().any(|t| t.contains("late queued answer")),
+        "queued turn must be found by the drain loop without a new update: {all:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_stream_that_drops_without_run_finished_still_shows_the_last_word() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let daemon = one_bot_daemon();
+    let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+        .with_api_base_url(server.uri())
+        .with_paired_users([PAIRED_USER_ID]);
+    let channel = TelegramChannel::new(cfg, daemon.clone()).unwrap();
+    let run = RunId::new();
+    // No RunFinished: the stream just ends.
+    let tx = daemon.queue_open_run(run);
+    tx.send(Envelope::new(
+        0,
+        Event::MessageDelta(MessageDelta {
+            run_id: run,
+            text: "hello wor".into(),
+        }),
+    ))
+    .unwrap();
+    channel
+        .handle_update(update(text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, "hi")))
+        .await
+        .unwrap();
+    tx.send(Envelope::new(
+        1,
+        Event::MessageDelta(MessageDelta {
+            run_id: run,
+            text: "ld".into(),
+        }),
+    ))
+    .unwrap();
+    drop(tx);
+    channel
+        .handle_update(update(text_update(
+            2,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "/status",
+        )))
+        .await
+        .unwrap();
+    let reqs = server.received_requests().await.unwrap();
+    let all: Vec<String> = sent_texts(&reqs)
+        .into_iter()
+        .chain(
+            edited_messages(&reqs)
+                .iter()
+                .filter_map(|m| m["text"].as_str().map(str::to_owned)),
+        )
+        .collect();
+    assert!(
+        all.iter().any(|t| t.contains("hello world")),
+        "last word must be flushed when the stream ends: {all:?}"
+    );
 }
