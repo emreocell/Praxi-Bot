@@ -56,6 +56,66 @@ pub fn secrets_file_path(data_dir: &Path) -> PathBuf {
     data_dir.join(SECRETS_FILE_NAME)
 }
 
+/// How many times the keychain probe is attempted in `Auto` mode before the
+/// keychain is considered unavailable.
+const AUTO_PROBE_ATTEMPTS: u32 = 3;
+
+/// Probe the keychain up to `attempts` times with a short backoff, so a
+/// transient failure (locked keychain, Secret Service still starting) does not
+/// count as "unavailable".
+fn probe_with_retry(store: &KeyringStore, attempts: u32) -> Result<(), SecretError> {
+    let mut last = None;
+    for attempt in 0..attempts.max(1) {
+        match store.probe() {
+            Ok(()) => return Ok(()),
+            Err(e) => last = Some(e),
+        }
+        if attempt + 1 < attempts {
+            std::thread::sleep(std::time::Duration::from_millis(
+                250 * u64::from(attempt + 1),
+            ));
+        }
+    }
+    Err(last.unwrap_or_else(|| SecretError::Unavailable("keychain probe failed".into())))
+}
+
+/// Decide the `Auto` backend. An existing encrypted file wins. Otherwise the
+/// keychain is used when its probe succeeds. If the probe keeps failing, we do
+/// **not** silently create `secrets.enc` (that would make the fallback sticky
+/// and orphan keychain secrets): the file is chosen only when the user opted in
+/// by providing a passphrase through the environment, else an error is returned.
+fn auto_uses_file(
+    file_exists: bool,
+    passphrase_opted_in: bool,
+    probe: &dyn Fn() -> Result<(), SecretError>,
+) -> Result<bool, SecretError> {
+    if file_exists {
+        return Ok(true);
+    }
+    match probe() {
+        Ok(()) => Ok(false),
+        Err(_) if passphrase_opted_in => Ok(true),
+        Err(e) => Err(SecretError::Unavailable(format!(
+            "OS keychain unavailable ({e}); not falling back to an encrypted file 
+             automatically. Retry later, or choose the file backend explicitly 
+             (backend = \"file\" or set {PASSPHRASE_ENV})"
+        ))),
+    }
+}
+
+/// When the encrypted file is used while the keychain also holds secrets,
+/// warn: those keychain entries are not read.
+fn warn_if_keychain_has_entries() {
+    if let Ok(names) = KeyringStore::new(KEYRING_SERVICE).list_names()
+        && !names.is_empty()
+    {
+        eprintln!(
+            "warning: using {SECRETS_FILE_NAME} but the OS keychain also holds {} secret(s) that will not be read",
+            names.len()
+        );
+    }
+}
+
 /// Open a secret store.
 ///
 /// For the file backend the passphrase comes from `BOT_SECRETS_PASSPHRASE`, or
@@ -73,7 +133,17 @@ pub fn open_store(
     let use_file = match choice {
         BackendChoice::File => true,
         BackendChoice::Keyring => false,
-        BackendChoice::Auto => path.exists() || KeyringStore::new(KEYRING_SERVICE).probe().is_err(),
+        BackendChoice::Auto => {
+            let file_exists = path.exists();
+            let opted_in = std::env::var(PASSPHRASE_ENV).is_ok_and(|p| !p.is_empty());
+            let use_file = auto_uses_file(file_exists, opted_in, &|| {
+                probe_with_retry(&KeyringStore::new(KEYRING_SERVICE), AUTO_PROBE_ATTEMPTS)
+            })?;
+            if use_file && file_exists {
+                warn_if_keychain_has_entries();
+            }
+            use_file
+        }
     };
     if use_file {
         let creating = !path.exists();
@@ -114,6 +184,30 @@ mod tests {
             BackendChoice::Keyring
         );
         assert!("x".parse::<BackendChoice>().is_err());
+    }
+
+    #[test]
+    fn auto_existing_file_wins_without_probing() {
+        let r = auto_uses_file(true, false, &|| panic!("must not probe"));
+        assert!(r.unwrap());
+    }
+
+    #[test]
+    fn auto_probe_ok_uses_keyring() {
+        assert!(!auto_uses_file(false, false, &|| Ok(())).unwrap());
+    }
+
+    #[test]
+    fn auto_probe_failure_does_not_silently_pick_file() {
+        let fail = || Err(SecretError::Unavailable("locked".into()));
+        let r = auto_uses_file(false, false, &fail);
+        assert!(matches!(r, Err(SecretError::Unavailable(_))));
+    }
+
+    #[test]
+    fn auto_probe_failure_with_passphrase_opt_in_uses_file() {
+        let fail = || Err(SecretError::Unavailable("locked".into()));
+        assert!(auto_uses_file(false, true, &fail).unwrap());
     }
 
     #[test]

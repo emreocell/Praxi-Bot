@@ -174,8 +174,11 @@ impl Default for PermissionResolver {
 fn level_to_decision(level: &Level) -> Decision {
     match level {
         Level::Deny => Decision::Deny,
-        Level::Ask => Decision::Ask,
-        Level::Allow | Level::AllowWithLimits(_) => Decision::Allow,
+        // Limits (`path_patterns`, `max_per_hour`, `max_amount_minor`) are not
+        // enforced yet: `ActionRequest` carries no path/URL/amount and there is
+        // no rate counter.  Until they are, fail closed and ask for approval.
+        Level::Ask | Level::AllowWithLimits(_) => Decision::Ask,
+        Level::Allow => Decision::Allow,
     }
 }
 
@@ -280,6 +283,24 @@ mod tests {
             &req_human(PermissionCategory::Shell),
         );
         assert_eq!(decision, Decision::Deny);
+    }
+
+    // ── AllowWithLimits is fail-closed ───────────────────────────────────────
+
+    #[test]
+    fn allow_with_limits_asks_until_limits_are_enforced() {
+        let mut global = Policy::default();
+        global.categories.insert(
+            PermissionCategory::Fs,
+            Rule::new(Level::AllowWithLimits(crate::policy::Limits {
+                max_per_hour: Some(1),
+                max_amount_minor: None,
+                path_patterns: vec!["src/**".into()],
+            })),
+        );
+        let resolver = PermissionResolver::new();
+        let d = resolver.resolve(&global, None, None, &req_human(PermissionCategory::Fs));
+        assert_eq!(d, Decision::Ask);
     }
 
     // ── Meta category ─────────────────────────────────────────────────────────

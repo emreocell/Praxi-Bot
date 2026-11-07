@@ -29,6 +29,10 @@ pub enum Level {
     /// The action is always allowed.
     Allow,
     /// The action is allowed within specified limits; outside them it needs approval.
+    ///
+    /// **Not enforced yet:** the resolver cannot evaluate limits (requests carry
+    /// no path/URL/amount and there is no rate counter), so it currently
+    /// resolves this level to `Ask` (fail-closed).
     AllowWithLimits(Limits),
 }
 
