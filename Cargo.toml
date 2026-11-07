@@ -68,3 +68,5 @@ protocol = { path = "crates/protocol", version = "0.1.0" }
 storage = { path = "crates/storage", version = "0.1.0" }
 wiremock = "0.6"
 uuid = { version = "1", features = ["v7", "serde"] }
+atspi = { version = "0.30", default-features = false, features = ["connection", "proxies", "tokio", "zbus"] }
+x11rb = { version = "0.14", features = ["xtest", "randr"] }
