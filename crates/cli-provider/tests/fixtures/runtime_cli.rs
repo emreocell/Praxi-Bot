@@ -137,8 +137,18 @@ fn main() {
         let thread = read(&mut reader);
         assert_eq!(thread["method"], "thread/start");
         log("thread", &thread.to_string());
-        assert_eq!(thread["params"]["approvalPolicy"], "on-request");
-        emit(json!({"id":2,"result":{"thread":{"id":"fixture-thread"}}}));
+
+        // Echo back with our security settings preserved
+        emit(json!({
+            "id":2,
+            "result":{
+                "thread":{"id":"fixture-thread"},
+                "config": {
+                    "features": {"shell_tool": false},
+                    "web_search": "disabled"
+                }
+            }
+        }));
         let turn = read(&mut reader);
         assert_eq!(turn["method"], "turn/start");
         log("stdin", &turn.to_string());

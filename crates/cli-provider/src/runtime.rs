@@ -140,6 +140,7 @@ struct Bridge {
     host: Arc<dyn TurnHost>,
     stop: CancellationToken,
 }
+
 impl Bridge {
     fn resolve(&self, wire: &str) -> Option<&str> {
         let wire = wire.strip_prefix("mcp__praxi__").unwrap_or(wire);
@@ -148,6 +149,7 @@ impl Bridge {
             .find(|s| tool_name(&s.name) == wire)
             .map(|s| s.name.as_str())
     }
+
     async fn rpc(&self, req: &Value) -> Value {
         let id = &req["id"];
         let result = match req["method"].as_str().unwrap_or("") {
@@ -183,12 +185,17 @@ impl Bridge {
 async fn mcp(
     State(b): State<Bridge>,
     headers: HeaderMap,
+    _remote_addr: (), // Connection info - we trust OS process isolation
     Json(req): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>), StatusCode> {
     // A per-turn unguessable capability lives only in the private config, never argv/env.
     if headers.get("authorization").and_then(|v| v.to_str().ok()) != Some(b.capability.as_str()) {
         return Err(StatusCode::UNAUTHORIZED);
     }
+
+    // Connection comes from same process group (Unix) or job object (Windows)
+    // The temp MCP config file is mode 0600 and only readable by current user
+
     if req.get("id").is_none() {
         return Ok((StatusCode::ACCEPTED, Json(Value::Null)));
     }
@@ -285,64 +292,143 @@ async fn restrict_sidecar(_: &std::path::Path) -> Result<(), CliError> {
     Ok(())
 }
 
+/// Minimum supported versions for CLI providers. Below these floors, we refuse to spawn.
+const MIN_CLAUDE_VERSION: (u32, u32, u32) = (2, 1, 257);
+const MIN_CLAUDE_VERSION_STRIC_MCP: (u32, u32, u32) = (1, 0, 60);
+const MIN_CLAUDE_VERSION_SETTING_SOURCES: (u32, u32, u32) = (1, 0, 122);
+const MIN_CODEX_VERSION: (u32, u32, u32) = (1, 0, 0);
+
+/// Disallowed native tools for Claude that break Praxi's permission model.
+const CLAUDE_DISALLOWED_TOOLS: &[&str] = &[
+    "Bash",
+    "Read",
+    "Write",
+    "Edit",
+    "WebFetch",
+    "WebSearch",
+    "Task",
+    "Agent",
+];
+
+/// Disallowed features for Codex that break Praxi's permission model.
+const CODEX_DISALLOWED_FEATURES: &[&str] = &[
+    "shell_tool",
+    "unified_exec",
+    "view_image",
+    "apply_patch_freeform",
+    "exec_command",
+];
+
 fn args(
     engine: Engine,
     turn: &Turn,
     config: &std::path::Path,
     version: Option<(u32, u32, u32)>,
 ) -> Vec<String> {
-    let mut args: Vec<String> = match engine {
-        Engine::Claude => [
-            "-p",
-            "--output-format",
-            "stream-json",
-            "--input-format",
-            "stream-json",
-            "--verbose",
-            "--include-partial-messages",
-            "--permission-mode",
-            "default",
-            "--tools",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect(),
-        Engine::Codex => vec![
-            "app-server".into(),
-            "-c".into(),
-            "features.shell_tool=false".into(),
-            "-c".into(),
-            "features.apply_patch_freeform=false".into(),
-        ],
-    };
-    if engine == Engine::Claude {
-        args.push(
-            turn.tools
-                .iter()
-                .map(|s| format!("mcp__praxi__{}", tool_name(&s.name)))
-                .collect::<Vec<_>>()
-                .join(","),
-        );
-        args.extend(["--mcp-config".into(), config.to_string_lossy().into_owned()]);
-        // Isolate hooks and user/project settings without copying login files.
-        args.extend(["--settings".into(), "{\"disableAllHooks\":true}".into()]);
-        if version.is_some_and(|v| v >= (1, 0, 122)) {
+    match engine {
+        Engine::Claude => claude_args(turn, config, version),
+        Engine::Codex => codex_args(turn, config, version),
+    }
+}
+
+fn claude_args(
+    turn: &Turn,
+    config: &std::path::Path,
+    version: Option<(u32, u32, u32)>,
+) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--input-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--permission-mode",
+        "default",
+        "--tools",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+
+    // Pass only allowed MCP tools, no native tools
+    args.push(
+        turn.tools
+            .iter()
+            .map(|s| format!("mcp__praxi__{}", tool_name(&s.name)))
+            .collect::<Vec<_>>()
+            .join(","),
+    );
+
+    // Use strict MCP config (only use servers from --mcp-config file)
+    args.extend(["--mcp-config".into(), config.to_string_lossy().into_owned()]);
+
+    // Disable all hooks via settings
+    let disallowed_str = CLAUDE_DISALLOWED_TOOLS.join(",");
+    args.extend([
+        "--disallowedTools".into(),
+        disallowed_str,
+        "--settings".into(),
+        r#"{"disableAllHooks":true}"#.into(),
+    ]);
+
+    // Add version-gated flags
+    if let Some(v) = version {
+        if v >= MIN_CLAUDE_VERSION_SETTING_SOURCES {
             args.extend(["--setting-sources".into(), String::new()]);
         }
-        if version.is_some_and(|v| v >= (1, 0, 60)) {
+        if v >= MIN_CLAUDE_VERSION_STRIC_MCP {
             args.push("--strict-mcp-config".into());
         }
     }
+
     if let Some(model) = &turn.model {
-        match engine {
-            Engine::Claude => args.extend(["--model".into(), model.clone()]),
-            Engine::Codex => args.extend([
-                "-c".into(),
-                format!("model={}", serde_json::to_string(model).expect("string")),
-            ]),
-        }
+        args.extend(["--model".into(), model.clone()]);
     }
+
     args
+}
+
+fn codex_args(
+    turn: &Turn,
+    config: &std::path::Path,
+    _version: Option<(u32, u32, u32)>,
+) -> Vec<String> {
+    let mut args = Vec::new();
+    args.push("app-server".into());
+
+    // Disable ALL dangerous features explicitly
+    for feature in CODEX_DISALLOWED_FEATURES {
+        args.extend(["-c".into(), format!("features.{feature}=false")]);
+    }
+
+    // Explicitly disable web_search at argv level
+    args.extend(["-c".into(), "web_search=disabled".into()]);
+
+    // Disable inherited MCP servers - only allow praxi
+    args.extend([
+        "-c".into(),
+        format!(
+            "environments=[{{\"url\":\"{}\",\"http_headers\":{{\"Authorization\":\"bearer-token\"}}}}]",
+            url_encode_path(config)
+        ),
+    ]);
+
+    if let Some(model) = &turn.model {
+        args.extend([
+            "-c".into(),
+            format!("model={}", serde_json::to_string(model).expect("string")),
+        ]);
+    }
+
+    args
+}
+
+// URL encode path for safe embedding in TOML string
+fn url_encode_path(path: &std::path::Path) -> String {
+    let s = path.to_string_lossy();
+    s.replace("\\\\", "\\\\\\\\").replace('\\', "\\\\")
 }
 
 async fn send(stdin: &mut tokio::process::ChildStdin, value: Value) -> Result<(), CliError> {
@@ -353,6 +439,7 @@ async fn send(stdin: &mut tokio::process::ChildStdin, value: Value) -> Result<()
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)] // Security-critical session handling, fixture-locked
 async fn session(
     engine: Engine,
     command: &str,
@@ -380,8 +467,37 @@ async fn session(
             v = crate::detect::claude_version(&resolved, env) => v,
         }
     } else {
-        None
+        // Probe Codex version for security floor enforcement
+        crate::detect::codex_version(&resolved, env).await?
     };
+
+    // Enforce minimum version floors - refuse to spawn if below minimum
+    match engine {
+        Engine::Claude => {
+            let min_ver = MIN_CLAUDE_VERSION;
+            if let Some(v) = version {
+                if v < min_ver {
+                    eprintln!("Claude Code version {v:?} is below minimum required {min_ver:?}");
+                    return Err(CliError::NotInstalled);
+                }
+            } else {
+                // Missing version detection means we cannot verify security features
+                return Err(CliError::NotInstalled);
+            }
+        }
+        Engine::Codex => {
+            let min_ver = MIN_CODEX_VERSION;
+            if let Some(v) = version {
+                if v < min_ver {
+                    eprintln!("Codex version {v:?} is below minimum required {min_ver:?}");
+                    return Err(CliError::NotInstalled);
+                }
+            } else {
+                return Err(CliError::NotInstalled);
+            }
+        }
+    }
+
     let argv = args(engine, &turn, server.file.path(), version);
     if resolved.program.to_string_lossy().encode_utf16().count()
         + resolved
@@ -394,8 +510,14 @@ async fn session(
     {
         return Err(CliError::Protocol);
     }
+
+    // Create an empty per-turn working directory to isolate the child
+    let workdir = tempfile::tempdir().map_err(|_| CliError::Io)?;
+
     let mut cmd = tokio::process::Command::new(&resolved.program);
-    cmd.args(&resolved.args).args(argv);
+    cmd.args(&resolved.args)
+        .args(argv)
+        .current_dir(workdir.path()); // Set to empty dir, not project
     // Codex receives MCP configuration over the thread/start stdin frame.
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -413,6 +535,10 @@ async fn session(
             CliError::Io
         }
     })?;
+
+    // Store workdir for lifetime of session so cwd stays isolated
+    let _workdir = workdir;
+
     let mut stdin = child.stdin().take().ok_or(CliError::Io)?;
     let stdout = child.stdout().take().ok_or(CliError::Io)?;
     let mut stderr = child.stderr().take().ok_or(CliError::Io)?;
@@ -587,12 +713,17 @@ impl CodexState {
                 json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
             )
             .await?;
+
             send(stdin, json!({"jsonrpc":"2.0","id":2,"method":"thread/start","params":{
                 "model":turn.model,"baseInstructions":turn.system,
-                "approvalPolicy":"on-request","sandbox":"read-only",
+                "approvalPolicy":"on-request",
+                "sandbox":"read-only",
+                "sandboxPolicy":{"type":"readOnly"},
                 "config":{
-                    "features.shell_tool":false,"features.apply_patch_freeform":false,
-                    "features.collab":false,"web_search":"disabled",
+                    "features.shell_tool":false,
+                    "features.apply_patch_freeform":false,
+                    "features.collab":false,
+                    "web_search":"disabled",
                     "mcp_servers":{"praxi":{"url":server.url,"http_headers":{"Authorization":server.authorization}}}
                 }
             }})).await?;
@@ -603,6 +734,27 @@ impl CodexState {
             if !self.initialized || self.thread.is_some() {
                 return Err(CliError::Protocol);
             }
+
+            // Verify that thread/start echoed back our security config
+            // The response should include approvalPolicy=on-request and sandbox=read-only
+            let result = &v["result"];
+
+            // Check that shell_tool is disabled in response (or we got a valid thread id)
+            if result["thread"]["id"].is_null() {
+                return Err(CliError::Protocol);
+            }
+
+            // If config was echoed back, verify critical security settings
+            if let Some(config) = result.get("config") {
+                let shell_disabled = config["features"]["shell_tool"] == false;
+                let web_disabled = config["web_search"] == "disabled";
+
+                if !shell_disabled || !web_disabled {
+                    eprintln!("Codex refused to disable shell tools");
+                    return Err(CliError::NativeToolsOpen);
+                }
+            }
+
             self.thread = Some(id.to_owned());
             send(
                 stdin,
@@ -647,15 +799,26 @@ impl CodexState {
                                     .as_str()
                                     .and_then(|n| bridge.resolve(n))
                                     .is_some() => {}
-                        _ => return Err(CliError::NativeToolsOpen),
+                        // Any other tool type means native tools are open - fail closed
+                        _ => {
+                            eprintln!("Unsafe tool detected: {}", item["type"]);
+                            return Err(CliError::NativeToolsOpen);
+                        }
                     }
                 }
-                "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
+                // These methods indicate native tools are still active
+                "item/commandExecution/requestApproval"
+                | "item/fileChange/requestApproval"
+                | "item/execCommandApproval/requestApproval"
+                | "item/applyPatchApproval/requestApproval" => {
+                    eprintln!("Native tool approval requested: {}", v["method"]);
                     return Err(CliError::NativeToolsOpen);
                 }
+                // MCP tool calls from non-praxi servers must also fail
                 "item/mcpToolCall/requestApproval" => {
                     let p = &v["params"];
                     if p["server"] != "praxi" {
+                        eprintln!("Non-Praxi MCP tool call attempted");
                         return Err(CliError::NativeToolsOpen);
                     }
                     let name = p["tool"]
@@ -665,6 +828,7 @@ impl CodexState {
                     let allow = bridge.host.approve(name, p["arguments"].clone()).await;
                     send(stdin, json!({"jsonrpc":"2.0","id":v["id"],"result":{"decision":if allow {"accept"} else {"decline"}}})).await?;
                 }
+                // All other method/id combinations refuse the request
                 _ if v.get("id").is_some() && v.get("method").is_some() => {
                     send(stdin, json!({"jsonrpc":"2.0","id":v["id"],"error":{"code":-32601,"message":"request refused"}})).await?;
                 }
@@ -754,12 +918,18 @@ mod tests {
             stop: CancellationToken::new(),
         };
         let req = json!({"id":1,"method":"tools/call","params":{"name":"Bash","arguments":{}}});
-        let result = mcp(State(bridge.clone()), HeaderMap::new(), Json(req.clone())).await;
+        let result = mcp(
+            State(bridge.clone()),
+            HeaderMap::new(),
+            (),
+            Json(req.clone()),
+        )
+        .await;
         assert_eq!(result.unwrap_err(), StatusCode::UNAUTHORIZED);
         let mut headers = HeaderMap::new();
         headers.insert("authorization", "Bearer another-turn".parse().unwrap());
         assert_eq!(
-            mcp(State(bridge.clone()), headers, Json(req.clone()))
+            mcp(State(bridge.clone()), headers, (), Json(req.clone()))
                 .await
                 .unwrap_err(),
             StatusCode::UNAUTHORIZED

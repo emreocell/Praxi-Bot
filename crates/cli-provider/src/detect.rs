@@ -6,6 +6,8 @@ use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
 
+use crate::runtime::CliError;
+
 /// Authentication status reported by a CLI provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -535,6 +537,27 @@ pub(crate) async fn claude_version(
             .ok()?;
         (parts.len() == 3).then(|| (parts[0], parts[1], parts[2]))
     })
+}
+
+/// Probe Codex version without opening login files or exposing raw diagnostics.
+pub(crate) async fn codex_version(
+    resolved: &ResolvedCommand,
+    env: &PathEnv,
+) -> Result<Option<(u32, u32, u32)>, CliError> {
+    let Ok((status, stdout, _)) = run_process_probe(resolved, &["--version"], env).await else {
+        return Err(CliError::NotInstalled);
+    };
+    if !status.success() {
+        return Err(CliError::NotInstalled);
+    }
+    Ok(stdout.split_whitespace().find_map(|part| {
+        let parts: Vec<u32> = part
+            .split('.')
+            .map(str::parse)
+            .collect::<Result<_, _>>()
+            .ok()?;
+        (parts.len() == 3).then(|| (parts[0], parts[1], parts[2]))
+    }))
 }
 
 fn parse_version_string(stdout: &str) -> Option<String> {
