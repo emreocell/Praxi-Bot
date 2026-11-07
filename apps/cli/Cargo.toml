@@ -12,7 +12,19 @@ name = "bot"
 path = "src/main.rs"
 
 [dependencies]
-clap.workspace = true
+clap = { workspace = true, features = ["env"] }
+dialoguer = { version = "0.12", default-features = false, features = ["password"] }
+permission-engine = { path = "../../crates/permission-engine", version = "0.1.0" }
+protocol.workspace = true
+provider-catalog = { path = "../../crates/provider-catalog", version = "0.1.0" }
+secret-store.workspace = true
+serde_json.workspace = true
+storage.workspace = true
+tokio.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

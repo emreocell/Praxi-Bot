@@ -22,6 +22,7 @@ members = [
     "crates/script-runtime",
     "crates/plugin-host",
     "crates/storage",
+    "crates/secret-store",
     "apps/cli",
     "apps/desktop",
     "apps/node-agent",
@@ -66,5 +67,6 @@ tempfile = "3"
 tokio-util = "0.7"
 protocol = { path = "crates/protocol", version = "0.1.0" }
 storage = { path = "crates/storage", version = "0.1.0" }
+secret-store = { path = "crates/secret-store", version = "0.1.0" }
 wiremock = "0.6"
 uuid = { version = "1", features = ["v7", "serde"] }

@@ -3,12 +3,17 @@
 use serde::{Deserialize, Serialize};
 
 /// How the provider authenticates API calls.
+///
+/// Serialised in `snake_case`; the `PascalCase` spellings used by the catalog TOML
+/// files (`ApiKeyEnv`, `None`) are accepted as aliases.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Auth {
     /// Read the API key from the named environment variable.
+    #[serde(alias = "ApiKeyEnv")]
     ApiKeyEnv(String),
     /// No authentication required (e.g. a local Ollama instance).
+    #[serde(alias = "None")]
     None,
 }
 
@@ -76,7 +81,7 @@ pub enum ProviderKind {
 }
 
 /// A single provider catalog entry (one `.toml` file in `providers/catalog/`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderEntry {
     /// Unique identifier (e.g. `"openrouter"`).
     pub id: String,

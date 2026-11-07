@@ -1,0 +1,32 @@
+[package]
+name = "secret-store"
+description = "Secret storage (OS keychain and encrypted-file backends), secret references and output redaction."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+argon2 = "0.5"
+base64.workspace = true
+chacha20poly1305 = "0.10"
+regex = "1"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3.6", default-features = false, features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
+
+[dev-dependencies]
+tempfile.workspace = true
