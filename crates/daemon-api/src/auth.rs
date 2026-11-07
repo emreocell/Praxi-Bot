@@ -182,7 +182,10 @@ pub(crate) async fn guard(State(state): State<AppState>, req: Request, next: Nex
     if req.method() == Method::OPTIONS && origin.is_some() {
         return with_cors(StatusCode::NO_CONTENT.into_response(), origin, true);
     }
-    let public = req.method() == Method::GET && req.uri().path() == "/v1/health";
+    // `GET /v1/health`, and the webhooks, which carry an HMAC of the body
+    // instead of the bearer token (the route verifies it).
+    let public =
+        (req.method() == Method::GET && req.uri().path() == "/v1/health") || is_webhook_route(&req);
     if !public {
         let presented = match bearer(req.headers()) {
             Some(t) => Some(t),
@@ -198,6 +201,10 @@ pub(crate) async fn guard(State(state): State<AppState>, req: Request, next: Nex
         }
     }
     with_cors(next.run(req).await, origin, false)
+}
+
+fn is_webhook_route(req: &Request) -> bool {
+    req.method() == Method::POST && req.uri().path().starts_with("/v1/webhooks/")
 }
 
 fn is_events_route(req: &Request) -> bool {

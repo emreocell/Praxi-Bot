@@ -440,18 +440,99 @@ impl TurnExecutor {
                     reason: format!("router budget of {budget:?} exceeded"),
                 },
             };
+        self.emit_route(ctx, &decision);
+        Some(decision)
+    }
+
+    fn emit_route(&self, ctx: &RunCtx, decision: &Decision) {
         self.sh.emit(
             ctx,
             Event::RouteDecided(RouteDecided {
                 run_id: ctx.run_id,
                 level: level_name(decision.level).to_owned(),
-                route: route_json(&decision),
+                route: route_json(decision),
                 confidence: decision.confidence,
                 latency_ms: decision.latency_ms,
                 reason: decision.reason.clone(),
             }),
         );
-        Some(decision)
+    }
+
+    /// The first step of a schedule-started workflow / tool run: the schedule
+    /// itself is the decision (no ladder, no model call).  A workflow is
+    /// replayed by the usual routed step; a tool call is recorded as a
+    /// `directive` in the user step and planned by `plan_next`.
+    pub(crate) fn scheduled_first_step(
+        &self,
+        ctx: &RunCtx,
+        raw: &str,
+        work: crate::shared::ScheduleWork,
+    ) -> Option<StepSpec> {
+        use crate::shared::ScheduleWork;
+        match work {
+            ScheduleWork::Prompt(_) => None,
+            ScheduleWork::Workflow { name, params } => {
+                let decision = Decision {
+                    route: Route::Workflow {
+                        name,
+                        params,
+                        confidence: 1.0,
+                    },
+                    level: Level::K0,
+                    confidence: 1.0,
+                    latency_ms: 0,
+                    reason: "started by a schedule".to_owned(),
+                };
+                self.emit_route(ctx, &decision);
+                let mut spec = StepSpec {
+                    name: STEP_USER.to_owned(),
+                    input: json!({ "text": raw }),
+                    idempotent: true,
+                    retry: None,
+                };
+                spec.input["route"] = serde_json::to_value(&decision).unwrap_or(Value::Null);
+                Some(spec)
+            }
+            ScheduleWork::Tool { name, input } => {
+                let mut spec = StepSpec {
+                    name: STEP_USER.to_owned(),
+                    input: json!({ "text": raw }),
+                    idempotent: true,
+                    retry: None,
+                };
+                spec.input["directive"] = json!({ "kind": "tool", "name": name, "input": input });
+                Some(spec)
+            }
+        }
+    }
+
+    /// The step a schedule-started tool run takes after its user step, or
+    /// `Done` once the tool step exists (it is never run twice, even after an
+    /// interruption).
+    pub(crate) fn directive_plan(history: &[RunStep]) -> Option<RoutePlan> {
+        let first = history.first().filter(|s| s.name == STEP_USER)?;
+        let d = first.input.get("directive")?;
+        if d["kind"] != "tool" {
+            return None;
+        }
+        if history.len() > 1 {
+            return Some(RoutePlan::Done);
+        }
+        if status_of(first) != Some(StepStatus::Succeeded) {
+            return None;
+        }
+        let call = crate::shared::CallRec {
+            id: "scheduled".to_owned(),
+            name: d["name"].as_str().unwrap_or_default().to_owned(),
+            arguments: d["input"].to_string(),
+            repeat: 1,
+        };
+        Some(RoutePlan::Step(StepSpec {
+            name: STEP_TOOLS.to_owned(),
+            input: json!({ "calls": [call] }),
+            idempotent: false,
+            retry: None,
+        }))
     }
 
     /// `Command` `/stop`: cancel the run that carries it.

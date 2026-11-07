@@ -162,6 +162,45 @@ impl Scheduler {
         self.inner.executor.execute(&fired).await
     }
 
+    /// Like [`Self::handle_webhook`], but returns as soon as the request is
+    /// authenticated and accepted: the execution runs in the background (it may
+    /// take as long as an agent turn).  The same errors are returned up front,
+    /// including [`SchedulerError::Busy`] while a run of `id` is in flight.
+    ///
+    /// # Errors
+    /// As [`Self::handle_webhook`], except execution errors (those are logged).
+    pub fn trigger_webhook(&self, id: TaskId, body: &str, signature: &str) -> Result<()> {
+        let now_ms = self.inner.clock.wall_ms();
+        let fired = prepare_webhook(&self.inner.store, id, body, signature, now_ms)?;
+        let Some(guard) = try_acquire_in_flight(&self.inner, &fired) else {
+            return Err(SchedulerError::Busy(id.to_string()));
+        };
+        spawn_executions(&self.inner, fired, 1, guard);
+        Ok(())
+    }
+
+    /// Fire schedule `id` now (`run-now`), in the background, without touching
+    /// its timer (`next_run_at`).  Works on disabled schedules too.
+    ///
+    /// # Errors
+    /// [`SchedulerError::NotFound`] for an unknown id,
+    /// [`SchedulerError::Busy`] while a run of `id` is in flight.
+    pub fn run_now(&self, id: TaskId) -> Result<()> {
+        let mut schedule = self
+            .inner
+            .store
+            .get(id)?
+            .ok_or_else(|| SchedulerError::NotFound(format!("schedule {id}")))?;
+        let Some(guard) = try_acquire_in_flight(&self.inner, &schedule) else {
+            return Err(SchedulerError::Busy(id.to_string()));
+        };
+        let now_ms = self.inner.clock.wall_ms();
+        self.inner.store.touch_last_run(id, now_ms)?;
+        schedule.last_run_at = Some(now_ms);
+        spawn_executions(&self.inner, schedule, 1, guard);
+        Ok(())
+    }
+
     /// Number of occurrences of `id` skipped due to the per-schedule
     /// concurrency limit of 1.
     #[must_use]

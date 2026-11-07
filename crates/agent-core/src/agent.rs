@@ -12,7 +12,7 @@ use parking_lot::{Mutex, RwLock};
 use permission_engine::{PermissionResolver, Policy};
 use protocol::event::{RunError, RunFinished, RunStarted};
 use protocol::{
-    BotId, ChatId, Event, InitiatorKind, PermissionCategory, RunId, ToolCallId, UserId,
+    BotId, ChatId, Event, InitiatorKind, PermissionCategory, RunId, TaskId, ToolCallId, UserId,
 };
 use storage::{Message as DbMessage, Storage, now_ms};
 use task_runtime::{RunState, Runtime, RuntimeError, StepStatus};
@@ -28,8 +28,8 @@ use crate::history::{status_of, step_output};
 use crate::profile::BotProfile;
 use crate::shared::{
     ApprovalScope, CategoryDecision, Delivery, EffectivePolicy, Grant, GrantTarget, Grants,
-    LoopError, MessageMode, ModelOut, Pending, Providers, STEP_MODEL, STEP_TOOLS, Shared,
-    StreamItem, Verdict, initiator_of, kind_for,
+    LoopError, MessageMode, ModelOut, Pending, Providers, STEP_MODEL, STEP_TOOLS, ScheduleWork,
+    Shared, StreamItem, Verdict, initiator_of, kind_for, kind_for_schedule,
 };
 use crate::{AUDIT_GRANT_ALWAYS, AUDIT_GRANT_REVOKED};
 
@@ -100,6 +100,8 @@ impl AgentLoop {
                 skills: OnceLock::new(),
                 skill_hints: RwLock::new(None),
                 router: crate::router::Router::default(),
+                directives: Mutex::new(HashMap::new()),
+                approval_paused: Mutex::new(HashSet::new()),
             }
         });
         let rt = Arc::new(Runtime::new(
@@ -321,6 +323,46 @@ impl AgentLoop {
         user_message: &str,
         initiator: InitiatorKind,
     ) -> Result<RunId> {
+        self.start_turn(chat_id, user_message, &kind_for(initiator), None)
+    }
+
+    /// Start a run on behalf of schedule `schedule_id` (initiator
+    /// [`InitiatorKind::Schedule`]) and return its run id; the run goes on in
+    /// the background.  `work` says what it does: a normal prompt turn, a saved
+    /// workflow replayed through the loop's permission gate, or one tool call
+    /// through the same gate.  Approvals apply as for any run; when nobody
+    /// answers within [`LoopConfig::schedule_approval_timeout`] the run
+    /// pauses (resumable with [`Self::resume`]).  `RunStarted` carries the
+    /// `schedule_id`.
+    ///
+    /// # Errors
+    /// As [`Self::run_turn`].
+    pub fn run_scheduled(
+        &self,
+        chat_id: ChatId,
+        schedule_id: TaskId,
+        work: ScheduleWork,
+    ) -> Result<RunId> {
+        let text = match &work {
+            ScheduleWork::Prompt(t) => t.clone(),
+            ScheduleWork::Workflow { name, params } => {
+                format!("Scheduled: run the saved workflow `{name}` with {params:?}.")
+            }
+            ScheduleWork::Tool { name, input } => {
+                format!("Scheduled: call the tool `{name}` with {input}.")
+            }
+        };
+        let directive = (!matches!(work, ScheduleWork::Prompt(_))).then_some(work);
+        self.start_turn(chat_id, &text, &kind_for_schedule(schedule_id), directive)
+    }
+
+    fn start_turn(
+        &self,
+        chat_id: ChatId,
+        user_message: &str,
+        kind: &str,
+        directive: Option<ScheduleWork>,
+    ) -> Result<RunId> {
         if self.sh.shutting_down.load(Ordering::SeqCst) {
             return Err(LoopError::ShuttingDown);
         }
@@ -337,13 +379,13 @@ impl AgentLoop {
             if active.contains_key(&chat_id) {
                 return Err(LoopError::Busy(chat_id));
             }
-            let run_id = self.rt.create_run(
-                chat.user_id,
-                chat.bot_id,
-                Some(chat_id),
-                &kind_for(initiator),
-            )?;
+            let run_id = self
+                .rt
+                .create_run(chat.user_id, chat.bot_id, Some(chat_id), kind)?;
             self.insert_user_message(chat.user_id, chat_id, run_id, user_message)?;
+            if let Some(d) = directive {
+                self.sh.directives.lock().insert(run_id, d);
+            }
             active.insert(chat_id, run_id);
             run_id
         };
@@ -804,6 +846,7 @@ impl AgentLoop {
                                 run_id,
                                 chat_id: ctx.chat_id,
                                 bot_id: ctx.bot_id,
+                                schedule_id: ctx.schedule_id,
                             }),
                         );
                     }
@@ -837,14 +880,19 @@ impl AgentLoop {
             // Paused by `shutdown`: no `run_finished` (the run is resumable and
             // a finished marker in its log would end later followers), no
             // queued follow-up turn.
+            let approval_timeout = self.sh.approval_paused.lock().remove(&run_id);
             if let Some(ctx) = &ctx {
+                let message = if approval_timeout {
+                    "run paused: nobody answered the approval request in time; resume it with \
+                     POST /v1/runs/{id}/resume"
+                } else {
+                    "run paused: the daemon is shutting down; resume it after the next start"
+                };
                 self.sh.emit(
                     ctx,
                     Event::Error(RunError {
                         run_id,
-                        message: "run paused: the daemon is shutting down; resume it after the \
-                                  next start"
-                            .into(),
+                        message: message.into(),
                         recoverable: true,
                     }),
                 );

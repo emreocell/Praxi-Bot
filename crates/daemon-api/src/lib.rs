@@ -20,6 +20,7 @@ pub mod error;
 pub mod fake;
 pub mod openapi;
 mod routes;
+mod schedule;
 mod sse;
 
 #[cfg(test)]
@@ -35,6 +36,7 @@ use axum::Router;
 use axum::routing::{get, post};
 use protocol::{BotId, ChatId, RunId, UserId};
 use provider_catalog::Catalog;
+use scheduler::{ScheduleStore, Scheduler};
 use storage::{Bot, Chat, Run, Storage, User, now_ms};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
@@ -106,6 +108,13 @@ struct Inner {
     shutdown: CancellationToken,
     hub: Arc<ControlHub>,
     provider_host: OnceLock<ProviderHost>,
+    /// `schedules.db`, opened on first use.
+    schedules: parking_lot::Mutex<Option<Arc<ScheduleStore>>>,
+    /// The running scheduler (see [`AppState::start_scheduler`]).
+    scheduler: OnceLock<Scheduler>,
+    /// Shutdown steps in the order they ran (tests only).
+    #[cfg(test)]
+    order: parking_lot::Mutex<Vec<&'static str>>,
 }
 
 /// Shared handler state (cheap to clone).
@@ -148,6 +157,10 @@ impl AppState {
             shutdown: CancellationToken::new(),
             hub,
             provider_host: OnceLock::new(),
+            schedules: parking_lot::Mutex::new(None),
+            scheduler: OnceLock::new(),
+            #[cfg(test)]
+            order: parking_lot::Mutex::new(Vec::new()),
         })))
     }
 
@@ -155,6 +168,60 @@ impl AppState {
     /// once, right after [`AppState::new`]; a second call is ignored).
     pub fn set_provider_host(&self, host: ProviderHost) {
         let _ = self.0.provider_host.set(host);
+    }
+
+    /// The schedule store (`<data dir>/schedules.db`), opened on first use.
+    pub(crate) fn schedule_store(&self) -> Result<Arc<ScheduleStore>, scheduler::SchedulerError> {
+        let mut g = self.0.schedules.lock();
+        if let Some(s) = g.as_ref() {
+            return Ok(Arc::clone(s));
+        }
+        let store = Arc::new(ScheduleStore::from_storage(self.storage())?);
+        *g = Some(Arc::clone(&store));
+        Ok(store)
+    }
+
+    /// The running scheduler, or `503` when the daemon did not start one.
+    pub(crate) fn scheduler(&self) -> Result<&Scheduler, ApiError> {
+        self.0
+            .scheduler
+            .get()
+            .ok_or_else(|| ApiError::unavailable("the scheduler is not running"))
+    }
+
+    /// Open the schedule store and start the scheduler with an executor that
+    /// runs payloads through the agent loop (initiator `Schedule`).  [`serve`]
+    /// calls this; a second call is a no-op.
+    ///
+    /// # Errors
+    /// The schedule store cannot be opened.
+    pub fn start_scheduler(&self) -> Result<(), scheduler::SchedulerError> {
+        if self.0.scheduler.get().is_some() {
+            return Ok(());
+        }
+        let store = self.schedule_store()?;
+        let exec = Arc::new(schedule::DaemonExecutor {
+            agent: self.0.agent.clone(),
+            storage: self.storage_arc(),
+            user_id: self.user_id(),
+        });
+        let _ = self.0.scheduler.set(Scheduler::start(store, exec));
+        Ok(())
+    }
+
+    /// Stop the scheduler (no new firings); running firings are left to the
+    /// agent loop's shutdown.
+    async fn stop_scheduler(&self) {
+        if let Some(s) = self.0.scheduler.get() {
+            s.shutdown().await;
+        }
+        #[cfg(test)]
+        self.0.order.lock().push("scheduler");
+    }
+
+    #[cfg(test)]
+    pub(crate) fn shutdown_order(&self) -> Vec<&'static str> {
+        self.0.order.lock().clone()
     }
 
     pub(crate) fn provider_host(&self) -> Option<&ProviderHost> {
@@ -222,6 +289,8 @@ impl AppState {
     /// Shut the loop down (see [`serve`]): live runs end `Paused`, then any
     /// run a crash left `Running` / `WaitingApproval` is checkpointed too.
     async fn checkpoint_runs(&self) -> Vec<RunId> {
+        #[cfg(test)]
+        self.0.order.lock().push("agent");
         let mut ids = self.0.agent.shutdown(self.0.cfg.shutdown_grace).await;
         let agent = self.0.agent.clone();
         let rest = tokio::task::spawn_blocking(move || agent.recover().unwrap_or_default())
@@ -273,6 +342,22 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/policy", get(r::get_policy).put(r::put_policy))
         .route("/v1/providers", get(r::list_providers))
         .route("/v1/providers/reload", post(r::reload_providers))
+        .route(
+            "/v1/schedules",
+            get(r::list_schedules).post(r::create_schedule),
+        )
+        .route("/v1/schedules/parse", post(r::parse_schedule))
+        .route(
+            "/v1/schedules/{id}",
+            get(r::get_schedule)
+                .put(r::update_schedule)
+                .delete(r::delete_schedule),
+        )
+        .route("/v1/schedules/{id}/run-now", post(r::run_schedule_now))
+        .route(
+            "/v1/webhooks/{id}",
+            post(r::webhook).layer(axum::extract::DefaultBodyLimit::max(r::WEBHOOK_MAX_BODY)),
+        )
         .route("/v1/events", get(sse::events))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -283,8 +368,9 @@ pub fn router(state: AppState) -> Router {
 
 /// Serve the API on `listener` until `shutdown` completes.
 ///
-/// Graceful shutdown: new connections stop, open SSE streams are closed, and
-/// then [`agent_core::AgentLoop::shutdown`] runs: no new turns, model streams
+/// Graceful shutdown: new connections stop, open SSE streams are closed, the
+/// scheduler stops (no new firings), and then
+/// [`agent_core::AgentLoop::shutdown`] runs: no new turns, model streams
 /// are cancelled, running tool steps get [`DaemonConfig::shutdown_grace`] to
 /// finish, and every live run ends `Paused` (unfinished steps marked
 /// interrupted, dangling approvals expired), resumable with
@@ -294,18 +380,22 @@ pub fn router(state: AppState) -> Router {
 /// The caller must bind `listener` to a loopback address.
 ///
 /// # Errors
-/// I/O errors of the server.
+/// I/O errors of the server, or the schedule store cannot be opened.
 pub async fn serve(
     listener: TcpListener,
     state: AppState,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<Vec<RunId>> {
+    state.start_scheduler().map_err(std::io::Error::other)?;
     let cancel = state.shutdown_token();
-    axum::serve(listener, router(state.clone()))
+    let served = axum::serve(listener, router(state.clone()))
         .with_graceful_shutdown(async move {
             shutdown.await;
             cancel.cancel();
         })
-        .await?;
+        .await;
+    // The scheduler first: nothing may start a run while the loop shuts down.
+    state.stop_scheduler().await;
+    served?;
     Ok(state.checkpoint_runs().await)
 }

@@ -10,7 +10,8 @@ use parking_lot::{Mutex, RwLock};
 use permission_engine::{Decision, PermissionResolver, Policy};
 use protocol::event::TodoItem;
 use protocol::{
-    BotId, ChatId, Envelope, Event, InitiatorKind, PermissionCategory, RunId, ToolCallId, UserId,
+    BotId, ChatId, Envelope, Event, InitiatorKind, PermissionCategory, RunId, TaskId, ToolCallId,
+    UserId,
 };
 use provider_catalog::{ChatProvider, ModelRef};
 use serde::{Deserialize, Serialize};
@@ -300,6 +301,8 @@ pub(crate) struct RunCtx {
     pub bot_id: BotId,
     pub user_id: UserId,
     pub initiator: InitiatorKind,
+    /// The schedule that started the run (schedule-initiated runs only).
+    pub schedule_id: Option<TaskId>,
     pub profile: Arc<BotProfile>,
     pub bot_policy: Option<Policy>,
     /// The run that spawned this one (subagent runs only).
@@ -368,6 +371,33 @@ pub(crate) struct Shared {
     pub skill_hints: RwLock<Option<SkillHintFn>>,
     /// The K0-K3 decision ladders (one per bot) and the workflow wiring.
     pub router: crate::router::Router,
+    /// What a schedule-started run does instead of asking the model, until its
+    /// first step has been planned (afterwards it lives in the step's input).
+    pub directives: Mutex<HashMap<RunId, ScheduleWork>>,
+    /// Runs that paused because nobody answered an approval in time.
+    pub approval_paused: Mutex<HashSet<RunId>>,
+}
+
+/// What a schedule-started run does (see
+/// [`AgentLoop::run_scheduled`](crate::AgentLoop::run_scheduled)).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ScheduleWork {
+    /// A normal turn with this prompt.
+    Prompt(String),
+    /// Replay a saved workflow through the loop's permission gate.
+    Workflow {
+        /// Workflow name.
+        name: String,
+        /// Workflow parameters.
+        params: BTreeMap<String, String>,
+    },
+    /// Call one registered tool through the loop's permission gate.
+    Tool {
+        /// Tool name.
+        name: String,
+        /// Tool input.
+        input: Value,
+    },
 }
 
 pub(crate) fn xe(e: impl std::fmt::Display) -> ExecError {
@@ -382,7 +412,21 @@ pub(crate) fn kind_for(i: InitiatorKind) -> String {
         InitiatorKind::Routine => format!("{KIND_PREFIX}:routine"),
         InitiatorKind::Channel => format!("{KIND_PREFIX}:channel"),
         InitiatorKind::Subagent => format!("{KIND_PREFIX}:subagent"),
+        InitiatorKind::Schedule => format!("{KIND_PREFIX}:schedule"),
     }
+}
+
+/// Run kind of a turn started by schedule `id` (the id survives a restart).
+pub(crate) fn kind_for_schedule(id: TaskId) -> String {
+    format!("{KIND_PREFIX}:schedule:{id}")
+}
+
+/// The schedule behind a run kind written by [`kind_for_schedule`].
+pub(crate) fn schedule_id_of(kind: &str) -> Option<TaskId> {
+    kind.strip_prefix("turn:schedule:")?
+        .parse()
+        .ok()
+        .map(TaskId)
 }
 
 pub(crate) fn initiator_of(kind: &str) -> InitiatorKind {
@@ -390,6 +434,7 @@ pub(crate) fn initiator_of(kind: &str) -> InitiatorKind {
         Some("routine") => InitiatorKind::Routine,
         Some("channel") => InitiatorKind::Channel,
         Some("subagent") => InitiatorKind::Subagent,
+        Some(s) if s == "schedule" || s.starts_with("schedule:") => InitiatorKind::Schedule,
         _ => InitiatorKind::Human,
     }
 }
@@ -466,6 +511,11 @@ impl Shared {
             bot_id: run.bot_id,
             user_id: run.user_id,
             initiator,
+            schedule_id: if run.parent_run_id.is_none() {
+                schedule_id_of(&run.kind)
+            } else {
+                None
+            },
             bot_policy,
             profile,
             parent_run_id: run.parent_run_id,

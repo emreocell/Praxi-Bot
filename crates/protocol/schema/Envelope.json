@@ -99,6 +99,14 @@
               "type": "string",
               "format": "uuid"
             },
+            "schedule_id": {
+              "description": "The schedule that started this run (scheduled runs only; additive).",
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            },
             "type": {
               "type": "string",
               "enum": [

@@ -946,3 +946,76 @@ async fn webhook_rejects_empty_secret_disabled_and_concurrent_runs() {
     assert_eq!(store.get(id).unwrap().unwrap().next_run_at, None);
     scheduler.shutdown().await;
 }
+
+#[tokio::test]
+async fn run_now_and_trigger_webhook_return_before_the_execution_ends() {
+    let store = Arc::new(ScheduleStore::open_in_memory().unwrap());
+    let (exec, entered, release) = RecordingExecutor::gated();
+    let s = Schedule::new(
+        BotId::new(),
+        None,
+        "later",
+        ScheduleSpec::Every { seconds: 3600 },
+        Payload::AgentPrompt {
+            text: "go {input}".into(),
+        },
+        MisfirePolicy::Skip,
+        0,
+    )
+    .unwrap();
+    let id = s.id;
+    store.insert(&s).unwrap();
+    store
+        .set_trigger(id, &Trigger::Webhook { secret: "k".into() })
+        .unwrap();
+    let clock = Arc::new(FakeClock::new(0));
+    let scheduler = Scheduler::start_with_clock(Arc::clone(&store), exec.clone(), clock);
+
+    assert!(matches!(
+        scheduler.run_now(TaskId::new()),
+        Err(SchedulerError::NotFound(_))
+    ));
+    let waiting = entered.notified();
+    tokio::pin!(waiting);
+    waiting.as_mut().enable();
+    scheduler.run_now(id).unwrap();
+    waiting.await;
+    assert!(scheduler.is_in_flight(id));
+    // Busy while the first one runs, for both entry points.
+    assert!(matches!(
+        scheduler.run_now(id),
+        Err(SchedulerError::Busy(_))
+    ));
+    let sig = sign_webhook_body("k", b"x");
+    assert!(matches!(
+        scheduler.trigger_webhook(id, "x", &sig),
+        Err(SchedulerError::Busy(_))
+    ));
+    release.notify_one();
+    scheduler.settle().await;
+    assert!(!scheduler.is_in_flight(id));
+    // run-now keeps the timer.
+    assert_eq!(store.get(id).unwrap().unwrap().next_run_at, s.next_run_at);
+
+    // Webhook: bad signature is refused up front; a good one runs with {input}.
+    assert!(matches!(
+        scheduler.trigger_webhook(id, "x", "sha256=00"),
+        Err(SchedulerError::InvalidSignature)
+    ));
+    let waiting = entered.notified();
+    tokio::pin!(waiting);
+    waiting.as_mut().enable();
+    scheduler.trigger_webhook(id, "x", &sig).unwrap();
+    waiting.await;
+    release.notify_one();
+    scheduler.settle().await;
+    let runs = exec.recorded();
+    assert_eq!(runs.len(), 2);
+    assert_eq!(
+        runs[1].payload,
+        Payload::AgentPrompt {
+            text: "go x".into()
+        }
+    );
+    scheduler.shutdown().await;
+}

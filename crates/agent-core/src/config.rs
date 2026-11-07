@@ -19,6 +19,9 @@ use task_runtime::RetryPolicy;
 /// servers add many more.
 pub const DEFAULT_DIRECT_TOOL_LIMIT: usize = 40;
 
+/// Default [`LoopConfig::schedule_approval_timeout`]: 30 minutes.
+pub const DEFAULT_SCHEDULE_APPROVAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
 /// Per-turn safety limits.
 #[derive(Debug, Clone)]
 pub struct Guards {
@@ -135,6 +138,9 @@ pub struct LoopConfig {
     pub redactor: Option<Redactor>,
     /// Memory hook; `None` = no memory.
     pub memory: Option<MemoryConfig>,
+    /// How long a schedule-started run waits for an approval (or a question
+    /// answer) before it pauses (default [`DEFAULT_SCHEDULE_APPROVAL_TIMEOUT`]).
+    pub schedule_approval_timeout: Duration,
 }
 
 impl Default for LoopConfig {
@@ -157,6 +163,7 @@ impl Default for LoopConfig {
             router_budget: Duration::from_secs(2),
             redactor: None,
             memory: None,
+            schedule_approval_timeout: DEFAULT_SCHEDULE_APPROVAL_TIMEOUT,
         }
     }
 }

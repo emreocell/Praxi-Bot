@@ -166,6 +166,34 @@ impl Shared {
         (approval_id, guard, rx)
     }
 
+    /// Wait for the user's verdict.  A schedule-started run only waits
+    /// [`LoopConfig::schedule_approval_timeout`](crate::LoopConfig); then the
+    /// run is asked to pause (resumable) and `None` is returned.
+    async fn wait_verdict(
+        &self,
+        ctx: &RunCtx,
+        rx: oneshot::Receiver<Verdict>,
+    ) -> Option<Result<Verdict, oneshot::error::RecvError>> {
+        if ctx.initiator != InitiatorKind::Schedule {
+            return Some(rx.await);
+        }
+        let limit = self.cfg.schedule_approval_timeout;
+        if let Ok(v) = tokio::time::timeout(limit, rx).await {
+            return Some(v);
+        }
+        self.approval_paused.lock().insert(ctx.run_id);
+        self.audit(
+            ctx,
+            "system",
+            "approval.timed_out",
+            &json!({ "timeout_secs": limit.as_secs() }),
+        );
+        if let Some(rt) = self.rt.get().and_then(Weak::upgrade) {
+            rt.request_pause(ctx.run_id, true);
+        }
+        None
+    }
+
     /// Park the run in `WaitingApproval` until `approve` / `deny` is called.
     /// `Ok(())` = approved, `Err(reason)` = denied.
     pub(crate) async fn request_approval(
@@ -189,8 +217,12 @@ impl Shared {
                 summary,
             }),
         );
-        let verdict = rx.await;
+        let verdict = self.wait_verdict(ctx, rx).await;
         self.set_state(ctx.run_id, RunState::Running);
+        let Some(verdict) = verdict else {
+            let _ = self.storage.decide_approval(approval_id, "expired");
+            return Err(Some("nobody approved in time; the run is paused".into()));
+        };
 
         match verdict {
             Ok(Verdict::Approved { scope, by }) => {
@@ -293,8 +325,12 @@ impl Shared {
                 options,
             }),
         );
-        let verdict = rx.await;
+        let verdict = self.wait_verdict(ctx, rx).await;
         self.set_state(ctx.run_id, RunState::Running);
+        let Some(verdict) = verdict else {
+            let _ = self.storage.decide_approval(approval_id, "expired");
+            return Err(Some("nobody answered in time; the run is paused".into()));
+        };
         match verdict {
             Ok(Verdict::Answered { answer, .. }) => {
                 let _ = self.storage.decide_approval(approval_id, "answered");

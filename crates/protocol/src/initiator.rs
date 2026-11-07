@@ -22,6 +22,10 @@ pub enum InitiatorKind {
     Channel,
     /// A parent agent run spawned this as a sub-agent.
     Subagent,
+    /// A schedule (cron / interval / one-shot / webhook) started the run.
+    /// Behaves like [`InitiatorKind::Human`] unless a rule says otherwise, but
+    /// never auto-approves money or never-list actions.
+    Schedule,
 }
 
 /// The entity that initiated an agent run, including the specific identifier.
@@ -36,6 +40,8 @@ pub enum Initiator {
     Channel(ChannelRef),
     /// A parent agent run spawned this as a sub-agent.
     Subagent(RunId),
+    /// A schedule started the run.
+    Schedule(TaskId),
 }
 
 impl Initiator {
@@ -47,6 +53,7 @@ impl Initiator {
             Self::Routine(_) => InitiatorKind::Routine,
             Self::Channel(_) => InitiatorKind::Channel,
             Self::Subagent(_) => InitiatorKind::Subagent,
+            Self::Schedule(_) => InitiatorKind::Schedule,
         }
     }
 }
@@ -71,6 +78,7 @@ mod tests {
             Initiator::Routine(TaskId::new()),
             Initiator::Channel(ChannelRef::new("telegram", "123")),
             Initiator::Subagent(RunId::new()),
+            Initiator::Schedule(TaskId::new()),
         ];
         for ini in cases {
             let json = serde_json::to_string(&ini).unwrap();

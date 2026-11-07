@@ -68,6 +68,14 @@ impl Modify for Security {
         routes::put_policy,
         routes::list_providers,
         routes::reload_providers,
+        routes::list_schedules,
+        routes::create_schedule,
+        routes::get_schedule,
+        routes::update_schedule,
+        routes::delete_schedule,
+        routes::run_schedule_now,
+        routes::parse_schedule,
+        routes::webhook,
         events_doc,
     ),
     components(schemas(
@@ -80,13 +88,14 @@ impl Modify for Security {
         dto::CategoryDecisionDto, dto::ControlMode, dto::ControlStateInput,
         dto::ControlStateDto, dto::ControlVerdict, dto::ControlDecisionInput,
         dto::ControlDecisionResponse, dto::PolicyDto, dto::PolicyInput, dto::ProvidersDto,
-        dto::ConfiguredProviderDto, dto::CatalogProviderDto, dto::ReloadResponse, dto::RememberResponse, error::ErrorBody, error::ErrorDetail,
+        dto::ConfiguredProviderDto, dto::CatalogProviderDto, dto::ReloadResponse, dto::RememberResponse, dto::ScheduleDto, dto::ScheduleInput,
+        dto::ParseSchedule, dto::ParsedSchedule, dto::AcceptedResponse, error::ErrorBody, error::ErrorDetail,
     )),
     modifiers(&Security),
     tags(
         (name = "meta"), (name = "bots"), (name = "chats"), (name = "approvals"),
         (name = "runs"), (name = "usage"), (name = "events"), (name = "control"),
-        (name = "policy"), (name = "providers")
+        (name = "policy"), (name = "providers"), (name = "schedules")
     )
 )]
 pub struct ApiDoc;
