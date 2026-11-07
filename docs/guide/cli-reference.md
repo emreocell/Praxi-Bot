@@ -61,8 +61,6 @@ permission preset), or scripted when `--provider` is given.
 | `--bot-name <NAME>` | First bot name |
 | `--permission <read-only\|read-and-draft\|approve-destructive\|full>` | Default permission preset (default `approve-destructive`) |
 
-See the known issue about the first bot in [Install and first run](install.md).
-
 ### `bot serve`
 
 Run the local daemon API on `127.0.0.1` until Ctrl-C or SIGTERM. Needs a usable

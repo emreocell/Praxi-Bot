@@ -67,13 +67,6 @@ bot bots list                   # shows your bots and their ids
 bot chat <bot-id> "What files are in my Documents folder?"
 ```
 
-> **Known issue (CLI wizard).** The first bot that `bot setup` saves uses a
-> simplified config that the agent loop cannot load as a profile, so chatting
-> with it fails with "has no usable profile". Until this is fixed, create your
-> bot from a profile file with `bot bots add` (see
-> [Bots and profiles](bots-and-profiles.md); it takes a minute), or create it in
-> the desktop app, which writes proper profiles.
-
 `bot setup` asks, in order: language of messages, provider, API key (hidden
 input), model, first-bot preset (`general`, `browser` or `desktop`), bot name
 and default permission preset. Nothing is saved until the wizard finishes. The key is
