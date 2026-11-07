@@ -9,9 +9,12 @@ use desktop_api::{
 };
 use windows::{
     Win32::{
-        Foundation::{CloseHandle, HWND, LPARAM, RECT},
+        Foundation::{CloseHandle, ERROR_SUCCESS, HWND, LPARAM, RECT, SetLastError, WAIT_OBJECT_0},
         Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute},
-        System::Threading::{AttachThreadInput, GetCurrentThreadId, GetProcessId},
+        System::Threading::{
+            AttachThreadInput, GetCurrentThreadId, GetProcessId, WaitForInputIdle,
+            WaitForSingleObject,
+        },
         UI::{
             HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext},
             Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW},
@@ -157,9 +160,16 @@ unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> windows::core
 pub fn list_windows() -> Result<Vec<WindowInfo>, DesktopError> {
     let mut handles: Vec<HWND> = Vec::new();
     // SAFETY: the callback only dereferences the pointer we pass here, and
-    // EnumWindows is synchronous so `handles` outlives it.
-    unsafe { EnumWindows(Some(enum_proc), LPARAM((&raw mut handles) as isize)) }
-        .map_err(|e| DesktopError::Internal(format!("EnumWindows: {e}")))?;
+    // EnumWindows is synchronous so `handles` outlives it. When no top-level
+    // windows exist, EnumWindows can return FALSE with ERROR_SUCCESS (0).
+    unsafe {
+        SetLastError(ERROR_SUCCESS);
+        if let Err(e) = EnumWindows(Some(enum_proc), LPARAM((&raw mut handles) as isize))
+            && !e.code().is_ok()
+        {
+            return Err(DesktopError::Internal(format!("EnumWindows: {e}")));
+        }
+    }
     Ok(handles
         .into_iter()
         .filter(|h| !is_cloaked(*h))
@@ -243,6 +253,8 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+const LAUNCH_IDLE_CAP_MS: u32 = 200;
+
 /// Launch an executable (or document / app alias) via `ShellExecuteExW`.
 /// No shell or PowerShell is involved. Returns the new process id, or 0 when the
 /// shell handled the request without a new process (URI handlers, reused instance).
@@ -281,7 +293,17 @@ pub fn launch(app: &AppSpec) -> Result<Pid, DesktopError> {
             // That is a success, not an error: pid 0 means "not known".
             return Ok(0);
         }
-        let pid = GetProcessId(info.hProcess);
+        // Let GUI apps initialise their message loop (capped). Stub launchers
+        // (`calc.exe` activating `CalculatorApp.exe`) exit within a few ms
+        // without creating a window under their own pid; returning 0 lets the
+        // caller match any new window.
+        let idle = WaitForInputIdle(info.hProcess, LAUNCH_IDLE_CAP_MS);
+        let stub_wait = if idle == 0 { 0 } else { 100 };
+        let pid = if WaitForSingleObject(info.hProcess, stub_wait) == WAIT_OBJECT_0 {
+            0
+        } else {
+            GetProcessId(info.hProcess)
+        };
         let _ = CloseHandle(info.hProcess);
         Ok(pid)
     }
