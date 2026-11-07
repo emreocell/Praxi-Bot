@@ -208,11 +208,35 @@ pub fn activate(hwnd: HWND) -> Result<(), DesktopError> {
     }
 }
 
+/// Quote one argument following the `CommandLineToArgvW` / MSVCRT rules:
+/// backslashes are literal unless they precede a double quote, in which case
+/// they must be doubled (and the quote escaped); trailing backslashes inside
+/// the surrounding quotes are doubled so they do not escape the closing quote.
 fn quote_arg(a: &str) -> String {
-    if !a.is_empty() && !a.contains([' ', '\t', '"']) {
+    if !a.is_empty() && !a.contains([' ', '\t', '\n', '\x0b', '"']) {
         return a.to_string();
     }
-    format!("\"{}\"", a.replace('"', "\\\""))
+    let mut out = String::with_capacity(a.len() + 2);
+    out.push('"');
+    let mut backslashes = 0usize;
+    for c in a.chars() {
+        match c {
+            '\\' => backslashes += 1,
+            '"' => {
+                out.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
+                out.push('"');
+                backslashes = 0;
+            }
+            _ => {
+                out.extend(std::iter::repeat_n('\\', backslashes));
+                out.push(c);
+                backslashes = 0;
+            }
+        }
+    }
+    out.extend(std::iter::repeat_n('\\', backslashes * 2));
+    out.push('"');
+    out
 }
 
 fn wide(s: &str) -> Vec<u16> {
@@ -260,5 +284,28 @@ pub fn launch(app: &AppSpec) -> Result<Pid, DesktopError> {
         let pid = GetProcessId(info.hProcess);
         let _ = CloseHandle(info.hProcess);
         Ok(pid)
+    }
+}
+
+#[cfg(test)]
+mod quote_tests {
+    use super::quote_arg;
+
+    #[test]
+    fn plain_and_empty() {
+        assert_eq!(quote_arg("abc"), "abc");
+        assert_eq!(quote_arg(""), r#""""#);
+        assert_eq!(quote_arg(r"C:\dir\file"), r"C:\dir\file");
+    }
+
+    #[test]
+    fn trailing_backslash_is_doubled() {
+        assert_eq!(quote_arg(r"C:\My Dir\"), r#""C:\My Dir\\""#);
+    }
+
+    #[test]
+    fn embedded_quote_and_backslashes() {
+        assert_eq!(quote_arg(r#"x" /s"#), r#""x\" /s""#);
+        assert_eq!(quote_arg(r#"a\"b"#), r#""a\\\"b""#);
     }
 }

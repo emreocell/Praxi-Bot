@@ -112,9 +112,11 @@ pub fn drag(from: (f64, f64), to: (f64, f64)) -> Result<(), DesktopError> {
         mouse(0, 0, MOUSEEVENTF_LEFTDOWN),
     ])?;
     std::thread::sleep(std::time::Duration::from_millis(50));
-    send(&[move_event(to.0, to.1)])?;
+    let moved = send(&[move_event(to.0, to.1)]);
     std::thread::sleep(std::time::Duration::from_millis(50));
-    send(&[mouse(0, 0, MOUSEEVENTF_LEFTUP)])
+    // Always try to release the button, even if the move failed.
+    let up = send(&[mouse(0, 0, MOUSEEVENTF_LEFTUP)]);
+    moved.and(up)
 }
 
 /// Type text as Unicode key events (layout independent).

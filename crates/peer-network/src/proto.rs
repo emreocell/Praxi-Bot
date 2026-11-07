@@ -58,6 +58,9 @@ pub async fn write_frame(send: &mut SendStream, payload: &[u8], max: usize) -> R
         .map_err(|e| PeerError::Connection(e.to_string()))
 }
 
+/// Read buffer growth step, so a header cannot force a large up-front allocation.
+const READ_CHUNK: usize = 64 * 1024;
+
 /// Read one frame; `Ok(None)` means the peer finished the stream cleanly
 /// before starting a new frame.
 ///
@@ -77,10 +80,17 @@ pub async fn read_frame(recv: &mut RecvStream, max: usize) -> Result<Option<Vec<
             "incoming message of {len} bytes exceeds the {max} byte limit"
         )));
     }
-    let mut buf = vec![0u8; len];
-    recv.read_exact(&mut buf)
-        .await
-        .map_err(|e| PeerError::Connection(e.to_string()))?;
+    // Grow the buffer as data actually arrives instead of trusting the header,
+    // so a peer announcing a huge frame and then stalling costs little memory.
+    let mut buf: Vec<u8> = Vec::with_capacity(len.min(READ_CHUNK));
+    while buf.len() < len {
+        let start = buf.len();
+        let take = (len - start).min(READ_CHUNK);
+        buf.resize(start + take, 0);
+        recv.read_exact(&mut buf[start..])
+            .await
+            .map_err(|e| PeerError::Connection(e.to_string()))?;
+    }
     Ok(Some(buf))
 }
 
