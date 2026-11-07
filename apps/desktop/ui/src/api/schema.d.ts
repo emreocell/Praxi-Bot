@@ -399,6 +399,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List schedules. */
+        get: operations["list_schedules"];
+        put?: never;
+        /** Create a schedule (armed unless `enabled` is `false`). */
+        post: operations["create_schedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/schedules/parse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Turn an English / Turkish phrase into a schedule spec. */
+        post: operations["parse_schedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/schedules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one schedule. */
+        get: operations["get_schedule"];
+        /**
+         * Replace a schedule's definition (its bot stays).  A changed or re-enabled
+         *     timer is re-armed from now; run state (`last_run_at_ms`) is kept.
+         */
+        put: operations["update_schedule"];
+        post?: never;
+        /** Delete a schedule (and its webhook trigger).  Runs it already started stay. */
+        delete: operations["delete_schedule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/schedules/{id}/run-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fire a schedule now, in the background; its timer is untouched.  The run is
+         *     a normal run (its `run_started` event carries the `schedule_id`).
+         */
+        post: operations["run_schedule_now"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/usage": {
         parameters: {
             query?: never;
@@ -416,10 +493,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/webhooks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fire a schedule from outside.  No bearer token: the body is authenticated
+         *     with `X-Signature-256: sha256=<hex HMAC-SHA256(secret, body)>` (the secret
+         *     is the schedule's `webhook_secret`).  Host / Origin checks still apply and
+         *     the body may be at most 256 KB.  The body replaces `{input}` in the payload.
+         *     `202` once accepted (the run goes on in the background).
+         */
+        post: operations["webhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description Answer of `POST /v1/schedules/{id}/run-now` and `POST /v1/webhooks/{id}`:
+         *     the run goes on in the background (follow it in the events, with the
+         *     `schedule_id` of its `run_started`).
+         */
+        AcceptedResponse: {
+            /**
+             * Format: uuid
+             * @description The schedule that fires.
+             */
+            schedule_id: string;
+            /** @description Always `accepted`. */
+            status: string;
+        };
         /** @description `POST /v1/questions/{call_id}`. */
         AnswerQuestion: {
             /** @description The user's answer (free text, or one of the offered options). */
@@ -751,6 +865,23 @@ export interface components {
          * @enum {string}
          */
         Mode: "steer" | "queue";
+        /** @description Body of `POST /v1/schedules/parse`. */
+        ParseSchedule: {
+            /** @description English or Turkish phrase, e.g. `every weekday at 9`, `her gün 09:00`. */
+            text: string;
+            /** @description IANA timezone for calendar phrases (default UTC). */
+            tz?: string | null;
+        };
+        /** @description Result of `POST /v1/schedules/parse`. */
+        ParsedSchedule: {
+            /**
+             * Format: int64
+             * @description First firing from now.
+             */
+            next_run_at_ms?: number | null;
+            /** @description The [`ScheduleDto::spec`] the phrase means. */
+            spec: unknown;
+        };
         /** @description The global default permission policy (`GET` / `PUT /v1/policy`). */
         PolicyDto: {
             /** @description Level per category: `deny`, `ask`, `allow` or `allow_with_limits`. */
@@ -844,6 +975,93 @@ export interface components {
              * @description Last state change.
              */
             updated_at_ms: number;
+        };
+        /** @description A schedule (`/v1/schedules`). */
+        ScheduleDto: {
+            /**
+             * Format: uuid
+             * @description Bot that runs it.
+             */
+            bot_id: string;
+            /**
+             * Format: uuid
+             * @description Chat the runs post to; without one a chat named after the schedule is
+             *     used (and created on the first firing).
+             */
+            chat_id?: string | null;
+            /**
+             * Format: int64
+             * @description Creation time.
+             */
+            created_at_ms: number;
+            /** @description Whether the timer is armed. */
+            enabled: boolean;
+            /**
+             * @description A webhook trigger is configured (`POST /v1/webhooks/{id}`); the secret
+             *     is never returned.
+             */
+            has_webhook: boolean;
+            /**
+             * Format: uuid
+             * @description Schedule id.
+             */
+            id: string;
+            /**
+             * Format: int64
+             * @description Last firing.
+             */
+            last_run_at_ms?: number | null;
+            /**
+             * @description `skip`, `run_once` or `run_all`: what happens to occurrences missed
+             *     while the daemon was down.
+             */
+            misfire_policy: string;
+            /** @description Display name. */
+            name: string;
+            /**
+             * Format: int64
+             * @description Next firing (`null` for a disabled or finished schedule).
+             */
+            next_run_at_ms?: number | null;
+            /**
+             * @description What it does: `{"kind": "agent_prompt", "text": "..."}`,
+             *     `{"kind": "workflow", "name": "...", "params": {}}` or
+             *     `{"kind": "tool", "name": "...", "input": {}}`.
+             */
+            payload: unknown;
+            /**
+             * @description When it fires: `{"cron": "0 9 * * 1-5 Europe/Istanbul"}`,
+             *     `{"every": {"seconds": 600}}` or `{"at": {"unix_ms": 1767225600000}}`.
+             */
+            spec: unknown;
+        };
+        /** @description Body of `POST /v1/schedules` and `PUT /v1/schedules/{id}`. */
+        ScheduleInput: {
+            /**
+             * Format: uuid
+             * @description Bot that runs it (cannot be changed afterwards).
+             */
+            bot_id: string;
+            /**
+             * Format: uuid
+             * @description Chat the runs post to (default: a chat named after the schedule).
+             */
+            chat_id?: string | null;
+            /** @description Armed or not (default `true`). */
+            enabled?: boolean | null;
+            /** @description `skip` (default), `run_once` or `run_all`. */
+            misfire_policy?: string | null;
+            /** @description Display name (must not be empty). */
+            name: string;
+            /** @description See [`ScheduleDto::payload`]. */
+            payload: unknown;
+            /** @description See [`ScheduleDto::spec`]. */
+            spec: unknown;
+            /**
+             * @description HMAC secret of a webhook trigger.  Absent: unchanged (none on create);
+             *     the empty string removes the trigger.
+             */
+            webhook_secret?: string | null;
         };
         /**
          * @description How far an approval reaches.
@@ -1787,6 +2005,244 @@ export interface operations {
             };
         };
     };
+    list_schedules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleDto"][];
+                };
+            };
+        };
+    };
+    create_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    parse_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ParseSchedule"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ParsedSchedule"];
+                };
+            };
+            /** @description the phrase is not understood */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Schedule id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Schedule id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Schedule id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    run_schedule_now: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Schedule id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcceptedResponse"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description a run of it is still in flight */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the scheduler is not running */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     usage: {
         parameters: {
             query?: {
@@ -1805,6 +2261,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UsageSummary"];
+                };
+            };
+        };
+    };
+    webhook: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description `sha256=<hex>` HMAC-SHA256 of the raw body */
+                "X-Signature-256": string;
+            };
+            path: {
+                /** @description Schedule id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/plain": string;
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcceptedResponse"];
+                };
+            };
+            /** @description missing or wrong signature */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description no such schedule or no webhook trigger */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description disabled, or a run of it is in flight */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description body larger than 256 KB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description the scheduler is not running */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };

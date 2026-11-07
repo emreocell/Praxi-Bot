@@ -7,7 +7,11 @@ export type Bot = S["BotDto"];
 export type BotInput = S["BotInput"];
 export type Chat = S["ChatDto"];
 export type Message = S["MessageDto"];
-export type Run = S["RunDto"];
+/**
+ * A run.  `schedule_id` is not in the generated `RunDto` yet (the daemon only
+ * reports it on the `run_started` event); typed here so it works once added.
+ */
+export type Run = S["RunDto"] & { schedule_id?: string | null };
 export type Approval = S["ApprovalDto"];
 export type Health = S["Health"];
 export type UsageSummary = S["UsageSummary"];
@@ -21,6 +25,10 @@ export type SendMode = S["Mode"];
 export type SendResponse = S["SendResponse"];
 export type DeliveryKind = S["DeliveryKind"];
 export type RememberResponse = S["RememberResponse"];
+export type Schedule = S["ScheduleDto"];
+export type ScheduleInput = S["ScheduleInput"];
+export type ParsedSchedule = S["ParsedSchedule"];
+export type AcceptedResponse = S["AcceptedResponse"];
 export type ErrorBody = S["ErrorBody"];
 export type ControlStateDto = S["ControlStateDto"];
 export type ControlModeName = NonNullable<ControlStateDto["mode"]>;
@@ -83,7 +91,14 @@ export type RouteInfo =
 export type RouteLevel = "K0" | "K1" | "K2" | "K3" | "K4";
 
 export type DaemonEvent =
-  | { type: "run_started"; run_id: string; chat_id: string; bot_id: string }
+  | {
+      type: "run_started";
+      run_id: string;
+      chat_id: string;
+      bot_id: string;
+      /** The schedule that started this run (scheduled runs only). */
+      schedule_id?: string | null;
+    }
   | { type: "run_finished"; run_id: string; error: string | null }
   | { type: "message_delta"; run_id: string; text: string }
   | {

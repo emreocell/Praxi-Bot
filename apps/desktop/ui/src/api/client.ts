@@ -1,5 +1,6 @@
 import type { Connection } from "./connection";
 import type {
+  AcceptedResponse,
   Approval,
   Bot,
   BotInput,
@@ -13,11 +14,14 @@ import type {
   GrantTarget,
   Health,
   Message,
+  ParsedSchedule,
   PolicyDto,
   PolicyInput,
   ProvidersDto,
   RememberResponse,
   Run,
+  Schedule,
+  ScheduleInput,
   Scope,
   SendMode,
   SendResponse,
@@ -184,6 +188,30 @@ export class ApiClient {
   }
   answerQuestion(callId: string, answer: string): Promise<{ call_id: string }> {
     return this.request("POST", `/questions/${callId}`, { body: { answer } });
+  }
+
+  listSchedules(): Promise<Schedule[]> {
+    return this.request("GET", "/schedules");
+  }
+  getSchedule(id: string): Promise<Schedule> {
+    return this.request("GET", `/schedules/${id}`);
+  }
+  createSchedule(input: ScheduleInput): Promise<Schedule> {
+    return this.request("POST", "/schedules", { body: input });
+  }
+  updateSchedule(id: string, input: ScheduleInput): Promise<Schedule> {
+    return this.request("PUT", `/schedules/${id}`, { body: input });
+  }
+  deleteSchedule(id: string): Promise<void> {
+    return this.request("DELETE", `/schedules/${id}`);
+  }
+  /** Fire a schedule now (409 while a run of it is still in flight). */
+  runScheduleNow(id: string): Promise<AcceptedResponse> {
+    return this.request("POST", `/schedules/${id}/run-now`);
+  }
+  /** Turn an English / Turkish phrase into a schedule spec. */
+  parseSchedule(text: string, tz?: string): Promise<ParsedSchedule> {
+    return this.request("POST", "/schedules/parse", { body: { text, tz } });
   }
 
   usage(sinceMs?: number): Promise<UsageSummary> {

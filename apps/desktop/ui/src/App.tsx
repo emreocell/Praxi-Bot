@@ -39,6 +39,7 @@ import { NeedsYouView } from "./views/NeedsYouView";
 import { NotificationSettings } from "./views/NotificationSettings";
 import { OnboardingView } from "./views/OnboardingView";
 import { PermissionsSection, ProvidersSection } from "./views/SettingsSections";
+import { SchedulesView } from "./views/SchedulesView";
 import { UsageView } from "./views/UsageView";
 import { i18n, type SupportedLanguage } from "./i18n";
 import {
@@ -73,6 +74,7 @@ type Route =
   | { kind: "chat"; chatId: string; botId: string }
   | { kind: "needs" }
   | { kind: "usage" }
+  | { kind: "schedules" }
   | { kind: "settings" };
 
 function AppShell() {
@@ -467,6 +469,13 @@ function AppShell() {
                 </Button>
               ) : null}
               <Button
+                variant={route.kind === "schedules" ? "primary" : "secondary"}
+                fullWidth
+                onClick={() => setRoute({ kind: "schedules" })}
+              >
+                {t("sidebar.schedules")}
+              </Button>
+              <Button
                 variant={route.kind === "usage" ? "primary" : "secondary"}
                 fullWidth
                 onClick={() => setRoute({ kind: "usage" })}
@@ -648,6 +657,9 @@ function AppShell() {
         ) : null}
         {route.kind === "needs" ? <NeedsYouView onOpenChat={openChat} /> : null}
         {route.kind === "usage" ? <UsageView /> : null}
+        {route.kind === "schedules" ? (
+          <SchedulesView onOpenChat={openChat} />
+        ) : null}
         {route.kind === "settings" ? (
         <div className={styles.settingsPane}>
           <div className={styles.settingsContainer}>
