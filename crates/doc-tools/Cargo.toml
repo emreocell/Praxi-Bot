@@ -1,0 +1,29 @@
+[package]
+name = "doc-tools"
+description = "Document and data tools: PDF, DOCX, XLSX, CSV and JSON query."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+calamine = "0.38"
+csv = "1"
+lopdf = { version = "0.47", default-features = false }
+quick-xml = "0.42"
+rust_xlsxwriter = "0.102"
+serde.workspace = true
+serde_json.workspace = true
+serde_json_path = "0.7"
+tokio = { workspace = true, features = ["rt"] }
+tool-registry = { path = "../tool-registry", version = "0.1.0" }
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

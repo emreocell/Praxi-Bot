@@ -1,0 +1,29 @@
+[package]
+name = "openapi-tools"
+description = "Import OpenAPI 3.0/3.1 specs and expose their operations as dynamic agent tools."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+base64.workspace = true
+percent-encoding.workspace = true
+reqwest.workspace = true
+secret-store.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml_ng.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["net"] }
+url.workspace = true
+tool-registry = { path = "../tool-registry", version = "0.1.0" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+wiremock.workspace = true
