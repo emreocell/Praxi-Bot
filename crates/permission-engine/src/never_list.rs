@@ -11,6 +11,15 @@
 //! inspected recursively, and each segment becomes *program + arguments*.  Two
 //! kinds of checks then apply:
 //!
+//! Beyond that: `( … )`, `{ …; }`, backticks and `$( … )` are command
+//! boundaries whose contents are scanned recursively; `eval`, `env -S`,
+//! `timeout`, `xargs`, `busybox`, `setsid`, `stdbuf`, `chroot`, … are wrappers
+//! with per-wrapper option tables (case-sensitive: `sudo -S` is not `-s`);
+//! globs in protected components (`/e*`, `C:\Win*`) and MSYS/WSL/Cygwin drive
+//! paths (`/c/Windows`, `/mnt/c/Windows`) are recognised.
+//!
+//! Known limit: targets fed through stdin (`… | xargs rm -rf`) cannot be seen.
+//!
 //! 1. **Unconditional** — the program is catastrophic whatever its target:
 //!    `format`, `diskpart` + `clean`, `mkfs*`, `dd of=/dev/*`, `bcdedit`,
 //!    `Format-Volume`, `Clear-Disk`, `cipher /w`, and bootloader installers
@@ -83,18 +92,90 @@ const HARMLESS_DEVICES: &[&str] = &[
 
 // ── Command-parsing data ──────────────────────────────────────────────────────
 
-/// Programs that merely run another program given as their first non-option
-/// argument.
-const WRAPPERS: &[&str] = &[
-    "sudo", "doas", "env", "nohup", "command", "exec", "time", "nice",
-];
+/// How to skip over a wrapper's own options to reach the wrapped command.
+struct WrapperSpec {
+    /// Option tokens (exact, case-sensitive) that consume the next token.
+    value_opts: &'static [&'static str],
+    /// Positional arguments to skip before the command (`timeout 5 cmd`).
+    positionals: usize,
+}
 
-/// Wrapper options that consume the following token as their value.
-const WRAPPER_OPTIONS_WITH_VALUE: &[&str] =
-    &["-u", "-g", "-h", "-p", "-n", "-d", "-t", "-r", "-c", "-s"];
+/// Look up a wrapper by its lower-case program name.
+fn wrapper_spec(name: &str) -> Option<WrapperSpec> {
+    let (value_opts, positionals): (&'static [&'static str], usize) = match name {
+        "sudo" => (
+            &[
+                "-u",
+                "-g",
+                "-h",
+                "-p",
+                "-C",
+                "-D",
+                "-R",
+                "-T",
+                "-U",
+                "-r",
+                "-t",
+                "--user",
+                "--group",
+                "--host",
+                "--prompt",
+                "--close-from",
+                "--chdir",
+                "--chroot",
+                "--other-user",
+                "--role",
+                "--type",
+                "--command-timeout",
+            ],
+            0,
+        ),
+        "doas" => (&["-u", "-C"], 0),
+        "env" => (&["-u", "-C", "--unset", "--chdir"], 0),
+        "nohup" | "command" | "setsid" | "busybox" | "toybox" | "unbuffer" => (&[], 0),
+        "exec" => (&["-a"], 0),
+        "time" => (&["-f", "-o", "--format", "--output"], 0),
+        "nice" => (&["-n", "--adjustment"], 0),
+        "ionice" => (&["-c", "-n", "-p", "-P", "-u", "--class", "--classdata"], 0),
+        "stdbuf" => (&["-i", "-o", "-e", "--input", "--output", "--error"], 0),
+        "timeout" => (&["-s", "-k", "--signal", "--kill-after"], 1),
+        "chroot" => (&["--userspec", "--groups"], 1),
+        "taskset" => (&[], 1),
+        "flock" => (&["-w", "-E", "--timeout", "--conflict-exit-code"], 1),
+        "wsl" => (&["-d", "--distribution", "-u", "--user", "--cd"], 0),
+        "xargs" => (
+            &[
+                "-a",
+                "-d",
+                "-E",
+                "-I",
+                "-L",
+                "-n",
+                "-P",
+                "-s",
+                "--arg-file",
+                "--delimiter",
+                "--eof",
+                "--replace",
+                "--max-lines",
+                "--max-args",
+                "--max-procs",
+                "--max-chars",
+            ],
+            0,
+        ),
+        _ => return None,
+    };
+    Some(WrapperSpec {
+        value_opts,
+        positionals,
+    })
+}
 
 /// Shell keywords that may precede a command inside a compound statement.
-const SHELL_KEYWORDS: &[&str] = &["if", "then", "else", "elif", "do", "while", "until", "!"];
+const SHELL_KEYWORDS: &[&str] = &[
+    "if", "then", "else", "elif", "do", "while", "until", "!", "{", "}",
+];
 
 /// POSIX shells that accept `-c <command>`.
 const POSIX_SHELLS: &[&str] = &["sh", "bash", "zsh", "dash", "ksh", "fish"];
@@ -136,18 +217,62 @@ fn is_drive_prefix(s: &str) -> bool {
     )
 }
 
+/// Windows system-root spellings that expand to `C:\Windows`.
+const WIN_ROOT_TOKENS: &[&str] = &["%windir%", "%systemroot%", "$env:windir", "$env:systemroot"];
+
+/// Concrete directory names that match the `lib*` prefix rule.
+const UNIX_LIB_NAMES: &[&str] = &["lib", "lib32", "lib64", "libx32", "libexec"];
+/// Concrete names matching the `program files*` prefix rule.
+const WIN_PF_NAMES: &[&str] = &["program files", "program files (x86)"];
+
+/// `true` if the component contains shell glob metacharacters.
+fn has_glob(comp: &str) -> bool {
+    comp.contains(['*', '?', '[', '{'])
+}
+
+/// Does a (possibly glob) path component denote one of `names`?  An invalid
+/// glob fails closed (matches).
+fn comp_matches_any(comp: &str, names: &[&str]) -> bool {
+    match Glob::new(comp) {
+        Ok(glob) => {
+            let matcher = glob.compile_matcher();
+            names.iter().any(|n| matcher.is_match(n))
+        }
+        Err(_) => true,
+    }
+}
+
+fn is_single_letter(s: &str) -> bool {
+    let mut chars = s.chars();
+    matches!((chars.next(), chars.next()), (Some(c), None) if c.is_ascii_alphabetic())
+}
+
 impl Target {
-    /// Parse an (already lower-cased, unquoted) path argument.
+    /// Parse a path argument (case-insensitive).
     fn parse(raw: &str) -> Self {
-        let unified = raw.replace('\\', "/");
+        let lowered = raw.to_lowercase();
+        let mut unified = lowered.replace('\\', "/");
+        // Win32 namespace prefixes: `\\?\C:\...`, `\\.\C:\...`.
+        for prefix in ["//?/", "//./"] {
+            if let Some(rest) = unified.strip_prefix(prefix) {
+                unified = rest.to_owned();
+                break;
+            }
+        }
+        let trailing_sep = unified.ends_with('/');
         let mut parts = unified.split('/');
 
-        let (anchor, first_is_anchor) = if unified.starts_with('/') {
+        let mut win_root = false;
+        let (mut anchor, first_is_anchor) = if unified.starts_with('/') {
             (Anchor::Unix, false)
         } else {
             match parts.clone().next() {
                 Some(first) if is_drive_prefix(first) => (Anchor::Drive, true),
                 Some(first) if HOME_TOKENS.contains(&first) => (Anchor::Home, true),
+                Some(first) if WIN_ROOT_TOKENS.contains(&first) => {
+                    win_root = true;
+                    (Anchor::Drive, true)
+                }
                 _ => (Anchor::Relative, false),
             }
         };
@@ -156,6 +281,9 @@ impl Target {
         }
 
         let mut components: Vec<String> = Vec::new();
+        if win_root {
+            components.push("windows".to_owned());
+        }
         for part in parts {
             match part {
                 "" | "." => {}
@@ -169,6 +297,25 @@ impl Target {
                 other => components.push(other.to_owned()),
             }
         }
+
+        // MSYS / Git Bash (`/c/Windows`), WSL (`/mnt/c/...`) and Cygwin
+        // (`/cygdrive/c/...`) spell Windows drives as Unix paths.  A bare `/x`
+        // is ambiguous (an ordinary Unix directory), so it only counts as a
+        // drive root with a trailing separator or further components.
+        if anchor == Anchor::Unix {
+            let drive_at = match components.as_slice() {
+                [m, l, ..] if (m == "mnt" || m == "cygdrive") && is_single_letter(l) => Some(2),
+                [l, rest @ ..] if is_single_letter(l) && (!rest.is_empty() || trailing_sep) => {
+                    Some(1)
+                }
+                _ => None,
+            };
+            if let Some(n) = drive_at {
+                components.drain(..n);
+                anchor = Anchor::Drive;
+            }
+        }
+
         // `/etc/*` deletes the *contents* of `/etc`: treat it as `/etc`.
         if components.last().is_some_and(|c| c == "*") {
             components.pop();
@@ -189,6 +336,13 @@ impl Target {
 
     fn unix_protected(comps: &[&str]) -> bool {
         let first = comps[0];
+        if has_glob(first) {
+            // A glob may expand to any protected directory: be conservative.
+            return comp_matches_any(first, UNIX_SYSTEM_TREES)
+                || comp_matches_any(first, UNIX_LIB_NAMES)
+                || (comps.len() == 1 && comp_matches_any(first, UNIX_PROTECTED_EXACT))
+                || (comps.len() <= 2 && comp_matches_any(first, UNIX_HOME_PARENTS));
+        }
         if UNIX_SYSTEM_TREES.contains(&first)
             || UNIX_SYSTEM_TREE_PREFIXES
                 .iter()
@@ -204,6 +358,11 @@ impl Target {
 
     fn windows_protected(comps: &[&str]) -> bool {
         let first = comps[0];
+        if has_glob(first) {
+            return comp_matches_any(first, WIN_SYSTEM_TREES)
+                || comp_matches_any(first, WIN_PF_NAMES)
+                || (comps.len() <= 2 && comp_matches_any(first, &[WIN_HOME_PARENT]));
+        }
         if WIN_SYSTEM_TREES.contains(&first)
             || WIN_SYSTEM_TREE_PREFIXES
                 .iter()
@@ -242,7 +401,9 @@ impl Splitter {
     }
 }
 
-/// Split a command line into segments of unquoted tokens.
+/// Split a command line into segments of unquoted tokens.  Unquoted `(`, `)` and
+/// backticks start a new segment (subshells, `$(...)`, backticks); a standalone
+/// `{` / `}` is a shell keyword (see `SHELL_KEYWORDS`).
 ///
 /// Quotes group words (`"C:\Program Files"`) and are removed.  Backslashes are
 /// literal so Windows paths survive.  Separators inside quotes are literal.
@@ -263,7 +424,7 @@ fn split_segments(command: &str) -> Vec<Vec<String>> {
                 quote = Some(c);
                 sp.has_token = true;
             }
-            ';' | '|' | '&' | '\n' | '\r' => sp.end_segment(),
+            ';' | '|' | '&' | '\n' | '\r' | '(' | ')' | '`' => sp.end_segment(),
             c if c.is_whitespace() => sp.end_token(),
             c => {
                 sp.token.push(c);
@@ -275,39 +436,121 @@ fn split_segments(command: &str) -> Vec<Vec<String>> {
     sp.segments
 }
 
-/// Reduce a program token to its bare lower-case name (`/bin/rm` → `rm`,
-/// `Rmdir.EXE` → `rmdir`).
-fn program_name(token: &str) -> &str {
-    let base = token.rsplit(['/', '\\']).next().unwrap_or(token);
-    base.strip_suffix(".exe").unwrap_or(base)
+/// Reduce a program token to its bare lower-case name (`/bin/rm` -> `rm`,
+/// `Rmdir.EXE` -> `rmdir`, `format.com` -> `format`).
+fn program_name(token: &str) -> String {
+    let base = token
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(token)
+        .to_lowercase();
+    for ext in [".exe", ".com", ".bat", ".cmd"] {
+        if let Some(stem) = base.strip_suffix(ext) {
+            return stem.to_owned();
+        }
+    }
+    base
 }
 
-/// Skip leading wrappers / shell keywords and return `(program, args)`.
-fn resolve_program(tokens: &[String]) -> Option<(&str, &[String])> {
+/// Result of peeling wrappers off a segment.
+enum Resolved<'a> {
+    /// A program (lower-case name) and its arguments.
+    Command(String, &'a [String]),
+    /// A command string to be parsed again (`eval ...`, `env -S ...`).
+    Payload(String),
+}
+
+/// Skip leading wrappers / shell keywords and return the wrapped command.
+fn resolve_program(tokens: &[String]) -> Option<Resolved<'_>> {
     let mut i = 0;
     loop {
         let name = program_name(tokens.get(i)?);
         i += 1;
-        if SHELL_KEYWORDS.contains(&name) {
+        if SHELL_KEYWORDS.contains(&name.as_str()) {
             continue;
         }
-        if WRAPPERS.contains(&name) {
+        if name == "eval" {
+            return Some(Resolved::Payload(tokens.get(i..)?.join(" ")));
+        }
+        if let Some(spec) = wrapper_spec(&name) {
             while let Some(tok) = tokens.get(i) {
-                if tok.starts_with('-') {
+                if tok == "--" {
                     i += 1;
-                    if WRAPPER_OPTIONS_WITH_VALUE.contains(&tok.as_str()) {
+                    break;
+                }
+                if name == "env" {
+                    let attached = tok
+                        .strip_prefix("--split-string=")
+                        .or_else(|| tok.strip_prefix("-S").filter(|r| !r.is_empty()));
+                    let separate = (tok == "-S" || tok == "--split-string").then_some("");
+                    if let Some(head) = attached.or(separate) {
+                        let rest = tokens.get(i + 1..).unwrap_or_default().join(" ");
+                        return Some(Resolved::Payload(format!("{head} {rest}")));
+                    }
+                    if !tok.starts_with('-') && tok.contains('=') {
+                        i += 1;
+                        continue;
+                    }
+                }
+                if tok.starts_with('-') && tok.len() > 1 {
+                    i += 1;
+                    if spec.value_opts.contains(&tok.as_str()) {
                         i += 1;
                     }
-                } else if name == "env" && tok.contains('=') {
-                    i += 1;
                 } else {
                     break;
                 }
             }
+            i += spec.positionals;
             continue;
         }
-        return Some((name, tokens.get(i..).unwrap_or_default()));
+        return Some(Resolved::Command(name, tokens.get(i..).unwrap_or_default()));
     }
+}
+
+/// Collect the bodies of `$(...)` and backtick substitutions (single-quoted
+/// text is literal and skipped; double quotes do *not* prevent substitution).
+fn extract_substitutions(command: &str) -> Vec<String> {
+    let chars: Vec<char> = command.chars().collect();
+    let mut out = Vec::new();
+    let (mut in_single, mut in_double) = (false, false);
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if in_single {
+            in_single = c != '\'';
+        } else {
+            match c {
+                '\'' if !in_double => in_single = true,
+                '"' => in_double = !in_double,
+                '`' => {
+                    let mut j = i + 1;
+                    while j < chars.len() && chars[j] != '`' {
+                        j += if chars[j] == '\\' { 2 } else { 1 };
+                    }
+                    let end = j.min(chars.len());
+                    out.push(chars[i + 1..end].iter().collect());
+                    i = end;
+                }
+                '$' if chars.get(i + 1) == Some(&'(') => {
+                    let (mut depth, mut j) = (1, i + 2);
+                    while j < chars.len() && depth > 0 {
+                        match chars[j] {
+                            '(' => depth += 1,
+                            ')' => depth -= 1,
+                            _ => {}
+                        }
+                        j += 1;
+                    }
+                    let end = if depth == 0 { j - 1 } else { j };
+                    out.push(chars[i + 2..end].iter().collect());
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    out
 }
 
 // ── Per-program checks ────────────────────────────────────────────────────────
@@ -318,9 +561,11 @@ fn shell_payload(program: &str, args: &[String]) -> Option<String> {
         if POSIX_SHELLS.contains(&program) {
             arg.starts_with('-') && !arg.starts_with("--") && arg.contains('c')
         } else if program == "cmd" {
-            arg == "/c" || arg == "/k"
+            arg.eq_ignore_ascii_case("/c") || arg.eq_ignore_ascii_case("/k")
         } else if POWERSHELL_HOSTS.contains(&program) {
-            arg.len() >= 2 && arg.starts_with('-') && "command".starts_with(&arg[1..])
+            arg.len() >= 2
+                && arg.starts_with('-')
+                && "command".starts_with(&arg[1..].to_ascii_lowercase())
         } else {
             false
         }
@@ -391,13 +636,20 @@ fn dd_matches(args: &[String]) -> bool {
 
 /// Decide whether one command segment is catastrophic.
 fn segment_matches(tokens: &[String], mentions_clean: bool, depth: u8) -> bool {
-    let Some((program, args)) = resolve_program(tokens) else {
-        return false;
+    let (program, raw_args) = match resolve_program(tokens) {
+        None => return false,
+        Some(Resolved::Payload(payload)) => return structural_match(&payload, depth + 1),
+        Some(Resolved::Command(program, args)) => (program, args),
     };
+    let program = program.as_str();
 
-    if let Some(payload) = shell_payload(program, args) {
+    if let Some(payload) = shell_payload(program, raw_args) {
         return structural_match(&payload, depth + 1);
     }
+
+    // Option / target comparisons are case-insensitive.
+    let lowered: Vec<String> = raw_args.iter().map(|a| a.to_lowercase()).collect();
+    let args = lowered.as_slice();
 
     if program.starts_with("mkfs") {
         return true;
@@ -415,13 +667,22 @@ fn segment_matches(tokens: &[String], mentions_clean: bool, depth: u8) -> bool {
     }
 }
 
-/// Run the structural (non-glob) checks over a normalised command.
+/// Run the structural checks over a command (substitutions, then segments).
 fn structural_match(command: &str, depth: u8) -> bool {
     if depth > MAX_PAYLOAD_DEPTH {
         return true;
     }
+    if extract_substitutions(command)
+        .iter()
+        .any(|inner| structural_match(inner, depth + 1))
+    {
+        return true;
+    }
     let segments = split_segments(command);
-    let mentions_clean = segments.iter().flatten().any(|t| t == "clean");
+    let mentions_clean = segments
+        .iter()
+        .flatten()
+        .any(|t| t.eq_ignore_ascii_case("clean"));
     segments
         .iter()
         .any(|segment| segment_matches(segment, mentions_clean, depth))
@@ -477,8 +738,10 @@ impl NeverList {
     /// - any user-defined extra pattern matches the full normalised command.
     #[must_use]
     pub fn matches(&self, raw_command: &str) -> bool {
-        let norm = Self::normalize(raw_command);
-        structural_match(&norm, 0) || self.extra_set.is_match(&norm)
+        // The structural check is case-preserving (wrapper options such as
+        // `sudo -S` vs `-s` differ); extra glob patterns use the normalised form.
+        structural_match(raw_command.trim(), 0)
+            || self.extra_set.is_match(Self::normalize(raw_command))
     }
 
     /// Normalise a raw command string before matching.
@@ -687,6 +950,105 @@ mod tests {
         assert!(!check("cipher /e secret.txt"));
         assert!(!check("diskpart /?"));
         assert!(!check(""));
+    }
+
+    // ── Review 2026-11-07 regressions ─────────────────────────────────────────
+
+    #[test]
+    fn matches_sudo_env_flags_case_sensitive() {
+        assert!(check("sudo -n rm -rf /"));
+        assert!(check("sudo -S rm -rf /"));
+        assert!(check("sudo -H rm -rf /etc"));
+        assert!(check("sudo -E -n -u root rm -rf /usr"));
+        assert!(check("sudo -u root -- rm -rf /"));
+        assert!(check("doas -n rm -rf /"));
+        assert!(check("env -i FOO=1 rm -rf /"));
+        assert!(check("env -u HOME rm -rf /"));
+        assert!(check("env -S 'rm -rf /'"));
+        assert!(check("env -S\"rm -rf /etc\""));
+        assert!(check("env --split-string=\"rm -rf /\""));
+        assert!(check("nice -n 5 rm -rf /"));
+    }
+
+    #[test]
+    fn matches_subshells_groups_and_substitution() {
+        assert!(check("(rm -rf /etc)"));
+        assert!(check("( cd /tmp && rm -rf / )"));
+        assert!(check("{ rm -rf /; }"));
+        assert!(check("echo $(rm -rf /)"));
+        assert!(check("echo `rm -rf /`"));
+        assert!(check("echo \"x $(rm -rf /etc) y\""));
+        assert!(check("echo $(echo $(rm -rf /))"));
+        assert!(check("diff <(rm -rf /) b"));
+    }
+
+    #[test]
+    fn matches_eval_and_exec_style_wrappers() {
+        assert!(check("eval rm -rf /"));
+        assert!(check("eval \"rm -rf /etc\""));
+        assert!(check("timeout 5 rm -rf /"));
+        assert!(check("timeout -s KILL 5 rm -rf /"));
+        assert!(check("timeout --signal=KILL 5s rm -rf /"));
+        assert!(check("xargs rm -rf /"));
+        assert!(check("xargs -n 1 rm -rf /etc"));
+        assert!(check("busybox rm -rf /"));
+        assert!(check("setsid rm -rf /"));
+        assert!(check("stdbuf -oL rm -rf /"));
+        assert!(check("chroot /mnt rm -rf /"));
+        assert!(check("nohup rm -rf / &"));
+        assert!(check("sh -c 'eval rm -rf /'"));
+    }
+
+    #[test]
+    fn matches_globbed_protected_targets() {
+        assert!(check("rm -rf /e*"));
+        assert!(check("rm -rf /[e]tc"));
+        assert!(check("rm -rf /et?"));
+        assert!(check("rm -rf /{etc,usr}"));
+        assert!(check("rm -rf /us*/lib"));
+        assert!(check("rm -rf /ho*/alice"));
+        assert!(check(r"Remove-Item -Recurse -Force C:\Win*"));
+        assert!(check(r"rd /s /q C:\Prog*"));
+        assert!(check(r"rd /s /q C:\Pro?ram?ata"));
+    }
+
+    #[test]
+    fn matches_msys_wsl_and_win32_namespace_paths() {
+        assert!(check("rm -rf /c/Windows"));
+        assert!(check("rm -rf /c/"));
+        assert!(check("rm -rf /c/*"));
+        assert!(check("rm -rf /mnt/c/Windows"));
+        assert!(check("rm -rf /mnt/c"));
+        assert!(check("rm -rf /mnt/d/"));
+        assert!(check("rm -rf /cygdrive/c/Windows/System32"));
+        assert!(check("rm -rf /c/Users/alice"));
+        assert!(check(r"Remove-Item -Recurse \\?\C:\Windows"));
+        assert!(check(r"rd /s /q %SystemRoot%"));
+        assert!(check("format.com c:"));
+        assert!(check("format.exe d: /q"));
+    }
+
+    #[test]
+    fn new_forms_do_not_overmatch() {
+        assert!(!check("sudo -n ls /etc"));
+        assert!(!check("sudo -n rm -rf ./build"));
+        assert!(!check("env FOO=1 make clean"));
+        assert!(!check("timeout 5 rm -rf /tmp/x"));
+        assert!(!check("(cd build && make)"));
+        assert!(!check("{ echo hi; }"));
+        assert!(!check("echo $(date)"));
+        assert!(!check("echo '$(rm -rf /)'"));
+        assert!(!check("echo `date`"));
+        assert!(!check("eval echo hi"));
+        assert!(!check("xargs echo /etc"));
+        assert!(!check("rm -rf /tmp/*"));
+        assert!(!check("rm -rf /t*"));
+        assert!(!check("rm -rf /c/Users/alice/project"));
+        assert!(!check("rm -rf /mnt/data"));
+        assert!(!check("rm -rf /mnt/c/Users/alice/project"));
+        assert!(!check("rm -rf /s"));
+        assert!(!check("rm -rf ${HOME}/project"));
+        assert!(!check("git log --format={x} -n 3"));
     }
 
     // ── Custom extra patterns ─────────────────────────────────────────────────
