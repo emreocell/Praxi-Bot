@@ -32,6 +32,60 @@ pub struct ModelCapabilities {
     pub json_mode: bool,
 }
 
+/// Per-model overrides of [`ModelCapabilities`].
+///
+/// Each field is optional: `None` keeps the value underneath (the provider
+/// flags, or a catalog override when a user value is merged on top). No
+/// provenance or date is recorded. Unknown models keep the provider flags
+/// (`tools` stays `true` unless an override says otherwise).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CapabilityOverrides {
+    /// Tool / function calling.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<bool>,
+    /// Vision / image input.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vision: Option<bool>,
+    /// Streaming (chunked) responses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub streaming: Option<bool>,
+    /// Requesting JSON output mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub json_mode: Option<bool>,
+}
+
+impl CapabilityOverrides {
+    /// Apply the set fields onto `base`. Unset fields leave `base` unchanged.
+    #[must_use]
+    pub fn apply(&self, mut base: ModelCapabilities) -> ModelCapabilities {
+        if let Some(v) = self.tools {
+            base.tools = v;
+        }
+        if let Some(v) = self.vision {
+            base.vision = v;
+        }
+        if let Some(v) = self.streaming {
+            base.streaming = v;
+        }
+        if let Some(v) = self.json_mode {
+            base.json_mode = v;
+        }
+        base
+    }
+
+    /// Field-wise merge. `self` wins wherever it is `Some`.
+    #[must_use]
+    pub fn merge_over(&self, catalog: &Self) -> Self {
+        Self {
+            tools: self.tools.or(catalog.tools),
+            vision: self.vision.or(catalog.vision),
+            streaming: self.streaming.or(catalog.streaming),
+            json_mode: self.json_mode.or(catalog.json_mode),
+        }
+    }
+}
+
 /// Provider-specific compatibility flags for handling API deviations.
 ///
 /// All fields default to "standard `OpenAI` behaviour", so a TOML table may set
@@ -109,6 +163,17 @@ impl ProviderEntry {
     pub fn model(&self, id: &str) -> Option<&ModelInfo> {
         self.models.iter().find(|m| m.id == id)
     }
+
+    /// Capabilities for `model`: the provider flags, with that model's catalog
+    /// overrides applied. A model with no override (or an unknown id) keeps
+    /// the provider flags.
+    #[must_use]
+    pub fn caps_for(&self, model: &str) -> ModelCapabilities {
+        match self.model(model).and_then(|m| m.capabilities.as_ref()) {
+            Some(over) => over.apply(self.capabilities.clone()),
+            None => self.capabilities.clone(),
+        }
+    }
 }
 
 /// A model known to the catalog, with limits and USD prices per million tokens.
@@ -134,6 +199,10 @@ pub struct ModelInfo {
     pub cache_write_per_mtok: Option<f64>,
     /// ISO date (`YYYY-MM-DD`) the prices were checked.
     pub prices_as_of: Option<String>,
+    /// Per-model capability overrides. Absent fields keep the provider flags.
+    /// No provenance or date is stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<CapabilityOverrides>,
 }
 
 impl ModelInfo {
