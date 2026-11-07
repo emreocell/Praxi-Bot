@@ -92,6 +92,27 @@ pub struct ToolCall {
     /// Raw JSON arguments exactly as the model produced them (may be invalid
     /// JSON; validate before use).
     pub arguments: String,
+    /// Opaque provider data that must be echoed back when the call is replayed
+    /// (for example Google's `extra_content.google.thought_signature` on the
+    /// OpenAI-compatible endpoint). `None` for providers that need nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_extra: Option<Value>,
+}
+
+impl ToolCall {
+    /// A call without provider-specific data.
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        arguments: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            arguments: arguments.into(),
+            provider_extra: None,
+        }
+    }
 }
 
 /// How the model may choose among the offered tools.

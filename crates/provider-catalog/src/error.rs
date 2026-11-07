@@ -39,6 +39,16 @@ pub enum ProviderError {
     #[error("upstream error ({status}): {message}")]
     Upstream { status: u16, message: String },
 
+    /// The model's output was blocked by a safety / content filter
+    /// (Gemini `SAFETY`, `RECITATION`, ..., `OpenAI` `content_filter`).
+    #[error("blocked by content filter: {0}")]
+    ContentFilter(String),
+
+    /// The model produced a malformed tool call (Gemini
+    /// `MALFORMED_FUNCTION_CALL`). Retrying the request once usually succeeds.
+    #[error("malformed tool call: {0}")]
+    MalformedToolCall(String),
+
     /// The request timed out.
     #[error("request timed out")]
     Timeout,

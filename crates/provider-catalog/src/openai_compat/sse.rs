@@ -7,6 +7,7 @@ use serde_json::Value;
 use crate::{
     error::ProviderError,
     provider::{ChatChunk, FinishReason, ToolCall, Usage},
+    util::{ThoughtFilter, finish_error},
 };
 
 /// Incremental server-sent-events decoder. Yields the `data` payload of each
@@ -59,6 +60,8 @@ struct PartialCall {
     id: String,
     name: String,
     arguments: String,
+    /// The call's `extra_content` object (Google thought signature), echoed back on replay.
+    extra: Option<Value>,
 }
 
 /// Accumulates deltas (index-based tool calls, usage, finish reason).
@@ -67,6 +70,7 @@ pub(super) struct Assembler {
     calls: BTreeMap<u64, PartialCall>,
     finish: Option<FinishReason>,
     usage: Option<Usage>,
+    thoughts: ThoughtFilter,
     /// Set once `[DONE]` or a finish reason has been seen.
     pub(super) finished: bool,
 }
@@ -131,10 +135,19 @@ impl Assembler {
         // Streamed chunks use `delta`; non-streamed responses use `message`.
         let delta = choice.get("delta").or_else(|| choice.get("message"));
         if let Some(delta) = delta {
+            // Gemma marks reasoning parts with `extra_content.google.thought`.
+            let is_thought = delta
+                .pointer("/extra_content/google/thought")
+                .and_then(Value::as_bool)
+                == Some(true);
             if let Some(text) = delta.get("content").and_then(Value::as_str)
                 && !text.is_empty()
+                && !is_thought
             {
-                out.push(ChatChunk::TextDelta(text.to_owned()));
+                let visible = self.thoughts.push(text);
+                if !visible.is_empty() {
+                    out.push(ChatChunk::TextDelta(visible));
+                }
             }
             if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
                 for (pos, c) in calls.iter().enumerate() {
@@ -144,6 +157,12 @@ impl Assembler {
                         && p.id.is_empty()
                     {
                         id.clone_into(&mut p.id);
+                    }
+                    if let Some(x) = c.get("extra_content")
+                        && x.is_object()
+                        && p.extra.is_none()
+                    {
+                        p.extra = Some(x.clone());
                     }
                     if let Some(f) = c.get("function") {
                         if let Some(n) = f.get("name").and_then(Value::as_str)
@@ -174,6 +193,13 @@ impl Assembler {
             ));
         }
         let mut out = Vec::new();
+        let tail = self.thoughts.finish();
+        if !tail.is_empty() {
+            out.push(ChatChunk::TextDelta(tail));
+        }
+        if let Some(e) = self.finish.as_ref().and_then(finish_error) {
+            return Err(e);
+        }
         for (idx, p) in std::mem::take(&mut self.calls) {
             out.push(ChatChunk::ToolCall(ToolCall {
                 id: if p.id.is_empty() {
@@ -183,6 +209,7 @@ impl Assembler {
                 },
                 name: p.name,
                 arguments: p.arguments,
+                provider_extra: p.extra,
             }));
         }
         if let Some(u) = self.usage.take() {

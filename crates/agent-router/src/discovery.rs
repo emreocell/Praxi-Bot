@@ -1,9 +1,13 @@
 //! BM25 tool discovery index over tool name + description + parameter names.
+//!
+//! Terms are stemmed (stemming-lite) and queries are expanded with an EN + TR
+//! synonym table, see [`crate::lexical`].
 
 use serde_json::Value;
 use tool_registry::ToolSpec;
 
 use crate::bm25::{Bm25Index, tokenize};
+use crate::lexical::{expand_query, stem_all};
 
 /// How many times the tool *name* is repeated in the indexed document, i.e. a
 /// cheap field boost: a hit in the name outweighs a hit in the description.
@@ -42,13 +46,13 @@ impl ToolIndex {
     pub fn build(specs: &[ToolSpec]) -> Self {
         let docs = specs.iter().map(|spec| {
             let mut terms = Vec::new();
-            let name_terms = tokenize(&spec.name);
+            let name_terms = stem_all(&tokenize(&spec.name));
             for _ in 0..NAME_BOOST {
                 terms.extend(name_terms.iter().cloned());
             }
-            terms.extend(tokenize(&spec.description));
+            terms.extend(stem_all(&tokenize(&spec.description)));
             for param in param_names(&spec.input_schema) {
-                terms.extend(tokenize(param));
+                terms.extend(stem_all(&tokenize(param)));
             }
             terms
         });
@@ -77,7 +81,7 @@ impl ToolIndex {
     #[must_use]
     pub fn search(&self, query: &str, k: usize) -> Vec<ToolHit> {
         self.index
-            .search(&tokenize(query), k)
+            .search(&expand_query(&tokenize(query)), k)
             .into_iter()
             .map(|(doc, score)| ToolHit {
                 name: self.entries[doc].0.clone(),
@@ -216,5 +220,41 @@ mod tests {
         assert_eq!(index.search("helper", 5).len(), 5);
         assert_eq!(index.search("zzzzqqq", 5).len(), 0);
         assert_eq!(index.search("", 5).len(), 0);
+    }
+
+    #[test]
+    fn synonyms_and_stems_find_desktop_tools() {
+        let specs = vec![
+            spec(
+                "desktop.type_text",
+                "Send keystrokes to the focused window",
+                &["text"],
+            ),
+            spec(
+                "desktop.launch_app",
+                "Start an application by name",
+                &["app"],
+            ),
+            spec("desktop.click", "Click at a screen position", &["x", "y"]),
+            spec("fs.list_files", "List the files of a directory", &["path"]),
+            spec(
+                "desktop.list_windows",
+                "List the open top-level windows",
+                &[],
+            ),
+            spec("process.list", "List running processes", &[]),
+            spec("misc.noise", "Unrelated helper", &[]),
+        ];
+        let index = ToolIndex::build(&specs);
+        assert_eq!(top(&index, "keyboard"), "desktop.type_text");
+        assert_eq!(top(&index, "klavye"), "desktop.type_text");
+        assert_eq!(top(&index, "yaz"), "desktop.type_text");
+        assert_eq!(top(&index, "typing"), "desktop.type_text");
+        assert_eq!(top(&index, "başlat"), "desktop.launch_app");
+        assert_eq!(top(&index, "tıkla"), "desktop.click");
+        assert_eq!(top(&index, "dosyalar"), "fs.list_files");
+        assert_eq!(top(&index, "pencere"), "desktop.list_windows");
+        assert_eq!(top(&index, "işlem"), "process.list");
+        assert_eq!(index.search("xyzzy", 3).len(), 0);
     }
 }

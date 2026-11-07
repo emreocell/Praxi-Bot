@@ -99,6 +99,8 @@ pub struct GuardOverrides {
     pub spill_preview_bytes: Option<usize>,
     /// Tool timeout in milliseconds.
     pub tool_timeout_ms: Option<u64>,
+    /// Model-call timeout (covering provider retries) in milliseconds.
+    pub model_timeout_ms: Option<u64>,
 }
 
 /// Effect of a fake tool.

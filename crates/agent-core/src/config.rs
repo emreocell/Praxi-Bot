@@ -26,6 +26,8 @@ pub struct Guards {
     pub max_steps: u32,
     /// Timeout for a single tool call.
     pub tool_timeout: Duration,
+    /// Timeout for one model call including all its provider retries.
+    pub model_timeout: Duration,
     /// Identical consecutive tool calls at which a warning is injected.
     pub repeat_warn: u32,
     /// Identical consecutive tool calls at which the turn is stopped.
@@ -43,6 +45,7 @@ impl Default for Guards {
         Self {
             max_steps: 40,
             tool_timeout: Duration::from_secs(120),
+            model_timeout: Duration::from_secs(300),
             repeat_warn: 3,
             repeat_stop: 5,
             max_tokens_per_turn: 2_000_000,

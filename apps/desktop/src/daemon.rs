@@ -145,24 +145,65 @@ fn read_token(data_dir: &Path) -> Result<String, String> {
     }
 }
 
-/// Where the `bot` binary lives: `PRAXIBOT_BOT_BIN`, next to the app (where a
-/// bundled sidecar is placed, and where `cargo build` puts both binaries), or
-/// `bot` on `PATH`.
+/// Target triple embedded by `build.rs` for Tauri `externalBin` sidecar lookup.
+pub const TARGET_TRIPLE: &str = env!("TAURI_TARGET_TRIPLE");
+
+fn is_non_empty_file(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() > 0)
+}
+
+/// Candidate sidecar file names in priority order:
+/// 1. `bot-<target-triple>[.exe]` (Tauri `externalBin` target-triple convention)
+/// 2. `bot[.exe]` (installed NSIS sidecar / Cargo workspace binary next to the app)
 #[must_use]
-pub fn bot_binary() -> OsString {
-    if let Some(p) = std::env::var_os("PRAXIBOT_BOT_BIN").filter(|p| !p.is_empty()) {
+pub fn sidecar_candidate_names(triple: &str, windows: bool) -> [String; 2] {
+    let ext = if windows { ".exe" } else { "" };
+    [format!("bot-{triple}{ext}"), format!("bot{ext}")]
+}
+
+fn resolve_bot_binary(
+    env_override: Option<OsString>,
+    current_exe_dir: Option<&Path>,
+    manifest_dir: Option<&Path>,
+) -> OsString {
+    if let Some(p) = env_override.filter(|p| !p.is_empty()) {
         return p;
     }
-    let name = if cfg!(windows) { "bot.exe" } else { "bot" };
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(dir) = exe.parent()
-    {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            return candidate.into_os_string();
+    let names = sidecar_candidate_names(TARGET_TRIPLE, cfg!(windows));
+    if let Some(dir) = current_exe_dir {
+        for name in &names {
+            let direct = dir.join(name);
+            if is_non_empty_file(&direct) {
+                return direct.into_os_string();
+            }
+            let nested = dir.join("binaries").join(name);
+            if is_non_empty_file(&nested) {
+                return nested.into_os_string();
+            }
+        }
+    }
+    if let Some(manifest) = manifest_dir {
+        let staged = manifest.join("binaries").join(&names[0]);
+        if is_non_empty_file(&staged) {
+            return staged.into_os_string();
         }
     }
     OsString::from("bot")
+}
+
+/// Where the `bot` binary lives: `PRAXIBOT_BOT_BIN`, the bundled Tauri sidecar
+/// (`bot-<target-triple>[.exe]` or `bot[.exe]` next to the executable), a
+/// staged sidecar in `apps/desktop/binaries/`, or `bot` on `PATH`.
+#[must_use]
+pub fn bot_binary() -> OsString {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf));
+    resolve_bot_binary(
+        std::env::var_os("PRAXIBOT_BOT_BIN"),
+        exe_dir.as_deref(),
+        Some(Path::new(env!("CARGO_MANIFEST_DIR"))),
+    )
 }
 
 /// A `bot` command with the console window suppressed on Windows.
@@ -221,9 +262,51 @@ pub async fn connect(handle: &DaemonHandle) -> Result<Connection, String> {
             if std::env::var_os("BOT_URL").is_some() {
                 return Err(format!("no daemon answers at {url}"));
             }
-            let fake = wants_fake();
+            let mut fake = wants_fake();
             *handle.child.lock() = Some(spawn_daemon(&data, fake)?);
             *handle.fake.lock() = fake;
+            let deadline = tokio::time::Instant::now() + START_TIMEOUT;
+            while !healthy(&url).await {
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(format!(
+                        "the daemon did not become healthy at {url} (see {})",
+                        data.join("desktop-daemon.log").display()
+                    ));
+                }
+                // A child that already exited will never answer.
+                let exited = handle
+                    .child
+                    .lock()
+                    .as_mut()
+                    .is_some_and(|c| matches!(c.try_wait(), Ok(Some(_))));
+                if exited {
+                    // On first run before any provider is configured in `providers.toml`,
+                    // `bot serve` exits immediately. Retry once with `--fake-provider` if
+                    // we haven't already so the UI can still connect during onboarding.
+                    if !fake {
+                        fake = true;
+                        if let Ok(child) = spawn_daemon(&data, true) {
+                            *handle.child.lock() = Some(child);
+                            *handle.fake.lock() = true;
+                            tokio::time::sleep(Duration::from_millis(250)).await;
+                            continue;
+                        }
+                    }
+                    return Err(format!(
+                        "the daemon exited right after start (see {})",
+                        data.join("desktop-daemon.log").display()
+                    ));
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+            let token = read_token(&data)?;
+            return Ok(Connection {
+                base_url: url,
+                token,
+                started_by_app: handle.started_by_app(),
+                fake_provider: *handle.fake.lock(),
+                data_dir: data.display().to_string(),
+            });
         }
         let deadline = tokio::time::Instant::now() + START_TIMEOUT;
         while !healthy(&url).await {
@@ -349,5 +432,56 @@ mod tests {
             s.write_all(resp.as_bytes()).await.unwrap();
         });
         assert!(healthy(&format!("http://{addr}")).await);
+    }
+
+    #[test]
+    fn sidecar_candidate_names_include_target_triple_first() {
+        let win = sidecar_candidate_names("x86_64-pc-windows-msvc", true);
+        assert_eq!(win[0], "bot-x86_64-pc-windows-msvc.exe");
+        assert_eq!(win[1], "bot.exe");
+
+        let unix = sidecar_candidate_names("aarch64-apple-darwin", false);
+        assert_eq!(unix[0], "bot-aarch64-apple-darwin");
+        assert_eq!(unix[1], "bot");
+    }
+
+    #[test]
+    fn resolve_bot_binary_prefers_sidecar_and_ignores_empty_stubs() {
+        let unique = format!(
+            "praxibot-sidecar-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let dir = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(dir.join("binaries")).unwrap();
+
+        let names = sidecar_candidate_names(TARGET_TRIPLE, cfg!(windows));
+        let triple_bin = dir.join(&names[0]);
+        let plain_bin = dir.join(&names[1]);
+
+        // Empty stub (0 bytes) must be ignored in favour of a non-empty binary.
+        std::fs::write(&triple_bin, b"").unwrap();
+        std::fs::write(&plain_bin, b"real-binary").unwrap();
+        assert_eq!(
+            resolve_bot_binary(None, Some(&dir), None),
+            plain_bin.clone().into_os_string()
+        );
+
+        // Once the target-triple sidecar is non-empty, it takes priority over plain `bot.exe`.
+        std::fs::write(&triple_bin, b"sidecar-binary").unwrap();
+        assert_eq!(
+            resolve_bot_binary(None, Some(&dir), None),
+            triple_bin.clone().into_os_string()
+        );
+
+        // Explicit PRAXIBOT_BOT_BIN overrides everything.
+        assert_eq!(
+            resolve_bot_binary(Some(OsString::from("/custom/bot")), Some(&dir), None),
+            OsString::from("/custom/bot")
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

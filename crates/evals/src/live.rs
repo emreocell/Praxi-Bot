@@ -11,8 +11,8 @@ use agent_core::ModelPrice;
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use provider_catalog::{
-    Catalog, ChatChunk, ChatProvider, ChatRequest, ModelRef, OpenAiCompatConfig, ProviderConfig,
-    ProviderError, config_path,
+    Auth, Catalog, ChatChunk, ChatProvider, ChatRequest, ModelRef, OpenAiCompatConfig,
+    ProviderConfig, ProviderError, ProviderKind, build_chat_provider, config_path,
 };
 use secret_store::{BackendChoice, open_store};
 use serde::Deserialize;
@@ -79,11 +79,18 @@ pub fn build_live_provider(
 ) -> Result<LiveProvider> {
     let cfg = ProviderConfig::load(&config_path(data_dir))?;
     let wanted = model.map(|m| ModelRef(m.to_owned()));
-    let settings = match wanted.as_ref().and_then(ModelRef::provider) {
+    let wanted_provider = wanted.as_ref().and_then(ModelRef::provider);
+    let configured = match wanted_provider {
         Some(p) => cfg.get(p),
         None => cfg.effective_default(),
+    };
+    if configured.is_none()
+        && let (Some(p), Some(m)) = (wanted_provider, &wanted)
+        && let Some(live) = native_gemini_preset(p, m, data_dir, catalog)?
+    {
+        return Ok(live);
     }
-    .ok_or("no configured provider (run `bot providers add` first)")?;
+    let settings = configured.ok_or("no configured provider (run `bot providers add` first)")?;
     let model_ref = match &wanted {
         Some(m) if m.provider().is_some() => m.clone(),
         Some(m) => ModelRef(format!("{}/{}", settings.id, m.0)),
@@ -111,11 +118,57 @@ pub fn build_live_provider(
         })?
     };
     let (store, _) = open_store(BackendChoice::Auto, data_dir, &|_| None)?;
-    let provider = settings.build_provider(&entry, &*store, OpenAiCompatConfig::default())?;
+    let provider = settings.build_provider(&entry, &*store, compat_config(data_dir))?;
     Ok(LiveProvider {
         provider: Arc::from(provider),
         model: model_ref.0,
     })
+}
+
+/// Provider tunables for eval runs: failed HTTP 400 request bodies (redacted, no
+/// key) are dumped to `<data_dir>/debug/`.
+fn compat_config(data_dir: &Path) -> OpenAiCompatConfig {
+    OpenAiCompatConfig {
+        debug_dir: Some(data_dir.join("debug")),
+        ..OpenAiCompatConfig::default()
+    }
+}
+
+/// The `gemini` preset: `--model gemini/<model>` works without `providers.toml`,
+/// through the native Gemini provider (catalog entry `gemini`), with the key read
+/// from the entry's environment variable (`GEMINI_API_KEY`). This is the
+/// documented default for Gemini runs: the OpenAI-compatible endpoint needs
+/// thought-signature handling and leaks thought text on some models.
+///
+/// Returns `Ok(None)` when `provider` is not a catalog entry of kind `gemini`.
+fn native_gemini_preset(
+    provider: &str,
+    model: &ModelRef,
+    data_dir: &Path,
+    catalog: Option<&Path>,
+) -> Result<Option<LiveProvider>> {
+    let dir = catalog_dir(catalog);
+    let Ok(cat) = Catalog::load_dir(&dir) else {
+        return Ok(None);
+    };
+    let Some(entry) = cat.get(provider).cloned() else {
+        return Ok(None);
+    };
+    if entry.kind != ProviderKind::Gemini {
+        return Ok(None);
+    }
+    let key = match &entry.auth {
+        Auth::ApiKeyEnv(var) => match std::env::var(var) {
+            Ok(k) if !k.trim().is_empty() => Some(k),
+            _ => return Err(format!("environment variable {var} is not set").into()),
+        },
+        Auth::None => None,
+    };
+    let built = build_chat_provider(&entry, compat_config(data_dir), key)?;
+    Ok(Some(LiveProvider {
+        provider: Arc::from(built),
+        model: model.0.clone(),
+    }))
 }
 
 /// Wraps a provider to space requests at least `min_interval` apart (free-tier
@@ -253,6 +306,23 @@ mod tests {
                 .is_empty()
         );
         assert!(parse_prices("").unwrap().is_empty());
+    }
+
+    #[test]
+    fn gemini_preset_only_applies_to_native_gemini_catalog_entries() {
+        let d = tempfile::tempdir().unwrap();
+        let m = |p: &str| ModelRef(format!("{p}/x"));
+        // Not in the catalog / not of kind `gemini`: no preset.
+        assert!(
+            native_gemini_preset("nope", &m("nope"), d.path(), None)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            native_gemini_preset("openrouter", &m("openrouter"), d.path(), None)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

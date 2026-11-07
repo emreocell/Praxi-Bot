@@ -65,6 +65,7 @@ fn calls(cs: &[(&str, &str, Value)]) -> Reply {
                 // The model sees dotted names with `.` replaced.
                 name: name.replace('.', "__"),
                 arguments: args.to_string(),
+                provider_extra: None,
             })
         })
         .collect();
@@ -1050,6 +1051,23 @@ async fn non_retryable_errors_are_not_retried() {
         assert_eq!(lp.wait(run).await.unwrap(), RunState::Failed, "{kind}");
         assert_eq!(fake.n_requests(), 1, "{kind}: no retry and no fallback");
     }
+}
+
+#[tokio::test]
+async fn model_call_timeout_covers_a_hanging_provider() {
+    let env = setup();
+    let fake = Fake::new(vec![Reply::Hang, text("never")]);
+    let mut config = cfg(Policy::full());
+    config.guards.model_timeout = Duration::from_millis(150);
+    config.model_retry.max_attempts = 3;
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
+    let run = lp.run_turn(env.chat, "hi").unwrap();
+    let state = tokio::time::timeout(Duration::from_secs(10), lp.wait(run))
+        .await
+        .expect("the model-call timeout must end the turn")
+        .unwrap();
+    assert_eq!(state, RunState::Failed);
+    assert_eq!(fake.n_requests(), 1);
 }
 
 #[test]

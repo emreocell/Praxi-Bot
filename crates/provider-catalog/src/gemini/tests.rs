@@ -274,31 +274,178 @@ fn signature_survives_id_round_trip() {
 #[test]
 fn finish_reasons_and_blocked_prompt() {
     use crate::util::EventDecoder;
-    for (r, want) in [
-        ("MAX_TOKENS", FinishReason::Length),
-        ("SAFETY", FinishReason::ContentFilter),
-        (
-            "MALFORMED_FUNCTION_CALL",
-            FinishReason::Other("MALFORMED_FUNCTION_CALL".into()),
-        ),
-    ] {
+    let run = |r: &str| {
         let mut d = super::stream::Decoder::default();
         d.feed(&final_chunk(&[], r, &json!({})).to_string())
             .unwrap();
-        let out = d.finish().unwrap();
+        d.finish()
+    };
+    let done = run("MAX_TOKENS").unwrap();
+    assert!(matches!(
+        done.last(),
+        Some(ChatChunk::Done {
+            finish_reason: FinishReason::Length
+        })
+    ));
+    for r in ["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT"] {
         assert!(
-            matches!(out.last(), Some(ChatChunk::Done { finish_reason }) if *finish_reason == want)
+            matches!(run(r), Err(ProviderError::ContentFilter(_))),
+            "{r}"
         );
     }
+    assert!(matches!(
+        run("MALFORMED_FUNCTION_CALL"),
+        Err(ProviderError::MalformedToolCall(_))
+    ));
+    assert!(matches!(run("OTHER"), Err(ProviderError::Stream(_))));
     let mut d = super::stream::Decoder::default();
     d.feed(&json!({"promptFeedback":{"blockReason":"SAFETY"}}).to_string())
         .unwrap();
-    assert!(matches!(
-        d.finish().unwrap().last(),
-        Some(ChatChunk::Done {
-            finish_reason: FinishReason::ContentFilter
+    assert!(matches!(d.finish(), Err(ProviderError::ContentFilter(_))));
+}
+
+#[tokio::test]
+async fn malformed_function_call_is_retried_once_then_succeeds() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(sse(&[final_chunk(
+            &[],
+            "MALFORMED_FUNCTION_CALL",
+            &json!({}),
+        )]))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .respond_with(sse(&[final_chunk(
+            &[json!({"text": "ok"})],
+            "STOP",
+            &json!({}),
+        )]))
+        .mount(&server)
+        .await;
+    let chunks = collect(&provider(&server, 0), req()).await.unwrap();
+    assert!(matches!(&chunks[0], ChatChunk::TextDelta(t) if t == "ok"));
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn malformed_function_call_twice_is_a_typed_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(sse(&[final_chunk(
+            &[],
+            "MALFORMED_FUNCTION_CALL",
+            &json!({}),
+        )]))
+        .mount(&server)
+        .await;
+    let e = collect(&provider(&server, 0), req()).await.unwrap_err();
+    assert!(matches!(e, ProviderError::MalformedToolCall(_)));
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn safety_finish_is_content_filter_and_not_retried() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(sse(&[final_chunk(&[], "SAFETY", &json!({}))]))
+        .mount(&server)
+        .await;
+    let e = collect(&provider(&server, 0), req()).await.unwrap_err();
+    assert!(matches!(e, ProviderError::ContentFilter(_)));
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn thought_tags_never_reach_the_answer() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(sse(&[
+            text_chunk("Hi <thou"),
+            text_chunk("ght>secret plan</thou"),
+            final_chunk(&[json!({"text": "ght> there"})], "STOP", &json!({})),
+        ]))
+        .mount(&server)
+        .await;
+    let chunks = collect(&provider(&server, 0), req()).await.unwrap();
+    let text: String = chunks
+        .iter()
+        .filter_map(|c| match c {
+            ChatChunk::TextDelta(t) => Some(t.as_str()),
+            _ => None,
         })
-    ));
+        .collect();
+    assert_eq!(text, "Hi  there");
+}
+
+#[tokio::test]
+async fn retry_time_is_capped() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(503).set_body_json(json!({"error":{"message":"x"}})))
+        .mount(&server)
+        .await;
+    let cfg = OpenAiCompatConfig {
+        max_retries: 1000,
+        base_delay: Duration::from_millis(20),
+        max_delay: Duration::from_millis(20),
+        max_total_retry: Duration::from_millis(100),
+        ..OpenAiCompatConfig::default()
+    };
+    let p = GeminiProvider::with_api_key(entry(&server.uri()), cfg, None).unwrap();
+    let t = std::time::Instant::now();
+    let e = collect(&p, req()).await.unwrap_err();
+    assert!(matches!(e, ProviderError::Upstream { .. }));
+    assert!(t.elapsed() < Duration::from_secs(2));
+    assert!(server.received_requests().await.unwrap().len() < 30);
+}
+
+#[tokio::test]
+async fn failed_400_is_dumped_redacted_when_debug_dir_is_set() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({"error":{"message":"bad"}})))
+        .mount(&server)
+        .await;
+    let dir = std::env::temp_dir().join(format!("gf-dump-{}", std::process::id()));
+    let cfg = OpenAiCompatConfig {
+        debug_dir: Some(dir.clone()),
+        ..fast(0)
+    };
+    let p =
+        GeminiProvider::with_api_key(entry(&server.uri()), cfg, Some("g-secret".into())).unwrap();
+    let mut r = req();
+    r.messages
+        .push(Message::text(MessageRole::User, "x".repeat(5000)));
+    assert!(collect(&p, r).await.is_err());
+    let text = std::fs::read_to_string(dir.join("last-failed-request-gemini.json")).unwrap();
+    assert!(text.contains("bytes redacted"));
+    assert!(!text.contains("g-secret"));
+    assert!(text.contains("\"status\": 400"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn invalid_call_arguments_are_replaced_and_noted_in_the_tool_message() {
+    let mut r = req();
+    let id = make_call_id(1, None);
+    r.messages.push(Message {
+        role: MessageRole::Assistant,
+        content: Value::Null,
+        tool_calls: vec![ToolCall::new(id.clone(), "a", "{not json")],
+        tool_call_id: None,
+    });
+    r.messages.push(Message::tool_result(id, "done"));
+    let b = body(&r);
+    assert_eq!(
+        b["contents"][1]["parts"][0]["functionCall"]["args"],
+        json!({})
+    );
+    let out = b["contents"][2]["parts"][0]["functionResponse"]["response"]["output"]
+        .as_str()
+        .unwrap();
+    assert!(out.contains("{not json") && out.contains("done"));
 }
 
 #[tokio::test]
@@ -570,11 +717,13 @@ fn tool_round_trip_maps_ids_to_names_and_merges_responses() {
             id: id_a.clone(),
             name: "a".into(),
             arguments: "{\"x\":1}".into(),
+            provider_extra: None,
         },
         ToolCall {
             id: id_b.clone(),
             name: "b".into(),
             arguments: "{}".into(),
+            provider_extra: None,
         },
     ];
     let mut r = req();

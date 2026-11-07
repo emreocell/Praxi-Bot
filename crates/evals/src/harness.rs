@@ -138,6 +138,9 @@ fn build_config(c: &TurnConfig) -> LoopConfig {
     if let Some(v) = g.tool_timeout_ms {
         guards.tool_timeout = Duration::from_millis(v);
     }
+    if let Some(v) = g.model_timeout_ms {
+        guards.model_timeout = Duration::from_millis(v);
+    }
     LoopConfig {
         guards,
         global_policy: c.policy.clone(),

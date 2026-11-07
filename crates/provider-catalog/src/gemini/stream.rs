@@ -12,7 +12,7 @@ use super::{classify, request::make_call_id};
 use crate::{
     error::ProviderError,
     provider::{ChatChunk, FinishReason, ToolCall, Usage},
-    util::EventDecoder,
+    util::{EventDecoder, ThoughtFilter, finish_error},
 };
 
 #[derive(Debug, Default)]
@@ -21,14 +21,13 @@ pub(super) struct Decoder {
     usage: Option<Usage>,
     finish: Option<FinishReason>,
     finished: bool,
+    thoughts: ThoughtFilter,
 }
 
 fn parse_finish(s: &str) -> FinishReason {
     match s {
         "STOP" => FinishReason::Stop,
         "MAX_TOKENS" => FinishReason::Length,
-        "SAFETY" | "RECITATION" | "BLOCKLIST" | "PROHIBITED_CONTENT" | "SPII" | "IMAGE_SAFETY"
-        | "LANGUAGE" => FinishReason::ContentFilter,
         other => FinishReason::Other(other.to_owned()),
     }
 }
@@ -104,12 +103,16 @@ impl EventDecoder for Decoder {
                         id,
                         name,
                         arguments: args,
+                        provider_extra: None,
                     });
                 } else if let Some(t) = p.get("text").and_then(Value::as_str)
                     && !t.is_empty()
                     && p.get("thought").and_then(Value::as_bool) != Some(true)
                 {
-                    out.push(ChatChunk::TextDelta(t.to_owned()));
+                    let visible = self.thoughts.push(t);
+                    if !visible.is_empty() {
+                        out.push(ChatChunk::TextDelta(visible));
+                    }
                 }
             }
         }
@@ -126,11 +129,20 @@ impl EventDecoder for Decoder {
                 "stream ended before a finish reason".into(),
             ));
         }
-        let mut out: Vec<ChatChunk> = std::mem::take(&mut self.calls)
-            .into_iter()
-            .map(ChatChunk::ToolCall)
-            .collect();
-        let has_calls = !out.is_empty();
+        if let Some(e) = self.finish.as_ref().and_then(finish_error) {
+            return Err(e);
+        }
+        let mut out: Vec<ChatChunk> = Vec::new();
+        let tail = self.thoughts.finish();
+        if !tail.is_empty() {
+            out.push(ChatChunk::TextDelta(tail));
+        }
+        out.extend(
+            std::mem::take(&mut self.calls)
+                .into_iter()
+                .map(ChatChunk::ToolCall),
+        );
+        let has_calls = out.iter().any(|c| matches!(c, ChatChunk::ToolCall(_)));
         if let Some(u) = self.usage.take() {
             out.push(ChatChunk::Usage(u));
         }

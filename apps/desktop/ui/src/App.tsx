@@ -27,12 +27,14 @@ import {
 } from "./config/product";
 import { HealthIndicator } from "./components/HealthIndicator";
 import { botView } from "./lib/botProfile";
+import { getAutostart, setAutostart } from "./lib/providers";
 import { ControlBridgeHost } from "./state/ControlBridgeHost";
 import { DaemonProvider, useDaemon } from "./state/DaemonContext";
 import { BotFormView } from "./views/BotFormView";
 import { BotHomeView } from "./views/BotHomeView";
 import { ChatView } from "./views/ChatView";
 import { NeedsYouView } from "./views/NeedsYouView";
+import { OnboardingView } from "./views/OnboardingView";
 import { PermissionsSection, ProvidersSection } from "./views/SettingsSections";
 import { UsageView } from "./views/UsageView";
 import { i18n, type SupportedLanguage } from "./i18n";
@@ -56,11 +58,13 @@ import {
   type AppSettings,
   DEFAULT_SETTINGS,
   loadSettings,
-  saveSettings
+  saveSettings,
+  shouldOpenOnboardingOnStart
 } from "./store/settingsStore";
 
 type Route =
   | { kind: "home" }
+  | { kind: "onboarding" }
   | { kind: "bot"; botId: string }
   | { kind: "botForm"; botId?: string }
   | { kind: "chat"; chatId: string; botId: string }
@@ -70,27 +74,44 @@ type Route =
 
 function AppShell() {
   const { t } = useTranslation();
-  const { bots, chats, needs } = useDaemon();
+  const {
+    phase,
+    error: daemonError,
+    bots,
+    chats,
+    needs,
+    refreshBots,
+    retry
+  } = useDaemon();
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [route, setRoute] = useState<Route>({ kind: "home" });
   const [controlState, setControlState] = useState<ControlSnapshot>(
     INITIAL_CONTROL_SNAPSHOT
   );
   const [recordingHotkey, setRecordingHotkey] = useState<boolean>(false);
+  const [autostartError, setAutostartError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let mounted = true;
-    void loadSettings().then((loaded) => {
+    void loadSettings().then(async (loaded) => {
       if (!mounted) {
         return;
       }
-      setSettings(loaded);
-      if (loaded.language && loaded.language !== i18n.language) {
-        void i18n.changeLanguage(loaded.language);
+      const osAutostart = await getAutostart().catch(() => loaded.autostart);
+      if (!mounted) {
+        return;
       }
-      if (loaded.stopHotkey) {
-        void setStopHotkey(loaded.stopHotkey)
+      const merged: AppSettings = { ...loaded, autostart: osAutostart };
+      setSettings(merged);
+      if (shouldOpenOnboardingOnStart(merged)) {
+        setRoute({ kind: "onboarding" });
+      }
+      if (merged.language && merged.language !== i18n.language) {
+        void i18n.changeLanguage(merged.language);
+      }
+      if (merged.stopHotkey) {
+        void setStopHotkey(merged.stopHotkey)
           .then((snap) => {
             if (mounted) {
               setControlState(snap);
@@ -238,6 +259,31 @@ function AppShell() {
       backgroundUrl: "",
       backgroundFileName: ""
     });
+  };
+
+  const handleToggleAutostart = async () => {
+    setAutostartError(null);
+    const nextVal = !settings.autostart;
+    try {
+      const applied = await setAutostart(nextVal);
+      updateSettings({ autostart: applied });
+    } catch {
+      setAutostartError(t("settings.autostart.error"));
+    }
+  };
+
+  const handleOpenOnboarding = (restartFromFirstStep: boolean) => {
+    if (restartFromFirstStep) {
+      updateSettings({
+        onboardingStep: 1,
+        onboardingSkipped: false
+      });
+    } else {
+      updateSettings({
+        onboardingSkipped: false
+      });
+    }
+    setRoute({ kind: "onboarding" });
   };
 
   const routeBotId =
@@ -437,27 +483,125 @@ function AppShell() {
     >
       <div className={styles.mainColumn}>
         {runBanner}
+        {route.kind === "onboarding" ? (
+          <OnboardingView
+            settings={settings}
+            onUpdateSettings={updateSettings}
+            onLanguageChange={handleLanguageChange}
+            onThemeChange={handleThemeChange}
+            onSkip={(currentStep) => {
+              updateSettings({
+                onboardingSkipped: true,
+                onboardingStep: currentStep
+              });
+              setRoute({ kind: "home" });
+            }}
+            onComplete={({ botId, chatId }) => {
+              updateSettings({
+                onboardingCompleted: true,
+                onboardingSkipped: false,
+                onboardingStep: 5,
+                ...(botId ? { onboardingBotId: botId } : {})
+              });
+              if (chatId && botId) {
+                setRoute({ kind: "chat", chatId, botId });
+              } else if (botId) {
+                setRoute({ kind: "bot", botId });
+              } else {
+                setRoute({ kind: "home" });
+              }
+            }}
+          />
+        ) : null}
         {route.kind === "home" ? (
           <div className={styles.centerPane}>
             <Card padding="lg" className={styles.emptyStateCard}>
-              <div className={styles.selectedBotContent}>
-                <h1 className={styles.emptyStateTitle}>
-                  {bots.length === 0
-                    ? t("main.welcomeTitle")
-                    : t("main.selectBotTitle")}
-                </h1>
-                <p className={styles.emptyStateDescription}>
-                  {bots.length === 0
-                    ? t("main.welcomeDescription")
-                    : t("main.selectBotDescription")}
-                </p>
-                <Button
-                  variant="primary"
-                  onClick={() => setRoute({ kind: "botForm" })}
+              {phase === "error" ? (
+                <div
+                  className={styles.selectedBotContent}
+                  data-testid="daemon-offline-empty-state"
                 >
-                  {t("sidebar.newBot")}
-                </Button>
-              </div>
+                  <h1 className={styles.emptyStateTitle}>
+                    {t("main.daemonOfflineTitle")}
+                  </h1>
+                  <p className={styles.emptyStateDescription}>
+                    {t("main.daemonOfflineDescription")}
+                  </p>
+                  {daemonError ? (
+                    <pre className={styles.errorDetailMono}>{daemonError}</pre>
+                  ) : null}
+                  <div className={styles.optionRow}>
+                    <Button variant="primary" onClick={retry}>
+                      {t("main.daemonRetry")}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => handleOpenOnboarding(false)}
+                    >
+                      {t("main.runSetupWizard")}
+                    </Button>
+                  </div>
+                </div>
+              ) : phase === "connecting" && bots.length === 0 ? (
+                <div className={styles.selectedBotContent}>
+                  <h1 className={styles.emptyStateTitle}>
+                    {t("main.daemonConnectingTitle")}
+                  </h1>
+                  <p className={styles.emptyStateDescription}>
+                    {t("main.daemonConnectingDescription")}
+                  </p>
+                  <Button variant="secondary" onClick={retry}>
+                    {t("main.daemonRetry")}
+                  </Button>
+                </div>
+              ) : (
+                <div
+                  className={styles.selectedBotContent}
+                  data-testid="home-empty-state"
+                >
+                  <h1 className={styles.emptyStateTitle}>
+                    {bots.length === 0
+                      ? t("main.welcomeTitle")
+                      : t("main.selectBotTitle")}
+                  </h1>
+                  <p className={styles.emptyStateDescription}>
+                    {bots.length === 0
+                      ? t("main.welcomeDescription")
+                      : t("main.selectBotDescription")}
+                  </p>
+                  <div className={styles.optionRow}>
+                    {bots.length === 0 ? (
+                      <>
+                        <Button
+                          variant="primary"
+                          onClick={() => handleOpenOnboarding(false)}
+                        >
+                          {t("main.runSetupWizard")}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={() => setRoute({ kind: "botForm" })}
+                        >
+                          {t("sidebar.newBot")}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={() => void refreshBots()}
+                        >
+                          {t("main.refreshBots")}
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        variant="primary"
+                        onClick={() => setRoute({ kind: "botForm" })}
+                      >
+                        {t("sidebar.newBot")}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
             </Card>
           </div>
         ) : null}
@@ -502,6 +646,71 @@ function AppShell() {
                 {t("settings.subtitle")}
               </p>
             </header>
+
+            <Card padding="md" className={styles.settingCard}>
+              <div className={styles.settingInfo}>
+                <h2 className={styles.settingHeading}>
+                  {t("settings.onboarding.title")}
+                </h2>
+                <p className={styles.settingDescription}>
+                  {t("settings.onboarding.description")}
+                </p>
+              </div>
+              <div className={styles.optionRow}>
+                <span className={styles.hotkeyChip}>
+                  {settings.onboardingCompleted
+                    ? t("settings.onboarding.statusCompleted")
+                    : settings.onboardingSkipped
+                      ? t("settings.onboarding.statusSkipped", {
+                          step: settings.onboardingStep || 1
+                        })
+                      : t("settings.onboarding.statusPending")}
+                </span>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() =>
+                    handleOpenOnboarding(settings.onboardingCompleted)
+                  }
+                  data-testid="settings-open-onboarding"
+                >
+                  {settings.onboardingCompleted
+                    ? t("settings.onboarding.restart")
+                    : t("settings.onboarding.resume")}
+                </Button>
+              </div>
+            </Card>
+
+            <Card padding="md" className={styles.settingCard}>
+              <div className={styles.settingInfo}>
+                <h2 className={styles.settingHeading}>
+                  {t("settings.autostart.title")}
+                </h2>
+                <p className={styles.settingDescription}>
+                  {t("settings.autostart.description")}
+                </p>
+              </div>
+              <div className={styles.optionRow}>
+                <span className={styles.hotkeyChip}>
+                  {settings.autostart
+                    ? t("settings.autostart.enabled")
+                    : t("settings.autostart.disabled")}
+                </span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleToggleAutostart()}
+                  data-testid="settings-toggle-autostart"
+                >
+                  {settings.autostart
+                    ? t("settings.autostart.disable")
+                    : t("settings.autostart.enable")}
+                </Button>
+              </div>
+              {autostartError ? (
+                <p className={styles.errorDetailMono}>{autostartError}</p>
+              ) : null}
+            </Card>
 
             <Card padding="md" className={styles.settingCard}>
               <div className={styles.settingInfo}>

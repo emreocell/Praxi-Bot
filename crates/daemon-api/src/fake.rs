@@ -65,6 +65,7 @@ impl ChatProvider for FakeProvider {
                             id: "fake-call-1".to_owned(),
                             name: name.to_owned(),
                             arguments: args.to_owned(),
+                            provider_extra: None,
                         }),
                         usage(),
                         ChatChunk::Done {

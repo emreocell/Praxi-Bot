@@ -157,6 +157,7 @@ fn call(cs: &[(&str, &str, Value)]) -> Option<Vec<ChatChunk>> {
                 id: (*id).to_owned(),
                 name: name.replace('.', "__"),
                 arguments: args.to_string(),
+                provider_extra: None,
             })
         })
         .collect();

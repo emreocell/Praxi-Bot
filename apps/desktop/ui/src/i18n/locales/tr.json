@@ -13,7 +13,14 @@
     "selectedBotLabel": "Aktif Bot Profili",
     "clearSelection": "Genel görünüme dön",
     "welcomeTitle": "İlk botunu oluştur",
-    "welcomeDescription": "Bir botun kişiliği, modelleri ve izin ön ayarı vardır. Sohbete başlamak için bir bot oluştur."
+    "welcomeDescription": "Bir botun kişiliği, modelleri ve izin ön ayarı vardır. Sohbete başlamak için kurulum sihirbazını çalıştır veya elle bir bot oluştur.",
+    "runSetupWizard": "Kurulum sihirbazını çalıştır",
+    "refreshBots": "Yenile",
+    "daemonOfflineTitle": "Yerel arka plan servisi çalışmıyor",
+    "daemonOfflineDescription": "Praxi-Bot yerel arka plan servisine (bot serve) ulaşamadı. 47821 numaralı yerel bağlantı noktasının engellenmediğinden emin olup yeniden deneyin.",
+    "daemonConnectingTitle": "Yerel servis başlatılıyor…",
+    "daemonConnectingDescription": "Bu bilgisayardaki yerleşik Praxi-Bot arka plan servisine bağlanılıyor.",
+    "daemonRetry": "Bağlantıyı yeniden dene"
   },
   "settings": {
     "title": "Görünüm ve Ayarlar",
@@ -121,6 +128,24 @@
         "preset": "Hazır ayar",
         "saved": "Kaydedildi."
       }
+    },
+    "onboarding": {
+      "title": "İlk kurulum sihirbazı",
+      "description": "Model sağlayıcısını, güvenlik varsayılanlarını veya ilk botunu yapılandırmak için 5 adımlı rehberli kurulumu yeniden aç.",
+      "resume": "Kurulum sihirbazına devam et",
+      "restart": "Kurulum sihirbazını yeniden çalıştır",
+      "statusCompleted": "Tamamlandı",
+      "statusSkipped": "5 adımın {{step}}. adımında duraklatıldı",
+      "statusPending": "Henüz tamamlanmadı"
+    },
+    "autostart": {
+      "title": "Windows oturumu açıldığında başlat",
+      "description": "Windows oturumu açtığında Praxi-Bot’u otomatik olarak başlat (kullanıcı bazlı, varsayılan olarak kapalı).",
+      "enabled": "Açık",
+      "disabled": "Kapalı (varsayılan)",
+      "enable": "Otomatik başlatmayı aç",
+      "disable": "Otomatik başlatmayı kapat",
+      "error": "Windows otomatik başlatma ayarı güncellenemedi."
     }
   },
   "overlay": {
@@ -384,5 +409,128 @@
   },
   "control": {
     "starting": "Çalışıyor…"
+  },
+  "onboarding": {
+    "badge": "İlk kurulum",
+    "stepCounter": "Adım {{current}} / {{total}}",
+    "skip": "Şimdilik atla",
+    "back": "Geri",
+    "next": "Devam et",
+    "finish": "Kurulumu tamamla",
+    "steps": {
+      "1": "Hoş geldin",
+      "2": "Sağlayıcı",
+      "3": "Güvenlik",
+      "4": "İlk bot",
+      "5": "Dene"
+    },
+    "daemonBanner": {
+      "offlineTitle": "Yerel servis yanıt vermiyor",
+      "offlineHint": "Tercihlerini seçmeye ve sağlayıcı anahtarını kaydetmeye devam edebilir veya yerel servisi şimdi yeniden başlatmayı deneyebilirsin.",
+      "retry": "Servisi yeniden dene"
+    },
+    "step1": {
+      "title": "Praxi-Bot’a hoş geldin",
+      "subtitle": "Yerel öncelikli kişisel bilgisayar kullanım asistanın. Terminal gerekmeden birkaç dakika içinde kurulumu tamamlayalım.",
+      "languageTitle": "Arayüz dili",
+      "languageHint": "İstediğin zaman Türkçe ve İngilizce arasında geçiş yapabilirsin.",
+      "themeTitle": "Görünüm teması",
+      "themeHint": "Açık, koyu veya Windows sistem temasını seç.",
+      "privacyTitle": "%100 yerel öncelikli ve sıfır telemetri",
+      "privacyBody": "Sohbetlerin, izinlerin ve bot profillerin kendi bilgisayarında kalır. Praxi-Bot hiçbir telemetri veya analitik toplamaz; veriler yalnızca seçtiğin model sağlayıcısına gönderilir."
+    },
+    "step2": {
+      "title": "Bir model sağlayıcısı bağla",
+      "subtitle": "Botunun zekâsının nerede çalışacağını seç. API anahtarın Windows Kimlik Bilgisi Yöneticisi’ne kaydedilir ve bir daha asla gösterilmez.",
+      "presets": {
+        "gemini": {
+          "title": "Google Gemini",
+          "badge": "Ücretsiz katman var",
+          "description": "Google’ın hızlı çok kipli ve bilgisayar kullanımı modelleri.",
+          "freeTierLine": "Google AI Studio ücretsiz bir Gemini API katmanı sunar — kredi kartı gerekmeden saniyeler içinde anahtar alabilirsin."
+        },
+        "anthropic": {
+          "title": "Anthropic Claude",
+          "badge": "Bulut API",
+          "description": "Akıl yürütme ve bilgisayar kullanımı için Claude Sonnet, Opus ve Haiku modelleri."
+        },
+        "openai_compatible": {
+          "title": "OpenAI uyumlu",
+          "badge": "OpenRouter / DeepSeek / Özel",
+          "description": "OpenRouter, DeepSeek veya LM Studio gibi herhangi bir OpenAI uyumlu uç nokta."
+        },
+        "ollama": {
+          "title": "Yerel Ollama",
+          "badge": "Bu bilgisayarda çalışır",
+          "description": "Açık ağırlıklı modelleri API anahtarı gerekmeden kendi bilgisayarında çalıştır."
+        },
+        "fake": {
+          "title": "Yerleşik Demo Sağlayıcısı",
+          "badge": "Çevrimdışı test modu",
+          "description": "API anahtarı olmadan kurulumu denemek için yerel yankı ve araç çağrısı simülatörü."
+        }
+      },
+      "providerId": "Katalog hazır ayarı",
+      "customOption": "Özel OpenAI uyumlu URL",
+      "customId": "Sağlayıcı kimliği",
+      "baseUrl": "Temel URL",
+      "apiKey": "API anahtarı",
+      "apiKeyPlaceholder": "API anahtarını buraya yapıştır…",
+      "keyStoredBadge": "API anahtarı işletim sistemi anahtarlığına kaydedildi (güvenlik için gizlendi)",
+      "replaceKey": "API anahtarını değiştir",
+      "noKeyNeeded": "Bu yerel sağlayıcı için API anahtarı gerekmez.",
+      "defaultModel": "Varsayılan model",
+      "saveProvider": "Sağlayıcıyı kaydet",
+      "saving": "Kaydediliyor…",
+      "testButton": "Bağlantıyı sına",
+      "testing": "Sınanıyor…",
+      "retryTest": "Sınamayı yeniden dene",
+      "savedOk": "{{id}} sağlayıcısı yapılandırmana kaydedildi.",
+      "testOk": "Bağlantı sınaması başarılı: {{detail}}",
+      "testFailedTitle": "Sağlayıcı sınaması başarısız oldu",
+      "testFailedHint": "API anahtarının geçerli olduğundan ve internet bağlantın olduğundan (veya Ollama’nın yerel olarak çalıştığından) emin olup yeniden dene.",
+      "nativeWarning": "Sağlayıcı anahtarlığı kaydı masaüstü uygulaması içinde çalışmayı gerektirir."
+    },
+    "step3": {
+      "title": "Güvenlik varsayılanlarını seç",
+      "subtitle": "Botunun bu bilgisayarda varsayılan olarak neler yapabileceğine karar ver. Bunu istediğin zaman bot veya kategori bazında değiştirebilirsin.",
+      "recommended": "Önerilen",
+      "whatItMeansTitle": "Bot bu bilgisayarda neler yapabilir?",
+      "explain": {
+        "read-only": "Bot ekranını inceleyebilir, dosyaları okuyabilir ve web sayfalarına bakabilir; ancak asla tıklayamaz, yazamaz, dosya düzenleyemez veya komut çalıştıramaz.",
+        "read-and-draft": "Bot okuyabilir ve taslak hazırlayabilir; ancak dosya değiştirmeden, tıklamadan veya komut çalıştırmadan önce yine sana sorar.",
+        "approve-destructive": "Bot dosyaları okuyabilir ve ekranını serbestçe inceleyebilir; tıklamadan, yazmadan, dosya düzenlemeden, kabuk komutu çalıştırmadan veya ileti göndermeden önce sana canlı bir onay kartı gösterir.",
+        "full": "Bot önceden sormadan okuyabilir, tıklayabilir, yazabilir, dosya düzenleyebilir ve komut çalıştırabilir (aşağıdaki sert güvenlik sınırları hariç)."
+      },
+      "floorsTitle": "Her zaman açık güvenlik korumaları",
+      "floorMoney": "Finansal ve ödeme işlemleri her zaman açık onayını gerektirir.",
+      "floorNever": "Yerleşik yasaklılar listesi: kimlik bilgisi depoları, SSH/GPG özel anahtarları ve kritik işletim sistemi önyükleme dosyaları her zaman engellenir.",
+      "floorHotkey": "Botu anında durdurmak için istediğin an {{hotkey}} kısayoluna basabilir veya yüzen araçtaki “Kontrolü al” düğmesine tıklayabilirsin.",
+      "saving": "Güvenlik politikası kaydediliyor…",
+      "saveError": "Çalışma alanı politikası kaydedilemedi: {{message}}"
+    },
+    "step4": {
+      "title": "İlk botunu oluştur",
+      "subtitle": "Asistanına bir ad, görünüm ve seçtiğin sağlayıcıdan otomatik doldurulan rol modelleri ver.",
+      "defaultBotName": "Atlas",
+      "defaultPersona": "Bilgisayarımda işlem yapmadan önce planını açıkça anlatan, yardımsever ve dikkatli kişisel asistan.",
+      "rolesTitle": "Model rol varsayılanları ({{provider}} sağlayıcısından)",
+      "rolesHint": "Yürütücü eylemleri ve araçları çalıştırır, Planlayıcı çok adımlı hedefleri böler, Sınıflandırıcı ise istekleri yönlendirir.",
+      "creating": "Bot oluşturuluyor…",
+      "createdBadge": "“{{name}}” botu hazır."
+    },
+    "step5": {
+      "title": "Botunu canlı dene",
+      "subtitle": "Botunun nasıl yanıt verdiğini ve herhangi bir masaüstü eylemi çalışmadan önce canlı onay kartlarının nasıl göründüğünü görmek için aşağıdaki örnek istemlerden birine tıkla.",
+      "promptScreen": "Ekranımda ne var?",
+      "promptNotepad": "Not Defteri'ni aç ve merhaba yaz",
+      "customPlaceholder": "Veya denemek için başka bir istem yaz…",
+      "send": "Gönder",
+      "sending": "Çalışıyor…",
+      "emptyHint": "Burada canlı bir deneme başlatmak için yukarıdaki örnek istemlerden birini seç.",
+      "approvalHint": "Bir aracın izne ihtiyacı olduğunda (Not Defteri’ni başlatmak gibi), Bir kez izin ver veya Reddet seçebilmen için onay kartı aşağıda canlı olarak belirir.",
+      "openFullChat": "Tam sohbette aç",
+      "retryPrompt": "İstemi yeniden dene"
+    }
   }
 }

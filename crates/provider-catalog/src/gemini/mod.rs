@@ -13,7 +13,11 @@
 //!   candidates + thinking tokens, `cached_tokens` = `cachedContentTokenCount`.
 //!   Implicit caching is automatic server-side; explicit `cachedContents`
 //!   resources are not managed here.
-//! - Thought summaries (`thought: true` parts) are never emitted as text.
+//! - Thought summaries (`thought: true` parts, `<thought>` spans) are never
+//!   emitted as text.
+//! - Abnormal finish reasons are errors, not empty stops: `SAFETY` and friends
+//!   -> `ContentFilter`, `MALFORMED_FUNCTION_CALL` -> `MalformedToolCall`
+//!   (the request is re-sent once), anything unknown -> `Stream`.
 //! - The API key is sent in the `x-goog-api-key` header, not the URL.
 //! - Errors: 401/403 and 400 `API_KEY_INVALID` -> `Auth`, other 400 ->
 //!   `InvalidRequest`, 429 -> `RateLimited` (from `Retry-After` or the
@@ -36,8 +40,9 @@ use crate::{
     openai_compat::OpenAiCompatConfig,
     provider::{ChatChunk, ChatProvider, ChatRequest},
     util::{
-        Classify, Secret, build_client, error_message, event_stream, key_from_env,
-        map_reqwest_error, model_name, retry_after, send_with_retry,
+        ChunkStream, Classify, Reopen, Secret, build_client, dump_failed_request, error_message,
+        event_stream, key_from_env, map_reqwest_error, model_name, retry_after,
+        retry_malformed_once, send_with_retry,
     },
 };
 
@@ -83,6 +88,18 @@ impl GeminiProvider {
 
     fn base(&self) -> &str {
         self.entry.base_url.trim_end_matches('/')
+    }
+
+    /// POST the request and return the decoded event stream.
+    async fn open(&self, url: &str, body: &Value) -> Result<ChunkStream, ProviderError> {
+        let make = || self.authed(self.client.post(url).json(body));
+        match send_with_retry(&self.config, &make, classify as Classify).await {
+            Ok(resp) => Ok(event_stream(resp, stream::Decoder::default())),
+            Err(e) => {
+                dump_failed_request(&self.config, &self.entry.id, body, &e);
+                Err(e)
+            }
+        }
     }
 
     fn authed(&self, rb: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
@@ -135,9 +152,13 @@ impl ChatProvider for GeminiProvider {
             "{}/models/{model}:streamGenerateContent?alt=sse",
             self.base()
         );
-        let make = || self.authed(self.client.post(&url).json(&body));
-        let resp = send_with_retry(&self.config, &make, classify as Classify).await?;
-        Ok(event_stream(resp, stream::Decoder::default()))
+        let first = self.open(&url, &body).await?;
+        let this = self.clone();
+        let reopen: Reopen = Box::new(move || {
+            let (this, url, body) = (this.clone(), url.clone(), body.clone());
+            Box::pin(async move { this.open(&url, &body).await })
+        });
+        Ok(retry_malformed_once(first, reopen))
     }
 
     async fn list_models(&self) -> Result<Vec<String>, ProviderError> {
