@@ -347,7 +347,7 @@ export async function isHumanDriving(): Promise<boolean> {
 }
 
 export async function beginAction(
-  rect: OverlayRect,
+  rect: OverlayRect | null,
   label: string,
   action = "click",
   text?: string
@@ -356,6 +356,24 @@ export async function beginAction(
     return false;
   }
   return invoke<boolean>("begin_action", { rect, label, action, text });
+}
+
+export async function startBotRun(
+  bot: BotRunMeta,
+  initialStep: string
+): Promise<ControlSnapshot> {
+  if (!isTauriRuntime()) {
+    return INITIAL_CONTROL_SNAPSHOT;
+  }
+  return invoke<ControlSnapshot>("start_bot_run", { bot, initialStep });
+}
+
+/** Ripple at global physical screen pixels (`overlay_click`). */
+export async function overlayClick(x: number, y: number): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  await invoke("overlay_click", { x, y });
 }
 
 export async function pauseBotRun(): Promise<ControlSnapshot> {

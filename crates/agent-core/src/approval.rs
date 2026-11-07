@@ -72,7 +72,12 @@ impl Shared {
             initiator: ctx.initiator,
         };
         let r = &self.resolver;
-        let d = r.resolve(&self.cfg.global_policy, ctx.bot_policy.as_ref(), None, &req);
+        let d = r.resolve(
+            &self.global_policy.read(),
+            ctx.bot_policy.as_ref(),
+            None,
+            &req,
+        );
         if d != Decision::Ask {
             return d;
         }
@@ -108,7 +113,7 @@ impl Shared {
             initiator: InitiatorKind::Human,
         };
         let r = &self.resolver;
-        let d = r.resolve(&self.cfg.global_policy, bot_policy, None, &req);
+        let d = r.resolve(&self.global_policy.read(), bot_policy, None, &req);
         // Same rule as `decide`: only a policy-level `Ask` can be waived.
         let floor = r.resolve(&Policy::full(), None, None, &req) != Decision::Allow;
         if d == Decision::Ask

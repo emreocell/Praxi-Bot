@@ -20,14 +20,11 @@
         "parameters": [
           {
             "name": "run_id",
-            "in": "path",
+            "in": "query",
             "description": "Only this run's approvals (pending and decided).  Without it: pending\napprovals of all runs.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           }
@@ -668,6 +665,134 @@
         ]
       }
     },
+    "/v1/control/state": {
+      "get": {
+        "tags": [
+          "control"
+        ],
+        "summary": "The daemon's view of the desktop app's controller registration.",
+        "operationId": "get_control_state",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlStateDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Register the desktop app as controller and report its mode (heartbeat: send\nit on every state change and at least every 5 s; it expires after 15 s).\nWhile the mode is `human_driving` or `paused`, desktop actions of bots are\nrefused immediately.",
+        "operationId": "put_control_state",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ControlStateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlStateDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/control/{request_id}": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Answer a `control_requested` event: let the action `proceed` (after the\noverlay highlight) or `refuse` it.",
+        "operationId": "decide_control",
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "description": "request_id of the control_requested event",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ControlDecisionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlDecisionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "unknown, answered or timed-out request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/events": {
       "get": {
         "tags": [
@@ -757,6 +882,148 @@
             }
           }
         }
+      }
+    },
+    "/v1/policy": {
+      "get": {
+        "tags": [
+          "policy"
+        ],
+        "summary": "The global default permission policy (what bots without their own rule\nfor a category get).",
+        "operationId": "get_policy",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "policy"
+        ],
+        "summary": "Replace the global default policy (persisted; effective for the next tool\ncall of every run).  Start from `preset`, or from the current policy\nwithout it, then apply the `categories` overrides.",
+        "operationId": "put_policy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/providers": {
+      "get": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Configured providers, catalog entries and the models each configured\nprovider offers (fetched live, with a short timeout; failures are reported\nper provider and never fail the route).",
+        "operationId": "list_providers",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvidersDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/providers/reload": {
+      "post": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Rebuild the loop's providers from `providers.toml` and the secret store, so\na provider added with the CLI / app is usable without restarting the\ndaemon.  Runs already streaming keep their provider.",
+        "operationId": "reload_providers",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReloadResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "the daemon has no provider configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "no usable provider; the old ones stay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
       }
     },
     "/v1/questions/{call_id}": {
@@ -1020,14 +1287,11 @@
         "parameters": [
           {
             "name": "since_ms",
-            "in": "path",
+            "in": "query",
             "description": "Only runs created at or after this time.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int64"
             }
           }
@@ -1217,6 +1481,56 @@
         ],
         "description": "Usage of one bot."
       },
+      "CatalogProviderDto": {
+        "type": "object",
+        "description": "A catalog entry.",
+        "required": [
+          "id",
+          "kind",
+          "base_url",
+          "auth",
+          "tools",
+          "vision",
+          "configured"
+        ],
+        "properties": {
+          "auth": {
+            "type": "string",
+            "description": "`api_key_env` or `none`."
+          },
+          "base_url": {
+            "type": "string",
+            "description": "Base URL."
+          },
+          "configured": {
+            "type": "boolean",
+            "description": "Already in `providers.toml`."
+          },
+          "id": {
+            "type": "string",
+            "description": "Catalog id."
+          },
+          "key_env": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Environment variable of the key, for `api_key_env`."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`openai_compatible`, `anthropic`, `gemini` or `other:<name>`."
+          },
+          "tools": {
+            "type": "boolean",
+            "description": "Supports tool calls."
+          },
+          "vision": {
+            "type": "boolean",
+            "description": "Supports image input."
+          }
+        }
+      },
       "CategoryDecisionDto": {
         "type": "object",
         "description": "Effective decision of one permission category.",
@@ -1265,6 +1579,167 @@
             "description": "Title."
           }
         }
+      },
+      "ConfiguredProviderDto": {
+        "type": "object",
+        "description": "A configured provider (never carries a key).",
+        "required": [
+          "id",
+          "enabled",
+          "is_default",
+          "has_key",
+          "custom",
+          "active",
+          "models"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "Loaded in the running loop (a restart or `reload` picks up changes)."
+          },
+          "custom": {
+            "type": "boolean",
+            "description": "Not from the catalog: defined by the user."
+          },
+          "default_model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Chosen default model (without the provider prefix)."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "May be used."
+          },
+          "has_key": {
+            "type": "boolean",
+            "description": "A key is stored for it."
+          },
+          "id": {
+            "type": "string",
+            "description": "Provider id."
+          },
+          "is_default": {
+            "type": "boolean",
+            "description": "Is the configured default."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Model ids the provider reports (empty without a listing)."
+          },
+          "models_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the model list could not be fetched."
+          }
+        }
+      },
+      "ControlDecisionInput": {
+        "type": "object",
+        "description": "`POST /v1/control/{request_id}`.",
+        "required": [
+          "decision"
+        ],
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/ControlVerdict",
+            "description": "Proceed or refuse."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Reason shown to the model on refuse."
+          }
+        }
+      },
+      "ControlDecisionResponse": {
+        "type": "object",
+        "description": "Response of `POST /v1/control/{request_id}`.",
+        "required": [
+          "request_id",
+          "decision"
+        ],
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/ControlVerdict",
+            "description": "The decision taken."
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The request answered."
+          }
+        }
+      },
+      "ControlMode": {
+        "type": "string",
+        "description": "Who is driving the desktop, as the desktop app's state machine reports it.",
+        "enum": [
+          "idle",
+          "bot_driving",
+          "human_driving",
+          "paused"
+        ]
+      },
+      "ControlStateDto": {
+        "type": "object",
+        "description": "The daemon's view of the controller registration.",
+        "required": [
+          "expires_in_ms",
+          "app_connected"
+        ],
+        "properties": {
+          "app_connected": {
+            "type": "boolean",
+            "description": "A desktop app is listening on the global event stream."
+          },
+          "expires_in_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Milliseconds until the registration expires; `0` when not registered.",
+            "minimum": 0
+          },
+          "mode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ControlMode",
+                "description": "Last reported mode; `null` when no app is registered (never reported,\nor the heartbeat expired)."
+              }
+            ]
+          }
+        }
+      },
+      "ControlStateInput": {
+        "type": "object",
+        "description": "`PUT /v1/control/state`: the desktop app registers as controller and\nreports its mode.  Send it on every state change and at least every 5 s;\nthe registration expires after 15 s without a heartbeat.",
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/ControlMode",
+            "description": "The app's current mode."
+          }
+        }
+      },
+      "ControlVerdict": {
+        "type": "string",
+        "description": "The app's answer to a `control_requested` event.",
+        "enum": [
+          "proceed",
+          "refuse"
+        ]
       },
       "CreateChat": {
         "type": "object",
@@ -1549,6 +2024,117 @@
           "queue"
         ]
       },
+      "PolicyDto": {
+        "type": "object",
+        "description": "The global default permission policy (`GET` / `PUT /v1/policy`).",
+        "required": [
+          "categories"
+        ],
+        "properties": {
+          "categories": {
+            "type": "object",
+            "description": "Level per category: `deny`, `ask`, `allow` or `allow_with_limits`.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "preset": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of the preset the policy equals (`read-only`,\n`approve-destructive`, `read-and-draft`, `full`); `null` = custom."
+          }
+        }
+      },
+      "PolicyInput": {
+        "type": "object",
+        "description": "`PUT /v1/policy`.  Start from `preset` (or, without it, from the current\npolicy) and apply the `categories` overrides on top.",
+        "properties": {
+          "categories": {
+            "type": "object",
+            "description": "Per-category level: `deny`, `ask` or `allow`.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "preset": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`read-only`, `approve-destructive`, `read-and-draft` or `full`."
+          }
+        }
+      },
+      "ProvidersDto": {
+        "type": "object",
+        "description": "`GET /v1/providers`.",
+        "required": [
+          "active",
+          "configured",
+          "catalog"
+        ],
+        "properties": {
+          "active": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids of the providers the running loop can use."
+          },
+          "catalog": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogProviderDto"
+            },
+            "description": "Entries of the built-in provider catalog."
+          },
+          "configured": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfiguredProviderDto"
+            },
+            "description": "Providers from the user's `providers.toml`."
+          },
+          "default_provider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Id of the loop's default provider."
+          }
+        }
+      },
+      "ReloadResponse": {
+        "type": "object",
+        "description": "`POST /v1/providers/reload`.",
+        "required": [
+          "active"
+        ],
+        "properties": {
+          "active": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids now loaded."
+          },
+          "default_provider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Id of the new default provider."
+          }
+        }
+      },
       "RevokeGrant": {
         "type": "object",
         "description": "`DELETE /v1/bots/{id}/grants`.",
@@ -1717,6 +2303,14 @@
             "description": "Completion tokens.",
             "minimum": 0
           },
+          "cost_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Cost in USD of the model calls whose price is known; `null` when no\ncall has a known price."
+          },
           "model_calls": {
             "type": "integer",
             "format": "int64",
@@ -1761,6 +2355,15 @@
     },
     {
       "name": "events"
+    },
+    {
+      "name": "control"
+    },
+    {
+      "name": "policy"
+    },
+    {
+      "name": "providers"
     }
   ]
 }

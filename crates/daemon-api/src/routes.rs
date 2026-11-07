@@ -9,6 +9,7 @@ use agent_core::{
 use axum::extract::{FromRequest, Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::{Json, extract::rejection::JsonRejection};
+use permission_engine::{Level, Policy, Rule};
 use protocol::{BotId, ChatId, Event, PermissionCategory, RunId, ToolCallId};
 use provider_catalog::Usage;
 use serde::Deserialize;
@@ -21,9 +22,11 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::dto::{
-    AnswerQuestion, AnswerResponse, ApprovalDto, BotDto, BotInput, BotUsage, CategoryDecisionDto,
-    ChatDto, CreateChat, DecideApproval, Decision, DecisionResponse, DeliveryKind,
-    EffectivePolicyDto, GrantDto, GrantTargetDto, Health, MessageDto, Mode, RevokeGrant, RunDto,
+    AnswerQuestion, AnswerResponse, ApprovalDto, BotDto, BotInput, BotUsage, CatalogProviderDto,
+    CategoryDecisionDto, ChatDto, ConfiguredProviderDto, ControlDecisionInput,
+    ControlDecisionResponse, ControlStateDto, ControlStateInput, CreateChat, DecideApproval,
+    Decision, DecisionResponse, DeliveryKind, EffectivePolicyDto, GrantDto, GrantTargetDto, Health,
+    MessageDto, Mode, PolicyDto, PolicyInput, ProvidersDto, ReloadResponse, RevokeGrant, RunDto,
     Scope, SendMessage, SendResponse, UsageSummary, UsageTotals,
 };
 use crate::error::{ApiError, ErrorBody};
@@ -449,6 +452,7 @@ pub(crate) async fn send_message(
 
 /// Query of `GET /v1/approvals`.
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ApprovalsQuery {
     /// Only this run's approvals (pending and decided).  Without it: pending
     /// approvals of all runs.
@@ -590,12 +594,16 @@ pub(crate) async fn resume_run(
 
 /// Query of `GET /v1/usage`.
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct UsageQuery {
     /// Only runs created at or after this time.
     pub since_ms: Option<i64>,
 }
 
-fn add(t: &mut UsageTotals, u: &Usage) {
+fn add(t: &mut UsageTotals, u: &Usage, cost: Option<f64>) {
+    if let Some(c) = cost {
+        *t.cost_usd.get_or_insert(0.0) += c;
+    }
     t.prompt_tokens += u.prompt_tokens;
     t.completion_tokens += u.completion_tokens;
     t.cached_tokens += u.cached_tokens.unwrap_or(0);
@@ -628,8 +636,15 @@ pub(crate) async fn usage(
             else {
                 continue;
             };
-            add(&mut total, &u);
-            add(by_bot.entry(run.bot_id.0).or_default(), &u);
+            let cost = step
+                .output
+                .as_ref()
+                .and_then(|o| o.get("model"))
+                .and_then(Value::as_str)
+                .and_then(|m| s.agent().price_for(m))
+                .map(|p| p.cost(u.prompt_tokens, u.completion_tokens, u.cached_tokens));
+            add(&mut total, &u, cost);
+            add(by_bot.entry(run.bot_id.0).or_default(), &u, cost);
         }
     }
     Ok(Json(UsageSummary {
@@ -640,4 +655,288 @@ pub(crate) async fn usage(
             .map(|(bot_id, totals)| BotUsage { bot_id, totals })
             .collect(),
     }))
+}
+
+// --------------------------------------------------------------- control
+
+fn control_state_dto(s: &AppState) -> ControlStateDto {
+    let reg = s.hub().registration();
+    ControlStateDto {
+        mode: reg.map(|(m, _)| m),
+        expires_in_ms: reg.map_or(0, |(_, left)| {
+            u64::try_from(left.as_millis()).unwrap_or(u64::MAX)
+        }),
+        app_connected: s.hub().app_connected(),
+    }
+}
+
+/// The daemon's view of the desktop app's controller registration.
+#[utoipa::path(get, path = "/v1/control/state", tag = "control", security(("bearer" = [])),
+    responses((status = 200, body = ControlStateDto)))]
+pub(crate) async fn get_control_state(State(s): State<AppState>) -> Json<ControlStateDto> {
+    Json(control_state_dto(&s))
+}
+
+/// Register the desktop app as controller and report its mode (heartbeat: send
+/// it on every state change and at least every 5 s; it expires after 15 s).
+/// While the mode is `human_driving` or `paused`, desktop actions of bots are
+/// refused immediately.
+#[utoipa::path(put, path = "/v1/control/state", tag = "control", security(("bearer" = [])),
+    request_body = ControlStateInput,
+    responses((status = 200, body = ControlStateDto), (status = 400, body = ErrorBody)))]
+pub(crate) async fn put_control_state(
+    State(s): State<AppState>,
+    ApiJson(input): ApiJson<ControlStateInput>,
+) -> Json<ControlStateDto> {
+    s.hub().put_state(input.mode);
+    Json(control_state_dto(&s))
+}
+
+/// Answer a `control_requested` event: let the action `proceed` (after the
+/// overlay highlight) or `refuse` it.
+#[utoipa::path(post, path = "/v1/control/{request_id}", tag = "control",
+    security(("bearer" = [])),
+    params(("request_id" = Uuid, Path, description = "request_id of the control_requested event")),
+    request_body = ControlDecisionInput,
+    responses((status = 200, body = ControlDecisionResponse),
+              (status = 404, body = ErrorBody, description = "unknown, answered or timed-out request")))]
+pub(crate) async fn decide_control(
+    State(s): State<AppState>,
+    Path(rid): Path<String>,
+    ApiJson(input): ApiJson<ControlDecisionInput>,
+) -> Result<Json<ControlDecisionResponse>, ApiError> {
+    let request_id = id(&rid)?;
+    if s.hub().decide(request_id, input.decision, input.reason) {
+        Ok(Json(ControlDecisionResponse {
+            request_id,
+            decision: input.decision,
+        }))
+    } else {
+        Err(ApiError::not_found("control request"))
+    }
+}
+
+// ---------------------------------------------------------------- policy
+
+/// File the global policy is persisted in (`<data dir>/policy.json`).
+pub(crate) const POLICY_FILE: &str = "policy.json";
+
+/// The persisted global policy, if one was saved and still parses.
+pub(crate) fn load_policy(data_dir: &std::path::Path) -> Option<Policy> {
+    let text = std::fs::read_to_string(data_dir.join(POLICY_FILE)).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+fn save_policy(data_dir: &std::path::Path, policy: &Policy) -> std::io::Result<()> {
+    let path = data_dir.join(POLICY_FILE);
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(policy)?)?;
+    std::fs::rename(&tmp, &path)
+}
+
+fn named_preset(name: &str) -> Option<Policy> {
+    match name.replace('_', "-").as_str() {
+        "read-only" => Some(Policy::read_only()),
+        "approve-destructive" => Some(Policy::approve_destructive()),
+        "read-and-draft" => Some(Policy::read_and_draft()),
+        "full" => Some(Policy::full()),
+        _ => None,
+    }
+}
+
+fn level_name(l: &Level) -> &'static str {
+    match l {
+        Level::Deny => "deny",
+        Level::Ask => "ask",
+        Level::Allow => "allow",
+        Level::AllowWithLimits(_) => "allow_with_limits",
+    }
+}
+
+fn policy_dto(p: &Policy) -> PolicyDto {
+    let preset = ["read-only", "approve-destructive", "read-and-draft", "full"]
+        .into_iter()
+        .find(|n| named_preset(n).is_some_and(|q| q.categories == p.categories))
+        .map(str::to_owned);
+    PolicyDto {
+        preset,
+        categories: p
+            .categories
+            .iter()
+            .map(|(c, r)| (category_name(*c), level_name(&r.level).to_owned()))
+            .collect(),
+    }
+}
+
+/// The global default permission policy (what bots without their own rule
+/// for a category get).
+#[utoipa::path(get, path = "/v1/policy", tag = "policy", security(("bearer" = [])),
+    responses((status = 200, body = PolicyDto)))]
+pub(crate) async fn get_policy(State(s): State<AppState>) -> Json<PolicyDto> {
+    Json(policy_dto(&s.agent().global_policy()))
+}
+
+/// Replace the global default policy (persisted; effective for the next tool
+/// call of every run).  Start from `preset`, or from the current policy
+/// without it, then apply the `categories` overrides.
+#[utoipa::path(put, path = "/v1/policy", tag = "policy", security(("bearer" = [])),
+    request_body = PolicyInput,
+    responses((status = 200, body = PolicyDto), (status = 400, body = ErrorBody)))]
+pub(crate) async fn put_policy(
+    State(s): State<AppState>,
+    ApiJson(input): ApiJson<PolicyInput>,
+) -> Result<Json<PolicyDto>, ApiError> {
+    let mut policy = match input.preset.as_deref() {
+        Some(name) => named_preset(name)
+            .ok_or_else(|| ApiError::bad_request(format!("unknown preset {name:?}")))?,
+        None => s.agent().global_policy(),
+    };
+    for (name, level) in &input.categories {
+        let cat = match serde_json::from_value::<PermissionCategory>(Value::String(name.clone())) {
+            Ok(c) if c != PermissionCategory::Meta => c,
+            _ => {
+                return Err(ApiError::bad_request(format!(
+                    "unknown permission category {name:?}"
+                )));
+            }
+        };
+        let level = match level.as_str() {
+            "deny" => Level::Deny,
+            "ask" => Level::Ask,
+            "allow" => Level::Allow,
+            other => {
+                return Err(ApiError::bad_request(format!(
+                    "level of {name:?} must be deny, ask or allow, not {other:?}"
+                )));
+            }
+        };
+        policy.categories.insert(cat, Rule::new(level));
+    }
+    save_policy(&s.data_dir(), &policy).map_err(ApiError::internal)?;
+    s.agent().set_global_policy(policy.clone());
+    Ok(Json(policy_dto(&policy)))
+}
+
+// ------------------------------------------------------------- providers
+
+fn kind_name(k: &provider_catalog::ProviderKind) -> String {
+    use provider_catalog::ProviderKind;
+    match k {
+        ProviderKind::OpenAiCompatible => "openai_compatible".to_owned(),
+        ProviderKind::Anthropic => "anthropic".to_owned(),
+        ProviderKind::Gemini => "gemini".to_owned(),
+        ProviderKind::Other(o) => format!("other:{o}"),
+    }
+}
+
+/// How long listing one provider's models may take.
+const MODELS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(4);
+
+async fn models_of(
+    p: Option<std::sync::Arc<dyn provider_catalog::ChatProvider>>,
+) -> (Vec<String>, Option<String>) {
+    let Some(p) = p else {
+        return (Vec::new(), None);
+    };
+    match tokio::time::timeout(MODELS_TIMEOUT, p.list_models()).await {
+        Ok(Ok(m)) => (m, None),
+        Ok(Err(e)) => (Vec::new(), Some(e.to_string())),
+        Err(_) => (Vec::new(), Some("timed out".to_owned())),
+    }
+}
+
+/// Configured providers, catalog entries and the models each configured
+/// provider offers (fetched live, with a short timeout; failures are reported
+/// per provider and never fail the route).
+#[utoipa::path(get, path = "/v1/providers", tag = "providers", security(("bearer" = [])),
+    responses((status = 200, body = ProvidersDto)))]
+pub(crate) async fn list_providers(
+    State(s): State<AppState>,
+) -> Result<Json<ProvidersDto>, ApiError> {
+    let cfg = provider_catalog::ProviderConfig::load(&provider_catalog::config_path(&s.data_dir()))
+        .map_err(|e| ApiError::internal(format!("providers.toml: {e}")))?;
+    let live = s.agent().providers();
+    let active = live.ids();
+    let default_id = cfg.effective_default().map(|d| d.id.clone());
+    let lookups = cfg.providers.iter().map(|p| models_of(live.get(&p.id)));
+    let models = futures::future::join_all(lookups).await;
+    let configured = cfg
+        .providers
+        .iter()
+        .zip(models)
+        .map(|(p, (models, models_error))| ConfiguredProviderDto {
+            id: p.id.clone(),
+            enabled: p.enabled,
+            is_default: default_id.as_deref() == Some(p.id.as_str()),
+            default_model: p.default_model.clone(),
+            has_key: p.key.is_some(),
+            custom: p.custom.is_some(),
+            active: active.contains(&p.id),
+            models,
+            models_error,
+        })
+        .collect();
+    let mut catalog: Vec<CatalogProviderDto> = s
+        .provider_host()
+        .map(|h| {
+            h.catalog
+                .all()
+                .map(|e| CatalogProviderDto {
+                    id: e.id.clone(),
+                    kind: kind_name(&e.kind),
+                    base_url: e.base_url.clone(),
+                    auth: match e.auth {
+                        provider_catalog::Auth::ApiKeyEnv(_) => "api_key_env",
+                        provider_catalog::Auth::None => "none",
+                    }
+                    .to_owned(),
+                    key_env: match &e.auth {
+                        provider_catalog::Auth::ApiKeyEnv(v) => Some(v.clone()),
+                        provider_catalog::Auth::None => None,
+                    },
+                    tools: e.capabilities.tools,
+                    vision: e.capabilities.vision,
+                    configured: cfg.get(&e.id).is_some(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    catalog.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(Json(ProvidersDto {
+        default_provider: Some(live.default_id().to_owned()),
+        active,
+        configured,
+        catalog,
+    }))
+}
+
+/// Rebuild the loop's providers from `providers.toml` and the secret store, so
+/// a provider added with the CLI / app is usable without restarting the
+/// daemon.  Runs already streaming keep their provider.
+#[utoipa::path(post, path = "/v1/providers/reload", tag = "providers",
+    security(("bearer" = [])),
+    responses((status = 200, body = ReloadResponse),
+              (status = 409, body = ErrorBody, description = "the daemon has no provider configuration"),
+              (status = 422, body = ErrorBody, description = "no usable provider; the old ones stay")))]
+pub(crate) async fn reload_providers(
+    State(s): State<AppState>,
+) -> Result<Json<ReloadResponse>, ApiError> {
+    if s.provider_host().is_none() {
+        return Err(ApiError::conflict(
+            "this daemon was started without provider configuration (fake provider)",
+        ));
+    }
+    let st = s.clone();
+    let built =
+        tokio::task::spawn_blocking(move || (st.provider_host().expect("checked above").reload)())
+            .await
+            .map_err(ApiError::internal)?;
+    let providers =
+        built.map_err(|m| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "reload_failed", m))?;
+    let out = ReloadResponse {
+        default_provider: Some(providers.default_id().to_owned()),
+        active: providers.ids(),
+    };
+    s.agent().set_providers(providers);
+    Ok(Json(out))
 }

@@ -13,6 +13,7 @@
 mod agent;
 mod approval;
 mod config;
+mod control;
 mod exec;
 mod history;
 mod memory;
@@ -24,6 +25,7 @@ mod tests;
 
 pub use agent::AgentLoop;
 pub use config::{Guards, LoopConfig, MemoryConfig, ModelPrice};
+pub use control::{ControlGate, ControlRequest};
 pub use permission_engine::Decision as PolicyDecision;
 pub use profile::{BotProfile, ModelsConfig, PermissionsConfig, ProfileError, ToolFilter};
 pub use shared::{

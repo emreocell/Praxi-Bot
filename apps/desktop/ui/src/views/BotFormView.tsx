@@ -17,12 +17,8 @@ import {
   PRESET_CHOICES,
   type PresetChoice
 } from "../lib/botProfile";
-import {
-  CATALOG_PROVIDERS,
-  type ConfiguredProvider,
-  FAKE_PROVIDER_ID,
-  listProviders
-} from "../lib/providers";
+import { FAKE_PROVIDER_ID } from "../lib/providers";
+import { type ProvidersView, providersView } from "../lib/providerView";
 import { useDaemon } from "../state/DaemonContext";
 import styles from "./BotFormView.module.css";
 
@@ -93,33 +89,36 @@ export function BotFormView({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
-  const [configured, setConfigured] = useState<ConfiguredProvider[]>([]);
+  const [providerList, setProviderList] = useState<ProvidersView>(() =>
+    providersView(null)
+  );
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
+    if (!client) {
+      return undefined;
+    }
     let cancelled = false;
-    listProviders()
+    client
+      .providers()
       .then((p) => {
         if (!cancelled) {
-          setConfigured(p);
+          setProviderList(providersView(p));
         }
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [client]);
 
   const providerIds = useMemo(() => {
-    const ids = new Set<string>(configured.map((p) => p.id));
-    for (const id of CATALOG_PROVIDERS) {
-      ids.add(id);
-    }
+    const ids = new Set<string>(providerList.selectable);
     if (conn?.fake_provider) {
       ids.add(FAKE_PROVIDER_ID);
     }
     return [...ids];
-  }, [configured, conn?.fake_provider]);
+  }, [providerList, conn?.fake_provider]);
 
   const patch = (p: Partial<BotDraft>) => setDraft((d) => ({ ...d, ...p }));
 

@@ -83,6 +83,12 @@ pub struct ToolCallCompleted {
     pub call_id: ToolCallId,
     /// `None` on success, an error message on failure.
     pub error: Option<String>,
+    /// Truncated (at most 2 KB), redacted start of the tool's output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_preview: Option<String>,
+    /// Time the tool itself ran, in milliseconds (excludes approval waits).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
 }
 
 // ── Plan / todo ───────────────────────────────────────────────────────────────
@@ -171,6 +177,35 @@ pub struct WorkflowDrift {
     pub reason: String,
 }
 
+// ── Desktop control bridge ────────────────────────────────────────────────────
+
+/// A rectangle in global physical screen pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ControlRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// A desktop action is about to run: the daemon asks the desktop app (if one
+/// is connected) to show the on-screen overlay first.  The app answers with
+/// `POST /v1/control/{request_id}`; without an answer the daemon decides on its
+/// own after a timeout.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ControlRequested {
+    /// Id to answer with.
+    pub request_id: uuid::Uuid,
+    pub run_id: RunId,
+    pub bot_id: BotId,
+    /// Target of the action (global physical screen pixels), when known.
+    pub rect: Option<ControlRect>,
+    /// Short description of the target, e.g. `Save button`.
+    pub label: String,
+    /// `click`, `type`, `key`, `scroll`, `drag`, `set_value`, `launch`, ...
+    pub action: String,
+}
+
 // ── Errors ────────────────────────────────────────────────────────────────────
 
 /// A non-fatal error occurred during the run.
@@ -201,6 +236,7 @@ pub enum Event {
     WorkflowStepStarted(WorkflowStepStarted),
     WorkflowStepCompleted(WorkflowStepCompleted),
     WorkflowDrift(WorkflowDrift),
+    ControlRequested(ControlRequested),
     Error(RunError),
 }
 

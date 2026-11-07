@@ -9,7 +9,7 @@ use agent_router::{ToolSurface, ToolVisibility};
 use builtin_tools::BuiltinConfig;
 use futures::future::BoxFuture;
 use parking_lot::{Mutex, RwLock};
-use permission_engine::PermissionResolver;
+use permission_engine::{PermissionResolver, Policy};
 use protocol::event::{RunError, RunFinished, RunStarted};
 use protocol::{
     BotId, ChatId, Event, InitiatorKind, PermissionCategory, RunId, ToolCallId, UserId,
@@ -21,7 +21,8 @@ use tool_registry::ToolRegistry;
 use uuid::Uuid;
 
 use crate::approval::{LoopGate, grant_detail, grant_target};
-use crate::config::LoopConfig;
+use crate::config::{LoopConfig, ModelPrice};
+use crate::control::{ControlGate, LoopControl};
 use crate::exec::TurnExecutor;
 use crate::history::{status_of, step_output};
 use crate::profile::BotProfile;
@@ -77,7 +78,9 @@ impl AgentLoop {
                     visibility,
                 ),
                 tools,
-                providers,
+                providers: RwLock::new(providers),
+                global_policy: RwLock::new(cfg.global_policy.clone()),
+                control: RwLock::new(None),
                 resolver: PermissionResolver::new(),
                 cfg,
                 profiles: RwLock::new(HashMap::new()),
@@ -113,6 +116,9 @@ impl AgentLoop {
         cfg.gate = Arc::new(LoopGate {
             sh: Arc::downgrade(&self.sh),
         });
+        cfg.control = Some(Arc::new(LoopControl {
+            sh: Arc::downgrade(&self.sh),
+        }));
         let _ = builtin_tools::register_builtin_tools(&self.sh.tools, cfg);
         self
     }
@@ -132,6 +138,42 @@ impl AgentLoop {
             let _ = self.sh.tools.register(tool);
         }
         self
+    }
+
+    /// Install the desktop control gate (the daemon registers its bridge to the
+    /// desktop app here); see [`ControlGate`].
+    pub fn set_control_gate(&self, gate: Arc<dyn ControlGate>) {
+        *self.sh.control.write() = Some(gate);
+    }
+
+    /// The loop's providers (cheap clone).
+    #[must_use]
+    pub fn providers(&self) -> Providers {
+        self.sh.providers.read().clone()
+    }
+
+    /// Replace the providers (after `POST /v1/providers/reload`); runs already
+    /// streaming keep the provider they started with.
+    pub fn set_providers(&self, providers: Providers) {
+        *self.sh.providers.write() = providers;
+    }
+
+    /// The workspace-wide default permission policy.
+    #[must_use]
+    pub fn global_policy(&self) -> Policy {
+        self.sh.global_policy.read().clone()
+    }
+
+    /// Replace the workspace-wide default policy; takes effect for the next
+    /// tool call of every run.
+    pub fn set_global_policy(&self, policy: Policy) {
+        *self.sh.global_policy.write() = policy;
+    }
+
+    /// Configured USD price of `model` (full `provider/model` reference).
+    #[must_use]
+    pub fn price_for(&self, model: &str) -> Option<ModelPrice> {
+        self.sh.cfg.prices.get(model).copied()
     }
 
     /// Register the profile used by `bot_id` (otherwise the bot row's JSON

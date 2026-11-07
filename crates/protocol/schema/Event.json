@@ -231,8 +231,24 @@
           "type": "string",
           "format": "uuid"
         },
+        "duration_ms": {
+          "description": "Time the tool itself ran, in milliseconds (excludes approval waits).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
         "error": {
           "description": "`None` on success, an error message on failure.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "output_preview": {
+          "description": "Truncated (at most 2 KB), redacted start of the tool's output.",
           "type": [
             "string",
             "null"
@@ -464,6 +480,58 @@
       }
     },
     {
+      "description": "A desktop action is about to run: the daemon asks the desktop app (if one is connected) to show the on-screen overlay first.  The app answers with `POST /v1/control/{request_id}`; without an answer the daemon decides on its own after a timeout.",
+      "type": "object",
+      "required": [
+        "action",
+        "bot_id",
+        "label",
+        "request_id",
+        "run_id",
+        "type"
+      ],
+      "properties": {
+        "action": {
+          "description": "`click`, `type`, `key`, `scroll`, `drag`, `set_value`, `launch`, ...",
+          "type": "string"
+        },
+        "bot_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "label": {
+          "description": "Short description of the target, e.g. `Save button`.",
+          "type": "string"
+        },
+        "rect": {
+          "description": "Target of the action (global physical screen pixels), when known.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ControlRect"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "request_id": {
+          "description": "Id to answer with.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "control_requested"
+          ]
+        }
+      }
+    },
+    {
       "description": "A non-fatal error occurred during the run.",
       "type": "object",
       "required": [
@@ -493,6 +561,34 @@
     }
   ],
   "definitions": {
+    "ControlRect": {
+      "description": "A rectangle in global physical screen pixels.",
+      "type": "object",
+      "required": [
+        "height",
+        "width",
+        "x",
+        "y"
+      ],
+      "properties": {
+        "height": {
+          "type": "number",
+          "format": "double"
+        },
+        "width": {
+          "type": "number",
+          "format": "double"
+        },
+        "x": {
+          "type": "number",
+          "format": "double"
+        },
+        "y": {
+          "type": "number",
+          "format": "double"
+        }
+      }
+    },
     "TodoItem": {
       "description": "One entry of the model-maintained todo list.",
       "type": "object",

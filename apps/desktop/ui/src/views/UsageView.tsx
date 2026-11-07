@@ -25,6 +25,13 @@ export function UsageView() {
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const nf = new Intl.NumberFormat(i18n.language);
+  const usd = new Intl.NumberFormat(i18n.language, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 4
+  });
+  const money = (v?: number | null) =>
+    v === null || v === undefined ? "—" : usd.format(v);
 
   const load = useCallback(async () => {
     if (!client) {
@@ -102,6 +109,12 @@ export function UsageView() {
                   {nf.format(totalTokens(usage.total))}
                 </span>
               </Card>
+              <Card padding="md" className={styles.stat}>
+                <span className={styles.statLabel}>{t("usage.cost")}</span>
+                <span className={styles.statValue} data-testid="usage-cost">
+                  {money(usage.total.cost_usd)}
+                </span>
+              </Card>
             </div>
 
             {rows.length === 0 ? (
@@ -127,6 +140,9 @@ export function UsageView() {
                       <th scope="col" className={styles.num}>
                         {t("usage.total")}
                       </th>
+                      <th scope="col" className={styles.num}>
+                        {t("usage.cost")}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -150,6 +166,7 @@ export function UsageView() {
                         </td>
                         <td className={styles.num}>{nf.format(u.cached_tokens)}</td>
                         <td className={styles.num}>{nf.format(totalTokens(u))}</td>
+                        <td className={styles.num}>{money(u.cost_usd)}</td>
                       </tr>
                     ))}
                   </tbody>

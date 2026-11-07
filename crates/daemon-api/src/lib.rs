@@ -13,6 +13,7 @@
 //! browser `EventSource` clients (Host / Origin still apply).
 
 pub mod auth;
+pub mod control;
 pub mod dto;
 pub mod error;
 #[cfg(any(test, feature = "fake-provider"))]
@@ -26,18 +27,20 @@ mod tests;
 
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use agent_core::{AgentLoop, BotProfile};
+use agent_core::{AgentLoop, BotProfile, Providers};
 use axum::Router;
 use axum::routing::{get, post};
 use protocol::{BotId, ChatId, RunId, UserId};
+use provider_catalog::Catalog;
 use storage::{Bot, Chat, Run, Storage, User, now_ms};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
 pub use auth::{TOKEN_FILE_NAME, TokenInfo, load_or_create_token, read_token, token_path};
+pub use control::{ControlConfig, ControlHub};
 pub use error::ApiError;
 pub use openapi::openapi_json;
 
@@ -61,6 +64,8 @@ pub struct DaemonConfig {
     /// How long [`serve`] lets running tool steps finish on shutdown before
     /// interrupting them (see [`agent_core::AgentLoop::shutdown`]).
     pub shutdown_grace: Duration,
+    /// Timing of the desktop control bridge (see [`control`]).
+    pub control: ControlConfig,
 }
 
 /// Default [`DaemonConfig::shutdown_grace`].
@@ -77,8 +82,19 @@ impl DaemonConfig {
                 .map(ToString::to_string)
                 .collect(),
             shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
+            control: ControlConfig::default(),
         }
     }
+}
+
+/// What `/v1/providers` needs from the embedder: the catalog, and a way to
+/// rebuild the providers from the configuration (which needs the secret
+/// store, so only the embedder can do it).
+pub struct ProviderHost {
+    /// Built-in catalog entries.
+    pub catalog: Catalog,
+    /// Rebuild the loop's providers from `providers.toml` and the secret store.
+    pub reload: Box<dyn Fn() -> Result<Providers, String> + Send + Sync>,
 }
 
 struct Inner {
@@ -88,6 +104,8 @@ struct Inner {
     cfg: DaemonConfig,
     started: Instant,
     shutdown: CancellationToken,
+    hub: Arc<ControlHub>,
+    provider_host: OnceLock<ProviderHost>,
 }
 
 /// Shared handler state (cheap to clone).
@@ -116,6 +134,11 @@ impl AppState {
             storage.insert_user(&u)?;
             u.id
         };
+        let hub = Arc::new(ControlHub::new(cfg.control));
+        agent.set_control_gate(hub.clone());
+        if let Some(p) = routes::load_policy(storage.data_dir()) {
+            agent.set_global_policy(p);
+        }
         Ok(Self(Arc::new(Inner {
             agent,
             storage,
@@ -123,7 +146,22 @@ impl AppState {
             cfg,
             started: Instant::now(),
             shutdown: CancellationToken::new(),
+            hub,
+            provider_host: OnceLock::new(),
         })))
+    }
+
+    /// Let `/v1/providers` list the catalog and reload the providers (call
+    /// once, right after [`AppState::new`]; a second call is ignored).
+    pub fn set_provider_host(&self, host: ProviderHost) {
+        let _ = self.0.provider_host.set(host);
+    }
+
+    pub(crate) fn provider_host(&self) -> Option<&ProviderHost> {
+        self.0.provider_host.get()
+    }
+    pub(crate) fn hub(&self) -> &Arc<ControlHub> {
+        &self.0.hub
     }
 
     pub(crate) fn agent(&self) -> &AgentLoop {
@@ -226,6 +264,14 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/runs/{id}/cancel", post(r::cancel_run))
         .route("/v1/runs/{id}/resume", post(r::resume_run))
         .route("/v1/usage", get(r::usage))
+        .route(
+            "/v1/control/state",
+            get(r::get_control_state).put(r::put_control_state),
+        )
+        .route("/v1/control/{request_id}", post(r::decide_control))
+        .route("/v1/policy", get(r::get_policy).put(r::put_policy))
+        .route("/v1/providers", get(r::list_providers))
+        .route("/v1/providers/reload", post(r::reload_providers))
         .route("/v1/events", get(sse::events))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

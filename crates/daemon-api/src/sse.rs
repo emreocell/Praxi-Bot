@@ -95,6 +95,8 @@ struct Feed {
     storage: Arc<Storage>,
     data_dir: PathBuf,
     cancel: CancellationToken,
+    /// Marks a global stream (the desktop app's) as open for the control bridge.
+    _app: Option<crate::control::SubscriberGuard>,
 }
 
 impl Feed {
@@ -323,6 +325,7 @@ pub(crate) async fn events(
         storage: state.storage_arc(),
         data_dir: state.data_dir(),
         cancel: state.shutdown_token(),
+        _app: scoped_run.is_none().then(|| state.hub().subscribe()),
     };
     match cursor {
         Cursor::Run(run, last) => {

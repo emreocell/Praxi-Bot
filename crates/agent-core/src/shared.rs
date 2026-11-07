@@ -167,6 +167,26 @@ impl Providers {
         self
     }
 
+    /// Id of the default provider (used for models without a `provider/` prefix).
+    #[must_use]
+    pub fn default_id(&self) -> &str {
+        self.default.id()
+    }
+
+    /// Ids of all providers, sorted.
+    #[must_use]
+    pub fn ids(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.by_id.keys().cloned().collect();
+        v.sort();
+        v
+    }
+
+    /// A provider by id.
+    #[must_use]
+    pub fn get(&self, id: &str) -> Option<Arc<dyn ChatProvider>> {
+        self.by_id.get(id).cloned()
+    }
+
     pub(crate) fn pick(&self, model: &ModelRef) -> Arc<dyn ChatProvider> {
         model
             .provider()
@@ -226,7 +246,11 @@ pub(crate) struct RunCtx {
 pub(crate) struct Shared {
     pub storage: Arc<Storage>,
     pub tools: ToolRegistry,
-    pub providers: Providers,
+    pub providers: RwLock<Providers>,
+    /// Workspace-wide policy; replaceable at runtime (`PUT /v1/policy`).
+    pub global_policy: RwLock<Policy>,
+    /// Desktop control bridge (see `control.rs`); `None` = no gate.
+    pub control: RwLock<Option<Arc<dyn crate::control::ControlGate>>>,
     pub resolver: PermissionResolver,
     pub cfg: LoopConfig,
     pub profiles: RwLock<HashMap<BotId, Arc<BotProfile>>>,

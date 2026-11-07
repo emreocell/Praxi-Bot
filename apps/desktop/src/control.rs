@@ -458,6 +458,20 @@ impl ControlStateMachine {
         true
     }
 
+    /// Like [`Self::begin_action_with_detail`] for an action without an on-screen
+    /// target (a key press, an app launch): only the step text changes.
+    pub fn begin_action_untargeted(&mut self, label: impl Into<String>) -> bool {
+        if self.mode != ControlMode::BotDriving {
+            if self.mode == ControlMode::HumanDriving {
+                self.refused_actions_count = self.refused_actions_count.saturating_add(1);
+            }
+            return false;
+        }
+        self.current_step = Some(label.into());
+        self.active_target = None;
+        true
+    }
+
     /// Confirms after the ~300 ms pre-action highlight delay that the bot is still allowed to act
     /// and that the run generation has not changed.
     pub fn confirm_action_after_highlight(&mut self, expected_generation: u64) -> bool {
@@ -754,6 +768,34 @@ impl ControlHandle {
             sink.on_state_changed(&post_snapshot);
         }
 
+        confirmed
+    }
+
+    /// `begin_action` for an action with no target to highlight: shows the step
+    /// in the widget, keeps the ~300 ms lead-in and re-checks the mode after it.
+    pub async fn begin_action_untargeted(&self, label: impl Into<String>) -> bool {
+        let (ok, generation, snapshot) = {
+            let mut guard = self.state.lock();
+            let generation = guard.run_generation();
+            let ok = guard.begin_action_untargeted(label);
+            (ok, generation, guard.snapshot())
+        };
+        let sink = self.sink.read().clone();
+        sink.on_state_changed(&snapshot);
+        if !ok {
+            return false;
+        }
+        if !self.pre_action_delay.is_zero() {
+            tokio::time::sleep(self.pre_action_delay).await;
+        }
+        let (confirmed, post) = {
+            let mut guard = self.state.lock();
+            let ok = guard.confirm_action_after_highlight(generation);
+            (ok, guard.snapshot())
+        };
+        if !confirmed {
+            sink.on_state_changed(&post);
+        }
         confirmed
     }
 
@@ -1287,6 +1329,23 @@ mod tests {
         // Stop all -> back to Idle
         handle.stop_all();
         assert_eq!(handle.snapshot().mode, ControlMode::Idle);
+    }
+
+    #[tokio::test]
+    async fn untargeted_actions_follow_the_same_rules_without_a_highlight() {
+        let handle = ControlHandle::new(Duration::from_millis(5));
+        assert!(
+            !handle.begin_action_untargeted("Press ctrl+s").await,
+            "idle refuses"
+        );
+        handle.start_run(sample_bot(), "Active step");
+        assert!(handle.begin_action_untargeted("Press ctrl+s").await);
+        let snap = handle.snapshot();
+        assert_eq!(snap.current_step.as_deref(), Some("Press ctrl+s"));
+        assert!(snap.active_target.is_none());
+        handle.take_the_wheel().expect("take wheel");
+        assert!(!handle.begin_action_untargeted("Press ctrl+s").await);
+        assert_eq!(handle.snapshot().refused_actions_count, 1);
     }
 
     #[test]

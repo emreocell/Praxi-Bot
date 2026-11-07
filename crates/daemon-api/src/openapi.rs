@@ -60,6 +60,13 @@ impl Modify for Security {
         routes::cancel_run,
         routes::resume_run,
         routes::usage,
+        routes::get_control_state,
+        routes::put_control_state,
+        routes::decide_control,
+        routes::get_policy,
+        routes::put_policy,
+        routes::list_providers,
+        routes::reload_providers,
         events_doc,
     ),
     components(schemas(
@@ -69,12 +76,16 @@ impl Modify for Security {
         dto::DecisionResponse, dto::RunDto, dto::UsageTotals, dto::BotUsage,
         dto::UsageSummary, dto::AnswerQuestion, dto::AnswerResponse, dto::GrantDto,
         dto::GrantTargetDto, dto::RevokeGrant, dto::EffectivePolicyDto,
-        dto::CategoryDecisionDto, error::ErrorBody, error::ErrorDetail,
+        dto::CategoryDecisionDto, dto::ControlMode, dto::ControlStateInput,
+        dto::ControlStateDto, dto::ControlVerdict, dto::ControlDecisionInput,
+        dto::ControlDecisionResponse, dto::PolicyDto, dto::PolicyInput, dto::ProvidersDto,
+        dto::ConfiguredProviderDto, dto::CatalogProviderDto, dto::ReloadResponse, error::ErrorBody, error::ErrorDetail,
     )),
     modifiers(&Security),
     tags(
         (name = "meta"), (name = "bots"), (name = "chats"), (name = "approvals"),
-        (name = "runs"), (name = "usage"), (name = "events")
+        (name = "runs"), (name = "usage"), (name = "events"), (name = "control"),
+        (name = "policy"), (name = "providers")
     )
 )]
 pub struct ApiDoc;

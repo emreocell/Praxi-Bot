@@ -371,6 +371,7 @@ mod tests {
             &storage,
             Providers::single(Arc::new(FakeProvider)),
             dir.path(),
+            None,
         );
         let state = AppState::new(agent, storage, DaemonConfig::new(TOKEN)).unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
