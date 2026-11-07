@@ -388,6 +388,9 @@ impl AgentLoop {
         directive: Option<ScheduleWork>,
         handoff: Option<RunId>,
     ) -> Result<RunId> {
+        if self.sh.providers.read().setup_required() {
+            return Err(LoopError::SetupRequired);
+        }
         if self.sh.shutting_down.load(Ordering::SeqCst) {
             return Err(LoopError::ShuttingDown);
         }
@@ -647,6 +650,9 @@ impl AgentLoop {
     /// # Errors
     /// Fails if the run does not exist, is not `Paused`, or its chat is busy.
     pub fn resume(&self, run_id: RunId) -> Result<()> {
+        if self.sh.providers.read().setup_required() {
+            return Err(LoopError::SetupRequired);
+        }
         if self.sh.shutting_down.load(Ordering::SeqCst) {
             return Err(LoopError::ShuttingDown);
         }

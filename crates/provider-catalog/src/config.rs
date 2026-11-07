@@ -4,13 +4,14 @@
 //! provider was added. ADR-0016: the first provider added is the global
 //! default unless another one is chosen explicitly.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use secret_store::{SecretRef, SecretStore, resolve};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    entry::{Auth, ProviderEntry},
+    entry::{Auth, CapabilityOverrides, ModelInfo, ProviderEntry},
     error::ProviderError,
     factory::build_chat_provider,
     openai_compat::OpenAiCompatConfig,
@@ -52,6 +53,12 @@ pub struct ProviderSettings {
     /// Full entry for custom (non-catalog) providers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom: Option<ProviderEntry>,
+    /// Per-model capability overrides, keyed by model id (no provider prefix).
+    /// Empty by default and omitted from `providers.toml` when empty. Applied
+    /// on top of the catalog [`ModelInfo`] overrides when the provider is
+    /// built; the user's values win. No provenance or date is stored.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub model_caps: BTreeMap<String, CapabilityOverrides>,
 }
 
 fn default_true() -> bool {
@@ -69,7 +76,35 @@ impl ProviderSettings {
             default_model: None,
             added_at_ms,
             custom: None,
+            model_caps: BTreeMap::new(),
         }
+    }
+
+    /// `entry` with [`Self::model_caps`] written onto each model's capability
+    /// overrides. The user's values win field by field over the catalog.
+    /// A model named only here is added so the override still applies. No
+    /// provenance or date is recorded.
+    #[must_use]
+    pub fn apply_model_caps(&self, entry: &ProviderEntry) -> ProviderEntry {
+        let mut entry = entry.clone();
+        if self.model_caps.is_empty() {
+            return entry;
+        }
+        for (id, user) in &self.model_caps {
+            if let Some(info) = entry.models.iter_mut().find(|m| m.id == *id) {
+                info.capabilities = Some(match info.capabilities.take() {
+                    Some(catalog) => user.merge_over(&catalog),
+                    None => user.clone(),
+                });
+            } else {
+                entry.models.push(ModelInfo {
+                    id: id.clone(),
+                    capabilities: Some(user.clone()),
+                    ..ModelInfo::default()
+                });
+            }
+        }
+        entry
     }
 
     /// `provider/model` reference when a default model is set.
@@ -84,7 +119,7 @@ impl ProviderSettings {
     /// from `store` here and goes straight into the HTTP client.
     ///
     /// Without a stored key the catalog entry's environment variable (if any)
-    /// is used.
+    /// is used. [`Self::model_caps`] is applied on top of `entry` first.
     ///
     /// # Errors
     /// Missing secret / env var, or HTTP client construction failure.
@@ -104,7 +139,8 @@ impl ProviderSettings {
             (None, Auth::None) => None,
             (None, Auth::ApiKeyEnv(var)) => Some(key_from_env(var)?),
         };
-        build_chat_provider(entry, config, key)
+        let entry = self.apply_model_caps(entry);
+        build_chat_provider(&entry, config, key)
     }
 }
 
@@ -375,6 +411,127 @@ mod tests {
         let back = ProviderConfig::load(&path).unwrap();
         assert_eq!(back, c);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn model_caps_round_trip_and_legacy_settings_still_load() {
+        let dir = std::env::temp_dir().join(format!("pc-caps-{}", std::process::id()));
+        let path = config_path(&dir);
+        let mut c = ProviderConfig::default();
+        let mut s = ProviderSettings::new("ollama", 10);
+        s.model_caps.insert(
+            "llama3.2".into(),
+            CapabilityOverrides {
+                tools: Some(false),
+                vision: Some(true),
+                ..CapabilityOverrides::default()
+            },
+        );
+        c.upsert(s);
+        c.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("model_caps"));
+        assert!(text.contains("llama3.2"));
+        assert!(!text.contains("provenance"));
+        assert!(!text.contains("as_of"));
+        let back = ProviderConfig::load(&path).unwrap();
+        assert_eq!(back, c);
+        assert_eq!(
+            back.get("ollama").unwrap().model_caps["llama3.2"].tools,
+            Some(false)
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        let legacy = r#"
+default_provider = "openrouter"
+
+[[provider]]
+id = "openrouter"
+enabled = true
+added_at_ms = 10
+default_model = "openai/gpt-4o"
+key = "provider.openrouter.api_key"
+
+[[provider]]
+id = "ollama"
+enabled = false
+added_at_ms = 20
+"#;
+        let cfg: ProviderConfig = toml::from_str(legacy).unwrap();
+        assert_eq!(cfg.default_provider.as_deref(), Some("openrouter"));
+        assert!(cfg.get("openrouter").unwrap().model_caps.is_empty());
+        assert_eq!(
+            cfg.get("openrouter").unwrap().default_model.as_deref(),
+            Some("openai/gpt-4o")
+        );
+        assert!(!cfg.get("ollama").unwrap().enabled);
+    }
+
+    #[tokio::test]
+    async fn build_provider_user_model_caps_beat_the_catalog() {
+        use std::time::Duration;
+
+        use crate::entry::{CapabilityOverrides, ModelInfo};
+        use crate::provider::{ChatRequest, Message, MessageRole, ModelRef};
+
+        let store = MemoryStore::new();
+        let mut entry = custom_entry();
+        entry.base_url = "http://127.0.0.1:1/v1".into();
+        entry.models.push(ModelInfo {
+            id: "m".into(),
+            capabilities: Some(CapabilityOverrides {
+                tools: Some(false),
+                ..CapabilityOverrides::default()
+            }),
+            ..ModelInfo::default()
+        });
+        let cfg = OpenAiCompatConfig {
+            max_retries: 0,
+            connect_timeout: Duration::from_millis(200),
+            timeout: Duration::from_millis(200),
+            ..OpenAiCompatConfig::default()
+        };
+        let mut req = ChatRequest::new(
+            ModelRef("mine/m".into()),
+            vec![Message::text(MessageRole::User, "hi")],
+        );
+        req.tools = vec![serde_json::json!({
+            "type": "function",
+            "function": {"name": "t", "parameters": {"type": "object"}}
+        })];
+
+        let s = ProviderSettings::new("mine", 1);
+        let err = s
+            .build_provider(&entry, &store, cfg.clone())
+            .unwrap()
+            .stream(req.clone())
+            .await
+            .err()
+            .unwrap();
+        assert!(matches!(
+            err,
+            ProviderError::Unsupported { ref capability } if capability == "tools"
+        ));
+
+        let mut user = ProviderSettings::new("mine", 1);
+        user.model_caps.insert(
+            "m".into(),
+            CapabilityOverrides {
+                tools: Some(true),
+                ..CapabilityOverrides::default()
+            },
+        );
+        let err = user
+            .build_provider(&entry, &store, cfg)
+            .unwrap()
+            .stream(req)
+            .await
+            .err()
+            .unwrap();
+        assert!(
+            !matches!(err, ProviderError::Unsupported { .. }),
+            "user tools=true must beat the catalog override, got {err:?}"
+        );
     }
 
     #[test]

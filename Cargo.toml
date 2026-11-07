@@ -13,6 +13,7 @@ members = [
     "crates/browser-cdp",
     "crates/vision",
     "crates/provider-catalog",
+    "crates/cli-provider",
     "crates/mcp-bridge",
     "crates/workflow-replay",
     "crates/memory-store",
@@ -80,6 +81,7 @@ percent-encoding = "2"
 url = "2"
 serde_yaml_ng = "0.10"
 protocol = { path = "crates/protocol", version = "0.1.0" }
+cli-provider = { path = "crates/cli-provider", version = "0.1.0" }
 storage = { path = "crates/storage", version = "0.1.0" }
 secret-store = { path = "crates/secret-store", version = "0.1.0" }
 wiremock = "0.6"

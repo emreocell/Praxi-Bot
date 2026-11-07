@@ -327,7 +327,7 @@ pub(crate) fn dump_failed_request(
 ) {
     let Some(dir) = &config.debug_dir else { return };
     let status = match err {
-        ProviderError::InvalidRequest(_) => 400,
+        ProviderError::InvalidRequest(_) | ProviderError::Unsupported { .. } => 400,
         ProviderError::Api { status, .. } if (400..500).contains(status) => *status,
         _ => return,
     };
