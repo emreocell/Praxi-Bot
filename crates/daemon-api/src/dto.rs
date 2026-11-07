@@ -511,6 +511,62 @@ pub struct ReloadResponse {
     pub active: Vec<String>,
 }
 
+/// Authentication status reported by a CLI provider (`GET /v1/providers/detected`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CliAuthState {
+    SignedIn,
+    SignedOut,
+    Unknown,
+}
+
+impl From<cli_provider::AuthState> for CliAuthState {
+    fn from(s: cli_provider::AuthState) -> Self {
+        match s {
+            cli_provider::AuthState::SignedIn => Self::SignedIn,
+            cli_provider::AuthState::SignedOut => Self::SignedOut,
+            cli_provider::AuthState::Unknown => Self::Unknown,
+        }
+    }
+}
+
+/// A detected coding CLI engine (`GET /v1/providers/detected`).
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DetectedProviderDto {
+    /// Engine id (`claude`, `codex`, `cursor`, `opencode`, `gemini`, `chatgpt-plan`).
+    pub id: String,
+    /// Display name.
+    pub display_name: String,
+    /// Whether the CLI binary was found on PATH and `--version` succeeded.
+    pub installed: bool,
+    /// CLI version (first line, trimmed, max 80 chars, or null).
+    pub version: Option<String>,
+    /// Authentication status (`signed_in`, `signed_out`, `unknown`).
+    pub auth: CliAuthState,
+    /// Account label (email or org name, max 160 chars, or null).
+    pub account_label: Option<String>,
+    /// Whether this engine can currently run turns (always false in this task).
+    pub runnable: bool,
+    /// Stable detail code (`not_on_path`, `timeout`, `auth_unparsed`, etc., or null).
+    pub detail: Option<String>,
+}
+
+impl From<cli_provider::DetectedCli> for DetectedProviderDto {
+    fn from(c: cli_provider::DetectedCli) -> Self {
+        Self {
+            id: c.id,
+            display_name: c.display_name,
+            installed: c.installed,
+            version: c.version,
+            auth: c.auth.into(),
+            account_label: c.account_label,
+            runnable: c.runnable,
+            detail: c.detail,
+        }
+    }
+}
+
 /// A schedule (`/v1/schedules`).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ScheduleDto {

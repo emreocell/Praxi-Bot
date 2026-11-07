@@ -18,6 +18,7 @@ workspace = true
 agent-core = { path = "../agent-core", version = "0.1.0" }
 async-trait.workspace = true
 desktop-api = { path = "../desktop-api", version = "0.1.0" }
+cli-provider.workspace = true
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
 futures.workspace = true
 getrandom = "0.3"

@@ -26,10 +26,11 @@ use crate::dto::{
     AcceptedResponse, AnswerQuestion, AnswerResponse, ApprovalDto, BotDto, BotInput, BotUsage,
     CatalogProviderDto, CategoryDecisionDto, ChatDto, ConfiguredProviderDto, ControlDecisionInput,
     ControlDecisionResponse, ControlStateDto, ControlStateInput, CreateChat, DecideApproval,
-    Decision, DecisionResponse, DeliveryKind, EffectivePolicyDto, GrantDto, GrantTargetDto, Health,
-    MessageDto, Mode, ParseSchedule, ParsedSchedule, PolicyDto, PolicyInput, ProvidersDto,
-    ReloadResponse, RememberResponse, RevokeGrant, RunDto, ScheduleChangeKind, ScheduleDto,
-    ScheduleInput, Scope, SendMessage, SendResponse, UsageSummary, UsageTotals,
+    Decision, DecisionResponse, DeliveryKind, DetectedProviderDto, EffectivePolicyDto, GrantDto,
+    GrantTargetDto, Health, MessageDto, Mode, ParseSchedule, ParsedSchedule, PolicyDto,
+    PolicyInput, ProvidersDto, ReloadResponse, RememberResponse, RevokeGrant, RunDto,
+    ScheduleChangeKind, ScheduleDto, ScheduleInput, Scope, SendMessage, SendResponse, UsageSummary,
+    UsageTotals,
 };
 use crate::error::{ApiError, ErrorBody};
 
@@ -962,6 +963,30 @@ pub(crate) async fn list_providers(
         configured,
         catalog,
     }))
+}
+
+/// Query parameters for `GET /v1/providers/detected`.
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+pub(crate) struct DetectProvidersQuery {
+    /// When set to 1, bypasses the in-process 60-second cache.
+    #[param(inline)]
+    pub refresh: Option<String>,
+}
+
+/// Detect installed, signed-in coding CLIs.
+#[utoipa::path(get, path = "/v1/providers/detected", tag = "providers", security(("bearer" = [])),
+    params(DetectProvidersQuery),
+    responses((status = 200, body = Vec<DetectedProviderDto>)))]
+pub(crate) async fn detect_providers(
+    State(s): State<AppState>,
+    Query(query): Query<DetectProvidersQuery>,
+) -> Result<Json<Vec<DetectedProviderDto>>, ApiError> {
+    let refresh = query
+        .refresh
+        .as_deref()
+        .is_some_and(|r| r == "1" || r.eq_ignore_ascii_case("true"));
+    let detected = s.detector().detect(refresh).await;
+    Ok(Json(detected.into_iter().map(Into::into).collect()))
 }
 
 /// Rebuild the loop's providers from `providers.toml` and the secret store, so

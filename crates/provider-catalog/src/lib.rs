@@ -21,7 +21,10 @@ pub use config::{
     ConfigError, ConnectionReport, ProviderConfig, ProviderSettings, api_key_secret_name,
     config_path, test_connection,
 };
-pub use entry::{Auth, CompatFlags, ModelCapabilities, ModelInfo, ProviderEntry, ProviderKind};
+pub use entry::{
+    Auth, CapabilityOverrides, CompatFlags, ModelCapabilities, ModelInfo, ProviderEntry,
+    ProviderKind,
+};
 pub use error::ProviderError;
 pub use factory::build_chat_provider;
 pub use gemini::GeminiProvider;
