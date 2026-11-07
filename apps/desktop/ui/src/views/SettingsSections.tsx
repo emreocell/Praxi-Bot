@@ -1,18 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Avatar, Button, Card } from "ui";
-import type { Bot, GrantTarget } from "../api/types";
+import {
+  type Bot,
+  type GrantTarget,
+  PERMISSION_CATEGORIES,
+  type PolicyDto
+} from "../api/types";
 import { isTauriRuntime } from "../overlay/events";
 import formStyles from "../components/Form.module.css";
 import { botView } from "../lib/botProfile";
-import {
-  addProvider,
-  CATALOG_PROVIDERS,
-  type ConfiguredProvider,
-  listProviders,
-  setDefaultProvider,
-  testProvider
-} from "../lib/providers";
+import { addProvider, setDefaultProvider, testProvider } from "../lib/providers";
+import { type ProviderRow, providersView } from "../lib/providerView";
 import { useDaemon } from "../state/DaemonContext";
 import styles from "./SettingsSections.module.css";
 
@@ -32,11 +31,12 @@ function outcomeOf(r: { code: number; stdout: string; stderr: string }): Outcome
 
 export function ProvidersSection() {
   const { t } = useTranslation();
-  const { conn, restartDaemon } = useDaemon();
+  const { client, conn, restartDaemon } = useDaemon();
   const native = isTauriRuntime();
-  const [list, setList] = useState<ConfiguredProvider[]>([]);
+  const [list, setList] = useState<ProviderRow[]>([]);
+  const [catalog, setCatalog] = useState<string[]>(() => providersView(null).catalog);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [choice, setChoice] = useState<string>(CATALOG_PROVIDERS[0]);
+  const [choice, setChoice] = useState<string>(() => providersView(null).catalog[0]);
   const [customId, setCustomId] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -46,16 +46,19 @@ export function ProvidersSection() {
   const [needsRestart, setNeedsRestart] = useState(false);
 
   const reload = useCallback(async () => {
-    if (!native) {
+    if (!client) {
       return;
     }
     try {
-      setList(await listProviders());
+      const view = providersView(await client.providers());
+      setList(view.configured);
+      setCatalog(view.catalog);
+      setChoice((c) => (c === CUSTOM || view.catalog.includes(c) ? c : view.catalog[0]));
       setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     }
-  }, [native]);
+  }, [client]);
 
   useEffect(() => {
     void reload();
@@ -68,7 +71,16 @@ export function ProvidersSection() {
       const o = await fn();
       setOutcome(o);
       if (o.ok && changes) {
-        setNeedsRestart(true);
+        // The daemon rebuilds its providers in place; only when it cannot
+        // (an older daemon, the fake provider) is a restart needed.
+        let reloaded = false;
+        try {
+          await client?.reloadProviders();
+          reloaded = true;
+        } catch {
+          reloaded = false;
+        }
+        setNeedsRestart(!reloaded);
       }
     } catch (e) {
       setOutcome({ ok: false, text: e instanceof Error ? e.message : String(e) });
@@ -111,12 +123,20 @@ export function ProvidersSection() {
                         {t("settings.providers.disabled")}
                       </span>
                     ) : null}
+                    {p.enabled && !p.active ? (
+                      <span className={styles.tag}>
+                        {t("settings.providers.notLoaded")}
+                      </span>
+                    ) : null}
                   </span>
                   <span className={styles.rowMeta}>
                     {p.model || t("settings.providers.noModel")} ·{" "}
-                    {p.keyName
+                    {p.hasKey
                       ? t("settings.providers.keyStored")
                       : t("settings.providers.noKey")}
+                    {p.models.length > 0
+                      ? ` · ${t("settings.providers.modelCount", { count: p.models.length })}`
+                      : ""}
                   </span>
                   <span className={styles.rowActions}>
                     <Button
@@ -163,7 +183,7 @@ export function ProvidersSection() {
                   value={choice}
                   onChange={(e) => setChoice(e.target.value)}
                 >
-                  {CATALOG_PROVIDERS.map((p) => (
+                  {catalog.map((p) => (
                     <option key={p} value={p}>
                       {p}
                     </option>
@@ -389,6 +409,115 @@ function BotPermissions({ bot }: { bot: Bot }) {
   );
 }
 
+const PRESETS = [
+  "read-only",
+  "approve-destructive",
+  "read-and-draft",
+  "full"
+] as const;
+const LEVELS = ["deny", "ask", "allow"] as const;
+
+/** The workspace default policy (`GET` / `PUT /v1/policy`), editable. */
+function WorkspacePolicy() {
+  const { t } = useTranslation();
+  const { client } = useDaemon();
+  const [policy, setPolicy] = useState<PolicyDto | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<Outcome | null>(null);
+
+  useEffect(() => {
+    if (!client) {
+      return;
+    }
+    client
+      .getPolicy()
+      .then(setPolicy)
+      .catch((e: unknown) =>
+        setMessage({ ok: false, text: e instanceof Error ? e.message : String(e) })
+      );
+  }, [client]);
+
+  const apply = async (input: { preset?: string; categories?: Record<string, string> }) => {
+    if (!client) {
+      return;
+    }
+    setBusy(true);
+    setMessage(null);
+    try {
+      setPolicy(await client.putPolicy(input));
+      setMessage({ ok: true, text: t("settings.permissions.workspace.saved") });
+    } catch (e) {
+      setMessage({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!policy) {
+    return message ? <p className={formStyles.error}>{message.text}</p> : null;
+  }
+  return (
+    <div className={styles.botPerm}>
+      <h3 className={styles.subHeading}>
+        {t("settings.permissions.workspace.title")}
+      </h3>
+      <p className={formStyles.hint}>
+        {t("settings.permissions.workspace.description")}
+      </p>
+      <div className={formStyles.field}>
+        <label className={formStyles.label} htmlFor="ws-preset">
+          {t("settings.permissions.workspace.preset")}
+        </label>
+        <select
+          id="ws-preset"
+          className={formStyles.select}
+          value={policy.preset ?? "custom"}
+          disabled={busy}
+          onChange={(e) => void apply({ preset: e.target.value })}
+        >
+          {PRESETS.map((p) => (
+            <option key={p} value={p}>
+              {t(`botForm.preset.${p}.name`)}
+            </option>
+          ))}
+          {policy.preset === null ? (
+            <option value="custom" disabled>
+              {t("botForm.preset.custom.name")}
+            </option>
+          ) : null}
+        </select>
+      </div>
+      <div className={formStyles.row}>
+        {PERMISSION_CATEGORIES.map((cat) => (
+          <div key={cat} className={formStyles.field}>
+            <label className={formStyles.label} htmlFor={`ws-${cat}`}>
+              {t(`botForm.category.${cat}`)}
+            </label>
+            <select
+              id={`ws-${cat}`}
+              className={formStyles.select}
+              value={policy.categories[cat] ?? "ask"}
+              disabled={busy}
+              onChange={(e) => void apply({ categories: { [cat]: e.target.value } })}
+            >
+              {LEVELS.map((l) => (
+                <option key={l} value={l}>
+                  {t(`botForm.level.${l}`)}
+                </option>
+              ))}
+            </select>
+          </div>
+        ))}
+      </div>
+      {message ? (
+        <p className={message.ok ? formStyles.hint : formStyles.error} role="status">
+          {message.text}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function PermissionsSection() {
   const { t } = useTranslation();
   const { bots } = useDaemon();
@@ -398,7 +527,7 @@ export function PermissionsSection() {
         <h2 className={styles.heading}>{t("settings.permissions.title")}</h2>
         <p className={formStyles.hint}>{t("settings.permissions.description")}</p>
       </div>
-      <p className={formStyles.hint}>{t("settings.permissions.workspaceDefault")}</p>
+      <WorkspacePolicy />
       {bots.length === 0 ? (
         <p className={formStyles.hint}>{t("settings.permissions.noBots")}</p>
       ) : (

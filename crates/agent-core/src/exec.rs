@@ -404,7 +404,7 @@ impl TurnExecutor {
         specs: &[ToolSpec],
     ) -> Result<ModelOut, ProviderError> {
         let model = req.model.clone();
-        let provider = self.sh.providers.pick(&model);
+        let provider = self.sh.providers.read().pick(&model);
         let mut stream = provider.stream(req).await?;
         let mut out = ModelOut {
             model: model.0,
@@ -561,7 +561,7 @@ impl TurnExecutor {
         let ctx_ref: &RunCtx = &ctx;
         let outcomes = futures::future::join_all(slots.into_iter().map(|slot| async move {
             match slot {
-                Slot::Done { text, is_error } => (text, is_error),
+                Slot::Done { text, is_error } => (text, is_error, None),
                 Slot::Run {
                     tool,
                     input,
@@ -574,8 +574,12 @@ impl TurnExecutor {
 
         let g = &self.sh.cfg.guards;
         let mut results = Vec::with_capacity(calls.len());
-        for ((call, call_uuid), (text, is_error)) in calls.iter().zip(uuids).zip(outcomes) {
-            let (mut text, spill_path) = self.spill(run, call_uuid, self.sh.redact(text));
+        for ((call, call_uuid), (text, is_error, duration_ms)) in
+            calls.iter().zip(uuids).zip(outcomes)
+        {
+            let text = self.sh.redact(text);
+            let output_preview = preview(&text);
+            let (mut text, spill_path) = self.spill(run, call_uuid, text);
             if call.repeat >= g.repeat_warn {
                 let _ = write!(
                     text,
@@ -590,6 +594,8 @@ impl TurnExecutor {
                     run_id: run.id,
                     call_id: call_uuid,
                     error: is_error.then(|| truncate_utf8(&text, 200).to_owned()),
+                    output_preview: Some(output_preview),
+                    duration_ms,
                 }),
             );
             results.push(ResultRec {
@@ -612,13 +618,18 @@ impl TurnExecutor {
         tool: &Arc<dyn Tool>,
         input: Value,
         meta: bool,
-    ) -> (String, bool) {
+    ) -> (String, bool, Option<u64>) {
         let g = &self.sh.cfg.guards;
         let tctx = ToolContext {
             run_id: run.id.to_string(),
             max_inline_bytes: g.spill_threshold_bytes,
         };
-        match tokio::time::timeout(g.tool_timeout, tool.call(&tctx, input)).await {
+        // Approval (if any) happened before this point, so the clock only
+        // covers the tool itself.
+        let started = std::time::Instant::now();
+        let outcome = tokio::time::timeout(g.tool_timeout, tool.call(&tctx, input)).await;
+        let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let (text, is_error) = match outcome {
             Err(_) => (
                 format!("Error: tool timed out after {:?}", g.tool_timeout),
                 true,
@@ -626,7 +637,8 @@ impl TurnExecutor {
             Ok(Err(e)) => (format!("Error: {e}"), true),
             Ok(Ok(out)) if meta => self.meta_output(ctx, call, &out).await,
             Ok(Ok(out)) => (render_output(&out), false),
-        }
+        };
+        (text, is_error, Some(duration_ms))
     }
 
     /// Turn the structured output of a `Meta` tool into events: a todo list
@@ -727,6 +739,22 @@ impl TurnExecutor {
             )
         }
     }
+}
+
+/// Largest `output_preview` of a `tool_call_completed` event, in bytes.
+pub(crate) const OUTPUT_PREVIEW_BYTES: usize = 2048;
+
+/// The (already redacted) start of a tool output, at most
+/// [`OUTPUT_PREVIEW_BYTES`] including the truncation marker.
+fn preview(text: &str) -> String {
+    const MARK: &str = "\n[truncated]";
+    if text.len() <= OUTPUT_PREVIEW_BYTES {
+        return text.to_owned();
+    }
+    format!(
+        "{}{MARK}",
+        truncate_utf8(text, OUTPUT_PREVIEW_BYTES - MARK.len())
+    )
 }
 
 /// Whether a provider failure is worth retrying (transient) as opposed to a

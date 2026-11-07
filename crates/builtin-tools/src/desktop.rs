@@ -26,6 +26,9 @@ use tool_registry::{
 };
 use vision::{BoundingBox, OcrEngine};
 
+use protocol::event::ControlRect;
+
+use crate::control::{ControlRequest, DesktopControlGate};
 use crate::util::{exec_err, finish_text, parse, save_file, spec};
 
 /// An OCR engine usable from tools.
@@ -58,6 +61,8 @@ struct State {
     generation: Option<u64>,
     /// Mark number to absolute screen centre.
     marks: BTreeMap<u32, (f64, f64)>,
+    /// Element index to its label and on-screen bounds (for the control gate).
+    targets: BTreeMap<u32, (String, Option<ControlRect>)>,
 }
 
 struct Shared {
@@ -66,6 +71,7 @@ struct Shared {
     state: Mutex<State>,
     data_dir: PathBuf,
     settings: DesktopSettings,
+    control: Option<Arc<dyn DesktopControlGate>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -119,6 +125,44 @@ fn parse_ref(v: &Value) -> Result<ElementRef, ToolError> {
     }
 }
 
+fn rect_of(r: desktop_api::snapshot::Rect) -> ControlRect {
+    ControlRect {
+        x: r.x,
+        y: r.y,
+        width: r.width,
+        height: r.height,
+    }
+}
+
+/// A small box around a screen point (marks and raw coordinates have no size).
+fn point_rect(x: f64, y: f64) -> ControlRect {
+    ControlRect {
+        x: x - 16.0,
+        y: y - 16.0,
+        width: 32.0,
+        height: 32.0,
+    }
+}
+
+fn union(a: Option<ControlRect>, b: Option<ControlRect>) -> Option<ControlRect> {
+    match (a, b) {
+        (Some(a), Some(b)) => {
+            let (x0, y0) = (a.x.min(b.x), a.y.min(b.y));
+            let (x1, y1) = (
+                (a.x + a.width).max(b.x + b.width),
+                (a.y + a.height).max(b.y + b.height),
+            );
+            Some(ControlRect {
+                x: x0,
+                y: y0,
+                width: x1 - x0,
+                height: y1 - y0,
+            })
+        }
+        (a, b) => a.or(b),
+    }
+}
+
 fn derr(e: &DesktopError) -> ToolError {
     let hint = match e {
         DesktopError::ElementNotFound { .. } => {
@@ -154,6 +198,43 @@ impl Shared {
         }
     }
 
+    /// Label and on-screen bounds of the element a mutating action targets.
+    fn describe(&self, r: ElementRef) -> (String, Option<ControlRect>) {
+        let st = self.state.lock();
+        match r {
+            ElementRef::Index(i) => st
+                .targets
+                .get(&i)
+                .cloned()
+                .unwrap_or_else(|| (format!("element {i}"), None)),
+            ElementRef::Mark(n) => (
+                format!("mark {n}"),
+                st.marks.get(&n).map(|(x, y)| point_rect(*x, *y)),
+            ),
+        }
+    }
+
+    /// Ask the control gate (if any) whether this mutating action may run.
+    async fn gate(
+        &self,
+        run_id: &str,
+        action: &str,
+        label: String,
+        rect: Option<ControlRect>,
+    ) -> Result<(), ToolError> {
+        let Some(gate) = &self.control else {
+            return Ok(());
+        };
+        gate.before_action(&ControlRequest {
+            run_id: run_id.to_owned(),
+            rect,
+            label,
+            action: action.to_owned(),
+        })
+        .await
+        .map_err(exec_err)
+    }
+
     fn default_method(r: ElementRef) -> ClickMethod {
         match r {
             ElementRef::Index(_) => ClickMethod::Accessibility,
@@ -182,6 +263,26 @@ impl Shared {
             st.window_id = Some(snap.window.id);
             st.generation = Some(snap.generation);
             st.marks.clear();
+            st.targets = snap
+                .nodes
+                .iter()
+                .map(|n| {
+                    let label = if n.name.is_empty() {
+                        n.role.clone()
+                    } else {
+                        format!(
+                            "{} \"{}\"",
+                            n.role,
+                            n.name
+                                .chars()
+                                .take(60)
+                                .collect::<String>()
+                                .replace('"', "'")
+                        )
+                    };
+                    (n.index, (label, n.bounds.map(rect_of)))
+                })
+                .collect();
         }
         let mut text = format!("window_id: {}\n", snap.window.id);
         text.push_str(&render_snapshot(&snap));
@@ -275,6 +376,7 @@ pub fn tools(
     ocr: Option<SharedOcr>,
     data_dir: &Path,
     settings: DesktopSettings,
+    control: Option<Arc<dyn DesktopControlGate>>,
 ) -> Vec<Arc<dyn Tool>> {
     let shared = Arc::new(Shared {
         backend,
@@ -282,6 +384,7 @@ pub fn tools(
         state: Mutex::new(State::default()),
         data_dir: data_dir.to_path_buf(),
         settings,
+        control,
     });
     let d = PermissionCategory::Desktop;
     let index_prop = json!({
@@ -528,7 +631,7 @@ fn window_line(w: &desktop_api::WindowInfo) -> String {
 }
 
 impl DesktopTool {
-    async fn run(&self, input: Value) -> Result<String, ToolError> {
+    async fn run(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
         let sh = &self.shared;
         match self.op {
             Op::ListApps => {
@@ -545,6 +648,8 @@ impl DesktopTool {
             }
             Op::Launch => {
                 let i: LaunchIn = parse(input)?;
+                sh.gate(run_id, "launch", i.executable.clone(), None)
+                    .await?;
                 let pid = sh
                     .backend
                     .launch(AppSpec {
@@ -606,6 +711,8 @@ impl DesktopTool {
                 let r = parse_ref(&i.index)?;
                 let method = parse_method(i.method.as_deref(), Shared::default_method(r))?;
                 let target = sh.target(r)?;
+                let (label, rect) = sh.describe(r);
+                sh.gate(run_id, "click", label, rect).await?;
                 let head = sh.act(Action::Click { target, method }).await?;
                 sh.settle_and_refresh(head).await
             }
@@ -613,6 +720,8 @@ impl DesktopTool {
                 let i: TypeIn = parse(input)?;
                 let r = parse_ref(&i.index)?;
                 let target = sh.target(r)?;
+                let (label, rect) = sh.describe(r);
+                sh.gate(run_id, "type", label, rect).await?;
                 // Focus the element with a real click, then type into the focus.
                 sh.act(Action::Click {
                     target,
@@ -626,6 +735,8 @@ impl DesktopTool {
                 let i: SetValueIn = parse(input)?;
                 let r = parse_ref(&i.index)?;
                 let target = sh.target(r)?;
+                let (label, rect) = sh.describe(r);
+                sh.gate(run_id, "set_value", label, rect).await?;
                 let head = sh
                     .act(Action::SetValue {
                         target,
@@ -637,6 +748,15 @@ impl DesktopTool {
             Op::Key => {
                 let i: KeyIn = parse(input)?;
                 let keys = parse_keys(&i.keys)?;
+                let focus = i.index.as_ref().map(parse_ref).transpose()?;
+                let (label, rect) = match focus {
+                    Some(r) => {
+                        let (l, rect) = sh.describe(r);
+                        (format!("{} in {l}", keys.join("+")), rect)
+                    }
+                    None => (keys.join("+"), None),
+                };
+                sh.gate(run_id, "key", label, rect).await?;
                 if let Some(idx) = &i.index {
                     let target = sh.target(parse_ref(idx)?)?;
                     sh.act(Action::Click {
@@ -650,6 +770,11 @@ impl DesktopTool {
             }
             Op::Scroll => {
                 let i: ScrollIn = parse(input)?;
+                let (label, rect) = match (&i.index, i.x, i.y) {
+                    (Some(idx), _, _) => sh.describe(parse_ref(idx)?),
+                    (None, Some(x), Some(y)) => ("point".to_owned(), Some(point_rect(x, y))),
+                    _ => (String::new(), None),
+                };
                 let target = match (&i.index, i.x, i.y) {
                     (Some(idx), _, _) => sh.target(parse_ref(idx)?)?,
                     (None, Some(x), Some(y)) => Target::ByCoordinate {
@@ -663,6 +788,7 @@ impl DesktopTool {
                         ));
                     }
                 };
+                sh.gate(run_id, "scroll", label, rect).await?;
                 let head = sh
                     .act(Action::Scroll {
                         target,
@@ -677,6 +803,9 @@ impl DesktopTool {
                 let (a, b) = (parse_ref(&i.from)?, parse_ref(&i.to)?);
                 let method = parse_method(i.method.as_deref(), ClickMethod::Global)?;
                 let (from, to) = (sh.target(a)?, sh.target(b)?);
+                let ((la, ra), (lb, rb)) = (sh.describe(a), sh.describe(b));
+                sh.gate(run_id, "drag", format!("{la} to {lb}"), union(ra, rb))
+                    .await?;
                 let head = sh.act(Action::Drag { from, to, method }).await?;
                 sh.settle_and_refresh(head).await
             }
@@ -691,7 +820,7 @@ impl Tool for DesktopTool {
     }
 
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
-        let text = self.run(input).await?;
+        let text = self.run(&ctx.run_id, input).await?;
         Ok(finish_text(ctx, &self.shared.data_dir.join("spill"), text))
     }
 }
@@ -755,7 +884,12 @@ pub(crate) mod fake {
                             if i == 3 { "edit" } else { "button" },
                             format!("el{i}"),
                             (i == 3).then(|| value.clone()),
-                            None,
+                            (i == 2).then_some(Rect {
+                                x: 120.0,
+                                y: 230.0,
+                                width: 80.0,
+                                height: 24.0,
+                            }),
                             vec![],
                         )
                     })
@@ -855,7 +989,7 @@ mod tests {
         ocr: Option<SharedOcr>,
     ) -> (tempfile::TempDir, Vec<Arc<dyn Tool>>) {
         let d = tempfile::tempdir().unwrap();
-        let t = tools(fake, ocr, d.path(), settings());
+        let t = tools(fake, ocr, d.path(), settings(), None);
         (d, t)
     }
 
@@ -1061,5 +1195,104 @@ mod tests {
             .next()
             .unwrap();
         assert!(Path::new(path).exists(), "{s}");
+    }
+
+    struct Recorder {
+        seen: Mutex<Vec<ControlRequest>>,
+        refuse: bool,
+    }
+
+    #[async_trait]
+    impl DesktopControlGate for Recorder {
+        async fn before_action(&self, req: &ControlRequest) -> Result<(), String> {
+            self.seen.lock().push(req.clone());
+            if self.refuse {
+                Err("the user has taken control".into())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    fn gated(
+        fake: Arc<FakeDesktop>,
+        refuse: bool,
+    ) -> (tempfile::TempDir, Vec<Arc<dyn Tool>>, Arc<Recorder>) {
+        let d = tempfile::tempdir().unwrap();
+        let gate = Arc::new(Recorder {
+            seen: Mutex::new(Vec::new()),
+            refuse,
+        });
+        let t = tools(fake, None, d.path(), settings(), Some(gate.clone()));
+        (d, t, gate)
+    }
+
+    #[tokio::test]
+    async fn mutating_actions_ask_the_gate_with_rect_label_and_run_id() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (_d, t, gate) = gated(fake.clone(), false);
+        let ctx = ToolContext {
+            run_id: "run-1".into(),
+            ..ToolContext::default()
+        };
+        get(&t, "desktop_get_state")
+            .call(&ctx, json!({}))
+            .await
+            .unwrap();
+        assert!(gate.seen.lock().is_empty(), "reads are not gated");
+        get(&t, "desktop_click")
+            .call(&ctx, json!({"index": 2}))
+            .await
+            .unwrap();
+        get(&t, "desktop_key")
+            .call(&ctx, json!({"keys": "ctrl+s"}))
+            .await
+            .unwrap();
+        get(&t, "desktop_launch")
+            .call(&ctx, json!({"executable": "notepad.exe"}))
+            .await
+            .unwrap();
+        let seen = gate.seen.lock().clone();
+        assert_eq!(seen.len(), 3);
+        assert_eq!(seen[0].run_id, "run-1");
+        assert_eq!(seen[0].action, "click");
+        assert_eq!(seen[0].label, "button \"el2\"");
+        let r = seen[0].rect.unwrap();
+        assert!((r.x - 120.0).abs() < 1e-9 && (r.width - 80.0).abs() < 1e-9);
+        assert_eq!(
+            (seen[1].action.as_str(), seen[1].label.as_str()),
+            ("key", "ctrl+s")
+        );
+        assert_eq!(
+            (seen[2].action.as_str(), seen[2].label.as_str()),
+            ("launch", "notepad.exe")
+        );
+        assert_eq!(fake.actions.lock().len(), 2, "click + key were dispatched");
+    }
+
+    #[tokio::test]
+    async fn a_refusing_gate_stops_the_action_before_it_is_dispatched() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (_d, t, gate) = gated(fake.clone(), true);
+        let ctx = ToolContext::default();
+        get(&t, "desktop_get_state")
+            .call(&ctx, json!({}))
+            .await
+            .unwrap();
+        let err = get(&t, "desktop_click")
+            .call(&ctx, json!({"index": 2}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("taken control"), "{err}");
+        let err = get(&t, "desktop_type")
+            .call(&ctx, json!({"index": 3, "text": "x"}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("taken control"), "{err}");
+        assert!(
+            fake.actions.lock().is_empty(),
+            "nothing reached the backend"
+        );
+        assert_eq!(gate.seen.lock().len(), 2);
     }
 }

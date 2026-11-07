@@ -67,6 +67,8 @@ export interface DaemonContextValue {
   recordAnswer: (runId: string, callId: string, answer: string) => void;
   retry: () => void;
   restartDaemon: () => Promise<void>;
+  /** Listen to the raw daemon events (live and replayed); returns the unsubscribe. */
+  onDaemonEvent: (listener: (env: GlobalEnvelope) => void) => () => void;
 }
 
 const Ctx = createContext<DaemonContextValue | null>(null);
@@ -94,6 +96,16 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
   const client = useMemo(() => (conn ? new ApiClient(conn) : null), [conn]);
   const clientRef = useRef<ApiClient | null>(null);
   clientRef.current = client;
+  const listeners = useRef(new Set<(env: GlobalEnvelope) => void>());
+  const onDaemonEvent = useCallback(
+    (listener: (env: GlobalEnvelope) => void) => {
+      listeners.current.add(listener);
+      return () => {
+        listeners.current.delete(listener);
+      };
+    },
+    []
+  );
 
   // 1. find / start the daemon
   useEffect(() => {
@@ -147,7 +159,12 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
     );
     return subscribeEvents(client, {
       lastEventId: 0,
-      onEvent: (env) => dispatch({ type: "event", env }),
+      onEvent: (env) => {
+        dispatch({ type: "event", env });
+        for (const l of listeners.current) {
+          l(env);
+        }
+      },
       onConnection: setEventsConnected
     });
   }, [client, refreshBots, refreshChats, refreshRuns]);
@@ -245,7 +262,8 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
     refreshRuns,
     recordAnswer,
     retry,
-    restartDaemon
+    restartDaemon,
+    onDaemonEvent
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

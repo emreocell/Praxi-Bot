@@ -25,6 +25,10 @@ export interface ToolItem {
   status: ToolStatus;
   requestedMs: number;
   completedMs?: number;
+  /** Time the tool itself ran (daemon-measured; excludes approval waits). */
+  durationMs?: number;
+  /** Redacted start of the tool output (at most 2 KB). */
+  outputPreview?: string;
   /** Human-readable approval summary (when approval was needed). */
   summary?: string;
   /** The call went through an approval gate. */
@@ -250,7 +254,9 @@ function reduce(
                 ...t,
                 status: e.error ? "error" : "done",
                 error: e.error ?? undefined,
-                completedMs: ts
+                completedMs: ts,
+                durationMs: e.duration_ms ?? undefined,
+                outputPreview: e.output_preview ?? undefined
               }
         );
         return {
@@ -353,6 +359,7 @@ function reduce(
       }));
     case "workflow_step_started":
     case "workflow_step_completed":
+    case "control_requested":
       return state;
   }
 }

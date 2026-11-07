@@ -138,6 +138,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/control/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The daemon's view of the desktop app's controller registration. */
+        get: operations["get_control_state"];
+        /**
+         * Register the desktop app as controller and report its mode (heartbeat: send
+         *     it on every state change and at least every 5 s; it expires after 15 s).
+         *     While the mode is `human_driving` or `paused`, desktop actions of bots are
+         *     refused immediately.
+         */
+        put: operations["put_control_state"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/control/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer a `control_requested` event: let the action `proceed` (after the
+         *     overlay highlight) or `refuse` it.
+         */
+        post: operations["decide_control"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/events": {
         parameters: {
             query?: never;
@@ -177,6 +220,73 @@ export interface paths {
         get: operations["health"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The global default permission policy (what bots without their own rule
+         *     for a category get).
+         */
+        get: operations["get_policy"];
+        /**
+         * Replace the global default policy (persisted; effective for the next tool
+         *     call of every run).  Start from `preset`, or from the current policy
+         *     without it, then apply the `categories` overrides.
+         */
+        put: operations["put_policy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Configured providers, catalog entries and the models each configured
+         *     provider offers (fetched live, with a short timeout; failures are reported
+         *     per provider and never fail the route).
+         */
+        get: operations["list_providers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/reload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rebuild the loop's providers from `providers.toml` and the secret store, so
+         *     a provider added with the CLI / app is usable without restarting the
+         *     daemon.  Runs already streaming keep their provider.
+         */
+        post: operations["reload_providers"];
         delete?: never;
         options?: never;
         head?: never;
@@ -369,6 +479,25 @@ export interface components {
              */
             bot_id: string;
         };
+        /** @description A catalog entry. */
+        CatalogProviderDto: {
+            /** @description `api_key_env` or `none`. */
+            auth: string;
+            /** @description Base URL. */
+            base_url: string;
+            /** @description Already in `providers.toml`. */
+            configured: boolean;
+            /** @description Catalog id. */
+            id: string;
+            /** @description Environment variable of the key, for `api_key_env`. */
+            key_env?: string | null;
+            /** @description `openai_compatible`, `anthropic`, `gemini` or `other:<name>`. */
+            kind: string;
+            /** @description Supports tool calls. */
+            tools: boolean;
+            /** @description Supports image input. */
+            vision: boolean;
+        };
         /** @description Effective decision of one permission category. */
         CategoryDecisionDto: {
             /** @description `allow`, `ask` or `deny`. */
@@ -396,6 +525,74 @@ export interface components {
             /** @description Title. */
             title: string;
         };
+        /** @description A configured provider (never carries a key). */
+        ConfiguredProviderDto: {
+            /** @description Loaded in the running loop (a restart or `reload` picks up changes). */
+            active: boolean;
+            /** @description Not from the catalog: defined by the user. */
+            custom: boolean;
+            /** @description Chosen default model (without the provider prefix). */
+            default_model?: string | null;
+            /** @description May be used. */
+            enabled: boolean;
+            /** @description A key is stored for it. */
+            has_key: boolean;
+            /** @description Provider id. */
+            id: string;
+            /** @description Is the configured default. */
+            is_default: boolean;
+            /** @description Model ids the provider reports (empty without a listing). */
+            models: string[];
+            /** @description Why the model list could not be fetched. */
+            models_error?: string | null;
+        };
+        /** @description `POST /v1/control/{request_id}`. */
+        ControlDecisionInput: {
+            /** @description Proceed or refuse. */
+            decision: components["schemas"]["ControlVerdict"];
+            /** @description Reason shown to the model on refuse. */
+            reason?: string | null;
+        };
+        /** @description Response of `POST /v1/control/{request_id}`. */
+        ControlDecisionResponse: {
+            /** @description The decision taken. */
+            decision: components["schemas"]["ControlVerdict"];
+            /**
+             * Format: uuid
+             * @description The request answered.
+             */
+            request_id: string;
+        };
+        /**
+         * @description Who is driving the desktop, as the desktop app's state machine reports it.
+         * @enum {string}
+         */
+        ControlMode: "idle" | "bot_driving" | "human_driving" | "paused";
+        /** @description The daemon's view of the controller registration. */
+        ControlStateDto: {
+            /** @description A desktop app is listening on the global event stream. */
+            app_connected: boolean;
+            /**
+             * Format: int64
+             * @description Milliseconds until the registration expires; `0` when not registered.
+             */
+            expires_in_ms: number;
+            mode?: null | components["schemas"]["ControlMode"];
+        };
+        /**
+         * @description `PUT /v1/control/state`: the desktop app registers as controller and
+         *     reports its mode.  Send it on every state change and at least every 5 s;
+         *     the registration expires after 15 s without a heartbeat.
+         */
+        ControlStateInput: {
+            /** @description The app's current mode. */
+            mode: components["schemas"]["ControlMode"];
+        };
+        /**
+         * @description The app's answer to a `control_requested` event.
+         * @enum {string}
+         */
+        ControlVerdict: "proceed" | "refuse";
         /** @description `POST /v1/chats`. */
         CreateChat: {
             /**
@@ -533,6 +730,48 @@ export interface components {
          * @enum {string}
          */
         Mode: "steer" | "queue";
+        /** @description The global default permission policy (`GET` / `PUT /v1/policy`). */
+        PolicyDto: {
+            /** @description Level per category: `deny`, `ask`, `allow` or `allow_with_limits`. */
+            categories: {
+                [key: string]: string;
+            };
+            /**
+             * @description Name of the preset the policy equals (`read-only`,
+             *     `approve-destructive`, `read-and-draft`, `full`); `null` = custom.
+             */
+            preset?: string | null;
+        };
+        /**
+         * @description `PUT /v1/policy`.  Start from `preset` (or, without it, from the current
+         *     policy) and apply the `categories` overrides on top.
+         */
+        PolicyInput: {
+            /** @description Per-category level: `deny`, `ask` or `allow`. */
+            categories?: {
+                [key: string]: string;
+            };
+            /** @description `read-only`, `approve-destructive`, `read-and-draft` or `full`. */
+            preset?: string | null;
+        };
+        /** @description `GET /v1/providers`. */
+        ProvidersDto: {
+            /** @description Ids of the providers the running loop can use. */
+            active: string[];
+            /** @description Entries of the built-in provider catalog. */
+            catalog: components["schemas"]["CatalogProviderDto"][];
+            /** @description Providers from the user's `providers.toml`. */
+            configured: components["schemas"]["ConfiguredProviderDto"][];
+            /** @description Id of the loop's default provider. */
+            default_provider?: string | null;
+        };
+        /** @description `POST /v1/providers/reload`. */
+        ReloadResponse: {
+            /** @description Ids now loaded. */
+            active: string[];
+            /** @description Id of the new default provider. */
+            default_provider?: string | null;
+        };
         /** @description `DELETE /v1/bots/{id}/grants`. */
         RevokeGrant: {
             /** @description The rule to remove. */
@@ -619,6 +858,12 @@ export interface components {
              */
             completion_tokens: number;
             /**
+             * Format: double
+             * @description Cost in USD of the model calls whose price is known; `null` when no
+             *     call has a known price.
+             */
+            cost_usd?: number | null;
+            /**
              * Format: int64
              * @description Number of model calls.
              */
@@ -640,15 +885,15 @@ export type $defs = Record<string, never>;
 export interface operations {
     list_approvals: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query?: {
                 /**
                  * @description Only this run's approvals (pending and decided).  Without it: pending
                  *     approvals of all runs.
                  */
-                run_id: string | null;
+                run_id?: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -1064,6 +1309,91 @@ export interface operations {
             };
         };
     };
+    get_control_state: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlStateDto"];
+                };
+            };
+        };
+    };
+    put_control_state: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControlStateInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlStateDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    decide_control: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description request_id of the control_requested event */
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControlDecisionInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlDecisionResponse"];
+                };
+            };
+            /** @description unknown, answered or timed-out request */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     events_doc: {
         parameters: {
             query?: {
@@ -1115,6 +1445,112 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Health"];
+                };
+            };
+        };
+    };
+    get_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyDto"];
+                };
+            };
+        };
+    };
+    put_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PolicyInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_providers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProvidersDto"];
+                };
+            };
+        };
+    };
+    reload_providers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReloadResponse"];
+                };
+            };
+            /** @description the daemon has no provider configuration */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description no usable provider; the old ones stay */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };
@@ -1280,12 +1716,12 @@ export interface operations {
     };
     usage: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query?: {
                 /** @description Only runs created at or after this time. */
-                since_ms: number | null;
+                since_ms?: number;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;

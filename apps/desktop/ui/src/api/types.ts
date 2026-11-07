@@ -20,6 +20,14 @@ export type Decision = S["Decision"];
 export type SendMode = S["Mode"];
 export type SendResponse = S["SendResponse"];
 export type ErrorBody = S["ErrorBody"];
+export type ControlStateDto = S["ControlStateDto"];
+export type ControlModeName = NonNullable<ControlStateDto["mode"]>;
+export type ControlVerdict = S["ControlVerdict"];
+export type PolicyDto = S["PolicyDto"];
+export type PolicyInput = S["PolicyInput"];
+export type ProvidersDto = S["ProvidersDto"];
+export type ConfiguredProviderDto = S["ConfiguredProviderDto"];
+export type CatalogProviderDto = S["CatalogProviderDto"];
 
 /** The permission preset names accepted by a bot profile (`permissions.preset`). */
 export type PermissionPreset =
@@ -88,6 +96,10 @@ export type DaemonEvent =
       run_id: string;
       call_id: string;
       error: string | null;
+      /** Redacted start of the output, at most 2 KB. */
+      output_preview?: string | null;
+      /** Time the tool itself ran (excludes approval waits). */
+      duration_ms?: number | null;
     }
   | { type: "todo_updated"; run_id: string; items: TodoItem[] }
   | {
@@ -124,6 +136,16 @@ export type DaemonEvent =
       workflow: string;
       step_index: number;
       reason: string;
+    }
+  | {
+      type: "control_requested";
+      request_id: string;
+      run_id: string;
+      bot_id: string;
+      /** Global physical screen pixels. */
+      rect: { x: number; y: number; width: number; height: number } | null;
+      label: string;
+      action: string;
     }
   | { type: "error"; run_id: string; message: string; recoverable: boolean };
 

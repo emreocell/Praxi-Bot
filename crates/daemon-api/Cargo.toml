@@ -17,9 +17,12 @@ workspace = true
 [dependencies]
 agent-core = { path = "../agent-core", version = "0.1.0" }
 async-trait.workspace = true
+desktop-api = { path = "../desktop-api", version = "0.1.0" }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
 futures.workspace = true
 getrandom = "0.3"
+parking_lot.workspace = true
+permission-engine = { path = "../permission-engine", version = "0.1.0" }
 protocol.workspace = true
 provider-catalog = { path = "../provider-catalog", version = "0.1.0" }
 serde.workspace = true
@@ -33,6 +36,7 @@ utoipa = { version = "5", features = ["uuid"] }
 uuid.workspace = true
 
 [dev-dependencies]
+builtin-tools = { path = "../builtin-tools", version = "0.1.0" }
 http-body-util = "0.1"
 tempfile.workspace = true
 tool-registry = { path = "../tool-registry", version = "0.1.0" }

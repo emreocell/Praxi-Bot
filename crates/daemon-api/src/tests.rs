@@ -1,3 +1,4 @@
+#![allow(clippy::used_underscore_binding, clippy::many_single_char_names)]
 //! Integration tests: the router is driven with `tower::ServiceExt` (no port),
 //! `serve` is exercised on an ephemeral loopback port.
 
@@ -1272,7 +1273,564 @@ fn openapi_snapshot() {
         "/v1/usage",
         "/v1/questions/{call_id}",
         "/v1/bots/{id}/grants",
+        "/v1/control/state",
+        "/v1/control/{request_id}",
+        "/v1/policy",
+        "/v1/providers",
+        "/v1/providers/reload",
     ] {
         assert!(v["paths"].get(p).is_some(), "{p}");
     }
+}
+
+// ------------------------------------------------------- control bridge
+
+/// A daemon whose bot has the (fake) desktop tools and a full policy, so a
+/// scripted click needs no approval.
+fn setup_desktop() -> (T, Arc<crate::fake::FakeDesktop>) {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Arc::new(Storage::open(dir.path()).unwrap());
+    let desktop = Arc::new(crate::fake::FakeDesktop::default());
+    let mut bt = builtin_tools::BuiltinConfig::new(
+        dir.path().join("bt"),
+        Arc::new(builtin_tools::ResolverGate::new(
+            permission_engine::PermissionResolver::new(),
+            permission_engine::Policy::full(),
+            None,
+            protocol::InitiatorKind::Human,
+        )),
+    );
+    bt.desktop = Some(desktop.clone());
+    bt.desktop_settings.action_settle = Duration::ZERO;
+    let agent = AgentLoop::new(
+        Arc::clone(&storage),
+        ToolRegistry::new(),
+        Providers::single(Arc::new(FakeProvider)),
+        LoopConfig {
+            global_policy: permission_engine::Policy::full(),
+            discovery_threshold: 1000,
+            ..LoopConfig::default()
+        },
+    )
+    .with_builtin_tools(bt);
+    let mut cfg = DaemonConfig::new(TOKEN);
+    cfg.control = crate::ControlConfig {
+        proceed_timeout: Duration::from_millis(150),
+        refuse_timeout: Duration::from_millis(600),
+        heartbeat_ttl: Duration::from_secs(5),
+    };
+    let state = AppState::new(agent.clone(), storage, cfg).unwrap();
+    (
+        T {
+            app: router(state.clone()),
+            state,
+            agent,
+            _dir: dir,
+        },
+        desktop,
+    )
+}
+
+/// Send `text`, wait for the run and return the assistant's reply (the fake
+/// provider echoes the tool result as `tool said: ...`).
+async fn run_and_reply(t: &T, chat: &str, text: &str) -> String {
+    let run = send_msg(t, chat, text, "queue").await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    wait_state(t, &run, "succeeded").await;
+    let msgs = call(t, Method::GET, &format!("/v1/chats/{chat}/messages"), None)
+        .await
+        .json();
+    msgs.as_array()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|m| m["role"] == "assistant")
+        .unwrap()["content"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+#[tokio::test]
+async fn control_routes_validate_and_report_the_registration() {
+    let t = setup();
+    let r = call(&t, Method::GET, "/v1/control/state", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(r.json()["mode"].is_null());
+    assert_eq!(r.json()["expires_in_ms"], 0);
+
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "human_driving"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["mode"], "human_driving");
+    assert!(r.json()["expires_in_ms"].as_u64().unwrap() > 10_000);
+    let r = call(&t, Method::GET, "/v1/control/state", None).await;
+    assert_eq!(r.json()["mode"], "human_driving");
+
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "sideways"})),
+    )
+    .await;
+    assert!(r.status.is_client_error());
+    // Unknown / malformed request ids.
+    let r = call(
+        &t,
+        Method::POST,
+        &format!("/v1/control/{}", uuid::Uuid::now_v7()),
+        Some(json!({"decision": "proceed"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/control/not-a-uuid",
+        Some(json!({"decision": "proceed"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    // Needs the bearer token like everything else.
+    let r = send(&t.app, Method::GET, "/v1/control/state", None, &[]).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
+    let (t, desktop) = setup_desktop();
+    let (_, chat) = make_chat(&t).await;
+    let r = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
+    assert!(r.contains("Button 2"), "{r}");
+
+    // Nobody registered: the click just runs.
+    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 2}"#).await;
+    assert!(r.contains("dispatched"), "{r}");
+    assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    // The human takes the wheel: refused at once, nothing is dispatched.
+    call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "human_driving"})),
+    )
+    .await;
+    let started = std::time::Instant::now();
+    let r = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
+    assert!(r.contains("Button 2"), "reads are not gated: {r}");
+    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 3}"#).await;
+    assert!(r.contains("taken control of the desktop"), "{r}");
+    assert!(
+        started.elapsed() < Duration::from_millis(500),
+        "no round trip while the human drives"
+    );
+    assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    // Handing the wheel back lets the bot continue (an idle registration that
+    // never answers would time out, so report bot_driving only after the app
+    // answers; here nobody listens on SSE and the registration says idle).
+    call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "idle"})),
+    )
+    .await;
+    // Registered but silent: refused after the long timeout (600 ms here).
+    let r = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
+    assert!(r.contains("Button"), "{r}");
+    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 3}"#).await;
+    assert!(r.contains("did not confirm"), "{r}");
+    assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+/// Answer every `control_requested` event of the loop with `decision`; returns
+/// the events seen.
+fn auto_answer(
+    t: &T,
+    decision: &'static str,
+    reason: Option<&'static str>,
+) -> Arc<parking_lot::Mutex<Vec<Value>>> {
+    let seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let mut rx = t.agent.subscribe();
+    let app = t.app.clone();
+    let log = Arc::clone(&seen);
+    tokio::spawn(async move {
+        while let Ok(item) = rx.recv().await {
+            if let protocol::Event::ControlRequested(c) = item.envelope.event {
+                log.lock().push(serde_json::to_value(&c).unwrap());
+                let (k, v) = auth();
+                let r = send(
+                    &app,
+                    Method::POST,
+                    &format!("/v1/control/{}", c.request_id),
+                    Some(json!({"decision": decision, "reason": reason})),
+                    &[(k, v.as_str())],
+                )
+                .await;
+                assert_eq!(r.status, StatusCode::OK);
+            }
+        }
+    });
+    seen
+}
+
+#[tokio::test]
+async fn a_registered_app_confirms_each_click_before_it_runs() {
+    let (t, desktop) = setup_desktop();
+    let (_, chat) = make_chat(&t).await;
+    call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "bot_driving"})),
+    )
+    .await;
+    let seen = auto_answer(&t, "proceed", None);
+    run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
+    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 2}"#).await;
+    assert!(r.contains("dispatched"), "{r}");
+    assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    let seen = seen.lock().clone();
+    assert_eq!(seen.len(), 1, "the read was not gated, the click was");
+    assert_eq!(seen[0]["action"], "click");
+    assert_eq!(seen[0]["label"], "button \"Button 2\"");
+    assert_eq!(seen[0]["rect"]["x"], 600.0);
+    assert_eq!(seen[0]["rect"]["width"], 110.0);
+}
+
+#[tokio::test]
+async fn an_app_refusal_reaches_the_model_and_nothing_is_dispatched() {
+    let (t, desktop) = setup_desktop();
+    let (_, chat) = make_chat(&t).await;
+    call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "bot_driving"})),
+    )
+    .await;
+    let _seen = auto_answer(&t, "refuse", Some("the user pressed Stop"));
+    run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
+    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 1}"#).await;
+    assert!(r.contains("the user pressed Stop"), "{r}");
+    assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 0);
+}
+
+// ---------------------------------------------------------------- policy
+
+#[tokio::test]
+async fn global_policy_is_editable_and_persisted() {
+    let t = setup();
+    let p = call(&t, Method::GET, "/v1/policy", None).await.json();
+    assert_eq!(p["preset"], "approve-destructive");
+    assert_eq!(p["categories"]["fs"], "ask");
+    assert!(p["categories"].get("meta").is_none());
+
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/policy",
+        Some(json!({"preset": "read-and-draft", "categories": {"fs": "allow", "money": "deny"}})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    let p = r.json();
+    assert!(p["preset"].is_null(), "no longer a preset: {p}");
+    assert_eq!(p["categories"]["fs"], "allow");
+    assert_eq!(p["categories"]["money"], "deny");
+    assert_eq!(p["categories"]["shell"], "ask");
+    assert_eq!(call(&t, Method::GET, "/v1/policy", None).await.json(), p);
+    // It is live in the loop and survives a restart (same data dir).
+    assert!(
+        t.agent
+            .global_policy()
+            .categories
+            .contains_key(&protocol::PermissionCategory::Fs)
+    );
+    let reborn = AppState::new(
+        AgentLoop::new(
+            Arc::new(Storage::open(t._dir.path()).unwrap()),
+            ToolRegistry::new(),
+            Providers::single(Arc::new(FakeProvider)),
+            LoopConfig::default(),
+        ),
+        Arc::new(Storage::open(t._dir.path()).unwrap()),
+        DaemonConfig::new(TOKEN),
+    );
+    // A second handle on the same sqlite file is fine for this read-only check.
+    if let Ok(reborn) = reborn {
+        let app = router(reborn);
+        let (k, v) = auth();
+        let r = send(&app, Method::GET, "/v1/policy", None, &[(k, v.as_str())]).await;
+        assert_eq!(r.json(), p, "persisted policy is loaded at start");
+    }
+
+    // Only a preset.
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/policy",
+        Some(json!({"preset": "full"})),
+    )
+    .await;
+    assert_eq!(r.json()["preset"], "full");
+    assert_eq!(r.json()["categories"]["money"], "allow");
+
+    for bad in [
+        json!({"preset": "yolo"}),
+        json!({"categories": {"nope": "allow"}}),
+        json!({"categories": {"meta": "deny"}}),
+        json!({"categories": {"fs": "maybe"}}),
+    ] {
+        let r = call(&t, Method::PUT, "/v1/policy", Some(bad.clone())).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}");
+    }
+    // A rejected change leaves the policy alone.
+    assert_eq!(
+        call(&t, Method::GET, "/v1/policy", None).await.json()["preset"],
+        "full"
+    );
+}
+
+#[tokio::test]
+async fn the_persisted_policy_changes_what_asks() {
+    let t = setup();
+    let (_, chat) = make_chat(&t).await;
+    // Default: danger_run (fs write) asks.
+    let run = send_msg(&t, &chat, "call:danger_run {}", "queue").await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (call_id, _) = pending_call(&t).await;
+    call(
+        &t,
+        Method::POST,
+        &format!("/v1/approvals/{call_id}"),
+        Some(json!({"decision": "deny"})),
+    )
+    .await;
+    wait_state(&t, &run, "succeeded").await;
+    // After PUT policy full it no longer asks.
+    call(
+        &t,
+        Method::PUT,
+        "/v1/policy",
+        Some(json!({"preset": "full"})),
+    )
+    .await;
+    let reply = run_and_reply(&t, &chat, "call:danger_run {}").await;
+    assert!(reply.contains("boom done"), "{reply}");
+}
+
+// ------------------------------------------------------------- providers
+
+struct Second;
+
+#[async_trait]
+impl provider_catalog::ChatProvider for Second {
+    fn id(&self) -> &'static str {
+        "second"
+    }
+    async fn stream(
+        &self,
+        _req: provider_catalog::ChatRequest,
+    ) -> Result<
+        futures::stream::BoxStream<
+            'static,
+            Result<provider_catalog::ChatChunk, provider_catalog::ProviderError>,
+        >,
+        provider_catalog::ProviderError,
+    > {
+        Err(provider_catalog::ProviderError::InvalidRequest(
+            "unused".into(),
+        ))
+    }
+    async fn list_models(&self) -> Result<Vec<String>, provider_catalog::ProviderError> {
+        Ok(vec!["m1".into(), "m2".into()])
+    }
+}
+
+fn catalog_entry(id: &str) -> provider_catalog::ProviderEntry {
+    provider_catalog::ProviderEntry {
+        id: id.into(),
+        kind: provider_catalog::ProviderKind::OpenAiCompatible,
+        base_url: "https://api.example.test/v1".into(),
+        auth: provider_catalog::Auth::ApiKeyEnv("EXAMPLE_KEY".into()),
+        capabilities: provider_catalog::ModelCapabilities {
+            tools: true,
+            vision: false,
+            streaming: true,
+            json_mode: false,
+        },
+        compat_flags: provider_catalog::CompatFlags::default(),
+        models_endpoint: None,
+    }
+}
+
+#[tokio::test]
+async fn providers_route_without_a_host_lists_only_what_is_loaded() {
+    let t = setup();
+    let r = call(&t, Method::GET, "/v1/providers", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let p = r.json();
+    assert_eq!(p["default_provider"], "fake");
+    assert_eq!(p["active"], json!(["fake"]));
+    assert_eq!(p["configured"], json!([]));
+    assert_eq!(p["catalog"], json!([]));
+    let r = call(&t, Method::POST, "/v1/providers/reload", None).await;
+    assert_eq!(r.status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn providers_are_listed_with_models_and_reload_swaps_them() {
+    let t = setup();
+    let mut cfg = provider_catalog::ProviderConfig::default();
+    let mut s = provider_catalog::ProviderSettings::new("second", 1);
+    s.default_model = Some("m1".into());
+    cfg.upsert(s);
+    cfg.upsert(provider_catalog::ProviderSettings::new("ghost", 2));
+    cfg.save(&provider_catalog::config_path(t._dir.path()))
+        .unwrap();
+
+    let fail = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let fail2 = Arc::clone(&fail);
+    t.state.set_provider_host(crate::ProviderHost {
+        catalog: provider_catalog::Catalog::from_entries([
+            catalog_entry("second"),
+            catalog_entry("aaa"),
+        ]),
+        reload: Box::new(move || {
+            if fail2.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err("no usable provider".into());
+            }
+            Ok(Providers::single(Arc::new(Second)).with(Arc::new(FakeProvider)))
+        }),
+    });
+
+    let p = call(&t, Method::GET, "/v1/providers", None).await.json();
+    let ids: Vec<&str> = p["catalog"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["aaa", "second"], "sorted catalog");
+    assert_eq!(p["catalog"][0]["auth"], "api_key_env");
+    assert_eq!(p["catalog"][0]["key_env"], "EXAMPLE_KEY");
+    assert_eq!(p["catalog"][0]["configured"], false);
+    assert_eq!(p["catalog"][1]["configured"], true);
+    let conf = p["configured"].as_array().unwrap();
+    assert_eq!(conf.len(), 2);
+    assert_eq!(conf[0]["id"], "second");
+    assert_eq!(conf[0]["is_default"], true);
+    assert_eq!(conf[0]["default_model"], "m1");
+    assert_eq!(conf[0]["active"], false, "not loaded until reload");
+    assert_eq!(conf[0]["models"], json!([]));
+    assert!(conf[0].get("key").is_none());
+
+    // A failing reload keeps the old providers.
+    fail.store(true, std::sync::atomic::Ordering::SeqCst);
+    let r = call(&t, Method::POST, "/v1/providers/reload", None).await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        r.json()["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("no usable")
+    );
+    assert_eq!(t.agent.providers().ids(), ["fake"]);
+
+    fail.store(false, std::sync::atomic::Ordering::SeqCst);
+    let r = call(&t, Method::POST, "/v1/providers/reload", None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["default_provider"], "second");
+    assert_eq!(r.json()["active"], json!(["fake", "second"]));
+
+    let p = call(&t, Method::GET, "/v1/providers", None).await.json();
+    let conf = p["configured"].as_array().unwrap();
+    assert_eq!(conf[0]["active"], true);
+    assert_eq!(conf[0]["models"], json!(["m1", "m2"]));
+    assert_eq!(conf[1]["active"], false);
+    assert_eq!(p["default_provider"], "second");
+}
+
+// ----------------------------------------------------------- usage cost
+
+#[tokio::test]
+async fn usage_carries_cost_only_when_a_price_is_known() {
+    let t = setup();
+    let (_, chat) = make_chat(&t).await;
+    run_and_reply(&t, &chat, "hello").await;
+    let u = call(&t, Method::GET, "/v1/usage", None).await.json();
+    assert!(u["total"]["cost_usd"].is_null(), "{u}");
+
+    // Same run, priced model.
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Arc::new(Storage::open(dir.path()).unwrap());
+    let mut config = LoopConfig::default();
+    config.prices.insert(
+        "fake/echo".into(),
+        agent_core::ModelPrice {
+            input_per_mtok: 2.0,
+            output_per_mtok: 10.0,
+            cached_per_mtok: None,
+        },
+    );
+    let agent = AgentLoop::new(
+        Arc::clone(&storage),
+        ToolRegistry::new(),
+        Providers::single(Arc::new(FakeProvider)),
+        config,
+    );
+    let state = AppState::new(agent.clone(), storage, DaemonConfig::new(TOKEN)).unwrap();
+    let priced = T {
+        app: router(state.clone()),
+        state,
+        agent,
+        _dir: dir,
+    };
+    let (bot, chat) = make_chat(&priced).await;
+    run_and_reply(&priced, &chat, "hello").await;
+    let u = call(&priced, Method::GET, "/v1/usage", None).await.json();
+    // 10 prompt + 5 completion tokens.
+    let want = (10.0 * 2.0 + 5.0 * 10.0) / 1_000_000.0;
+    let got = u["total"]["cost_usd"].as_f64().unwrap();
+    assert!((got - want).abs() < 1e-12, "{got} vs {want}");
+    let by_bot = u["by_bot"].as_array().unwrap();
+    assert_eq!(by_bot[0]["bot_id"], bot.as_str());
+    assert!((by_bot[0]["cost_usd"].as_f64().unwrap() - want).abs() < 1e-12);
+}
+
+#[tokio::test]
+async fn tool_completion_events_carry_a_preview_and_duration() {
+    let t = setup();
+    let (_, chat) = make_chat(&t).await;
+    let run = send_msg(&t, &chat, "call:danger_run {}", "queue").await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (call_id, _) = pending_call(&t).await;
+    call(
+        &t,
+        Method::POST,
+        &format!("/v1/approvals/{call_id}"),
+        Some(json!({"decision": "approve"})),
+    )
+    .await;
+    wait_state(&t, &run, "succeeded").await;
+    let fr = events(&t, &format!("?run_id={run}"), None).await;
+    let done = fr.iter().find(|f| f.1 == "tool_call_completed").unwrap();
+    assert_eq!(done.2["event"]["output_preview"], "boom done");
+    assert!(done.2["event"]["duration_ms"].is_u64());
 }

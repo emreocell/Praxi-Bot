@@ -2307,3 +2307,250 @@ async fn shutdown_with_nothing_running_returns_immediately_and_flushes_memory() 
         "background extraction was flushed"
     );
 }
+
+// ---------- tool output preview / duration ----------
+
+fn completed_events(
+    rx: &mut broadcast::Receiver<StreamItem>,
+) -> Vec<protocol::event::ToolCallCompleted> {
+    let mut out = Vec::new();
+    while let Ok(i) = rx.try_recv() {
+        if let Event::ToolCallCompleted(c) = i.envelope.event {
+            out.push(c);
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn output_preview_is_redacted_and_capped_at_2kb() {
+    let env = setup();
+    let secret = "sk-abcdefghijklmnopqrstuvwxyz0123";
+    let small = Arc::new(tool(
+        "t.small",
+        Effect::Read,
+        &format!("key is {secret} ok"),
+    ));
+    let big = Arc::new(tool("t.big", Effect::Read, &"x".repeat(5000)));
+    let fake = Fake::new(vec![
+        calls(&[("c1", "t.small", json!({}))]),
+        calls(&[("c2", "t.big", json!({}))]),
+        text("done"),
+    ]);
+    let mut config = cfg(Policy::full());
+    config.redactor = Some(secret_store::Redactor::new());
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&small), t(&big)],
+        profile(""),
+        config,
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+
+    let done = completed_events(&mut rx);
+    assert_eq!(done.len(), 2);
+    let p0 = done[0].output_preview.as_deref().unwrap();
+    assert!(p0.contains("[REDACTED]") && !p0.contains(secret), "{p0}");
+    let p1 = done[1].output_preview.as_deref().unwrap();
+    assert!(p1.len() <= 2048, "{}", p1.len());
+    assert!(p1.ends_with("[truncated]"), "{p1}");
+    assert!(done.iter().all(|c| c.duration_ms.is_some()));
+}
+
+#[tokio::test]
+async fn tool_duration_excludes_the_approval_wait() {
+    let env = setup();
+    let w = Arc::new(tool("t.write", Effect::Write, "written"));
+    let fake = Fake::new(vec![calls(&[("c1", "t.write", json!({}))]), text("done")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&w)],
+        profile(""),
+        cfg(Policy::approve_destructive()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    lp.approve(a.call_id, ApprovalScope::Once, env.user)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let done = completed_events(&mut rx);
+    let ms = done[0].duration_ms.unwrap();
+    assert!(
+        ms < 300,
+        "the 600 ms approval wait leaked into the duration: {ms}"
+    );
+}
+
+// ---------- desktop control bridge ----------
+
+type GateSlot = Arc<Mutex<Option<Arc<dyn builtin_tools::DesktopControlGate>>>>;
+
+struct GateTool {
+    spec: ToolSpec,
+    gate: GateSlot,
+}
+
+#[async_trait]
+impl Tool for GateTool {
+    fn spec(&self) -> &ToolSpec {
+        &self.spec
+    }
+    async fn call(&self, ctx: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
+        let gate = self.gate.lock().clone().expect("gate installed");
+        gate.before_action(&builtin_tools::ControlRequest {
+            run_id: ctx.run_id.clone(),
+            rect: Some(protocol::event::ControlRect {
+                x: 10.0,
+                y: 20.0,
+                width: 30.0,
+                height: 40.0,
+            }),
+            label: "Save".into(),
+            action: "click".into(),
+        })
+        .await
+        .map_err(ToolError::Execution)?;
+        Ok(ToolOutput::text("clicked"))
+    }
+}
+
+struct TestGate {
+    refuse: bool,
+    seen: Mutex<Vec<crate::ControlRequest>>,
+}
+
+#[async_trait]
+impl crate::ControlGate for TestGate {
+    async fn before_action(
+        &self,
+        req: crate::ControlRequest,
+        publish: &(dyn Fn() + Send + Sync),
+    ) -> Result<(), String> {
+        self.seen.lock().push(req);
+        publish();
+        if self.refuse {
+            Err("the user has taken control".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn gate_loop(env: &Env, fake: &Arc<Fake>) -> AgentLoop {
+    let slot: GateSlot = Arc::new(Mutex::new(None));
+    let gt = Arc::new(GateTool {
+        spec: ToolSpec {
+            name: "t.desk".into(),
+            description: "test desktop tool".into(),
+            input_schema: json!({"type": "object"}),
+            effect: Effect::Read,
+            category: PermissionCategory::Desktop,
+            platforms: vec![Platform::All],
+        },
+        gate: Arc::clone(&slot),
+    });
+    let registry = ToolRegistry::new();
+    registry.register(gt as Arc<dyn Tool>);
+    let lp = AgentLoop::new(
+        Arc::clone(&env.storage),
+        registry,
+        Providers::single(Arc::clone(fake) as Arc<dyn ChatProvider>),
+        cfg(Policy::full()),
+    );
+    lp.add_profile(env.bot, profile(""));
+    *slot.lock() = Some(Arc::new(crate::control::LoopControl {
+        sh: Arc::downgrade(&lp.sh),
+    }));
+    lp
+}
+
+#[tokio::test]
+async fn control_gate_sees_the_run_and_can_publish_the_request_event() {
+    let env = setup();
+    let fake = Fake::new(vec![calls(&[("c1", "t.desk", json!({}))]), text("done")]);
+    let lp = gate_loop(&env, &fake);
+    let gate = Arc::new(TestGate {
+        refuse: false,
+        seen: Mutex::new(Vec::new()),
+    });
+    lp.set_control_gate(gate.clone());
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+
+    let seen = gate.seen.lock().clone();
+    assert_eq!(seen.len(), 1);
+    assert_eq!((seen[0].run_id, seen[0].bot_id), (run, env.bot));
+    assert_eq!(
+        (seen[0].label.as_str(), seen[0].action.as_str()),
+        ("Save", "click")
+    );
+    let mut event = None;
+    while let Ok(i) = rx.try_recv() {
+        if let Event::ControlRequested(c) = i.envelope.event {
+            event = Some(c);
+        }
+    }
+    let c = event.expect("control_requested was published");
+    assert_eq!(c.request_id, seen[0].request_id);
+    assert!((c.rect.unwrap().width - 30.0).abs() < 1e-9);
+    assert!(tool_messages(&fake.request(1))[0].contains("clicked"));
+}
+
+#[tokio::test]
+async fn a_refusing_control_gate_fails_the_tool_call_with_its_message() {
+    let env = setup();
+    let fake = Fake::new(vec![calls(&[("c1", "t.desk", json!({}))]), text("done")]);
+    let lp = gate_loop(&env, &fake);
+    lp.set_control_gate(Arc::new(TestGate {
+        refuse: true,
+        seen: Mutex::new(Vec::new()),
+    }));
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(tool_messages(&fake.request(1))[0].contains("taken control"));
+}
+
+#[tokio::test]
+async fn without_a_control_gate_the_action_just_runs() {
+    let env = setup();
+    let fake = Fake::new(vec![calls(&[("c1", "t.desk", json!({}))]), text("done")]);
+    let lp = gate_loop(&env, &fake);
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(tool_messages(&fake.request(1))[0].contains("clicked"));
+}
+
+#[tokio::test]
+async fn global_policy_can_be_replaced_at_runtime() {
+    let env = setup();
+    let w = Arc::new(tool("t.write", Effect::Write, "written"));
+    let fake = Fake::new(vec![calls(&[("c1", "t.write", json!({}))]), text("done")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&w)],
+        profile(""),
+        cfg(Policy::approve_destructive()),
+    );
+    lp.set_global_policy(Policy::full());
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(
+        lp.wait(run).await.unwrap(),
+        RunState::Succeeded,
+        "no approval needed any more"
+    );
+    assert_eq!(w.count.load(Ordering::SeqCst), 1);
+}

@@ -53,10 +53,14 @@ export function ToolCard({ tool }: { tool: ToolItem }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const subagent = isSubagentTool(tool.name);
+  // The daemon measures the tool alone; without it (old logs) fall back to
+  // request-to-completion, which includes any approval wait.
   const duration =
-    tool.completedMs !== undefined
-      ? formatDuration(tool.completedMs - tool.requestedMs)
-      : null;
+    tool.durationMs !== undefined
+      ? formatDuration(tool.durationMs)
+      : tool.completedMs !== undefined
+        ? formatDuration(tool.completedMs - tool.requestedMs)
+        : null;
   const classes = [
     styles.card,
     subagent ? styles.subagent : "",
@@ -106,6 +110,12 @@ export function ToolCard({ tool }: { tool: ToolItem }) {
             <>
               <span className={styles.bodyLabel}>{t("chat.tool.result")}</span>
               <pre className={styles.code}>{tool.error}</pre>
+            </>
+          ) : null}
+          {!tool.error && tool.outputPreview ? (
+            <>
+              <span className={styles.bodyLabel}>{t("chat.tool.result")}</span>
+              <pre className={styles.code}>{tool.outputPreview}</pre>
             </>
           ) : null}
         </div>

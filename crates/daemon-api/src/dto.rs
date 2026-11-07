@@ -301,6 +301,10 @@ pub struct UsageTotals {
     pub cached_tokens: u64,
     /// Number of model calls.
     pub model_calls: u64,
+    /// Cost in USD of the model calls whose price is known; `null` when no
+    /// call has a known price.
+    #[serde(default)]
+    pub cost_usd: Option<f64>,
 }
 
 /// Usage of one bot.
@@ -322,4 +326,163 @@ pub struct UsageSummary {
     pub total: UsageTotals,
     /// Per bot.
     pub by_bot: Vec<BotUsage>,
+}
+
+// ---------------------------------------------------------- control bridge
+
+/// Who is driving the desktop, as the desktop app's state machine reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ControlMode {
+    /// No bot run is using the desktop.
+    Idle,
+    /// A bot run is driving the desktop.
+    BotDriving,
+    /// The human took the wheel: desktop actions are refused at once.
+    HumanDriving,
+    /// The run is paused: desktop actions are refused at once.
+    Paused,
+}
+
+/// `PUT /v1/control/state`: the desktop app registers as controller and
+/// reports its mode.  Send it on every state change and at least every 5 s;
+/// the registration expires after 15 s without a heartbeat.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ControlStateInput {
+    /// The app's current mode.
+    pub mode: ControlMode,
+}
+
+/// The daemon's view of the controller registration.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ControlStateDto {
+    /// Last reported mode; `null` when no app is registered (never reported,
+    /// or the heartbeat expired).
+    pub mode: Option<ControlMode>,
+    /// Milliseconds until the registration expires; `0` when not registered.
+    pub expires_in_ms: u64,
+    /// A desktop app is listening on the global event stream.
+    pub app_connected: bool,
+}
+
+/// The app's answer to a `control_requested` event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ControlVerdict {
+    /// Run the action.
+    Proceed,
+    /// Do not run it (the human stopped or took over).
+    Refuse,
+}
+
+/// `POST /v1/control/{request_id}`.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ControlDecisionInput {
+    /// Proceed or refuse.
+    pub decision: ControlVerdict,
+    /// Reason shown to the model on refuse.
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+/// Response of `POST /v1/control/{request_id}`.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ControlDecisionResponse {
+    /// The request answered.
+    pub request_id: Uuid,
+    /// The decision taken.
+    pub decision: ControlVerdict,
+}
+
+// ------------------------------------------------------------------ policy
+
+/// The global default permission policy (`GET` / `PUT /v1/policy`).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PolicyDto {
+    /// Name of the preset the policy equals (`read-only`,
+    /// `approve-destructive`, `read-and-draft`, `full`); `null` = custom.
+    pub preset: Option<String>,
+    /// Level per category: `deny`, `ask`, `allow` or `allow_with_limits`.
+    pub categories: BTreeMap<String, String>,
+}
+
+/// `PUT /v1/policy`.  Start from `preset` (or, without it, from the current
+/// policy) and apply the `categories` overrides on top.
+#[derive(Debug, Default, Serialize, Deserialize, ToSchema)]
+pub struct PolicyInput {
+    /// `read-only`, `approve-destructive`, `read-and-draft` or `full`.
+    #[serde(default)]
+    pub preset: Option<String>,
+    /// Per-category level: `deny`, `ask` or `allow`.
+    #[serde(default)]
+    pub categories: BTreeMap<String, String>,
+}
+
+// --------------------------------------------------------------- providers
+
+/// `GET /v1/providers`.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ProvidersDto {
+    /// Id of the loop's default provider.
+    pub default_provider: Option<String>,
+    /// Ids of the providers the running loop can use.
+    pub active: Vec<String>,
+    /// Providers from the user's `providers.toml`.
+    pub configured: Vec<ConfiguredProviderDto>,
+    /// Entries of the built-in provider catalog.
+    pub catalog: Vec<CatalogProviderDto>,
+}
+
+/// A configured provider (never carries a key).
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ConfiguredProviderDto {
+    /// Provider id.
+    pub id: String,
+    /// May be used.
+    pub enabled: bool,
+    /// Is the configured default.
+    pub is_default: bool,
+    /// Chosen default model (without the provider prefix).
+    pub default_model: Option<String>,
+    /// A key is stored for it.
+    pub has_key: bool,
+    /// Not from the catalog: defined by the user.
+    pub custom: bool,
+    /// Loaded in the running loop (a restart or `reload` picks up changes).
+    pub active: bool,
+    /// Model ids the provider reports (empty without a listing).
+    pub models: Vec<String>,
+    /// Why the model list could not be fetched.
+    pub models_error: Option<String>,
+}
+
+/// A catalog entry.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct CatalogProviderDto {
+    /// Catalog id.
+    pub id: String,
+    /// `openai_compatible`, `anthropic`, `gemini` or `other:<name>`.
+    pub kind: String,
+    /// Base URL.
+    pub base_url: String,
+    /// `api_key_env` or `none`.
+    pub auth: String,
+    /// Environment variable of the key, for `api_key_env`.
+    pub key_env: Option<String>,
+    /// Supports tool calls.
+    pub tools: bool,
+    /// Supports image input.
+    pub vision: bool,
+    /// Already in `providers.toml`.
+    pub configured: bool,
+}
+
+/// `POST /v1/providers/reload`.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ReloadResponse {
+    /// Id of the new default provider.
+    pub default_provider: Option<String>,
+    /// Ids now loaded.
+    pub active: Vec<String>,
 }

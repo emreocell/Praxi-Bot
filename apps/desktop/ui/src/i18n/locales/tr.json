@@ -80,7 +80,7 @@
     },
     "providers": {
       "title": "Model sağlayıcıları",
-      "description": "API anahtarları işletim sisteminin anahtar zincirinde saklanır. Daemon sağlayıcıları başlarken okur.",
+      "description": "API anahtarları işletim sistemi anahtarlığında saklanır. Değişiklikleri arka plan servisi yeniden başlatmadan alır.",
       "nativeOnly": "Sağlayıcı yönetimi masaüstü uygulamasında kullanılabilir.",
       "none": "Henüz sağlayıcı yapılandırılmadı.",
       "default": "Varsayılan",
@@ -101,18 +101,26 @@
       "addAndTest": "Ekle ve sına",
       "restartHint": "Değişikliğin geçerli olması için daemon’u yeniden başlat.",
       "restartManual": "Değişikliğin geçerli olması için daemon’u kendin yeniden başlat (bu uygulama başlatmadı).",
-      "restart": "Daemon’u yeniden başlat"
+      "restart": "Daemon’u yeniden başlat",
+      "notLoaded": "Henüz yüklenmedi",
+      "modelCount": "{{count}} model",
+      "modelCount_other": "{{count}} model"
     },
     "permissions": {
       "title": "İzinler",
       "description": "Her botun şu an neler yapabileceği; onay kartlarından verdiğin “Her zaman izin ver” kuralları dahil.",
-      "workspaceDefault": "Kendi politikası olmayan botlar için çalışma alanı varsayılanı “Yıkıcı işlemlerde onay”dır.",
       "noBots": "Henüz bot yok.",
       "noGrants": "“Her zaman izin ver” kuralı yok.",
       "viaGrant": "“Her zaman izin ver” kuralı sayesinde izinli",
       "grantCategory": "Her {{name}} aracına her zaman izin ver",
       "grantTool": "{{name}} için her zaman izin ver",
-      "revoke": "Geri al"
+      "revoke": "Geri al",
+      "workspace": {
+        "title": "Çalışma alanı varsayılanı",
+        "description": "Bir kategori için kendi kuralı olmayan her bota uygulanır. Değişiklik bir sonraki araç çağrısında geçerli olur.",
+        "preset": "Hazır ayar",
+        "saved": "Kaydedildi."
+      }
     }
   },
   "overlay": {
@@ -345,7 +353,8 @@
     "cached": "Önbellekte",
     "total": "Toplam",
     "deletedBot": "Silinmiş bot",
-    "costNote": "Maliyet henüz daemon tarafından bildirilmiyor; yalnızca token sayıları gösterilir."
+    "costNote": "Maliyet yalnızca fiyatı bilinen modeller için gösterilir; “—” bilinmiyor demektir.",
+    "cost": "Maliyet"
   },
   "needs": {
     "title": "Senden bekleyenler",
@@ -356,5 +365,8 @@
       "question": "Soru"
     },
     "open": "Sohbeti aç"
+  },
+  "control": {
+    "starting": "Çalışıyor…"
   }
 }
