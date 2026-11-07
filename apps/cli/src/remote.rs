@@ -192,6 +192,14 @@ fn render(ev: &Event, out: &mut dyn Write) -> std::io::Result<()> {
             );
             Ok(())
         }
+        Event::QuestionAsked(q) => {
+            eprintln!("\n[question] {}", q.question);
+            for (i, o) in q.options.iter().enumerate() {
+                eprintln!("  {}. {o}", i + 1);
+            }
+            eprintln!("  answer with: bot answer {} \"<text>\"", q.call_id);
+            Ok(())
+        }
         Event::ToolCallDenied(_) => {
             eprintln!("\n[tool call denied]");
             Ok(())
@@ -239,6 +247,101 @@ pub async fn approve(
         "{} {call_id}",
         if deny { "denied" } else { "approved" }
     )?;
+    Ok(())
+}
+
+/// `bot answer <call-id> "<text>"`.
+///
+/// # Errors
+/// No such pending question (exit 5), daemon errors.
+pub async fn answer(
+    c: &Client,
+    call_id: &str,
+    text: &str,
+    json_out: bool,
+    out: &mut dyn Write,
+) -> Result<()> {
+    let r = c
+        .request(
+            Method::POST,
+            &format!("/v1/questions/{call_id}"),
+            Some(json!({ "answer": text })),
+        )
+        .await?;
+    if json_out {
+        return print_json(out, &r);
+    }
+    writeln!(out, "answered {call_id}")?;
+    Ok(())
+}
+
+/// `bot grants list <bot-id>`.
+///
+/// # Errors
+/// Unknown bot (exit 5), daemon errors.
+pub async fn grants_list(
+    c: &Client,
+    bot_id: &str,
+    json_out: bool,
+    out: &mut dyn Write,
+) -> Result<()> {
+    let grants = c
+        .request(Method::GET, &format!("/v1/bots/{bot_id}/grants"), None)
+        .await?;
+    if json_out {
+        return print_json(out, &grants);
+    }
+    let list = grants.as_array().cloned().unwrap_or_default();
+    if list.is_empty() {
+        writeln!(out, "(no grants)")?;
+    }
+    for g in list {
+        writeln!(
+            out,
+            "{}  {}",
+            g["target"]["kind"].as_str().unwrap_or("?"),
+            g["target"]["name"].as_str().unwrap_or("?"),
+        )?;
+    }
+    Ok(())
+}
+
+/// Request body target of `bot grants revoke`: exactly one of tool / category.
+///
+/// # Errors
+/// Neither or both given (exit 6).
+pub fn grant_target_body(tool: Option<&str>, category: Option<&str>) -> Result<Value> {
+    match (tool, category) {
+        (Some(name), None) => Ok(json!({ "kind": "tool", "name": name })),
+        (None, Some(name)) => Ok(json!({ "kind": "category", "name": name })),
+        _ => Err(fail(
+            exit::REJECTED,
+            "give exactly one of --tool <name> or --category <name>",
+        )),
+    }
+}
+
+/// `bot grants revoke <bot-id> --tool|--category <name>`.
+///
+/// # Errors
+/// Unknown bot or grant (exit 5), daemon errors.
+pub async fn grants_revoke(
+    c: &Client,
+    bot_id: &str,
+    target: Value,
+    json_out: bool,
+    out: &mut dyn Write,
+) -> Result<()> {
+    c.request(
+        Method::DELETE,
+        &format!("/v1/bots/{bot_id}/grants"),
+        Some(json!({ "target": target })),
+    )
+    .await?;
+    if json_out {
+        return print_json(out, &json!({ "revoked": target }));
+    }
+    writeln!(out, "revoked")?;
     Ok(())
 }
 
@@ -361,6 +464,159 @@ mod tests {
 
     fn uuid_like() -> String {
         "01900000-0000-7000-8000-000000000000".to_owned()
+    }
+
+    async fn setup_bot_and_chat(c: &Client, dir: &std::path::Path) -> (String, String) {
+        let file = dir.join("bot.toml");
+        std::fs::write(&file, PROFILE).unwrap();
+        let mut out = Vec::new();
+        bots_add(c, &file, true, &mut out).await.unwrap();
+        let bot = serde_json::from_slice::<Value>(&out).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let chat = c
+            .request(Method::POST, "/v1/chats", Some(json!({ "bot_id": bot })))
+            .await
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        (bot, chat)
+    }
+
+    async fn send_text(c: &Client, chat: &str, text: &str) -> String {
+        let sent = c
+            .request(
+                Method::POST,
+                &format!("/v1/chats/{chat}/messages"),
+                Some(json!({ "text": text, "mode": "queue" })),
+            )
+            .await
+            .unwrap();
+        sent["run_id"].as_str().unwrap().to_owned()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[allow(clippy::too_many_lines)]
+    async fn answer_and_grants_commands_against_a_live_daemon() {
+        let (dir, url) = daemon().await;
+        let c = Client::new(&url, TOKEN.to_owned());
+        let (bot, chat) = setup_bot_and_chat(&c, dir.path()).await;
+        let mut out = Vec::new();
+
+        // An approval with the new scope creates a category grant.
+        let target = dir.path().join("x.txt");
+        let msg = format!(
+            "call:fs_write {}",
+            json!({ "path": target, "content": "hi" })
+        );
+        let run = send_text(&c, &chat, &msg).await;
+        let call_id = loop {
+            let p = c.request(Method::GET, "/v1/approvals", None).await.unwrap();
+            if let Some(a) = p.as_array().and_then(|a| a.first()) {
+                break a["call_id"].as_str().unwrap().to_owned();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        };
+        approve(
+            &c,
+            &call_id,
+            "always_category",
+            false,
+            None,
+            false,
+            &mut out,
+        )
+        .await
+        .unwrap();
+        c.follow_run(&run, |_, _| {}).await.unwrap();
+
+        out.clear();
+        grants_list(&c, &bot, false, &mut out).await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&out), "category  fs\n");
+        out.clear();
+        grants_list(&c, &bot, true, &mut out).await.unwrap();
+        let g: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(g[0]["target"], json!({"kind": "category", "name": "fs"}));
+
+        // Revoke: validation, success, repeat, unknown bot.
+        assert_eq!(
+            code_of(&*grant_target_body(None, None).unwrap_err()),
+            exit::REJECTED
+        );
+        assert_eq!(
+            code_of(&*grant_target_body(Some("t"), Some("fs")).unwrap_err()),
+            exit::REJECTED
+        );
+        let by_tool = grant_target_body(Some("fs_write"), None).unwrap();
+        let err = grants_revoke(&c, &bot, by_tool, false, &mut out)
+            .await
+            .unwrap_err();
+        assert_eq!(code_of(&*err), exit::NOT_FOUND);
+        let by_cat = grant_target_body(None, Some("fs")).unwrap();
+        out.clear();
+        grants_revoke(&c, &bot, by_cat.clone(), false, &mut out)
+            .await
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out), "revoked\n");
+        let err = grants_revoke(&c, &bot, by_cat.clone(), false, &mut out)
+            .await
+            .unwrap_err();
+        assert_eq!(code_of(&*err), exit::NOT_FOUND);
+        let err = grants_revoke(&c, &uuid_like(), by_cat, false, &mut out)
+            .await
+            .unwrap_err();
+        assert_eq!(code_of(&*err), exit::NOT_FOUND);
+        out.clear();
+        grants_list(&c, &bot, false, &mut out).await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&out), "(no grants)\n");
+        let bad = grant_target_body(None, Some("nonsense")).unwrap();
+        let err = grants_revoke(&c, &bot, bad, false, &mut out)
+            .await
+            .unwrap_err();
+        assert_eq!(code_of(&*err), exit::REJECTED);
+
+        // A question card is answered with `bot answer`.
+        let run = send_text(
+            &c,
+            &chat,
+            r#"call:ask_user {"question":"Which colour?","options":["red","blue"]}"#,
+        )
+        .await;
+        let id: uuid::Uuid = run.parse().unwrap();
+        let question = loop {
+            let log = storage::read_event_log(dir.path(), protocol::RunId(id)).unwrap();
+            if let Some(q) = log.iter().find_map(|e| match &e.event {
+                Event::QuestionAsked(q) => Some(q.call_id.to_string()),
+                _ => None,
+            }) {
+                break q;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        };
+        out.clear();
+        answer(&c, &question, "blue", false, &mut out)
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&out),
+            format!("answered {question}\n")
+        );
+        c.follow_run(&run, |_, _| {}).await.unwrap();
+        let msgs = c
+            .request(Method::GET, &format!("/v1/chats/{chat}/messages"), None)
+            .await
+            .unwrap();
+        let last = msgs.as_array().unwrap().last().unwrap()["content"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(last.contains("The user answered: blue"), "{last}");
+        let err = answer(&c, &question, "again", false, &mut out)
+            .await
+            .unwrap_err();
+        assert_eq!(code_of(&*err), exit::NOT_FOUND);
     }
 
     #[tokio::test]

@@ -1,6 +1,8 @@
 //! Request / response bodies of the `/v1` routes.  Ids are UUID strings;
 //! timestamps are Unix epoch milliseconds.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
@@ -28,6 +30,79 @@ pub struct BotDto {
     pub config: Value,
     /// Creation time.
     pub created_at_ms: i64,
+    /// The truth about what the bot may do: its stored policy merged with its
+    /// persisted "always allow" grants.  Only present in `GET /v1/bots/{id}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_policy: Option<EffectivePolicyDto>,
+}
+
+/// A bot's permission picture (`GET /v1/bots/{id}`).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct EffectivePolicyDto {
+    /// The profile's own policy as JSON; `null` = the workspace policy applies.
+    pub policy: Option<Value>,
+    /// What a human-initiated call of each category resolves to, grants
+    /// included (`meta` is always allowed and omitted).
+    pub categories: BTreeMap<String, CategoryDecisionDto>,
+    /// The persisted "always allow" rules.  Tool-level grants only widen that
+    /// one tool and are not reflected in `categories`.
+    pub grants: Vec<GrantDto>,
+}
+
+/// Effective decision of one permission category.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CategoryDecisionDto {
+    /// `allow`, `ask` or `deny`.
+    pub decision: String,
+    /// `true` when `allow` holds only because of a category grant.
+    pub via_grant: bool,
+}
+
+/// What an "always allow" grant covers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum GrantTargetDto {
+    /// One tool, by name.
+    Tool {
+        /// Tool name.
+        name: String,
+    },
+    /// Every tool of a permission category.
+    Category {
+        /// `fs`, `shell`, `desktop`, `browser`, `accounts`, `messaging`,
+        /// `money`, `system`, `remote` or `script`.
+        name: String,
+    },
+}
+
+/// A persisted "always allow" rule of a bot.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GrantDto {
+    /// What it covers.
+    pub target: GrantTargetDto,
+    /// When it was granted.
+    pub granted_at_ms: i64,
+}
+
+/// `DELETE /v1/bots/{id}/grants`.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct RevokeGrant {
+    /// The rule to remove.
+    pub target: GrantTargetDto,
+}
+
+/// `POST /v1/questions/{call_id}`.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct AnswerQuestion {
+    /// The user's answer (free text, or one of the offered options).
+    pub answer: String,
+}
+
+/// Response of an answered question.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct AnswerResponse {
+    /// Tool call id of the question card.
+    pub call_id: Uuid,
 }
 
 /// Create (`POST /v1/bots`) or replace (`PUT /v1/bots/{id}`) a bot.  Exactly
@@ -165,8 +240,11 @@ pub enum Scope {
     Once,
     /// This tool for the rest of the chat.
     ThisChat,
-    /// This tool for this bot, persisted.
+    /// This tool for this bot, persisted (a grant, see `/v1/bots/{id}/grants`).
     Always,
+    /// The tool's whole permission category for this bot, persisted.  Money and
+    /// never-list floors still ask.
+    AlwaysCategory,
 }
 
 /// `POST /v1/approvals/{call_id}`.

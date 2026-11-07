@@ -8,7 +8,9 @@
 //! `127.0.0.1`; on top of that every request must carry a loopback `Host`
 //! (DNS-rebinding protection), a browser `Origin` must be one of the
 //! configured desktop-app origins, and everything except `GET /v1/health`
-//! needs `Authorization: Bearer <per-install token>` (see [`auth`]).
+//! needs `Authorization: Bearer <per-install token>` (see [`auth`]).  The one
+//! exception is `GET /v1/events`, which also accepts `?token=<token>` for
+//! browser `EventSource` clients (Host / Origin still apply).
 
 pub mod auth;
 pub mod dto;
@@ -25,7 +27,7 @@ mod tests;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use agent_core::{AgentLoop, BotProfile};
 use axum::Router;
@@ -56,7 +58,13 @@ pub struct DaemonConfig {
     pub token: String,
     /// Browser origins that may call the API (exact match).
     pub allowed_origins: Vec<String>,
+    /// How long [`serve`] lets running tool steps finish on shutdown before
+    /// interrupting them (see [`agent_core::AgentLoop::shutdown`]).
+    pub shutdown_grace: Duration,
 }
+
+/// Default [`DaemonConfig::shutdown_grace`].
+pub const DEFAULT_SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 
 impl DaemonConfig {
     /// Config with the default desktop origins.
@@ -68,6 +76,7 @@ impl DaemonConfig {
                 .iter()
                 .map(ToString::to_string)
                 .collect(),
+            shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
         }
     }
 }
@@ -123,6 +132,9 @@ impl AppState {
     pub(crate) fn storage(&self) -> &Storage {
         &self.0.storage
     }
+    pub(crate) fn storage_arc(&self) -> Arc<Storage> {
+        Arc::clone(&self.0.storage)
+    }
     pub(crate) fn user_id(&self) -> UserId {
         self.0.user_id
     }
@@ -169,9 +181,20 @@ impl AppState {
         }
     }
 
-    /// Checkpoint every run that is still running (see [`serve`]).
-    fn checkpoint_runs(&self) -> Vec<RunId> {
-        self.0.agent.recover().unwrap_or_default()
+    /// Shut the loop down (see [`serve`]): live runs end `Paused`, then any
+    /// run a crash left `Running` / `WaitingApproval` is checkpointed too.
+    async fn checkpoint_runs(&self) -> Vec<RunId> {
+        let mut ids = self.0.agent.shutdown(self.0.cfg.shutdown_grace).await;
+        let agent = self.0.agent.clone();
+        let rest = tokio::task::spawn_blocking(move || agent.recover().unwrap_or_default())
+            .await
+            .unwrap_or_default();
+        for r in rest {
+            if !ids.contains(&r) {
+                ids.push(r);
+            }
+        }
+        ids
     }
 }
 
@@ -183,6 +206,10 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/openapi.json", get(openapi::serve_openapi))
         .route("/v1/bots", get(r::list_bots).post(r::create_bot))
         .route(
+            "/v1/bots/{id}/grants",
+            get(r::list_grants).delete(r::revoke_grant),
+        )
+        .route(
             "/v1/bots/{id}",
             get(r::get_bot).put(r::update_bot).delete(r::delete_bot),
         )
@@ -193,6 +220,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/v1/approvals", get(r::list_approvals))
         .route("/v1/approvals/{call_id}", post(r::decide_approval))
+        .route("/v1/questions/{call_id}", post(r::answer_question))
         .route("/v1/runs", get(r::list_runs))
         .route("/v1/runs/{id}", get(r::get_run))
         .route("/v1/runs/{id}/cancel", post(r::cancel_run))
@@ -209,10 +237,12 @@ pub fn router(state: AppState) -> Router {
 /// Serve the API on `listener` until `shutdown` completes.
 ///
 /// Graceful shutdown: new connections stop, open SSE streams are closed, and
-/// then every run that is still `Running` / `WaitingApproval` is checkpointed
-/// (its unfinished steps are marked interrupted and the run becomes `Paused`,
-/// resumable with `POST /v1/runs/{id}/resume` after the next start).  The ids
-/// of the checkpointed runs are returned.
+/// then [`agent_core::AgentLoop::shutdown`] runs: no new turns, model streams
+/// are cancelled, running tool steps get [`DaemonConfig::shutdown_grace`] to
+/// finish, and every live run ends `Paused` (unfinished steps marked
+/// interrupted, dangling approvals expired), resumable with
+/// `POST /v1/runs/{id}/resume` after the next start.  Runs a crash left behind
+/// are checkpointed as well.  The ids of the paused runs are returned.
 ///
 /// The caller must bind `listener` to a loopback address.
 ///
@@ -230,8 +260,5 @@ pub async fn serve(
             cancel.cancel();
         })
         .await?;
-    let st = state.clone();
-    Ok(tokio::task::spawn_blocking(move || st.checkpoint_runs())
-        .await
-        .unwrap_or_default())
+    Ok(state.checkpoint_runs().await)
 }

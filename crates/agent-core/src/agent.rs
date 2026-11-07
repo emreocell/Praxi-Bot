@@ -1,15 +1,19 @@
 //! The public [`AgentLoop`] handle.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Weak};
+use std::time::Duration;
 
-use agent_router::ToolSurface;
+use agent_router::{ToolSurface, ToolVisibility};
 use builtin_tools::BuiltinConfig;
 use futures::future::BoxFuture;
 use parking_lot::{Mutex, RwLock};
 use permission_engine::PermissionResolver;
 use protocol::event::{RunError, RunFinished, RunStarted};
-use protocol::{BotId, ChatId, Event, InitiatorKind, RunId, ToolCallId, UserId};
+use protocol::{
+    BotId, ChatId, Event, InitiatorKind, PermissionCategory, RunId, ToolCallId, UserId,
+};
 use storage::{Message as DbMessage, Storage, now_ms};
 use task_runtime::{RunState, Runtime, RuntimeError, StepStatus};
 use tokio::sync::broadcast;
@@ -22,8 +26,9 @@ use crate::exec::TurnExecutor;
 use crate::history::{status_of, step_output};
 use crate::profile::BotProfile;
 use crate::shared::{
-    ApprovalScope, Delivery, Grant, GrantTarget, Grants, LoopError, MessageMode, ModelOut, Pending,
-    Providers, STEP_MODEL, Shared, StreamItem, Verdict, initiator_of, kind_for,
+    ApprovalScope, CategoryDecision, Delivery, EffectivePolicy, Grant, GrantTarget, Grants,
+    LoopError, MessageMode, ModelOut, Pending, Providers, STEP_MODEL, STEP_TOOLS, Shared,
+    StreamItem, Verdict, initiator_of, kind_for,
 };
 use crate::{AUDIT_GRANT_ALWAYS, AUDIT_GRANT_REVOKED};
 
@@ -56,23 +61,38 @@ impl AgentLoop {
         cfg: LoopConfig,
     ) -> Self {
         let (events, _) = broadcast::channel(4096);
-        let surface = ToolSurface::new(tools.clone(), cfg.discovery_threshold);
-        let sh = Arc::new(Shared {
-            storage: Arc::clone(&storage),
-            surface,
-            tools,
-            providers,
-            resolver: PermissionResolver::new(),
-            cfg,
-            profiles: RwLock::new(HashMap::new()),
-            events,
-            runs: Mutex::new(HashMap::new()),
-            pending: Mutex::new(HashMap::new()),
-            grants: Mutex::new(load_grants(&storage)),
-            active: Mutex::new(HashMap::new()),
-            queued: Mutex::new(HashMap::new()),
-            tasks: Mutex::new(HashMap::new()),
-            bg: Mutex::new(Vec::new()),
+        let first_gseq = storage.last_gseq().unwrap_or(0);
+        // The discovery meta-tools only reveal what the calling bot may see.
+        let sh = Arc::new_cyclic(|weak: &Weak<Shared>| {
+            let weak = weak.clone();
+            let visibility: ToolVisibility = Arc::new(move |ctx, spec| {
+                weak.upgrade()
+                    .is_some_and(|sh| sh.tool_visible_to_run(&ctx.run_id, spec))
+            });
+            Shared {
+                storage: Arc::clone(&storage),
+                surface: ToolSurface::with_visibility(
+                    tools.clone(),
+                    cfg.discovery_threshold,
+                    visibility,
+                ),
+                tools,
+                providers,
+                resolver: PermissionResolver::new(),
+                cfg,
+                profiles: RwLock::new(HashMap::new()),
+                events,
+                runs: Mutex::new(HashMap::new()),
+                pending: Mutex::new(HashMap::new()),
+                grants: Mutex::new(load_grants(&storage)),
+                active: Mutex::new(HashMap::new()),
+                queued: Mutex::new(HashMap::new()),
+                tasks: Mutex::new(HashMap::new()),
+                bg: Mutex::new(Vec::new()),
+                gseq: AtomicU64::new(first_gseq),
+                emit_gate: Mutex::new(()),
+                shutting_down: AtomicBool::new(false),
+            }
         });
         let rt = Arc::new(Runtime::new(
             storage,
@@ -137,6 +157,9 @@ impl AgentLoop {
         user_message: &str,
         initiator: InitiatorKind,
     ) -> Result<RunId> {
+        if self.sh.shutting_down.load(Ordering::SeqCst) {
+            return Err(LoopError::ShuttingDown);
+        }
         let chat = self
             .sh
             .storage
@@ -366,6 +389,9 @@ impl AgentLoop {
     /// # Errors
     /// Fails if the run does not exist, is not `Paused`, or its chat is busy.
     pub fn resume(&self, run_id: RunId) -> Result<()> {
+        if self.sh.shutting_down.load(Ordering::SeqCst) {
+            return Err(LoopError::ShuttingDown);
+        }
         let run = self
             .sh
             .storage
@@ -388,6 +414,144 @@ impl AgentLoop {
         }
         self.spawn(run_id, Start::Resume);
         Ok(())
+    }
+
+    /// Graceful shutdown (a restart must lose nothing).
+    ///
+    /// 1. Stops accepting new turns / resumes ([`LoopError::ShuttingDown`]).
+    /// 2. Cancels in-flight model calls and runs parked on an approval or
+    ///    question; their step is marked `Interrupted`.
+    /// 3. Lets running *tool* steps finish for up to `grace`, then interrupts
+    ///    what is left (an interrupted tool is never replayed on resume).
+    /// 4. Every run that was live ends `Paused` (resumable after the next
+    ///    start; dangling approvals expire), not `Cancelled`.
+    /// 5. Flushes background memory tasks (bounded by `grace`, at least 1 s).
+    ///
+    /// Queued (not yet started) follow-up messages are in-memory only and are
+    /// dropped.  Returns the runs that were paused.  Call
+    /// [`Self::recover`] afterwards to checkpoint anything a crash left behind.
+    pub async fn shutdown(&self, grace: Duration) -> Vec<RunId> {
+        self.sh.shutting_down.store(true, Ordering::SeqCst);
+        let deadline = tokio::time::Instant::now() + grace;
+        // Hard stop for the unwinding of interrupted runs.
+        let hard = deadline + Duration::from_secs(5);
+        let mut seen: HashSet<RunId> = HashSet::new();
+        loop {
+            let active = self.rt.active_runs();
+            if active.is_empty() {
+                break;
+            }
+            let now = tokio::time::Instant::now();
+            if now >= hard {
+                break;
+            }
+            for run in active {
+                seen.insert(run);
+                // A finishing tool step is the only thing worth waiting for.
+                let interrupt = now >= deadline || !self.tool_step_in_flight(run);
+                self.rt.request_pause(run, interrupt);
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        // Let the drive tasks finish their bookkeeping (`conclude`).
+        let handles: Vec<_> = self.sh.tasks.lock().drain().map(|(_, h)| h).collect();
+        for h in handles {
+            let left = hard.saturating_duration_since(tokio::time::Instant::now());
+            let _ = tokio::time::timeout(left.max(Duration::from_millis(200)), h).await;
+        }
+        let mut paused = Vec::new();
+        for run in seen {
+            if self.rt.state(run).ok() != Some(RunState::Paused) {
+                continue;
+            }
+            self.expire_approvals(run);
+            if let Ok(Some(r)) = self.sh.storage.get_run(run) {
+                let _ = self.sh.storage.append_audit(
+                    r.user_id,
+                    Some(run),
+                    "system",
+                    "run.paused_for_shutdown",
+                    &serde_json::json!({}),
+                );
+            }
+            paused.push(run);
+        }
+        let _ =
+            tokio::time::timeout(grace.max(Duration::from_secs(1)), self.flush_background()).await;
+        paused
+    }
+
+    /// Whether the run's newest step is a tool step that is still executing
+    /// (and the run is not parked waiting for the user).
+    fn tool_step_in_flight(&self, run: RunId) -> bool {
+        let st = &self.sh.storage;
+        if st
+            .get_run(run)
+            .ok()
+            .flatten()
+            .is_some_and(|r| r.state == RunState::WaitingApproval.as_str())
+        {
+            return false;
+        }
+        st.list_steps(run)
+            .ok()
+            .and_then(|s| s.last().cloned())
+            .is_some_and(|s| s.name == STEP_TOOLS && s.status == StepStatus::Intent.as_str())
+    }
+
+    fn expire_approvals(&self, run: RunId) {
+        let st = &self.sh.storage;
+        for a in st.list_approvals(run).unwrap_or_default() {
+            if a.decision.is_none() {
+                let _ = st.decide_approval(a.id, "expired");
+            }
+        }
+    }
+
+    /// The bot's permission picture: its stored policy merged with its
+    /// persisted grants, per category (what a human-initiated call resolves to).
+    ///
+    /// # Errors
+    /// [`LoopError::NotFound`] / [`LoopError::Profile`] when the bot or its
+    /// profile is unusable.
+    pub fn effective_policy(&self, bot_id: BotId) -> Result<EffectivePolicy> {
+        let profile = self.sh.profile_for(bot_id).map_err(|e| {
+            if e.contains("not found") {
+                LoopError::NotFound(format!("bot {bot_id}"))
+            } else {
+                LoopError::Profile(e)
+            }
+        })?;
+        let policy = profile.policy();
+        let categories: BTreeMap<PermissionCategory, CategoryDecision> = [
+            PermissionCategory::Fs,
+            PermissionCategory::Shell,
+            PermissionCategory::Desktop,
+            PermissionCategory::Browser,
+            PermissionCategory::Accounts,
+            PermissionCategory::Messaging,
+            PermissionCategory::Money,
+            PermissionCategory::System,
+            PermissionCategory::Remote,
+            PermissionCategory::Script,
+        ]
+        .into_iter()
+        .map(|c| {
+            let (decision, via_grant) = self.sh.effective_category(bot_id, policy.as_ref(), c);
+            (
+                c,
+                CategoryDecision {
+                    decision,
+                    via_grant,
+                },
+            )
+        })
+        .collect();
+        Ok(EffectivePolicy {
+            policy,
+            categories,
+            grants: self.list_grants(bot_id),
+        })
     }
 
     /// Wait until the background task of `run_id` (started by this handle) has
@@ -466,6 +630,31 @@ impl AgentLoop {
     fn conclude(&self, run_id: RunId, res: &std::result::Result<RunState, RuntimeError>) {
         let run = self.sh.storage.get_run(run_id).ok().flatten();
         let ctx = self.ctx_of(run_id);
+        if matches!(res, Ok(RunState::Paused)) {
+            // Paused by `shutdown`: no `run_finished` (the run is resumable and
+            // a finished marker in its log would end later followers), no
+            // queued follow-up turn.
+            if let Some(ctx) = &ctx {
+                self.sh.emit(
+                    ctx,
+                    Event::Error(RunError {
+                        run_id,
+                        message: "run paused: the daemon is shutting down; resume it after the \
+                                  next start"
+                            .into(),
+                        recoverable: true,
+                    }),
+                );
+            }
+            self.sh.runs.lock().remove(&run_id);
+            if let Some(chat_id) = run.as_ref().and_then(|r| r.chat_id) {
+                let mut active = self.sh.active.lock();
+                if active.get(&chat_id) == Some(&run_id) {
+                    active.remove(&chat_id);
+                }
+            }
+            return;
+        }
         let error: Option<String> = match res {
             Ok(RunState::Succeeded) => None,
             Ok(RunState::Failed) => Some(

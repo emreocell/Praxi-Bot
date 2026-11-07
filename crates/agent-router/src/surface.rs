@@ -36,14 +36,26 @@ fn is_meta(name: &str) -> bool {
     matches!(name, FIND_TOOL | GET_TOOL_DETAILS | USE_TOOL)
 }
 
+/// Per-call visibility of a tool: `(call context, tool spec) -> visible`.
+///
+/// The discovery meta-tools consult it so `find_tool` / `get_tool_details` /
+/// `use_tool` only reveal tools the *calling bot* may see (the context carries
+/// the run id the loop resolves the bot from).
+pub type ToolVisibility = Arc<dyn Fn(&ToolContext, &ToolSpec) -> bool + Send + Sync>;
+
 /// Shared state of the three meta-tools: the registry and a cached BM25 index
 /// that is rebuilt only when [`ToolRegistry::generation`] changes.
 struct Discovery {
     registry: ToolRegistry,
     cache: Mutex<Option<(u64, Arc<ToolIndex>)>>,
+    visibility: Option<ToolVisibility>,
 }
 
 impl Discovery {
+    fn visible(&self, ctx: &ToolContext, spec: &ToolSpec) -> bool {
+        self.visibility.as_ref().is_none_or(|f| f(ctx, spec))
+    }
+
     fn index(&self) -> Arc<ToolIndex> {
         let generation = self.registry.generation();
         let mut cache = self.cache.lock();
@@ -93,7 +105,7 @@ impl Tool for FindTool {
         &self.spec
     }
 
-    async fn call(&self, _ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
+    async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
         let query = str_arg(&input, "query")?;
         let k = input
             .get("k")
@@ -107,11 +119,19 @@ impl Tool for FindTool {
                     .unwrap_or(MAX_FIND_K)
                     .clamp(1, MAX_FIND_K)
             });
-        let hits: Vec<Value> = self
-            .discovery
-            .index()
-            .search(query, k)
+        let index = self.discovery.index();
+        // The index is shared by all bots: rank everything, then drop what this
+        // caller may not see, then cut to `k`.
+        let hits: Vec<Value> = index
+            .search(query, index.len())
             .into_iter()
+            .filter(|h| {
+                self.discovery
+                    .registry
+                    .get(&h.name)
+                    .is_some_and(|t| self.discovery.visible(ctx, t.spec()))
+            })
+            .take(k)
             .map(|h| json!({ "name": h.name, "description": h.description, "score": h.score }))
             .collect();
         Ok(ToolOutput {
@@ -134,9 +154,9 @@ impl Tool for GetToolDetails {
         &self.spec
     }
 
-    async fn call(&self, _ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
+    async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
         let name = str_arg(&input, "name")?;
-        let target = lookup(&self.discovery.registry, name)?;
+        let target = lookup(&self.discovery, ctx, name)?;
         let spec = target.spec();
         Ok(ToolOutput {
             content: vec![ContentPart::Json {
@@ -165,24 +185,33 @@ impl Tool for UseTool {
 
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
         let name = str_arg(&input, "name")?;
-        let target = lookup(&self.discovery.registry, name)?;
+        let target = lookup(&self.discovery, ctx, name)?;
         let arguments = input.get("input").cloned().unwrap_or_else(|| json!({}));
         target.call(ctx, arguments).await
     }
 }
 
-/// Resolve a non-meta tool by name for the discovery meta-tools.
-fn lookup(registry: &ToolRegistry, name: &str) -> Result<Arc<dyn Tool>, ToolError> {
+/// Resolve a non-meta tool by name for the discovery meta-tools.  A tool the
+/// caller may not see is reported exactly like a missing one.
+fn lookup(
+    discovery: &Discovery,
+    ctx: &ToolContext,
+    name: &str,
+) -> Result<Arc<dyn Tool>, ToolError> {
     if is_meta(name) {
         return Err(ToolError::InvalidInput(format!(
             "`{name}` is a discovery tool; use find_tool to locate a real tool"
         )));
     }
-    registry.get(name).ok_or_else(|| {
-        ToolError::InvalidInput(format!(
-            "unknown tool `{name}`; use find_tool to search for the right name"
-        ))
-    })
+    discovery
+        .registry
+        .get(name)
+        .filter(|t| discovery.visible(ctx, t.spec()))
+        .ok_or_else(|| {
+            ToolError::InvalidInput(format!(
+                "unknown tool `{name}`; use find_tool to search for the right name"
+            ))
+        })
 }
 
 /// How tools are currently presented to the model.
@@ -213,9 +242,25 @@ impl ToolSurface {
     /// registry holds **more than** `threshold` tools.
     #[must_use]
     pub fn new(registry: ToolRegistry, threshold: usize) -> Self {
+        Self::build(registry, threshold, None)
+    }
+
+    /// Like [`Self::new`], but the discovery meta-tools only reveal / run tools
+    /// for which `visibility` returns `true` for the calling context.
+    #[must_use]
+    pub fn with_visibility(
+        registry: ToolRegistry,
+        threshold: usize,
+        visibility: ToolVisibility,
+    ) -> Self {
+        Self::build(registry, threshold, Some(visibility))
+    }
+
+    fn build(registry: ToolRegistry, threshold: usize, visibility: Option<ToolVisibility>) -> Self {
         let discovery = Arc::new(Discovery {
             registry,
             cache: Mutex::new(None),
+            visibility,
         });
         let find: Arc<dyn Tool> = Arc::new(FindTool {
             spec: meta_spec(
@@ -472,6 +517,46 @@ mod tests {
         assert!(matches!(err, ToolError::InvalidInput(_)));
         let err = block_on(use_tool.call(&ctx, json!({}))).unwrap_err();
         assert!(matches!(err, ToolError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn discovery_only_reveals_tools_visible_to_the_caller() {
+        let reg = registry_with(10);
+        reg.register(fake("secret_send", "send a secret message", Effect::Write));
+        reg.register(fake("public_send", "send a public message", Effect::Write));
+        // Visibility depends on the caller (run id), as in the agent loop.
+        let vis: ToolVisibility = Arc::new(|ctx, spec| {
+            ctx.run_id == "all" || (ctx.run_id == "narrow" && spec.name != "secret_send")
+        });
+        let surface = ToolSurface::with_visibility(reg, 5, vis);
+        let ctx = |id: &str| ToolContext {
+            run_id: id.to_owned(),
+            ..ToolContext::default()
+        };
+        let find = surface.resolve(FIND_TOOL).unwrap();
+        let names = |id: &str| -> Vec<String> {
+            let out =
+                block_on(find.call(&ctx(id), json!({ "query": "send message", "k": 25 }))).unwrap();
+            json_of(&out)
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|h| h["name"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        assert!(names("all").contains(&"secret_send".to_owned()));
+        let narrow = names("narrow");
+        assert!(narrow.contains(&"public_send".to_owned()));
+        assert!(!narrow.contains(&"secret_send".to_owned()));
+        assert!(names("unknown").is_empty(), "unknown callers see nothing");
+
+        let details = surface.resolve(GET_TOOL_DETAILS).unwrap();
+        let hidden = block_on(details.call(&ctx("narrow"), json!({ "name": "secret_send" })));
+        assert!(matches!(hidden, Err(ToolError::InvalidInput(_))));
+        assert!(block_on(details.call(&ctx("all"), json!({ "name": "secret_send" }))).is_ok());
+        let use_tool = surface.resolve(USE_TOOL).unwrap();
+        let hidden = block_on(use_tool.call(&ctx("narrow"), json!({ "name": "secret_send" })));
+        assert!(matches!(hidden, Err(ToolError::InvalidInput(_))));
     }
 
     #[test]

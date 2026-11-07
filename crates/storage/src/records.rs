@@ -162,3 +162,15 @@ pub struct AuditEntry {
     /// Time.
     pub ts_ms: i64,
 }
+
+/// One row of the daemon-wide event order: global sequence number `gseq` is
+/// the event `seq` of run `run_id`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventIndexRow {
+    /// Daemon-wide, monotonically increasing sequence number (starts at 1).
+    pub gseq: u64,
+    /// Run the event belongs to.
+    pub run_id: RunId,
+    /// The envelope's run-local `seq`.
+    pub seq: u64,
+}

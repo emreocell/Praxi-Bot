@@ -64,6 +64,7 @@ fn setup() -> T {
     let storage = Arc::new(Storage::open(dir.path()).unwrap());
     let tools = ToolRegistry::new();
     tools.register(Arc::new(Danger));
+    tools.register(Arc::new(Ask));
     let agent = AgentLoop::new(
         Arc::clone(&storage),
         tools,
@@ -543,8 +544,54 @@ async fn sse_resumes_from_last_event_id() {
     assert_eq!(r.status, StatusCode::NOT_FOUND);
 }
 
+/// Read SSE frames from a streaming body until `done(frames)` holds.
+async fn read_until(
+    body: &mut axum::body::Body,
+    mut done: impl FnMut(&[(String, String, Value)]) -> bool,
+) -> Vec<(String, String, Value)> {
+    let mut buf = Vec::new();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let fr = frames(&buf);
+            if done(&fr) {
+                return fr;
+            }
+            let frame = body.frame().await.expect("stream ended").unwrap();
+            if let Some(d) = frame.data_ref() {
+                buf.extend_from_slice(d);
+            }
+        }
+    })
+    .await
+    .expect("expected SSE frames did not arrive")
+}
+
+async fn open_global(t: &T, last_id: Option<&str>) -> axum::body::Body {
+    let (k, v) = auth();
+    let mut b = Request::builder()
+        .uri("/v1/events")
+        .header("host", "localhost")
+        .header(k, v.as_str());
+    if let Some(l) = last_id {
+        b = b.header("last-event-id", l);
+    }
+    let resp = t
+        .app
+        .clone()
+        .oneshot(b.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    resp.into_body()
+}
+
+fn run_finished_of(fr: &[(String, String, Value)], run: &str) -> bool {
+    fr.iter()
+        .any(|f| f.1 == "run_finished" && f.2["event"]["run_id"] == run)
+}
+
 #[tokio::test]
-async fn global_stream_is_live_and_resumes_a_run_cursor() {
+async fn global_stream_resumes_across_all_runs_with_gseq() {
     let t = setup();
     let (_, chat) = make_chat(&t).await;
     let first = send_msg(&t, &chat, "a b", "queue").await["run_id"]
@@ -552,57 +599,90 @@ async fn global_stream_is_live_and_resumes_a_run_cursor() {
         .unwrap()
         .to_owned();
     wait_state(&t, &first, "succeeded").await;
-
-    // Open the global stream with a cursor into the finished run, then start a
-    // second run: replay of run 1 (seq > 1) followed by live run 2 events.
-    let (k, v) = auth();
-    let cursor = format!("{first}:1");
-    let req = Request::builder()
-        .uri("/v1/events")
-        .header("host", "localhost")
-        .header(k, v.as_str())
-        .header("last-event-id", cursor)
-        .body(Body::empty())
-        .unwrap();
-    let resp = t.app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let mut body = resp.into_body();
-
     let second = send_msg(&t, &chat, "c d", "queue").await["run_id"]
         .as_str()
         .unwrap()
         .to_owned();
+    wait_state(&t, &second, "succeeded").await;
 
-    let mut buf = Vec::new();
-    let finished = |buf: &[u8], run: &str| {
-        frames(buf)
-            .iter()
-            .any(|f| f.1 == "run_finished" && f.2["event"]["run_id"] == run)
-    };
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while !finished(&buf, &second) {
-            let frame = body.frame().await.unwrap().unwrap();
-            if let Some(d) = frame.data_ref() {
-                buf.extend_from_slice(d);
-            }
-        }
-    })
-    .await
-    .expect("global stream delivers run 2 live");
+    let index = t.state.storage().list_event_index(0, 10_000).unwrap();
+    assert!(index.len() > 6);
+    assert!(
+        index.iter().zip(1u64..).all(|(r, n)| r.gseq == n),
+        "gapless daemon-wide numbering"
+    );
+    let total = index.len();
 
-    let fr = frames(&buf);
-    let of = |run: &str| -> Vec<u64> {
-        fr.iter()
-            .filter(|f| f.2["event"]["run_id"] == run)
-            .map(|f| f.2["seq"].as_u64().unwrap())
-            .collect()
-    };
-    let r1 = of(&first);
-    assert!(r1.first() == Some(&2) && r1.windows(2).all(|w| w[1] == w[0] + 1));
-    let r2 = of(&second);
-    assert_eq!(r2.first(), Some(&0));
-    assert!(r2.windows(2).all(|w| w[1] == w[0] + 1));
-    assert!(fr.iter().all(|f| f.0.contains(':')));
+    // Cursor in the middle of run 1: the rest of run 1, then all of run 2,
+    // ids are the daemon-wide gseq, strictly increasing without gaps.
+    let cut = 3usize;
+    let mut body = open_global(&t, Some(&cut.to_string())).await;
+    let fr = read_until(&mut body, |fr| fr.len() >= total - cut).await;
+    let ids: Vec<usize> = fr.iter().map(|f| f.0.parse().unwrap()).collect();
+    assert_eq!(ids, (cut + 1..=total).collect::<Vec<_>>());
+    let runs: Vec<&str> = fr
+        .iter()
+        .map(|f| f.2["event"]["run_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(runs.first(), Some(&first.as_str()));
+    assert_eq!(runs.last(), Some(&second.as_str()));
+    assert!(run_finished_of(&fr, &first) && run_finished_of(&fr, &second));
+
+    // The same stream continues live with the next gseq.
+    let third = send_msg(&t, &chat, "e f", "queue").await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let live = read_until(&mut body, |fr| run_finished_of(fr, &third)).await;
+    let ids: Vec<usize> = live.iter().map(|f| f.0.parse().unwrap()).collect();
+    let live_ids: Vec<usize> = ids.into_iter().filter(|i| *i > total).collect();
+    assert_eq!(live_ids.first(), Some(&(total + 1)));
+    assert!(live_ids.windows(2).all(|w| w[1] == w[0] + 1));
+    drop(body);
+
+    // A cursor at the end replays nothing; the stream just waits for new events.
+    let end = t.state.storage().last_gseq().unwrap();
+    let mut body = open_global(&t, Some(&end.to_string())).await;
+    let fourth = send_msg(&t, &chat, "g h", "queue").await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let fr = read_until(&mut body, |fr| run_finished_of(fr, &fourth)).await;
+    assert_eq!(fr.first().unwrap().0, (end + 1).to_string());
+    assert!(fr.iter().all(|f| f.2["event"]["run_id"] == fourth.as_str()));
+    drop(body);
+
+    // Without a cursor the stream is live only (no history).
+    let before = t.state.storage().last_gseq().unwrap();
+    let mut body = open_global(&t, None).await;
+    let fifth = send_msg(&t, &chat, "i j", "queue").await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let fr = read_until(&mut body, |fr| run_finished_of(fr, &fifth)).await;
+    assert_eq!(fr.first().unwrap().0, (before + 1).to_string());
+    drop(body);
+
+    // A cursor from the future (e.g. a reset database) is clamped, and the
+    // pre-gseq `<run>:<seq>` form is rejected.
+    let mut body = open_global(&t, Some("999999999")).await;
+    let sixth = send_msg(&t, &chat, "k l", "queue").await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let fr = read_until(&mut body, |fr| run_finished_of(fr, &sixth)).await;
+    assert!(fr.iter().all(|f| f.2["event"]["run_id"] == sixth.as_str()));
+    drop(body);
+    let (k, v) = auth();
+    let r = send(
+        &t.app,
+        Method::GET,
+        "/v1/events",
+        None,
+        &[(k, v.as_str()), ("last-event-id", &format!("{first}:1"))],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
 }
 
 // --------------------------------------------------------- approvals
@@ -800,12 +880,370 @@ async fn graceful_shutdown_checkpoints_running_runs_and_closes_streams() {
     assert_eq!(paused[0].to_string(), run);
     let state = t.agent.runtime().state(paused[0]).unwrap();
     assert_eq!(state.as_str(), "paused");
+    // The daemon refuses new turns once it is shutting down.
+    let (_, chat2) = make_chat(&t).await;
+    let r = call(
+        &t,
+        Method::POST,
+        &format!("/v1/chats/{chat2}/messages"),
+        Some(json!({"text": "late"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE, "{:?}", r.json());
+    assert_eq!(r.json()["error"]["code"], "unavailable");
     // The stream ends instead of hanging.
     let end = tokio::time::timeout(Duration::from_secs(5), async {
         while body.frame().await.is_some() {}
     })
     .await;
     assert!(end.is_ok());
+}
+
+// ------------------------------------------- questions, grants, policy
+
+struct Ask;
+
+#[async_trait]
+impl Tool for Ask {
+    fn spec(&self) -> &ToolSpec {
+        static SPEC: std::sync::OnceLock<ToolSpec> = std::sync::OnceLock::new();
+        SPEC.get_or_init(|| ToolSpec {
+            name: "ask_user".to_owned(),
+            description: "question card".to_owned(),
+            input_schema: json!({"type": "object"}),
+            effect: Effect::Read,
+            category: PermissionCategory::Meta,
+            platforms: vec![Platform::All],
+        })
+    }
+    async fn call(&self, _: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
+        Ok(ToolOutput {
+            content: vec![tool_registry::ContentPart::Json {
+                data: json!({
+                    "kind": "question_card",
+                    "question": input["question"],
+                    "options": input["options"],
+                }),
+            }],
+            spill: None,
+        })
+    }
+}
+
+/// The `call_id` of the run's newest `question_asked` event.
+async fn question_call(t: &T, run: &str) -> String {
+    let id: uuid::Uuid = run.parse().unwrap();
+    for _ in 0..200 {
+        let log = storage::read_event_log(t.state.storage().data_dir(), protocol::RunId(id))
+            .unwrap_or_default();
+        for env in log.iter().rev() {
+            if let protocol::Event::QuestionAsked(q) = &env.event {
+                return q.call_id.to_string();
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("no question was asked");
+}
+
+#[tokio::test]
+async fn question_card_is_answered_through_the_api() {
+    let t = setup();
+    let (_, chat) = make_chat(&t).await;
+    let run = send_msg(
+        &t,
+        &chat,
+        r#"call:ask_user {"question":"Which colour?","options":["red","blue"]}"#,
+        "queue",
+    )
+    .await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let call_id = question_call(&t, &run).await;
+    wait_state(&t, &run, "waiting_approval").await;
+
+    // Bad ids and bodies.
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/questions/not-a-uuid",
+        Some(json!({"answer": "x"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let r = call(
+        &t,
+        Method::POST,
+        &format!("/v1/questions/{call_id}"),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    // Unauthenticated.
+    let r = send(
+        &t.app,
+        Method::POST,
+        &format!("/v1/questions/{call_id}"),
+        Some(json!({"answer": "blue"})),
+        &[],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+
+    let r = call(
+        &t,
+        Method::POST,
+        &format!("/v1/questions/{call_id}"),
+        Some(json!({"answer": "blue"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["call_id"], call_id.as_str());
+    wait_state(&t, &run, "succeeded").await;
+    let msgs = call(&t, Method::GET, &format!("/v1/chats/{chat}/messages"), None)
+        .await
+        .json();
+    let last = msgs.as_array().unwrap().last().unwrap();
+    assert!(
+        last["content"]
+            .as_str()
+            .unwrap()
+            .contains("The user answered: blue"),
+        "{last}"
+    );
+    // Answering twice: nothing is waiting any more.
+    let r = call(
+        &t,
+        Method::POST,
+        &format!("/v1/questions/{call_id}"),
+        Some(json!({"answer": "red"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn grants_are_listed_revoked_and_shown_in_the_effective_policy() {
+    let t = setup();
+    let (bot, chat) = make_chat(&t).await;
+    let bot_path = format!("/v1/bots/{bot}");
+
+    let eff = call(&t, Method::GET, &bot_path, None).await.json()["effective_policy"].clone();
+    assert!(eff["policy"].is_null());
+    assert_eq!(eff["categories"]["fs"]["decision"], "ask");
+    assert_eq!(eff["categories"]["fs"]["via_grant"], false);
+    assert_eq!(eff["grants"], json!([]));
+    assert!(eff["categories"].get("meta").is_none());
+    // The list endpoint does not carry it.
+    let list = call(&t, Method::GET, "/v1/bots", None).await.json();
+    assert!(list[0].get("effective_policy").is_none());
+
+    // Approve with the new `always_category` scope.
+    let run = send_msg(&t, &chat, "call:danger_run {}", "queue").await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (call_id, _) = pending_call(&t).await;
+    let r = call(
+        &t,
+        Method::POST,
+        &format!("/v1/approvals/{call_id}"),
+        Some(json!({"decision": "approve", "scope": "always_category"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    wait_state(&t, &run, "succeeded").await;
+    let r = call(
+        &t,
+        Method::POST,
+        &format!("/v1/approvals/{call_id}"),
+        Some(json!({"decision": "approve", "scope": "bogus"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+
+    let grants = call(&t, Method::GET, &format!("{bot_path}/grants"), None).await;
+    assert_eq!(grants.status, StatusCode::OK);
+    let g = grants.json();
+    assert_eq!(g.as_array().unwrap().len(), 1);
+    assert_eq!(g[0]["target"], json!({"kind": "category", "name": "fs"}));
+    assert!(g[0]["granted_at_ms"].as_i64().unwrap() > 0);
+
+    // The effective policy now tells the truth.
+    let eff = call(&t, Method::GET, &bot_path, None).await.json()["effective_policy"].clone();
+    assert_eq!(eff["categories"]["fs"]["decision"], "allow");
+    assert_eq!(eff["categories"]["fs"]["via_grant"], true);
+    assert_eq!(eff["categories"]["shell"]["decision"], "ask");
+    assert_eq!(eff["grants"], g);
+    // ... and a second tool call of that category needs no approval.
+    let run2 = send_msg(&t, &chat, "call:danger_run {}", "queue").await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    wait_state(&t, &run2, "succeeded").await;
+
+    // Revoke: validation, success, repeat.
+    let path = format!("{bot_path}/grants");
+    for bad in [
+        json!({"target": {"kind": "category", "name": "nonsense"}}),
+        json!({"target": {"kind": "category", "name": "meta"}}),
+        json!({"target": {"kind": "tool", "name": " "}}),
+    ] {
+        let r = call(&t, Method::DELETE, &path, Some(bad)).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{:?}", r.json());
+    }
+    let r = call(&t, Method::DELETE, &path, Some(json!({"target": 1}))).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let r = call(
+        &t,
+        Method::DELETE,
+        &path,
+        Some(json!({"target": {"kind": "tool", "name": "danger_run"}})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "no such tool grant");
+    let rev = json!({"target": {"kind": "category", "name": "fs"}});
+    let r = call(&t, Method::DELETE, &path, Some(rev.clone())).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    let r = call(&t, Method::DELETE, &path, Some(rev)).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    assert_eq!(call(&t, Method::GET, &path, None).await.json(), json!([]));
+    let eff = call(&t, Method::GET, &bot_path, None).await.json()["effective_policy"].clone();
+    assert_eq!(eff["categories"]["fs"]["decision"], "ask");
+
+    // A tool-level grant via `always`, and unknown bots.
+    let run3 = send_msg(&t, &chat, "call:danger_run {}", "queue").await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (call3, _) = pending_call(&t).await;
+    call(
+        &t,
+        Method::POST,
+        &format!("/v1/approvals/{call3}"),
+        Some(json!({"decision": "approve", "scope": "always"})),
+    )
+    .await;
+    wait_state(&t, &run3, "succeeded").await;
+    let g = call(&t, Method::GET, &path, None).await.json();
+    assert_eq!(
+        g[0]["target"],
+        json!({"kind": "tool", "name": "danger_run"})
+    );
+    let eff = call(&t, Method::GET, &bot_path, None).await.json()["effective_policy"].clone();
+    assert_eq!(
+        eff["categories"]["fs"]["decision"], "ask",
+        "a tool grant does not open the category"
+    );
+    assert_eq!(eff["grants"], g);
+    let unknown = format!("/v1/bots/{}/grants", uuid::Uuid::now_v7());
+    assert_eq!(
+        call(&t, Method::GET, &unknown, None).await.status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        call(
+            &t,
+            Method::DELETE,
+            &unknown,
+            Some(json!({"target": {"kind": "tool", "name": "x"}}))
+        )
+        .await
+        .status,
+        StatusCode::NOT_FOUND
+    );
+}
+
+// ------------------------------------------------------ SSE token auth
+
+#[tokio::test]
+async fn events_route_accepts_the_token_in_the_query_only_there() {
+    let t = setup();
+    let (_, chat) = make_chat(&t).await;
+    let run = send_msg(&t, &chat, "x y", "queue").await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    wait_state(&t, &run, "succeeded").await;
+
+    let url = format!("/v1/events?run_id={run}&token={TOKEN}");
+    let r = send(&t.app, Method::GET, &url, None, &[]).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_ne!(frames(&r.body).len(), 0);
+    // Also with the desktop app's browser origin.
+    let r = send(
+        &t.app,
+        Method::GET,
+        &url,
+        None,
+        &[("origin", "tauri://localhost")],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(
+        r.headers["access-control-allow-origin"],
+        "tauri://localhost"
+    );
+
+    // Wrong / empty / near-miss tokens.
+    let wrong = format!("{}0", &TOKEN[..63]);
+    for bad in [wrong.as_str(), "", "short", TOKEN.to_uppercase().as_str()] {
+        let r = send(
+            &t.app,
+            Method::GET,
+            &format!("/v1/events?run_id={run}&token={bad}"),
+            None,
+            &[],
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED, "token {bad:?}");
+    }
+
+    // Host / Origin checks still come first.
+    let r = send(&t.app, Method::GET, &url, None, &[("host", "evil.com")]).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let r = send(
+        &t.app,
+        Method::GET,
+        &url,
+        None,
+        &[("origin", "https://evil.com")],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+
+    // An Authorization header, when present, is the one that counts.
+    let r = send(
+        &t.app,
+        Method::GET,
+        &url,
+        None,
+        &[("authorization", "Bearer wrong")],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+
+    // Every other route (and method) ignores `?token=`.
+    for path in [
+        format!("/v1/bots?token={TOKEN}"),
+        format!("/v1/runs?token={TOKEN}"),
+        format!("/v1/approvals?token={TOKEN}"),
+        format!("/v1/events/extra?token={TOKEN}"),
+    ] {
+        let r = send(&t.app, Method::GET, &path, None, &[]).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{path}");
+    }
+    let r = send(
+        &t.app,
+        Method::POST,
+        &format!("/v1/events?token={TOKEN}"),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
 }
 
 // ------------------------------------------------------------ openapi
@@ -832,6 +1270,8 @@ fn openapi_snapshot() {
         "/v1/events",
         "/v1/runs/{id}/resume",
         "/v1/usage",
+        "/v1/questions/{call_id}",
+        "/v1/bots/{id}/grants",
     ] {
         assert!(v["paths"].get(p).is_some(), "{p}");
     }

@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use builtin_tools::{GateRequest, ToolGate, raw_command_for};
 use permission_engine::{ActionRequest, Decision, Policy};
 use protocol::event::{ApprovalNeeded, QuestionAsked, ToolCallApproved, ToolCallDenied};
-use protocol::{Event, PermissionCategory, RunId, ToolCallId};
+use protocol::{BotId, Event, InitiatorKind, PermissionCategory, RunId, ToolCallId};
 use serde_json::{Value, json};
 use storage::{Approval, now_ms};
 use task_runtime::{RunState, can_transition};
@@ -92,6 +92,37 @@ impl Shared {
         } else {
             d
         }
+    }
+
+    /// Decision for a human-initiated call of `category` under a bot's policy
+    /// plus its category grants; the flag says a grant made the difference.
+    pub(crate) fn effective_category(
+        &self,
+        bot_id: BotId,
+        bot_policy: Option<&Policy>,
+        category: PermissionCategory,
+    ) -> (Decision, bool) {
+        let req = ActionRequest {
+            category,
+            raw_command: String::new(),
+            initiator: InitiatorKind::Human,
+        };
+        let r = &self.resolver;
+        let d = r.resolve(&self.cfg.global_policy, bot_policy, None, &req);
+        // Same rule as `decide`: only a policy-level `Ask` can be waived.
+        let floor = r.resolve(&Policy::full(), None, None, &req) != Decision::Allow;
+        if d == Decision::Ask
+            && !floor
+            && self
+                .grants
+                .lock()
+                .always
+                .iter()
+                .any(|g| g.bot_id == bot_id && g.target == GrantTarget::Category(category))
+        {
+            return (Decision::Allow, true);
+        }
+        (d, false)
     }
 
     pub(crate) fn set_state(&self, run_id: RunId, to: RunState) {

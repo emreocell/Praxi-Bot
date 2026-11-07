@@ -1,12 +1,13 @@
 //! State shared between the public [`AgentLoop`](crate::AgentLoop) handle and
 //! the step executor.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use agent_router::{SurfaceMode, ToolSurface};
 use parking_lot::{Mutex, RwLock};
-use permission_engine::{PermissionResolver, Policy};
+use permission_engine::{Decision, PermissionResolver, Policy};
 use protocol::event::TodoItem;
 use protocol::{
     BotId, ChatId, Envelope, Event, InitiatorKind, PermissionCategory, RunId, ToolCallId, UserId,
@@ -44,6 +45,10 @@ pub enum LoopError {
     /// No approval is waiting under that call id (already decided, or lost in a restart).
     #[error("no pending approval for call {0}")]
     NoPendingApproval(ToolCallId),
+    /// [`AgentLoop::shutdown`](crate::AgentLoop::shutdown) was called: no new
+    /// turns are accepted.
+    #[error("the agent loop is shutting down")]
+    ShuttingDown,
 }
 
 /// How far an approval reaches (ADR-0012).
@@ -103,9 +108,36 @@ pub enum Delivery {
     Queued,
 }
 
+/// The permission picture of one bot: its stored policy merged with its
+/// persisted grants (what actually happens for a human-initiated call).
+#[derive(Debug, Clone)]
+pub struct EffectivePolicy {
+    /// The bot profile's own policy; `None` = the workspace policy applies.
+    pub policy: Option<Policy>,
+    /// Effective decision per permission category (`Meta` is always allowed and
+    /// omitted).
+    pub categories: BTreeMap<PermissionCategory, CategoryDecision>,
+    /// The persisted "always allow" rules (tool-level ones are *not* reflected
+    /// in `categories`: they only widen one tool).
+    pub grants: Vec<Grant>,
+}
+
+/// Effective decision for one category.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CategoryDecision {
+    /// What a call of this category resolves to (initiator: human).
+    pub decision: Decision,
+    /// `true` when `decision` is `Allow` only because of a category grant (the
+    /// policy alone would ask).
+    pub via_grant: bool,
+}
+
 /// One event of the run stream.
 #[derive(Debug, Clone)]
 pub struct StreamItem {
+    /// Daemon-wide sequence number (starts at 1, strictly increasing in
+    /// broadcast order, persisted in the storage event index).
+    pub gseq: u64,
     /// Run the event belongs to.
     pub run_id: RunId,
     /// The sequenced envelope (also appended to the run's NDJSON log).
@@ -208,6 +240,12 @@ pub(crate) struct Shared {
     /// Background work (memory extraction).
     pub bg: Mutex<Vec<JoinHandle<()>>>,
     pub surface: ToolSurface,
+    /// Last `gseq` handed out (see [`StreamItem::gseq`]).
+    pub gseq: AtomicU64,
+    /// Serialises `emit`, so `gseq` order equals broadcast order.
+    pub emit_gate: Mutex<()>,
+    /// Set by `AgentLoop::shutdown`: no new turns / resumes.
+    pub shutting_down: AtomicBool,
 }
 
 pub(crate) fn xe(e: impl std::fmt::Display) -> ExecError {
@@ -280,13 +318,32 @@ impl Shared {
         Ok(Arc::clone(self.runs.lock().entry(run.id).or_insert(ctx)))
     }
 
-    /// Append to the run's NDJSON log and broadcast.
+    /// Whether `spec` may be shown to / used by the bot of run `run_id` (the
+    /// discovery meta-tools ask this; an unknown run sees nothing).
+    pub fn tool_visible_to_run(&self, run_id: &str, spec: &ToolSpec) -> bool {
+        let Ok(id) = run_id.parse::<Uuid>() else {
+            return false;
+        };
+        self.runs
+            .lock()
+            .get(&RunId(id))
+            .is_some_and(|c| c.profile.tool_visible(&spec.name) && platform_ok(&spec.platforms))
+    }
+
+    /// Append to the run's NDJSON log, index it under the next `gseq` and
+    /// broadcast.
     pub fn emit(&self, ctx: &RunCtx, event: Event) {
         let event = self.redact_event(event);
-        let envelope = {
+        // Lock order: gate, then the run's state.
+        let _gate = self.emit_gate.lock();
+        let (envelope, gseq) = {
             let mut st = ctx.state.lock();
             let env = Envelope::new(st.seq, event);
             st.seq += 1;
+            let gseq = self.gseq.fetch_add(1, Ordering::SeqCst) + 1;
+            // Index before the log line: a crash in between loses nothing a
+            // replay could expect (a missing log line is skipped).
+            let _ = self.storage.index_event(gseq, ctx.run_id, env.seq);
             if st.writer.is_none() {
                 st.writer = EventLogWriter::open(self.storage.data_dir(), ctx.run_id).ok();
             }
@@ -294,9 +351,10 @@ impl Shared {
                 // A failing log must not kill the turn; the DB stays the source of truth.
                 let _ = w.append(&env);
             }
-            env
+            (env, gseq)
         };
         let _ = self.events.send(StreamItem {
+            gseq,
             run_id: ctx.run_id,
             envelope,
         });

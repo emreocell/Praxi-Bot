@@ -5,7 +5,13 @@ use rusqlite::Connection;
 use crate::error::{Result, StorageError};
 
 /// Embedded migrations, ordered; version = index + 1.
-const MIGRATIONS: &[(&str, &str)] = &[("0001_init", include_str!("../migrations/0001_init.sql"))];
+const MIGRATIONS: &[(&str, &str)] = &[
+    ("0001_init", include_str!("../migrations/0001_init.sql")),
+    (
+        "0002_event_index",
+        include_str!("../migrations/0002_event_index.sql"),
+    ),
+];
 
 /// Highest schema version this build supports.
 #[must_use]
@@ -75,6 +81,7 @@ mod tests {
                 "audit_log",
                 "bots",
                 "chats",
+                "event_index",
                 "messages",
                 "run_steps",
                 "runs",

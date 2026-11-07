@@ -64,6 +64,9 @@ impl ApiError {
             "missing or invalid bearer token",
         )
     }
+    pub(crate) fn unavailable(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::SERVICE_UNAVAILABLE, "unavailable", message)
+    }
     pub(crate) fn internal(message: impl std::fmt::Display) -> Self {
         Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -118,6 +121,7 @@ impl From<LoopError> for ApiError {
             LoopError::NotFound(w) => Self::not_found(w),
             LoopError::Profile(m) => Self::new(StatusCode::UNPROCESSABLE_ENTITY, "bad_profile", m),
             LoopError::Busy(c) => Self::conflict(format!("chat {c} already has an active turn")),
+            LoopError::ShuttingDown => Self::unavailable("the daemon is shutting down"),
             LoopError::NoPendingApproval(c) => {
                 Self::not_found(format!("pending approval for call {c}"))
             }

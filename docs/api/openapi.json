@@ -210,7 +210,7 @@
         "tags": [
           "bots"
         ],
-        "summary": "Get one bot.",
+        "summary": "Get one bot, including its `effective_policy` (stored policy merged with\nthe persisted grants).",
         "operationId": "get_bot",
         "parameters": [
           {
@@ -352,6 +352,116 @@
           },
           "409": {
             "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/bots/{id}/grants": {
+      "get": {
+        "tags": [
+          "bots"
+        ],
+        "summary": "The bot's persisted \"always allow\" grants (created by approving with scope\n`always` / `always_category`).",
+        "operationId": "list_grants",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bot id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GrantDto"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "bots"
+        ],
+        "summary": "Revoke one grant (audited); the next matching call asks again.",
+        "operationId": "revoke_grant",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bot id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeGrant"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such bot or grant",
             "content": {
               "application/json": {
                 "schema": {
@@ -564,7 +674,7 @@
           "events"
         ],
         "summary": "Documentation stub for the SSE route (the handler lives in `sse.rs`).",
-        "description": "Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the\nSSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local\n`seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log; without\nit the `id` is `<run_id>:<seq>` and the same form resumes that run.",
+        "description": "Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the\nSSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local\n`seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without\nit the stream covers all runs: the SSE `id` is a daemon-wide, strictly\nincreasing `gseq` (persisted) and `Last-Event-ID: <gseq>` replays every\nmissed event of every run, in order, before going live.  Browsers cannot set\nheaders on `EventSource`, so this route (and only this one) also accepts the\nAPI token as the `token` query parameter (Host / Origin checks still apply;\nthe token is compared in constant time; beware that URLs may be logged).",
         "operationId": "events_doc",
         "parameters": [
           {
@@ -578,9 +688,18 @@
             }
           },
           {
+            "name": "token",
+            "in": "query",
+            "description": "API token, for clients that cannot send Authorization (EventSource)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "Last-Event-ID",
             "in": "header",
-            "description": "Resume cursor (`<seq>` with run_id, else `<run_id>:<seq>`)",
+            "description": "Resume cursor: `<seq>` with run_id, else the daemon-wide `<gseq>`",
             "required": false,
             "schema": {
               "type": [
@@ -638,6 +757,64 @@
             }
           }
         }
+      }
+    },
+    "/v1/questions/{call_id}": {
+      "post": {
+        "tags": [
+          "approvals"
+        ],
+        "summary": "Answer a pending question card (the `call_id` of a `question_asked` event).",
+        "operationId": "answer_question",
+        "parameters": [
+          {
+            "name": "call_id",
+            "in": "path",
+            "description": "Tool call id from the question_asked event",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerQuestion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnswerResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
       }
     },
     "/v1/runs": {
@@ -877,6 +1054,33 @@
   },
   "components": {
     "schemas": {
+      "AnswerQuestion": {
+        "type": "object",
+        "description": "`POST /v1/questions/{call_id}`.",
+        "required": [
+          "answer"
+        ],
+        "properties": {
+          "answer": {
+            "type": "string",
+            "description": "The user's answer (free text, or one of the offered options)."
+          }
+        }
+      },
+      "AnswerResponse": {
+        "type": "object",
+        "description": "Response of an answered question.",
+        "required": [
+          "call_id"
+        ],
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Tool call id of the question card."
+          }
+        }
+      },
       "ApprovalDto": {
         "type": "object",
         "description": "A pending or decided tool-call approval.",
@@ -946,6 +1150,17 @@
             "format": "int64",
             "description": "Creation time."
           },
+          "effective_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EffectivePolicyDto",
+                "description": "The truth about what the bot may do: its stored policy merged with its\npersisted \"always allow\" grants.  Only present in `GET /v1/bots/{id}`."
+              }
+            ]
+          },
           "id": {
             "type": "string",
             "format": "uuid",
@@ -1001,6 +1216,24 @@
           }
         ],
         "description": "Usage of one bot."
+      },
+      "CategoryDecisionDto": {
+        "type": "object",
+        "description": "Effective decision of one permission category.",
+        "required": [
+          "decision",
+          "via_grant"
+        ],
+        "properties": {
+          "decision": {
+            "type": "string",
+            "description": "`allow`, `ask` or `deny`."
+          },
+          "via_grant": {
+            "type": "boolean",
+            "description": "`true` when `allow` holds only because of a category grant."
+          }
+        }
       },
       "ChatDto": {
         "type": "object",
@@ -1114,6 +1347,36 @@
           "queued"
         ]
       },
+      "EffectivePolicyDto": {
+        "type": "object",
+        "description": "A bot's permission picture (`GET /v1/bots/{id}`).",
+        "required": [
+          "categories",
+          "grants"
+        ],
+        "properties": {
+          "categories": {
+            "type": "object",
+            "description": "What a human-initiated call of each category resolves to, grants\nincluded (`meta` is always allowed and omitted).",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CategoryDecisionDto"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GrantDto"
+            },
+            "description": "The persisted \"always allow\" rules.  Tool-level grants only widen that\none tool and are not reflected in `categories`."
+          },
+          "policy": {
+            "description": "The profile's own policy as JSON; `null` = the workspace policy applies."
+          }
+        }
+      },
       "ErrorBody": {
         "type": "object",
         "description": "JSON body of an error response.",
@@ -1144,6 +1407,70 @@
             "description": "Human-readable message."
           }
         }
+      },
+      "GrantDto": {
+        "type": "object",
+        "description": "A persisted \"always allow\" rule of a bot.",
+        "required": [
+          "target",
+          "granted_at_ms"
+        ],
+        "properties": {
+          "granted_at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When it was granted."
+          },
+          "target": {
+            "$ref": "#/components/schemas/GrantTargetDto",
+            "description": "What it covers."
+          }
+        }
+      },
+      "GrantTargetDto": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "One tool, by name.",
+            "required": [
+              "name",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "tool"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "description": "Tool name."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Every tool of a permission category.",
+            "required": [
+              "name",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "category"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "description": "`fs`, `shell`, `desktop`, `browser`, `accounts`, `messaging`,\n`money`, `system`, `remote` or `script`."
+              }
+            }
+          }
+        ],
+        "description": "What an \"always allow\" grant covers."
       },
       "Health": {
         "type": "object",
@@ -1222,6 +1549,19 @@
           "queue"
         ]
       },
+      "RevokeGrant": {
+        "type": "object",
+        "description": "`DELETE /v1/bots/{id}/grants`.",
+        "required": [
+          "target"
+        ],
+        "properties": {
+          "target": {
+            "$ref": "#/components/schemas/GrantTargetDto",
+            "description": "The rule to remove."
+          }
+        }
+      },
       "RunDto": {
         "type": "object",
         "description": "A run.",
@@ -1285,7 +1625,8 @@
         "enum": [
           "once",
           "this_chat",
-          "always"
+          "always",
+          "always_category"
         ]
       },
       "SendMessage": {

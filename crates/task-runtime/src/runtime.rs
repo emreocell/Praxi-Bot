@@ -1,6 +1,6 @@
 //! The durable run [`Runtime`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -54,6 +54,7 @@ struct TokenGuard<'a> {
 impl Drop for TokenGuard<'_> {
     fn drop(&mut self) {
         self.rt.tokens.lock().remove(&self.run_id);
+        self.rt.pausing.lock().remove(&self.run_id);
     }
 }
 
@@ -63,6 +64,9 @@ pub struct Runtime {
     storage: Arc<Storage>,
     executor: Arc<dyn StepExecutor>,
     tokens: Mutex<HashMap<RunId, CancellationToken>>,
+    /// Live runs that must stop as `Paused` (not `Cancelled`), see
+    /// [`Runtime::request_pause`].
+    pausing: Mutex<HashSet<RunId>>,
 }
 
 impl Runtime {
@@ -73,6 +77,7 @@ impl Runtime {
             storage,
             executor,
             tokens: Mutex::new(HashMap::new()),
+            pausing: Mutex::new(HashSet::new()),
         }
     }
 
@@ -185,11 +190,51 @@ impl Runtime {
     /// Fails if the run is already terminal or on storage errors.
     pub fn cancel(&self, run_id: RunId) -> Result<()> {
         if let Some(token) = self.tokens.lock().get(&run_id) {
+            // An explicit cancel beats a pending pause request.
+            self.pausing.lock().remove(&run_id);
             token.cancel();
             return Ok(());
         }
         self.transition(run_id, RunState::Cancelled, None)?;
         Ok(())
+    }
+
+    /// Runs currently driven by this runtime (a task is executing them).
+    #[must_use]
+    pub fn active_runs(&self) -> Vec<RunId> {
+        self.tokens.lock().keys().copied().collect()
+    }
+
+    /// Ask a live run to stop as `Paused` (resumable), e.g. for a clean
+    /// shutdown.  Returns `false` if the run is not live.
+    ///
+    /// * `interrupt = false`: the step in flight (if any) finishes, then the
+    ///   run pauses before planning the next one.
+    /// * `interrupt = true`: the step in flight is abandoned and marked
+    ///   `Interrupted` (it is never replayed unless idempotent, see
+    ///   [`Runtime::resume`]); the run pauses.
+    ///
+    /// `interrupt = true` may follow an earlier `false` request.
+    pub fn request_pause(&self, run_id: RunId, interrupt: bool) -> bool {
+        let tokens = self.tokens.lock();
+        let Some(token) = tokens.get(&run_id) else {
+            return false;
+        };
+        self.pausing.lock().insert(run_id);
+        if interrupt {
+            token.cancel();
+        }
+        true
+    }
+
+    /// Terminal-or-paused state a stopped live run moves to: `Paused` after
+    /// [`Runtime::request_pause`], else `Cancelled`.
+    fn stop_state(&self, run_id: RunId) -> RunState {
+        if self.pausing.lock().contains(&run_id) {
+            RunState::Paused
+        } else {
+            RunState::Cancelled
+        }
     }
 
     /// Startup recovery: every run left `Running` gets its un-finished steps
@@ -256,8 +301,8 @@ impl Runtime {
     ) -> Result<RunState> {
         let st = &self.storage;
         loop {
-            if token.is_cancelled() {
-                return self.transition(run_id, RunState::Cancelled, None);
+            if token.is_cancelled() || self.pausing.lock().contains(&run_id) {
+                return self.transition(run_id, self.stop_state(run_id), None);
             }
             let run = self.require_run(run_id)?;
             let (step_id, spec, mut attempt) = if let Some(prev) = pending.take() {
@@ -316,7 +361,7 @@ impl Runtime {
                             None,
                             true,
                         )?;
-                        return self.transition(run_id, RunState::Cancelled, None);
+                        return self.transition(run_id, self.stop_state(run_id), None);
                     }
                     Some(Ok(output)) => {
                         st.update_step(
@@ -348,7 +393,7 @@ impl Runtime {
                         tokio::select! {
                             biased;
                             () = token.cancelled() => {
-                                return self.transition(run_id, RunState::Cancelled, None);
+                                return self.transition(run_id, self.stop_state(run_id), None);
                             }
                             () = tokio::time::sleep(policy.backoff(attempt)) => {}
                         }
@@ -385,6 +430,7 @@ mod tests {
     enum Block {
         Pending,
         UntilCancel,
+        Sleep(u64),
     }
 
     struct Fake {
@@ -447,6 +493,7 @@ mod tests {
                         cancel.cancelled().await;
                         return Err(ExecError("cancelled".into()));
                     }
+                    Block::Sleep(ms) => tokio::time::sleep(Duration::from_millis(*ms)).await,
                 }
             }
             Ok(json!({ "done": step.name }))
@@ -695,6 +742,72 @@ mod tests {
             vec![("a".into(), "interrupted".into(), 1)]
         );
         assert!(rt.cancel(run).is_err(), "already terminal");
+    }
+
+    #[tokio::test]
+    async fn pause_with_interrupt_abandons_the_step_and_pauses() {
+        let dir = tempfile::tempdir().unwrap();
+        let (st, u, b) = setup(dir.path());
+        let ex = Arc::new(Fake::new(vec![spec("a", false)]).blocking("a", Block::Pending));
+        let rt = Arc::new(Runtime::new(st.clone(), ex));
+        let run = rt.create_run(u, b, None, "turn").unwrap();
+        let handle = tokio::spawn({
+            let rt = rt.clone();
+            async move { rt.start(run).await }
+        });
+        wait_for_intent(&st, run).await;
+        assert_eq!(rt.active_runs(), vec![run]);
+        assert!(rt.request_pause(run, true));
+        assert_eq!(handle.await.unwrap().unwrap(), RunState::Paused);
+        assert_eq!(
+            statuses(&st, run),
+            vec![("a".into(), "interrupted".into(), 1)]
+        );
+        assert_eq!(rt.active_runs(), Vec::<RunId>::new());
+        assert!(!rt.request_pause(run, true), "no longer live");
+    }
+
+    #[tokio::test]
+    async fn pause_without_interrupt_lets_the_step_finish_then_stops() {
+        let dir = tempfile::tempdir().unwrap();
+        let (st, u, b) = setup(dir.path());
+        let ex = Arc::new(
+            Fake::new(vec![spec("a", false), spec("b", false)]).blocking("a", Block::Sleep(150)),
+        );
+        let rt = Arc::new(Runtime::new(st.clone(), ex.clone()));
+        let run = rt.create_run(u, b, None, "turn").unwrap();
+        let handle = tokio::spawn({
+            let rt = rt.clone();
+            async move { rt.start(run).await }
+        });
+        wait_for_intent(&st, run).await;
+        assert!(rt.request_pause(run, false));
+        assert_eq!(handle.await.unwrap().unwrap(), RunState::Paused);
+        // "a" completed, "b" never started.
+        assert_eq!(
+            statuses(&st, run),
+            vec![("a".into(), "succeeded".into(), 1)]
+        );
+        assert_eq!(*ex.executed.lock(), vec!["a".to_owned()]);
+        // The paused run resumes and finishes.
+        assert_eq!(rt.resume(run).await.unwrap(), RunState::Succeeded);
+    }
+
+    #[tokio::test]
+    async fn cancel_beats_a_pending_pause() {
+        let dir = tempfile::tempdir().unwrap();
+        let (st, u, b) = setup(dir.path());
+        let ex = Arc::new(Fake::new(vec![spec("a", false)]).blocking("a", Block::Pending));
+        let rt = Arc::new(Runtime::new(st.clone(), ex));
+        let run = rt.create_run(u, b, None, "turn").unwrap();
+        let handle = tokio::spawn({
+            let rt = rt.clone();
+            async move { rt.start(run).await }
+        });
+        wait_for_intent(&st, run).await;
+        assert!(rt.request_pause(run, false));
+        rt.cancel(run).unwrap();
+        assert_eq!(handle.await.unwrap().unwrap(), RunState::Cancelled);
     }
 
     #[tokio::test]

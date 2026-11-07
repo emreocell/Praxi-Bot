@@ -24,9 +24,11 @@ mod tests;
 
 pub use agent::AgentLoop;
 pub use config::{Guards, LoopConfig, MemoryConfig, ModelPrice};
+pub use permission_engine::Decision as PolicyDecision;
 pub use profile::{BotProfile, ModelsConfig, PermissionsConfig, ProfileError, ToolFilter};
 pub use shared::{
-    ApprovalScope, Delivery, Grant, GrantTarget, LoopError, MessageMode, Providers, StreamItem,
+    ApprovalScope, CategoryDecision, Delivery, EffectivePolicy, Grant, GrantTarget, LoopError,
+    MessageMode, Providers, StreamItem,
 };
 
 /// Audit-log action recording an "always allow" grant rule for a bot.

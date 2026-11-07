@@ -13,5 +13,6 @@ pub mod surface;
 
 pub use discovery::{ToolHit, ToolIndex};
 pub use surface::{
-    DEFAULT_DISCOVERY_THRESHOLD, FIND_TOOL, GET_TOOL_DETAILS, SurfaceMode, ToolSurface, USE_TOOL,
+    DEFAULT_DISCOVERY_THRESHOLD, FIND_TOOL, GET_TOOL_DETAILS, SurfaceMode, ToolSurface,
+    ToolVisibility, USE_TOOL,
 };

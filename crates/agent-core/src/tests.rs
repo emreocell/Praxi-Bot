@@ -1893,3 +1893,405 @@ async fn disabled_memory_does_nothing() {
             .is_empty()
     );
 }
+
+// ---------- discovery visibility ----------
+
+#[tokio::test]
+async fn find_tool_and_get_tool_details_only_see_tools_visible_to_the_bot() {
+    let env = setup();
+    let secret = Arc::new(tool("t.secret", Effect::Read, "s"));
+    let extra: Vec<Arc<TestTool>> = (0..4)
+        .map(|i| Arc::new(tool(&format!("t.extra{i}"), Effect::Read, "x")))
+        .collect();
+    let mut all = vec![t(&secret)];
+    all.extend(extra.iter());
+    let fake = Fake::new(vec![
+        calls(&[("c1", "find_tool", json!({"query": "test tool", "k": 25}))]),
+        calls(&[("c2", "get_tool_details", json!({"name": "t.secret"}))]),
+        text("done"),
+    ]);
+    let mut config = cfg(Policy::full());
+    config.discovery_threshold = 3;
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &all,
+        profile("[tools]\nexclude = [\"t.secret\"]\n"),
+        config,
+    );
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+
+    let found = &tool_messages(&fake.request(1))[0];
+    assert!(found.contains("t.extra0"), "{found}");
+    assert!(!found.contains("t.secret"), "leaked via find_tool: {found}");
+    let details = &tool_messages(&fake.request(2))[1];
+    assert!(details.contains("unknown tool"), "{details}");
+    assert!(!details.contains("input_schema"), "{details}");
+}
+
+// ---------- global event order ----------
+
+#[tokio::test]
+async fn events_carry_a_persisted_daemon_wide_sequence() {
+    let env = setup();
+    let fake = Fake::new(vec![text("one"), text("two")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let mut rx = lp.subscribe();
+    let r1 = lp.run_turn(env.chat, "a").unwrap();
+    lp.wait(r1).await.unwrap();
+    let mut items = Vec::new();
+    while let Ok(i) = rx.try_recv() {
+        items.push(i);
+    }
+    assert!(items.len() >= 3);
+    assert!(
+        items.iter().zip(1u64..).all(|(i, n)| i.gseq == n),
+        "gapless, starting at 1"
+    );
+    let idx = env.storage.list_event_index(0, 10_000).unwrap();
+    let got: Vec<_> = idx.iter().map(|r| (r.gseq, r.run_id, r.seq)).collect();
+    let want: Vec<_> = items
+        .iter()
+        .map(|i| (i.gseq, i.run_id, i.envelope.seq))
+        .collect();
+    assert_eq!(got, want);
+
+    // A fresh loop over the same storage continues the counter.
+    let fake2 = Fake::new(vec![text("two")]);
+    let lp2 = make_loop(
+        &env.storage,
+        env.bot,
+        &fake2,
+        &[],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let mut rx2 = lp2.subscribe();
+    let r2 = lp2.run_turn(env.chat, "b").unwrap();
+    lp2.wait(r2).await.unwrap();
+    let first = rx2.try_recv().unwrap();
+    assert_eq!(first.gseq, items.len() as u64 + 1);
+}
+
+// ---------- effective policy ----------
+
+#[tokio::test]
+async fn effective_policy_merges_category_grants_but_not_floors_or_denies() {
+    let env = setup();
+    let fake = Fake::new(vec![]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(""),
+        cfg(Policy::approve_destructive()),
+    );
+    let before = lp.effective_policy(env.bot).unwrap();
+    assert!(before.policy.is_none() && before.grants.is_empty());
+    assert_eq!(
+        before.categories[&PermissionCategory::Fs].decision,
+        crate::PolicyDecision::Ask
+    );
+    for c in [PermissionCategory::Fs, PermissionCategory::Money] {
+        lp.sh.grants.lock().always.push(crate::Grant {
+            bot_id: env.bot,
+            target: GrantTarget::Category(c),
+            granted_at_ms: 1,
+        });
+    }
+    lp.sh.grants.lock().always.push(crate::Grant {
+        bot_id: env.bot,
+        target: GrantTarget::Tool("t.x".into()),
+        granted_at_ms: 2,
+    });
+    let eff = lp.effective_policy(env.bot).unwrap();
+    let fs = &eff.categories[&PermissionCategory::Fs];
+    assert_eq!(
+        (fs.decision.clone(), fs.via_grant),
+        (crate::PolicyDecision::Allow, true)
+    );
+    let money = &eff.categories[&PermissionCategory::Money];
+    assert_eq!(
+        (money.decision.clone(), money.via_grant),
+        (crate::PolicyDecision::Ask, false),
+        "the money floor is never waived"
+    );
+    assert_eq!(
+        eff.categories[&PermissionCategory::Shell].decision,
+        crate::PolicyDecision::Ask
+    );
+    assert_eq!(eff.grants.len(), 3);
+    assert!(!eff.categories.contains_key(&PermissionCategory::Meta));
+
+    // A bot-level deny is not widened by a grant.
+    let lp2 = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile("[permissions]\npreset = \"read-only\"\n"),
+        cfg(Policy::full()),
+    );
+    lp2.sh.grants.lock().always.push(crate::Grant {
+        bot_id: env.bot,
+        target: GrantTarget::Category(PermissionCategory::Fs),
+        granted_at_ms: 1,
+    });
+    let eff2 = lp2.effective_policy(env.bot).unwrap();
+    assert!(eff2.policy.is_some());
+    assert_eq!(
+        eff2.categories[&PermissionCategory::Fs].decision,
+        crate::PolicyDecision::Deny
+    );
+    assert!(lp2.effective_policy(BotId::new()).is_err());
+}
+
+// ---------- shutdown ----------
+
+fn step_states(storage: &Storage, run: protocol::RunId) -> Vec<(String, String)> {
+    storage
+        .list_steps(run)
+        .unwrap()
+        .into_iter()
+        .map(|s| (s.name, s.status))
+        .collect()
+}
+
+#[tokio::test]
+async fn shutdown_cancels_a_model_call_pauses_the_run_and_refuses_new_work() {
+    let env = setup();
+    let fake = Fake::new(vec![Reply::Hang]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "hello").unwrap();
+    for _ in 0..500 {
+        if fake.n_requests() == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let started = std::time::Instant::now();
+    let paused = lp.shutdown(Duration::from_secs(30)).await;
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "a model stream is cancelled at once, not waited for"
+    );
+    assert_eq!(paused, vec![run]);
+    assert_eq!(lp.runtime().state(run).unwrap(), RunState::Paused);
+    assert_eq!(
+        step_states(&env.storage, run).last().unwrap(),
+        &("model".to_owned(), "interrupted".to_owned())
+    );
+    assert!(matches!(
+        lp.run_turn(env.chat, "again"),
+        Err(crate::LoopError::ShuttingDown)
+    ));
+    assert!(matches!(
+        lp.send_user_message(env.chat, "again", MessageMode::Queue),
+        Err(crate::LoopError::ShuttingDown)
+    ));
+    assert!(matches!(
+        lp.resume(run),
+        Err(crate::LoopError::ShuttingDown)
+    ));
+
+    // Next start: `recover` has nothing left to do and the run resumes
+    // (the idempotent model step is replayed).
+    let fake2 = Fake::new(vec![text("hello again")]);
+    let lp2 = make_loop(
+        &env.storage,
+        env.bot,
+        &fake2,
+        &[],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    assert!(lp2.recover().unwrap().is_empty());
+    lp2.resume(run).unwrap();
+    assert_eq!(lp2.wait(run).await.unwrap(), RunState::Succeeded);
+    // The paused run's log has no `run_finished` before the resume.
+    let log = read_event_log(env.dir.path(), run).unwrap();
+    let finished = log
+        .iter()
+        .filter(|e| matches!(e.event, Event::RunFinished(_)))
+        .count();
+    assert_eq!(finished, 1);
+    assert!(
+        log.iter()
+            .any(|e| matches!(&e.event, Event::Error(x) if x.recoverable))
+    );
+}
+
+#[tokio::test]
+async fn shutdown_waits_for_a_running_tool_step_within_the_grace_period() {
+    let env = setup();
+    let mut slow = tool("t.write", Effect::Write, "written");
+    slow.delay = Duration::from_millis(300);
+    let slow = Arc::new(slow);
+    let fake = Fake::new(vec![calls(&[("c1", "t.write", json!({}))]), Reply::Hang]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&slow)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "write").unwrap();
+    for _ in 0..500 {
+        if slow.count.load(Ordering::SeqCst) == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert_eq!(slow.count.load(Ordering::SeqCst), 1, "tool is running");
+    let paused = lp.shutdown(Duration::from_secs(30)).await;
+    assert_eq!(paused, vec![run]);
+    let steps = step_states(&env.storage, run);
+    assert_eq!(
+        steps.last().unwrap(),
+        &("tools".to_owned(), "succeeded".to_owned()),
+        "the tool step finished and its result is durable: {steps:?}"
+    );
+    // The next model call was never started.
+    assert_eq!(fake.n_requests(), 1);
+    assert_eq!(lp.runtime().state(run).unwrap(), RunState::Paused);
+
+    // Resume continues from the stored tool result; the tool is not re-run.
+    let fake2 = Fake::new(vec![text("all written")]);
+    let again = Arc::new(tool("t.write", Effect::Write, "again"));
+    let lp2 = make_loop(
+        &env.storage,
+        env.bot,
+        &fake2,
+        &[t(&again)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    lp2.resume(run).unwrap();
+    assert_eq!(lp2.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(again.count.load(Ordering::SeqCst), 0);
+    assert_eq!(tool_messages(&fake2.request(0)), vec!["written".to_owned()]);
+}
+
+#[tokio::test]
+async fn shutdown_interrupts_a_tool_that_outlives_the_grace_period() {
+    let env = setup();
+    let mut hang = tool("t.write", Effect::Write, "never");
+    hang.delay = Duration::from_secs(3600);
+    let hang = Arc::new(hang);
+    let fake = Fake::new(vec![calls(&[("c1", "t.write", json!({}))])]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&hang)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "write").unwrap();
+    for _ in 0..500 {
+        if hang.count.load(Ordering::SeqCst) == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let paused = lp.shutdown(Duration::from_millis(150)).await;
+    assert_eq!(paused, vec![run]);
+    assert_eq!(
+        step_states(&env.storage, run).last().unwrap(),
+        &("tools".to_owned(), "interrupted".to_owned())
+    );
+
+    // On resume the interrupted (side-effecting) tool is never replayed.
+    let fake2 = Fake::new(vec![text("could not confirm")]);
+    let w = Arc::new(tool("t.write", Effect::Write, "w"));
+    let lp2 = make_loop(
+        &env.storage,
+        env.bot,
+        &fake2,
+        &[t(&w)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    lp2.resume(run).unwrap();
+    assert_eq!(lp2.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(w.count.load(Ordering::SeqCst), 0);
+    assert!(tool_messages(&fake2.request(0))[0].contains("interrupted"));
+}
+
+#[tokio::test]
+async fn shutdown_pauses_a_run_waiting_for_approval_and_expires_the_request() {
+    let env = setup();
+    let w = Arc::new(tool("t.write", Effect::Write, "w"));
+    let fake = Fake::new(vec![calls(&[("c1", "t.write", json!({}))])]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&w)],
+        profile(""),
+        cfg(Policy::approve_destructive()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    let paused = lp.shutdown(Duration::from_secs(30)).await;
+    assert_eq!(paused, vec![run]);
+    assert_eq!(lp.runtime().state(run).unwrap(), RunState::Paused);
+    let approvals = env.storage.list_approvals(run).unwrap();
+    assert_eq!(approvals[0].decision.as_deref(), Some("expired"));
+    assert_eq!(w.count.load(Ordering::SeqCst), 0);
+    assert!(matches!(
+        lp.approve(a.call_id, ApprovalScope::Once, env.user),
+        Err(crate::LoopError::NoPendingApproval(_))
+    ));
+}
+
+#[tokio::test]
+async fn shutdown_with_nothing_running_returns_immediately_and_flushes_memory() {
+    let env = setup();
+    let (store, mem) = memory_cfg();
+    let extraction = json!([{
+        "kind": "profile",
+        "content": "The user is called Ayse",
+        "quote": "I am Ayse",
+        "hypothetical": false,
+        "importance": 0.8
+    }])
+    .to_string();
+    let fake = Fake::new(vec![text("hi Ayse"), text(&extraction)]);
+    let mut config = cfg(Policy::full());
+    config.memory = Some(mem);
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
+    let run = lp.run_turn(env.chat, "I am Ayse").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(lp.shutdown(Duration::from_secs(5)).await.is_empty());
+    assert_eq!(
+        store
+            .list(env.user, &memory_store::ListFilter::default())
+            .unwrap()
+            .len(),
+        1,
+        "background extraction was flushed"
+    );
+}

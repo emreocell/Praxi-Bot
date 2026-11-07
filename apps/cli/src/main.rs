@@ -70,7 +70,10 @@ enum Command {
         #[command(subcommand)]
         action: ProvidersCmd,
     },
-    /// Run the local daemon API (127.0.0.1 only) until Ctrl-C.
+    /// Run the local daemon API (127.0.0.1 only) until Ctrl-C / SIGTERM.
+    ///
+    /// On shutdown running tool steps get `--shutdown-grace` seconds to finish,
+    /// then every live run is paused (resume it after the next start).
     ///
     /// Exit codes of the client commands: 0 ok, 1 error, 2 usage, 3 daemon
     /// unreachable, 4 auth rejected, 5 not found, 6 request rejected, 7 run failed.
@@ -79,6 +82,9 @@ enum Command {
         #[cfg(feature = "fake-provider")]
         #[arg(long)]
         fake_provider: bool,
+        /// Seconds running tool steps may take to finish on shutdown.
+        #[arg(long, default_value_t = 10)]
+        shutdown_grace: u64,
     },
     /// Show daemon status (also verifies the API token).
     Status,
@@ -100,12 +106,24 @@ enum Command {
         #[command(subcommand)]
         action: BotsCmd,
     },
+    /// Answer a pending question card (`question_asked` event).
+    Answer {
+        /// Tool call id of the question (shown in the chat stream).
+        call_id: String,
+        /// The answer.
+        text: String,
+    },
+    /// List or revoke a bot's persisted "always allow" grants.
+    Grants {
+        #[command(subcommand)]
+        action: GrantsCmd,
+    },
     /// Approve (or deny) a pending tool call.
     Approve {
         /// Tool call id (shown in the chat stream / `approval_needed` event).
         tool_call_id: String,
         /// How far the approval reaches.
-        #[arg(long, value_parser = ["once", "this_chat", "always"], default_value = "once")]
+        #[arg(long, value_parser = ["once", "this_chat", "always", "always_category"], default_value = "once")]
         scope: String,
         /// Deny instead of approving.
         #[arg(long)]
@@ -113,6 +131,26 @@ enum Command {
         /// Reason given to the model on deny.
         #[arg(long, requires = "deny")]
         reason: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum GrantsCmd {
+    /// List the grants of a bot.
+    List {
+        /// Bot id.
+        bot_id: String,
+    },
+    /// Remove one grant (the next matching call asks again).
+    Revoke {
+        /// Bot id.
+        bot_id: String,
+        /// Revoke the grant of this tool.
+        #[arg(long, group = "target")]
+        tool: Option<String>,
+        /// Revoke the grant of this permission category (fs, shell, ...).
+        #[arg(long, group = "target")]
+        category: Option<String>,
     },
 }
 
@@ -274,7 +312,12 @@ fn run() -> Result<()> {
     // Daemon commands (no secret store needed, except `serve` with real providers).
     match command {
         Command::Serve { .. } => return run_serve(&cli, command, &data_dir),
-        Command::Status | Command::Chat { .. } | Command::Bots { .. } | Command::Approve { .. } => {
+        Command::Status
+        | Command::Chat { .. }
+        | Command::Bots { .. }
+        | Command::Approve { .. }
+        | Command::Answer { .. }
+        | Command::Grants { .. } => {
             return run_client(&cli, command, &data_dir);
         }
         _ => {}
@@ -316,7 +359,9 @@ fn run() -> Result<()> {
         | Command::Status
         | Command::Chat { .. }
         | Command::Bots { .. }
-        | Command::Approve { .. } => Ok(()),
+        | Command::Approve { .. }
+        | Command::Answer { .. }
+        | Command::Grants { .. } => Ok(()),
         Command::Providers { action } => match action {
             ProvidersCmd::Add {
                 id,
@@ -361,23 +406,27 @@ fn run() -> Result<()> {
 }
 
 fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result<()> {
+    let grace = match command {
+        Command::Serve { shutdown_grace, .. } => std::time::Duration::from_secs(*shutdown_grace),
+        _ => daemon_api::DEFAULT_SHUTDOWN_GRACE,
+    };
     #[cfg(feature = "fake-provider")]
     if let Command::Serve {
         fake_provider: true,
+        ..
     } = command
     {
         let providers =
             agent_core::Providers::single(std::sync::Arc::new(daemon_api::fake::FakeProvider));
-        return serve::serve(data_dir, cli.port, providers, cli.json);
+        return serve::serve(data_dir, cli.port, providers, cli.json, grace);
     }
-    let _ = command;
     let (store, kind) = open_store(cli.secrets_backend, data_dir, &ask_passphrase)?;
     eprintln!("(secret backend: {kind:?})");
     let catalog = load_catalog(cli.catalog_dir.as_ref())?;
     let providers = serve::build_providers(data_dir, &catalog, store.as_ref(), &mut |w| {
         eprintln!("warning: {w}");
     })?;
-    serve::serve(data_dir, cli.port, providers, cli.json)
+    serve::serve(data_dir, cli.port, providers, cli.json, grace)
 }
 
 fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result<()> {
@@ -425,6 +474,23 @@ fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Resul
                     mode,
                 };
                 remote::chat(&c, &opts, json, &mut out).await
+            }
+            Command::Answer { call_id, text } => {
+                remote::answer(&c, call_id, text, json, &mut out).await
+            }
+            Command::Grants {
+                action: GrantsCmd::List { bot_id },
+            } => remote::grants_list(&c, bot_id, json, &mut out).await,
+            Command::Grants {
+                action:
+                    GrantsCmd::Revoke {
+                        bot_id,
+                        tool,
+                        category,
+                    },
+            } => {
+                let target = remote::grant_target_body(tool.as_deref(), category.as_deref())?;
+                remote::grants_revoke(&c, bot_id, target, json, &mut out).await
             }
             Command::Approve {
                 tool_call_id,
@@ -511,6 +577,52 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Command::Chat { ref mode, .. }) if mode == "steer"
+        ));
+        let cli = Cli::try_parse_from(["bot", "answer", "c1", "blue"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Answer { ref call_id, ref text }) if call_id == "c1" && text == "blue"
+        ));
+        assert!(Cli::try_parse_from(["bot", "answer", "c1"]).is_err());
+        assert!(matches!(
+            Cli::try_parse_from(["bot", "grants", "list", "b1"])
+                .unwrap()
+                .command,
+            Some(Command::Grants {
+                action: GrantsCmd::List { .. }
+            })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["bot", "grants", "revoke", "b1", "--category", "fs"])
+                .unwrap()
+                .command,
+            Some(Command::Grants {
+                action: GrantsCmd::Revoke { .. }
+            })
+        ));
+        assert!(
+            Cli::try_parse_from([
+                "bot",
+                "grants",
+                "revoke",
+                "b1",
+                "--tool",
+                "t",
+                "--category",
+                "fs"
+            ])
+            .is_err()
+        );
+        let cli =
+            Cli::try_parse_from(["bot", "approve", "c1", "--scope", "always_category"]).unwrap();
+        assert!(matches!(cli.command, Some(Command::Approve { .. })));
+        let cli = Cli::try_parse_from(["bot", "serve", "--shutdown-grace", "3"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Serve {
+                shutdown_grace: 3,
+                ..
+            })
         ));
         let cli = Cli::try_parse_from(["bot", "approve", "c1", "--scope", "always"]).unwrap();
         assert!(matches!(

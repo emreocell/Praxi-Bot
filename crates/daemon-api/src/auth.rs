@@ -184,13 +184,32 @@ pub(crate) async fn guard(State(state): State<AppState>, req: Request, next: Nex
     }
     let public = req.method() == Method::GET && req.uri().path() == "/v1/health";
     if !public {
-        let ok =
-            bearer(req.headers()).is_some_and(|t| ct_eq(t.as_bytes(), state.token().as_bytes()));
+        let presented = match bearer(req.headers()) {
+            Some(t) => Some(t),
+            // A browser `EventSource` cannot set headers: the events route (and
+            // only that one) also takes `?token=`.  Host / Origin were already
+            // checked above; an `Authorization` header, when present, wins.
+            None if is_events_route(&req) => query_token(req.uri().query()),
+            None => None,
+        };
+        let ok = presented.is_some_and(|t| ct_eq(t.as_bytes(), state.token().as_bytes()));
         if !ok {
             return with_cors(ApiError::unauthorized().into_response(), origin, false);
         }
     }
     with_cors(next.run(req).await, origin, false)
+}
+
+fn is_events_route(req: &Request) -> bool {
+    req.method() == Method::GET && req.uri().path() == "/v1/events"
+}
+
+/// The `token` query parameter (raw: tokens are hex, nothing to decode).
+fn query_token(query: Option<&str>) -> Option<&str> {
+    query?
+        .split('&')
+        .find_map(|kv| kv.strip_prefix("token="))
+        .filter(|t| !t.is_empty())
 }
 
 fn with_cors(mut resp: Response, origin: Option<HeaderValue>, preflight: bool) -> Response {
@@ -261,6 +280,15 @@ mod tests {
         std::fs::write(token_path(d.path()), "short").unwrap();
         assert!(read_token(d.path()).is_err());
         assert_ne!(load_or_create_token(d.path()).unwrap().token, a.token);
+    }
+
+    #[test]
+    fn query_token_parsing() {
+        assert_eq!(query_token(Some("token=abc")), Some("abc"));
+        assert_eq!(query_token(Some("run_id=1&token=abc&x=2")), Some("abc"));
+        assert_eq!(query_token(Some("token=")), None);
+        assert_eq!(query_token(Some("mytoken=abc")), None);
+        assert_eq!(query_token(None), None);
     }
 
     #[test]

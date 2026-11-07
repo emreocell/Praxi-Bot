@@ -44,6 +44,8 @@ impl Modify for Security {
         routes::list_bots,
         routes::create_bot,
         routes::get_bot,
+        routes::list_grants,
+        routes::revoke_grant,
         routes::update_bot,
         routes::delete_bot,
         routes::list_chats,
@@ -52,6 +54,7 @@ impl Modify for Security {
         routes::send_message,
         routes::list_approvals,
         routes::decide_approval,
+        routes::answer_question,
         routes::list_runs,
         routes::get_run,
         routes::cancel_run,
@@ -64,7 +67,9 @@ impl Modify for Security {
         dto::MessageDto, dto::Mode, dto::SendMessage, dto::DeliveryKind, dto::SendResponse,
         dto::ApprovalDto, dto::Decision, dto::Scope, dto::DecideApproval,
         dto::DecisionResponse, dto::RunDto, dto::UsageTotals, dto::BotUsage,
-        dto::UsageSummary, error::ErrorBody, error::ErrorDetail,
+        dto::UsageSummary, dto::AnswerQuestion, dto::AnswerResponse, dto::GrantDto,
+        dto::GrantTargetDto, dto::RevokeGrant, dto::EffectivePolicyDto,
+        dto::CategoryDecisionDto, error::ErrorBody, error::ErrorDetail,
     )),
     modifiers(&Security),
     tags(
@@ -78,12 +83,18 @@ pub struct ApiDoc;
 ///
 /// Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the
 /// SSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local
-/// `seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log; without
-/// it the `id` is `<run_id>:<seq>` and the same form resumes that run.
+/// `seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without
+/// it the stream covers all runs: the SSE `id` is a daemon-wide, strictly
+/// increasing `gseq` (persisted) and `Last-Event-ID: <gseq>` replays every
+/// missed event of every run, in order, before going live.  Browsers cannot set
+/// headers on `EventSource`, so this route (and only this one) also accepts the
+/// API token as the `token` query parameter (Host / Origin checks still apply;
+/// the token is compared in constant time; beware that URLs may be logged).
 #[utoipa::path(get, path = "/v1/events", tag = "events", security(("bearer" = [])),
     params(
         ("run_id" = Option<uuid::Uuid>, Query, description = "Follow only this run; the stream ends after run_finished"),
-        ("Last-Event-ID" = Option<String>, Header, description = "Resume cursor (`<seq>` with run_id, else `<run_id>:<seq>`)")
+        ("token" = Option<String>, Query, description = "API token, for clients that cannot send Authorization (EventSource)"),
+        ("Last-Event-ID" = Option<String>, Header, description = "Resume cursor: `<seq>` with run_id, else the daemon-wide `<gseq>`")
     ),
     responses((status = 200, description = "text/event-stream of protocol::Envelope",
         content_type = "text/event-stream", body = String),

@@ -2,11 +2,14 @@
 
 use std::collections::BTreeMap;
 
-use agent_core::{ApprovalScope, BotProfile, Delivery, MessageMode};
+use agent_core::{
+    ApprovalScope, BotProfile, Delivery, EffectivePolicy, Grant, GrantTarget, MessageMode,
+    PolicyDecision,
+};
 use axum::extract::{FromRequest, Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::{Json, extract::rejection::JsonRejection};
-use protocol::{BotId, ChatId, Event, RunId, ToolCallId};
+use protocol::{BotId, ChatId, Event, PermissionCategory, RunId, ToolCallId};
 use provider_catalog::Usage;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -18,9 +21,10 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::dto::{
-    ApprovalDto, BotDto, BotInput, BotUsage, ChatDto, CreateChat, DecideApproval, Decision,
-    DecisionResponse, DeliveryKind, Health, MessageDto, Mode, RunDto, Scope, SendMessage,
-    SendResponse, UsageSummary, UsageTotals,
+    AnswerQuestion, AnswerResponse, ApprovalDto, BotDto, BotInput, BotUsage, CategoryDecisionDto,
+    ChatDto, CreateChat, DecideApproval, Decision, DecisionResponse, DeliveryKind,
+    EffectivePolicyDto, GrantDto, GrantTargetDto, Health, MessageDto, Mode, RevokeGrant, RunDto,
+    Scope, SendMessage, SendResponse, UsageSummary, UsageTotals,
 };
 use crate::error::{ApiError, ErrorBody};
 
@@ -53,6 +57,67 @@ fn bot_dto(b: Bot) -> BotDto {
         name: b.name,
         config: b.config,
         created_at_ms: b.created_at_ms,
+        effective_policy: None,
+    }
+}
+
+fn category_name(c: PermissionCategory) -> String {
+    serde_json::to_value(c)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+fn grant_dto(g: &Grant) -> GrantDto {
+    GrantDto {
+        target: match &g.target {
+            GrantTarget::Tool(name) => GrantTargetDto::Tool { name: name.clone() },
+            GrantTarget::Category(c) => GrantTargetDto::Category {
+                name: category_name(*c),
+            },
+        },
+        granted_at_ms: g.granted_at_ms,
+    }
+}
+
+fn grant_target(t: GrantTargetDto) -> Result<GrantTarget, ApiError> {
+    match t {
+        GrantTargetDto::Tool { name } if !name.trim().is_empty() => Ok(GrantTarget::Tool(name)),
+        GrantTargetDto::Tool { .. } => Err(ApiError::bad_request("tool name must not be empty")),
+        GrantTargetDto::Category { name } => {
+            match serde_json::from_value::<PermissionCategory>(Value::String(name.clone())) {
+                // `meta` is always allowed; a grant on it would mean nothing.
+                Ok(c) if c != PermissionCategory::Meta => Ok(GrantTarget::Category(c)),
+                _ => Err(ApiError::bad_request(format!(
+                    "unknown permission category {name:?}"
+                ))),
+            }
+        }
+    }
+}
+
+fn effective_policy_dto(e: EffectivePolicy) -> EffectivePolicyDto {
+    EffectivePolicyDto {
+        policy: e.policy.and_then(|p| serde_json::to_value(p).ok()),
+        categories: e
+            .categories
+            .into_iter()
+            .map(|(c, d)| {
+                let decision = match d.decision {
+                    PolicyDecision::Allow => "allow",
+                    PolicyDecision::Ask => "ask",
+                    PolicyDecision::Deny => "deny",
+                };
+                (
+                    category_name(c),
+                    CategoryDecisionDto {
+                        decision: decision.to_owned(),
+                        via_grant: d.via_grant,
+                    },
+                )
+            })
+            .collect(),
+        grants: e.grants.iter().map(grant_dto).collect(),
     }
 }
 
@@ -199,7 +264,8 @@ pub(crate) async fn create_bot(
     Ok((StatusCode::CREATED, Json(bot_dto(bot))))
 }
 
-/// Get one bot.
+/// Get one bot, including its `effective_policy` (stored policy merged with
+/// the persisted grants).
 #[utoipa::path(get, path = "/v1/bots/{id}", tag = "bots", security(("bearer" = [])),
     params(("id" = Uuid, Path, description = "Bot id")),
     responses((status = 200, body = BotDto), (status = 404, body = ErrorBody)))]
@@ -207,7 +273,50 @@ pub(crate) async fn get_bot(
     State(s): State<AppState>,
     Path(bid): Path<String>,
 ) -> Result<Json<BotDto>, ApiError> {
-    Ok(Json(bot_dto(s.bot_of_user(BotId(id(&bid)?))?)))
+    let bot = s.bot_of_user(BotId(id(&bid)?))?;
+    let effective = s.agent().effective_policy(bot.id).ok();
+    let mut dto = bot_dto(bot);
+    dto.effective_policy = effective.map(effective_policy_dto);
+    Ok(Json(dto))
+}
+
+/// The bot's persisted "always allow" grants (created by approving with scope
+/// `always` / `always_category`).
+#[utoipa::path(get, path = "/v1/bots/{id}/grants", tag = "bots", security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "Bot id")),
+    responses((status = 200, body = Vec<GrantDto>), (status = 404, body = ErrorBody)))]
+pub(crate) async fn list_grants(
+    State(s): State<AppState>,
+    Path(bid): Path<String>,
+) -> Result<Json<Vec<GrantDto>>, ApiError> {
+    let bot = s.bot_of_user(BotId(id(&bid)?))?;
+    Ok(Json(
+        s.agent()
+            .list_grants(bot.id)
+            .iter()
+            .map(grant_dto)
+            .collect(),
+    ))
+}
+
+/// Revoke one grant (audited); the next matching call asks again.
+#[utoipa::path(delete, path = "/v1/bots/{id}/grants", tag = "bots", security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "Bot id")),
+    request_body = RevokeGrant,
+    responses((status = 204), (status = 400, body = ErrorBody),
+              (status = 404, body = ErrorBody, description = "no such bot or grant")))]
+pub(crate) async fn revoke_grant(
+    State(s): State<AppState>,
+    Path(bid): Path<String>,
+    ApiJson(input): ApiJson<RevokeGrant>,
+) -> Result<StatusCode, ApiError> {
+    let bot = s.bot_of_user(BotId(id(&bid)?))?;
+    let target = grant_target(input.target)?;
+    if s.agent().revoke_grant(bot.id, &target)? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError::not_found("grant"))
+    }
 }
 
 /// Replace a bot's name and profile.
@@ -394,6 +503,7 @@ pub(crate) async fn decide_approval(
                 Scope::Once => ApprovalScope::Once,
                 Scope::ThisChat => ApprovalScope::ThisChat,
                 Scope::Always => ApprovalScope::Always,
+                Scope::AlwaysCategory => ApprovalScope::AlwaysCategory,
             };
             s.agent().approve(call_id, scope, s.user_id())?;
         }
@@ -403,6 +513,23 @@ pub(crate) async fn decide_approval(
         call_id: call_uuid,
         decision: input.decision,
     }))
+}
+
+/// Answer a pending question card (the `call_id` of a `question_asked` event).
+#[utoipa::path(post, path = "/v1/questions/{call_id}", tag = "approvals",
+    security(("bearer" = [])),
+    params(("call_id" = Uuid, Path, description = "Tool call id from the question_asked event")),
+    request_body = AnswerQuestion,
+    responses((status = 200, body = AnswerResponse), (status = 404, body = ErrorBody)))]
+pub(crate) async fn answer_question(
+    State(s): State<AppState>,
+    Path(call): Path<String>,
+    ApiJson(input): ApiJson<AnswerQuestion>,
+) -> Result<Json<AnswerResponse>, ApiError> {
+    let call_uuid = id(&call)?;
+    s.agent()
+        .answer_question(ToolCallId(call_uuid), &input.answer)?;
+    Ok(Json(AnswerResponse { call_id: call_uuid }))
 }
 
 // ------------------------------------------------------------------ runs

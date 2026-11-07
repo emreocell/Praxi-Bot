@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::error::{Result, StorageError};
 use crate::migrate;
-use crate::records::{Approval, AuditEntry, Bot, Chat, Message, Run, RunStep, User};
+use crate::records::{Approval, AuditEntry, Bot, Chat, EventIndexRow, Message, Run, RunStep, User};
 
 /// Current Unix time in milliseconds.
 #[must_use]
@@ -609,6 +609,61 @@ impl Storage {
             .collect::<rusqlite::Result<_>>()?)
     }
 
+    // ---- global event order ----
+
+    /// Highest `gseq` handed out so far (`0` when no event was indexed yet).
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn last_gseq(&self) -> Result<u64> {
+        let v: i64 =
+            self.conn()
+                .query_row("SELECT COALESCE(MAX(gseq), 0) FROM event_index", [], |r| {
+                    r.get(0)
+                })?;
+        Ok(u64::try_from(v).unwrap_or(0))
+    }
+
+    /// Record that event `seq` of `run_id` has the daemon-wide number `gseq`.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors (including a reused `gseq`).
+    pub fn index_event(&self, gseq: u64, run_id: RunId, seq: u64) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO event_index (gseq, run_id, seq) VALUES (?1, ?2, ?3)",
+            params![
+                i64::try_from(gseq).unwrap_or(i64::MAX),
+                run_id.to_string(),
+                i64::try_from(seq).unwrap_or(i64::MAX)
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Up to `limit` index rows with `gseq > after`, in order.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn list_event_index(&self, after: u64, limit: u32) -> Result<Vec<EventIndexRow>> {
+        let conn = self.conn();
+        let mut st = conn.prepare(
+            "SELECT gseq, run_id, seq FROM event_index WHERE gseq > ?1 ORDER BY gseq LIMIT ?2",
+        )?;
+        let rows = st.query_map(
+            params![i64::try_from(after).unwrap_or(i64::MAX), limit],
+            |r| {
+                let gseq: i64 = r.get(0)?;
+                let seq: i64 = r.get(2)?;
+                Ok(EventIndexRow {
+                    gseq: u64::try_from(gseq).unwrap_or(0),
+                    run_id: RunId(uuid_at(r, 1)?),
+                    seq: u64::try_from(seq).unwrap_or(0),
+                })
+            },
+        )?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// Run a raw statement (test hook to prove schema-level guarantees).
     #[cfg(test)]
     pub(crate) fn raw_execute(&self, sql: &str) -> rusqlite::Result<usize> {
@@ -946,6 +1001,27 @@ mod tests {
         );
         assert!(f.st.raw_execute("DELETE FROM audit_log").is_err());
         assert_eq!(f.st.list_audit(f.user.id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn event_index_orders_and_persists() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (RunId::new(), RunId::new());
+        {
+            let st = Storage::open(dir.path()).unwrap();
+            assert_eq!(st.last_gseq().unwrap(), 0);
+            st.index_event(1, a, 0).unwrap();
+            st.index_event(2, b, 0).unwrap();
+            st.index_event(3, a, 1).unwrap();
+            assert!(st.index_event(3, b, 1).is_err(), "gseq is never reused");
+        }
+        let st = Storage::open(dir.path()).unwrap();
+        assert_eq!(st.last_gseq().unwrap(), 3);
+        let rows = st.list_event_index(1, 10).unwrap();
+        let got: Vec<_> = rows.iter().map(|r| (r.gseq, r.run_id, r.seq)).collect();
+        assert_eq!(got, [(2, b, 0), (3, a, 1)]);
+        assert_eq!(st.list_event_index(0, 2).unwrap().len(), 2);
+        assert_eq!(st.list_event_index(3, 10).unwrap(), vec![]);
     }
 
     #[test]
