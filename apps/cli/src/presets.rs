@@ -1,7 +1,6 @@
 //! Bot and permission presets offered by `bot setup`.
 
 use clap::ValueEnum;
-use permission_engine::Policy;
 use serde_json::{Value, json};
 
 /// Interface language of the wizard.
@@ -92,14 +91,28 @@ impl BotPreset {
         }
     }
 
-    /// Tool groups the preset enables.
+    /// Tool-name globs the preset exposes (`[tools] allow` of the profile).
+    ///
+    /// Every preset keeps the agent-internal tools (questions, todos,
+    /// sub-agents, skills, workflows, tool discovery) so the loop works.
     #[must_use]
-    pub fn tool_groups(self) -> &'static [&'static str] {
+    pub fn tool_allow(self) -> Vec<&'static str> {
+        let mut v = vec![
+            "ask_user",
+            "todo_write",
+            "spawn_subagent",
+            "find_tool",
+            "get_tool_details",
+            "use_tool",
+            "skill_*",
+            "workflow_*",
+        ];
         match self {
-            Self::General => &["memory"],
-            Self::Browser => &["memory", "browser"],
-            Self::Desktop => &["memory", "desktop", "fs"],
+            Self::General => v.extend(["fs_read", "fs_list", "fs_search"]),
+            Self::Browser => v.push("browser_*"),
+            Self::Desktop => v.extend(["desktop_*", "fs_*", "checkpoint_*"]),
         }
+        v
     }
 }
 
@@ -158,34 +171,53 @@ impl PermissionPreset {
             ),
         }
     }
+}
 
-    /// The policy this preset stands for.
-    #[must_use]
-    pub fn policy(self) -> Policy {
-        match self {
-            Self::ReadOnly => Policy::read_only(),
-            Self::ReadAndDraft => Policy::read_and_draft(),
-            Self::ApproveDestructive => Policy::approve_destructive(),
-            Self::Full => Policy::full(),
-        }
+/// Profile slug for a bot name: lower-case ASCII letters and digits joined by
+/// `-`; `fallback` when nothing usable remains.
+#[must_use]
+pub fn slug(name: &str, fallback: &str) -> String {
+    let mapped: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let s = mapped
+        .split('-')
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if s.is_empty() {
+        fallback.to_string()
+    } else {
+        s
     }
 }
 
-/// The `config` JSON stored on the created bot record.
+/// The `config` JSON stored on the created bot record: a real bot profile,
+/// the structure `agent_core::BotProfile` loads (same as `bot bots add`).
 #[must_use]
 pub fn bot_config(
     preset: BotPreset,
     perm: PermissionPreset,
-    model: Option<&str>,
+    name: &str,
+    model: &str,
     lang: Lang,
 ) -> Value {
     json!({
-        "preset": preset.id(),
-        "language": lang.code(),
-        "system_prompt": preset.system_prompt(),
-        "tool_groups": preset.tool_groups(),
-        "model": model,
-        "permission_preset": perm.id(),
-        "permissions": serde_json::to_value(perm.policy()).unwrap_or(Value::Null),
+        "bot": {
+            "id": slug(name, preset.id()),
+            "name": name,
+            "persona": preset.system_prompt(),
+            "language": lang.code(),
+        },
+        "models": { "executor": model },
+        "permissions": { "preset": perm.id() },
+        "tools": { "allow": preset.tool_allow() },
     })
 }
