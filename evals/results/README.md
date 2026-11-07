@@ -136,3 +136,35 @@ Re-run: pass in 3 calls.
 - `browser-wikipedia-second-result` is judged (the search ranking is live data).
 - Eval runs on a real desktop with the user's own browsers installed: a model that launches `chrome.exe` opens the
   user's Chrome. Tasks now clean up the processes they started (never pre-existing ones).
+
+## Discovery baseline (task 039, 2026-11-07)
+
+Frozen golden-query test for tool discovery, run before anyone changes ranking, lexical rules, the surface or embeddings:
+`cargo test -p agent-router --test discovery_golden -- --nocapture`
+(fixture: `crates/agent-router/tests/fixtures/discovery_golden.json`).
+
+- Corpus: 60 tools = 39 real builtin specs (browser, desktop, fs, checkpoint, shell, script, meta, skills, workflow; copied 2026-11-07) + 21 synthetic `mcp:<server>/<tool>` tools, including 8 read/destructive near-duplicate pairs (draft/send mail, read/delete document, get/merge PR, query/drop table, list/delete event, ...).
+- Queries: 58 (52 labelled + 6 `none`), EN 37 / TR 13 / TR-ascii 8. Splits: seen 18, paraphrase 22 (words absent from tool names/descriptions), confusable 12, none 6.
+- Indexes: `ToolIndex` (find_tool: stemming + EN/TR synonyms + BM25) and the K2 `Corpus` in BM25-only mode (`NullEmbedder`, no synonyms/stemming).
+- Metrics: top-1 = first hit is an expected tool; recall@5 = any expected tool in the top 5; MRR over the full ranking; destr.pick = confusable queries whose expectation is non-destructive but a destructive tool ranked first; none-empty = share of `none` queries returning no hit.
+
+| Index | Group | n | top-1 % | recall@5 % | MRR % | destr.pick | none-empty % |
+|---|---|---|---|---|---|---|---|
+| ToolIndex | all | 52 | 55.8 | 78.8 | 67.2 | 3 | 50.0 |
+| ToolIndex | en | 34 | 64.7 | 88.2 | 75.8 | 2 | 0.0 |
+| ToolIndex | tr | 11 | 45.5 | 54.5 | 51.3 | 1 | 100.0 |
+| ToolIndex | tr_ascii | 7 | 28.6 | 71.4 | 50.0 | 0 | 100.0 |
+| ToolIndex | seen | 18 | 88.9 | 94.4 | 90.7 | 0 | n/a |
+| ToolIndex | paraphrase | 22 | 27.3 | 54.5 | 42.1 | 0 | n/a |
+| ToolIndex | confusable | 12 | 58.3 | 100.0 | 77.8 | 3 | n/a |
+| Corpus (BM25) | all | 52 | 53.8 | 71.2 | 61.5 | 5 | 66.7 |
+| Corpus (BM25) | en | 34 | 67.6 | 88.2 | 76.4 | 4 | 33.3 |
+| Corpus (BM25) | tr | 11 | 36.4 | 45.5 | 40.9 | 1 | 100.0 |
+| Corpus (BM25) | tr_ascii | 7 | 14.3 | 28.6 | 21.4 | 0 | 100.0 |
+| Corpus (BM25) | seen | 18 | 94.4 | 94.4 | 94.4 | 0 | n/a |
+| Corpus (BM25) | paraphrase | 22 | 22.7 | 36.4 | 27.9 | 0 | n/a |
+| Corpus (BM25) | confusable | 12 | 50.0 | 100.0 | 73.6 | 5 | n/a |
+
+Mean ranking time (unoptimised test build, per query): ToolIndex about 150 us, Corpus about 17 us.
+
+Reading: lexical discovery is fine when the query reuses tool vocabulary (seen: 89-94 % top-1) and collapses on paraphrases (23-27 % top-1, 36-55 % recall@5) and on Turkish (ToolIndex tr 46 % top-1; Corpus tr_ascii 14 %). The MCP-style confusable pairs are found (recall@5 100 %) but a destructive twin wins top-1 in 3 (ToolIndex) / 5 (Corpus) of 12 queries. The test asserts floors about 2 points below these numbers, so a regression fails CI; raise them when ranking improves.
