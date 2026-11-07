@@ -137,6 +137,9 @@ pub struct FrameInput {
     pub ax_nodes: Vec<Value>,
     /// DOM facts for inputs and cursor-interactive candidates.
     pub extras: Vec<DomExtra>,
+    /// True when the DOM snapshot for this frame could not be captured. Without it sensitive
+    /// inputs cannot be recognised, so every text-entry value is masked (fail closed).
+    pub extras_failed: bool,
 }
 
 /// What a ref points to.
@@ -406,7 +409,15 @@ struct Builder<'a> {
     opts: &'a SnapshotOptions,
     refs: &'a mut RefMap,
     out: Vec<SnapNode>,
+    truncated: bool,
 }
+
+/// Maximum AX nesting (hidden levels included) followed before the walk is cut off. Guards the
+/// worker stack against hostile pages that nest thousands of elements.
+const MAX_NEST: usize = 256;
+
+/// Roles whose value is masked when sensitivity information is unavailable.
+const FREE_TEXT_ROLES: &[&str] = &["textbox", "searchbox", "combobox", "spinbutton"];
 
 /// Build the snapshot lines for a page. `frames[0]` must be the main frame; iframes are spliced
 /// under the `Iframe` AX node whose backend id equals the child's `owner_backend_id`.
@@ -441,9 +452,20 @@ pub fn build_snapshot(
         opts,
         refs,
         out: Vec::new(),
+        truncated: false,
     };
     if !frames.is_empty() {
-        b.emit_frame(0, 0);
+        b.emit_frame(0, 0, 0);
+    }
+    if b.truncated {
+        b.out.push(SnapNode {
+            depth: 0,
+            ref_id: None,
+            role: "text".to_string(),
+            name: "[snapshot truncated: nesting too deep]".to_string(),
+            value: None,
+            states: Vec::new(),
+        });
     }
     let mut out = b.out;
     if opts.compact && !opts.interactive_only {
@@ -457,10 +479,10 @@ impl Builder<'_> {
         self.opts.interactive_only || self.opts.max_depth.is_none_or(|m| depth <= m)
     }
 
-    fn emit_frame(&mut self, f: usize, depth: usize) {
+    fn emit_frame(&mut self, f: usize, depth: usize, nest: usize) {
         let roots = self.parsed[f].roots.clone();
         for r in roots {
-            self.emit_node(f, r, depth, "");
+            self.emit_node(f, r, depth, "", nest);
         }
         // Cursor-interactive elements the AX tree does not know about.
         let frame = &self.frames[f];
@@ -527,7 +549,11 @@ impl Builder<'_> {
         });
     }
 
-    fn emit_node(&mut self, f: usize, n: usize, depth: usize, parent_name: &str) {
+    fn emit_node(&mut self, f: usize, n: usize, depth: usize, parent_name: &str, nest: usize) {
+        if nest > MAX_NEST {
+            self.truncated = true;
+            return;
+        }
         let node = self.parsed[f].nodes[n].clone();
         let extra: Option<DomExtra> = node
             .backend
@@ -561,7 +587,7 @@ impl Builder<'_> {
         // Transparent nodes: hoist children.
         if node.ignored || (TRANSPARENT_ROLES.contains(&role) && !clickable) {
             for c in node.children {
-                self.emit_node(f, c, depth, parent_name);
+                self.emit_node(f, c, depth, parent_name, nest + 1);
             }
             return;
         }
@@ -592,7 +618,10 @@ impl Builder<'_> {
 
         // Mask sensitive values.
         let mut value = node.value.clone();
-        if extra.as_ref().is_some_and(DomExtra::is_sensitive) && value.is_some() {
+        let unknown_sensitivity = self.frames[f].extras_failed && FREE_TEXT_ROLES.contains(&role);
+        if (extra.as_ref().is_some_and(DomExtra::is_sensitive) || unknown_sensitivity)
+            && value.is_some()
+        {
             value = Some(MASK.to_string());
         }
 
@@ -622,7 +651,7 @@ impl Builder<'_> {
         }
         .to_string();
         for c in node.children {
-            self.emit_node(f, c, child_depth, &parent);
+            self.emit_node(f, c, child_depth, &parent, nest + 1);
         }
         if is_iframe && let Some(b) = node.backend {
             let child = self.frames.iter().position(|c| {
@@ -630,7 +659,7 @@ impl Builder<'_> {
                     && c.owner_backend_id == Some(b)
             });
             if let Some(cf) = child {
-                self.emit_frame(cf, child_depth);
+                self.emit_frame(cf, child_depth, nest + 1);
             }
         }
     }
@@ -664,6 +693,7 @@ fn prune_empty(out: &mut Vec<SnapNode>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     const EXAMPLE: &str = include_str!("../tests/fixtures/example_com.json");
     const LOGIN: &str = include_str!("../tests/fixtures/login_form.json");
@@ -874,5 +904,71 @@ mod tests {
         assert_eq!(RefMap::normalize("@e3"), "e3");
         assert_eq!(RefMap::normalize("[e3]"), "e3");
         assert_eq!(RefMap::normalize(" e3 "), "e3");
+    }
+
+    fn textbox_frame(value: &str, failed: bool) -> FrameInput {
+        let ax = json!([
+            {"nodeId":"1","role":{"value":"RootWebArea"},"childIds":["2"],"backendDOMNodeId":1},
+            {"nodeId":"2","parentId":"1","role":{"value":"textbox"},"name":{"value":"Card"},
+             "value":{"value":value},"childIds":[],"backendDOMNodeId":2}
+        ]);
+        FrameInput {
+            frame_id: "main".into(),
+            loader_id: Some("L1".into()),
+            ax_nodes: ax.as_array().unwrap().clone(),
+            extras_failed: failed,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn masks_text_values_when_dom_snapshot_failed() {
+        let mut refs = RefMap::new();
+        let t = text(
+            &[textbox_frame("4111111111111111", true)],
+            &SnapshotOptions::default(),
+            &mut refs,
+        );
+        assert!(!t.contains("4111"), "{t}");
+        assert!(t.contains("[masked]"), "{t}");
+        let t = text(
+            &[textbox_frame("hello", false)],
+            &SnapshotOptions::default(),
+            &mut RefMap::new(),
+        );
+        assert!(t.contains("hello"), "{t}");
+    }
+
+    #[test]
+    fn deep_nesting_is_truncated_without_overflow() {
+        let depth = 20_000;
+        let mut ax = vec![
+            json!({"nodeId":"0","role":{"value":"generic"},"ignored":true,
+            "childIds":["1"],"backendDOMNodeId":1}),
+        ];
+        for i in 1..depth {
+            ax.push(
+                json!({"nodeId":i.to_string(),"role":{"value":"generic"},"ignored":true,
+                "childIds":[(i+1).to_string()],"backendDOMNodeId":i+1}),
+            );
+        }
+        ax.push(
+            json!({"nodeId":depth.to_string(),"role":{"value":"button"},"name":{"value":"deep"},
+            "childIds":[],"backendDOMNodeId":depth+1}),
+        );
+        let frame = FrameInput {
+            frame_id: "main".into(),
+            loader_id: Some("L1".into()),
+            ax_nodes: ax,
+            ..Default::default()
+        };
+        // Run on a small stack like the real worker to prove no overflow.
+        let t = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || text(&[frame], &SnapshotOptions::default(), &mut RefMap::new()))
+            .unwrap()
+            .join()
+            .expect("no stack overflow");
+        assert!(t.contains("truncated"), "{t}");
     }
 }

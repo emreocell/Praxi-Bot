@@ -2,7 +2,7 @@
 //! A single tab: session management, frames (including out-of-process iframes), snapshots.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
@@ -28,8 +28,8 @@ pub(crate) struct Shared {
     pub oopif: StdMutex<HashMap<String, String>>,
     /// Sessions whose domains are already enabled.
     pub ready: StdMutex<HashSet<String>>,
-    /// In-flight network requests of the main session.
-    pub inflight: AtomicI64,
+    /// In-flight network request ids of the main session (a redirect chain reuses one id).
+    pub inflight: StdMutex<HashSet<String>>,
     /// Last network activity.
     pub last_net: StdMutex<Option<Instant>>,
     /// Incremented on every main-frame navigation; invalidates refs.
@@ -318,6 +318,7 @@ impl Page {
                         loader_id: f["loaderId"].as_str().map(str::to_string),
                         ax_nodes: ax,
                         extras: Vec::new(),
+                        extras_failed: false,
                     });
                     for c in node["childFrames"].as_array().into_iter().flatten() {
                         stack.push((c.clone(), false, Some(id.clone()), None));
@@ -371,14 +372,25 @@ impl Page {
             }
         }
         for s in sessions {
-            let Ok(resp) = self
-                .cmd_on(
-                    s.as_deref(),
-                    "DOMSnapshot.captureSnapshot",
-                    json!({"computedStyles": COMPUTED_STYLES}),
-                )
-                .await
-            else {
+            let mut captured = None;
+            for _attempt in 0..2 {
+                if let Ok(r) = self
+                    .cmd_on(
+                        s.as_deref(),
+                        "DOMSnapshot.captureSnapshot",
+                        json!({"computedStyles": COMPUTED_STYLES}),
+                    )
+                    .await
+                {
+                    captured = Some(r);
+                    break;
+                }
+            }
+            let Some(resp) = captured else {
+                // Fail closed: without DOM facts sensitive inputs are unrecognisable.
+                for f in frames.iter_mut().filter(|f| f.session_id == s) {
+                    f.extras_failed = true;
+                }
                 continue;
             };
             let extras: Vec<DomExtra> = dom::parse_dom_snapshot(&resp);
@@ -491,10 +503,10 @@ impl Page {
     pub(crate) async fn wait_network_idle(&self, quiet: Duration, timeout: Duration) -> Result<()> {
         let deadline = Instant::now() + timeout;
         loop {
-            let inflight = self.shared.inflight.load(Ordering::SeqCst);
+            let inflight = self.shared.inflight.lock().map_or(0, |s| s.len());
             let last = self.shared.last_net.lock().ok().and_then(|l| *l);
             let idle_for = last.map_or(quiet, |t| t.elapsed());
-            if inflight <= 0 && idle_for >= quiet {
+            if inflight == 0 && idle_for >= quiet {
                 return Ok(());
             }
             if Instant::now() >= deadline {
@@ -546,13 +558,18 @@ async fn watch(mut rx: broadcast::Receiver<CdpEvent>, session: String, shared: A
                 }
             }
             "Network.requestWillBeSent" if sid == session => {
-                shared.inflight.fetch_add(1, Ordering::SeqCst);
+                if let Some(id) = ev.params["requestId"].as_str()
+                    && let Ok(mut set) = shared.inflight.lock()
+                {
+                    set.insert(id.to_string());
+                }
                 touch(&shared);
             }
             "Network.loadingFinished" | "Network.loadingFailed" if sid == session => {
-                let v = shared.inflight.fetch_sub(1, Ordering::SeqCst);
-                if v <= 0 {
-                    shared.inflight.store(0, Ordering::SeqCst);
+                if let Some(id) = ev.params["requestId"].as_str()
+                    && let Ok(mut set) = shared.inflight.lock()
+                {
+                    set.remove(id);
                 }
                 touch(&shared);
             }
@@ -560,7 +577,9 @@ async fn watch(mut rx: broadcast::Receiver<CdpEvent>, session: String, shared: A
                 if sid == session && ev.params["frame"].get("parentId").is_none() =>
             {
                 shared.nav_gen.fetch_add(1, Ordering::SeqCst);
-                shared.inflight.store(0, Ordering::SeqCst);
+                if let Ok(mut set) = shared.inflight.lock() {
+                    set.clear();
+                }
             }
             _ => {}
         }
@@ -570,5 +589,35 @@ async fn watch(mut rx: broadcast::Receiver<CdpEvent>, session: String, shared: A
 fn touch(shared: &Shared) {
     if let Ok(mut l) = shared.last_net.lock() {
         *l = Some(Instant::now());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ev(method: &str, params: Value) -> CdpEvent {
+        CdpEvent {
+            method: method.into(),
+            params,
+            session_id: Some("S".into()),
+        }
+    }
+
+    #[tokio::test]
+    async fn redirect_chain_does_not_leak_inflight() {
+        let (tx, rx) = broadcast::channel(64);
+        let shared = Arc::new(Shared::default());
+        let task = tokio::spawn(watch(rx, "S".into(), shared.clone()));
+        // Three hops share one requestId, then a single loadingFinished.
+        for _ in 0..3 {
+            tx.send(ev("Network.requestWillBeSent", json!({"requestId": "R1"})))
+                .unwrap();
+        }
+        tx.send(ev("Network.loadingFinished", json!({"requestId": "R1"})))
+            .unwrap();
+        drop(tx);
+        task.await.unwrap();
+        assert!(shared.inflight.lock().unwrap().is_empty());
     }
 }
