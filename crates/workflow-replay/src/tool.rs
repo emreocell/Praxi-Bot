@@ -28,7 +28,9 @@ use tool_registry::{
 };
 
 use crate::error::WorkflowError;
-use crate::replay::{Handles, MAX_WORKFLOW_DEPTH, Handover, HandoverReason, ReplayOptions, ReplayReport, Replayer};
+use crate::replay::{
+    Handles, Handover, HandoverReason, MAX_WORKFLOW_DEPTH, ReplayOptions, ReplayReport, Replayer,
+};
 use crate::store::WorkflowStore;
 
 /// Name of the run tool.
