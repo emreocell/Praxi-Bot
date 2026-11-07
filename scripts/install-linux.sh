@@ -207,8 +207,14 @@ apt_candidate() {
 install_cft() {
   # Official Google Chrome for Testing, pinned, for both supported CPUs.
   # No snap, PPA, Node runtime or printer services. Update the pin with releases.
-  local platform=linux64 version=157.0.8103.38 browser_work pkg
-  [[ "${ARCH}" != "aarch64" ]] || platform=linux-arm64
+  local version="157.0.8103.38"
+  local sha256_linux64="8cdeb344e9b2cefe59f4aea8d1d93d5d93054c03cde217665c16fc1f62e72a66"
+  local sha256_linux_arm64="5517510e61657ff43ee9ab804ecd1a499b3d5bd3caf72f097516bd6565ba5a17"
+  local platform=linux64 expected_sha="${sha256_linux64}" actual_sha browser_work pkg
+  if [[ "${ARCH}" == "aarch64" ]]; then
+    platform=linux-arm64
+    expected_sha="${sha256_linux_arm64}"
+  fi
   local libs=(libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0
     libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2)
   for pkg in libasound2 libatspi2.0-0; do
@@ -223,6 +229,13 @@ install_cft() {
     rm -rf "${browser_work}"
     die "Chrome for Testing download failed; install a non-snap browser and use --skip-packages"
   fi
+  actual_sha="$(sha256_hex "$(sha256sum "${browser_work}/chrome.zip")")"
+  if [[ "${actual_sha}" != "${expected_sha}" ]]; then
+    rm -f "${browser_work}/chrome.zip"
+    rm -rf "${browser_work}"
+    die "Chrome for Testing SHA-256 mismatch for ${platform} (expected ${expected_sha}, got ${actual_sha})"
+  fi
+  log "Chrome for Testing checksum OK"
   unzip -q "${browser_work}/chrome.zip" -d "${browser_work}"
   install -d -m 0755 /opt/praxi-browser
   cp -a "${browser_work}/chrome-${platform}/." /opt/praxi-browser/

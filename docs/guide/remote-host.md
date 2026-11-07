@@ -174,9 +174,17 @@ into `/opt/praxi-browser`. The CPU choice is explicit: `linux64` for x86_64,
 [official download metadata](https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json)
 now publishes Linux ARM64 builds (since version 153); older advice that Google's
 Linux browser builds are x86_64-only is no longer true for this distribution.
-The pinned archive is delivered via HTTPS; Google does not publish a detached
-SHA-256 file here. Re-run an updated installer to receive a newer browser pin;
-Chrome for Testing does not auto-update.
+The pinned archive is delivered via HTTPS and verified against pinned SHA-256
+checksums for each architecture before extraction. Re-run an updated installer
+to receive a newer browser pin; Chrome for Testing does not auto-update.
+
+To update the pinned Chrome for Testing version and checksums in
+`scripts/install-linux.sh`, download the new version's archives for both
+platforms (`linux64` and `linux-arm64`) from
+`https://storage.googleapis.com/chrome-for-testing-public/<version>/<platform>/chrome-<platform>.zip`,
+compute their hashes using `sha256sum`, and update `version`,
+`sha256_linux64`, and `sha256_linux_arm64` together at the top of
+`install_cft`.
 
 Fedora/RHEL uses `chromium` from the administrator's enabled RPM repos, without
 weak dependencies; absence is an installation error. No PPA or snap is added.
