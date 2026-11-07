@@ -7,19 +7,21 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agent_core::{AgentLoop, LoopConfig, Providers};
+use agent_router::ladder::{GeminiEmbedder, gemini};
 use builtin_tools::{BuiltinConfig, ResolverGate};
 use daemon_api::{AppState, DaemonConfig, ProviderHost, load_or_create_token, token_path};
 use desktop_api::DesktopBackend;
 use permission_engine::{PermissionResolver, Policy};
 use protocol::InitiatorKind;
 use provider_catalog::{
-    Catalog, ChatProvider, ModelInfo, OpenAiCompatConfig, ProviderConfig, ProviderEntry,
-    ProviderSettings, config_path,
+    Auth, Catalog, ChatProvider, ModelInfo, OpenAiCompatConfig, ProviderConfig, ProviderEntry,
+    ProviderKind, ProviderSettings, config_path,
 };
 use secret_store::SecretStore;
 use skills::{SkillIndex, SkillPaths};
 use storage::Storage;
 use tool_registry::ToolRegistry;
+use workflow_replay::{Handles, WorkflowStore};
 
 use crate::Result;
 
@@ -57,7 +59,33 @@ pub fn build_providers(
     for (id, p, models) in built {
         providers = providers.with(p).with_catalog_prices(&id, &models);
     }
+    // K2 embeddings (decision ladder): Gemini when a Gemini key is configured.
+    if let Some(key) = gemini_key(&cfg, catalog, store) {
+        providers = providers.with_embedder(Arc::new(GeminiEmbedder::new(
+            key,
+            gemini::DEFAULT_EMBED_MODEL,
+        )));
+    }
     Ok(providers)
+}
+
+/// The API key of the first enabled Gemini provider that has one (stored
+/// secret or environment variable), for the router's embedder.
+fn gemini_key(cfg: &ProviderConfig, catalog: &Catalog, store: &dyn SecretStore) -> Option<String> {
+    cfg.providers.iter().filter(|p| p.enabled).find_map(|s| {
+        let entry = s.custom.as_ref().or_else(|| catalog.get(&s.id))?;
+        if entry.kind != ProviderKind::Gemini {
+            return None;
+        }
+        let key = match (&s.key, &entry.auth) {
+            (Some(r), _) => secret_store::resolve(store, r)
+                .ok()
+                .map(|k| k.expose().to_string()),
+            (None, Auth::ApiKeyEnv(var)) => std::env::var(var).ok(),
+            (None, Auth::None) => None,
+        };
+        key.filter(|k| !k.trim().is_empty())
+    })
 }
 
 fn build_one(
@@ -75,10 +103,6 @@ fn build_one(
     let provider = Arc::from(s.build_provider(&entry, store, OpenAiCompatConfig::default())?);
     Ok((provider, entry.models))
 }
-
-/// Registry size above which the model sees the discovery tools instead of
-/// every tool (see `build_agent`).
-const DIRECT_TOOL_LIMIT: usize = 40;
 
 /// Assemble the loop (tools + providers) over `storage`.
 ///
@@ -100,19 +124,25 @@ pub fn build_agent(
         InitiatorKind::Human,
     );
     let mut tools = BuiltinConfig::new(data_dir.to_path_buf(), Arc::new(gate));
-    tools.desktop = desktop;
-    // The built-in set (with `spawn_subagent` and the skill tools) is just over
-    // the router's default discovery threshold; the model should see these
-    // directly and only switch to `find_tool` / `use_tool` once plugins or MCP
-    // servers add many more.
-    let config = LoopConfig {
-        discovery_threshold: DIRECT_TOOL_LIMIT,
-        ..LoopConfig::default()
-    };
-    AgentLoop::new(Arc::clone(storage), ToolRegistry::new(), providers, config)
-        .with_builtin_tools(tools)
-        .with_subagents()
-        .with_skills(load_skills(data_dir))
+    tools.desktop.clone_from(&desktop);
+    // The discovery threshold is `LoopConfig`'s default (40).
+    AgentLoop::new(
+        Arc::clone(storage),
+        ToolRegistry::new(),
+        providers,
+        LoopConfig::default(),
+    )
+    .with_builtin_tools(tools)
+    .with_subagents()
+    .with_skills(load_skills(data_dir))
+    .with_workflows(
+        WorkflowStore::new(data_dir),
+        Handles {
+            desktop,
+            browser: None,
+            tools: ToolRegistry::new(),
+        },
+    )
 }
 
 /// The skills index of a data dir: the bundled skills plus `<data_dir>/skills/`,
@@ -352,10 +382,11 @@ id = "unpriced"
             assert!(names.iter().any(|n| n == want), "{want} in {names:?}");
         }
         assert!(
-            names.len() <= DIRECT_TOOL_LIMIT,
+            names.len() <= LoopConfig::default().discovery_threshold,
             "{} built-in tools exceed the direct limit",
             names.len()
         );
+        assert!(names.iter().any(|n| n == "workflow_run"), "{names:?}");
         let idx = load_skills(dir.path());
         assert!(idx.write_dir().is_some());
         assert!(idx.get("custom-dropdowns").is_some(), "bundled skills load");

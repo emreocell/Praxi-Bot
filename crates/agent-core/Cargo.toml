@@ -33,6 +33,7 @@ tokio-util.workspace = true
 tool-registry = { path = "../tool-registry", version = "0.1.0" }
 toml.workspace = true
 uuid.workspace = true
+workflow-replay = { path = "../workflow-replay", version = "0.1.0" }
 
 [dev-dependencies]
 tempfile.workspace = true

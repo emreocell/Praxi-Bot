@@ -9,7 +9,10 @@ use task_runtime::StepStatus;
 use tool_registry::ToolSpec;
 
 use crate::profile::BotProfile;
-use crate::shared::{CallRec, ModelOut, ResultRec, STEP_MODEL, STEP_TOOLS, STEP_USER};
+use crate::router::workflow_note;
+use crate::shared::{
+    CallRec, ModelOut, ResultRec, STEP_MODEL, STEP_TOOLS, STEP_USER, STEP_WORKFLOW,
+};
 
 /// Providers (OpenAI-style) reject `.` in function names; expose `a.b` as `a__b`.
 pub(crate) fn expose(name: &str) -> String {
@@ -112,6 +115,16 @@ pub(crate) fn build_messages(
                 flush(&mut out, &mut outstanding);
                 let text = step.input["text"].as_str().unwrap_or_default();
                 out.push(Message::text(MessageRole::User, text));
+            }
+            STEP_WORKFLOW => {
+                // The router replayed a saved workflow that stopped early:
+                // tell the model where it stopped, in the user's message.
+                if let Some(note) = workflow_note(step)
+                    && let Some(m) = out.iter_mut().rev().find(|m| m.role == MessageRole::User)
+                    && let Value::String(s) = &mut m.content
+                {
+                    s.push_str(&note);
+                }
             }
             STEP_MODEL => {
                 if status_of(step) != Some(StepStatus::Succeeded) {

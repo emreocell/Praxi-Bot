@@ -367,6 +367,53 @@
       }
     },
     {
+      "description": "The K0-K3 ladder decided how a turn starts (ADR-0005), before the main model (K4) runs.  Emitted once per top-level turn of a bot whose router is enabled.",
+      "type": "object",
+      "required": [
+        "confidence",
+        "latency_ms",
+        "level",
+        "reason",
+        "route",
+        "run_id",
+        "type"
+      ],
+      "properties": {
+        "confidence": {
+          "description": "Confidence in `0..=1`.",
+          "type": "number",
+          "format": "double"
+        },
+        "latency_ms": {
+          "description": "Wall time of the whole decision.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "level": {
+          "description": "Level that decided: `K0` (rules / commands), `K1` (intent cache), `K2` (BM25 + embeddings), `K3` (classifier) or `K4` (nothing cheaper applied).",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why (for the \"why did it do that\" panel).",
+          "type": "string"
+        },
+        "route": {
+          "description": "The route, tagged by `kind`: `command` (`name`, `args`), `workflow` (`name`, `params`, `confidence`), `tool_hint` (`tools`), `skill_hint` (`skills`) or `agent`."
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "route_decided"
+          ]
+        }
+      }
+    },
+    {
       "description": "A recorded workflow step is about to run (deterministic replay, no model).",
       "type": "object",
       "required": [

@@ -191,6 +191,8 @@ pub enum DeliveryKind {
     Steered,
     /// Queued behind the running turn.
     Queued,
+    /// The message was `/stop`: the running turn was cancelled (`run_id` is that turn).
+    Stopped,
 }
 
 /// Response of a sent message.
@@ -200,6 +202,15 @@ pub struct SendResponse {
     pub delivery: DeliveryKind,
     /// The run to follow (`null` when queued: the turn has no run yet).
     pub run_id: Option<Uuid>,
+}
+
+/// Response of `POST /v1/runs/{id}/remember`.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct RememberResponse {
+    /// The route that was cached for the run's request text, tagged by `kind`
+    /// (`workflow`, `tool_hint` or `skill_hint`).
+    #[schema(value_type = Object)]
+    pub route: serde_json::Value,
 }
 
 /// A pending or decided tool-call approval.

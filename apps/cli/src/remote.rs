@@ -133,6 +133,9 @@ pub async fn chat(c: &Client, o: &ChatOpts<'_>, json_out: bool, out: &mut dyn Wr
             .ok_or_else(|| fail(exit::GENERIC, "daemon returned no chat id"))?
             .to_owned()
     };
+    // Open the global stream first so nothing the run emits is missed; it
+    // also carries the subagents events (approvals inside them).
+    let feed = c.open_events().await?;
     let sent = c
         .request(
             Method::POST,
@@ -157,7 +160,7 @@ pub async fn chat(c: &Client, o: &ChatOpts<'_>, json_out: bool, out: &mut dyn Wr
     }
     let mut io_err: Option<std::io::Error> = None;
     let result = c
-        .follow_run(run_id, |raw, env| {
+        .follow_tree(feed, run_id, |raw, env| {
             let r = if json_out {
                 writeln!(out, "{raw}")
             } else {
@@ -212,6 +215,17 @@ fn render(ev: &Event, out: &mut dyn Write) -> std::io::Result<()> {
             if let Some(e) = &t.error {
                 eprintln!("\n[tool error] {e}");
             }
+            Ok(())
+        }
+        Event::RouteDecided(r) => {
+            eprintln!(
+                "[route {} {} {:.2}, {} ms] {}",
+                r.level,
+                r.route["kind"].as_str().unwrap_or("?"),
+                r.confidence,
+                r.latency_ms,
+                r.reason
+            );
             Ok(())
         }
         Event::SubagentStarted(e) => {

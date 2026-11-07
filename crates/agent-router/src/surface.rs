@@ -351,6 +351,41 @@ impl ToolSurface {
         }
     }
 
+    /// Tool definitions for a turn the router narrowed to `hinted` (ADR-0005:
+    /// the router only narrows): the hinted tools that exist and pass
+    /// `visible`, plus the three discovery meta-tools so the model can still
+    /// reach every other tool through `find_tool`.  Sorted by name.
+    #[must_use]
+    pub fn hinted_specs(
+        &self,
+        hinted: &[String],
+        visible: &dyn Fn(&ToolSpec) -> bool,
+    ) -> Vec<ToolSpec> {
+        let mut specs: Vec<ToolSpec> = hinted
+            .iter()
+            .filter_map(|n| self.discovery.registry.get(n))
+            .map(|t| t.spec().clone())
+            .filter(|s| !is_meta(&s.name) && visible(s))
+            .collect();
+        specs.sort_by(|a, b| a.name.cmp(&b.name));
+        specs.dedup_by(|a, b| a.name == b.name);
+        specs.extend(self.meta.iter().map(|t| t.spec().clone()));
+        specs
+    }
+
+    /// Like [`Self::resolve`] for a turn narrowed by [`Self::hinted_specs`]:
+    /// the meta-tools and the hinted tools are addressable in either mode.
+    #[must_use]
+    pub fn resolve_hinted(&self, name: &str, hinted: &[String]) -> Option<Arc<dyn Tool>> {
+        if let Some(t) = self.meta.iter().find(|t| t.spec().name == name) {
+            return Some(Arc::clone(t));
+        }
+        if hinted.iter().any(|h| h == name) {
+            return self.discovery.registry.get(name);
+        }
+        self.resolve(name)
+    }
+
     /// Resolve a tool the model asked for.  In discovery mode only the three
     /// meta-tools are directly addressable (everything else goes via
     /// `use_tool`).

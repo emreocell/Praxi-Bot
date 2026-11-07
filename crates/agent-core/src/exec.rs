@@ -28,8 +28,10 @@ use tool_registry::{ContentPart, Tool, ToolContext, ToolOutput, ToolSpec};
 use crate::history::{
     GUARD_NOTE, build_messages, expose, status_of, step_output, tool_defs, truncate_utf8,
 };
+use crate::router::{RoutePlan, route_hints};
 use crate::shared::{
-    CallRec, ModelOut, ResultRec, RunCtx, STEP_MODEL, STEP_TOOLS, STEP_USER, Shared, xe,
+    CallRec, ModelOut, ResultRec, RunCtx, STEP_COMMAND, STEP_MODEL, STEP_TOOLS, STEP_USER,
+    STEP_WORKFLOW, Shared, xe,
 };
 
 pub(crate) struct TurnExecutor {
@@ -69,6 +71,14 @@ fn user_step(text: &str) -> StepSpec {
     }
 }
 
+/// The first step of a routed turn: the user message plus the ladder's
+/// decision (the audit record; `remember` and the hints read it back).
+fn routed_user_step(text: &str, decision: &agent_router::ladder::Decision) -> StepSpec {
+    let mut spec = user_step(text);
+    spec.input["route"] = serde_json::to_value(decision).unwrap_or(Value::Null);
+    spec
+}
+
 #[async_trait]
 impl StepExecutor for TurnExecutor {
     async fn next_step(
@@ -76,6 +86,11 @@ impl StepExecutor for TurnExecutor {
         run: &Run,
         history: &[RunStep],
     ) -> Result<Option<StepSpec>, ExecError> {
+        if history.is_empty()
+            && let Some(spec) = self.first_step(run).await?
+        {
+            return Ok(Some(spec));
+        }
         self.plan_next(run, history)
     }
 
@@ -89,6 +104,8 @@ impl StepExecutor for TurnExecutor {
             STEP_USER => Ok(json!({ "text": step.input["text"] })),
             STEP_MODEL => self.exec_model(run, step).await,
             STEP_TOOLS => self.exec_tools(run, step).await,
+            STEP_WORKFLOW => self.exec_workflow(run, step).await,
+            STEP_COMMAND => self.exec_command(run, step),
             other => Err(xe(format!("unknown step kind {other:?}"))),
         }
     }
@@ -97,21 +114,58 @@ impl StepExecutor for TurnExecutor {
 impl TurnExecutor {
     // ---- planning ----
 
+    /// The first step of a top-level turn: the user message, after the
+    /// decision ladder (K0-K3) had its say.  `None` for subagents (their first
+    /// step comes from `plan_next`).
+    async fn first_step(&self, run: &Run) -> Result<Option<StepSpec>, ExecError> {
+        let ctx = self.sh.ctx(run)?;
+        if ctx.sub.is_some() {
+            return Ok(None);
+        }
+        let raw = self.first_user_text(&ctx, run)?;
+        let Some(decision) = self.route_first(&ctx, &raw).await else {
+            return Ok(Some(user_step(&self.with_recall(&ctx, &raw))));
+        };
+        if let agent_router::ladder::Route::Command(c) = &decision.route
+            && c.name == "stop"
+        {
+            // `/stop`: the run that carries it is cancelled before it starts.
+            self.stop_run(run);
+        }
+        Ok(Some(routed_user_step(
+            &self.with_recall(&ctx, &raw),
+            &decision,
+        )))
+    }
+
+    fn first_user_text(&self, ctx: &RunCtx, run: &Run) -> Result<String, ExecError> {
+        self.sh
+            .storage
+            .list_messages(ctx.chat_id)
+            .map_err(xe)?
+            .into_iter()
+            .find(|m| m.run_id == Some(run.id) && m.role == "user")
+            .map(|m| m.content)
+            .ok_or_else(|| xe("turn has no user message"))
+    }
+
     fn plan_next(&self, run: &Run, history: &[RunStep]) -> Result<Option<StepSpec>, ExecError> {
         let ctx = self.sh.ctx(run)?;
         if history.is_empty() {
             if let Some(sub) = &ctx.sub {
                 return Ok(Some(user_step(&sub.first_message())));
             }
-            let first = self
-                .sh
-                .storage
-                .list_messages(ctx.chat_id)
-                .map_err(xe)?
-                .into_iter()
-                .find(|m| m.run_id == Some(run.id) && m.role == "user")
-                .ok_or_else(|| xe("turn has no user message"))?;
-            return Ok(Some(user_step(&self.with_recall(&ctx, &first.content))));
+            let first = self.first_user_text(&ctx, run)?;
+            return Ok(Some(user_step(&self.with_recall(&ctx, &first))));
+        }
+        let steer_empty = ctx.state.lock().steer.is_empty();
+        match Self::route_plan(history, steer_empty) {
+            RoutePlan::Step(spec) => return Ok(Some(spec)),
+            RoutePlan::Done => {
+                ctx.state.lock().closed = true;
+                return Ok(None);
+            }
+            RoutePlan::Continue => {}
         }
         let model_steps = history.iter().filter(|s| s.name == STEP_MODEL).count();
         match self.pending_tools(&ctx, history) {
@@ -207,10 +261,10 @@ impl TurnExecutor {
         }
     }
 
-    fn is_read(&self, ctx: &RunCtx, name: &str, args: &str) -> bool {
+    fn is_read(&self, ctx: &RunCtx, hints: &[String], name: &str, args: &str) -> bool {
         let input: Value = serde_json::from_str(args).unwrap_or(Value::Null);
         self.sh
-            .resolve_call(&ctx.profile, name, &input)
+            .resolve_call(&ctx.profile, name, &input, hints)
             .and_then(|r| r.spec)
             .is_some_and(|s| s.effect == tool_registry::Effect::Read)
     }
@@ -237,6 +291,7 @@ impl TurnExecutor {
                 })
                 .collect()
         };
+        let hints = route_hints(history).tools;
         let covered = tool_steps(&history[mi + 1..]).len();
         if covered >= mo.tool_calls.len() {
             return Ok(None);
@@ -247,11 +302,12 @@ impl TurnExecutor {
             .iter()
             .map(|c| call_key(&c.name, &c.arguments))
             .collect();
-        let group_all_reads = self.is_read(ctx, &remaining[0].name, &remaining[0].arguments);
+        let group_all_reads =
+            self.is_read(ctx, &hints, &remaining[0].name, &remaining[0].arguments);
         let take = if group_all_reads {
             remaining
                 .iter()
-                .take_while(|c| self.is_read(ctx, &c.name, &c.arguments))
+                .take_while(|c| self.is_read(ctx, &hints, &c.name, &c.arguments))
                 .count()
         } else {
             1
@@ -294,15 +350,16 @@ impl TurnExecutor {
             .as_bool()
             .unwrap_or(false)
             .then(|| step.input["guard"].as_str().unwrap_or("guard").to_owned());
+        let hints = route_hints(&steps);
         let specs = if guard_reason.is_some() {
             Vec::new()
         } else {
-            self.sh.model_specs(&ctx.profile)
+            self.sh.model_specs(&ctx.profile, &hints.tools)
         };
         let note = guard_reason
             .as_deref()
             .map(|r| GUARD_NOTE.replace("{reason}", r));
-        let skills = self.skills_block(&ctx, &steps);
+        let skills = self.skills_block(&ctx, &steps, &hints.skills);
         let messages = build_messages(
             &self.sh.storage,
             run,
@@ -395,7 +452,12 @@ impl TurnExecutor {
     /// The skills index block for the system prompt: skills matching the
     /// foreground page / app (when the embedder tells us) or else the turn's
     /// latest user text are listed first.
-    fn skills_block(&self, ctx: &RunCtx, steps: &[RunStep]) -> Option<String> {
+    fn skills_block(
+        &self,
+        ctx: &RunCtx,
+        steps: &[RunStep],
+        suggested: &[String],
+    ) -> Option<String> {
         let index = self.sh.skills.get()?;
         let hints = self
             .sh
@@ -411,11 +473,14 @@ impl TurnExecutor {
             .and_then(|s| s.input["text"].as_str())
             .map(str::to_owned)
             .or_else(|| ctx.sub.as_ref().map(|s| s.task.clone()));
-        let block = index.prompt_block(&skills::SkillContext {
-            domain: hints.domain,
-            app: hints.app,
-            text,
-        });
+        let block = index.prompt_block_suggesting(
+            &skills::SkillContext {
+                domain: hints.domain,
+                app: hints.app,
+                text,
+            },
+            suggested,
+        );
         (!block.is_empty()).then_some(block)
     }
 
@@ -493,6 +558,7 @@ impl TurnExecutor {
         let ctx = self.sh.ctx(run)?;
         let calls: Vec<CallRec> =
             serde_json::from_value(step.input["calls"].clone()).map_err(xe)?;
+        let hints = route_hints(&self.sh.storage.list_steps(run.id).map_err(xe)?).tools;
 
         let mut slots = Vec::with_capacity(calls.len());
         let mut uuids = Vec::with_capacity(calls.len());
@@ -525,7 +591,10 @@ impl TurnExecutor {
                     continue;
                 }
             };
-            let Some(resolved) = self.sh.resolve_call(&ctx.profile, &call.name, &input) else {
+            let Some(resolved) = self
+                .sh
+                .resolve_call(&ctx.profile, &call.name, &input, &hints)
+            else {
                 slots.push(err(format!("unknown tool {:?}", call.name)));
                 continue;
             };

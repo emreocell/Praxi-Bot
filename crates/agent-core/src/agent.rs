@@ -99,6 +99,7 @@ impl AgentLoop {
                 spawn_gate: Mutex::new(()),
                 skills: OnceLock::new(),
                 skill_hints: RwLock::new(None),
+                router: crate::router::Router::default(),
             }
         });
         let rt = Arc::new(Runtime::new(
@@ -200,6 +201,8 @@ impl AgentLoop {
     /// streaming keep the provider they started with.
     pub fn set_providers(&self, providers: Providers) {
         *self.sh.providers.write() = providers;
+        // The K2 embedder and the K3 classifier come from the providers.
+        self.sh.router.reset();
     }
 
     /// The workspace-wide default permission policy.
@@ -225,6 +228,63 @@ impl AgentLoop {
     /// `config` is parsed as a profile).
     pub fn add_profile(&self, bot_id: BotId, profile: BotProfile) {
         self.sh.profiles.write().insert(bot_id, Arc::new(profile));
+        self.sh.router.reset_bot(bot_id);
+    }
+
+    /// Wire saved workflows into the loop: registers `workflow_run` /
+    /// `workflow_list` (their inner steps pass the loop's approval flow), lets
+    /// the decision ladder route requests to workflows and replay them without
+    /// a model call, and forwards the replay's events to the run's stream.
+    /// `handles.tools` is replaced by the loop's own registry.
+    #[must_use]
+    pub fn with_workflows(
+        self,
+        store: workflow_replay::WorkflowStore,
+        mut handles: workflow_replay::Handles,
+    ) -> Self {
+        handles.tools = self.sh.tools.clone();
+        let weak = Arc::downgrade(&self.sh);
+        let opts = workflow_replay::ReplayOptions {
+            events: Some(Arc::new(move |ev: Event| {
+                let Some(sh) = weak.upgrade() else { return };
+                let Some(run_id) = crate::router::event_run_id(&ev) else {
+                    return;
+                };
+                let ctx = sh.runs.lock().get(&run_id).cloned();
+                if let Some(ctx) = ctx {
+                    sh.emit(&ctx, ev);
+                }
+            })),
+            ..workflow_replay::ReplayOptions::default()
+        };
+        let (s2, h2, o2) = (store.clone(), handles.clone(), opts.clone());
+        let this = self.with_gated_tools(|gate| workflow_replay::tools(s2, h2, gate, o2));
+        let _ = this.sh.router.workflows.set(crate::router::WorkflowWiring {
+            store,
+            handles,
+            opts,
+        });
+        this
+    }
+
+    /// A saved workflow was edited or deleted: drop the routes cached for it
+    /// (K1) and rebuild the router's candidates at the next turn.
+    pub fn workflow_changed(&self, name: &str) {
+        self.sh.router.workflow_changed(name);
+    }
+
+    /// Cache the route a succeeded run took (`POST /v1/runs/{id}/remember`):
+    /// the same request text then goes straight there (K1).  A run whose model
+    /// ran a saved workflow (`workflow_run`) remembers that workflow.  Returns
+    /// the remembered route as JSON (tagged by `kind`).
+    ///
+    /// # Errors
+    /// [`LoopError::NotFound`] for an unknown run, [`LoopError::Router`] when
+    /// the run is not eligible (not succeeded, a subagent, no route or
+    /// workflow, router disabled) or the cache refuses it.
+    pub fn remember_route(&self, run_id: RunId) -> Result<serde_json::Value> {
+        let route = self.sh.remember_route(run_id)?;
+        Ok(serde_json::to_value(route).unwrap_or(serde_json::Value::Null))
     }
 
     /// Subscribe to the live event stream of all runs (events are also
@@ -303,6 +363,10 @@ impl AgentLoop {
         text: &str,
         mode: MessageMode,
     ) -> Result<Delivery> {
+        if let Some(run_id) = self.stop_command_target(chat_id, text) {
+            self.cancel(run_id)?;
+            return Ok(Delivery::Stopped(run_id));
+        }
         {
             let active = self.sh.active.lock();
             if let Some(&run_id) = active.get(&chat_id) {
@@ -328,6 +392,22 @@ impl AgentLoop {
             }
         }
         Ok(Delivery::NewTurn(self.run_turn(chat_id, text)?))
+    }
+
+    /// The running turn of `chat_id` when `text` is the `/stop` command and
+    /// the bot's router is enabled (K0 is deterministic: no ladder needed).
+    fn stop_command_target(&self, chat_id: ChatId, text: &str) -> Option<RunId> {
+        let run_id = *self.sh.active.lock().get(&chat_id)?;
+        let is_stop = matches!(
+            agent_router::ladder::rules::slash_command(text),
+            Some(agent_router::ladder::Route::Command(c)) if c.name == "stop"
+        );
+        if !is_stop {
+            return None;
+        }
+        let chat = self.sh.storage.get_chat(chat_id).ok().flatten()?;
+        let profile = self.sh.profile_for(chat.bot_id).ok()?;
+        profile.router.enabled.then_some(run_id)
     }
 
     /// Approve a pending tool call (the id from `ApprovalNeeded`).
@@ -856,6 +936,9 @@ impl AgentLoop {
     fn final_text(&self, run_id: RunId) -> Option<String> {
         let steps = self.sh.storage.list_steps(run_id).ok()?;
         let last = steps.last()?;
+        if let Some(text) = crate::router::routed_final_text(last) {
+            return Some(text);
+        }
         if last.name != STEP_MODEL || status_of(last) != Some(StepStatus::Succeeded) {
             return None;
         }

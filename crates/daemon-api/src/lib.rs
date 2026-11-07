@@ -263,6 +263,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/runs/{id}", get(r::get_run))
         .route("/v1/runs/{id}/cancel", post(r::cancel_run))
         .route("/v1/runs/{id}/resume", post(r::resume_run))
+        .route("/v1/runs/{id}/remember", post(r::remember_run))
         .route("/v1/usage", get(r::usage))
         .route(
             "/v1/control/state",

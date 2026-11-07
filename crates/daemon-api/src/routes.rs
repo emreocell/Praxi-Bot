@@ -26,8 +26,8 @@ use crate::dto::{
     CategoryDecisionDto, ChatDto, ConfiguredProviderDto, ControlDecisionInput,
     ControlDecisionResponse, ControlStateDto, ControlStateInput, CreateChat, DecideApproval,
     Decision, DecisionResponse, DeliveryKind, EffectivePolicyDto, GrantDto, GrantTargetDto, Health,
-    MessageDto, Mode, PolicyDto, PolicyInput, ProvidersDto, ReloadResponse, RevokeGrant, RunDto,
-    Scope, SendMessage, SendResponse, UsageSummary, UsageTotals,
+    MessageDto, Mode, PolicyDto, PolicyInput, ProvidersDto, ReloadResponse, RememberResponse,
+    RevokeGrant, RunDto, Scope, SendMessage, SendResponse, UsageSummary, UsageTotals,
 };
 use crate::error::{ApiError, ErrorBody};
 
@@ -442,6 +442,7 @@ pub(crate) async fn send_message(
         Delivery::NewTurn(r) => (DeliveryKind::NewTurn, Some(r.0)),
         Delivery::Steered(r) => (DeliveryKind::Steered, Some(r.0)),
         Delivery::Queued => (DeliveryKind::Queued, None),
+        Delivery::Stopped(r) => (DeliveryKind::Stopped, Some(r.0)),
     };
     Ok((
         StatusCode::ACCEPTED,
@@ -575,6 +576,22 @@ pub(crate) async fn cancel_run(
     let run = s.run_of_user(RunId(id(&rid)?))?;
     s.agent().cancel(run.id)?;
     Ok(Json(run_dto(s.run_of_user(run.id)?)))
+}
+
+/// Remember the route a succeeded run took (or the workflow its model ran):
+/// the same request text is then routed there directly next time (intent
+/// cache, K1).
+#[utoipa::path(post, path = "/v1/runs/{id}/remember", tag = "runs", security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "Run id")),
+    responses((status = 200, body = RememberResponse), (status = 404, body = ErrorBody),
+              (status = 409, body = ErrorBody, description = "the run is not eligible")))]
+pub(crate) async fn remember_run(
+    State(s): State<AppState>,
+    Path(rid): Path<String>,
+) -> Result<Json<RememberResponse>, ApiError> {
+    let run = s.run_of_user(RunId(id(&rid)?))?;
+    let route = s.agent().remember_route(run.id)?;
+    Ok(Json(RememberResponse { route }))
 }
 
 /// Resume a paused run (e.g. after a daemon restart).

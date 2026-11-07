@@ -17,6 +17,7 @@ fake-provider = ["daemon-api/fake-provider"]
 
 [dependencies]
 agent-core = { path = "../../crates/agent-core", version = "0.1.0" }
+agent-router = { path = "../../crates/agent-router", version = "0.1.0" }
 builtin-tools = { path = "../../crates/builtin-tools", version = "0.1.0" }
 clap = { workspace = true, features = ["env"] }
 daemon-api = { path = "../../crates/daemon-api", version = "0.1.0" }
@@ -34,6 +35,7 @@ storage.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 tool-registry = { path = "../../crates/tool-registry", version = "0.1.0" }
 toml.workspace = true
+workflow-replay = { path = "../../crates/workflow-replay", version = "0.1.0" }
 
 [target.'cfg(windows)'.dependencies]
 desktop-windows = { path = "../../crates/desktop-windows", version = "0.1.0" }

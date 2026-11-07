@@ -10,6 +10,15 @@ use permission_engine::Policy;
 use secret_store::Redactor;
 use task_runtime::RetryPolicy;
 
+/// Registry size above which the model sees the discovery tools instead of
+/// every tool, unless [`LoopConfig::discovery_threshold`] says otherwise.
+///
+/// The built-in set (with `spawn_subagent`, the skill and the workflow tools)
+/// is just over the router's own default of 25; the model should see these
+/// directly and only switch to `find_tool` / `use_tool` once plugins or MCP
+/// servers add many more.
+pub const DEFAULT_DIRECT_TOOL_LIMIT: usize = 40;
+
 /// Per-turn safety limits.
 #[derive(Debug, Clone)]
 pub struct Guards {
@@ -111,8 +120,14 @@ pub struct LoopConfig {
     /// Sampling temperature.
     pub temperature: Option<f64>,
     /// Registry size above which the model sees the `find_tool` /
-    /// `get_tool_details` / `use_tool` discovery tools instead of every tool.
+    /// `get_tool_details` / `use_tool` discovery tools instead of every tool
+    /// (default [`DEFAULT_DIRECT_TOOL_LIMIT`]).
     pub discovery_threshold: usize,
+    /// Thresholds and budgets of the K0-K3 decision ladder.
+    pub ladder: agent_router::LadderConfig,
+    /// Hard cap on the whole routing decision of a turn; when it is hit the
+    /// turn goes to the main model (`Agent`, K4).
+    pub router_budget: Duration,
     /// Masks secrets in tool outputs and emitted events when set.
     pub redactor: Option<Redactor>,
     /// Memory hook; `None` = no memory.
@@ -134,7 +149,9 @@ impl Default for LoopConfig {
             read_tools_skip_ask: true,
             max_tokens: None,
             temperature: None,
-            discovery_threshold: agent_router::DEFAULT_DISCOVERY_THRESHOLD,
+            discovery_threshold: DEFAULT_DIRECT_TOOL_LIMIT,
+            ladder: agent_router::LadderConfig::default(),
+            router_budget: Duration::from_secs(2),
             redactor: None,
             memory: None,
         }

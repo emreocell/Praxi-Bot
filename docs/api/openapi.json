@@ -1219,6 +1219,64 @@
         ]
       }
     },
+    "/v1/runs/{id}/remember": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Remember the route a succeeded run took (or the workflow its model ran):\nthe same request text is then routed there directly next time (intent\ncache, K1).",
+        "operationId": "remember_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Run id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RememberResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "the run is not eligible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/runs/{id}/resume": {
       "post": {
         "tags": [
@@ -1819,7 +1877,8 @@
         "enum": [
           "new_turn",
           "steered",
-          "queued"
+          "queued",
+          "stopped"
         ]
       },
       "EffectivePolicyDto": {
@@ -2132,6 +2191,19 @@
               "null"
             ],
             "description": "Id of the new default provider."
+          }
+        }
+      },
+      "RememberResponse": {
+        "type": "object",
+        "description": "Response of `POST /v1/runs/{id}/remember`.",
+        "required": [
+          "route"
+        ],
+        "properties": {
+          "route": {
+            "type": "object",
+            "description": "The route that was cached for the run's request text, tagged by `kind`\n(`workflow`, `tool_hint` or `skill_hint`)."
           }
         }
       },

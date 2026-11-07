@@ -844,6 +844,27 @@ async fn cancel_and_resume_rules() {
 }
 
 #[tokio::test]
+async fn remember_is_refused_for_runs_without_a_route_and_unknown_runs() {
+    let t = setup();
+    let (_, chat) = make_chat(&t).await;
+    let run = send_msg(&t, &chat, "hello", "queue").await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    wait_state(&t, &run, "succeeded").await;
+    let r = call(&t, Method::POST, &format!("/v1/runs/{run}/remember"), None).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{:?}", r.json());
+    let r = call(
+        &t,
+        Method::POST,
+        &format!("/v1/runs/{}/remember", uuid::Uuid::now_v7()),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn graceful_shutdown_checkpoints_running_runs_and_closes_streams() {
     let t = setup();
     let (_, chat) = make_chat(&t).await;
@@ -1270,6 +1291,7 @@ fn openapi_snapshot() {
         "/v1/bots",
         "/v1/events",
         "/v1/runs/{id}/resume",
+        "/v1/runs/{id}/remember",
         "/v1/usage",
         "/v1/questions/{call_id}",
         "/v1/bots/{id}/grants",

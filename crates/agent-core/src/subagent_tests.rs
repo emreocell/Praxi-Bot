@@ -545,8 +545,11 @@ async fn model_role_and_max_steps_shape_the_child() {
         env.bot,
         &brain,
         &[x],
+        // The role model exists for the child; the router's K3 would call it too.
         profile(
             "classifier = \"fake/small\"
+[router]
+k3 = false
 ",
         ),
         cfg(Policy::full()),

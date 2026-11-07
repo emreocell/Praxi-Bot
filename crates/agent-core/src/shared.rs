@@ -51,6 +51,10 @@ pub enum LoopError {
     /// turns are accepted.
     #[error("the agent loop is shutting down")]
     ShuttingDown,
+    /// The decision ladder refused the request (router disabled, run not
+    /// eligible for `remember`, ...).
+    #[error("router: {0}")]
+    Router(String),
 }
 
 /// How far an approval reaches (ADR-0012).
@@ -108,6 +112,8 @@ pub enum Delivery {
     Steered(RunId),
     /// Queued behind the running turn.
     Queued,
+    /// The message was the `/stop` command: the running turn was cancelled.
+    Stopped(RunId),
 }
 
 /// The permission picture of one bot: its stored policy merged with its
@@ -153,6 +159,8 @@ pub struct Providers {
     by_id: HashMap<String, Arc<dyn ChatProvider>>,
     /// Catalog prices keyed by the full model reference (`provider/model`).
     prices: HashMap<String, ModelPrice>,
+    /// Embedding backend of the K2 router (`None` = BM25 only).
+    embedder: Option<Arc<dyn agent_router::ladder::Embedder>>,
 }
 
 impl Providers {
@@ -165,7 +173,23 @@ impl Providers {
             default: p,
             by_id,
             prices: HashMap::new(),
+            embedder: None,
         }
+    }
+
+    /// Set the embedding backend of the K2 router (for example a
+    /// `GeminiEmbedder` when a Gemini key is configured).  Part of the
+    /// providers so a reload refreshes it together with them.
+    #[must_use]
+    pub fn with_embedder(mut self, embedder: Arc<dyn agent_router::ladder::Embedder>) -> Self {
+        self.embedder = Some(embedder);
+        self
+    }
+
+    /// The K2 embedding backend, if any.
+    #[must_use]
+    pub fn embedder(&self) -> Option<Arc<dyn agent_router::ladder::Embedder>> {
+        self.embedder.clone()
     }
 
     /// Record the catalog prices of `provider_id`'s models (those with a known
@@ -342,6 +366,8 @@ pub(crate) struct Shared {
     pub skills: OnceLock<skills::SkillIndex>,
     /// Foreground browser / app source for skill suggestions.
     pub skill_hints: RwLock<Option<SkillHintFn>>,
+    /// The K0-K3 decision ladders (one per bot) and the workflow wiring.
+    pub router: crate::router::Router,
 }
 
 pub(crate) fn xe(e: impl std::fmt::Display) -> ExecError {
@@ -522,7 +548,19 @@ impl Shared {
 
     /// Tool specs shown to the model: the discovery meta-tools above the
     /// threshold, otherwise every tool the bot may see (sorted by name).
-    pub fn model_specs(&self, profile: &BotProfile) -> Vec<ToolSpec> {
+    ///
+    /// `hints` (a router `ToolHint`) narrows the turn to those tools plus the
+    /// discovery meta-tools, so the model can still reach everything else.
+    pub fn model_specs(&self, profile: &BotProfile, hints: &[String]) -> Vec<ToolSpec> {
+        if !hints.is_empty() {
+            let narrowed = self.surface.hinted_specs(hints, &|s| {
+                profile.tool_visible(&s.name) && platform_ok(&s.platforms)
+            });
+            // Only the meta-tools left: every hint was unknown or hidden.
+            if narrowed.len() > 3 {
+                return narrowed;
+            }
+        }
         match self.surface.mode() {
             SurfaceMode::Discovery => self.surface.specs(),
             SurfaceMode::Direct => self.visible_specs(profile),
@@ -537,8 +575,13 @@ impl Shared {
         profile: &BotProfile,
         name: &str,
         input: &serde_json::Value,
+        hints: &[String],
     ) -> Option<Resolved> {
-        let tool = self.surface.resolve(name)?;
+        let tool = if hints.is_empty() {
+            self.surface.resolve(name)?
+        } else {
+            self.surface.resolve_hinted(name, hints)?
+        };
         let own = tool.spec().clone();
         let mut eff_input = input.clone();
         let (spec, eff_name) = if name == agent_router::USE_TOOL {
@@ -557,7 +600,11 @@ impl Shared {
                 // Malformed target: the meta-tool itself reports the error.
                 _ => (None, name.to_owned()),
             }
-        } else if self.surface.mode() == SurfaceMode::Discovery {
+        } else if matches!(
+            name,
+            agent_router::FIND_TOOL | agent_router::GET_TOOL_DETAILS
+        ) && (self.surface.mode() == SurfaceMode::Discovery || !hints.is_empty())
+        {
             // find_tool / get_tool_details: always available to the model.
             (Some(own), name.to_owned())
         } else {
@@ -674,3 +721,7 @@ pub(crate) struct ResultRec {
 pub(crate) const STEP_USER: &str = "user_message";
 pub(crate) const STEP_MODEL: &str = "model";
 pub(crate) const STEP_TOOLS: &str = "tools";
+/// A saved workflow replayed by the router (K0-K3), instead of a model call.
+pub(crate) const STEP_WORKFLOW: &str = "workflow";
+/// A built-in command run by the router (`/new`).
+pub(crate) const STEP_COMMAND: &str = "command";

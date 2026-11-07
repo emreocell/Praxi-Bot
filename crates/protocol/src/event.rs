@@ -144,6 +144,29 @@ pub struct ModelFallback {
     pub reason: String,
 }
 
+// ── Decision ladder ───────────────────────────────────────────────────────────
+
+/// The K0-K3 ladder decided how a turn starts (ADR-0005), before the main
+/// model (K4) runs.  Emitted once per top-level turn of a bot whose router is
+/// enabled.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RouteDecided {
+    pub run_id: RunId,
+    /// Level that decided: `K0` (rules / commands), `K1` (intent cache), `K2`
+    /// (BM25 + embeddings), `K3` (classifier) or `K4` (nothing cheaper applied).
+    pub level: String,
+    /// The route, tagged by `kind`: `command` (`name`, `args`), `workflow`
+    /// (`name`, `params`, `confidence`), `tool_hint` (`tools`), `skill_hint`
+    /// (`skills`) or `agent`.
+    pub route: Value,
+    /// Confidence in `0..=1`.
+    pub confidence: f64,
+    /// Wall time of the whole decision.
+    pub latency_ms: u64,
+    /// Why (for the "why did it do that" panel).
+    pub reason: String,
+}
+
 // ── Workflow replay ───────────────────────────────────────────────────────────
 
 /// A recorded workflow step is about to run (deterministic replay, no model).
@@ -266,6 +289,7 @@ pub enum Event {
     TodoUpdated(TodoUpdated),
     QuestionAsked(QuestionAsked),
     ModelFallback(ModelFallback),
+    RouteDecided(RouteDecided),
     WorkflowStepStarted(WorkflowStepStarted),
     WorkflowStepCompleted(WorkflowStepCompleted),
     WorkflowDrift(WorkflowDrift),

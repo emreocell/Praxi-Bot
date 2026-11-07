@@ -59,6 +59,7 @@ impl Modify for Security {
         routes::get_run,
         routes::cancel_run,
         routes::resume_run,
+        routes::remember_run,
         routes::usage,
         routes::get_control_state,
         routes::put_control_state,
@@ -79,7 +80,7 @@ impl Modify for Security {
         dto::CategoryDecisionDto, dto::ControlMode, dto::ControlStateInput,
         dto::ControlStateDto, dto::ControlVerdict, dto::ControlDecisionInput,
         dto::ControlDecisionResponse, dto::PolicyDto, dto::PolicyInput, dto::ProvidersDto,
-        dto::ConfiguredProviderDto, dto::CatalogProviderDto, dto::ReloadResponse, error::ErrorBody, error::ErrorDetail,
+        dto::ConfiguredProviderDto, dto::CatalogProviderDto, dto::ReloadResponse, dto::RememberResponse, error::ErrorBody, error::ErrorDetail,
     )),
     modifiers(&Security),
     tags(

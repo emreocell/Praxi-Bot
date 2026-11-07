@@ -177,11 +177,20 @@ impl SkillIndex {
     /// first, at most [`PROMPT_BUDGET_BYTES`] bytes. Empty when no skills exist.
     #[must_use]
     pub fn prompt_block(&self, ctx: &SkillContext) -> String {
+        self.prompt_block_suggesting(ctx, &[])
+    }
+
+    /// Like [`Self::prompt_block`], and the skills named in `suggested` (a
+    /// router hint) are listed first as suggested too.
+    #[must_use]
+    pub fn prompt_block_suggesting(&self, ctx: &SkillContext, suggested: &[String]) -> String {
         let skills = self.list();
         if skills.is_empty() {
             return String::new();
         }
-        let (mut ordered, rest): (Vec<_>, Vec<_>) = skills.iter().partition(|s| s.matches(ctx));
+        let (mut ordered, rest): (Vec<_>, Vec<_>) = skills
+            .iter()
+            .partition(|s| s.matches(ctx) || suggested.contains(&s.name));
         let n_suggested = ordered.len();
         ordered.extend(rest);
         let mut out = String::from(

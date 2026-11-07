@@ -57,6 +57,26 @@ pub struct ToolFilter {
     pub exclude: Vec<String>,
 }
 
+/// `[router]` table: the K0-K3 decision ladder (ADR-0005) of this bot.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct RouterSettings {
+    /// Run the ladder before the main model (default `true`).
+    pub enabled: bool,
+    /// Use the K3 classifier model (`models.classifier`); defaults to `true`
+    /// when a classifier model is configured.
+    pub k3: Option<bool>,
+}
+
+impl Default for RouterSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            k3: None,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct BotSection {
     id: String,
@@ -74,6 +94,8 @@ struct Raw {
     permissions: PermissionsConfig,
     #[serde(default)]
     tools: ToolFilter,
+    #[serde(default)]
+    router: RouterSettings,
 }
 
 /// A loaded bot profile.
@@ -93,6 +115,8 @@ pub struct BotProfile {
     pub permissions: PermissionsConfig,
     /// Tool allow / exclude lists.
     pub tools: ToolFilter,
+    /// Decision-ladder settings.
+    pub router: RouterSettings,
     allow: GlobSet,
     exclude: GlobSet,
     /// Extra allow-lists a tool must also match (subagent narrowing).
@@ -137,6 +161,7 @@ impl TryFrom<Raw> for BotProfile {
             models: r.models,
             permissions: r.permissions,
             tools: r.tools,
+            router: r.router,
         })
     }
 }
@@ -164,6 +189,16 @@ impl BotProfile {
     /// Fails on I/O errors or as [`Self::from_toml_str`].
     pub fn from_path(path: &Path) -> Result<Self, ProfileError> {
         Self::from_toml_str(&std::fs::read_to_string(path)?)
+    }
+
+    /// The K3 classifier model when the ladder should use it: `router.k3`
+    /// (default on) and a configured `models.classifier`.
+    #[must_use]
+    pub fn k3_model(&self) -> Option<&str> {
+        self.models
+            .classifier
+            .as_deref()
+            .filter(|_| self.router.k3.unwrap_or(true))
     }
 
     /// Whether `tool_name` passes the allow / exclude lists.
