@@ -2,12 +2,108 @@ import type { ProvidersDto } from "../api/types.ts";
 
 /** Providers shipped with the app, used only while the daemon cannot say. */
 export const FALLBACK_CATALOG = [
+  "anthropic",
   "deepseek",
+  "gemini",
   "gemini-openai-compat",
   "lmstudio",
   "ollama",
   "openrouter"
 ] as const;
+
+export type OnboardingPresetGroup =
+  | "gemini"
+  | "anthropic"
+  | "openai_compatible"
+  | "ollama"
+  | "fake";
+
+export interface ProviderRoleDefaults {
+  defaultModel: string;
+  executor: string;
+  planner: string;
+  classifier: string;
+  requiresKey: boolean;
+  defaultBaseUrl: string;
+}
+
+/**
+ * Recommended default model and role assignments (`executor`, `planner`,
+ * `classifier`) for a provider during first-run onboarding.
+ */
+export function providerRoleDefaults(
+  providerId: string,
+  chosenModel?: string
+): ProviderRoleDefaults {
+  const trimmed = chosenModel?.trim() ?? "";
+  switch (providerId) {
+    case "gemini":
+    case "gemini-openai-compat":
+      return {
+        defaultModel: "gemini-2.5-flash-lite",
+        executor: trimmed || "gemini-2.5-flash-lite",
+        planner: "gemini-3.1-pro-preview",
+        classifier: "gemini-2.5-flash-lite",
+        requiresKey: true,
+        defaultBaseUrl: ""
+      };
+    case "anthropic":
+      return {
+        defaultModel: "claude-sonnet-5-5",
+        executor: trimmed || "claude-sonnet-5-5",
+        planner: "claude-opus-5-5",
+        classifier: "claude-haiku-5-5",
+        requiresKey: true,
+        defaultBaseUrl: ""
+      };
+    case "ollama":
+      return {
+        defaultModel: "qwen3:8b",
+        executor: trimmed || "qwen3:8b",
+        planner: trimmed || "qwen3:8b",
+        classifier: trimmed || "qwen3:8b",
+        requiresKey: false,
+        defaultBaseUrl: "http://localhost:11434/v1"
+      };
+    case "lmstudio":
+      return {
+        defaultModel: "local-model",
+        executor: trimmed || "local-model",
+        planner: trimmed || "local-model",
+        classifier: trimmed || "local-model",
+        requiresKey: false,
+        defaultBaseUrl: "http://localhost:1234/v1"
+      };
+    case "deepseek":
+      return {
+        defaultModel: "deepseek-chat",
+        executor: trimmed || "deepseek-chat",
+        planner: "deepseek-reasoner",
+        classifier: "deepseek-chat",
+        requiresKey: true,
+        defaultBaseUrl: "https://api.deepseek.com/v1"
+      };
+    case "fake":
+      return {
+        defaultModel: "echo",
+        executor: trimmed || "echo",
+        planner: trimmed || "echo",
+        classifier: trimmed || "echo",
+        requiresKey: false,
+        defaultBaseUrl: ""
+      };
+    case "openrouter":
+    default:
+      return {
+        defaultModel: "openai/gpt-4o-mini",
+        executor: trimmed || "openai/gpt-4o-mini",
+        planner: trimmed || "openai/gpt-4o",
+        classifier: trimmed || "openai/gpt-4o-mini",
+        requiresKey: true,
+        defaultBaseUrl: "https://openrouter.ai/api/v1"
+      };
+  }
+}
 
 export interface ProviderRow {
   id: string;

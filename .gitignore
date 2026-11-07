@@ -5,6 +5,7 @@
 node_modules/
 dist/
 apps/desktop/gen/
+apps/desktop/binaries/
 
 # Environment files
 .env

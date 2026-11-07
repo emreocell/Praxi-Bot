@@ -1814,6 +1814,52 @@ async fn usage_carries_cost_only_when_a_price_is_known() {
 }
 
 #[tokio::test]
+async fn usage_cost_uses_the_providers_catalog_prices_and_follows_a_reload() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Arc::new(Storage::open(dir.path()).unwrap());
+    let priced = |input: f64| {
+        Providers::single(Arc::new(FakeProvider)).with_catalog_prices(
+            "fake",
+            &[provider_catalog::ModelInfo {
+                id: "echo".into(),
+                input_per_mtok: Some(input),
+                output_per_mtok: Some(10.0),
+                ..provider_catalog::ModelInfo::default()
+            }],
+        )
+    };
+    let agent = AgentLoop::new(
+        Arc::clone(&storage),
+        ToolRegistry::new(),
+        priced(2.0),
+        LoopConfig::default(),
+    );
+    let state = AppState::new(agent.clone(), storage, DaemonConfig::new(TOKEN)).unwrap();
+    let t = T {
+        app: router(state.clone()),
+        state,
+        agent,
+        _dir: dir,
+    };
+    let (_, chat) = make_chat(&t).await;
+    run_and_reply(&t, &chat, "hello").await;
+    let cost = |u: &Value| u["total"]["cost_usd"].as_f64().unwrap();
+    let u = call(&t, Method::GET, "/v1/usage", None).await.json();
+    assert!(
+        (cost(&u) - (10.0 * 2.0 + 5.0 * 10.0) / 1e6).abs() < 1e-12,
+        "{u}"
+    );
+
+    // A providers reload brings new prices; `/v1/usage` prices every recorded
+    // call at the prices currently loaded.
+    t.agent.set_providers(priced(4.0));
+    run_and_reply(&t, &chat, "again").await;
+    let u = call(&t, Method::GET, "/v1/usage", None).await.json();
+    let want = (20.0 * 4.0 + 10.0 * 10.0) / 1e6;
+    assert!((cost(&u) - want).abs() < 1e-12, "{u}");
+}
+
+#[tokio::test]
 async fn tool_completion_events_carry_a_preview_and_duration() {
     let t = setup();
     let (_, chat) = make_chat(&t).await;

@@ -143,6 +143,7 @@ fn run_dto(r: storage::Run) -> RunDto {
         error: r.error,
         created_at_ms: r.created_at_ms,
         updated_at_ms: r.updated_at_ms,
+        parent_run_id: r.parent_run_id.map(|p| p.0),
     }
 }
 

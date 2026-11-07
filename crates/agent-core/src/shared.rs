@@ -2,8 +2,8 @@
 //! the step executor.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock, Weak};
 
 use agent_router::{SurfaceMode, ToolSurface};
 use parking_lot::{Mutex, RwLock};
@@ -14,15 +14,17 @@ use protocol::{
 };
 use provider_catalog::{ChatProvider, ModelRef};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use storage::{EventLogWriter, Run, Storage, read_event_log};
-use task_runtime::ExecError;
+use task_runtime::{ExecError, Runtime};
 use tokio::sync::{broadcast, oneshot};
 use tokio::task::JoinHandle;
 use tool_registry::{Platform, ToolRegistry, ToolSpec};
 use uuid::Uuid;
 
-use crate::config::LoopConfig;
+use crate::config::{LoopConfig, ModelPrice};
 use crate::profile::BotProfile;
+use crate::subagent::SubSpec;
 
 /// Errors of the public loop API.
 #[derive(Debug, thiserror::Error)]
@@ -149,6 +151,8 @@ pub struct StreamItem {
 pub struct Providers {
     default: Arc<dyn ChatProvider>,
     by_id: HashMap<String, Arc<dyn ChatProvider>>,
+    /// Catalog prices keyed by the full model reference (`provider/model`).
+    prices: HashMap<String, ModelPrice>,
 }
 
 impl Providers {
@@ -157,7 +161,41 @@ impl Providers {
     pub fn single(p: Arc<dyn ChatProvider>) -> Self {
         let mut by_id = HashMap::new();
         by_id.insert(p.id().to_owned(), Arc::clone(&p));
-        Self { default: p, by_id }
+        Self {
+            default: p,
+            by_id,
+            prices: HashMap::new(),
+        }
+    }
+
+    /// Record the catalog prices of `provider_id`'s models (those with a known
+    /// input and output price), keyed `provider_id/model`.  They price the
+    /// usage records unless [`LoopConfig::prices`] overrides a model.
+    #[must_use]
+    pub fn with_catalog_prices(
+        mut self,
+        provider_id: &str,
+        models: &[provider_catalog::ModelInfo],
+    ) -> Self {
+        for m in models {
+            if let (Some(input), Some(output)) = (m.input_per_mtok, m.output_per_mtok) {
+                self.prices.insert(
+                    format!("{provider_id}/{}", m.id),
+                    ModelPrice {
+                        input_per_mtok: input,
+                        output_per_mtok: output,
+                        cached_per_mtok: m.cached_per_mtok,
+                    },
+                );
+            }
+        }
+        self
+    }
+
+    /// Catalog price of a model (full `provider/model` reference).
+    #[must_use]
+    pub fn price_for(&self, model: &str) -> Option<ModelPrice> {
+        self.prices.get(model).copied()
     }
 
     /// Add a provider, addressable by its `id()` (the `provider/` prefix of a model ref).
@@ -240,7 +278,31 @@ pub(crate) struct RunCtx {
     pub initiator: InitiatorKind,
     pub profile: Arc<BotProfile>,
     pub bot_policy: Option<Policy>,
+    /// The run that spawned this one (subagent runs only).
+    pub parent_run_id: Option<RunId>,
+    /// Spawn parameters of a subagent run.
+    pub sub: Option<SubSpec>,
     pub state: Mutex<CtxState>,
+}
+
+impl RunCtx {
+    /// Subagent nesting level: 0 for a top-level run.
+    pub fn depth(&self) -> u32 {
+        self.sub.as_ref().map_or(0, |s| s.depth)
+    }
+}
+
+/// Where the foreground browser domain / application come from, for skill
+/// suggestions (see [`AgentLoop::set_skill_hints`](crate::AgentLoop::set_skill_hints)).
+pub type SkillHintFn = Arc<dyn Fn() -> SkillHints + Send + Sync>;
+
+/// What is in the foreground right now, when known.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SkillHints {
+    /// Host of the current browser page.
+    pub domain: Option<String>,
+    /// Foreground application name or executable.
+    pub app: Option<String>,
 }
 
 pub(crate) struct Shared {
@@ -270,6 +332,16 @@ pub(crate) struct Shared {
     pub emit_gate: Mutex<()>,
     /// Set by `AgentLoop::shutdown`: no new turns / resumes.
     pub shutting_down: AtomicBool,
+    /// The durable runtime (set once by `AgentLoop::new`; weak because the
+    /// runtime owns the executor that owns this).
+    pub rt: OnceLock<Weak<Runtime>>,
+    /// Serialises the "count live children, then create one" step of
+    /// `spawn_subagent`.
+    pub spawn_gate: Mutex<()>,
+    /// Skills index (`AgentLoop::with_skills`).
+    pub skills: OnceLock<skills::SkillIndex>,
+    /// Foreground browser / app source for skill suggestions.
+    pub skill_hints: RwLock<Option<SkillHintFn>>,
 }
 
 pub(crate) fn xe(e: impl std::fmt::Display) -> ExecError {
@@ -297,6 +369,16 @@ pub(crate) fn initiator_of(kind: &str) -> InitiatorKind {
 }
 
 impl Shared {
+    /// USD price of `model` (full `provider/model` reference): the loop
+    /// config's override, else the providers' catalog price.
+    pub fn price_for(&self, model: &str) -> Option<ModelPrice> {
+        self.cfg
+            .prices
+            .get(model)
+            .copied()
+            .or_else(|| self.providers.read().price_for(model))
+    }
+
     /// Profile for a bot: explicit registration, else the bot row's JSON config.
     pub fn profile_for(&self, bot_id: BotId) -> Result<Arc<BotProfile>, String> {
         if let Some(p) = self.profiles.read().get(&bot_id) {
@@ -320,17 +402,48 @@ impl Shared {
             return Ok(Arc::clone(c));
         }
         let chat_id = run.chat_id.ok_or_else(|| xe("turn run has no chat"))?;
-        let profile = self.profile_for(run.bot_id).map_err(xe)?;
         let seq = read_event_log(self.storage.data_dir(), run.id)
             .map_or(0, |v| v.last().map_or(0, |e| e.seq + 1));
+        let (profile, bot_policy, initiator, sub) = match run.parent_run_id {
+            None => {
+                let profile = self.profile_for(run.bot_id).map_err(xe)?;
+                (
+                    Arc::clone(&profile),
+                    profile.policy(),
+                    initiator_of(&run.kind),
+                    None,
+                )
+            }
+            Some(parent_id) => {
+                // A subagent is the parent's bot: same policy, grants and
+                // initiator; a narrowed tool surface and its own model.
+                let parent = self
+                    .storage
+                    .get_run(parent_id)
+                    .map_err(xe)?
+                    .ok_or_else(|| xe(format!("parent run {parent_id} not found")))?;
+                let pctx = self.ctx(&parent)?;
+                let spec: SubSpec =
+                    serde_json::from_value(run.spec.clone().unwrap_or(Value::Null)).map_err(xe)?;
+                let model = spec.model_for(&pctx.profile).map_err(xe)?;
+                let profile = Arc::new(
+                    pctx.profile
+                        .narrowed(spec.tools.as_deref(), Some(&model))
+                        .map_err(xe)?,
+                );
+                (profile, pctx.bot_policy.clone(), pctx.initiator, Some(spec))
+            }
+        };
         let ctx = Arc::new(RunCtx {
             run_id: run.id,
             chat_id,
             bot_id: run.bot_id,
             user_id: run.user_id,
-            initiator: initiator_of(&run.kind),
-            bot_policy: profile.policy(),
+            initiator,
+            bot_policy,
             profile,
+            parent_run_id: run.parent_run_id,
+            sub,
             state: Mutex::new(CtxState {
                 steer: VecDeque::new(),
                 closed: false,
@@ -362,7 +475,7 @@ impl Shared {
         let _gate = self.emit_gate.lock();
         let (envelope, gseq) = {
             let mut st = ctx.state.lock();
-            let env = Envelope::new(st.seq, event);
+            let env = Envelope::new(st.seq, event).with_parent(ctx.parent_run_id);
             st.seq += 1;
             let gseq = self.gseq.fetch_add(1, Ordering::SeqCst) + 1;
             // Index before the log line: a crash in between loses nothing a

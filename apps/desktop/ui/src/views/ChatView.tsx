@@ -1,5 +1,6 @@
 import {
   type KeyboardEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -13,12 +14,20 @@ import {
   ApprovalCard,
   NoticeLine,
   QuestionCard,
+  SubagentCard,
   TodoCard,
   ToolCard
 } from "../components/ChatCards";
 import { botView } from "../lib/botProfile";
 import { useDaemon } from "../state/DaemonContext";
-import { itemTs, type RunState, type TimelineItem } from "../state/timeline";
+import {
+  assignChildRuns,
+  itemTs,
+  type RunState,
+  type TimelineItem,
+  topLevelRuns
+} from "../state/timeline";
+import ccStyles from "../components/ChatCards.module.css";
 import styles from "./ChatView.module.css";
 
 const LIVE_STATES = new Set(["pending", "running", "waiting_approval"]);
@@ -52,11 +61,8 @@ export function ChatView({
   const stickToBottom = useRef(true);
 
   const chatRuns = useMemo(
-    () =>
-      Object.values(events.runs)
-        .filter((r) => r.chatId === chatId)
-        .sort((a, b) => a.startedMs - b.startedMs),
-    [events.runs, chatId]
+    () => topLevelRuns(events, chatId),
+    [events, chatId]
   );
   const finishedCount = chatRuns.filter(
     (r) => r.finishedMs !== undefined
@@ -78,7 +84,9 @@ export function ChatView({
   }, [loadMessages, finishedCount]);
 
   // ---- the run to stop / resume
-  const serverRuns = runs.filter((r) => r.chat_id === chatId);
+  const serverRuns = runs.filter(
+    (r) => r.chat_id === chatId && !r.parent_run_id
+  );
   const serverLive = [...serverRuns].reverse().find((r) => LIVE_STATES.has(r.state));
   const serverPaused = [...serverRuns].reverse().find((r) => r.state === "paused");
   const eventLive: RunState | undefined = [...chatRuns]
@@ -223,16 +231,42 @@ export function ChatView({
     />
   );
 
-  const renderItem = (item: TimelineItem, runId: string) => {
+  const cancelChild = async (childRunId: string) => {
+    if (!client) {
+      return;
+    }
+    await client.cancelRun(childRunId);
+    await refreshRuns();
+  };
+
+  const renderItem = (item: TimelineItem, runId: string): ReactNode => {
+    const run = events.runs[runId];
+    const nested = run?.parentRunId !== undefined;
     switch (item.kind) {
       case "text":
+        if (nested) {
+          return <p className={ccStyles.nestedText}>{item.text}</p>;
+        }
         return (
           <div className={styles.assistantRow}>
             {botAvatar}
             <div className={styles.assistantBubble}>{item.text}</div>
           </div>
         );
-      case "tool":
+      case "tool": {
+        const child =
+          run && item.status !== "awaiting_approval"
+            ? assignChildRuns(events, run)[item.callId]
+            : undefined;
+        if (child) {
+          return (
+            <SubagentCard
+              run={child}
+              renderItem={renderItem}
+              onCancel={cancelChild}
+            />
+          );
+        }
         return item.status === "awaiting_approval" ? (
           <ApprovalCard
             tool={item}
@@ -251,6 +285,7 @@ export function ChatView({
         ) : (
           <ToolCard tool={item} />
         );
+      }
       case "question":
         return (
           <QuestionCard

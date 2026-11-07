@@ -288,6 +288,9 @@ pub struct RunDto {
     pub created_at_ms: i64,
     /// Last state change.
     pub updated_at_ms: i64,
+    /// The run that spawned this one when it is a subagent run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_run_id: Option<Uuid>,
 }
 
 /// Token totals.

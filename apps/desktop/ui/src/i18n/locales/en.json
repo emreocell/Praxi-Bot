@@ -13,7 +13,14 @@
     "selectedBotLabel": "Active Bot Profile",
     "clearSelection": "Back to overview",
     "welcomeTitle": "Create your first bot",
-    "welcomeDescription": "A bot has a persona, models and a permission preset. Create one to start chatting."
+    "welcomeDescription": "A bot has a persona, models and a permission preset. Run the guided setup wizard or create a bot manually to start chatting.",
+    "runSetupWizard": "Run setup wizard",
+    "refreshBots": "Refresh",
+    "daemonOfflineTitle": "Local daemon is not running",
+    "daemonOfflineDescription": "Praxi-Bot could not reach the local background daemon (bot serve). Make sure no firewall or port conflict blocks loopback port 47821, then retry.",
+    "daemonConnectingTitle": "Starting local daemon…",
+    "daemonConnectingDescription": "Connecting to the bundled Praxi-Bot background service on this computer.",
+    "daemonRetry": "Retry connection"
   },
   "settings": {
     "title": "Appearance & Settings",
@@ -121,6 +128,24 @@
         "preset": "Preset",
         "saved": "Saved."
       }
+    },
+    "onboarding": {
+      "title": "First-run setup wizard",
+      "description": "Re-open the 5-step guided setup to configure a model provider, safety defaults, or your first bot.",
+      "resume": "Resume setup wizard",
+      "restart": "Run setup wizard again",
+      "statusCompleted": "Completed",
+      "statusSkipped": "Paused at step {{step}} of 5",
+      "statusPending": "Not completed yet"
+    },
+    "autostart": {
+      "title": "Launch at Windows sign-in",
+      "description": "Start Praxi-Bot automatically when you sign in to Windows (per-user, off by default).",
+      "enabled": "Enabled",
+      "disabled": "Off (default)",
+      "enable": "Enable autostart",
+      "disable": "Disable autostart",
+      "error": "Could not update Windows autostart setting."
     }
   },
   "overlay": {
@@ -206,6 +231,22 @@
     "placeholder": "Message the bot…",
     "placeholderBusy": "The bot is working — queue or steer…",
     "send": "Send",
+    "subagent": {
+      "title": "Subagent",
+      "task": "Task",
+      "summary": "Summary",
+      "toggle": "Subagent: {{task}}",
+      "cancel": "Cancel",
+      "cancelLabel": "Cancel subagent: {{task}}",
+      "status": {
+        "running": "Running",
+        "waiting_approval": "Needs approval",
+        "succeeded": "Done",
+        "failed": "Failed",
+        "cancelled": "Cancelled",
+        "paused": "Paused"
+      }
+    },
     "tool": {
       "subagent": "Subagent",
       "input": "Input",
@@ -368,5 +409,128 @@
   },
   "control": {
     "starting": "Working…"
+  },
+  "onboarding": {
+    "badge": "First-run setup",
+    "stepCounter": "Step {{current}} of {{total}}",
+    "skip": "Skip for now",
+    "back": "Back",
+    "next": "Continue",
+    "finish": "Finish setup",
+    "steps": {
+      "1": "Welcome",
+      "2": "Provider",
+      "3": "Safety",
+      "4": "First bot",
+      "5": "Try it"
+    },
+    "daemonBanner": {
+      "offlineTitle": "Local daemon is not responding",
+      "offlineHint": "You can still choose preferences and save your provider key, or retry starting the local daemon now.",
+      "retry": "Retry daemon"
+    },
+    "step1": {
+      "title": "Welcome to Praxi-Bot",
+      "subtitle": "Your personal, local-first computer-use assistant. Let’s get you set up in a couple of minutes — no terminal required.",
+      "languageTitle": "Interface language",
+      "languageHint": "You can switch between English and Turkish at any time.",
+      "themeTitle": "Appearance theme",
+      "themeHint": "Pick light, dark, or follow your Windows system theme.",
+      "privacyTitle": "100% local-first & zero telemetry",
+      "privacyBody": "Your chats, permissions, and bot profiles stay on your computer. Praxi-Bot collects no telemetry or analytics; data is sent only to the model provider you configure."
+    },
+    "step2": {
+      "title": "Connect a model provider",
+      "subtitle": "Pick where your bot’s intelligence runs. Your API key is stored in the Windows Credential Manager and is never shown again.",
+      "presets": {
+        "gemini": {
+          "title": "Google Gemini",
+          "badge": "Free tier available",
+          "description": "Fast multimodal & computer-use models from Google.",
+          "freeTierLine": "Google AI Studio offers a free Gemini API tier — get an API key in seconds with no credit card required."
+        },
+        "anthropic": {
+          "title": "Anthropic Claude",
+          "badge": "Cloud API",
+          "description": "Claude Sonnet, Opus, and Haiku models for reasoning and computer use."
+        },
+        "openai_compatible": {
+          "title": "OpenAI-compatible",
+          "badge": "OpenRouter / DeepSeek / Custom",
+          "description": "Any OpenAI-compatible endpoint such as OpenRouter, DeepSeek, or LM Studio."
+        },
+        "ollama": {
+          "title": "Local Ollama",
+          "badge": "Runs on this PC",
+          "description": "Run open-weights models locally on your machine with no API key needed."
+        },
+        "fake": {
+          "title": "Built-in Demo Provider",
+          "badge": "Offline test mode",
+          "description": "Deterministic local echo & tool-call simulator for testing onboarding without an API key."
+        }
+      },
+      "providerId": "Catalog preset",
+      "customOption": "Custom OpenAI-compatible URL",
+      "customId": "Provider ID",
+      "baseUrl": "Base URL",
+      "apiKey": "API key",
+      "apiKeyPlaceholder": "Paste your API key here…",
+      "keyStoredBadge": "API key saved in OS keychain (hidden for security)",
+      "replaceKey": "Replace API key",
+      "noKeyNeeded": "No API key is required for this local provider.",
+      "defaultModel": "Default model",
+      "saveProvider": "Save provider",
+      "saving": "Saving…",
+      "testButton": "Test connection",
+      "testing": "Testing…",
+      "retryTest": "Retry test",
+      "savedOk": "Provider {{id}} saved to your configuration.",
+      "testOk": "Connection test succeeded: {{detail}}",
+      "testFailedTitle": "Provider test failed",
+      "testFailedHint": "Check that your API key is valid, you have network access (or Ollama is running locally), and try again.",
+      "nativeWarning": "Provider keychain storage requires running inside the desktop app."
+    },
+    "step3": {
+      "title": "Choose your safety defaults",
+      "subtitle": "Decide what your bot is allowed to do on this computer by default. You can change this per bot or per category at any time.",
+      "recommended": "Recommended",
+      "whatItMeansTitle": "What the bot can do on your computer",
+      "explain": {
+        "read-only": "The bot can inspect your screen, read files, and look at web pages, but it can never click, type, edit files, or run commands.",
+        "read-and-draft": "The bot can read and prepare drafts, but it still asks before changing files, clicking, or running commands.",
+        "approve-destructive": "The bot can read files and inspect your screen freely, and shows you a live approval card before clicking, typing, editing files, running shell commands, or sending messages.",
+        "full": "The bot can read, click, type, edit files, and run commands without asking first (except hard safety floors below)."
+      },
+      "floorsTitle": "Always-on safety protections",
+      "floorMoney": "Financial & payment actions always require your explicit confirmation.",
+      "floorNever": "Built-in never-list: credential stores, SSH/GPG private keys, and critical OS boot files are always blocked.",
+      "floorHotkey": "Press {{hotkey}} at any time — or click “Take the wheel” in the floating widget — to stop the bot immediately.",
+      "saving": "Saving safety policy…",
+      "saveError": "Could not save workspace policy: {{message}}"
+    },
+    "step4": {
+      "title": "Create your first bot",
+      "subtitle": "Give your assistant a name, look, and role models pre-filled from your chosen provider.",
+      "defaultBotName": "Atlas",
+      "defaultPersona": "Helpful, careful personal assistant that explains its plan clearly before acting on my computer.",
+      "rolesTitle": "Model role defaults (from {{provider}})",
+      "rolesHint": "Executor handles actions and tools, Planner breaks down multi-step goals, and Classifier routes requests.",
+      "creating": "Creating bot…",
+      "createdBadge": "Bot “{{name}}” is ready."
+    },
+    "step5": {
+      "title": "Try your bot live",
+      "subtitle": "Click a sample prompt below to see your bot respond and how live approval cards work before any desktop action runs.",
+      "promptScreen": "What's on my screen?",
+      "promptNotepad": "Open Notepad and write hello",
+      "customPlaceholder": "Or type another prompt to try…",
+      "send": "Send",
+      "sending": "Running…",
+      "emptyHint": "Pick one of the sample prompts above to start a live test run right here.",
+      "approvalHint": "When a tool needs permission (like launching Notepad), the approval card appears live below so you can Allow once or Deny.",
+      "openFullChat": "Open in full chat",
+      "retryPrompt": "Retry prompt"
+    }
   }
 }

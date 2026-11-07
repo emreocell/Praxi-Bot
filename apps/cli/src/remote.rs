@@ -178,6 +178,10 @@ pub async fn chat(c: &Client, o: &ChatOpts<'_>, json_out: bool, out: &mut dyn Wr
     }
 }
 
+fn short_id(id: &str) -> &str {
+    id.get(..8).unwrap_or(id)
+}
+
 fn render(ev: &Event, out: &mut dyn Write) -> std::io::Result<()> {
     match ev {
         Event::MessageDelta(d) => write!(out, "{}", d.text),
@@ -208,6 +212,22 @@ fn render(ev: &Event, out: &mut dyn Write) -> std::io::Result<()> {
             if let Some(e) = &t.error {
                 eprintln!("\n[tool error] {e}");
             }
+            Ok(())
+        }
+        Event::SubagentStarted(e) => {
+            eprintln!(
+                "\n[subagent {}] started: {}",
+                short_id(&e.run_id.to_string()),
+                e.task
+            );
+            Ok(())
+        }
+        Event::SubagentFinished(e) => {
+            eprintln!(
+                "\n[subagent {}] {}",
+                short_id(&e.run_id.to_string()),
+                e.state
+            );
             Ok(())
         }
         Event::Error(e) => {

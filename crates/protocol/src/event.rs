@@ -206,6 +206,39 @@ pub struct ControlRequested {
     pub action: String,
 }
 
+// ── Subagents ─────────────────────────────────────────────────────────────────
+
+/// The agent spawned a subagent (a child run of the same bot).  Emitted on the
+/// parent run's stream; the child's own events carry `parent_run_id` in their
+/// envelope.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SubagentStarted {
+    /// The child run.
+    pub run_id: RunId,
+    pub parent_run_id: RunId,
+    /// What the child was asked to do.
+    pub task: String,
+    /// The parent's `spawn_subagent` tool call that created the child.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<ToolCallId>,
+}
+
+/// A subagent run ended.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SubagentFinished {
+    /// The child run.
+    pub run_id: RunId,
+    pub parent_run_id: RunId,
+    /// Final run state: `succeeded`, `failed`, `cancelled` or `paused`.
+    pub state: String,
+    /// The child's final text (at most 2 KB here; the parent's tool result
+    /// carries up to 8 KB) or the failure message.
+    pub summary: String,
+    /// The parent's `spawn_subagent` tool call that created the child.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<ToolCallId>,
+}
+
 // ── Errors ────────────────────────────────────────────────────────────────────
 
 /// A non-fatal error occurred during the run.
@@ -237,6 +270,8 @@ pub enum Event {
     WorkflowStepCompleted(WorkflowStepCompleted),
     WorkflowDrift(WorkflowDrift),
     ControlRequested(ControlRequested),
+    SubagentStarted(SubagentStarted),
+    SubagentFinished(SubagentFinished),
     Error(RunError),
 }
 

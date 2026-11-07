@@ -18,6 +18,14 @@
         }
       ]
     },
+    "parent_run_id": {
+      "description": "Set on every event emitted by a subagent (child) run: the run that spawned it.  Absent on top-level runs.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
     "seq": {
       "description": "Monotonically increasing sequence number within a run.",
       "type": "integer",
@@ -593,6 +601,89 @@
               "type": "string",
               "enum": [
                 "control_requested"
+              ]
+            }
+          }
+        },
+        {
+          "description": "The agent spawned a subagent (a child run of the same bot).  Emitted on the parent run's stream; the child's own events carry `parent_run_id` in their envelope.",
+          "type": "object",
+          "required": [
+            "parent_run_id",
+            "run_id",
+            "task",
+            "type"
+          ],
+          "properties": {
+            "call_id": {
+              "description": "The parent's `spawn_subagent` tool call that created the child.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            },
+            "parent_run_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "run_id": {
+              "description": "The child run.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "task": {
+              "description": "What the child was asked to do.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "subagent_started"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A subagent run ended.",
+          "type": "object",
+          "required": [
+            "parent_run_id",
+            "run_id",
+            "state",
+            "summary",
+            "type"
+          ],
+          "properties": {
+            "call_id": {
+              "description": "The parent's `spawn_subagent` tool call that created the child.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            },
+            "parent_run_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "run_id": {
+              "description": "The child run.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "state": {
+              "description": "Final run state: `succeeded`, `failed`, `cancelled` or `paused`.",
+              "type": "string"
+            },
+            "summary": {
+              "description": "The child's final text (at most 2 KB here; the parent's tool result carries up to 8 KB) or the failure message.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "subagent_finished"
               ]
             }
           }

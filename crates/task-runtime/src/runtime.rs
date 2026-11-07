@@ -98,6 +98,23 @@ impl Runtime {
         chat_id: Option<ChatId>,
         kind: &str,
     ) -> Result<RunId> {
+        self.create_child_run(user_id, bot_id, chat_id, kind, None, None)
+    }
+
+    /// Persist a new run in `Queued`, optionally as a child (subagent) of
+    /// `parent` with its spawn parameters in `spec`.
+    ///
+    /// # Errors
+    /// Fails on storage errors (e.g. unknown user/bot/parent).
+    pub fn create_child_run(
+        &self,
+        user_id: UserId,
+        bot_id: BotId,
+        chat_id: Option<ChatId>,
+        kind: &str,
+        parent: Option<RunId>,
+        spec: Option<serde_json::Value>,
+    ) -> Result<RunId> {
         let now = now_ms();
         let run = Run {
             id: RunId::new(),
@@ -109,6 +126,8 @@ impl Runtime {
             error: None,
             created_at_ms: now,
             updated_at_ms: now,
+            parent_run_id: parent,
+            spec,
         };
         self.storage.insert_run(&run)?;
         Ok(run.id)

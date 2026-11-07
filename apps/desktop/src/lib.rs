@@ -630,6 +630,97 @@ async fn providers_cli(
     daemon::run_providers_cli(args, key).await
 }
 
+const DEFAULT_AUTOSTART_REG_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+const AUTOSTART_VALUE_NAME: &str = "Praxi-Bot";
+
+fn autostart_reg_key() -> String {
+    std::env::var("PRAXIBOT_AUTOSTART_REG_KEY")
+        .ok()
+        .filter(|k| !k.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_AUTOSTART_REG_KEY.to_owned())
+}
+
+#[cfg(windows)]
+fn query_windows_autostart(reg_key: &str) -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    std::process::Command::new("reg")
+        .args(["query", reg_key, "/v", AUTOSTART_VALUE_NAME])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+#[cfg(windows)]
+fn write_windows_autostart(reg_key: &str, enabled: bool) -> Result<bool, String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    if enabled {
+        let exe = std::env::current_exe().map_err(|e| format!("cannot locate executable: {e}"))?;
+        let quoted = format!("\"{}\"", exe.display());
+        let status = std::process::Command::new("reg")
+            .args([
+                "add",
+                reg_key,
+                "/v",
+                AUTOSTART_VALUE_NAME,
+                "/t",
+                "REG_SZ",
+                "/d",
+                &quoted,
+                "/f",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map_err(|e| format!("cannot update autostart registry entry: {e}"))?;
+        if !status.success() {
+            return Err("failed to enable Windows autostart".into());
+        }
+        Ok(true)
+    } else {
+        if query_windows_autostart(reg_key) {
+            let _ = std::process::Command::new("reg")
+                .args(["delete", reg_key, "/v", AUTOSTART_VALUE_NAME, "/f"])
+                .creation_flags(CREATE_NO_WINDOW)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
+        Ok(false)
+    }
+}
+
+/// Check whether per-user autostart (`HKCU\...\Run\Praxi-Bot`) is enabled.
+/// Off by default.
+#[tauri::command]
+fn get_autostart() -> bool {
+    #[cfg(windows)]
+    {
+        query_windows_autostart(&autostart_reg_key())
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// Enable or disable per-user Windows autostart (`HKCU\...\Run\Praxi-Bot`).
+#[tauri::command]
+fn set_autostart(enabled: bool) -> Result<bool, String> {
+    #[cfg(windows)]
+    {
+        write_windows_autostart(&autostart_reg_key(), enabled)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(enabled)
+    }
+}
+
 fn setup_dev_menu(app: &tauri::App, control: ControlHandle) {
     if !cfg!(debug_assertions) {
         return;
@@ -761,6 +852,8 @@ pub fn run() {
             daemon_connect,
             daemon_restart,
             providers_cli,
+            get_autostart,
+            set_autostart,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -785,5 +878,24 @@ mod tests {
         assert!(!valid_provider_id("--base-url"));
         assert!(!valid_provider_id("a b"));
         assert!(!valid_provider_id("a;b"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_autostart_defaults_off_and_toggles_cleanly() {
+        let test_key = format!(
+            r"HKCU\Software\PraxiBotAutostartTest_{}",
+            std::process::id()
+        );
+        assert!(!super::query_windows_autostart(&test_key));
+        assert_eq!(super::write_windows_autostart(&test_key, true), Ok(true));
+        assert!(super::query_windows_autostart(&test_key));
+        assert_eq!(super::write_windows_autostart(&test_key, false), Ok(false));
+        assert!(!super::query_windows_autostart(&test_key));
+        let _ = std::process::Command::new("reg")
+            .args(["delete", &test_key, "/f"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
     }
 }

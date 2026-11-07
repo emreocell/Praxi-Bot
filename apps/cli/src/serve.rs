@@ -13,10 +13,11 @@ use desktop_api::DesktopBackend;
 use permission_engine::{PermissionResolver, Policy};
 use protocol::InitiatorKind;
 use provider_catalog::{
-    Catalog, ChatProvider, OpenAiCompatConfig, ProviderConfig, ProviderEntry, ProviderSettings,
-    config_path,
+    Catalog, ChatProvider, ModelInfo, OpenAiCompatConfig, ProviderConfig, ProviderEntry,
+    ProviderSettings, config_path,
 };
 use secret_store::SecretStore;
+use skills::{SkillIndex, SkillPaths};
 use storage::Storage;
 use tool_registry::ToolRegistry;
 
@@ -35,24 +36,26 @@ pub fn build_providers(
 ) -> Result<Providers> {
     let cfg = ProviderConfig::load(&config_path(data_dir))?;
     let default_id = cfg.effective_default().map(|d| d.id.clone());
-    let mut built: Vec<(String, Arc<dyn ChatProvider>)> = Vec::new();
+    let mut built: Vec<(String, Arc<dyn ChatProvider>, Vec<ModelInfo>)> = Vec::new();
     for s in cfg.providers.iter().filter(|p| p.enabled) {
         match build_one(s, catalog, store) {
-            Ok(p) => built.push((s.id.clone(), p)),
+            Ok((p, models)) => built.push((s.id.clone(), p, models)),
             Err(e) => warn(&format!("provider {} skipped: {e}", s.id)),
         }
     }
     let pos = built
         .iter()
-        .position(|(id, _)| Some(id) == default_id.as_ref())
+        .position(|(id, _, _)| Some(id) == default_id.as_ref())
         .unwrap_or(0);
     if built.is_empty() {
         return Err("no usable provider; run `bot setup` or `bot providers add`".into());
     }
-    let (_, first) = built.remove(pos);
-    let mut providers = Providers::single(first);
-    for (_, p) in built {
-        providers = providers.with(p);
+    // The catalog's prices go with the providers, so a reload refreshes them
+    // too and `/v1/usage` can report `cost_usd`.
+    let (id, first, models) = built.remove(pos);
+    let mut providers = Providers::single(first).with_catalog_prices(&id, &models);
+    for (id, p, models) in built {
+        providers = providers.with(p).with_catalog_prices(&id, &models);
     }
     Ok(providers)
 }
@@ -61,7 +64,7 @@ fn build_one(
     s: &ProviderSettings,
     catalog: &Catalog,
     store: &dyn SecretStore,
-) -> Result<Arc<dyn ChatProvider>> {
+) -> Result<(Arc<dyn ChatProvider>, Vec<ModelInfo>)> {
     let entry: ProviderEntry = match &s.custom {
         Some(c) => c.clone(),
         None => catalog
@@ -69,12 +72,13 @@ fn build_one(
             .cloned()
             .ok_or_else(|| format!("{:?} is not in the catalog", s.id))?,
     };
-    Ok(Arc::from(s.build_provider(
-        &entry,
-        store,
-        OpenAiCompatConfig::default(),
-    )?))
+    let provider = Arc::from(s.build_provider(&entry, store, OpenAiCompatConfig::default())?);
+    Ok((provider, entry.models))
 }
+
+/// Registry size above which the model sees the discovery tools instead of
+/// every tool (see `build_agent`).
+const DIRECT_TOOL_LIMIT: usize = 40;
 
 /// Assemble the loop (tools + providers) over `storage`.
 ///
@@ -97,13 +101,29 @@ pub fn build_agent(
     );
     let mut tools = BuiltinConfig::new(data_dir.to_path_buf(), Arc::new(gate));
     tools.desktop = desktop;
-    AgentLoop::new(
-        Arc::clone(storage),
-        ToolRegistry::new(),
-        providers,
-        LoopConfig::default(),
-    )
-    .with_builtin_tools(tools)
+    // The built-in set (with `spawn_subagent` and the skill tools) is just over
+    // the router's default discovery threshold; the model should see these
+    // directly and only switch to `find_tool` / `use_tool` once plugins or MCP
+    // servers add many more.
+    let config = LoopConfig {
+        discovery_threshold: DIRECT_TOOL_LIMIT,
+        ..LoopConfig::default()
+    };
+    AgentLoop::new(Arc::clone(storage), ToolRegistry::new(), providers, config)
+        .with_builtin_tools(tools)
+        .with_subagents()
+        .with_skills(load_skills(data_dir))
+}
+
+/// The skills index of a data dir: the bundled skills plus `<data_dir>/skills/`,
+/// which is also where `skill_write` saves what the bot learns.
+#[must_use]
+pub fn load_skills(data_dir: &Path) -> SkillIndex {
+    let dir = data_dir.join("skills");
+    SkillIndex::load(SkillPaths {
+        user: Some(dir.clone()),
+        bot: Some(dir),
+    })
 }
 
 /// The desktop backend of the real daemon: Windows UI Automation on Windows,
@@ -263,7 +283,83 @@ pub fn serve(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_origins;
+    use super::*;
+    use provider_catalog::ProviderConfig;
+    use secret_store::MemoryStore;
+
+    const PRICED: &str = r#"
+id = "t"
+kind = "open_ai_compatible"
+base_url = "http://127.0.0.1:1/v1"
+auth = "None"
+
+[capabilities]
+tools = true
+vision = false
+streaming = true
+json_mode = false
+
+[compat_flags]
+
+[[models]]
+id = "m1"
+input_per_mtok = 2.0
+output_per_mtok = 8.0
+cached_per_mtok = 0.5
+
+[[models]]
+id = "unpriced"
+"#;
+
+    #[test]
+    fn providers_carry_the_catalog_prices_and_a_reload_refreshes_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry: ProviderEntry = toml::from_str(PRICED).unwrap();
+        let catalog = Catalog::from_entries([entry]);
+        let mut cfg = ProviderConfig::default();
+        cfg.upsert(ProviderSettings::new("t", 0));
+        cfg.save(&config_path(dir.path())).unwrap();
+
+        let store = MemoryStore::new();
+        let p = build_providers(dir.path(), &catalog, &store, &mut |_| {}).unwrap();
+        let price = p.price_for("t/m1").expect("catalog price");
+        assert_eq!(
+            (
+                price.input_per_mtok,
+                price.output_per_mtok,
+                price.cached_per_mtok
+            ),
+            (2.0, 8.0, Some(0.5))
+        );
+        assert!(p.price_for("t/unpriced").is_none());
+        assert!(p.price_for("other/m1").is_none());
+
+        // The reload path (`ProviderHost::reload`) calls the same function and
+        // the loop swaps the prices in with the providers.
+        let storage = Arc::new(Storage::open(dir.path()).unwrap());
+        let agent = build_agent(&storage, p, dir.path(), None);
+        assert_eq!(agent.price_for("t/m1").unwrap().output_per_mtok, 8.0);
+    }
+
+    #[test]
+    fn the_agent_has_subagent_and_skill_tools_and_a_skills_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Arc::new(Storage::open(dir.path()).unwrap());
+        let providers = Providers::single(Arc::new(daemon_api::fake::FakeProvider));
+        let agent = build_agent(&storage, providers, dir.path(), None);
+        let names = agent.tool_names();
+        for want in ["spawn_subagent", "skill_list", "skill_read", "skill_write"] {
+            assert!(names.iter().any(|n| n == want), "{want} in {names:?}");
+        }
+        assert!(
+            names.len() <= DIRECT_TOOL_LIMIT,
+            "{} built-in tools exceed the direct limit",
+            names.len()
+        );
+        let idx = load_skills(dir.path());
+        assert!(idx.write_dir().is_some());
+        assert!(idx.get("custom-dropdowns").is_some(), "bundled skills load");
+    }
 
     #[test]
     fn origin_list_is_trimmed_and_filtered() {

@@ -11,6 +11,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0002_event_index",
         include_str!("../migrations/0002_event_index.sql"),
     ),
+    (
+        "0003_subagents",
+        include_str!("../migrations/0003_subagents.sql"),
+    ),
 ];
 
 /// Highest schema version this build supports.

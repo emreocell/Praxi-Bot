@@ -30,13 +30,39 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
+    "publisher": "Praxi-Bot",
+    "category": "Productivity",
+    "shortDescription": "Local-first personal computer-use assistant",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "externalBin": [
+      "binaries/bot"
+    ],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "startMenuFolder": "Praxi-Bot",
+        "languages": [
+          "English",
+          "Turkish"
+        ],
+        "displayLanguageSelector": true,
+        "compression": "lzma",
+        "installerHooks": "nsis/installer-hooks.nsh"
+      }
+    }
   }
 }

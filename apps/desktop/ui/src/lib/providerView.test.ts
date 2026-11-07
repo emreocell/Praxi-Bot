@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ProvidersDto } from "../api/types.ts";
-import { FALLBACK_CATALOG, providersView } from "./providerView.ts";
+import {
+  FALLBACK_CATALOG,
+  providerRoleDefaults,
+  providersView
+} from "./providerView.ts";
 
 const dto: ProvidersDto = {
   default_provider: "second",
@@ -73,4 +77,21 @@ test("without a daemon answer the shipped catalog is offered", () => {
 test("a daemon without catalog entries (fake provider) falls back too", () => {
   const v = providersView({ ...dto, catalog: [] });
   assert.deepEqual(v.catalog, [...FALLBACK_CATALOG]);
+});
+
+test("providerRoleDefaults populates executor, planner, and classifier per preset", () => {
+  const gemini = providerRoleDefaults("gemini");
+  assert.equal(gemini.executor, "gemini-2.5-flash-lite");
+  assert.equal(gemini.planner, "gemini-3.1-pro-preview");
+  assert.equal(gemini.classifier, "gemini-2.5-flash-lite");
+  assert.equal(gemini.requiresKey, true);
+
+  const anthropic = providerRoleDefaults("anthropic", "claude-sonnet-5-5-custom");
+  assert.equal(anthropic.executor, "claude-sonnet-5-5-custom");
+  assert.equal(anthropic.planner, "claude-opus-5-5");
+  assert.equal(anthropic.classifier, "claude-haiku-5-5");
+
+  const ollama = providerRoleDefaults("ollama");
+  assert.equal(ollama.requiresKey, false);
+  assert.equal(ollama.defaultBaseUrl, "http://localhost:11434/v1");
 });
