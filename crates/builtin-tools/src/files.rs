@@ -836,8 +836,10 @@ fn is_protected(path: &Path, data_dir: &Path) -> bool {
 }
 
 fn under_data_sensitive(path: &Path, data_dir: &Path) -> bool {
-    let p = norm_parts(path);
-    let d = norm_parts(data_dir);
+    let path = widen_path(path).unwrap_or_else(|_| path.to_path_buf());
+    let data_dir = widen_path(data_dir).unwrap_or_else(|_| data_dir.to_path_buf());
+    let p = norm_parts(&path);
+    let d = norm_parts(&data_dir);
     if p.len() <= d.len() || p[..d.len()] != d[..] {
         return false;
     }
@@ -853,13 +855,28 @@ fn under_data_sensitive(path: &Path, data_dir: &Path) -> bool {
 /// A protected path is readable only when that path itself is granted.
 /// A grant of the lexical path does not authorize a different resolved path,
 /// and a grant of the resolved path does not authorize a different lexical one.
+/// The 8.3 name and the long name of one file are the same path.
 fn credential_blocked(sh: &Shared, lexical: &Path, resolved: &Path) -> bool {
     protected_ungranted(lexical, &sh.data_dir, &sh.grants)
         || protected_ungranted(resolved, &sh.data_dir, &sh.grants)
 }
 
 fn protected_ungranted(path: &Path, data_dir: &Path, grants: &[PathBuf]) -> bool {
-    is_protected(path, data_dir) && !grants.iter().any(|g| same_path(g, path))
+    is_protected(path, data_dir) && !grants.iter().any(|g| grant_matches(g, path))
+}
+
+/// Exact path, or the same file under its 8.3 and long names.
+///
+/// A failed widen does not count as a match: an alias that cannot be verified
+/// stays denied.
+fn grant_matches(grant: &Path, path: &Path) -> bool {
+    if same_path(grant, path) {
+        return true;
+    }
+    match (widen_path(grant), widen_path(path)) {
+        (Ok(a), Ok(b)) => same_path(&a, &b),
+        _ => false,
+    }
 }
 
 fn same_path(a: &Path, b: &Path) -> bool {
@@ -867,11 +884,57 @@ fn same_path(a: &Path, b: &Path) -> bool {
 }
 
 fn roots_contain(roots: &[PathBuf], path: &Path) -> bool {
-    let p = norm_parts(path);
+    // An 8.3 alias that cannot be widened is not inside. Matching the short
+    // text against a long root would deny a real child; matching it without
+    // widening would also let a different short name through.
+    let Ok(path) = widen_path(path) else {
+        return false;
+    };
+    let p = norm_parts(&path);
     roots.iter().any(|root| {
-        let r = norm_parts(root);
+        let Ok(root) = widen_path(root) else {
+            return false;
+        };
+        let r = norm_parts(&root);
         !r.is_empty() && p.len() >= r.len() && p[..r.len()] == r[..]
     })
+}
+
+/// Long form of `path`, without following a symlink or junction.
+///
+/// Roots and the opened identity come from `GetFinalPathNameByHandleW`, which
+/// expands `RUNNER~1` to `runneradmin`. The caller's path is often still the
+/// 8.3 temp directory, so containment and grants compare one form. The walk
+/// stops at a reparse point; the link target is classified by the caller.
+fn widen_path(path: &Path) -> Result<PathBuf, ToolError> {
+    #[cfg(not(windows))]
+    {
+        Ok(path.to_path_buf())
+    }
+    #[cfg(windows)]
+    {
+        // UNC and device paths are rejected before any directory is opened.
+        reject_syntax(&path.to_string_lossy())?;
+        let (anchor, names) = split_anchor(path)?;
+        let mut acc = anchor;
+        for (i, name) in names.iter().enumerate() {
+            if component_is_device(&name.to_string_lossy()) {
+                return Err(denied(DEVICE_MSG));
+            }
+            let next = acc.join(name);
+            match fs::symlink_metadata(&next) {
+                Ok(meta) if reparse_unsafe(&meta) || meta.file_type().is_symlink() => {
+                    return append_missing(&next, &names[i + 1..]);
+                }
+                Ok(_) => acc = final_identity(&next)?,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                    return append_missing(&next, &names[i + 1..]);
+                }
+                Err(_) => return Err(denied("path could not be verified")),
+            }
+        }
+        Ok(acc)
+    }
 }
 
 fn fold_part(s: &str) -> String {
@@ -1263,8 +1326,14 @@ fn walk_checkpoint(path: &Path, policy: &CpPolicy) -> Result<(PathBuf, PathBuf),
 }
 
 fn in_checkpoint_store(path: &Path, data_dir: &Path) -> bool {
+    let Ok(path) = widen_path(path) else {
+        return false;
+    };
+    let Ok(data_dir) = widen_path(data_dir) else {
+        return false;
+    };
     let store = data_dir.join("checkpoints");
-    let p = norm_parts(path);
+    let p = norm_parts(&path);
     let s = norm_parts(&store);
     !s.is_empty() && p.len() >= s.len() && p[..s.len()] == s[..]
 }
@@ -2486,15 +2555,20 @@ mod tests {
     async fn unc_device_and_dos_names_are_refused_before_open() {
         let (_d, _w, t) = setup();
         let c = ctx();
-        let paths = [
+        let mut paths = vec![
             r"\\192.0.2.1\share\file",
             r"\\?\UNC\192.0.2.1\share\file",
             "//192.0.2.1/share/file",
             r"\\.\PhysicalDrive0",
             r"\\.\NUL",
-            "NUL",
-            "CON",
         ];
+        // `NUL` and `CON` are ordinary file names on Unix. On Windows they are
+        // DOS devices and are still refused before any open.
+        #[cfg(windows)]
+        {
+            paths.push("NUL");
+            paths.push("CON");
+        }
         for path in paths {
             let started = std::time::Instant::now();
             let err = get(&t, "fs_read")
@@ -3415,6 +3489,70 @@ mod tests {
                 .unwrap(),
         );
         assert!(ok.contains("ordinary"), "{ok}");
+    }
+
+    /// A root or grant taken from an 8.3 temp path must still allow that path.
+    ///
+    /// `prepare_roots` stores the long identity. The caller path keeps the
+    /// short temp prefix (`RUNNER~1`), and the two forms name one directory.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn short_temp_root_and_grant_match_the_long_identity() {
+        let base = tempfile::tempdir().unwrap();
+        let long_work = base.path().join("project-workspace");
+        fs::create_dir_all(&long_work).unwrap();
+        let short_work = win_fs::short_path(&long_work).unwrap();
+        assert_ne!(
+            short_work
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_ascii_lowercase(),
+            "project-workspace",
+            "this volume did not generate an 8.3 name for project-workspace: {}",
+            short_work.display()
+        );
+        let data = base.path().join("praxi-data");
+        fs::create_dir_all(&data).unwrap();
+        let root = short_work.join("root");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("ok.txt"), "safe").unwrap();
+        let bounded = tools_bounded(&data, std::slice::from_ref(&root), &[]);
+        let c = ctx();
+        let ok = text(
+            &get(&bounded, "fs_read")
+                .call(&c, json!({"path": root.join("ok.txt")}))
+                .await
+                .unwrap(),
+        );
+        assert!(ok.contains("safe"), "{ok}");
+        let outside = short_work.join("outside.txt");
+        fs::write(&outside, "nope").unwrap();
+        let err = get(&bounded, "fs_read")
+            .call(&c, json!({"path": &outside}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+
+        let secret = "PRAXI_SENTINEL_short_grant";
+        let envf = short_work.join(".env");
+        fs::write(&envf, secret).unwrap();
+        let granted = tools_bounded(&data, &[], std::slice::from_ref(&envf));
+        let ok = text(
+            &get(&granted, "fs_read")
+                .call(&c, json!({"path": &envf}))
+                .await
+                .unwrap(),
+        );
+        assert!(ok.contains(secret), "{ok}");
+        let long_env = fs::canonicalize(&envf).unwrap();
+        let ok = text(
+            &get(&granted, "fs_read")
+                .call(&c, json!({"path": &long_env}))
+                .await
+                .unwrap(),
+        );
+        assert!(ok.contains(secret), "long path of a short grant: {ok}");
     }
 
     #[cfg(windows)]
