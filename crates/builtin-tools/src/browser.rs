@@ -664,7 +664,7 @@ pub fn tools(
                 json!({"type":"object","properties":{
                     "switch_to":{"type":"integer","minimum":1,"description":"Tab number from the list."}
                 }}),
-                Effect::Read,
+                Effect::Write,
                 b,
             ),
         ),
@@ -902,10 +902,10 @@ impl BrowserTool {
             }
             Op::Tabs => {
                 let i: TabsIn = parse(input)?;
-                // Listing stays a read. Activating a tab steals focus, so it
-                // goes through the same control gate as other mutations.
-                // The tool spec stays `Effect::Read` because the built-in
-                // inventory in `lib.rs` is owned by another change.
+                // The tool is `Effect::Write` so a default Ask policy cannot
+                // auto-approve tab activation via `read_tools_skip_ask`.
+                // Listing shares that spec. The control gate still runs only
+                // for activation: a bare list does not take over the desktop.
                 if let Some(n) = i.switch_to {
                     self.gate(run_id, "tab", format!("tab {n}")).await?;
                 }
@@ -1360,6 +1360,19 @@ mod tests {
             ..BrowserSettings::isolated(d.path())
         });
         assert_eq!(drv.profile_path(None).unwrap(), Some(d.path().join("p")));
+    }
+
+    #[test]
+    fn tab_activation_spec_effect_is_write() {
+        let (_d, _f, t) = build();
+        // Activation is `browser_tabs` with `switch_to`. Its effect is what
+        // `read_tools_skip_ask` consults; the control gate does not run when
+        // the overlay app is closed.
+        assert_eq!(
+            get(&t, "browser_tabs").spec().effect,
+            Effect::Write,
+            "tab activation must be Write so a default Ask is not auto-approved"
+        );
     }
 
     struct RefuseGate;

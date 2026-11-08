@@ -20,7 +20,8 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 parking_lot.workspace = true
 permission-engine = { path = "../permission-engine", version = "0.1.0" }
 # Copied locally from mcp-bridge (do not share the helper yet): Unix process
-# group + killpg, Windows job object with kill-on-close.
+# group + killpg, Windows job object. Kill-on-close is intentionally not
+# enabled; tree kill is TerminateJobObject / killpg while the call is armed.
 process-wrap = { version = "10.0.1", features = ["tokio1"] }
 protocol.workspace = true
 script-runtime = { path = "../script-runtime", version = "0.1.0" }

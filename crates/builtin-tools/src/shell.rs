@@ -187,11 +187,13 @@ fn apply_child_env(cmd: &mut Command) {
     }
 }
 
-/// Same strategy as `mcp-bridge`'s `isolate_child`: Unix `process_group(0)` so
-/// `killpg` reaches the tree, Windows job object with kill-on-close.
+/// Unix process group so `killpg` reaches the tree, Windows job object so
+/// `TerminateJobObject` does. `KillOnDrop` is not registered: that flag is
+/// what sets `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, and closing the job on a
+/// successful return would kill background children the shell had already
+/// detached. Tree kill is `start_kill` while [`TreeGuard`] is armed.
 fn isolate_child(cmd: Command) -> process_wrap::tokio::CommandWrap {
     let mut wrap = process_wrap::tokio::CommandWrap::from(cmd);
-    wrap.wrap(process_wrap::tokio::KillOnDrop);
     #[cfg(unix)]
     {
         wrap.wrap(process_wrap::tokio::ProcessGroup::leader());
@@ -239,9 +241,13 @@ impl Drop for TreeGuard {
         let Some(mut child) = self.child.take() else {
             return;
         };
-        if self.armed {
-            let _ = child.start_kill();
+        // Success already waited the direct child and disarmed. Dropping the
+        // wrapper must not `killpg` / close a kill-on-close job, and must not
+        // block in the process-group wait until background children exit.
+        if !self.armed {
+            return;
         }
+        let _ = child.start_kill();
         if tokio::runtime::Handle::try_current().is_ok() {
             tokio::spawn(async move {
                 let _ = child.wait().await;
@@ -329,8 +335,18 @@ impl Tool for ShellTool {
             armed: true,
         };
 
+        // The outermost `wait` reaps the whole process group (Unix) or blocks
+        // on the job. A shell that backgrounded a child would then sit until
+        // that child exits or the tool timeout `killpg`s it. Wait the direct
+        // child only; `terminate` / armed `Drop` still kill and reap the tree.
         let waited = tokio::time::timeout(timeout, async {
-            guard.child.as_mut().expect("child present").wait().await
+            guard
+                .child
+                .as_mut()
+                .expect("child present")
+                .inner_mut()
+                .wait()
+                .await
         })
         .await;
         let (code, note) = match waited {
@@ -363,9 +379,9 @@ impl Tool for ShellTool {
             .await;
         }
         guard.abort_readers();
-        // Successful exit must not kill background descendants. Timeout, wait
-        // errors and a dropped future leave `armed` set (timeout clears it
-        // inside `terminate`).
+        // The direct child has exited. Disarm before drop so background
+        // descendants are left running. Timeout, wait errors and a dropped
+        // future leave `armed` set (`terminate` clears it after the tree kill).
         if note.is_none() {
             guard.armed = false;
         }
@@ -660,6 +676,99 @@ mod tests {
         assert!(
             !marker.exists(),
             "descendant wrote the marker after the shell future was dropped"
+        );
+    }
+
+    fn process_alive(pid: u32) -> bool {
+        if cfg!(windows) {
+            let output = std::process::Command::new("tasklist")
+                .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .output();
+            let Ok(output) = output else {
+                return false;
+            };
+            let text = String::from_utf8_lossy(&output.stdout);
+            let want = pid.to_string();
+            text.lines().any(|line| {
+                line.split(',')
+                    .nth(1)
+                    .is_some_and(|col| col.trim().trim_matches('"') == want)
+            })
+        } else {
+            std::process::Command::new("kill")
+                .args(["-0", &pid.to_string()])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+        }
+    }
+
+    /// A background child must still be running after a successful `shell_run`.
+    ///
+    /// Unix `ProcessGroupChild::wait` blocks until the group is empty, so a
+    /// group wait turns this into a timeout that `killpg`s the child. Windows
+    /// `KILL_ON_JOB_CLOSE` kills it when the job handle drops on return.
+    #[tokio::test]
+    async fn successful_shell_run_leaves_background_child_alive() {
+        let work = tempfile::tempdir().unwrap();
+        let spill = tempfile::tempdir().unwrap();
+        let t = tool(spill.path());
+        let pidfile = work.path().join("pid.txt");
+        let _cleanup = KillLater {
+            pidfile: pidfile.clone(),
+        };
+        let cmd = if cfg!(windows) {
+            format!(
+                "$psi = New-Object System.Diagnostics.ProcessStartInfo; \
+                 $psi.FileName = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'; \
+                 $psi.Arguments = '-NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 30\"'; \
+                 $psi.UseShellExecute = $false; \
+                 $psi.CreateNoWindow = $true; \
+                 $p = [System.Diagnostics.Process]::Start($psi); \
+                 Set-Content -LiteralPath {pid} -Value $p.Id -Encoding Ascii; \
+                 Write-Output started-bg",
+                pid = ps_single(&pidfile),
+            )
+        } else {
+            format!(
+                "sleep 30 & echo $! > '{}' ; echo started-bg",
+                pidfile.display()
+            )
+        };
+        let started = std::time::Instant::now();
+        let out = t
+            .call(
+                &ToolContext::default(),
+                json!({"command": cmd, "shell": shell_for_tests(), "timeout": 15}),
+            )
+            .await
+            .unwrap();
+        let s = text(&out);
+        assert!(s.contains("exit_code: 0"), "{s}");
+        assert!(s.contains("started-bg"), "{s}");
+        assert!(
+            started.elapsed() < Duration::from_secs(12),
+            "shell_run waited out the background child ({:?})",
+            started.elapsed()
+        );
+        let pid_text = std::fs::read_to_string(&pidfile).expect("background pid file");
+        let pid = pid_text
+            .chars()
+            .filter(char::is_ascii_digit)
+            .collect::<String>()
+            .parse::<u32>()
+            .unwrap_or_else(|_| panic!("pid file {pid_text:?}"));
+        // A job-close kill lands before `call` returns. The pause covers a
+        // kill that is only queued by the time the tool result is observed.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            process_alive(pid),
+            "background child {pid} was killed after a successful shell_run"
         );
     }
 
