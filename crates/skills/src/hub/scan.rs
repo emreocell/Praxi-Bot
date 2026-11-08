@@ -1,9 +1,12 @@
 //! Static safety scan of a skill tree before installation.
 //!
 //! Heuristic and conservative: it never executes anything, it only reads the
-//! files and reports what looks risky. The result is a [`RiskReport`] the
-//! user must accept (see [`RiskReport::requires_acceptance`]) before the hub
-//! installs the skill. A clean scan is not a guarantee of safety.
+//! files and reports what looks risky. A clean scan is not a guarantee of
+//! safety and is not the security boundary. The hub still requires an accept
+//! token for git and index skills (see [`crate::hub::SkillHub::install`]).
+//! [`RiskReport::requires_acceptance`] is only the scanner's own advisory
+//! signal. Homoglyph folding is a short table plus NFKC, not a full Unicode
+//! UTS #39 confusable skeleton; unmapped characters can still hide a phrase.
 
 use std::collections::HashSet;
 use std::fs;
@@ -105,12 +108,13 @@ impl RiskReport {
         }
     }
 
-    /// True when the user has to accept the report (by passing
-    /// [`RiskReport::fingerprint`]) to install.
+    /// Advisory signal: a warning, a high finding, or an active file type.
     ///
-    /// Acceptance is required when any finding is a warning or worse, and also
-    /// when the tree contains an active file type. A script or similar file is
-    /// not treated as safe just because its text produced no warning.
+    /// The hub does not treat `false` as permission to install. Git and index
+    /// sources always need [`crate::hub::InstallOptions::accept`], and a local
+    /// folder needs it unless the risk is [`RiskLevel::Low`] and
+    /// `trust_local` is set. A script is still not treated as safe just
+    /// because its text produced no warning.
     #[must_use]
     pub fn requires_acceptance(&self) -> bool {
         self.active || self.risk() != RiskLevel::Low
@@ -402,8 +406,35 @@ impl Collector<'_> {
 
 struct DecodeBudget {
     used: usize,
+    exhausted: bool,
 }
 
+impl DecodeBudget {
+    /// Keep `text` when the per-file decode budget still has room. A further
+    /// successful decode past the budget sets [`Self::exhausted`] and is not
+    /// scanned.
+    fn push(&mut self, text: Option<String>, out: &mut Vec<String>) {
+        let Some(text) = text else {
+            return;
+        };
+        if self.exhausted {
+            return;
+        }
+        if self.used >= MAX_DECODED_BLOBS {
+            self.exhausted = true;
+            return;
+        }
+        self.used += 1;
+        out.push(text);
+    }
+}
+
+/// Maps a few confusable letters onto ASCII.
+///
+/// This is not a Unicode UTS #39 confusable skeleton. Mathematical
+/// alphanumeric symbols and any other unmapped character still hide a phrase
+/// from the substring rules. That gap is a known limitation of this advisory
+/// scanner.
 fn fold_confusable(c: char) -> char {
     match c {
         'а' | 'α' => 'a',
@@ -540,13 +571,16 @@ fn consider_base64(out: &mut Vec<String>, line: &str, budget: &mut DecodeBudget)
         line,
         |c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=' | '-' | '_'),
         |run| {
-            if budget.used >= MAX_DECODED_BLOBS || run.len() < MIN_ENCODED_RUN {
+            if budget.exhausted || run.len() < MIN_ENCODED_RUN {
                 return;
             }
-            if let Some(text) = decode_base64(run) {
-                budget.used += 1;
-                out.push(text);
+            if budget.used >= MAX_DECODED_BLOBS {
+                if decode_base64(run).is_some() {
+                    budget.exhausted = true;
+                }
+                return;
             }
+            budget.push(decode_base64(run), out);
         },
     );
 }
@@ -556,13 +590,16 @@ fn consider_hex(out: &mut Vec<String>, line: &str, budget: &mut DecodeBudget) {
         line,
         |c| c.is_ascii_hexdigit(),
         |run| {
-            if budget.used >= MAX_DECODED_BLOBS {
+            if budget.exhausted {
                 return;
             }
-            if let Some(text) = decode_hex(run) {
-                budget.used += 1;
-                out.push(text);
+            if budget.used >= MAX_DECODED_BLOBS {
+                if decode_hex(run).is_some() {
+                    budget.exhausted = true;
+                }
+                return;
             }
+            budget.push(decode_hex(run), out);
         },
     );
 }
@@ -627,13 +664,16 @@ fn decode_escapes(line: &str) -> Option<String> {
 }
 
 fn push_decoded(out: &mut Vec<String>, budget: &mut DecodeBudget, text: Option<String>) {
-    if budget.used >= MAX_DECODED_BLOBS {
+    if budget.exhausted {
         return;
     }
-    if let Some(text) = text {
-        budget.used += 1;
-        out.push(text);
+    if budget.used >= MAX_DECODED_BLOBS {
+        if text.is_some() {
+            budget.exhausted = true;
+        }
+        return;
     }
+    budget.push(text, out);
 }
 
 fn decode_payloads(original: &str, normalized: &str, budget: &mut DecodeBudget) -> Vec<String> {
@@ -713,24 +753,137 @@ fn inspect_line(
         }
     }
     note_secrets(c, line, &normalized, n);
+    if pipe_targets_shell(&normalized) {
+        c.add(Script, High, n, PIPE_SHELL);
+    }
     if decode {
+        let already = budget.exhausted;
         for decoded in decode_payloads(line, &normalized, budget) {
             for decoded_line in decoded.lines() {
                 inspect_line(c, decoded_line, n, false, false, budget);
             }
         }
+        if budget.exhausted && !already {
+            c.add(
+                Obfuscation,
+                Warn,
+                n,
+                "stopped decoding after the per-file budget",
+            );
+        }
     }
 }
 
+const SHELL_NAMES: &[&str] = &[
+    "ash",
+    "bash",
+    "busybox",
+    "cmd",
+    "csh",
+    "dash",
+    "fish",
+    "iex",
+    "ksh",
+    "powershell",
+    "pwsh",
+    "sh",
+    "tcsh",
+    "zsh",
+];
+
+/// `| /bin/sh` and `|sh` after continuation joining. The shell name may be a
+/// path (`/bin/sh`, `powershell.exe`); a bare trailing `|` is not enough.
+fn pipe_targets_shell(normalized: &str) -> bool {
+    let mut from = 0;
+    while let Some(rel) = normalized[from..].find('|') {
+        let after = from + rel + 1;
+        let tail = normalized[after..].trim_start();
+        let token_len = tail.find(char::is_whitespace).unwrap_or(tail.len());
+        let token = tail[..token_len]
+            .trim_matches(|c: char| matches!(c, '"' | '\'' | '`' | ';' | ')' | '('));
+        let base = token.rsplit(['/', '\\']).next().unwrap_or(token);
+        let base = base.strip_suffix(".exe").unwrap_or(base);
+        if SHELL_NAMES.contains(&base) {
+            return true;
+        }
+        from = after;
+    }
+    false
+}
+
+/// How many physical lines a shell continuation (`|` or `\`) may span.
+const MAX_CONTINUATION_LINES: usize = 32;
+/// How many bytes of joined continuation text are scanned as one line.
+const MAX_CONTINUATION_CHARS: usize = 8 * 1024;
+
+fn line_continues(line: &str) -> bool {
+    let trimmed = line.trim_end();
+    trimmed.ends_with('|') || trimmed.ends_with('\\')
+}
+
+/// Join a bounded run of shell continuation lines. The bool is true when the
+/// run was cut off and the remainder must be scanned on its own.
+fn join_continuations(lines: &[&str], start: usize) -> (String, usize, bool) {
+    let mut joined = String::new();
+    let mut index = start;
+    let mut parts = 0usize;
+    let mut truncated = false;
+    while index < lines.len() {
+        let line = lines[index];
+        let continues = line_continues(line);
+        let piece = if continues && line.trim_end().ends_with('\\') {
+            line.trim_end().strip_suffix('\\').unwrap_or(line)
+        } else if continues {
+            line.trim_end()
+        } else {
+            line
+        };
+        if parts > 0 {
+            joined.push(' ');
+        }
+        if parts == 0 {
+            joined.push_str(piece);
+        } else {
+            joined.push_str(piece.trim_start());
+        }
+        parts += 1;
+        index += 1;
+        if !continues || index >= lines.len() {
+            break;
+        }
+        if parts >= MAX_CONTINUATION_LINES || joined.len() >= MAX_CONTINUATION_CHARS {
+            truncated = true;
+            break;
+        }
+    }
+    (joined, index, truncated)
+}
+
 fn scan_text(file: &str, text: &str, out: &mut Vec<Finding>) {
+    let lines: Vec<&str> = text.lines().collect();
     let mut c = Collector {
         file,
         seen: HashSet::new(),
         out: Vec::new(),
     };
-    let mut budget = DecodeBudget { used: 0 };
-    for (i, line) in text.lines().enumerate() {
-        inspect_line(&mut c, line, Some(i + 1), true, true, &mut budget);
+    let mut budget = DecodeBudget {
+        used: 0,
+        exhausted: false,
+    };
+    let mut index = 0;
+    while index < lines.len() {
+        let start = index;
+        let (joined, next, truncated) = join_continuations(&lines, index);
+        if truncated {
+            c.add(
+                Obfuscation,
+                Warn,
+                Some(start + 1),
+                "shell continuation exceeds the scan bound",
+            );
+        }
+        inspect_line(&mut c, &joined, Some(start + 1), true, true, &mut budget);
+        index = next;
     }
     out.extend(c.out);
 }
@@ -791,8 +944,18 @@ fn scan_file(f: &TreeFile, bytes: &[u8], out: &mut Vec<Finding>) -> bool {
             "contains a non-text binary file",
         ));
     }
-    // NUL and invalid UTF-8 are legal places to hide text the agent will read.
-    let text = String::from_utf8_lossy(bytes);
+    // NULs are legal places to hide text, including inside an image extension
+    // that suppresses the generic non-text warning. Strip NULs and the U+FFFD
+    // `from_utf8_lossy` inserts for invalid bytes before matching, and still
+    // warn that the file contained NULs.
+    if bytes.contains(&0) {
+        out.push(file_finding(f, Obfuscation, Warn, "contains NUL bytes"));
+    }
+    let lossy = String::from_utf8_lossy(bytes);
+    let text: String = lossy
+        .chars()
+        .filter(|c| *c != '\0' && *c != '\u{FFFD}')
+        .collect();
     scan_text(&f.rel, &text, out);
     active
 }

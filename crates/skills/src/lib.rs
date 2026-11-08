@@ -9,7 +9,10 @@
 //! user (`<data_dir>/skills/`), per-bot (`<data_dir>/bots/<id>/skills/`).
 //!
 //! Third-party skills are installed, scanned, locked and updated through
-//! [`hub::SkillHub`].
+//! [`hub::SkillHub`]. The static scan is advisory. Installing or updating a
+//! git or index skill requires an accept token bound to that preview's
+//! fingerprint; a local folder needs the same token unless it is low risk and
+//! `trust_local` is set.
 //!
 //! # Wiring (agent-core)
 //! ```ignore

@@ -4,9 +4,11 @@
 //! traits so the hub can be tested without either. The defaults shell out to
 //! the `curl` and `git` command-line tools (no HTTP client dependency).
 
+use std::fs;
 use std::io::Read;
-use std::path::{Component, Path};
-use std::process::{Command, Stdio};
+use std::path::{Component, Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::time::Duration;
 
 use serde::Deserialize;
 
@@ -167,7 +169,9 @@ pub trait GitBackend: Send + Sync {
 }
 
 /// Uses the `git` CLI: `init` + `fetch --depth 1` + `checkout`, which works
-/// for branches, tags and full commit hashes alike.
+/// for branches, tags and full commit hashes alike. While git runs, the
+/// destination directory is polled; past a small multiple of the skill byte
+/// cap the process tree is killed and the directory is removed.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GitCli;
 
@@ -200,6 +204,144 @@ fn push_config(cmd: &mut Command, key_value: &str) {
     cmd.arg("-c").arg(key_value);
 }
 
+/// Git keeps a pack and then checks the same bytes out again. Three times the
+/// skill cap leaves room for one full tree plus its objects, and still stops
+/// a fetch that is filling the disk.
+const GIT_DIR_BYTE_MULTIPLE: u64 = 3;
+const GIT_STDOUT_CAP: usize = 8 * 1024 * 1024;
+const GIT_STDERR_CAP: usize = 256 * 1024;
+const GIT_POLL_INTERVAL: Duration = Duration::from_millis(25);
+
+fn git_dir_byte_limit() -> u64 {
+    super::util::MAX_TOTAL_BYTES.saturating_mul(GIT_DIR_BYTE_MULTIPLE)
+}
+
+fn metadata_is_reparse(meta: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    {
+        meta.file_type().is_symlink()
+    }
+}
+
+fn directory_bytes(root: &Path) -> u64 {
+    fn walk(path: &Path, total: &mut u64) {
+        let Ok(meta) = fs::symlink_metadata(path) else {
+            return;
+        };
+        if meta.file_type().is_symlink() || metadata_is_reparse(&meta) {
+            return;
+        }
+        if meta.is_file() {
+            *total = total.saturating_add(meta.len());
+        } else if meta.is_dir() {
+            let Ok(entries) = fs::read_dir(path) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                walk(&entry.path(), total);
+            }
+        }
+    }
+    let mut total = 0u64;
+    walk(root, &mut total);
+    total
+}
+
+fn tree_kill_program() -> PathBuf {
+    #[cfg(windows)]
+    {
+        std::env::var_os("SYSTEMROOT")
+            .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
+            .join("System32")
+            .join("taskkill.exe")
+    }
+    #[cfg(not(windows))]
+    {
+        let bin = PathBuf::from("/bin/kill");
+        if bin.is_file() {
+            bin
+        } else {
+            PathBuf::from("kill")
+        }
+    }
+}
+
+fn kill_process_tree(child: &mut Child) {
+    let pid = child.id();
+    let mut killer = Command::new(tree_kill_program());
+    #[cfg(windows)]
+    killer.args(["/F", "/T", "/PID", &pid.to_string()]);
+    #[cfg(not(windows))]
+    killer.args(["-9", &format!("-{pid}")]);
+    let _ = killer
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn remove_entry(path: &Path) -> std::io::Result<()> {
+    let meta = fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() || metadata_is_reparse(&meta) {
+        return fs::remove_file(path);
+    }
+    if meta.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    }
+}
+
+fn clear_directory(dir: &Path) {
+    for _ in 0..40 {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        let mut stuck = false;
+        for entry in entries.flatten() {
+            if remove_entry(&entry.path()).is_err() {
+                stuck = true;
+            }
+        }
+        if !stuck {
+            return;
+        }
+        std::thread::sleep(GIT_POLL_INTERVAL);
+    }
+}
+
+struct CapturedPipe {
+    buf: Vec<u8>,
+    overflow: bool,
+}
+
+fn read_pipe_capped(mut reader: impl Read, max: usize) -> CapturedPipe {
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 8192];
+    let mut overflow = false;
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                if buf.len().saturating_add(n) > max {
+                    overflow = true;
+                    continue;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+            }
+        }
+    }
+    CapturedPipe { buf, overflow }
+}
+
 fn spawn_git(dir: &Path, args: &[String], extra_c: &[String]) -> Result<GitOutput, HubError> {
     let hooks = nonexistent_hooks(dir)?;
     let mut cmd = Command::new("git");
@@ -221,15 +363,89 @@ fn spawn_git(dir: &Path, args: &[String], extra_c: &[String]) -> Result<GitOutpu
     cmd.env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_HTTP_LOW_SPEED_LIMIT", "1000")
         .env("GIT_HTTP_LOW_SPEED_TIME", "30")
-        .env("GIT_CONFIG_COUNT", "0");
-    let out = cmd
-        .output()
+        .env("GIT_CONFIG_COUNT", "0")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let mut child = cmd
+        .spawn()
         .map_err(|e| HubError::Git(format!("cannot run git: {e}")))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| HubError::Git("git stdout missing".into()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| HubError::Git("git stderr missing".into()))?;
+    let stdout_thread = std::thread::spawn(move || read_pipe_capped(stdout, GIT_STDOUT_CAP));
+    let stderr_thread = std::thread::spawn(move || read_pipe_capped(stderr, GIT_STDERR_CAP));
+    let watched = watch_git_dir(dir, &mut child);
+    let stdout = join_pipe(stdout_thread);
+    let stderr = join_pipe(stderr_thread);
+    let status = match watched? {
+        GitWatch::TooLarge => {
+            clear_directory(dir);
+            let limit = git_dir_byte_limit();
+            return Err(HubError::TooLarge(format!(
+                "git wrote more than {limit} bytes; the process was stopped and the temporary directory was removed"
+            )));
+        }
+        GitWatch::Finished(status) => status,
+    };
+    if stdout.overflow || stderr.overflow {
+        return Err(HubError::Git("git output exceeded the capture cap".into()));
+    }
     Ok(GitOutput {
-        status: out.status,
-        stdout: out.stdout,
-        stderr: out.stderr,
+        status,
+        stdout: stdout.buf,
+        stderr: stderr.buf,
     })
+}
+
+enum GitWatch {
+    Finished(std::process::ExitStatus),
+    TooLarge,
+}
+
+/// Poll `dir` while `child` runs. [`GitWatch::TooLarge`] means the directory
+/// passed the byte cap; a still-running process tree was killed.
+fn watch_git_dir(dir: &Path, child: &mut Child) -> Result<GitWatch, HubError> {
+    let limit = git_dir_byte_limit();
+    loop {
+        if directory_bytes(dir) > limit {
+            kill_process_tree(child);
+            return Ok(GitWatch::TooLarge);
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if directory_bytes(dir) > limit {
+                    return Ok(GitWatch::TooLarge);
+                }
+                return Ok(GitWatch::Finished(status));
+            }
+            Ok(None) => std::thread::sleep(GIT_POLL_INTERVAL),
+            Err(e) => {
+                kill_process_tree(child);
+                return Err(HubError::Git(format!("git wait: {e}")));
+            }
+        }
+    }
+}
+
+fn join_pipe(thread: std::thread::JoinHandle<CapturedPipe>) -> CapturedPipe {
+    match thread.join() {
+        Ok(captured) => captured,
+        Err(_) => CapturedPipe {
+            buf: Vec::new(),
+            overflow: true,
+        },
+    }
 }
 
 fn git_text_raw(dir: &Path, args: &[&str]) -> Result<String, HubError> {
@@ -801,5 +1017,66 @@ mod tests {
         let body = fs::read_to_string(dest.join("a.txt")).unwrap();
         assert!(body.contains("hello"), "{body}");
         assert!(!tmp.path().join("praxi-no-hooks").exists());
+    }
+
+    fn write_incompressible(path: &Path, bytes: usize) {
+        use std::io::Write;
+        let mut file = fs::File::create(path).unwrap();
+        let mut buf = vec![0u8; 1024 * 1024];
+        let mut left = bytes;
+        let mut seed = 0x00C0_FFEE_u64;
+        while left > 0 {
+            for slot in &mut buf {
+                seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+                *slot = seed.to_le_bytes()[3];
+            }
+            let n = left.min(buf.len());
+            file.write_all(&buf[..n]).unwrap();
+            left -= n;
+        }
+        file.sync_all().unwrap();
+    }
+
+    #[test]
+    fn git_fetch_stops_when_destination_exceeds_byte_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let origin = tmp.path().join("origin");
+        let dest = tmp.path().join("dest");
+        fs::create_dir_all(&origin).unwrap();
+        fs::create_dir_all(&dest).unwrap();
+        raw_git(&origin, &["init", "--quiet", "-b", "main"]);
+        raw_git(&origin, &["config", "user.email", "t@example.com"]);
+        raw_git(&origin, &["config", "user.name", "t"]);
+        raw_git(&origin, &["config", "core.autocrlf", "false"]);
+        raw_git(&origin, &["config", "core.compression", "0"]);
+        raw_git(&origin, &["config", "pack.compression", "0"]);
+        fs::write(origin.join(".gitattributes"), b"* -text\n").unwrap();
+        let blob = origin.join("blob.bin");
+        write_incompressible(&blob, 32 * 1024 * 1024);
+        raw_git(&origin, &["add", "blob.bin"]);
+        raw_git(&origin, &["add", ".gitattributes"]);
+        raw_git(&origin, &["commit", "--quiet", "-m", "big"]);
+        git(&dest, &["init", "--quiet"]).unwrap();
+        git(&dest, &["remote", "add", "origin", &fwd(&origin)]).unwrap();
+        let err = git(
+            &dest,
+            &[
+                "fetch",
+                "--quiet",
+                "--depth",
+                "1",
+                "--no-recurse-submodules",
+                "origin",
+                "HEAD",
+            ],
+        )
+        .unwrap_err();
+        assert!(matches!(err, crate::hub::HubError::TooLarge(_)), "{err}");
+        let left = super::directory_bytes(&dest);
+        assert!(
+            left <= super::super::util::MAX_TOTAL_BYTES,
+            "temporary directory still holds {left} bytes"
+        );
+        assert!(blob.metadata().unwrap().len() > super::git_dir_byte_limit());
     }
 }

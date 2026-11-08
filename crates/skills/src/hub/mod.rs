@@ -6,11 +6,14 @@
 //!
 //! 1. [`SkillHub::preview`] stages the skill in a temp directory, validates
 //!    `SKILL.md` and runs the static scan ([`scan`]), returning a [`Preview`]
-//!    with a [`RiskReport`].
-//! 2. [`SkillHub::install`] copies the staged tree into the user skills
-//!    directory only if the report is clean, or the caller passes the
-//!    report's fingerprint in [`InstallOptions::accept`] (the user accepted
-//!    exactly this content).
+//!    with a [`RiskReport`]. The scan is advisory defense in depth. It is not
+//!    the security boundary: a clean report does not by itself authorize a
+//!    remote install.
+//! 2. [`SkillHub::install`] copies the staged tree only when [`InstallOptions::accept`]
+//!    is the fingerprint of that exact preview. Git URLs and index URLs always
+//!    require it. A local folder requires it unless the risk is [`RiskLevel::Low`]
+//!    and [`InstallOptions::trust_local`] is set. Update is the same call with
+//!    the preview from [`SkillHub::preview_update`] and `replace: true`.
 //! 3. A lockfile records name, source, commit, content hash and install time
 //!    so [`SkillHub::restore`] / [`SkillHub::sync`] can reproduce installs and
 //!    detect tampering. Usage counters live in a separate file.
@@ -23,7 +26,7 @@
 //! let hub = skills::hub::SkillHub::new(skills::hub::HubPaths::from_data_dir(&data_dir));
 //! let preview = hub.preview(&InstallSource::Git { url, rev: None, subdir: None })?;
 //! show(preview.report.render());                      // CLI / UI approval dialog
-//! hub.install(preview, &InstallOptions { accept: Some(fp), replace: false })?;
+//! hub.install(preview, &InstallOptions { accept: Some(fp), replace: false, trust_local: false })?;
 //! skill_index.reload();                               // pick up the new skill
 //! // in the skill_read tool: hub.record_use(&name)?;  // usage counters
 //! ```
@@ -125,15 +128,26 @@ impl HubPaths {
     }
 }
 
-/// Options for [`SkillHub::install`].
+/// Options for [`SkillHub::install`] and for an update (`replace: true` on the
+/// preview returned by [`SkillHub::preview_update`]).
 #[derive(Debug, Clone, Default)]
 pub struct InstallOptions {
-    /// Fingerprint of the report the user accepted. Required when
-    /// [`RiskReport::requires_acceptance`]; ignored otherwise.
+    /// Fingerprint of the preview the caller is accepting.
+    ///
+    /// Must equal [`RiskReport::fingerprint`] exactly. Required for every git
+    /// URL and every index URL, whatever the scanner reported, and for a local
+    /// folder unless the risk is [`RiskLevel::Low`] and [`Self::trust_local`]
+    /// is set. A token for any other fingerprint is refused.
     pub accept: Option<String>,
     /// Overwrite an existing hub-installed skill of the same name (update).
     /// Skills not installed through the hub are never overwritten.
     pub replace: bool,
+    /// Install a low-risk local folder without [`Self::accept`].
+    ///
+    /// The caller is stating that it already trusts this folder. This flag does
+    /// not apply to git or index sources, and it does not apply when the scan
+    /// risk is above [`RiskLevel::Low`]. Defaults to `false`.
+    pub trust_local: bool,
 }
 
 /// A staged, scanned skill waiting for acceptance. Dropping it discards the
@@ -251,12 +265,18 @@ impl SkillHub {
 
     /// Install a previewed skill.
     ///
+    /// Git and index previews always require [`InstallOptions::accept`] to be
+    /// this preview's fingerprint. A local folder requires the same token
+    /// unless its risk is [`RiskLevel::Low`] and [`InstallOptions::trust_local`]
+    /// is set. Passing `replace: true` is the update path and uses the same
+    /// rule.
+    ///
     /// # Errors
-    /// [`HubError::NotAccepted`] when the report needs acceptance and
-    /// `opts.accept` does not equal its fingerprint; [`HubError::AlreadyInstalled`];
-    /// I/O and lockfile failures.
+    /// [`HubError::NotAccepted`] when acceptance is required and `opts.accept`
+    /// is missing or is not this preview's fingerprint;
+    /// [`HubError::AlreadyInstalled`]; I/O and lockfile failures.
     pub fn install(&self, preview: &Preview, opts: &InstallOptions) -> Result<LockEntry, HubError> {
-        if preview.report.requires_acceptance()
+        if acceptance_required(preview, opts)
             && opts.accept.as_deref() != Some(preview.report.fingerprint.as_str())
         {
             return Err(HubError::NotAccepted {
@@ -269,7 +289,10 @@ impl SkillHub {
 
     /// Re-fetch the skill from its recorded source. Returns `None` when the
     /// content is unchanged, otherwise a [`Preview`] to pass to
-    /// [`SkillHub::install`] with `replace: true`.
+    /// [`SkillHub::install`] with `replace: true`. That install still requires
+    /// an accept token for the new fingerprint when the source is a git URL
+    /// or an index URL, and for a local folder that is not a trusted low-risk
+    /// tree.
     ///
     /// # Errors
     /// [`HubError::NotInstalled`], plus everything [`SkillHub::preview`] can return.
@@ -608,6 +631,15 @@ impl SkillHub {
             let _ = remove_dir_inside(skills_dir, &old);
         }
         Ok(entry)
+    }
+}
+
+/// Remote skills always need an accept token. A local folder needs one
+/// unless the caller opts into trusting a low-risk tree.
+fn acceptance_required(preview: &Preview, opts: &InstallOptions) -> bool {
+    match &preview.source {
+        SourceSpec::Git { .. } | SourceSpec::Index { .. } => true,
+        SourceSpec::Local { .. } => !(opts.trust_local && preview.report.risk() == RiskLevel::Low),
     }
 }
 
