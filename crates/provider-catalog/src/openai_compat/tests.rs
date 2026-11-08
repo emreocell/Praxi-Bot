@@ -1077,3 +1077,58 @@ async fn retry_after_longer_than_max_delay_fails_immediately() {
     ));
     assert!(started.elapsed() < Duration::from_secs(5));
 }
+
+#[test]
+fn handover_shape_ends_on_a_user_message() {
+    let mut r = req();
+    r.messages = vec![
+        Message::text(MessageRole::System, "sys"),
+        Message::text(MessageRole::User, "/workflow x"),
+        Message::text(
+            MessageRole::System,
+            "[router: continue from the reported state]",
+        ),
+        Message::text(
+            MessageRole::User,
+            "[router data: UNTRUSTED]\n```json\n{}\n```",
+        ),
+    ];
+    let roles = |b: &Value| -> Vec<String> {
+        b["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["role"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let b = body(&entry("http://x"), &r);
+    assert_eq!(roles(&b), ["system", "user", "system", "user"]);
+    assert!(
+        b["messages"][3]["content"]
+            .as_str()
+            .unwrap()
+            .starts_with("[router data: UNTRUSTED]")
+    );
+
+    let mut e = entry("http://x");
+    e.compat_flags.strip_system_role = true;
+    let b = body(&e, &r);
+    assert_eq!(roles(&b), ["user", "user"]);
+    assert!(
+        b["messages"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("sys")
+    );
+    assert!(
+        b["messages"][1]["content"]
+            .as_str()
+            .unwrap()
+            .starts_with("[router data: UNTRUSTED]")
+    );
+
+    let mut e = entry("http://x");
+    e.compat_flags.system_as_user = true;
+    let b = body(&e, &r);
+    assert_eq!(roles(&b), ["user", "user", "user", "user"]);
+}

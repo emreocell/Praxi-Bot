@@ -258,13 +258,6 @@ fn summarize_handover(r: &ReplayReport, h: &Handover) -> String {
         r.wall_time_ms,
         r.llm_calls,
     );
-    if let Some(o) = &h.partial_state.last_output {
-        let _ = writeln!(
-            out,
-            "Last step output (untrusted data):\n{}",
-            untrusted_data_block("workflow-replay.last_output", o)
-        );
-    }
     out.push_str(
         "Steps not yet done (continue from the first one yourself; check the screen first):\n",
     );
@@ -279,23 +272,49 @@ fn summarize_handover(r: &ReplayReport, h: &Handover) -> String {
     if h.partial_state.remaining.len() > 16 {
         out.push_str("  [remaining step descriptions truncated]\n");
     }
+    // Last on purpose: the router's outer cap can only cut this tail, never
+    // the actionable remaining-steps list above.
+    if let Some(o) = &h.partial_state.last_output {
+        let _ = writeln!(
+            out,
+            "Last step output (untrusted data):\n{}",
+            untrusted_data_block_capped("workflow-replay.last_output", o, LAST_OUTPUT_CAP)
+        );
+    }
     out
 }
+
+/// Cap for the nested `last_output` block inside a handover summary.
+pub const LAST_OUTPUT_CAP: usize = 2048;
 
 /// Fence replay data with explicit provenance and a 4 KiB UTF-8 input cap.
 ///
 /// The serialized block remains valid JSON even when input contains newlines,
 /// quotes, or closing Markdown fences. JSON escaping can expand a byte up to
 /// six times; the returned block is bounded to less than 26 KiB. Callers must
-/// still place this in a tool/data message, never in a user or system message.
+/// still place this in a User data message labelled untrusted, never in a
+/// system message.
 #[must_use]
 pub fn untrusted_data_block(origin: &str, text: &str) -> String {
-    let prefix = utf8_prefix(text, 4096);
+    untrusted_data_block_capped(origin, text, 4096)
+}
+
+/// Like [`untrusted_data_block`] with an input cap of `max` bytes. A cut
+/// input ends with an ellipsis and carries `truncated: true`.
+#[must_use]
+pub fn untrusted_data_block_capped(origin: &str, text: &str, max: usize) -> String {
+    let prefix = utf8_prefix(text, max);
+    let truncated = prefix.len() != text.len();
+    let shown = if truncated {
+        format!("{prefix}\u{2026}")
+    } else {
+        prefix.to_owned()
+    };
     let data = json!({
         "origin": utf8_prefix(origin, 128),
         "trust": "untrusted",
-        "truncated": prefix.len() != text.len(),
-        "text": prefix,
+        "truncated": truncated,
+        "text": shown,
     })
     .to_string()
     // Even a backtick fence embedded in the text stays inside the JSON string.
@@ -375,8 +394,12 @@ mod tests {
         let decoded: Value = serde_json::from_str(encoded).unwrap();
         assert_eq!(decoded["trust"], "untrusted");
         assert_eq!(decoded["truncated"], true);
-        assert!(decoded["text"].as_str().unwrap().len() <= 4096);
-        assert!(attack.starts_with(decoded["text"].as_str().unwrap()));
+        let shown = decoded["text"].as_str().unwrap();
+        let shown = shown
+            .strip_suffix('\u{2026}')
+            .expect("ellipsis marks the cut");
+        assert!(shown.len() <= 4096);
+        assert!(attack.starts_with(shown));
         let worst = untrusted_data_block(&"`".repeat(256), &"`".repeat(50_000));
         assert!(worst.len() < 26 * 1024);
         assert_eq!(worst.matches("```").count(), 2);

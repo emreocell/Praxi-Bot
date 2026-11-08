@@ -419,7 +419,7 @@ async fn workflow_handover_continues_in_k4_with_the_partial_state() {
     let user = req
         .messages
         .iter()
-        .rfind(|m| m.role == MessageRole::User)
+        .find(|m| m.role == MessageRole::User)
         .unwrap()
         .content
         .as_str()
@@ -427,7 +427,7 @@ async fn workflow_handover_continues_in_k4_with_the_partial_state() {
         .to_owned();
     // SEC-10 keeps the user text as the original request. The trusted handover
     // instruction is a system message; the partial state is an untrusted
-    // assistant data block.
+    // user-role data block.
     assert_eq!(user, "/workflow needs_agent");
     let handover = req
         .messages
@@ -447,12 +447,17 @@ async fn workflow_handover_continues_in_k4_with_the_partial_state() {
             .contains("untrusted tool data"),
         "{handover:?}"
     );
-    let partial = req
-        .messages
-        .iter()
-        .rfind(|m| m.role == MessageRole::Assistant)
-        .unwrap_or_else(|| panic!("missing partial state: {req:?}"));
-    let partial_text = partial.content.as_str().unwrap();
+    // The partial state is a labelled User-role data block, not an Assistant
+    // turn, and it is the last message of the request (no prefill).
+    let last = req.messages.last().unwrap();
+    assert_eq!(last.role, MessageRole::User, "{req:?}");
+    assert!(
+        req.messages
+            .iter()
+            .all(|m| m.role != MessageRole::Assistant)
+    );
+    let partial_text = last.content.as_str().unwrap();
+    assert!(partial_text.starts_with("[router data: UNTRUSTED"));
     assert!(
         partial_text.contains("Pick the right folder"),
         "{partial_text}"
@@ -461,8 +466,8 @@ async fn workflow_handover_continues_in_k4_with_the_partial_state() {
         partial_text.contains("router.workflow_replay"),
         "{partial_text}"
     );
-    assert!(partial.tool_calls.is_empty());
-    assert!(partial.tool_call_id.is_none());
+    assert!(last.tool_calls.is_empty());
+    assert!(last.tool_call_id.is_none());
     // Steps: user (with the decision), the workflow attempt, the model call.
     let names: Vec<String> = env
         .storage
