@@ -2,11 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::future::Future;
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use futures::FutureExt;
@@ -17,6 +15,7 @@ use secret_store::{MemoryStore, Redactor, SecretRef, SecretStore};
 use serde_json::Value;
 use tokio::sync::{Mutex as AsyncMutex, Notify};
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::bot_api::{
@@ -27,10 +26,11 @@ use crate::channel_trait::{
     Channel, ChannelCaps, ChatRef, IncomingKind, IncomingMessage, InlineButton, OutgoingMessage,
 };
 use crate::daemon_client::{
-    ApprovalDecision, DaemonClient, DeliveryKind, SendOutcome, format_approval_callback,
+    ApprovalDecision, DaemonClient, DeliveryKind, format_approval_callback,
     format_question_callback, parse_approval_callback, parse_question_callback,
 };
 use crate::error::{Result, TelegramError};
+use crate::inbox::{DeliveryReceipt, Inbox, MAX_ATTEMPTS};
 use crate::pairing::{
     PairAttempt, PairingStore, TELEGRAM_BOT_TOKEN_SECRET, UNPAIRED_REFUSAL_TEXT, load_bot_token,
 };
@@ -69,6 +69,12 @@ const CONFLICT_BACKOFF: Duration = Duration::from_secs(15);
 
 /// Upper bound of the exponential error backoff.
 const MAX_ERROR_BACKOFF: Duration = Duration::from_secs(30);
+
+/// A continuously ready SSE stream must yield back to inbound polling.
+const MAX_DRAIN_EVENTS: usize = 32;
+const MAX_EVENTS_PER_RUN: usize = 8;
+const MAX_DRAIN_TIME: Duration = Duration::from_millis(25);
+const MAX_INBOX_PER_PASS: usize = 32;
 
 /// Delay before the next poll after `err` (the `failures`-th consecutive failure).
 pub(crate) fn poll_error_delay(err: &TelegramError, failures: u32, base: Duration) -> Duration {
@@ -235,6 +241,7 @@ struct ActiveRun {
     finished: bool,
     /// Subagent run: only approvals, questions and errors are surfaced for it.
     is_child: bool,
+    cancel: CancellationToken,
 }
 
 /// Result of [`TelegramChannel::attach_run`].
@@ -285,6 +292,7 @@ struct PendingQuestion {
 struct RuntimeState {
     next_offset: Option<i64>,
     active_runs: Vec<ActiveRun>,
+    run_controls: HashMap<RunId, (i64, CancellationToken)>,
     chat_active_run: HashMap<i64, RunId>,
     pending_questions: HashMap<ToolCallId, PendingQuestion>,
     chat_pending_question: HashMap<i64, ToolCallId>,
@@ -300,7 +308,17 @@ struct Inner {
     api_client: Arc<dyn DaemonClient>,
     pairing: PairingStore,
     redactor: Redactor,
-    runtime: AsyncMutex<RuntimeState>,
+    runtime: Mutex<RuntimeState>,
+    inbox: Inbox,
+    inbox_gate: AsyncMutex<()>,
+    priority_gate: AsyncMutex<()>,
+    drain_gate: AsyncMutex<()>,
+    inbox_wake: Notify,
+    priority_wake: Notify,
+    clock_epoch_ms: i64,
+    clock_started: Instant,
+    #[cfg(test)]
+    clock_offset_ms: std::sync::atomic::AtomicI64,
     /// Approval requests this bridge sent: `call_id` -> Telegram chat that received the buttons.
     /// A callback is only honoured for an entry issued to the pressing chat (anti-forgery).
     pending_approvals: Mutex<HashMap<ToolCallId, i64>>,
@@ -309,6 +327,41 @@ struct Inner {
     cancel: CancellationToken,
     /// Wakes the run loop when a run stream was added.
     wake: Notify,
+}
+
+/// Own streams outside the runtime lock. Dropping a cancelled drain restores all
+/// still-live streams; a concurrent Stop marks their tokens and they are discarded.
+struct ActiveRunsLease<'a> {
+    inner: &'a Inner,
+    runs: Vec<ActiveRun>,
+}
+
+impl Drop for ActiveRunsLease<'_> {
+    fn drop(&mut self) {
+        let mut rt = self.inner.runtime.lock();
+        for run in self.runs.drain(..) {
+            if run.finished || run.cancel.is_cancelled() {
+                rt.run_controls.remove(&run.run_id);
+                if rt.chat_active_run.get(&run.telegram_chat_id) == Some(&run.run_id) {
+                    rt.chat_active_run.remove(&run.telegram_chat_id);
+                }
+            } else {
+                rt.active_runs.push(run);
+            }
+        }
+    }
+}
+
+fn permanent_delivery_error(error: &TelegramError) -> bool {
+    match error {
+        TelegramError::DaemonHttp { status, .. } => (400..500).contains(status) && *status != 429,
+        TelegramError::TelegramApi {
+            error_code: Some(code),
+            ..
+        } => (400..500).contains(code) && *code != 429,
+        TelegramError::Config(_) | TelegramError::Malformed(_) => true,
+        _ => false,
+    }
 }
 
 /// Telegram channel bridge implementing [`Channel`] and driving the long-polling loop.
@@ -400,6 +453,12 @@ impl TelegramChannel {
             pairing.add_paired_user(uid)?;
         }
 
+        let inbox_path = config.state_path.as_ref().map(|path| {
+            path.parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .join("telegram-inbox.jsonl")
+        });
+        let inbox = Inbox::open(inbox_path, &offset_key)?;
         let bot_api = BotApiClient::with_base_url(token, &config.api_base_url);
         let runtime = RuntimeState {
             next_offset: pairing.saved_offset(&offset_key),
@@ -411,7 +470,17 @@ impl TelegramChannel {
             api_client,
             pairing,
             redactor,
-            runtime: AsyncMutex::new(runtime),
+            runtime: Mutex::new(runtime),
+            inbox,
+            inbox_gate: AsyncMutex::new(()),
+            priority_gate: AsyncMutex::new(()),
+            drain_gate: AsyncMutex::new(()),
+            inbox_wake: Notify::new(),
+            priority_wake: Notify::new(),
+            clock_epoch_ms: now_ms(),
+            clock_started: Instant::now(),
+            #[cfg(test)]
+            clock_offset_ms: std::sync::atomic::AtomicI64::new(0),
             pending_approvals: Mutex::new(HashMap::new()),
             offset_key,
             cancel: CancellationToken::new(),
@@ -501,173 +570,297 @@ impl TelegramChannel {
         }
     }
 
-    /// Handle a batch of updates returned by `getUpdates` (never touches run streams).
-    async fn handle_updates(&self, updates: Vec<Update>) -> Result<usize> {
-        let count = updates.len();
-        let mut first_err: Option<TelegramError> = None;
-        for update in updates {
-            self.advance_offset(update.update_id).await;
-            if let Some(incoming) = update.into_incoming()
-                && let Err(e) = self.handle_incoming(incoming).await
-            {
-                first_err.get_or_insert(e);
+    fn inbox_now_ms(&self) -> i64 {
+        let now = self.inner.clock_epoch_ms.saturating_add(
+            i64::try_from(self.inner.clock_started.elapsed().as_millis()).unwrap_or(i64::MAX),
+        );
+        #[cfg(test)]
+        let now = now.saturating_add(
+            self.inner
+                .clock_offset_ms
+                .load(std::sync::atomic::Ordering::Relaxed),
+        );
+        now
+    }
+
+    #[cfg(test)]
+    pub(crate) fn advance_retry_clock(&self, duration: Duration) {
+        self.inner.clock_offset_ms.fetch_add(
+            i64::try_from(duration.as_millis()).unwrap_or(i64::MAX),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        self.inner.inbox_wake.notify_one();
+        self.inner.priority_wake.notify_one();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_inbox_writes(&self, enabled: bool) {
+        self.inner.inbox.fail_writes(enabled);
+    }
+
+    fn report_error(&self, error: &TelegramError) {
+        eprintln!("telegram: {}", self.redact(&error.to_string()));
+    }
+
+    /// Take durable ownership of the entire batch before acknowledging any update.
+    fn handle_updates(&self, updates: &[Update]) -> Result<usize> {
+        self.inner.inbox.enqueue(updates, self.inbox_now_ms())?;
+        let saved = if let Some(id) = updates.iter().map(|u| u.update_id).max() {
+            self.advance_offset(id)
+        } else {
+            Ok(())
+        };
+        // Offset persistence can fail after a successful inbox fsync. Delivery still
+        // proceeds from the inbox, and a restart safely deduplicates Telegram replays.
+        self.inner.inbox_wake.notify_one();
+        self.inner.priority_wake.notify_one();
+        saved.map(|()| updates.len())
+    }
+
+    /// Polling, ordered delivery, priority Stop, and outbound streaming have separate
+    /// futures. A slow Telegram send or inline 429 retry cannot suspend `getUpdates`
+    /// or cancellation. All four futures terminate with the channel's token.
+    async fn run_loop(&self) {
+        tokio::join!(
+            biased;
+            self.poll_loop(),
+            self.inbox_loop(true),
+            self.inbox_loop(false),
+            self.drain_loop(),
+        );
+    }
+
+    async fn poll_loop(&self) {
+        let base = self.inner.config.poll_backoff;
+        let mut failures = 0u32;
+        let mut delay = Duration::ZERO;
+        loop {
+            tokio::select! {
+                biased;
+                () = self.inner.cancel.cancelled() => return,
+                () = tokio::time::sleep(delay) => {}
             }
-        }
-        match first_err {
-            Some(e) => Err(e),
-            None => Ok(count),
+            let offset = self.inner.runtime.lock().next_offset;
+            let polled = tokio::select! {
+                biased;
+                () = self.inner.cancel.cancelled() => return,
+                result = self.inner.bot_api.get_updates(offset, self.inner.config.poll_timeout_secs) => result,
+            };
+            let result = match polled {
+                Ok(updates) => self.handle_updates(&updates),
+                Err(error) => Err(error),
+            };
+            match result {
+                Ok(count) => {
+                    failures = 0;
+                    delay = if count == 0 { base } else { Duration::ZERO };
+                }
+                Err(error) => {
+                    self.report_error(&error);
+                    failures = failures.saturating_add(1);
+                    delay = poll_error_delay(&error, failures, base);
+                }
+            }
         }
     }
 
-    /// The persistent long-poll future: only the `getUpdates` HTTP call (after an optional
-    /// delay). It must never take the runtime mutex: it stays suspended while the loop drains
-    /// run streams (which lock it), and a suspended-but-unpolled waiter on that fair mutex
-    /// would deadlock the drain. The offset is therefore read by the caller.
-    fn new_poll(
-        &self,
-        offset: Option<i64>,
-        delay: Duration,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<Update>>> + Send + '_>> {
-        Box::pin(async move {
-            if !delay.is_zero() {
-                tokio::time::sleep(delay).await;
+    async fn inbox_loop(&self, priority: bool) {
+        let wake = if priority {
+            &self.inner.priority_wake
+        } else {
+            &self.inner.inbox_wake
+        };
+        loop {
+            let result = tokio::select! {
+                biased;
+                () = self.inner.cancel.cancelled() => return,
+                result = self.process_pending(priority) => result,
+            };
+            if let Err(error) = result {
+                self.report_error(&error);
+            }
+            let delay = self
+                .inner
+                .inbox
+                .retry_delay(priority, self.inbox_now_ms())
+                .unwrap_or(Duration::from_secs(3600))
+                .max(self.inner.config.poll_backoff);
+            tokio::select! {
+                biased;
+                () = self.inner.cancel.cancelled() => return,
+                () = wake.notified() => {},
+                () = tokio::time::sleep(delay) => {},
+            }
+        }
+    }
+
+    async fn process_pending(&self, priority: bool) -> Result<usize> {
+        let gate = if priority {
+            &self.inner.priority_gate
+        } else {
+            &self.inner.inbox_gate
+        };
+        let _guard = gate.lock().await;
+        let mut processed = 0;
+        let mut first_error = None;
+        while processed < MAX_INBOX_PER_PASS {
+            let Some(entry) = self.inner.inbox.next(priority, self.inbox_now_ms()) else {
+                break;
+            };
+            if entry.attempts >= MAX_ATTEMPTS && !entry.delivered {
+                self.dead_letter(entry.update_id).await?;
+                processed += 1;
+                continue;
             }
             self.inner
-                .bot_api
-                .get_updates(offset, self.inner.config.poll_timeout_secs)
-                .await
-        })
-    }
-
-    /// The `getUpdates` long poll lives in one persistent future so it keeps its full
-    /// timeout, while active runs are drained on their own backed-off schedule. (It used to
-    /// call `getUpdates` with `timeout=0` every 100 ms for as long as a run was open, e.g.
-    /// while waiting hours for an approval.) Updates are handled in the loop body, outside
-    /// the persistent future.
-    async fn run_loop(&self) {
-        let base = self.inner.config.poll_backoff;
-        let mut failures: u32 = 0;
-        let mut drain_interval = base;
-        let mut drain_paused_until: Option<Instant> = None;
-        let offset = self.inner.runtime.lock().await.next_offset;
-        let mut poll = self.new_poll(offset, Duration::ZERO);
-        while !self.inner.cancel.is_cancelled() {
-            // Queued messages also need draining: their run is attached by the drain pass,
-            // and it may not exist yet when the previous run finishes.
-            let needs_drain = {
-                let rt = self.inner.runtime.lock().await;
-                !rt.active_runs.is_empty() || !rt.queued.is_empty()
+                .inbox
+                .begin_attempt(entry.update_id, self.inbox_now_ms())?;
+            let delivery = async {
+                if entry.delivered && entry.delivery.is_none() {
+                    return Ok(());
+                }
+                match entry.payload.into_incoming() {
+                    Some(incoming) => self.handle_incoming(incoming).await,
+                    None => Ok(()),
+                }
             };
-            let wait = if needs_drain {
-                let paused = drain_paused_until.map_or(Duration::ZERO, |t| {
-                    t.saturating_duration_since(Instant::now())
-                });
-                drain_interval.max(paused)
-            } else {
-                drain_interval = base;
-                Duration::from_secs(3600)
+            let result = tokio::select! {
+                biased;
+                () = self.inner.cancel.cancelled() => return Ok(processed),
+                result = delivery => result,
             };
-            tokio::select! {
-                () = self.inner.cancel.cancelled() => break,
-                res = &mut poll => {
-                    let handled = match res {
-                        Ok(updates) => self.handle_updates(updates).await.map(|_| ()),
-                        Err(e) => Err(e),
-                    };
-                    let delay = if let Err(e) = handled {
-                        failures = failures.saturating_add(1);
-                        poll_error_delay(&e, failures, base)
+            processed += 1;
+            match result {
+                Ok(()) => self.inner.inbox.done(entry.update_id)?,
+                Err(error) => {
+                    let terminal = permanent_delivery_error(&error)
+                        || entry.attempts.saturating_add(1) >= MAX_ATTEMPTS;
+                    first_error.get_or_insert(error);
+                    if terminal {
+                        self.dead_letter(entry.update_id).await?;
                     } else {
-                        failures = 0;
-                        Duration::ZERO
-                    };
-                    let offset = self.inner.runtime.lock().await.next_offset;
-                    poll = self.new_poll(offset, delay);
-                    // A handled update may have started a run.
-                    drain_interval = base;
-                    let _ = self.drain_active_runs().await;
-                }
-                () = self.inner.wake.notified() => {
-                    drain_interval = base;
-                }
-                () = tokio::time::sleep(wait) => {
-                    match self.drain_active_runs().await {
-                        Ok(0) => drain_interval = (drain_interval * 2).min(MAX_IDLE_DRAIN_INTERVAL),
-                        Ok(_) => drain_interval = base,
-                        Err(e) => {
-                            drain_interval = base;
-                            drain_paused_until =
-                                Some(Instant::now() + poll_error_delay(&e, 1, base));
-                        }
+                        // Preserve delivery order: later normal messages wait behind a
+                        // transient failure. The independent /stop worker is never blocked.
+                        break;
                     }
                 }
             }
         }
+        first_error.map_or(Ok(processed), Err)
     }
 
-    /// Remember the next offset (in memory and on disk) so confirmed updates never replay.
-    async fn advance_offset(&self, update_id: i64) {
-        let next = update_id.saturating_add(1);
-        let to_save = {
-            let mut rt = self.inner.runtime.lock().await;
-            let merged = rt.next_offset.map_or(next, |cur| cur.max(next));
-            rt.next_offset = Some(merged);
-            merged
-        };
-        let _ = self
-            .inner
-            .pairing
-            .save_offset(&self.inner.offset_key, to_save);
-    }
-
-    /// Execute a single `getUpdates` poll pass, process all returned updates,
-    /// and advance any active run event streams.
-    ///
-    /// # Errors
-    /// Returns [`TelegramError`] on Telegram or daemon API failures.
-    pub async fn poll_once(&self) -> Result<usize> {
-        let (offset, timeout) = {
-            let rt = self.inner.runtime.lock().await;
-            let timeout = if rt.active_runs.is_empty() {
-                self.inner.config.poll_timeout_secs
-            } else {
-                0
-            };
-            (rt.next_offset, timeout)
-        };
-
-        let updates = self.inner.bot_api.get_updates(offset, timeout).await?;
-        let count = updates.len();
-
-        // One failing update (e.g. a user who blocked the bot) must not starve the rest of
-        // the batch; the offset is advanced first so a poison update is never replayed.
-        let mut first_err: Option<TelegramError> = None;
-        for update in updates {
-            self.advance_offset(update.update_id).await;
-            if let Err(e) = self.handle_update(update).await {
-                first_err.get_or_insert(e);
+    async fn dead_letter(&self, id: i64) -> Result<()> {
+        if let Some(chat_id) = self.inner.inbox.dead(id)? {
+            let notice = format!("Could not process message {id}.");
+            tokio::select! {
+                biased;
+                () = self.inner.cancel.cancelled() => {},
+                result = self.send_redacted(chat_id, &notice, None) => {
+                    if let Err(error) = result { self.report_error(&error); }
+                }
             }
         }
+        Ok(())
+    }
 
-        if let Err(e) = self.drain_active_runs().await {
-            first_err.get_or_insert(e);
-        }
-        match first_err {
-            Some(e) => Err(e),
-            None => Ok(count),
+    async fn drain_loop(&self) {
+        let base = self.inner.config.poll_backoff;
+        let mut interval = base;
+        loop {
+            let needs_drain = {
+                let rt = self.inner.runtime.lock();
+                !rt.active_runs.is_empty() || !rt.queued.is_empty()
+            };
+            let wait = if needs_drain {
+                interval
+            } else {
+                Duration::from_secs(3600)
+            };
+            tokio::select! {
+                biased;
+                () = self.inner.cancel.cancelled() => return,
+                () = self.inner.wake.notified() => {},
+                () = tokio::time::sleep(wait) => {},
+            }
+            let result = tokio::select! {
+                biased;
+                () = self.inner.cancel.cancelled() => return,
+                result = self.drain_active_runs() => result,
+            };
+            interval = match result {
+                Ok(0) => (interval * 2).min(MAX_IDLE_DRAIN_INTERVAL),
+                Ok(_) => base,
+                Err(error) => {
+                    self.report_error(&error);
+                    poll_error_delay(&error, 1, base)
+                }
+            };
         }
     }
 
-    /// Process a single Telegram [`Update`] and advance active run streams.
+    /// Only called after the corresponding batch has been fsynced to the inbox.
+    fn advance_offset(&self, update_id: i64) -> Result<()> {
+        let next = update_id.saturating_add(1);
+        let mut rt = self.inner.runtime.lock();
+        let merged = rt.next_offset.map_or(next, |current| current.max(next));
+        let result = self
+            .inner
+            .pairing
+            .save_offset(&self.inner.offset_key, merged);
+        // Even if the pairing file cannot be saved, the inbox already owns delivery.
+        // On restart an older offset causes harmless deduplicated replays.
+        rt.next_offset = Some(merged);
+        result
+    }
+
+    /// Poll once, durably record updates, process ready inbox items, then drain a
+    /// bounded number of events. Retry delays are honoured across calls and restarts.
     ///
     /// # Errors
-    /// Returns [`TelegramError`] on Telegram or daemon API failures.
-    pub async fn handle_update(&self, update: Update) -> Result<()> {
-        let Some(incoming) = update.into_incoming() else {
-            return Ok(());
+    /// Returns an error for an inbox/offset write or Telegram/daemon API failure.
+    pub async fn poll_once(&self) -> Result<usize> {
+        let (offset, timeout) = {
+            let rt = self.inner.runtime.lock();
+            (
+                rt.next_offset,
+                if rt.run_controls.is_empty() {
+                    self.inner.config.poll_timeout_secs
+                } else {
+                    0
+                },
+            )
         };
-        self.handle_incoming(incoming).await?;
-        self.drain_active_runs().await.map(|_| ())
+        let updates = self.inner.bot_api.get_updates(offset, timeout).await?;
+        let count = updates.len();
+        let mut first_error = self.handle_updates(&updates).err();
+        for priority in [true, false] {
+            if let Err(error) = self.process_pending(priority).await {
+                first_error.get_or_insert(error);
+            }
+        }
+        if let Err(error) = self.drain_active_runs().await {
+            first_error.get_or_insert(error);
+        }
+        first_error.map_or(Ok(count), Err)
+    }
+
+    /// Durably process one update and drain a bounded number of run events.
+    /// Duplicate update IDs do not repeat a daemon side effect.
+    ///
+    /// # Errors
+    /// Returns an error for an inbox/offset write or Telegram/daemon API failure.
+    pub async fn handle_update(&self, update: Update) -> Result<()> {
+        self.handle_updates(&[update])?;
+        let mut first_error = None;
+        for priority in [true, false] {
+            if let Err(error) = self.process_pending(priority).await {
+                first_error.get_or_insert(error);
+            }
+        }
+        if let Err(error) = self.drain_active_runs().await {
+            first_error.get_or_insert(error);
+        }
+        first_error.map_or(Ok(()), Err)
     }
 
     async fn send_redacted(
@@ -720,9 +913,12 @@ impl TelegramChannel {
         }
 
         match msg.kind {
-            IncomingKind::Text(text) => self.handle_paired_text(chat_id, &text).await,
+            IncomingKind::Text(text) => {
+                self.handle_paired_text(chat_id, &text, msg.update_id).await
+            }
             IncomingKind::Callback { query_id, data, .. } => {
-                self.handle_callback(chat_id, &query_id, &data).await
+                self.handle_callback(chat_id, &query_id, &data, msg.update_id)
+                    .await
             }
         }
     }
@@ -768,7 +964,7 @@ impl TelegramChannel {
         Ok(())
     }
 
-    async fn handle_paired_text(&self, chat_id: i64, text: &str) -> Result<()> {
+    async fn handle_paired_text(&self, chat_id: i64, text: &str, update_id: i64) -> Result<()> {
         let trimmed = text.trim();
         if trimmed.is_empty() {
             return Ok(());
@@ -789,31 +985,44 @@ impl TelegramChannel {
             return self.handle_use_command(chat_id, arg).await;
         }
         if trimmed == "/stop" || trimmed.starts_with("/stop@") {
-            return self.handle_stop_command(chat_id).await;
+            return self.handle_stop_command(chat_id, update_id).await;
         }
         if trimmed == "/status" || trimmed.starts_with("/status@") {
             return self.handle_status_command(chat_id).await;
         }
 
+        // A retry after daemon acknowledgement resumes the original delivery. A
+        // question arriving in the meantime must not reinterpret the accepted text.
+        if self
+            .inner
+            .inbox
+            .get(update_id)
+            .is_some_and(|entry| entry.delivery.is_some())
+        {
+            return self.forward_user_message(chat_id, trimmed, update_id).await;
+        }
+
         // If the chat has a pending `ask_user` question, free text answers it.
-        let pending_q = {
-            let mut rt = self.inner.runtime.lock().await;
-            if let Some(call_id) = rt.chat_pending_question.remove(&chat_id) {
-                rt.pending_questions.remove(&call_id);
-                Some(call_id)
-            } else {
-                None
-            }
-        };
+        let pending_q = self
+            .inner
+            .runtime
+            .lock()
+            .chat_pending_question
+            .get(&chat_id)
+            .copied();
         if let Some(call_id) = pending_q {
             self.inner
                 .api_client
                 .answer_question(call_id, trimmed)
                 .await?;
+            self.inner.inbox.delivered(update_id, None)?;
+            let mut rt = self.inner.runtime.lock();
+            rt.chat_pending_question.remove(&chat_id);
+            rt.pending_questions.remove(&call_id);
             return Ok(());
         }
 
-        self.forward_user_message(chat_id, trimmed).await
+        self.forward_user_message(chat_id, trimmed, update_id).await
     }
 
     async fn handle_bots_command(&self, chat_id: i64) -> Result<()> {
@@ -877,24 +1086,46 @@ impl TelegramChannel {
         Ok(())
     }
 
-    async fn handle_stop_command(&self, chat_id: i64) -> Result<()> {
-        let active_run = {
-            let mut rt = self.inner.runtime.lock().await;
-            let run_id = rt.chat_active_run.remove(&chat_id);
-            if let Some(rid) = run_id {
-                // Subagent children of the stopped chat go with it.
-                rt.active_runs
-                    .retain(|r| r.run_id != rid && !(r.is_child && r.telegram_chat_id == chat_id));
-            }
+    async fn handle_stop_command(&self, chat_id: i64, update_id: i64) -> Result<()> {
+        let saved_target = self
+            .inner
+            .inbox
+            .get(update_id)
+            .filter(|entry| entry.stop_chat_id.is_some())
+            .map(|entry| entry.cancel_run);
+        let active_run = saved_target.unwrap_or_else(|| {
+            self.inner
+                .runtime
+                .lock()
+                .chat_active_run
+                .get(&chat_id)
+                .copied()
+        });
+        // Persist the cancellation target before removing it from live state. A failed
+        // daemon cancellation can then retry the same run, including after a restart.
+        self.inner.inbox.stop(update_id, chat_id, active_run)?;
+        {
+            let mut rt = self.inner.runtime.lock();
+            rt.chat_active_run.remove(&chat_id);
+            rt.run_controls.retain(|_, (chat, cancel)| {
+                if *chat == chat_id {
+                    cancel.cancel();
+                    false
+                } else {
+                    true
+                }
+            });
+            rt.active_runs.retain(|r| r.telegram_chat_id != chat_id);
             rt.queued.remove(&chat_id);
-            run_id
-        };
+        }
 
         if let Some(run_id) = active_run {
             self.inner.api_client.cancel_run(run_id).await?;
+            self.inner.inbox.delivered(update_id, None)?;
             self.send_redacted(chat_id, &format!("🛑 Stopped run {run_id}."), None)
                 .await?;
         } else {
+            self.inner.inbox.delivered(update_id, None)?;
             self.send_redacted(chat_id, "No active run to stop.", None)
                 .await?;
         }
@@ -909,7 +1140,7 @@ impl TelegramChannel {
             .bot_for_chat(chat_id)
             .or(self.inner.config.default_bot_id);
         let active_run = {
-            let rt = self.inner.runtime.lock().await;
+            let rt = self.inner.runtime.lock();
             rt.chat_active_run.get(&chat_id).copied()
         };
 
@@ -955,40 +1186,108 @@ impl TelegramChannel {
         Ok(created.id)
     }
 
-    async fn forward_user_message(&self, telegram_chat_id: i64, text: &str) -> Result<()> {
-        let bot_id = match self.resolve_bot_for_chat(telegram_chat_id).await {
-            Ok(id) => id,
-            Err(TelegramError::Daemon(msg)) if msg.contains("no bots configured") => {
-                self.send_redacted(
-                    telegram_chat_id,
-                    "No bots configured on the daemon. Add a bot first.",
-                    None,
-                )
-                .await?;
-                return Ok(());
-            }
-            Err(e) => return Err(e),
-        };
-        let daemon_chat_id = self.resolve_daemon_chat(telegram_chat_id, bot_id).await?;
-        let sent_at_ms = now_ms();
-        let outcome: SendOutcome = self
+    async fn deliver_user_message(
+        &self,
+        telegram_chat_id: i64,
+        text: &str,
+        update_id: i64,
+    ) -> Result<Option<DeliveryReceipt>> {
+        if self.inner.inbox.cancelled(update_id, telegram_chat_id)
+            && self
+                .inner
+                .inbox
+                .get(update_id)
+                .is_none_or(|entry| !entry.delivered)
+        {
+            // A priority Stop may arrive in the same poll batch as a not-yet-started
+            // message. Honour that cancellation instead of starting it afterwards.
+            return Ok(None);
+        }
+        let receipt = if let Some(receipt) = self
             .inner
-            .api_client
-            .send_message(daemon_chat_id, text)
-            .await?;
+            .inbox
+            .get(update_id)
+            .and_then(|entry| entry.delivery)
+        {
+            receipt
+        } else {
+            let bot_id = match self.resolve_bot_for_chat(telegram_chat_id).await {
+                Ok(id) => id,
+                Err(TelegramError::Daemon(message)) if message.contains("no bots configured") => {
+                    self.send_redacted(
+                        telegram_chat_id,
+                        "No bots configured on the daemon. Add a bot first.",
+                        None,
+                    )
+                    .await?;
+                    return Ok(None);
+                }
+                Err(error) => return Err(error),
+            };
+            let daemon_chat = self.resolve_daemon_chat(telegram_chat_id, bot_id).await?;
+            let sent_at_ms = now_ms();
+            let outcome = self
+                .inner
+                .api_client
+                .send_message_idempotent(daemon_chat, text, &format!("tg:{update_id}"))
+                .await?;
+            let receipt = DeliveryReceipt {
+                daemon_chat,
+                outcome,
+                sent_at_ms,
+            };
+            // Commit the daemon acknowledgement BEFORE subscription or Telegram output.
+            // The daemon must honour the key to cover a crash before this local fsync.
+            self.inner
+                .inbox
+                .delivered(update_id, Some(receipt.clone()))?;
+            receipt
+        };
+        Ok(Some(receipt))
+    }
+
+    async fn forward_user_message(
+        &self,
+        telegram_chat_id: i64,
+        text: &str,
+        update_id: i64,
+    ) -> Result<()> {
+        let Some(receipt) = self
+            .deliver_user_message(telegram_chat_id, text, update_id)
+            .await?
+        else {
+            return Ok(());
+        };
+        let DeliveryReceipt {
+            daemon_chat: daemon_chat_id,
+            outcome,
+            sent_at_ms,
+        } = receipt;
+
+        if self.inner.inbox.cancelled(update_id, telegram_chat_id) {
+            if let Some(run_id) = outcome.run_id {
+                self.inner.api_client.cancel_run(run_id).await?;
+            }
+            self.inner.inbox.delivered(update_id, None)?;
+            return Ok(());
+        }
 
         match outcome.delivery {
             DeliveryKind::Stopped => {
-                let mut rt = self.inner.runtime.lock().await;
-                if let Some(rid) = outcome
-                    .run_id
-                    .or_else(|| rt.chat_active_run.remove(&telegram_chat_id))
                 {
-                    rt.chat_active_run.remove(&telegram_chat_id);
-                    rt.active_runs.retain(|r| r.run_id != rid);
+                    let mut rt = self.inner.runtime.lock();
+                    if let Some(rid) = outcome
+                        .run_id
+                        .or_else(|| rt.chat_active_run.remove(&telegram_chat_id))
+                    {
+                        rt.chat_active_run.remove(&telegram_chat_id);
+                        if let Some((_, cancel)) = rt.run_controls.remove(&rid) {
+                            cancel.cancel();
+                        }
+                        rt.active_runs.retain(|r| r.run_id != rid);
+                    }
+                    rt.queued.remove(&telegram_chat_id);
                 }
-                rt.queued.remove(&telegram_chat_id);
-                drop(rt);
                 self.send_redacted(telegram_chat_id, "🛑 Run stopped.", None)
                     .await?;
             }
@@ -996,7 +1295,7 @@ impl TelegramChannel {
                 // The daemon starts this turn later as a brand-new run nobody subscribed to;
                 // remember it so `attach_queued_runs` can find and follow that run.
                 {
-                    let mut rt = self.inner.runtime.lock().await;
+                    let mut rt = self.inner.runtime.lock();
                     let entry = rt
                         .queued
                         .entry(telegram_chat_id)
@@ -1010,6 +1309,8 @@ impl TelegramChannel {
                     entry.daemon_chat = daemon_chat_id;
                     entry.count += 1;
                 }
+                self.inner.inbox.delivered(update_id, None)?;
+                self.inner.wake.notify_one();
                 self.send_redacted(
                     telegram_chat_id,
                     "⏳ Message queued behind the active run.",
@@ -1019,7 +1320,9 @@ impl TelegramChannel {
             }
             _ => {
                 if let Some(run_id) = outcome.run_id
-                    && self.attach_run(telegram_chat_id, run_id, false).await?
+                    && self
+                        .attach_run(telegram_chat_id, run_id, false, None)
+                        .await?
                         == AttachOutcome::Full
                 {
                     self.send_redacted(
@@ -1043,47 +1346,64 @@ impl TelegramChannel {
         telegram_chat_id: i64,
         run_id: RunId,
         is_child: bool,
+        parent_cancel: Option<CancellationToken>,
     ) -> Result<AttachOutcome> {
+        let cancel =
+            parent_cancel.map_or_else(CancellationToken::new, |parent| parent.child_token());
         {
-            let mut rt = self.inner.runtime.lock().await;
+            let mut rt = self.inner.runtime.lock();
             if rt.attached_runs.contains(&run_id) {
                 return Ok(AttachOutcome::AlreadyFollowed);
             }
-            if rt.active_runs.len() >= MAX_ACTIVE_RUNS {
+            if rt.run_controls.len() >= MAX_ACTIVE_RUNS {
                 return Ok(AttachOutcome::Full);
             }
             if rt.attached_runs.len() >= MAX_ATTACHED_RUNS {
                 rt.attached_runs.clear();
             }
             rt.attached_runs.insert(run_id);
+            rt.run_controls
+                .insert(run_id, (telegram_chat_id, cancel.clone()));
+            if !is_child {
+                rt.chat_active_run.insert(telegram_chat_id, run_id);
+            }
         }
-        let stream = match self.inner.api_client.subscribe_run(run_id).await {
-            Ok(s) => s,
-            Err(e) => {
-                self.inner
-                    .runtime
-                    .lock()
-                    .await
-                    .attached_runs
-                    .remove(&run_id);
-                return Err(e);
+        let subscribed = tokio::select! {
+            biased;
+            () = self.inner.cancel.cancelled() => None,
+            () = cancel.cancelled() => None,
+            result = self.inner.api_client.subscribe_run(run_id) => Some(result),
+        };
+        let stream = match subscribed {
+            Some(Ok(stream)) if !cancel.is_cancelled() => stream,
+            result => {
+                let mut rt = self.inner.runtime.lock();
+                rt.attached_runs.remove(&run_id);
+                rt.run_controls.remove(&run_id);
+                if rt.chat_active_run.get(&telegram_chat_id) == Some(&run_id) {
+                    rt.chat_active_run.remove(&telegram_chat_id);
+                }
+                return match result {
+                    Some(Err(error)) => Err(error),
+                    _ => Ok(AttachOutcome::AlreadyFollowed),
+                };
             }
         };
         {
-            let mut rt = self.inner.runtime.lock().await;
-            if !is_child {
-                rt.chat_active_run.insert(telegram_chat_id, run_id);
+            let mut rt = self.inner.runtime.lock();
+            if cancel.is_cancelled() {
+                return Ok(AttachOutcome::AlreadyFollowed);
             }
             rt.active_runs.push(ActiveRun {
                 telegram_chat_id,
                 run_id,
-                // A finished stream must never be polled again (unfold panics).
                 stream: stream.fuse().boxed(),
                 editor: ThrottledEditor::new(telegram_chat_id, self.inner.config.edit_interval),
                 answer_buf: String::new(),
                 tool_names: HashMap::new(),
                 finished: false,
                 is_child,
+                cancel,
             });
         }
         self.inner.wake.notify_one();
@@ -1093,14 +1413,9 @@ impl TelegramChannel {
     /// Follow runs the daemon started for messages that were queued behind another run.
     async fn attach_queued_runs(&self) -> Result<()> {
         let candidates: Vec<(i64, ChatId, i64, Vec<RunId>)> = {
-            let mut rt = self.inner.runtime.lock().await;
+            let mut rt = self.inner.runtime.lock();
             rt.queued.retain(|_, q| q.queued_at.elapsed() < QUEUED_TTL);
-            let busy: HashSet<i64> = rt
-                .active_runs
-                .iter()
-                .filter(|r| !r.is_child)
-                .map(|r| r.telegram_chat_id)
-                .collect();
+            let busy: HashSet<i64> = rt.chat_active_run.keys().copied().collect();
             let exclude: Vec<RunId> = rt.attached_runs.iter().copied().collect();
             let now = Instant::now();
             rt.queued
@@ -1131,11 +1446,21 @@ impl TelegramChannel {
                 }
             };
             let Some(run_id) = found else { continue };
-            match self.attach_run(tg_chat, run_id, false).await {
+            if !self
+                .inner
+                .runtime
+                .lock()
+                .queued
+                .get(&tg_chat)
+                .is_some_and(|q| q.daemon_chat == daemon_chat && q.queued_at_ms == since_ms)
+            {
+                continue;
+            }
+            match self.attach_run(tg_chat, run_id, false, None).await {
                 // Run table full: keep the entry and retry on the next pass.
                 Ok(AttachOutcome::Full) => {}
                 Ok(_) => {
-                    let mut rt = self.inner.runtime.lock().await;
+                    let mut rt = self.inner.runtime.lock();
                     if let Some(q) = rt.queued.get_mut(&tg_chat) {
                         q.count = q.count.saturating_sub(1);
                         q.queued_at_ms = now_ms();
@@ -1152,18 +1477,16 @@ impl TelegramChannel {
         first_err.map_or(Ok(()), Err)
     }
 
-    async fn handle_callback(&self, chat_id: i64, query_id: &str, data: &str) -> Result<()> {
+    async fn handle_callback(
+        &self,
+        chat_id: i64,
+        query_id: &str,
+        data: &str,
+        update_id: i64,
+    ) -> Result<()> {
         if let Some((call_id, decision, scope)) = parse_approval_callback(data) {
             // Only approvals this bridge issued to *this* chat may be decided from it.
-            let allowed = {
-                let mut pending = self.inner.pending_approvals.lock();
-                if pending.get(&call_id) == Some(&chat_id) {
-                    pending.remove(&call_id);
-                    true
-                } else {
-                    false
-                }
-            };
+            let allowed = { self.inner.pending_approvals.lock().get(&call_id) == Some(&chat_id) };
             if !allowed {
                 self.inner
                     .bot_api
@@ -1181,6 +1504,8 @@ impl TelegramChannel {
                 self.inner.pending_approvals.lock().insert(call_id, chat_id);
                 return Err(e);
             }
+            self.inner.inbox.delivered(update_id, None)?;
+            self.inner.pending_approvals.lock().remove(&call_id);
             let ack = match decision {
                 ApprovalDecision::Approve => "Approved",
                 ApprovalDecision::Deny => "Denied",
@@ -1194,10 +1519,10 @@ impl TelegramChannel {
 
         if let Some((call_id, payload)) = parse_question_callback(data) {
             let answer = {
-                let mut rt = self.inner.runtime.lock().await;
+                let rt = self.inner.runtime.lock();
                 // Only questions this bridge asked in *this* chat can be answered from it,
                 // and only with one of the offered options.
-                let valid = rt.pending_questions.get(&call_id).and_then(|pq| {
+                rt.pending_questions.get(&call_id).and_then(|pq| {
                     (pq.telegram_chat_id == chat_id)
                         .then(|| {
                             payload
@@ -1207,14 +1532,7 @@ impl TelegramChannel {
                         })
                         .flatten()
                         .cloned()
-                });
-                if valid.is_some() {
-                    rt.pending_questions.remove(&call_id);
-                    if rt.chat_pending_question.get(&chat_id) == Some(&call_id) {
-                        rt.chat_pending_question.remove(&chat_id);
-                    }
-                }
-                valid
+                })
             };
             let Some(answer) = answer else {
                 self.inner
@@ -1227,6 +1545,14 @@ impl TelegramChannel {
                 .api_client
                 .answer_question(call_id, &answer)
                 .await?;
+            self.inner.inbox.delivered(update_id, None)?;
+            {
+                let mut rt = self.inner.runtime.lock();
+                rt.pending_questions.remove(&call_id);
+                if rt.chat_pending_question.get(&chat_id) == Some(&call_id) {
+                    rt.chat_pending_question.remove(&chat_id);
+                }
+            }
             self.inner
                 .bot_api
                 .answer_callback_query(query_id, Some("Answered"))
@@ -1241,98 +1567,87 @@ impl TelegramChannel {
         Ok(())
     }
 
-    /// Advance every active run stream. Returns the number of events processed.
-    ///
-    /// One run's Telegram failure (403/429) never aborts the pass: errors are collected per
-    /// run, finished runs are always cleaned up, pending questions are always registered,
-    /// and a finished stream is never polled again.
+    /// Drain a bounded pass. No runtime lock is held while awaiting a stream,
+    /// Telegram HTTP, retries, final-edit throttles, or daemon subscriptions.
     async fn drain_active_runs(&self) -> Result<usize> {
-        let mut first_err: Option<TelegramError> = None;
-        let mut events = 0usize;
-        let mut spawned: Vec<(i64, RunId)> = Vec::new();
-        {
-            let mut rt = self.inner.runtime.lock().await;
-            let mut pending_questions_to_insert: Vec<(ToolCallId, PendingQuestion)> = Vec::new();
-            let mut finished_chats: Vec<(i64, RunId)> = Vec::new();
-
-            for run in &mut rt.active_runs {
-                if !run.finished
-                    && let Err(e) = self
-                        .drain_one_run(
-                            run,
-                            &mut pending_questions_to_insert,
-                            &mut spawned,
-                            &mut events,
-                        )
-                        .await
-                {
-                    first_err.get_or_insert(e);
-                }
-                if run.finished {
-                    finished_chats.push((run.telegram_chat_id, run.run_id));
-                }
+        let _guard = self.inner.drain_gate.lock().await;
+        let runs = std::mem::take(&mut self.inner.runtime.lock().active_runs);
+        let mut lease = ActiveRunsLease {
+            inner: &self.inner,
+            runs,
+        };
+        let mut first_error = None;
+        let mut events = 0;
+        let mut spawned = Vec::new();
+        let deadline = Instant::now() + MAX_DRAIN_TIME;
+        let mut visited = 0;
+        for run in &mut lease.runs {
+            if events >= MAX_DRAIN_EVENTS || Instant::now() >= deadline {
+                break;
             }
-
-            for (call_id, pq) in pending_questions_to_insert {
-                rt.chat_pending_question
-                    .insert(pq.telegram_chat_id, call_id);
-                rt.pending_questions.insert(call_id, pq);
+            visited += 1;
+            if run.finished || run.cancel.is_cancelled() {
+                continue;
             }
-            for (chat_id, run_id) in finished_chats {
-                if rt.chat_active_run.get(&chat_id) == Some(&run_id) {
-                    rt.chat_active_run.remove(&chat_id);
-                }
-            }
-            rt.active_runs.retain(|r| !r.finished);
-        }
-
-        // Subagent runs announced by their parent: follow them too, so their approvals and
-        // questions reach the same Telegram chat.
-        for (chat_id, child) in spawned {
-            if let Err(e) = self.attach_run(chat_id, child, true).await {
-                first_err.get_or_insert(e);
+            let cancel = run.cancel.clone();
+            let result = tokio::select! {
+                biased;
+                () = self.inner.cancel.cancelled() => break,
+                () = cancel.cancelled() => continue,
+                result = self.drain_one_run(run, &mut spawned, &mut events, deadline) => result,
+            };
+            if let Err(error) = result {
+                first_error.get_or_insert(error);
             }
         }
-        if let Err(e) = self.attach_queued_runs().await {
-            first_err.get_or_insert(e);
+        // Fairness between runs when one pass hits its global event/time budget.
+        if !lease.runs.is_empty() {
+            let rotation = visited % lease.runs.len();
+            lease.runs.rotate_left(rotation);
         }
-        first_err.map_or(Ok(events), Err)
+        for (chat_id, child, parent_cancel) in spawned {
+            if !parent_cancel.is_cancelled()
+                && let Err(error) = self
+                    .attach_run(chat_id, child, true, Some(parent_cancel))
+                    .await
+            {
+                first_error.get_or_insert(error);
+            }
+        }
+        drop(lease);
+        if let Err(error) = self.attach_queued_runs().await {
+            first_error.get_or_insert(error);
+        }
+        first_error.map_or(Ok(events), Err)
     }
 
     async fn drain_one_run(
         &self,
         run: &mut ActiveRun,
-        pending_questions: &mut Vec<(ToolCallId, PendingQuestion)>,
-        spawned: &mut Vec<(i64, RunId)>,
+        spawned: &mut Vec<(i64, RunId, CancellationToken)>,
         events: &mut usize,
+        deadline: Instant,
     ) -> Result<()> {
-        loop {
-            let next_env = if let Some(ready) = run.stream.next().now_or_never() {
-                ready
-            } else if let Ok(item) =
-                tokio::time::timeout(Duration::from_millis(15), run.stream.next()).await
-            {
-                item
-            } else {
-                // Stream is still open and waiting; flush throttled text if due.
+        let mut per_run = 0;
+        while per_run < MAX_EVENTS_PER_RUN
+            && *events < MAX_DRAIN_EVENTS
+            && Instant::now() < deadline
+        {
+            let Some(next_env) = run.stream.next().now_or_never() else {
                 run.editor.flush_if_due(&self.inner.bot_api).await?;
                 return Ok(());
             };
-
             let Some(env) = next_env else {
-                // The stream ended without `RunFinished` (connection drop): still show what
-                // was held back by `safe_stream_prefix`.
                 return self.finish_dropped_run(run).await;
             };
+            per_run += 1;
             *events += 1;
-
-            self.process_run_event(run, env.event, pending_questions, spawned)
-                .await?;
-
+            self.process_run_event(run, env.event, spawned).await?;
             if run.finished {
-                return Ok(());
+                break;
             }
         }
+        Ok(())
     }
 
     /// A run stream that ended without `RunFinished`: mark it finished, flush the full
@@ -1386,8 +1701,7 @@ impl TelegramChannel {
         &self,
         run: &mut ActiveRun,
         event: Event,
-        pending_questions: &mut Vec<(ToolCallId, PendingQuestion)>,
-        spawned: &mut Vec<(i64, RunId)>,
+        spawned: &mut Vec<(i64, RunId, CancellationToken)>,
     ) -> Result<()> {
         let chat_id = run.telegram_chat_id;
         match event {
@@ -1459,13 +1773,21 @@ impl TelegramChannel {
                     })
                     .collect();
                 let markup = InlineKeyboardMarkup::from_rows(rows);
-                pending_questions.push((
-                    q.call_id,
-                    PendingQuestion {
-                        telegram_chat_id: chat_id,
-                        options: q.options,
-                    },
-                ));
+                {
+                    let mut rt = self.inner.runtime.lock();
+                    if rt.pending_questions.len() >= MAX_PENDING_PROMPTS {
+                        rt.pending_questions.clear();
+                        rt.chat_pending_question.clear();
+                    }
+                    rt.chat_pending_question.insert(chat_id, q.call_id);
+                    rt.pending_questions.insert(
+                        q.call_id,
+                        PendingQuestion {
+                            telegram_chat_id: chat_id,
+                            options: q.options,
+                        },
+                    );
+                }
                 let text = format!("❓ {}", q.question);
                 self.send_redacted(chat_id, &text, markup.as_ref()).await?;
             }
@@ -1474,7 +1796,7 @@ impl TelegramChannel {
                 self.send_redacted(chat_id, &text, None).await?;
             }
             Event::SubagentStarted(s) => {
-                spawned.push((chat_id, s.run_id));
+                spawned.push((chat_id, s.run_id, run.cancel.clone()));
             }
             Event::RunFinished(f) => self.finish_run(run, f.error).await?,
             _ => {}
@@ -1487,7 +1809,7 @@ impl TelegramChannel {
 impl Channel for TelegramChannel {
     async fn receive(&self) -> Result<BoxStream<'static, IncomingMessage>> {
         let offset = {
-            let rt = self.inner.runtime.lock().await;
+            let rt = self.inner.runtime.lock();
             rt.next_offset
         };
         let updates = self
@@ -1495,18 +1817,13 @@ impl Channel for TelegramChannel {
             .bot_api
             .get_updates(offset, self.inner.config.poll_timeout_secs)
             .await?;
-        let mut items = Vec::with_capacity(updates.len());
-        let mut max_next: Option<i64> = None;
-        for u in updates {
-            let next = u.update_id.saturating_add(1);
-            max_next = Some(max_next.map_or(next, |cur| cur.max(next)));
-            if let Some(inc) = u.into_incoming() {
-                items.push(inc);
-            }
-        }
-        if let Some(next) = max_next {
-            self.advance_offset(next - 1).await;
-        }
+        // The raw Channel API has no consumer acknowledgement. Retain these
+        // records in the inbox so the bridge can recover them after a restart.
+        self.handle_updates(&updates)?;
+        let items: Vec<_> = updates
+            .into_iter()
+            .filter_map(Update::into_incoming)
+            .collect();
         Ok(Box::pin(stream::iter(items)))
     }
 

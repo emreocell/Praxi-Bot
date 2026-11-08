@@ -33,6 +33,19 @@ pub enum TelegramError {
     #[error("daemon api error: {0}")]
     Daemon(String),
 
+    /// A daemon HTTP rejection with its status preserved for retry classification.
+    #[error("daemon api error ({status}): {message}")]
+    DaemonHttp {
+        /// HTTP status returned by the daemon.
+        status: u16,
+        /// Human-readable error returned by the daemon.
+        message: String,
+    },
+
+    /// A successful daemon response did not match the expected response schema.
+    #[error("malformed daemon response: {0}")]
+    Malformed(String),
+
     /// Secret store error (e.g. missing bot token).
     #[error("secret error: {0}")]
     Secret(#[from] SecretError),
