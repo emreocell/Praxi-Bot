@@ -10217,8 +10217,10 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "builtin-tools",
+ "chrono",
  "desktop-api",
  "desktop-windows",
+ "fs4",
  "parking_lot",
  "protocol",
  "script-runtime",
