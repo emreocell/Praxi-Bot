@@ -539,6 +539,13 @@ pub(crate) async fn claude_version(
     })
 }
 
+/// `claude --help` text, so a turn can refuse before spawn when the installed
+/// CLI does not advertise the permission mode and tool flags this crate sends.
+pub(crate) async fn claude_help(resolved: &ResolvedCommand, env: &PathEnv) -> Option<String> {
+    let (status, stdout, _) = run_process_probe(resolved, &["--help"], env).await.ok()?;
+    status.success().then_some(stdout)
+}
+
 /// Probe Codex version without opening login files or exposing raw diagnostics.
 pub(crate) async fn codex_version(
     resolved: &ResolvedCommand,

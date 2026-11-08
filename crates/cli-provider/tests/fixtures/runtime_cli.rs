@@ -73,6 +73,21 @@ fn main() {
         );
         return;
     }
+    if args.iter().any(|s| s == "--help" || s == "-h") {
+        let modes = std::env::var("FAKE_PERMISSION_MODES")
+            .unwrap_or_else(|_| "acceptEdits,auto,bypassPermissions,manual,dontAsk,plan".into());
+        let quoted = modes
+            .split(',')
+            .filter(|mode| !mode.trim().is_empty())
+            .map(|mode| format!("\"{}\"", mode.trim()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("--permission-mode <mode> (choices: {quoted})");
+        println!("--tools Specify the list. Use \"\" to disable all tools");
+        println!("--disallowedTools");
+        println!("--settings");
+        return;
+    }
     log("argv", &raw_command_line());
     log("pid", &std::process::id().to_string());
     log(
@@ -112,6 +127,14 @@ fn main() {
         let prompt = read(&mut reader);
         log("stdin", &prompt.to_string());
         assert_eq!(prompt["type"], "user");
+        if mode == "unknown-frame" {
+            emit(json!({"type":"system","subtype":"init"}));
+            emit(
+                json!({"type":"stream_event","event":{"delta":{"type":"text_delta","text":"SHOULD_NOT_APPLY"}}}),
+            );
+            std::thread::sleep(std::time::Duration::from_secs(120));
+            return;
+        }
         if mode == "bash" {
             emit(
                 json!({"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","name":"Bash","input":{"command":"bad"}}}}),
@@ -137,22 +160,47 @@ fn main() {
         let thread = read(&mut reader);
         assert_eq!(thread["method"], "thread/start");
         log("thread", &thread.to_string());
-
-        // Echo back with our security settings preserved
+        if mode == "no-echo" {
+            emit(json!({"id":2,"result":{"thread":{"id":"fixture-thread"}}}));
+            std::thread::sleep(std::time::Duration::from_secs(120));
+            return;
+        }
+        if mode == "partial-echo" {
+            emit(json!({
+                "id":2,
+                "result":{
+                    "thread":{"id":"fixture-thread"},
+                    "config":{"features":{"shell_tool":false},"web_search":"disabled"}
+                }
+            }));
+            std::thread::sleep(std::time::Duration::from_secs(120));
+            return;
+        }
+        // Echo the closed set the parent sent, plus empty environments.
         emit(json!({
             "id":2,
             "result":{
-                "thread":{"id":"fixture-thread"},
-                "config": {
-                    "features": {"shell_tool": false},
-                    "web_search": "disabled"
-                }
+                "thread":{"id":"fixture-thread","environments":[]},
+                "environments": thread["params"]["environments"].clone(),
+                "sandbox": thread["params"]["sandbox"].clone(),
+                "approvalPolicy": thread["params"]["approvalPolicy"].clone(),
+                "config": thread["params"]["config"].clone()
             }
         }));
         let turn = read(&mut reader);
         assert_eq!(turn["method"], "turn/start");
         log("stdin", &turn.to_string());
         emit(json!({"id":3,"result":{}}));
+        if let Some(method) = mode.strip_prefix("bad-method:") {
+            if method.contains("Delta") || method.contains("patchUpdated") {
+                emit(json!({"method": method, "params": {}}));
+            } else {
+                emit(json!({"method": method, "id": 9, "params": {}}));
+            }
+            emit(json!({"method":"item/agentMessage/delta","params":{"delta":"SHOULD_NOT_APPLY"}}));
+            std::thread::sleep(std::time::Duration::from_secs(120));
+            return;
+        }
         if mode == "native" {
             emit(json!({"method":"item/commandExecution/requestApproval","id":9,"params":{}}));
             std::thread::sleep(std::time::Duration::from_secs(120));

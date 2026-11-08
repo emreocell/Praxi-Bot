@@ -4,6 +4,7 @@
 //! `gemini`, `chatgpt-plan`).
 
 pub mod detect;
+mod peer;
 pub mod runtime;
 
 pub use detect::{AuthState, DetectedCli, Detector, PathEnv};

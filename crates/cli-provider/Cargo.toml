@@ -16,6 +16,7 @@ futures.workspace = true
 parking_lot.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 thiserror.workspace = true
@@ -26,7 +27,13 @@ tool-registry = { path = "../tool-registry", version = "0.1.0" }
 process-wrap = { version = "10.0.1", features = ["tokio1"] }
 
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = ["Win32_System_Threading"] }
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_Networking_WinSock",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
+] }
 
 [[bin]]
 name = "fake-cli"

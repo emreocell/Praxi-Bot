@@ -1,11 +1,19 @@
 //! Per-turn CLI sessions. Wire dialects are locked by `tests/fixtures/runtime_cli.rs`.
 //! No credential files are opened here. Prompts and results only cross stdin/MCP.
-use std::{io::Write, process::Stdio, sync::Arc};
+use std::{
+    io::Write,
+    net::SocketAddr,
+    process::Stdio,
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicU32, Ordering},
+    },
+};
 
 use async_trait::async_trait;
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode},
     routing::post,
 };
@@ -139,6 +147,9 @@ struct Bridge {
     tools: Arc<Vec<ToolSpec>>,
     host: Arc<dyn TurnHost>,
     stop: CancellationToken,
+    /// `0` until the turn's CLI process exists. Connections are refused until then.
+    child_pid: Arc<AtomicU32>,
+    listen: Arc<OnceLock<SocketAddr>>,
 }
 
 impl Bridge {
@@ -184,17 +195,28 @@ impl Bridge {
 }
 async fn mcp(
     State(b): State<Bridge>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
-    _remote_addr: (), // Connection info - we trust OS process isolation
     Json(req): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>), StatusCode> {
+    // The bearer is not enough: any same-user process can read the sidecar.
+    // Only this turn's child, or a descendant of that child, may call a tool.
+    let root = b.child_pid.load(Ordering::SeqCst);
+    let allowed = match b.listen.get().copied() {
+        Some(listen) => {
+            tokio::task::spawn_blocking(move || crate::peer::peer_is_allowed(peer, listen, root))
+                .await
+                .unwrap_or(false)
+        }
+        None => false,
+    };
+    if !allowed {
+        return Err(StatusCode::FORBIDDEN);
+    }
     // A per-turn unguessable capability lives only in the private config, never argv/env.
     if headers.get("authorization").and_then(|v| v.to_str().ok()) != Some(b.capability.as_str()) {
         return Err(StatusCode::UNAUTHORIZED);
     }
-
-    // Connection comes from same process group (Unix) or job object (Windows)
-    // The temp MCP config file is mode 0600 and only readable by current user
 
     if req.get("id").is_none() {
         return Ok((StatusCode::ACCEPTED, Json(Value::Null)));
@@ -208,6 +230,7 @@ struct BridgeServer {
     stop: CancellationToken,
     url: String,
     authorization: String,
+    child_pid: Arc<AtomicU32>,
 }
 impl Drop for BridgeServer {
     fn drop(&mut self) {
@@ -218,8 +241,11 @@ impl Drop for BridgeServer {
 impl BridgeServer {
     async fn open(bridge: Bridge) -> Result<Self, CliError> {
         let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
-        let url = format!("http://127.0.0.1:{}/mcp", listener.local_addr()?.port());
+        let listen = listener.local_addr()?;
+        bridge.listen.set(listen).map_err(|_| CliError::Io)?;
+        let url = format!("http://127.0.0.1:{}/mcp", listen.port());
         let authorization = bridge.capability.clone();
+        let child_pid = Arc::clone(&bridge.child_pid);
         let config = json!({"mcpServers":{"praxi":{"type":"http","url":url,"headers":{"Authorization":authorization}}}});
         let mut file = tempfile::Builder::new()
             .prefix("praxi-mcp-")
@@ -232,9 +258,12 @@ impl BridgeServer {
         let shutdown = stop.clone();
         let app = Router::new().route("/mcp", post(mcp)).with_state(bridge);
         let task = tokio::spawn(async move {
-            let _ = axum::serve(listener, app)
-                .with_graceful_shutdown(shutdown.cancelled_owned())
-                .await;
+            let _ = axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(shutdown.cancelled_owned())
+            .await;
         });
         Ok(Self {
             file,
@@ -242,7 +271,12 @@ impl BridgeServer {
             stop,
             url,
             authorization,
+            child_pid,
         })
+    }
+
+    fn allow_child(&self, pid: u32) {
+        self.child_pid.store(pid, Ordering::SeqCst);
     }
 }
 
@@ -298,25 +332,40 @@ const MIN_CLAUDE_VERSION_STRIC_MCP: (u32, u32, u32) = (1, 0, 60);
 const MIN_CLAUDE_VERSION_SETTING_SOURCES: (u32, u32, u32) = (1, 0, 122);
 const MIN_CODEX_VERSION: (u32, u32, u32) = (1, 0, 0);
 
-/// Disallowed native tools for Claude that break Praxi's permission model.
+/// Permission mode accepted by Claude Code 2.1.314 (`claude --help`).
+const CLAUDE_PERMISSION_MODE: &str = "manual";
+
+/// Built-ins removed from Claude. `claude --help` names Bash, PowerShell and
+/// the other code-running tools under `--restricted`; the rest are this
+/// install's tools (`sdk-tools.d.ts`), including Workflow which runs a script.
 const CLAUDE_DISALLOWED_TOOLS: &[&str] = &[
     "Bash",
+    "PowerShell",
     "Read",
     "Write",
     "Edit",
+    "NotebookEdit",
+    "Glob",
+    "Grep",
     "WebFetch",
     "WebSearch",
     "Task",
     "Agent",
+    "Workflow",
 ];
 
-/// Disallowed features for Codex that break Praxi's permission model.
-const CODEX_DISALLOWED_FEATURES: &[&str] = &[
+/// Features `codex features list` shows as stable and on, plus the shell family
+/// that would still run under `sandbox_mode = "read-only"`.
+const CODEX_CLOSED_FEATURES: &[&str] = &[
     "shell_tool",
     "unified_exec",
     "view_image",
-    "apply_patch_freeform",
-    "exec_command",
+    "browser_use",
+    "browser_use_external",
+    "computer_use",
+    "hooks",
+    "multi_agent",
+    "plugins",
 ];
 
 fn args(
@@ -324,10 +373,11 @@ fn args(
     turn: &Turn,
     config: &std::path::Path,
     version: Option<(u32, u32, u32)>,
+    codex_mcp_servers: &[String],
 ) -> Vec<String> {
     match engine {
         Engine::Claude => claude_args(turn, config, version),
-        Engine::Codex => codex_args(turn, config, version),
+        Engine::Codex => codex_args(turn, codex_mcp_servers),
     }
 }
 
@@ -345,32 +395,28 @@ fn claude_args(
         "--verbose",
         "--include-partial-messages",
         "--permission-mode",
-        "default",
+        CLAUDE_PERMISSION_MODE,
         "--tools",
+        "",
     ]
     .into_iter()
     .map(str::to_owned)
     .collect();
 
-    // Pass only allowed MCP tools, no native tools
-    args.push(
-        turn.tools
-            .iter()
-            .map(|s| format!("mcp__praxi__{}", tool_name(&s.name)))
-            .collect::<Vec<_>>()
-            .join(","),
-    );
-
-    // Use strict MCP config (only use servers from --mcp-config file)
+    // `--tools ""` disables every built-in. MCP tools come from `--mcp-config`.
     args.extend(["--mcp-config".into(), config.to_string_lossy().into_owned()]);
 
-    // Disable all hooks via settings
     let disallowed_str = CLAUDE_DISALLOWED_TOOLS.join(",");
+    let settings = serde_json::json!({
+        "disableAllHooks": true,
+        "permissions": {"deny": CLAUDE_DISALLOWED_TOOLS}
+    })
+    .to_string();
     args.extend([
         "--disallowedTools".into(),
         disallowed_str,
         "--settings".into(),
-        r#"{"disableAllHooks":true}"#.into(),
+        settings,
     ]);
 
     // Add version-gated flags
@@ -390,45 +436,168 @@ fn claude_args(
     args
 }
 
-fn codex_args(
-    turn: &Turn,
-    config: &std::path::Path,
-    _version: Option<(u32, u32, u32)>,
-) -> Vec<String> {
+fn codex_args(turn: &Turn, mcp_servers: &[String]) -> Vec<String> {
     let mut args = Vec::new();
     args.push("app-server".into());
-
-    // Disable ALL dangerous features explicitly
-    for feature in CODEX_DISALLOWED_FEATURES {
+    // `-c` values are TOML (`codex --help`). Booleans are bare; strings are quoted.
+    for feature in CODEX_CLOSED_FEATURES {
         args.extend(["-c".into(), format!("features.{feature}=false")]);
     }
-
-    // Explicitly disable web_search at argv level
-    args.extend(["-c".into(), "web_search=disabled".into()]);
-
-    // Disable inherited MCP servers - only allow praxi
     args.extend([
         "-c".into(),
-        format!(
-            "environments=[{{\"url\":\"{}\",\"http_headers\":{{\"Authorization\":\"bearer-token\"}}}}]",
-            url_encode_path(config)
-        ),
+        "web_search=\"disabled\"".into(),
+        "-c".into(),
+        "sandbox_mode=\"read-only\"".into(),
+        "-c".into(),
+        "approval_policy=\"on-request\"".into(),
     ]);
-
+    for name in mcp_servers {
+        args.extend(["-c".into(), format!("mcp_servers.{name}.enabled=false")]);
+    }
     if let Some(model) = &turn.model {
         args.extend([
             "-c".into(),
             format!("model={}", serde_json::to_string(model).expect("string")),
         ]);
     }
-
     args
 }
 
-// URL encode path for safe embedding in TOML string
-fn url_encode_path(path: &std::path::Path) -> String {
-    let s = path.to_string_lossy();
-    s.replace("\\\\", "\\\\\\\\").replace('\\', "\\\\")
+/// `true` when this Claude's `--help` advertises `manual` and `--tools ""`.
+fn claude_launch_accepted(help: &str) -> bool {
+    permission_modes(help)
+        .iter()
+        .any(|mode| mode == CLAUDE_PERMISSION_MODE)
+        && help.contains("--disallowedTools")
+        && help.contains("--settings")
+        && help.contains("disable all tools")
+}
+
+fn permission_modes(help: &str) -> Vec<String> {
+    let Some(start) = help.find("--permission-mode") else {
+        return Vec::new();
+    };
+    let rest = &help[start..];
+    let Some(choices_at) = rest.find("choices:") else {
+        return Vec::new();
+    };
+    let rest = &rest[choices_at + "choices:".len()..];
+    let end = rest.find(')').unwrap_or(rest.len().min(400));
+    quoted_strings(&rest[..end])
+}
+
+fn quoted_strings(blob: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = blob;
+    while let Some(start) = rest.find('"') {
+        rest = &rest[start + 1..];
+        let Some(end) = rest.find('"') else {
+            break;
+        };
+        out.push(rest[..end].to_owned());
+        rest = &rest[end + 1..];
+    }
+    out
+}
+
+fn codex_config_path(env: &PathEnv) -> Result<std::path::PathBuf, CliError> {
+    if let Some(home) = env
+        .env_vars
+        .get("CODEX_HOME")
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(std::path::PathBuf::from(home).join("config.toml"));
+    }
+    let home = env
+        .home_dir
+        .clone()
+        .or_else(|| {
+            env.env_vars
+                .get("USERPROFILE")
+                .map(std::path::PathBuf::from)
+        })
+        .or_else(|| env.env_vars.get("HOME").map(std::path::PathBuf::from))
+        .ok_or(CliError::NativeToolsOpen)?;
+    Ok(home.join(".codex").join("config.toml"))
+}
+
+/// Names of MCP servers in the user's Codex config. Missing file means none.
+/// An unreadable file, an include, or a name that cannot be targeted with `-c`
+/// refuses the turn: those servers would stay enabled.
+fn codex_user_mcp_servers(env: &PathEnv) -> Result<Vec<String>, CliError> {
+    let path = codex_config_path(env)?;
+    match std::fs::read_to_string(&path) {
+        Ok(text) => codex_mcp_server_names(&text),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(_) => Err(CliError::NativeToolsOpen),
+    }
+}
+
+fn codex_mcp_server_names(text: &str) -> Result<Vec<String>, CliError> {
+    let parsed: toml::Value = toml::from_str(text).map_err(|_| CliError::NativeToolsOpen)?;
+    let Some(root) = parsed.as_table() else {
+        return Err(CliError::NativeToolsOpen);
+    };
+    if root.contains_key("include") || root.contains_key("includes") {
+        return Err(CliError::NativeToolsOpen);
+    }
+    let Some(servers) = root.get("mcp_servers") else {
+        return Ok(Vec::new());
+    };
+    let Some(table) = servers.as_table() else {
+        return Err(CliError::NativeToolsOpen);
+    };
+    let mut names = Vec::new();
+    for name in table.keys() {
+        if !mcp_server_name_ok(name) {
+            return Err(CliError::NativeToolsOpen);
+        }
+        names.push(name.clone());
+    }
+    names.sort();
+    Ok(names)
+}
+
+fn mcp_server_name_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+fn codex_closed_features() -> serde_json::Map<String, Value> {
+    CODEX_CLOSED_FEATURES
+        .iter()
+        .map(|name| ((*name).to_owned(), Value::Bool(false)))
+        .collect()
+}
+
+/// The `thread/start` result must echo the closed sandbox, every closed
+/// feature, and an empty environment list. A missing field is a refusal.
+fn codex_confinement_echoed(result: &Value) -> bool {
+    let Some(config) = result.get("config").filter(|value| value.is_object()) else {
+        return false;
+    };
+    let features_closed = CODEX_CLOSED_FEATURES.iter().all(|name| {
+        config["features"][*name] == false || config[&format!("features.{name}")] == false
+    });
+    if !features_closed || config["web_search"] != "disabled" {
+        return false;
+    }
+    let sandbox = if result.get("sandbox").is_some() {
+        &result["sandbox"]
+    } else {
+        &config["sandbox_mode"]
+    };
+    let sandbox_closed = sandbox == "read-only" || sandbox["type"] == "readOnly";
+    let environments = if result.get("environments").is_some() {
+        &result["environments"]
+    } else if result["thread"].get("environments").is_some() {
+        &result["thread"]["environments"]
+    } else {
+        return false;
+    };
+    sandbox_closed && environments.as_array().is_some_and(Vec::is_empty)
 }
 
 async fn send(stdin: &mut tokio::process::ChildStdin, value: Value) -> Result<(), CliError> {
@@ -455,6 +624,8 @@ async fn session(
         tools: Arc::new(turn.tools.clone()),
         host: host.clone(),
         stop: stop.clone(),
+        child_pid: Arc::new(AtomicU32::new(0)),
+        listen: Arc::new(OnceLock::new()),
     };
     let server = BridgeServer::open(bridge.clone()).await?;
     if stop.is_cancelled() {
@@ -497,8 +668,21 @@ async fn session(
             }
         }
     }
+    if engine == Engine::Claude {
+        let help = crate::detect::claude_help(&resolved, env)
+            .await
+            .ok_or(CliError::NativeToolsOpen)?;
+        if !claude_launch_accepted(&help) {
+            return Err(CliError::NativeToolsOpen);
+        }
+    }
+    let mcp_servers = if engine == Engine::Codex {
+        codex_user_mcp_servers(env)?
+    } else {
+        Vec::new()
+    };
 
-    let argv = args(engine, &turn, server.file.path(), version);
+    let argv = args(engine, &turn, server.file.path(), version, &mcp_servers);
     if resolved.program.to_string_lossy().encode_utf16().count()
         + resolved
             .args
@@ -535,6 +719,11 @@ async fn session(
             CliError::Io
         }
     })?;
+    let child_pid = child
+        .id()
+        .filter(|pid| *pid != 0)
+        .ok_or(CliError::NativeToolsOpen)?;
+    server.allow_child(child_pid);
 
     // Store workdir for lifetime of session so cwd stays isolated
     let _workdir = workdir;
@@ -651,8 +840,12 @@ fn claude_frame(
                 *partial = true;
                 host.text(t);
             }
-            if e["content_block"]["type"] == "tool_use" {
-                validate_tool(bridge, &e["content_block"])?;
+            if let Some(kind) = e["content_block"]["type"].as_str() {
+                match kind {
+                    "tool_use" => validate_tool(bridge, &e["content_block"])?,
+                    "text" | "thinking" => {}
+                    _ => return Err(CliError::NativeToolsOpen),
+                }
             }
         }
         "assistant" => {
@@ -665,7 +858,8 @@ fn claude_frame(
                                 host.text(text);
                             }
                         }
-                        _ => {}
+                        Some("text" | "thinking") => {}
+                        _ => return Err(CliError::NativeToolsOpen),
                     }
                 }
             }
@@ -681,7 +875,7 @@ fn claude_frame(
             read_usage(&v["usage"], usage);
             return Ok(true);
         }
-        _ => {}
+        _ => return Err(CliError::NativeToolsOpen),
     }
     Ok(false)
 }
@@ -714,19 +908,25 @@ impl CodexState {
             )
             .await?;
 
-            send(stdin, json!({"jsonrpc":"2.0","id":2,"method":"thread/start","params":{
-                "model":turn.model,"baseInstructions":turn.system,
-                "approvalPolicy":"on-request",
-                "sandbox":"read-only",
-                "sandboxPolicy":{"type":"readOnly"},
-                "config":{
-                    "features.shell_tool":false,
-                    "features.apply_patch_freeform":false,
-                    "features.collab":false,
-                    "web_search":"disabled",
-                    "mcp_servers":{"praxi":{"url":server.url,"http_headers":{"Authorization":server.authorization}}}
-                }
-            }})).await?;
+            let config = json!({
+                "features": codex_closed_features(),
+                "web_search": "disabled",
+                "sandbox_mode": "read-only",
+                "approval_policy": "on-request",
+                "mcp_servers": {"praxi": {"url": server.url, "http_headers": {"Authorization": server.authorization}}}
+            });
+            send(
+                stdin,
+                json!({"jsonrpc":"2.0","id":2,"method":"thread/start","params":{
+                    "model":turn.model,"baseInstructions":turn.system,
+                    "approvalPolicy":"on-request",
+                    "sandbox":"read-only",
+                    "sandboxPolicy":{"type":"readOnly"},
+                    "environments": [],
+                    "config": config
+                }}),
+            )
+            .await?;
         } else if v["id"] == 2 && v.get("result").is_some() {
             let id = v["result"]["thread"]["id"]
                 .as_str()
@@ -734,25 +934,8 @@ impl CodexState {
             if !self.initialized || self.thread.is_some() {
                 return Err(CliError::Protocol);
             }
-
-            // Verify that thread/start echoed back our security config
-            // The response should include approvalPolicy=on-request and sandbox=read-only
-            let result = &v["result"];
-
-            // Check that shell_tool is disabled in response (or we got a valid thread id)
-            if result["thread"]["id"].is_null() {
-                return Err(CliError::Protocol);
-            }
-
-            // If config was echoed back, verify critical security settings
-            if let Some(config) = result.get("config") {
-                let shell_disabled = config["features"]["shell_tool"] == false;
-                let web_disabled = config["web_search"] == "disabled";
-
-                if !shell_disabled || !web_disabled {
-                    eprintln!("Codex refused to disable shell tools");
-                    return Err(CliError::NativeToolsOpen);
-                }
+            if !codex_confinement_echoed(&v["result"]) {
+                return Err(CliError::NativeToolsOpen);
             }
 
             self.thread = Some(id.to_owned());
@@ -791,34 +974,19 @@ impl CodexState {
                 "item/started" | "item/completed" => {
                     let item = &v["params"]["item"];
                     match item["type"].as_str().unwrap_or("") {
-                        "userMessage" | "agentMessage" | "reasoning" | "plan"
-                        | "contextCompaction" => {}
+                        "userMessage" | "agentMessage" | "reasoning" => {}
                         "mcpToolCall"
                             if item["server"] == "praxi"
                                 && item["tool"]
                                     .as_str()
                                     .and_then(|n| bridge.resolve(n))
                                     .is_some() => {}
-                        // Any other tool type means native tools are open - fail closed
-                        _ => {
-                            eprintln!("Unsafe tool detected: {}", item["type"]);
-                            return Err(CliError::NativeToolsOpen);
-                        }
+                        _ => return Err(CliError::NativeToolsOpen),
                     }
                 }
-                // These methods indicate native tools are still active
-                "item/commandExecution/requestApproval"
-                | "item/fileChange/requestApproval"
-                | "item/execCommandApproval/requestApproval"
-                | "item/applyPatchApproval/requestApproval" => {
-                    eprintln!("Native tool approval requested: {}", v["method"]);
-                    return Err(CliError::NativeToolsOpen);
-                }
-                // MCP tool calls from non-praxi servers must also fail
                 "item/mcpToolCall/requestApproval" => {
                     let p = &v["params"];
                     if p["server"] != "praxi" {
-                        eprintln!("Non-Praxi MCP tool call attempted");
                         return Err(CliError::NativeToolsOpen);
                     }
                     let name = p["tool"]
@@ -828,11 +996,9 @@ impl CodexState {
                     let allow = bridge.host.approve(name, p["arguments"].clone()).await;
                     send(stdin, json!({"jsonrpc":"2.0","id":v["id"],"result":{"decision":if allow {"accept"} else {"decline"}}})).await?;
                 }
-                // All other method/id combinations refuse the request
-                _ if v.get("id").is_some() && v.get("method").is_some() => {
-                    send(stdin, json!({"jsonrpc":"2.0","id":v["id"],"error":{"code":-32601,"message":"request refused"}})).await?;
-                }
-                _ => {}
+                // Approval methods, output deltas, and anything else are a
+                // native action. Stop before the next stdout line is applied.
+                _ => return Err(CliError::NativeToolsOpen),
             }
         }
         Ok(false)
@@ -894,53 +1060,246 @@ mod tests {
                 &turn,
                 std::path::Path::new("private-config.json"),
                 None,
+                &[],
             );
             assert!(!argv.iter().any(|a| a.contains("private prompt")
                 || a.contains("private system")
                 || a.contains("%PATH%")));
             assert!(!argv.iter().any(|a| a == "--strict-mcp-config"));
+            assert!(
+                !argv
+                    .iter()
+                    .any(|a| a.contains("bearer") || a.contains("environments="))
+            );
         }
-        let argv = args(
+        let claude = args(
             Engine::Claude,
             &turn,
             std::path::Path::new("private-config.json"),
             Some((2, 1, 300)),
+            &[],
         );
-        assert!(argv.iter().any(|a| a == "--strict-mcp-config"));
-        assert!(argv.iter().any(|a| a == "--setting-sources"));
+        assert!(claude.iter().any(|a| a == "--strict-mcp-config"));
+        assert!(claude.iter().any(|a| a == "--setting-sources"));
+        assert_eq!(
+            claude
+                .windows(2)
+                .find(|pair| pair[0] == "--permission-mode")
+                .map(|pair| pair[1].as_str()),
+            Some("manual")
+        );
+        assert_eq!(
+            claude
+                .windows(2)
+                .find(|pair| pair[0] == "--tools")
+                .map(|pair| pair[1].as_str()),
+            Some("")
+        );
+        let denied = claude
+            .windows(2)
+            .find(|pair| pair[0] == "--disallowedTools")
+            .map(|pair| pair[1].as_str())
+            .unwrap();
+        for name in CLAUDE_DISALLOWED_TOOLS {
+            assert!(denied.split(',').any(|tool| tool == *name), "{name}");
+        }
+        let settings = claude
+            .windows(2)
+            .find(|pair| pair[0] == "--settings")
+            .map(|pair| pair[1].as_str())
+            .unwrap();
+        let settings: Value = serde_json::from_str(settings).unwrap();
+        assert_eq!(
+            settings["permissions"]["deny"].as_array().unwrap().len(),
+            CLAUDE_DISALLOWED_TOOLS.len()
+        );
+        let codex = args(
+            Engine::Codex,
+            &turn,
+            std::path::Path::new("private-config.json"),
+            None,
+            &["demo".into()],
+        );
+        for feature in CODEX_CLOSED_FEATURES {
+            assert!(
+                codex
+                    .iter()
+                    .any(|arg| arg == &format!("features.{feature}=false"))
+            );
+        }
+        assert!(codex.iter().any(|arg| arg == "web_search=\"disabled\""));
+        assert!(codex.iter().any(|arg| arg == "sandbox_mode=\"read-only\""));
+        assert!(
+            codex
+                .iter()
+                .any(|arg| arg == "approval_policy=\"on-request\"")
+        );
+        assert!(
+            codex
+                .iter()
+                .any(|arg| arg == "mcp_servers.demo.enabled=false")
+        );
+        assert!(
+            !codex
+                .iter()
+                .any(|arg| arg.contains("exec_command") || arg.contains("apply_patch"))
+        );
     }
-    #[tokio::test]
-    async fn bridge_rejects_other_turns_and_unmounted_tools() {
-        let bridge = Bridge {
+    #[test]
+    fn claude_launch_requires_a_known_permission_mode() {
+        let accepted = "\
+--permission-mode <mode> (choices: \"acceptEdits\", \"auto\", \"bypassPermissions\", \"manual\", \"dontAsk\", \"plan\")
+--tools Use \"\" to disable all tools
+--disallowedTools
+--settings
+";
+        assert!(claude_launch_accepted(accepted));
+        let unknown = accepted.replace("\"manual\", ", "");
+        assert!(!claude_launch_accepted(&unknown));
+        assert!(!claude_launch_accepted(
+            "--permission-mode <mode> (choices: \"manual\")"
+        ));
+    }
+    #[test]
+    fn codex_mcp_config_names_are_closed_or_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = PathEnv::for_test(dir.path().into())
+            .with_env_var("CODEX_HOME", dir.path().display().to_string());
+        assert_eq!(codex_user_mcp_servers(&env).unwrap(), Vec::<String>::new());
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "[mcp_servers.demo]\ncommand = \"helper\"\n[mcp_servers.other_tool]\ncommand = \"y\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            codex_user_mcp_servers(&env).unwrap(),
+            vec!["demo".to_owned(), "other_tool".to_owned()]
+        );
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "[mcp_servers.\"a.b\"]\ncommand = \"helper\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            codex_user_mcp_servers(&env).unwrap_err(),
+            CliError::NativeToolsOpen
+        );
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "include = [\"other.toml\"]\n",
+        )
+        .unwrap();
+        assert_eq!(
+            codex_user_mcp_servers(&env).unwrap_err(),
+            CliError::NativeToolsOpen
+        );
+    }
+    #[test]
+    fn missing_codex_echo_is_not_closed() {
+        assert!(!codex_confinement_echoed(&json!({"thread":{"id":"t"}})));
+        assert!(!codex_confinement_echoed(&json!({
+            "thread":{"id":"t"},
+            "config":{"features":{"shell_tool":false},"web_search":"disabled"}
+        })));
+        let mut features = serde_json::Map::new();
+        for name in CODEX_CLOSED_FEATURES {
+            features.insert((*name).to_owned(), json!(false));
+        }
+        assert!(codex_confinement_echoed(&json!({
+            "thread":{"id":"t","environments":[]},
+            "sandbox":"read-only",
+            "environments":[],
+            "config":{"features":features,"web_search":"disabled","sandbox_mode":"read-only"}
+        })));
+    }
+    fn bridge() -> Bridge {
+        Bridge {
             capability: "Bearer private-turn-capability".into(),
             tools: Arc::new(vec![]),
             host: Arc::new(NoCalls),
             stop: CancellationToken::new(),
-        };
-        let req = json!({"id":1,"method":"tools/call","params":{"name":"Bash","arguments":{}}});
-        let result = mcp(
-            State(bridge.clone()),
-            HeaderMap::new(),
-            (),
-            Json(req.clone()),
+            child_pid: Arc::new(AtomicU32::new(std::process::id())),
+            listen: Arc::new(OnceLock::new()),
+        }
+    }
+    fn http_post(url: &str, auth: Option<&str>, body: &str) -> String {
+        use std::io::{Read, Write};
+        let address = url
+            .strip_prefix("http://")
+            .unwrap()
+            .split('/')
+            .next()
+            .unwrap();
+        let mut stream = std::net::TcpStream::connect(address).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let auth = auth
+            .map(|value| format!("Authorization: {value}\r\n"))
+            .unwrap_or_default();
+        write!(
+            stream,
+            "POST /mcp HTTP/1.1\r\nHost: {address}\r\n{auth}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
         )
-        .await;
-        assert_eq!(result.unwrap_err(), StatusCode::UNAUTHORIZED);
-        let mut headers = HeaderMap::new();
-        headers.insert("authorization", "Bearer another-turn".parse().unwrap());
-        assert_eq!(
-            mcp(State(bridge.clone()), headers, (), Json(req.clone()))
-                .await
-                .unwrap_err(),
-            StatusCode::UNAUTHORIZED
-        );
+        .unwrap();
+        let mut out = String::new();
+        stream.read_to_string(&mut out).unwrap();
+        out
+    }
+    #[tokio::test]
+    async fn bridge_rejects_other_turns_and_unmounted_tools() {
+        let bridge = bridge();
+        let req = json!({"id":1,"method":"tools/call","params":{"name":"Bash","arguments":{}}});
         let reply = bridge.rpc(&req).await;
         assert_eq!(reply["result"]["isError"], true);
         let server = BridgeServer::open(bridge).await.unwrap();
         let path = server.file.path().to_owned();
+        let config: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let url = config["mcpServers"]["praxi"]["url"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let body = req.to_string();
+        let unauth = post_off_runtime(url.clone(), None, body.clone()).await;
+        assert!(unauth.starts_with("HTTP/1.1 401"), "{unauth}");
+        let wrong = post_off_runtime(
+            url.clone(),
+            Some("Bearer another-turn".into()),
+            body.clone(),
+        )
+        .await;
+        assert!(wrong.starts_with("HTTP/1.1 401"), "{wrong}");
+        let ok = post_off_runtime(url, Some("Bearer private-turn-capability".into()), body).await;
+        assert!(ok.starts_with("HTTP/1.1 200"), "{ok}");
+        assert!(ok.contains("\"isError\":true"));
         assert!(path.exists());
         drop(server);
         assert!(!path.exists());
+    }
+    #[tokio::test]
+    async fn non_child_connection_rejected() {
+        let bridge = bridge();
+        bridge.child_pid.store(u32::MAX, Ordering::SeqCst);
+        let server = BridgeServer::open(bridge).await.unwrap();
+        let config: Value =
+            serde_json::from_str(&std::fs::read_to_string(server.file.path()).unwrap()).unwrap();
+        let url = config["mcpServers"]["praxi"]["url"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let auth = config["mcpServers"]["praxi"]["headers"]["Authorization"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let body = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"Bash","arguments":{}}}"#.to_owned();
+        let response = post_off_runtime(url, Some(auth), body).await;
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+    }
+    async fn post_off_runtime(url: String, auth: Option<String>, body: String) -> String {
+        tokio::task::spawn_blocking(move || http_post(&url, auth.as_deref(), &body))
+            .await
+            .unwrap()
     }
     #[test]
     fn tool_names_are_collision_free() {
