@@ -42,6 +42,31 @@ impl std::fmt::Debug for ScheduleStore {
 }
 
 impl ScheduleStore {
+    /// Validate and migrate an existing staged database without starting a scheduler.
+    /// Returns the resulting schema version. Never creates a missing database.
+    ///
+    /// # Errors
+    /// Fails on corruption, an incompatible schema, or migration errors.
+    pub fn validate_and_migrate(path: impl AsRef<Path>) -> Result<u32> {
+        let mut conn =
+            Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        conn.busy_timeout(Duration::from_secs(5))?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+        let integrity: String = conn.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+        if integrity != "ok" {
+            return Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
+                Some(integrity),
+            )
+            .into());
+        }
+        migrate(&mut conn)?;
+        // user_version alone does not prove that the required schema exists.
+        conn.prepare(SCHEDULE_SELECT)?;
+        conn.prepare("SELECT schedule_id, trigger_json, created_at_ms FROM schedule_triggers")?;
+        Ok(conn.query_row("PRAGMA user_version", [], |row| row.get(0))?)
+    }
+
     /// Open (creating if needed) `<data_dir>/schedules.db`, enable WAL +
     /// foreign keys, and apply pending migrations.
     ///

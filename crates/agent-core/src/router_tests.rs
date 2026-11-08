@@ -854,3 +854,113 @@ async fn can_remember_does_not_build_a_ladder_or_touch_the_disk() {
         "no sqlite cache created"
     );
 }
+
+// ---------- control gate on the replay path ----------
+
+struct CountingBrowser {
+    opened: AtomicUsize,
+}
+
+#[async_trait]
+impl builtin_tools::BrowserDriver for CountingBrowser {
+    async fn open(&self, _url: &str, _profile: Option<&str>) -> Result<String, String> {
+        self.opened.fetch_add(1, Ordering::SeqCst);
+        Ok("# page".into())
+    }
+    async fn snapshot(&self, _i: bool) -> Result<String, String> {
+        Ok(String::new())
+    }
+    async fn click(&self, _r: &str) -> Result<String, String> {
+        Err("unused".into())
+    }
+    async fn fill(&self, _r: &str, _t: &str) -> Result<String, String> {
+        Err("unused".into())
+    }
+    async fn select(&self, _r: &str, _v: &str) -> Result<String, String> {
+        Err("unused".into())
+    }
+    async fn press(&self, _k: &str) -> Result<String, String> {
+        Err("unused".into())
+    }
+    async fn scroll(&self, _r: Option<&str>, _x: f64, _y: f64) -> Result<String, String> {
+        Err("unused".into())
+    }
+    async fn wait(&self, _c: builtin_tools::Wait, _t: Option<Duration>) -> Result<String, String> {
+        Err("unused".into())
+    }
+    async fn back(&self) -> Result<String, String> {
+        Err("unused".into())
+    }
+    async fn tabs(&self, _s: Option<usize>) -> Result<String, String> {
+        Err("unused".into())
+    }
+    async fn screenshot(
+        &self,
+        _f: bool,
+        _e: Option<&str>,
+    ) -> Result<(Vec<u8>, &'static str), String> {
+        Err("unused".into())
+    }
+    async fn eval(&self, _js: &str) -> Result<Value, String> {
+        Err("unused".into())
+    }
+}
+
+struct TakeoverGate {
+    seen: Mutex<Vec<crate::ControlRequest>>,
+}
+
+#[async_trait]
+impl crate::ControlGate for TakeoverGate {
+    async fn before_action(
+        &self,
+        req: crate::ControlRequest,
+        _publish: &(dyn Fn() + Send + Sync),
+    ) -> Result<(), String> {
+        self.seen.lock().push(req);
+        Err("the user has taken control".into())
+    }
+}
+
+#[tokio::test]
+async fn replay_started_through_the_agent_is_refused_during_human_takeover() {
+    let env = setup();
+    let script = Script::new(vec![("fake/m", vec![Rep::Text("handled")])]);
+    let lp = make(&env, &script, &[], "");
+    let browser = Arc::new(CountingBrowser {
+        opened: AtomicUsize::new(0),
+    });
+    let store = WorkflowStore::new(env.dir.path());
+    let lp = lp.with_workflows(
+        store.clone(),
+        Handles {
+            desktop: None,
+            browser: Some(Arc::clone(&browser) as Arc<dyn builtin_tools::BrowserDriver>),
+            tools: ToolRegistry::new(),
+        },
+    );
+    let gate = Arc::new(TakeoverGate {
+        seen: Mutex::new(Vec::new()),
+    });
+    lp.set_control_gate(gate.clone());
+    let mut wf = Workflow::new("open_it");
+    wf.description = "open a page".into();
+    wf.steps = vec![Step::Navigate(workflow_replay::Navigate {
+        url: "https://example.test/".into(),
+        profile: None,
+    })];
+    store.save(&wf).unwrap();
+
+    let (run, _) = turn(&lp, env.chat, "/workflow open_it").await;
+    assert_eq!(
+        browser.opened.load(Ordering::SeqCst),
+        0,
+        "backend untouched"
+    );
+    let seen = gate.seen.lock().clone();
+    assert_eq!(seen.len(), 1, "the replay asked the control gate");
+    assert_eq!(
+        (seen[0].run_id, seen[0].action.as_str()),
+        (run, "browser_open")
+    );
+}

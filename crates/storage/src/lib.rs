@@ -8,6 +8,7 @@
 pub mod db;
 pub mod error;
 pub mod event_log;
+pub mod journal;
 pub mod migrate;
 pub mod paths;
 pub mod records;
@@ -15,5 +16,6 @@ pub mod records;
 pub use db::{Storage, now_ms};
 pub use error::{Result, StorageError};
 pub use event_log::{EventLogWriter, event_log_path, read_event_log};
+pub use journal::{EventJournal, FsJournalSink, JournalRecord, JournalSink};
 pub use paths::{DATA_DIR_ENV, data_dir, resolve_data_dir};
 pub use records::{Approval, AuditEntry, Bot, Chat, EventIndexRow, Message, Run, RunStep, User};

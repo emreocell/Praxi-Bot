@@ -219,8 +219,13 @@ export class ApiClient {
   }
 
   /** Heartbeat of the desktop app as controller (see `controlBridge.ts`). */
-  putControlState(mode: ControlModeName): Promise<ControlStateDto> {
-    return this.request("PUT", "/control/state", { body: { mode } });
+  putControlState(
+    mode: ControlModeName,
+    release?: boolean
+  ): Promise<ControlStateDto> {
+    return this.request("PUT", "/control/state", {
+      body: release ? { mode, release: true } : { mode }
+    });
   }
   decideControl(
     requestId: string,

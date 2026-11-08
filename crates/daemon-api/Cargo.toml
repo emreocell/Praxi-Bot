@@ -39,6 +39,9 @@ toml.workspace = true
 utoipa = { version = "5", features = ["uuid"] }
 uuid.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["fs", "process", "std"] }
+
 [dev-dependencies]
 builtin-tools = { path = "../builtin-tools", version = "0.1.0" }
 http-body-util = "0.1"

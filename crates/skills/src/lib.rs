@@ -8,6 +8,12 @@
 //! Sources, later overriding earlier by `name`: bundled (repo `skills/`),
 //! user (`<data_dir>/skills/`), per-bot (`<data_dir>/bots/<id>/skills/`).
 //!
+//! Third-party skills are installed, scanned, locked and updated through
+//! [`hub::SkillHub`]. The static scan is advisory. Installing or updating a
+//! git or index skill requires an accept token bound to that preview's
+//! fingerprint; a local folder needs the same token unless it is low risk and
+//! `trust_local` is set.
+//!
 //! # Wiring (agent-core)
 //! ```ignore
 //! let skills = skills::SkillIndex::load(skills::SkillPaths::from_data_dir(&data_dir, Some(bot_id)));
@@ -18,6 +24,7 @@
 
 mod bundled;
 mod frontmatter;
+pub mod hub;
 mod index;
 mod skill;
 mod tools;

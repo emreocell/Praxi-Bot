@@ -7,6 +7,9 @@ use thiserror::Error;
 /// Errors from catalog loading or provider operations.
 #[derive(Debug, Error)]
 pub enum ProviderError {
+    /// CLI engines run whole turns instead of implementing `ChatProvider`.
+    #[error("cli engines are sessions")]
+    CliSession,
     /// A TOML catalog file could not be parsed.
     #[error("catalog parse error in {path}: {source}")]
     CatalogParse {

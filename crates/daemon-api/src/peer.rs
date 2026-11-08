@@ -60,10 +60,11 @@ async fn guard(State(state): State<AppState>, req: Request, next: Next) -> Respo
     // Fail closed if attribution cannot be persisted. The normal approval audit
     // and permission engine remain in place and record the resulting decision.
     let mut audit_actor = None;
-    if req.method() == Method::POST
+    if (req.method() == Method::POST
         && (path.starts_with("/v1/approvals/")
             || path.starts_with("/v1/questions/")
-            || path.starts_with("/v1/control/"))
+            || path.starts_with("/v1/control/")))
+        || (req.method() == Method::PUT && path == "/v1/control/state")
     {
         let role = if peer.role == PeerRole::Phone {
             "phone"
