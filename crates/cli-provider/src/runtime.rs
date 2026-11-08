@@ -346,7 +346,10 @@ async fn restrict_sidecar(path: &std::path::Path) -> Result<(), CliError> {
     }
     Ok(())
 }
+// NamedTempFile is already mode 0600 here, so there is no ACL step to await.
+// `async` stays so the call site can `.await` on every host.
 #[cfg(not(windows))]
+#[allow(clippy::unused_async)]
 async fn restrict_sidecar(_: &std::path::Path) -> Result<(), CliError> {
     Ok(())
 }
