@@ -425,9 +425,44 @@ async fn workflow_handover_continues_in_k4_with_the_partial_state() {
         .as_str()
         .unwrap()
         .to_owned();
-    assert!(user.starts_with("/workflow needs_agent"), "{user}");
-    assert!(user.contains("stopped early"), "{user}");
-    assert!(user.contains("Pick the right folder"), "{user}");
+    // SEC-10 keeps the user text as the original request. The trusted handover
+    // instruction is a system message; the partial state is an untrusted
+    // assistant data block.
+    assert_eq!(user, "/workflow needs_agent");
+    let handover = req
+        .messages
+        .iter()
+        .find(|m| {
+            m.role == MessageRole::System
+                && m.content
+                    .as_str()
+                    .is_some_and(|s| s.contains("did not complete"))
+        })
+        .unwrap_or_else(|| panic!("missing handover instruction: {req:?}"));
+    assert!(
+        handover
+            .content
+            .as_str()
+            .unwrap()
+            .contains("untrusted tool data"),
+        "{handover:?}"
+    );
+    let partial = req
+        .messages
+        .iter()
+        .rfind(|m| m.role == MessageRole::Assistant)
+        .unwrap_or_else(|| panic!("missing partial state: {req:?}"));
+    let partial_text = partial.content.as_str().unwrap();
+    assert!(
+        partial_text.contains("Pick the right folder"),
+        "{partial_text}"
+    );
+    assert!(
+        partial_text.contains("router.workflow_replay"),
+        "{partial_text}"
+    );
+    assert!(partial.tool_calls.is_empty());
+    assert!(partial.tool_call_id.is_none());
     // Steps: user (with the decision), the workflow attempt, the model call.
     let names: Vec<String> = env
         .storage
