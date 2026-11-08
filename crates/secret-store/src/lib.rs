@@ -15,8 +15,12 @@ mod file;
 mod keyring_store;
 mod memory;
 mod open;
+#[cfg(windows)]
+mod publish;
 mod redact;
 mod secret;
+mod transaction;
+mod wipe;
 
 pub use error::SecretError;
 pub use file::{EncryptedFileStore, KdfParams};

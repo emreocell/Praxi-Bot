@@ -3,10 +3,14 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::SecretError;
+use crate::wipe::wipe_string;
 
 /// A secret value. `Debug` never prints the content.
+///
+/// The bytes are wiped when the value is dropped.
 #[derive(Clone, PartialEq, Eq)]
 pub struct SecretValue(String);
 
@@ -29,6 +33,20 @@ impl fmt::Debug for SecretValue {
         f.write_str("SecretValue(<redacted>)")
     }
 }
+
+impl Zeroize for SecretValue {
+    fn zeroize(&mut self) {
+        wipe_string(&mut self.0);
+    }
+}
+
+impl Drop for SecretValue {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for SecretValue {}
 
 /// A reference to a secret by name. Safe to persist and to show to the agent.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
