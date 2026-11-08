@@ -337,3 +337,24 @@
 
 .brandMark { display: inline-flex; align-items: center; justify-content: center; width: var(--size-avatar-sm); height: var(--size-avatar-sm); border-radius: var(--radius-md); background: var(--color-accent); color: var(--color-accent-contrast); box-shadow: var(--shadow-sm); }
 .emptyIcon { width: var(--space-10); height: var(--space-10); color: var(--color-accent-text); margin-bottom: var(--space-3); }
+
+.botTop { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-2); }
+.characterTile { display: flex; flex-direction: column; align-items: center; padding: var(--space-2); border: none; border-radius: var(--radius-card); background: var(--color-surface); color: var(--color-text); font-size: var(--font-size-ui); font-weight: var(--font-weight-semibold); cursor: pointer; }
+.characterTile:hover { background: var(--color-surface-elevated); }
+.topActions { display: flex; gap: var(--space-1); }
+.iconButton { display: inline-flex; align-items: center; justify-content: center; width: var(--space-8); height: var(--space-8); padding: 0; border: none; border-radius: var(--radius-md); background: transparent; color: var(--color-text-muted); cursor: pointer; }
+.iconButton:hover { background: var(--color-surface-elevated); color: var(--color-text); }
+.botSearch { width: 100%; margin-top: var(--space-3); padding: var(--space-2); border: none; border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); font-size: var(--font-size-ui); }
+.botRole { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-ui); font-weight: var(--font-weight-regular); }
+.bottomRow { display: flex; align-items: center; gap: var(--space-2); }
+.appsPill { display: flex; flex: 1; align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border: none; border-radius: var(--radius-pill); background: var(--color-surface-elevated); color: var(--color-text); font-size: var(--font-size-ui); cursor: pointer; }
+.appsPill:hover { background: var(--color-surface-active); }
+.appStack { display: flex; padding-right: var(--space-1); }
+.appStack > span { margin-right: calc(var(--space-1) * -1); outline: var(--size-border-thick) solid var(--color-surface-elevated); }
+.titleBar { position: relative; display: flex; flex-shrink: 0; align-items: center; justify-content: center; height: var(--size-titlebar); color: var(--color-text-muted); font-size: var(--font-size-xs); }
+.runtimeLabel { display: flex; align-items: center; gap: var(--space-2); }
+.runtimeLabel > svg { width: var(--space-3); height: var(--space-3); }
+.windowActions { position: absolute; right: var(--space-3); top: 0; display: flex; }
+.windowActions .iconButton { height: var(--size-titlebar); }
+
+.emptyStateCard { border: none; box-shadow: none; background: transparent; }

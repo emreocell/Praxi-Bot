@@ -37,3 +37,5 @@
   color: var(--color-warning);
   font-weight: var(--font-weight-semibold);
 }
+
+.root { margin: var(--space-1) var(--space-5); padding: var(--space-2) var(--space-3); background: var(--color-warning-subtle); border-radius: var(--radius-md); }

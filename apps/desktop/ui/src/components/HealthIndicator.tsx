@@ -38,6 +38,8 @@ export function HealthIndicator() {
       })
     : (error ?? label);
 
+  if (level === "ok") return null;
+
   return (
     <div className={styles.root} role="status" title={title}>
       <span
@@ -45,9 +47,6 @@ export function HealthIndicator() {
         aria-hidden="true"
       />
       <span className={styles.label}>{label}</span>
-      {conn?.fake_provider ? (
-        <span className={styles.tag}>{t("health.fakeProvider")}</span>
-      ) : null}
       {phase === "error" || (phase === "ready" && !health) ? (
         <Button
           size="sm"

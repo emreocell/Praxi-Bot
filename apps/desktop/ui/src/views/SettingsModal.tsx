@@ -20,12 +20,14 @@ const SECTION_ICONS = { general: Settings2, ai: BrainCircuit, computer: Monitor,
 
 
 /** Consecutive `row` cards share one rounded group; `block` cards stand alone. */
-function renderCards(cards: CardDef[]): ReactNode[] {
+function renderCards(cards: CardDef[], groupLabel: (key: string) => string): ReactNode[] {
   const out: ReactNode[] = [];
   let run: CardDef[] = [];
   const flush = () => {
     if (run.length > 0) {
       const first = run[0].id;
+      const group = first === "account" ? "account" : first === "theme" ? "appearance" : first === "language" ? "behavior" : null;
+      if (group) out.push(<h3 key={`label-${first}`} className={styles.sectionLabel}>{groupLabel(group)}</h3>);
       out.push(
         <SettingGroup key={`group-${first}`}>
           {run.map((c) => (
@@ -39,6 +41,7 @@ function renderCards(cards: CardDef[]): ReactNode[] {
     }
   };
   for (const c of cards) {
+    if (["theme", "language"].includes(c.id)) flush();
     if (c.kind === "row") {
       run.push(c);
     } else {
@@ -162,6 +165,7 @@ export function SettingsModal({
           <button
             type="button"
             className={styles.close}
+            title={t("common.close")}
             aria-label={t("common.close")}
             onClick={onClose}
           >
@@ -179,7 +183,7 @@ export function SettingsModal({
                     {t(`settingsModal.nav.${s}`)}
                   </h3>
                 ) : null}
-                {renderCards(visible.filter((c) => c.section === s))}
+                {renderCards(visible.filter((c) => c.section === s), key => t(`settingsModal.groups.${key}`))}
               </section>
             ))
           )}

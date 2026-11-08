@@ -1,8 +1,10 @@
-import { Blocks, Cable, Check, FolderOpen, Plus, Search, Server, X } from "lucide-react";
-import { siGithub, siGitlab, siNotion, siGoogledrive, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siLinear, siTodoist, siObsidian, siHomeassistant } from "simple-icons";
+import { Cable, Check, Plus, Search, Server, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "ui";
+import { BotAvatar, Button } from "ui";
+import { BrandIcon } from "../components/BrandIcon";
+import { brandIcon } from "../lib/brandIcons";
+import { botView } from "../lib/botProfile";
 import type { McpCatalogEntry, McpServer } from "../api/types";
 import formStyles from "../components/Form.module.css";
 import { Modal } from "../components/Modal";
@@ -24,13 +26,6 @@ import {
 import { useDaemon } from "../state/DaemonContext";
 import { useMcp } from "../state/useMcp";
 import styles from "./AppsModal.module.css";
-
-const BRAND_ICONS = [siGithub, siGitlab, siNotion, siGoogledrive, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siLinear, siTodoist, siObsidian, siHomeassistant];
-function Tile({ name }: { name: string }) {
-  const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, "");
-  const brand = BRAND_ICONS.find((icon) => normalized === icon.slug || normalized === icon.title.toLowerCase().replace(/[^a-z0-9]/g, ""));
-  return <span className={styles.tile} aria-hidden="true">{brand ? <svg viewBox="0 0 24 24"><path d={brand.path} fill="currentColor" /></svg> : normalized === "filesystem" ? <FolderOpen /> : <Blocks />}</span>;
-}
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -58,10 +53,10 @@ function ConnectedRow({
     server.status === "quarantined";
   return (
     <li className={styles.serverRow} data-testid={`mcp-server-${server.name}`}>
-      <Tile name={server.name} />
+      <BrandIcon name={server.name} />
       <div className={styles.serverMain}>
         <div className={styles.serverTitle}>
-          <span className={styles.serverName}>{server.name}</span>
+          <span className={styles.serverName}>{brandIcon(server.name).known ? brandIcon(server.name).name : server.name}</span>
           <span className={`${styles.status} ${styles[`tone_${tone}`]}`}>
             <span className={styles.statusDot} aria-hidden="true" />
             {t(`apps.status.${server.status}`)}
@@ -69,17 +64,12 @@ function ConnectedRow({
         </div>
         <div className={styles.serverMeta}>
           <span>{t("apps.toolCount", { count: server.tool_count })}</span>
-          <span aria-hidden="true">·</span>
-          <span>
-            {access.all
-              ? t("apps.botsAll")
-              : t("apps.botsSome", { names: access.names.join(", ") })}
+          <span className={styles.usedBy} title={access.all ? t("apps.botsAll") : t("apps.botsSome", { names: access.names.join(", ") })}>
+            {bots.filter(b => access.all || server.bots?.includes(b.id)).map(b => <BotAvatar key={b.id} bot={botView(b)} size="xs" />)}
           </span>
-          <span aria-hidden="true">·</span>
-          <span>{server.transport}</span>
         </div>
         {server.error ? (
-          <p className={formStyles.error}>{server.error}</p>
+          <p className={`${formStyles.error} ${styles.connectionError}`} title={server.error}>{server.error}</p>
         ) : null}
       </div>
       <div className={styles.serverActions}>
@@ -151,7 +141,7 @@ function CatalogCard({
   return (
     <li className={styles.card} data-testid={`mcp-catalog-${entry.id}`}>
       <div className={styles.cardHead}>
-        <Tile name={entry.name} />
+        <BrandIcon name={entry.name} />
         <div className={styles.cardTitle}>
           <span className={styles.serverName}>{entry.name}</span>
           <span className={styles.category}>
@@ -389,8 +379,8 @@ export function AppsModal({
   const categories = useMemo(() => catalogCategories(catalog), [catalog]);
   const shownServers = useMemo(() => filterServers(servers, query), [servers, query]);
   const shownCatalog = useMemo(
-    () => filterCatalog(catalog, query, category),
-    [catalog, query, category]
+    () => filterCatalog(catalog, query, category).sort((a,b) => Number(isConnected(a, servers)) - Number(isConnected(b, servers))),
+    [catalog, query, category, servers]
   );
 
   const run = async (key: string, fn: () => Promise<void>) => {
@@ -427,7 +417,7 @@ export function AppsModal({
         <header className={styles.header}>
           <div className={styles.headTop}>
             <div>
-              <h2 className={styles.title}><Blocks />{t("apps.title")}</h2>
+              <h2 className={styles.title}>{t("apps.title")}</h2>
               <p className={styles.subtitle}>{t("apps.subtitle")}</p>
             </div>
             <div className={styles.headActions}>
@@ -443,6 +433,7 @@ export function AppsModal({
               <button
                 type="button"
                 className={styles.close}
+                title={t("common.close")}
                 aria-label={t("common.close")}
                 onClick={onClose}
               >

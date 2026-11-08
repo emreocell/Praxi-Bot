@@ -7,7 +7,7 @@
   justify-content: center;
   padding: var(--space-6);
   background-color: var(--color-modal-backdrop);
-  backdrop-filter: blur(var(--space-2));
+  backdrop-filter: blur(var(--size-border-heavy));
 }
 
 .dialog {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Avatar, Button, Card } from "ui";
+import { BotAvatar, Button, Card } from "ui";
 import type { UsageSummary, UsageTotals } from "../api/types";
 import formStyles from "../components/Form.module.css";
 import { botView } from "../lib/botProfile";
@@ -153,12 +153,7 @@ export function UsageView({ embedded = false }: { embedded?: boolean }) {
                       <tr key={u.bot_id}>
                         <th scope="row">
                           <div className={styles.botCell}>
-                          <Avatar
-                            name={view?.name ?? "?"}
-                            src={view?.avatar}
-                            color={view?.color}
-                            size="sm"
-                          />
+                          <BotAvatar bot={view ?? { id: "unknown", name: "Bot" }} size="sm" />
                           <span>{view?.name ?? t("usage.deletedBot")}</span>
                           </div>
                         </th>

@@ -1,6 +1,6 @@
 import { ArrowUpRight, CheckCheck } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Avatar, Button, Card } from "ui";
+import { BotAvatar, Button, Card } from "ui";
 import formStyles from "../components/Form.module.css";
 import { botView } from "../lib/botProfile";
 import { useDaemon } from "../state/DaemonContext";
@@ -31,12 +31,7 @@ export function NeedsYouView({
               return (
                 <li key={n.callId}>
                   <Card padding="md" className={styles.row}>
-                    <Avatar
-                      name={view?.name ?? "?"}
-                      src={view?.avatar}
-                      color={view?.color}
-                      size="md"
-                    />
+                    <BotAvatar bot={view ?? { id: "unknown", name: "Bot" }} size="md" />
                     <div className={styles.text}>
                       <span className={styles.kind}>
                         {t(`needs.kind.${n.kind}`)}

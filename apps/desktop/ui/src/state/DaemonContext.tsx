@@ -168,6 +168,16 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
     );
     if (client instanceof MockApiClient) {
       setEventsConnected(true);
+      if (new URLSearchParams(window.location.search).get("screen") !== "empty") {
+        const runId = "mock-review-run";
+        const events: GlobalEnvelope["event"][] = [
+          { type: "run_started", run_id: runId, bot_id: "11111111-1111-4111-8111-111111111111", chat_id: "33333333-3333-4333-8333-333333333333" },
+          { type: "tool_call_requested", run_id: runId, call_id: "mock-tool", tool_name: "github.search", input: { query: "is:closed updated:this-week" } },
+          { type: "tool_call_completed", run_id: runId, call_id: "mock-tool", error: null },
+          { type: "run_finished", run_id: runId, error: null }
+        ];
+        events.forEach((event, i) => dispatch({ type: "event", env: { v: 1, seq: i + 1, gseq: i + 1, ts_ms: 1750000000000 + (i === 3 ? 2000 : 200 + i * 100), event } }));
+      }
       return undefined;
     }
     return subscribeEvents(client, {

@@ -1,6 +1,6 @@
 import { type ChangeEvent, type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Avatar, Button, Card } from "ui";
+import { BotAvatar, Button, Card } from "ui";
 import {
   PERMISSION_CATEGORIES,
   type PermissionCategoryName,
@@ -194,12 +194,7 @@ export function BotFormView({
           <div className={formStyles.field}>
             <span className={formStyles.label}>{t("botForm.avatar")}</span>
             <div className={formStyles.row}>
-              <Avatar
-                name={draft.name || "?"}
-                src={draft.avatar ?? undefined}
-                color={draft.color}
-                size="lg"
-              />
+              <BotAvatar bot={{ id: botId ?? "new-bot", name: draft.name, color: draft.color, avatar: draft.avatar }} size="lg" />
               <input
                 ref={fileRef}
                 type="file"

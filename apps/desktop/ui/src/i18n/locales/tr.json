@@ -7,7 +7,9 @@
     "newBot": "Yeni bot",
     "usage": "Kullanım",
     "schedules": "Zamanlanmış görevler",
-    "apps": "Uygulamalar"
+    "apps": "Uygulamalar",
+    "searchBots": "Botlarda ara",
+    "unread": "Okunmamış mesaj"
   },
   "main": {
     "selectBotTitle": "Bir bot seçin",
@@ -343,7 +345,12 @@
       "noMatch": "Eşleşme yok"
     },
     "conversationLabel": "Bugün",
-    "composerHint": "Göndermek için Enter · Komutlar için / · Bot seçmek için @"
+    "composerHint": "Göndermek için Enter · Komutlar için / · Bot seçmek için @",
+    "attach": "Dosya ekle",
+    "attachments": "Ekler",
+    "emptyTitle": "Birlikte ne yapalım?",
+    "fileTooLarge": "Metin dosyası en fazla 1 MB olabilir.",
+    "removeAttachment": "{{name}} ekini kaldır"
   },
   "botForm": {
     "createTitle": "Yeni bot",
@@ -354,8 +361,8 @@
     "nameRequired": "Ad gerekli.",
     "avatar": "Avatar",
     "avatarChoose": "Görsel veya GIF seç",
-    "avatarUseInitials": "Baş harfleri kullan",
-    "avatarInitialsHint": "Görsel seçene kadar baş harfler gösterilir.",
+    "avatarUseInitials": "Karakteri kullan",
+    "avatarInitialsHint": "Botunuza özel bir karakter.",
     "avatarHint": "PNG, JPEG, WebP veya GIF (400 KB’a kadar GIF’ler animasyonunu korur).",
     "avatarTooLarge": "Bu görsel çok büyük.",
     "avatarUnreadable": "Bu dosya görsel olarak okunamadı.",
@@ -705,11 +712,12 @@
     "settings": "Ayarlar",
     "apps": "Uygulamalar",
     "computer": "Bilgisayar",
-    "help": "Yardım"
+    "help": "Yardım",
+    "localComputer": "Bu bilgisayar"
   },
   "apps": {
     "title": "Uygulamalar",
-    "subtitle": "MCP sunucularını bağlayarak botlarınınızın dış araçlara erişmesini sağlayın.",
+    "subtitle": "Uygulamalarını bir kez bağla. Hangi botların kullanacağını sen seç.",
     "search": "Uygulama ve sunucu ara",
     "mcpServers": "Özel MCP sunucusu",
     "categoriesLabel": "Kategoriler",
@@ -746,7 +754,7 @@
     "connectedToast": "{{name}} bağlandı",
     "disconnectedToast": "{{name}} bağlantısı kesildi",
     "missingSecret": "Gerekli tüm gizli anahtarları girin.",
-    "connectedSection": "Bağlandı",
+    "connectedSection": "Bağlı uygulamalar",
     "catalogSection": "Katalog",
     "loading": "Katalog yükleniyor…",
     "noResults": "Eşleşen sunucu yok.",
@@ -866,6 +874,11 @@
         "title": "Güncellemeler nasıl çalışır",
         "description": "Sürümler ayrı dağıtılır; yükseltme adımları için proje belgelerine bakın."
       }
+    },
+    "groups": {
+      "account": "Hesap",
+      "appearance": "Görünüm",
+      "behavior": "Davranış"
     }
   },
   "palette": {
@@ -890,5 +903,9 @@
     "switchBot": "{{name}} botuna geç",
     "runSchedule": "Şimdi çalıştır: {{name}}",
     "scheduleStarted": "Zamanlama başlatıldı"
+  },
+  "window": {
+    "minimize": "Küçült",
+    "maximize": "Büyüt / geri yükle"
   }
 }

@@ -13,7 +13,7 @@
     "--color-accent-contrast": "#1A100B",
     "--color-accent-text": "#7C4525",
     "--color-border": "#D8D3CC",
-    "--color-border-strong": "#7D7066",
+    "--color-border-strong": "#BDB5AC",
     "--color-text-inverse": "#1A100B",
     "--color-accent-hover": "#DB825F",
     "--color-accent-subtle": "color-mix(in srgb, #C86B4A 12%, #FAF8F5)",
@@ -26,8 +26,8 @@
     "--color-danger-contrast": "#FFFFFF",
     "--color-danger-subtle": "color-mix(in srgb, var(--color-danger) 10%, #FAF8F5)",
     "--color-warning-subtle": "color-mix(in srgb, var(--color-warning) 10%, #FAF8F5)",
-    "--color-focus": "#7D7066",
-    "--color-scrollbar": "#7D7066",
+    "--color-focus": "#8A4E2A",
+    "--color-scrollbar": "#BDB5AC",
     "--color-selection": "#D8D3CC",
     "--color-selection-text": "#1A1A1A",
     "--color-code-bg": "#F4F1ED",
@@ -45,7 +45,11 @@
     "--shadow-overlay": "0 24px 80px #100e0c30, 0 2px 8px #100e0c14",
     "--shadow-focus": "0 0 0 2px var(--color-background), 0 0 0 4px var(--color-focus)",
     "--shadow-target": "0 0 0 4px var(--color-accent-subtle)",
-    "--shadow-human-banner": "0 0 0 3px var(--color-warning-subtle)"
+    "--shadow-human-banner": "0 0 0 3px var(--color-warning-subtle)",
+    "--color-primary": "#1A1A1A",
+    "--color-primary-contrast": "#FFFFFF",
+    "--color-logo-tile": "#F5F5F3",
+    "--color-creature-eyes": "#172125"
   },
   "background": {
     "url": "",

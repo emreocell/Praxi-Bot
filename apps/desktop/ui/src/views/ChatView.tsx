@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowUp, Bookmark, MessageSquare, Square, Zap } from "lucide-react";
+import { ArrowLeft, ArrowUp, Bookmark, Plus, X, Square, Zap } from "lucide-react";
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -9,7 +9,8 @@ import {
   useState
 } from "react";
 import { useTranslation } from "react-i18next";
-import { Avatar, Button } from "ui";
+import { BotAvatar, Button } from "ui";
+import { isMockMode } from "../api/mock";
 import { ApiError } from "../api/client";
 import type { Message, SendMode } from "../api/types";
 import {
@@ -60,6 +61,7 @@ import styles from "./ChatView.module.css";
 const LIVE_STATES = new Set(["pending", "running", "waiting_approval"]);
 
 type Entry =
+  | { kind: "day"; key: string; ts: number }
   | { kind: "user"; key: string; ts: number; text: string }
   | { kind: "assistant"; key: string; ts: number; text: string; live: boolean }
   | { kind: "item"; key: string; ts: number; item: TimelineItem; runId: string }
@@ -138,6 +140,8 @@ export function ChatView({
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [attachments, setAttachments] = useState<{ name: string; content: string }[]>([]);
   const [mode, setMode] = useState<SendMode>("queue");
   const [sending, setSending] = useState(false);
   const [caret, setCaret] = useState(0);
@@ -148,6 +152,13 @@ export function ChatView({
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const stickToBottom = useRef(true);
   const [remember, setRemember] = useState<Record<string, RememberState>>({});
+  useEffect(() => {
+    const el = inputRef.current;
+    if (el) {
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, parseFloat(getComputedStyle(el).maxHeight))}px`;
+    }
+  }, [text]);
   const mountedAt = useRef(Date.now());
   const switchedFor = useRef(new Set<string>());
 
@@ -285,7 +296,9 @@ export function ChatView({
       }
     }
     // Array.prototype.sort is stable: equal timestamps keep insertion order.
-    return out.sort((a, b) => a.ts - b.ts);
+    const sorted = out.sort((a, b) => a.ts - b.ts);
+    return sorted.flatMap((entry, index): Entry[] => index === 0 || new Date(entry.ts).toDateString() !== new Date(sorted[index - 1].ts).toDateString()
+      ? [{ kind: "day", key: `day-${entry.key}`, ts: entry.ts }, entry] : [entry]);
   }, [messages, chatRuns, showAgentRoute, remember]);
 
   const lastItem = entries[entries.length - 1];
@@ -365,7 +378,7 @@ export function ChatView({
   };
 
   const send = async () => {
-    let body = text.trim();
+    let body = [text.trim(), ...attachments.map(f => `--- ${f.name} ---\n${f.content}`)].filter(Boolean).join("\n\n");
     if (!client || !body || sending) {
       return;
     }
@@ -382,6 +395,7 @@ export function ChatView({
         await client.sendMessage(created.id, mention.rest);
         await refreshChats().catch(() => {});
         setText("");
+        setAttachments([]);
         onSwitchChat?.(created.id);
         return;
       }
@@ -397,6 +411,7 @@ export function ChatView({
         toast.show(t("chat.stopped"), "info");
       }
       setText("");
+      setAttachments([]);
       stickToBottom.current = true;
       await Promise.all([loadMessages(), refreshRuns()]);
     } catch (e) {
@@ -471,14 +486,10 @@ export function ChatView({
     }
   };
 
-  const botAvatar = (
-    <Avatar
-      name={view?.name ?? "?"}
-      src={view?.avatar}
-      color={view?.color}
-      size="sm"
-    />
-  );
+  const awaitingApproval = serverLive?.state === "waiting_approval" || chatRuns.some(run => run.finishedMs === undefined && run.items.some(item => item.kind === "tool" && item.status === "awaiting_approval"));
+  const lastFailed = [...chatRuns].reverse()[0]?.error;
+  const avatarState = awaitingApproval ? "waiting-approval" : active ? (lastItem?.kind === "item" && lastItem.item.kind === "tool" ? "working" : "thinking") : lastFailed ? "error" : "idle";
+  const botAvatar = <BotAvatar bot={view ?? { id: chat?.bot_id ?? "unknown", name: "Bot" }} size="sm" state={avatarState} />;
 
   const rememberRun = async (runId: string) => {
     if (!client) {
@@ -597,8 +608,8 @@ export function ChatView({
   return (
     <div className={styles.root}>
       <header className={styles.header}>
-        <Button size="sm" variant="ghost" onClick={onBack}>
-          <ArrowLeft />{t("common.back")}
+        <Button size="sm" variant="ghost" title={t("common.back")} aria-label={t("common.back")} onClick={onBack}>
+          <ArrowLeft />
         </Button>
         {botAvatar}
         <div className={styles.headerText}>
@@ -630,12 +641,14 @@ export function ChatView({
         onScroll={onScroll}
         data-testid="chat-timeline"
       >
-        <div className={styles.timeline}><div className={styles.conversationLabel}>{t("chat.conversationLabel")}</div>
+        <div className={styles.timeline}>
           {entries.length === 0 ? (
-            <div className={styles.emptyConversation}><MessageSquare /><p className={styles.hint}>{t("chat.emptyHint")}</p></div>
+            <div className={styles.emptyConversation}><BotAvatar bot={view ?? { id: "bot", name: "Bot" }} size="hero" /><h1>{t("chat.emptyTitle", { name: view?.name })}</h1><p className={styles.hint}>{t("chat.emptyHint")}</p></div>
           ) : null}
           {entries.map((e) => {
             switch (e.kind) {
+              case "day":
+                return <div key={e.key} className={styles.conversationLabel}>{isMockMode() || new Date(e.ts).toDateString() === new Date().toDateString() ? t("chat.conversationLabel") : new Intl.DateTimeFormat(undefined, { day: "numeric", month: "long" }).format(e.ts)}</div>;
               case "user":
                 return (
                   <div key={e.key} className={styles.userRow}>
@@ -792,12 +805,23 @@ export function ChatView({
             ))}
           </ul>
         ) : null}
+        {attachments.length > 0 ? <div className={styles.attachments} aria-label={t("chat.attachments")}>{attachments.map((f,i) => <button key={`${f.name}-${i}`} onClick={() => setAttachments(prev => prev.filter((_,idx) => idx !== i))} title={t("chat.removeAttachment", { name: f.name })} aria-label={t("chat.removeAttachment", { name: f.name })}>{f.name}<X /></button>)}</div> : null}
         <div className={styles.inputRow}>
+          <input type="file" ref={fileRef} className={styles.hidden} accept=".txt,.md,.csv,.json,.ts,.js,.py,.html,.css,.log" multiple onChange={async e => {
+            const files = [...(e.target.files ?? [])];
+            try {
+              if (files.some(f => f.size > 1024 * 1024)) throw new Error(t("chat.fileTooLarge"));
+              const added = await Promise.all(files.map(async f => ({ name: f.name, content: await f.text() })));
+              setAttachments(prev => [...prev, ...added]);
+            } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+            e.target.value = "";
+          }} />
+          <button className={styles.attachButton} title={t("chat.attach")} aria-label={t("chat.attach")} onClick={() => fileRef.current?.click()}><Plus /></button>
           <textarea
             ref={inputRef}
             className={styles.input}
             value={text}
-            rows={2}
+            rows={1}
             placeholder={
               active ? t("chat.placeholderBusy") : t("chat.placeholder")
             }
@@ -810,12 +834,15 @@ export function ChatView({
             onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onKeyDown={onKeyDown}
           />
+          {bot ? <div className={styles.composerModel}><ModelPicker groups={pickerGroups} value={view?.executor ?? ""} disabled={!client} onPick={ref => void pickModel(ref)} reviewOpen={false} /></div> : null}
           <Button
             variant="primary"
-            disabled={sending || !text.trim()}
+            disabled={sending || (!text.trim() && attachments.length === 0)}
+            title={t("chat.send")}
+            aria-label={t("chat.send")}
             onClick={() => void send()}
           >
-            <ArrowUp />{t("chat.send")}
+            <ArrowUp />
           </Button>
         </div>
       <p className={styles.composerHint}>{t("chat.composerHint")}</p></footer>

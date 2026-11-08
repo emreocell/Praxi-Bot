@@ -1,7 +1,9 @@
-import { BrainCircuit, Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { filterModelGroups, type ModelGroup } from "../lib/modelPicker";
+import { BrandIcon } from "./BrandIcon";
+import { isMockMode } from "../api/mock";
 import styles from "./ModelPicker.module.css";
 
 /**
@@ -13,19 +15,25 @@ export function ModelPicker({
   value,
   onPick,
   disabled = false,
-  placeholder
+  placeholder,
+  reviewOpen = true
 }: {
   groups: ModelGroup[];
   value: string;
   onPick: (ref: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  reviewOpen?: boolean;
 }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(() => reviewOpen && isMockMode() && new URLSearchParams(window.location.search).get("screen") === "models");
   const [query, setQuery] = useState("");
   const root = useRef<HTMLDivElement | null>(null);
-  const shown = useMemo(() => filterModelGroups(groups, query), [groups, query]);
+  const shown = useMemo(() => filterModelGroups(groups, query).sort((a,b) => {
+    const order = [groups[0]?.provider, "openai", "gemini", "ollama", "claude-code"];
+    const priority = (id: string) => order.includes(id) ? order.indexOf(id) : order.length;
+    return priority(a.provider) - priority(b.provider);
+  }), [groups, query]);
 
   useEffect(() => {
     if (!open) {
@@ -77,7 +85,7 @@ export function ModelPicker({
         data-testid="model-picker"
         onClick={() => setOpen((o) => !o)}
       >
-        <BrainCircuit /><span className={styles.triggerText}>
+        <BrandIcon name={value.split("/")[0]} small /><span className={styles.triggerText}>
           {value.split("/").pop() || placeholder || t("modelPicker.none")}
         </span>
         <ChevronDown />
@@ -98,7 +106,7 @@ export function ModelPicker({
             ) : (
               shown.map((g) => (
                 <div key={g.provider} className={styles.group} role="group" aria-label={g.provider}>
-                  <div className={styles.groupLabel}>{g.provider}</div>
+                  <div className={styles.groupLabel}><BrandIcon name={g.provider} small />{g.provider === "gemini" ? "Google Gemini" : g.provider === "claude-code" ? "Claude Code CLI" : g.provider === "openai" ? "OpenAI" : g.provider === "anthropic" ? "Anthropic" : g.provider === "ollama" ? "Ollama" : g.provider}</div>
                   {g.models.map((m) => (
                     <button
                       key={m.ref}

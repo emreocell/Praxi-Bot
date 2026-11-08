@@ -94,3 +94,9 @@
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
+
+.root { width: auto; flex-shrink: 0; }
+.trigger { width: var(--space-10); height: var(--space-10); padding: var(--space-1); border-radius: var(--radius-pill); }
+.avatar { width: var(--space-8); height: var(--space-8); font-weight: var(--font-weight-medium); }
+.menu { width: calc(var(--size-sidebar-width) - var(--space-8)); right: auto; bottom: calc(100% + var(--space-3)); padding: var(--space-2); border-color: var(--color-border); }
+.item { min-height: var(--space-10); }

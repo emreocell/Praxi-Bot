@@ -150,3 +150,18 @@
 .switch { height: var(--space-6); width: var(--space-10); }
 .switchOn .thumb { background-color: var(--color-accent-contrast); }
 .thumb { background-color: var(--color-text); }
+
+.group { background: var(--color-surface-elevated); border-color: transparent; border-radius: var(--radius-card); }
+.group > div + div { border-color: var(--color-border); }
+.row { padding: var(--space-4); min-height: calc(var(--space-16) + var(--space-2)); gap: var(--space-5); }
+.rowTitle { font-size: var(--font-size-ui); font-weight: var(--font-weight-medium); }
+.rowDesc { line-height: var(--line-height-normal); }
+.stacked { align-items: stretch; }
+.segmented { border: none; background: var(--color-surface-active); border-radius: var(--radius-pill); padding: var(--size-border-heavy); gap: 0; }
+.segment { border-radius: var(--radius-pill); }
+.segmentActive, .segmentActive:hover { background: var(--color-surface); }
+.switchOn { background: var(--color-primary); border-color: transparent; }
+.switchOn .thumb { background: var(--color-primary-contrast); }
+
+/* stylelint-disable-next-line unit-disallowed-list -- desktop window resize boundary */
+@media (width <= 56em) { .row { flex-wrap: wrap; gap: var(--space-3); } .rowControl { max-width: 100%; } }

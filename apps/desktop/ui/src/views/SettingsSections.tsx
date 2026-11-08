@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Avatar, Button, Card } from "ui";
+import { BotAvatar, Button, Card } from "ui";
 import {
   type Bot,
   type GrantTarget,
@@ -351,7 +351,7 @@ function BotPermissions({ bot }: { bot: Bot }) {
   return (
     <div className={styles.botPerm}>
       <div className={styles.botPermHead}>
-        <Avatar name={view.name} src={view.avatar} color={view.color} size="sm" />
+        <BotAvatar bot={view} size="sm" />
         <span className={styles.rowName}>{view.name}</span>
       </div>
       {error ? <p className={formStyles.error}>{error}</p> : null}

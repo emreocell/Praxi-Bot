@@ -1,0 +1,6 @@
+.tile { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: var(--space-12); height: var(--space-12); border-radius: 26%; background: var(--color-logo-tile); color: var(--brand-color); font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); }
+.tile > svg { width: 60%; height: 60%; fill: var(--brand-color); }
+.tile > svg:global(.lucide) { fill: none; }
+.small { width: var(--space-6); height: var(--space-6); border-radius: 25%; font-size: var(--font-size-xs); }
+
+.tile > img { width: 64%; height: 64%; object-fit: contain; }
