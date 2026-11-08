@@ -909,6 +909,7 @@ fn kind_name(k: &provider_catalog::ProviderKind) -> String {
         ProviderKind::OpenAiCompatible => "openai_compatible".to_owned(),
         ProviderKind::Anthropic => "anthropic".to_owned(),
         ProviderKind::Gemini => "gemini".to_owned(),
+        ProviderKind::Cli => "cli".to_owned(),
         ProviderKind::Other(o) => format!("other:{o}"),
     }
 }
@@ -940,7 +941,15 @@ pub(crate) async fn list_providers(
     let cfg = provider_catalog::ProviderConfig::load(&provider_catalog::config_path(&s.data_dir()))
         .map_err(|e| ApiError::internal(format!("providers.toml: {e}")))?;
     let live = s.agent().providers();
-    let active = live.ids();
+    let mut active = live.ids();
+    active.extend(
+        cfg.providers
+            .iter()
+            .filter(|p| p.enabled && p.cli.is_some())
+            .map(|p| p.id.clone()),
+    );
+    active.sort();
+    active.dedup();
     let default_id = cfg.effective_default().map(|d| d.id.clone());
     let lookups = cfg.providers.iter().map(|p| models_of(live.get(&p.id)));
     let models = futures::future::join_all(lookups).await;
@@ -985,6 +994,18 @@ pub(crate) async fn list_providers(
                 .collect()
         })
         .unwrap_or_default();
+    for p in cfg.providers.iter().filter(|p| p.cli.is_some()) {
+        catalog.push(CatalogProviderDto {
+            id: p.id.clone(),
+            kind: "cli".into(),
+            base_url: String::new(),
+            auth: "none".into(),
+            key_env: None,
+            tools: true,
+            vision: false,
+            configured: true,
+        });
+    }
     catalog.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(Json(ProvidersDto {
         default_provider: (!live.setup_required()).then(|| live.default_id().to_owned()),

@@ -82,6 +82,9 @@ fn setup_with(prepare: impl FnOnce(&std::path::Path)) -> T {
         LoopConfig::default(),
     );
     let state = AppState::new(agent.clone(), storage, DaemonConfig::new(TOKEN)).unwrap();
+    state.set_detector(Arc::new(cli_provider::Detector::with_env(
+        cli_provider::PathEnv::for_test(dir.path().join("sealed-cli-path")),
+    )));
     T {
         app: router(state.clone()),
         state,
@@ -2504,4 +2507,33 @@ async fn peer_control_state_changes_are_audited_with_the_device_as_actor() {
         .filter(|e| format!("{e:?}").contains("phone:Alice"))
         .count();
     assert_eq!(n, 4, "requested+completed for both calls: {audit:?}");
+}
+
+#[tokio::test]
+async fn providers_lists_secret_free_cli_records_without_probing() {
+    let t = setup();
+    let mut p = provider_catalog::ProviderSettings::new("cli:codex", 0);
+    p.cli = Some(provider_catalog::config::CliSettings::Cli {
+        engine: provider_catalog::config::CliEngine::Codex,
+        command: "missing-c062-fixture".into(),
+    });
+    let cfg = provider_catalog::ProviderConfig {
+        providers: vec![p],
+        default_provider: None,
+    };
+    cfg.save(&provider_catalog::config_path(t.state.storage().data_dir()))
+        .unwrap();
+    let response = call(&t, Method::GET, "/v1/providers", None).await;
+    assert_eq!(response.status, StatusCode::OK);
+    let v = response.json();
+    assert_eq!(v["configured"][0]["id"], "cli:codex");
+    assert_eq!(v["configured"][0]["has_key"], false);
+    assert_eq!(v["configured"][0]["active"], true);
+    assert!(
+        v["catalog"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["id"] == "cli:codex" && r["kind"] == "cli")
+    );
 }
