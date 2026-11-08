@@ -84,6 +84,12 @@ impl EventJournal {
         let handle = std::thread::Builder::new()
             .name("event-journal".into())
             .spawn(move || writer_loop(&rx, sink, &thread_errors))
+            .map_err(|e| {
+                eprintln!(
+                    "error: event journal thread did not start: {e}; events are NOT persisted"
+                );
+                errors.fetch_add(1, Ordering::Relaxed);
+            })
             .ok();
         Self {
             tx: Some(tx),
@@ -132,6 +138,13 @@ impl Drop for EventJournal {
     }
 }
 
+/// Count a sink failure; the first one is also logged.
+fn note_error(errors: &AtomicU64, what: &str, e: &crate::error::StorageError) {
+    if errors.fetch_add(1, Ordering::Relaxed) == 0 {
+        eprintln!("error: event journal {what} failed: {e} (further failures are only counted)");
+    }
+}
+
 fn writer_loop(rx: &Receiver<Msg>, mut sink: impl JournalSink, errors: &AtomicU64) {
     while let Ok(first) = rx.recv() {
         let mut msgs = vec![first];
@@ -150,15 +163,15 @@ fn writer_loop(rx: &Receiver<Msg>, mut sink: impl JournalSink, errors: &AtomicU6
         for m in msgs {
             match m {
                 Msg::Rec(rec) => {
-                    if sink.write(&rec).is_err() {
-                        errors.fetch_add(1, Ordering::Relaxed);
+                    if let Err(e) = sink.write(&rec) {
+                        note_error(errors, "write", &e);
                     }
                 }
                 Msg::Barrier(b) => barriers.push(b),
             }
         }
-        if sink.sync().is_err() {
-            errors.fetch_add(1, Ordering::Relaxed);
+        if let Err(e) = sink.sync() {
+            note_error(errors, "sync", &e);
         }
         for b in barriers {
             let _ = b.send(());
@@ -204,10 +217,10 @@ impl JournalSink for FsJournalSink {
             w.append_buffered(&rec.envelope)?;
             *dirty = true;
         }
-        let _ = self
-            .storage
-            .index_event(rec.gseq, rec.run_id, rec.envelope.seq);
-        Ok(())
+        // The line is already written; a failing index row is reported (counted
+        // and logged by the journal), not ignored.
+        self.storage
+            .index_event(rec.gseq, rec.run_id, rec.envelope.seq)
     }
 
     fn sync(&mut self) -> Result<()> {
@@ -377,6 +390,28 @@ mod tests {
         assert_eq!(written.len(), 400);
         let gs: Vec<u64> = written.iter().map(|r| r.gseq).collect();
         assert!(gs.windows(2).all(|p| p[0] < p[1]), "gseq not monotonic");
+    }
+
+    struct FailSink;
+
+    impl JournalSink for FailSink {
+        fn write(&mut self, _: &JournalRecord) -> Result<()> {
+            Err(std::io::Error::other("disk full").into())
+        }
+        fn sync(&mut self) -> Result<()> {
+            Err(std::io::Error::other("disk full").into())
+        }
+    }
+
+    // Review #10: sink failures are counted (and the first one logged), and a
+    // barrier still returns instead of hanging.
+    #[test]
+    fn sink_failures_are_counted_and_barrier_still_returns() {
+        let journal = EventJournal::new(FailSink);
+        assert_eq!(journal.error_count(), 0);
+        journal.append(todo(RunId::new(), 1, 0));
+        journal.flush();
+        assert!(journal.error_count() >= 2, "{}", journal.error_count());
     }
 
     #[test]

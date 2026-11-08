@@ -61,6 +61,7 @@ impl AgentLoop {
         providers: Providers,
         cfg: LoopConfig,
     ) -> Self {
+        let providers = providers.with_redactor(cfg.redactor.clone());
         let (events, _) = broadcast::channel(4096);
         let first_gseq = storage.last_gseq().unwrap_or(0);
         // The discovery meta-tools only reveal what the calling bot may see.
@@ -94,6 +95,7 @@ impl AgentLoop {
                 bg: Mutex::new(Vec::new()),
                 gseq: AtomicU64::new(first_gseq),
                 emit_gate: Mutex::new(()),
+                send_gate: Mutex::new(()),
                 shutting_down: AtomicBool::new(false),
                 rt: OnceLock::new(),
                 spawn_gate: Mutex::new(()),
@@ -210,7 +212,7 @@ impl AgentLoop {
     /// Replace the providers (after `POST /v1/providers/reload`); runs already
     /// streaming keep the provider they started with.
     pub fn set_providers(&self, providers: Providers) {
-        *self.sh.providers.write() = providers;
+        *self.sh.providers.write() = providers.with_redactor(self.sh.cfg.redactor.clone());
         // The K2 embedder and the K3 classifier come from the providers.
         self.sh.router.reset();
     }
@@ -745,7 +747,22 @@ impl AgentLoop {
         }
         let _ =
             tokio::time::timeout(grace.max(Duration::from_secs(1)), self.flush_background()).await;
+        // Everything emitted so far (including the tail events of the runs just
+        // paused) must be on disk before the process exits.
+        self.flush_journal();
         paused
+    }
+
+    /// Make every event emitted so far durable (blocks until the journal
+    /// writer has synced them).
+    pub fn flush_journal(&self) {
+        self.sh.flush_journal();
+    }
+
+    /// Journal write/sync failures since start (0 = healthy).
+    #[must_use]
+    pub fn journal_error_count(&self) -> u64 {
+        self.sh.journal_error_count()
     }
 
     /// Whether the run's newest step is a tool step that is still executing
@@ -843,13 +860,16 @@ impl AgentLoop {
         run_id: RunId,
         text: &str,
     ) -> Result<()> {
+        // A key pasted into the chat is stored (and replayed into every later
+        // provider request) masked.
+        self.sh.refresh_redactor();
         self.sh.storage.insert_message(&DbMessage {
             id: Uuid::now_v7(),
             user_id,
             chat_id,
             run_id: Some(run_id),
             role: "user".to_owned(),
-            content: text.to_owned(),
+            content: self.sh.redact(text.to_owned()),
             created_at_ms: now_ms(),
         })?;
         Ok(())
@@ -951,11 +971,17 @@ impl AgentLoop {
             Ok(other) => Some(format!("stopped in state {other}")),
             Err(e) => Some(e.to_string()),
         };
+        // Provider errors can carry URLs with `?key=...`.
+        let error = error.map(|e| self.sh.redact(e));
         if error.is_none()
             && let Some(run) = &run
             && let Some(chat_id) = run.chat_id
             && let Some(text) = self.final_text(run_id)
         {
+            // The final answer is persisted, replayed into later requests and fed
+            // to memory extraction: mask it as a whole (a secret split across
+            // streamed deltas is only whole here).
+            let text = self.sh.redact(text);
             let _ = self.sh.storage.insert_message(&DbMessage {
                 id: Uuid::now_v7(),
                 user_id: run.user_id,

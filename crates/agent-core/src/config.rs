@@ -111,11 +111,25 @@ impl MemoryConfig {
     }
 }
 
+/// Refresh callback of a [`SharedRedactor`] (re-reads the secret sources).
+pub type RedactorRefreshFn = Arc<dyn Fn(&SharedRedactor) + Send + Sync>;
+
+#[derive(Default)]
+struct RedactorInner {
+    redactor: RwLock<Redactor>,
+    /// Values registered by hand (`register`); they survive a refresh.
+    pinned: parking_lot::Mutex<Vec<String>>,
+    refresher: RwLock<Option<RedactorRefreshFn>>,
+}
+
 /// A [`Redactor`] that can be replaced while the loop runs (secrets are added
 /// and rotated after startup).  Clones share the same underlying redactor, so
 /// the daemon keeps a handle to refresh what the loop already uses.
+///
+/// Every registered secret is also masked in its JSON-escaped, URL-encoded and
+/// base64 (standard and URL-safe) forms.
 #[derive(Clone, Default)]
-pub struct SharedRedactor(Arc<RwLock<Redactor>>);
+pub struct SharedRedactor(Arc<RedactorInner>);
 
 impl std::fmt::Debug for SharedRedactor {
     // Never print the registered secret values.
@@ -130,22 +144,92 @@ impl From<Redactor> for SharedRedactor {
     }
 }
 
+/// `value` plus its JSON-escaped, URL-encoded and base64 (standard and
+/// URL-safe, at each of the three byte alignments) renderings.
+#[must_use]
+pub fn secret_variants(value: &str) -> Vec<String> {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::{STANDARD_NO_PAD, URL_SAFE_NO_PAD};
+    let mut out = vec![value.to_owned()];
+    if let Ok(j) = serde_json::to_string(value) {
+        out.push(j[1..j.len() - 1].to_owned());
+    }
+    let mut url = String::new();
+    for b in value.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            url.push(char::from(b));
+        } else {
+            {
+                use std::fmt::Write as _;
+                let _ = write!(url, "%{b:02X}");
+            }
+        }
+    }
+    out.push(url);
+    // Base64 of a substring depends on its alignment in the encoded text; the
+    // stable middle of each of the 3 alignments is what appears in practice.
+    for k in 0..3usize {
+        let mut bytes = vec![0u8; k];
+        bytes.extend_from_slice(value.as_bytes());
+        let lead = [0, 2, 3][k];
+        let trail = usize::from(bytes.len() % 3 != 0);
+        for enc in [
+            STANDARD_NO_PAD.encode(&bytes),
+            URL_SAFE_NO_PAD.encode(&bytes),
+        ] {
+            if enc.len() > lead + trail {
+                out.push(enc[lead..enc.len() - trail].to_owned());
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn add_with_variants(r: &mut Redactor, value: &str) {
+    for v in secret_variants(value) {
+        r.add_secret(&v);
+    }
+}
+
 impl SharedRedactor {
     /// Share `r`.
     #[must_use]
     pub fn new(r: Redactor) -> Self {
-        Self(Arc::new(RwLock::new(r)))
+        let s = Self::default();
+        *s.0.redactor.write() = r;
+        s
     }
 
-    /// Replace the redactor atomically.
-    pub fn replace(&self, r: Redactor) {
-        *self.0.write() = r;
+    /// Replace the redactor atomically (pinned values are kept).
+    pub fn replace(&self, mut r: Redactor) {
+        for v in self.0.pinned.lock().iter() {
+            add_with_variants(&mut r, v);
+        }
+        *self.0.redactor.write() = r;
+    }
+
+    /// Mask `value` (and its encoded forms) from now on, immediately and
+    /// across later refreshes.
+    pub fn register(&self, value: &str) {
+        if value.len() < 6 {
+            return;
+        }
+        {
+            let mut pinned = self.0.pinned.lock();
+            if !pinned.iter().any(|p| p == value) {
+                pinned.push(value.to_owned());
+            }
+        }
+        add_with_variants(&mut self.0.redactor.write(), value);
     }
 
     /// Rebuild from every value in `store` plus `extra` literal secrets (the
-    /// daemon token, the vault passphrase).  On a backend failure the previous
-    /// redactor stays in place (fail closed: nothing already known is dropped)
-    /// and the error is returned.
+    /// daemon token, the vault passphrase, environment keys), each with its
+    /// encoded variants.  On a backend failure the previous redactor stays in
+    /// place (fail closed: nothing already known is dropped) and the error is
+    /// returned.
     ///
     /// # Errors
     /// Backend failures while reading the store.
@@ -154,27 +238,44 @@ impl SharedRedactor {
         store: Option<&dyn SecretStore>,
         extra: &[String],
     ) -> Result<(), secret_store::SecretError> {
-        let mut r = match store {
-            Some(s) => Redactor::from_store(s)?,
-            None => Redactor::new(),
-        };
+        let mut r = Redactor::new();
+        if let Some(s) = store {
+            for name in s.list_names()? {
+                if let Some(v) = s.get(&name)? {
+                    add_with_variants(&mut r, v.expose());
+                }
+            }
+        }
         for e in extra {
-            r.add_secret(e);
+            add_with_variants(&mut r, e);
         }
         self.replace(r);
         Ok(())
     }
 
+    /// Install the callback [`Self::refresh_now`] runs.
+    pub fn set_refresher(&self, f: RedactorRefreshFn) {
+        *self.0.refresher.write() = Some(f);
+    }
+
+    /// Re-read the secret sources now (no-op without a refresher).
+    pub fn refresh_now(&self) {
+        let f = self.0.refresher.read().clone();
+        if let Some(f) = f {
+            f(self);
+        }
+    }
+
     /// Mask all known values and patterns in `text`.
     #[must_use]
     pub fn redact(&self, text: &str) -> String {
-        self.0.read().redact(text)
+        self.0.redactor.read().redact(text)
     }
 
     /// Whether `text` contains anything that would be masked.
     #[must_use]
     pub fn contains_secret(&self, text: &str) -> bool {
-        self.0.read().contains_secret(text)
+        self.0.redactor.read().contains_secret(text)
     }
 }
 

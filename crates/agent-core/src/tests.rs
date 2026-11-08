@@ -2539,6 +2539,161 @@ async fn concurrent_emit_keeps_gseq_and_seq_monotonic_in_journal_and_stream() {
     assert_eq!(journaled, streamed, "journal order must equal stream order");
 }
 
+// ---------- review fix round: persistence, request, encodings, shutdown ----------
+
+fn persona_profile(persona: &str) -> BotProfile {
+    BotProfile::from_toml_str(&format!(
+        "[bot]\nid = \"t\"\nname = \"T\"\npersona = \"{persona}\"\n[models]\nexecutor = \"fake/m\"\n"
+    ))
+    .unwrap()
+}
+
+fn redactor_with(secret: &str) -> crate::SharedRedactor {
+    let h = crate::SharedRedactor::default();
+    h.register(secret);
+    h
+}
+
+#[tokio::test]
+async fn persisted_messages_and_provider_request_are_redacted() {
+    let env = setup();
+    let secret = "plain-sentinel-KEY-5150";
+    let fake = Fake::new(vec![text(&format!("the key is {secret}"))]);
+    let mut config = cfg(Policy::full());
+    config.redactor = Some(redactor_with(secret));
+    // The secret sits in the system prompt (persona) and in the user text.
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        persona_profile(&format!("You are T. Internal: {secret}")),
+        config,
+    );
+    let run = lp
+        .run_turn(env.chat, &format!("please keep {secret} safe"))
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    // Provider request: every message (system prompt and user text).
+    let req = serde_json::to_string(&fake.request(0).messages).unwrap();
+    assert!(!req.contains(secret), "leaked to the provider: {req}");
+    assert!(req.contains("[REDACTED]"));
+    // Stored chat messages: user text and the assistant's final answer.
+    let msgs = env.storage.list_messages(env.chat).unwrap();
+    assert!(msgs.len() >= 2);
+    for m in &msgs {
+        assert!(
+            !m.content.contains(secret),
+            "stored {}: {}",
+            m.role,
+            m.content
+        );
+    }
+    assert!(msgs.iter().any(|m| m.content.contains("[REDACTED]")));
+}
+
+#[test]
+fn redact_event_fails_closed_when_the_event_cannot_be_transformed() {
+    let run = protocol::RunId::new();
+    let r = redactor_with("fail-closed-secret-1");
+    let ev = delta_event(run, "fail-closed-secret-1 raw");
+    let broken = serde_json::from_str::<Value>("{");
+    assert!(broken.is_err());
+    let out = crate::shared::redact_event_checked(&r, run, ev, broken);
+    let json = serde_json::to_string(&out).unwrap();
+    assert!(!json.contains("fail-closed-secret-1"), "{json}");
+    assert!(matches!(out, Event::Error(_)));
+    // A redacted value that no longer deserialises is withheld too.
+    let ev = delta_event(run, "x");
+    let bad =
+        json!({"type": "message_delta", "run_id": "not-a-uuid", "text": "fail-closed-secret-1"});
+    let out = crate::shared::redact_event_checked(&r, run, ev, Ok(bad));
+    assert!(matches!(out, Event::Error(_)), "{out:?}");
+}
+
+#[test]
+fn encoded_forms_of_a_secret_are_masked() {
+    use base64::Engine as _;
+    let secret = "s3cr3t/Value+with=odd\"chars\nline2";
+    let h = crate::SharedRedactor::default();
+    h.refresh_from_store(None, &[secret.to_owned()]).unwrap();
+    let json_form = serde_json::to_string(secret).unwrap();
+    let url_form: String = secret
+        .bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() {
+                char::from(b).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect();
+    let b64_std = base64::engine::general_purpose::STANDARD.encode(secret);
+    let b64_url = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(secret);
+    // Embedded at every alignment inside a larger base64 text (basic-auth style).
+    let embedded: Vec<String> = ["", "a", "ab"]
+        .iter()
+        .map(|p| base64::engine::general_purpose::STANDARD.encode(format!("{p}user:{secret}tail")))
+        .collect();
+    for (name, form) in [
+        ("plain", secret.to_owned()),
+        ("json", json_form),
+        ("url", url_form),
+        ("b64", b64_std),
+        ("b64url", b64_url),
+        ("emb0", embedded[0].clone()),
+        ("emb1", embedded[1].clone()),
+        ("emb2", embedded[2].clone()),
+    ] {
+        assert!(h.contains_secret(&format!("x {form} y")), "{name}: {form}");
+    }
+    // Whole-secret forms are fully masked, not just detected.
+    assert!(
+        !h.redact(&format!("a {} b", serde_json::to_string(secret).unwrap()))
+            .contains("odd")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn shutdown_flushes_non_barrier_tail_events_to_the_journal() {
+    let probe = ProbeSink {
+        sync_delay: Duration::from_millis(200),
+        ..ProbeSink::default()
+    };
+    let (_env, lp, run) = loop_with_probe(&probe).await;
+    let ctx = run_ctx(&lp, run);
+    lp.sh.emit(&ctx, delta_event(run, "tail-before-shutdown"));
+    lp.shutdown(Duration::from_millis(50)).await;
+    let w = probe.written.lock();
+    assert!(
+        w.iter().any(|r| matches!(
+            &r.envelope.event,
+            Event::MessageDelta(d) if d.text == "tail-before-shutdown"
+        )),
+        "tail event not durable after shutdown"
+    );
+}
+
+#[tokio::test]
+async fn redactor_is_refreshed_at_run_start_and_before_the_user_message_is_stored() {
+    let env = setup();
+    let secret = "late-added-secret-8841";
+    let fake = Fake::new(vec![text("ok")]);
+    let handle = crate::SharedRedactor::default();
+    // The "store" learns the secret only when the loop asks for a refresh.
+    handle.set_refresher(Arc::new(move |h| h.register(secret)));
+    let mut config = cfg(Policy::full());
+    config.redactor = Some(handle.clone());
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
+    assert!(!handle.contains_secret(secret));
+    let run = lp.run_turn(env.chat, &format!("here: {secret}")).unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let msgs = env.storage.list_messages(env.chat).unwrap();
+    assert!(msgs.iter().all(|m| !m.content.contains(secret)), "{msgs:?}");
+    let req = serde_json::to_string(&fake.request(0).messages).unwrap();
+    assert!(!req.contains(secret), "{req}");
+}
+
 // ---------- memory ----------
 
 fn memory_cfg() -> (Arc<memory_store::MemoryStore>, crate::MemoryConfig) {

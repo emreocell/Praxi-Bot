@@ -113,14 +113,55 @@ fn build_one(
 /// secret stored after startup is masked too.
 pub const REDACTOR_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
-/// Literal secrets that live outside the secret store: the daemon bearer token
-/// and the vault passphrase (when it comes from the environment).
-fn redactor_extras(api_token: &str, passphrase: Option<&str>) -> Vec<String> {
-    let mut v = vec![api_token.to_owned()];
-    if let Some(p) = passphrase.filter(|p| !p.is_empty()) {
-        v.push(p.to_owned());
+/// Environment variable name suffixes whose values are credentials.
+const ENV_SECRET_SUFFIXES: [&str; 3] = ["_API_KEY", "_TOKEN", "_SECRET"];
+
+/// Values of credential-looking environment variables (`*_API_KEY`, `*_TOKEN`,
+/// `*_SECRET`) and of the provider key variables named by the catalog or
+/// `providers.toml` (`catalog_vars`); values shorter than 6 bytes are skipped.
+fn env_secret_values(
+    vars: impl IntoIterator<Item = (String, String)>,
+    catalog_vars: &[String],
+) -> Vec<String> {
+    vars.into_iter()
+        .filter(|(name, value)| {
+            value.len() >= 6
+                && (catalog_vars.iter().any(|c| c == name)
+                    || ENV_SECRET_SUFFIXES
+                        .iter()
+                        .any(|s| name.to_ascii_uppercase().ends_with(s)))
+        })
+        .map(|(_, value)| value)
+        .collect()
+}
+
+const BUILTIN_CATALOG_SOURCES: &[&str] = &[
+    include_str!("../../../providers/catalog/anthropic.toml"),
+    include_str!("../../../providers/catalog/deepseek.toml"),
+    include_str!("../../../providers/catalog/gemini-openai-compat.toml"),
+    include_str!("../../../providers/catalog/gemini.toml"),
+    include_str!("../../../providers/catalog/lmstudio.toml"),
+    include_str!("../../../providers/catalog/ollama.toml"),
+    include_str!("../../../providers/catalog/openrouter.toml"),
+];
+
+/// Names of the environment variables that hold provider API keys: every
+/// `ApiKeyEnv` of the built-in catalog and of the user's custom providers.
+fn catalog_env_vars(data_dir: &Path) -> Vec<String> {
+    let mut entries: Vec<ProviderEntry> = BUILTIN_CATALOG_SOURCES
+        .iter()
+        .filter_map(|src| toml::from_str(src).ok())
+        .collect();
+    if let Ok(cfg) = ProviderConfig::load(&config_path(data_dir)) {
+        entries.extend(cfg.providers.into_iter().filter_map(|p| p.custom));
     }
-    v
+    entries
+        .into_iter()
+        .filter_map(|e| match e.auth {
+            Auth::ApiKeyEnv(var) => Some(var),
+            Auth::None => None,
+        })
+        .collect()
 }
 
 /// The vault passphrase from the environment, if any.
@@ -128,34 +169,76 @@ fn env_passphrase() -> Option<String> {
     std::env::var(PASSPHRASE_ENV).ok().filter(|p| !p.is_empty())
 }
 
-/// The production redactor: the built-in key shapes, every value in `store`,
-/// the daemon bearer token and the vault passphrase.  A store that cannot be
-/// read still yields the shapes plus the token and passphrase (fail closed).
-#[must_use]
-pub fn production_redactor(
-    store: Option<&dyn SecretStore>,
-    api_token: &str,
-    passphrase: Option<&str>,
-) -> SharedRedactor {
-    let extras = redactor_extras(api_token, passphrase);
+/// Where the redactor's secrets come from; re-read on every refresh.
+#[derive(Clone)]
+struct RedactorSources {
+    store: Option<Arc<dyn SecretStore>>,
+    api_token: String,
+    passphrase: Option<String>,
+    /// Provider key environment variables (see [`catalog_env_vars`]).
+    catalog_vars: Vec<String>,
+}
+
+impl RedactorSources {
+    /// Literal secrets outside the secret store: the daemon bearer token, the
+    /// vault passphrase and credential environment variables.
+    fn extras(&self) -> Vec<String> {
+        let mut v = vec![self.api_token.clone()];
+        v.extend(self.passphrase.iter().filter(|p| !p.is_empty()).cloned());
+        v.extend(env_secret_values(std::env::vars(), &self.catalog_vars));
+        v
+    }
+
+    /// Re-read everything into `handle`; on failure the previous contents stay.
+    fn refresh(&self, handle: &SharedRedactor) {
+        if let Err(e) = handle.refresh_from_store(self.store.as_deref(), &self.extras()) {
+            eprintln!("warning: secret redaction refresh failed (keeping the previous set): {e}");
+        }
+    }
+}
+
+/// The production redactor: the built-in key shapes, every value in the secret
+/// store, the daemon bearer token, the vault passphrase and credential
+/// environment variables, each also in JSON/URL/base64 form.  A store that
+/// cannot be read still yields the shapes plus the other secrets (fail closed).
+/// Refresh it with [`SharedRedactor::refresh_now`] (installed here).
+fn production_redactor(sources: &RedactorSources) -> SharedRedactor {
     let handle = SharedRedactor::default();
-    if let Err(e) = handle.refresh_from_store(store, &extras) {
+    let extras = sources.extras();
+    if let Err(e) = handle.refresh_from_store(sources.store.as_deref(), &extras) {
         eprintln!("warning: secret redaction: cannot read the secret store: {e}");
         let _ = handle.refresh_from_store(None, &extras);
     }
+    let s = sources.clone();
+    handle.set_refresher(Arc::new(move |h| s.refresh(h)));
     handle
 }
 
-/// Re-read `store` into `handle`; on failure the previous contents stay.
-fn refresh_redactor(
-    handle: &SharedRedactor,
-    store: &dyn SecretStore,
-    api_token: &str,
-    passphrase: Option<&str>,
-) {
-    let extras = redactor_extras(api_token, passphrase);
-    if let Err(e) = handle.refresh_from_store(Some(store), &extras) {
-        eprintln!("warning: secret redaction refresh failed (keeping the previous set): {e}");
+/// A secret store that masks every value written through it from the moment
+/// it is stored (the daemon's write-only secrets route, MCP, channels), not
+/// only after the next refresh.
+struct RegisteringStore {
+    inner: Arc<dyn SecretStore>,
+    redactor: SharedRedactor,
+}
+
+impl SecretStore for RegisteringStore {
+    fn get(
+        &self,
+        name: &str,
+    ) -> std::result::Result<Option<secret_store::SecretValue>, secret_store::SecretError> {
+        self.inner.get(name)
+    }
+    fn set(&self, name: &str, value: &str) -> std::result::Result<(), secret_store::SecretError> {
+        self.inner.set(name, value)?;
+        self.redactor.register(value);
+        Ok(())
+    }
+    fn delete(&self, name: &str) -> std::result::Result<bool, secret_store::SecretError> {
+        self.inner.delete(name)
+    }
+    fn list_names(&self) -> std::result::Result<Vec<String>, secret_store::SecretError> {
+        self.inner.list_names()
     }
 }
 
@@ -451,8 +534,20 @@ pub fn serve(
     }
     let api_token = token.token;
     let passphrase = env_passphrase();
-    let redactor =
-        production_redactor(telegram_store.as_deref(), &api_token, passphrase.as_deref());
+    let sources = RedactorSources {
+        store: telegram_store.clone(),
+        api_token: api_token.clone(),
+        passphrase,
+        catalog_vars: catalog_env_vars(data_dir),
+    };
+    let redactor = production_redactor(&sources);
+    // Secrets written through the daemon are masked immediately.
+    let telegram_store: Option<Arc<dyn SecretStore>> = telegram_store.as_ref().map(|s| {
+        Arc::new(RegisteringStore {
+            inner: Arc::clone(s),
+            redactor: redactor.clone(),
+        }) as Arc<dyn SecretStore>
+    });
     let agent = build_agent_with_redactor(&storage, providers, data_dir, desktop, redactor.clone());
     // Same registry the loop calls tools from: MCP servers and email register into it.
     let mcp_tools = agent.tool_registry();
@@ -473,27 +568,20 @@ pub fn serve(
         .enable_all()
         .build()?;
     rt.block_on(async {
-        // Pick up secrets stored after startup (the redactor is shared with the loop).
-        let refresher = telegram_store.clone().map(|store| {
-            let (handle, token, pass) = (redactor.clone(), api_token.clone(), passphrase.clone());
+        // Backstop poll: pick up secrets stored behind the daemon's back (the CLI,
+        // the environment).  Runs with or without a secret store.
+        let refresher = {
+            let handle = redactor.clone();
             tokio::spawn(async move {
                 let mut tick = tokio::time::interval(REDACTOR_REFRESH_INTERVAL);
                 tick.tick().await;
                 loop {
                     tick.tick().await;
-                    let (h, s, t, p) = (
-                        handle.clone(),
-                        Arc::clone(&store),
-                        token.clone(),
-                        pass.clone(),
-                    );
-                    let _ = tokio::task::spawn_blocking(move || {
-                        refresh_redactor(&h, &*s, &t, p.as_deref());
-                    })
-                    .await;
+                    let h = handle.clone();
+                    let _ = tokio::task::spawn_blocking(move || h.refresh_now()).await;
                 }
             })
-        });
+        };
         let peer =
             crate::peer::start_server(data_dir, *host_mode, *peer_enabled, state.clone()).await?;
         // Connect in the background (a slow `npx` must not delay the listener)
@@ -567,9 +655,7 @@ pub fn serve(
             peer.shutdown().await;
         }
         mcp.shutdown().await;
-        if let Some(r) = refresher {
-            r.abort();
-        }
+        refresher.abort();
         let paused = outcome?;
         if json {
             println!(
@@ -613,39 +699,94 @@ cached_per_mtok = 0.5
 id = "unpriced"
 "#;
 
+    fn sources(store: Option<Arc<dyn SecretStore>>, passphrase: Option<&str>) -> RedactorSources {
+        RedactorSources {
+            store,
+            api_token: "daemon-token-abcdef123456".into(),
+            passphrase: passphrase.map(ToOwned::to_owned),
+            catalog_vars: vec!["ACME_KEY".into()],
+        }
+    }
+
     // SEC-02 (redaction half): production wiring masks stored secrets, the
     // daemon bearer token and the vault passphrase, and follows later changes.
     #[test]
     fn production_redactor_masks_store_token_and_passphrase() {
-        let store = MemoryStore::new();
+        let store = Arc::new(MemoryStore::new());
         store
             .set("provider.key", "stored-provider-secret-1")
             .unwrap();
-        let r = production_redactor(
-            Some(&store),
-            "daemon-token-abcdef123456",
-            Some("vault-passphrase-xyz"),
-        );
+        let r = production_redactor(&sources(Some(store), Some("vault-passphrase-xyz")));
         let text =
             "a stored-provider-secret-1 b daemon-token-abcdef123456 c vault-passphrase-xyz d";
-        let out = r.redact(text);
-        assert_eq!(out, "a [REDACTED] b [REDACTED] c [REDACTED] d");
-        // Built-in key shapes stay on.
+        assert_eq!(r.redact(text), "a [REDACTED] b [REDACTED] c [REDACTED] d");
         assert!(r.contains_secret("sk-abcdefghijklmnopqrstuvwxyz123456"));
-        // Without a store the token and passphrase are still masked.
-        let r = production_redactor(None, "daemon-token-abcdef123456", None);
+        // Without a store the token is still masked.
+        let r = production_redactor(&sources(None, None));
         assert!(r.contains_secret("daemon-token-abcdef123456"));
     }
 
     #[test]
     fn redactor_refresh_picks_up_a_secret_stored_later() {
-        let store = MemoryStore::new();
-        let r = production_redactor(Some(&store), "daemon-token-abcdef123456", None);
+        let store = Arc::new(MemoryStore::new());
+        let r = production_redactor(&sources(Some(store.clone()), None));
         assert!(!r.contains_secret("late-secret-value-99"));
         store.set("late", "late-secret-value-99").unwrap();
-        refresh_redactor(&r, &store, "daemon-token-abcdef123456", None);
+        // The loop calls this at every run start / user message.
+        r.refresh_now();
         assert!(r.contains_secret("late-secret-value-99"));
         assert!(r.contains_secret("daemon-token-abcdef123456"));
+    }
+
+    // Review #1: provider keys that only live in the environment and match no
+    // built-in key shape.
+    #[test]
+    fn env_only_provider_keys_are_collected() {
+        let vars = vec![
+            ("ACME_KEY".to_owned(), "acme-plain-key-777".to_owned()),
+            ("OTHER_API_KEY".to_owned(), "other-plain-key-888".to_owned()),
+            ("db_token".to_owned(), "db-plain-token-999".to_owned()),
+            ("SHORT_SECRET".to_owned(), "abc".to_owned()),
+            ("HOME".to_owned(), "/home/someone/long/path".to_owned()),
+        ];
+        let got = env_secret_values(vars, &["ACME_KEY".to_owned()]);
+        assert_eq!(
+            got,
+            vec![
+                "acme-plain-key-777",
+                "other-plain-key-888",
+                "db-plain-token-999"
+            ]
+        );
+        // And they end up masked (extras are registered with the redactor).
+        let r = SharedRedactor::default();
+        r.refresh_from_store(None, &got).unwrap();
+        assert!(r.contains_secret("printenv: ACME_KEY=acme-plain-key-777"));
+        // Catalog variable names include the built-in providers' key variables.
+        let vars = catalog_env_vars(Path::new("."));
+        assert!(vars.contains(&"ANTHROPIC_API_KEY".to_owned()), "{vars:?}");
+    }
+
+    // Review #6: the secrets route masks a value the moment it is stored, and
+    // the redactor needs no secret store to run.
+    #[test]
+    fn registering_store_masks_written_values_immediately() {
+        let inner: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
+        let r = production_redactor(&sources(None, None));
+        let store = RegisteringStore {
+            inner,
+            redactor: r.clone(),
+        };
+        assert!(!r.contains_secret("just-written-secret-42"));
+        store.set("k", "just-written-secret-42").unwrap();
+        assert!(r.contains_secret("just-written-secret-42"));
+        // Survives a refresh even though the refresh sources do not hold it.
+        r.refresh_now();
+        assert!(r.contains_secret("just-written-secret-42"));
+        assert_eq!(
+            store.get("k").unwrap().unwrap().expose(),
+            "just-written-secret-42"
+        );
     }
 
     #[test]
