@@ -236,6 +236,13 @@ impl ControlHub {
         (!left.is_zero()).then_some((mode, left))
     }
 
+    /// Last reported mode, including an expired registration. Heartbeat expiry
+    /// changes liveness, not whether the next heartbeat is a mode transition.
+    #[must_use]
+    pub fn reported_mode(&self) -> Option<ControlMode> {
+        self.state.lock().registration.map(|(mode, _)| mode)
+    }
+
     /// A desktop app is listening on the global event stream.
     #[must_use]
     pub fn app_connected(&self) -> bool {
@@ -585,5 +592,17 @@ mod tests {
             ControlHub::with_latch_file(fast(), f).latched(),
             Some(ControlMode::Paused)
         );
+    }
+
+    #[test]
+    fn expired_heartbeat_keeps_its_reported_mode_for_transition_auditing() {
+        let hub = ControlHub::new(ControlConfig {
+            heartbeat_ttl: Duration::ZERO,
+            ..ControlConfig::default()
+        });
+        hub.put_state(ControlMode::Paused);
+        assert!(hub.registration().is_none());
+        assert_eq!(hub.reported_mode(), Some(ControlMode::Paused));
+        assert_eq!(hub.latched(), Some(ControlMode::Paused));
     }
 }

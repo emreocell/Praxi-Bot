@@ -128,6 +128,7 @@ struct Inner {
     user_id: UserId,
     cfg: DaemonConfig,
     started: Instant,
+    sse_gaps_total: Arc<std::sync::atomic::AtomicU64>,
     shutdown: CancellationToken,
     hub: Arc<ControlHub>,
     provider_host: OnceLock<ProviderHost>,
@@ -206,6 +207,7 @@ impl AppState {
             user_id,
             cfg,
             started: Instant::now(),
+            sse_gaps_total: Arc::default(),
             shutdown: CancellationToken::new(),
             hub,
             provider_host: OnceLock::new(),
@@ -437,7 +439,7 @@ fn api_routes() -> Router<AppState> {
     use mcp_routes as m;
     use routes as r;
     Router::new()
-        .route("/v1/health", get(r::health))
+        .route("/v1/health", get(sse::health))
         .route("/v1/openapi.json", get(openapi::serve_openapi))
         .route("/v1/bots", get(r::list_bots).post(r::create_bot))
         .route(

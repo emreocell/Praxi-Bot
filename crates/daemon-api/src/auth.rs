@@ -118,7 +118,7 @@ fn read_verified(data_dir: &Path, path: &Path) -> std::io::Result<(String, bool)
     // No symlink is followed (O_NOFOLLOW, atomic with the open), no FIFO blocks.
     let mut f = std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(i32::try_from(flags.bits()).unwrap_or(0))
+        .custom_flags(checked_open_flags(flags.bits())?)
         .open(path)?;
     let meta = f.metadata()?;
     let euid = rustix::process::geteuid().as_raw();
@@ -140,6 +140,16 @@ fn read_verified(data_dir: &Path, path: &Path) -> std::io::Result<(String, bool)
     let mut s = String::new();
     f.read_to_string(&mut s)?;
     Ok((s, true))
+}
+
+#[cfg(unix)]
+fn checked_open_flags(bits: u32) -> std::io::Result<i32> {
+    i32::try_from(bits).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "api-token open flags cannot be represented by the operating system",
+        )
+    })
 }
 
 /// Windows: the ACL is restricted *before* the secret is read; failing to do
@@ -187,7 +197,7 @@ fn write_private(path: &Path, content: &str) -> std::io::Result<bool> {
 /// SID of the current user (`whoami /user`), not a spoofable env var.
 #[cfg(not(unix))]
 fn current_user_sid() -> std::io::Result<String> {
-    let out = std::process::Command::new("whoami")
+    let out = std::process::Command::new(system_command("whoami.exe")?)
         .args(["/user", "/fo", "csv", "/nh"])
         .output()?;
     let text = String::from_utf8_lossy(&out.stdout);
@@ -199,11 +209,21 @@ fn current_user_sid() -> std::io::Result<String> {
         .ok_or_else(|| std::io::Error::other("cannot determine the current user's SID"))
 }
 
+/// Security utilities must never be resolved through the working directory or PATH.
+#[cfg(not(unix))]
+fn system_command(name: &str) -> std::io::Result<PathBuf> {
+    let root = std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .ok_or_else(|| std::io::Error::other("SystemRoot must be an absolute path"))?;
+    Ok(root.join("System32").join(name))
+}
+
 #[cfg(not(unix))]
 fn restrict_permissions(path: &Path) -> std::io::Result<()> {
     let sid = current_user_sid()?;
     let icacls = |args: &[&std::ffi::OsStr]| -> std::io::Result<()> {
-        let st = std::process::Command::new("icacls")
+        let st = std::process::Command::new(system_command("icacls.exe")?)
             .arg(path)
             .args(args)
             .stdout(std::process::Stdio::null())
@@ -444,7 +464,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = token_path(d.path());
         std::fs::write(&p, "ab".repeat(32)).unwrap();
-        let st = std::process::Command::new("icacls")
+        let st = std::process::Command::new(system_command("icacls.exe").unwrap())
             .arg(&p)
             .args(["/grant", "*S-1-1-0:(R)"])
             .output()
@@ -453,7 +473,7 @@ mod tests {
         let info = load_or_create_token(d.path()).unwrap();
         assert_eq!(info.token, "ab".repeat(32));
         assert!(info.restricted, "restriction must succeed and be reported");
-        let acl = std::process::Command::new("icacls")
+        let acl = std::process::Command::new(system_command("icacls.exe").unwrap())
             .arg(&p)
             .output()
             .unwrap();
@@ -475,5 +495,32 @@ mod tests {
         assert!(ct_eq(b"abc", b"abc"));
         assert!(!ct_eq(b"abc", b"abd"));
         assert!(!ct_eq(b"abc", b"abcd"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unsupported_open_flag_bits_are_rejected_instead_of_dropped() {
+        assert_eq!(
+            checked_open_flags(u32::MAX).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+        let flags = rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::NONBLOCK
+            | rustix::fs::OFlags::CLOEXEC;
+        assert_eq!(
+            u32::try_from(checked_open_flags(flags.bits()).unwrap()).unwrap(),
+            flags.bits()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn acl_utilities_resolve_to_absolute_system_paths() {
+        for executable in ["whoami.exe", "icacls.exe"] {
+            let path = system_command(executable).unwrap();
+            assert!(path.is_absolute());
+            assert_eq!(path.file_name().unwrap(), executable);
+            assert_eq!(path.parent().unwrap().file_name().unwrap(), "System32");
+        }
     }
 }

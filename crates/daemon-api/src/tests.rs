@@ -2537,3 +2537,63 @@ async fn providers_lists_secret_free_cli_records_without_probing() {
             .any(|r| r["id"] == "cli:codex" && r["kind"] == "cli")
     );
 }
+
+#[tokio::test]
+async fn peer_heartbeats_only_audit_mode_changes_and_explicit_release() {
+    let t = setup();
+    for (body, expected_rows) in [
+        (json!({"mode":"paused"}), 2),
+        (json!({"mode":"paused"}), 2),
+        (json!({"mode":"idle"}), 4),
+        (json!({"mode":"idle"}), 4),
+        (json!({"mode":"idle","release":true}), 6),
+    ] {
+        let mut req = Request::builder()
+            .method(Method::PUT)
+            .uri("/v1/control/state")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        req.extensions_mut().insert(crate::PeerIdentity {
+            key: "heartbeat-peer".into(),
+            role: crate::PeerRole::Phone,
+        });
+        let response = crate::peer_router(t.state.clone())
+            .oneshot(req)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let audit = t.state.storage().list_audit(t.state.user_id()).unwrap();
+        assert_eq!(
+            audit.len(),
+            expected_rows,
+            "plain heartbeat must not add audit rows: {body}"
+        );
+        if body["release"] != true {
+            assert_eq!(
+                t.state.hub().latched(),
+                Some(crate::dto::ControlMode::Paused)
+            );
+        }
+    }
+    assert_eq!(t.state.hub().latched(), None);
+}
+
+#[tokio::test]
+async fn health_exposes_per_daemon_sse_gap_count() {
+    let t = setup();
+    let initial = call(&t, Method::GET, "/v1/health", None).await.json();
+    assert_eq!(initial["sse_gaps_total"], 0);
+    t.state
+        .0
+        .sse_gaps_total
+        .store(3, std::sync::atomic::Ordering::Relaxed);
+    let current = call(&t, Method::GET, "/v1/health", None).await.json();
+    assert_eq!(current["sse_gaps_total"], 3);
+    assert_eq!(current["status"], initial["status"]);
+    assert_eq!(current["version"], initial["version"]);
+    assert_eq!(
+        call(&setup(), Method::GET, "/v1/health", None).await.json()["sse_gaps_total"],
+        0
+    );
+}
