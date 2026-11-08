@@ -14,13 +14,17 @@ use windows::{
             CloseHandle, ERROR_SUCCESS, HANDLE, HWND, LPARAM, RECT, SetLastError, WAIT_OBJECT_0,
         },
         Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute},
+        Storage::FileSystem::GetFullPathNameW,
         System::Threading::{
             AttachThreadInput, GetCurrentThreadId, GetProcessId, WaitForInputIdle,
             WaitForSingleObject,
         },
         UI::{
             HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext},
-            Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW},
+            Shell::{
+                ASSOCF_NONE, ASSOCSTR_COMMAND, AssocQueryStringW, SEE_MASK_NOCLOSEPROCESS,
+                SHELLEXECUTEINFOW, ShellExecuteExW,
+            },
             WindowsAndMessaging::{
                 BringWindowToTop, EnumWindows, GWL_EXSTYLE, GetForegroundWindow, GetWindowLongW,
                 GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
@@ -29,7 +33,7 @@ use windows::{
             },
         },
     },
-    core::PCWSTR,
+    core::{PCWSTR, PWSTR},
 };
 
 /// Make this process per-monitor DPI aware so that UIA rectangles, GDI capture
@@ -257,15 +261,22 @@ fn launched_window_pid(process: HANDLE) -> Pid {
     }
 }
 
-/// Launch an executable (or document / app alias) via `ShellExecuteExW`.
-/// Executables use a direct process launch. Batch arguments are validated before
-/// invoking the file association. Returns the process id, or 0 when the shell
-/// handles the request without a new process (URI handlers, reused instance).
+/// Launch an executable, document, or shortcut.
+///
+/// The path is resolved with `GetFullPathNameW` (trailing dots and spaces, `.`
+/// and `..`, without a `\\?\` prefix) before a launcher is chosen. Command
+/// interpreters refuse shell metacharacters. Batch files, shortcuts, and
+/// associations whose template runs `cmd.exe` use the batch quoting rules.
+/// Other images keep `CommandLineToArgvW` quoting. Returns the process id, or
+/// 0 when the shell handles the request without a new process.
 pub fn launch(app: &AppSpec) -> Result<Pid, DesktopError> {
-    let parameters = crate::pure::launch_parameters(app)?;
-    // Executables are started directly; no file association or cmd.exe adapter
-    // can reinterpret their arguments as shell syntax.
-    if app.executable.to_ascii_lowercase().ends_with(".exe") {
+    let resolved = resolved_image_path(&app.executable);
+    let cmd_association =
+        crate::pure::needs_association_check(&resolved) && association_expanded_by_cmd(&resolved);
+    let prepared = crate::pure::prepare_launch(app, &resolved, cmd_association)?;
+    // Spawn the caller's original path. `GetFullPathNameW` does not search
+    // `PATH`, so a bare `cmd.exe` must stay bare for `CreateProcess`.
+    if prepared.spawns_directly() {
         let child = std::process::Command::new(&app.executable)
             .args(&app.args)
             .spawn()
@@ -273,8 +284,9 @@ pub fn launch(app: &AppSpec) -> Result<Pid, DesktopError> {
         // Child keeps ownership of the process handle and closes it on drop.
         return Ok(launched_window_pid(HANDLE(child.as_raw_handle())));
     }
+    let parameters = prepared.parameters();
     let file = wide(&app.executable);
-    let params = wide(&parameters);
+    let params = wide(parameters);
     let verb = wide("open");
     let mut info = SHELLEXECUTEINFOW {
         #[allow(clippy::cast_possible_truncation)]
@@ -307,8 +319,67 @@ pub fn launch(app: &AppSpec) -> Result<Pid, DesktopError> {
     }
 }
 
+fn resolved_image_path(executable: &str) -> String {
+    match win32_full_path(executable) {
+        Some(full) => crate::pure::strip_device_prefix(&full),
+        None => crate::pure::normalize_launch_path(executable),
+    }
+}
+
+fn win32_full_path(path: &str) -> Option<String> {
+    if path.is_empty() {
+        return None;
+    }
+    let wide_path = wide(path);
+    let mut buf = vec![0u16; 32768];
+    // SAFETY: `wide_path` is NUL-terminated and lives for the call. `buf` is
+    // writable for its full length. `GetFullPathNameW` does not retain either
+    // pointer. A zero return is failure; a length past the buffer means the
+    // buffer was too small.
+    let written = unsafe { GetFullPathNameW(PCWSTR(wide_path.as_ptr()), Some(&mut buf), None) };
+    let written = usize::try_from(written).ok()?;
+    if written == 0 || written >= buf.len() {
+        return None;
+    }
+    String::from_utf16(&buf[..written]).ok()
+}
+
+fn association_expanded_by_cmd(path: &str) -> bool {
+    association_command(path)
+        .is_some_and(|template| crate::pure::command_template_uses_cmd(&template))
+}
+
+fn association_command(path: &str) -> Option<String> {
+    let wide_path = wide(path);
+    let mut buf = vec![0u16; 4096];
+    let mut len = u32::try_from(buf.len()).unwrap_or(4096);
+    // SAFETY: `wide_path` is NUL-terminated and lives for the call. `buf` is a
+    // writable buffer of `len` wide characters. `AssocQueryStringW` does not
+    // retain either pointer. On failure the buffer is ignored.
+    let hr = unsafe {
+        AssocQueryStringW(
+            ASSOCF_NONE,
+            ASSOCSTR_COMMAND,
+            PCWSTR(wide_path.as_ptr()),
+            PCWSTR::null(),
+            Some(PWSTR(buf.as_mut_ptr())),
+            &raw mut len,
+        )
+    };
+    if hr.is_err() {
+        return None;
+    }
+    let end = buf.iter().position(|&unit| unit == 0).unwrap_or(buf.len());
+    if end == 0 {
+        return None;
+    }
+    String::from_utf16(&buf[..end]).ok()
+}
+
 #[cfg(test)]
 mod launch_tests {
+    use std::os::windows::process::CommandExt;
+
     use super::*;
 
     const CHILD_TEST: &str = "winlist::launch_tests::non_gui_child_fixture";
@@ -349,5 +420,214 @@ mod launch_tests {
             args: vec!["plain & second-command".into()],
         };
         assert!(matches!(launch(&app), Err(DesktopError::Unsupported(_))));
+    }
+
+    #[test]
+    fn normalized_image_matches_get_full_path_name() {
+        for path in [
+            r"C:\Windows\System32\cmd.exe.",
+            r"C:\Windows\System32\cmd.exe...",
+            r"C:\Windows\System32\cmd.exe ",
+            r"C:\Windows\System32\cmd.exe. .",
+            r"C:\Windows\System32\cmd.exe\.",
+            r"C:\Windows\System32\cmd.exe\.\.",
+            r"C:\Windows\System32\cmd.exe\..\cmd.exe.",
+            r"C:\Windows.\System32.\cmd.EXE. ",
+            r"C:\foo.\..\cmd.exe.",
+            r"C:\foo...\bar",
+            r"C:\Program Files (x86)\tool.cmd.",
+            r"C:/Windows/System32/cmd.exe.",
+            r"\\?\C:\Windows\System32\cmd.exe.",
+            r"\\?\C:\Windows\System32\cmd.exe\.",
+            r"\\?\C:\foo.\bar.",
+            r"C:\..\Windows\System32\cmd.exe.",
+        ] {
+            let api = win32_full_path(path).unwrap_or_else(|| panic!("GetFullPathName {path}"));
+            assert_eq!(
+                crate::pure::normalize_launch_path(path),
+                crate::pure::strip_device_prefix(&api),
+                "{path} api {api}"
+            );
+        }
+    }
+
+    #[test]
+    fn cmd_exe_and_trailing_dot_with_safe_and_calc_are_unsupported() {
+        let before = (
+            image_count("calc.exe"),
+            image_count("Calculator.exe"),
+            image_count("CalculatorApp.exe"),
+        );
+        for executable in [
+            "cmd.exe",
+            "cmd.exe.",
+            r"C:\Windows\System32\cmd.exe",
+            r"C:\Windows\System32\cmd.exe.",
+            r"C:\Windows\System32\cmd.exe\.",
+        ] {
+            let app = AppSpec {
+                executable: executable.into(),
+                args: vec!["safe&calc".into()],
+            };
+            assert!(
+                matches!(launch(&app), Err(DesktopError::Unsupported(_))),
+                "{executable}"
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        assert_eq!(
+            (
+                image_count("calc.exe"),
+                image_count("Calculator.exe"),
+                image_count("CalculatorApp.exe"),
+            ),
+            before,
+            "safe&calc started the calculator"
+        );
+    }
+
+    #[test]
+    fn benign_trailing_dot_cmd_still_runs() {
+        let app = AppSpec {
+            executable: r"C:\Windows\System32\cmd.exe.".into(),
+            args: vec!["/c".into(), "exit".into(), "0".into()],
+        };
+        assert_eq!(launch(&app).unwrap(), 0);
+    }
+
+    #[test]
+    fn shortcut_to_cmd_with_plain_and_second_is_unsupported() {
+        let dir = std::env::temp_dir().join(format!("praxi-lnk-{}", std::process::id()));
+        let _cleanup = TempDir(dir.clone());
+        std::fs::create_dir_all(&dir).unwrap();
+        let helper = dir.join("helper.cmd");
+        let second = dir.join("second.cmd");
+        let log = dir.join("helper-log.txt");
+        let marker = dir.join("second-ran.txt");
+        let lnk = dir.join("helper.lnk");
+        std::fs::write(
+            &helper,
+            format!("@echo off\r\necho RAN>\"{}\"\r\n", log.display()),
+        )
+        .unwrap();
+        std::fs::write(
+            &second,
+            format!("@echo off\r\necho INJECTED>\"{}\"\r\n", marker.display()),
+        )
+        .unwrap();
+        create_shortcut(&lnk, &helper, &dir);
+        let app = AppSpec {
+            executable: lnk.display().to_string(),
+            args: vec!["plain&second".into()],
+        };
+        assert!(matches!(launch(&app), Err(DesktopError::Unsupported(_))));
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        assert!(
+            !log.exists(),
+            "shortcut ran: {}",
+            std::fs::read_to_string(&log).unwrap_or_default()
+        );
+        assert!(!marker.exists(), "second command ran");
+    }
+
+    #[test]
+    fn batch_parentheses_trailing_backslash_and_comspec_survive_cmd() {
+        let dir = std::env::temp_dir().join(format!("praxi-batch-{}", std::process::id()));
+        let _cleanup = TempDir(dir.clone());
+        std::fs::create_dir_all(&dir).unwrap();
+        let helper = dir.join("helper.cmd");
+        let out = dir.join("out.txt");
+        std::fs::write(
+            &helper,
+            "@echo off\r\nsetlocal DisableDelayedExpansion\r\nset \"a=%~1\"\r\nsetlocal EnableDelayedExpansion\r\n> \"%~dp0out.txt\" echo(!a!\r\n",
+        )
+        .unwrap();
+        let launch_arg = |arg: &str| {
+            let _ = std::fs::remove_file(&out);
+            launch(&AppSpec {
+                executable: helper.display().to_string(),
+                args: vec![arg.into()],
+            })
+            .unwrap_or_else(|error| panic!("launch {arg:?}: {error}"));
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            loop {
+                if let Ok(text) = std::fs::read_to_string(&out) {
+                    return text;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "script did not write {arg:?}"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        };
+        assert_eq!(launch_arg("(x86)").trim(), "(x86)");
+        assert_eq!(
+            launch_arg(r"C:\Program Files (x86)\").trim(),
+            r"C:\Program Files (x86)\"
+        );
+        let captured = launch_arg("%COMSPEC%");
+        let comspec = std::env::var("COMSPEC").unwrap();
+        assert_ne!(
+            captured.trim().to_ascii_lowercase(),
+            comspec.to_ascii_lowercase(),
+            "percent was expanded before the script: {captured}"
+        );
+        assert!(
+            captured.contains('%'),
+            "expected a literal percent, got {captured}"
+        );
+    }
+
+    #[test]
+    fn file_associations_classify_cmd_templates() {
+        let vbs = association_command(".vbs").expect("vbs association");
+        assert!(!crate::pure::command_template_uses_cmd(&vbs), "{vbs}");
+        let cmd = association_command(".cmd").expect("cmd association");
+        assert!(!crate::pure::command_template_uses_cmd(&cmd), "{cmd}");
+        let comspec = std::env::var("COMSPEC").unwrap();
+        assert!(crate::pure::command_template_uses_cmd(&format!(
+            r#""{comspec}" /c "%1" %*"#
+        )));
+    }
+
+    fn image_count(image: &str) -> usize {
+        let output = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("IMAGENAME eq {image}"), "/FO", "CSV", "/NH"])
+            .output()
+            .expect("tasklist");
+        let text = String::from_utf8_lossy(&output.stdout);
+        let needle = image.to_ascii_lowercase();
+        text.lines()
+            .filter(|line| line.to_ascii_lowercase().contains(&needle))
+            .count()
+    }
+
+    fn create_shortcut(lnk: &std::path::Path, target: &std::path::Path, workdir: &std::path::Path) {
+        let quote = |path: &std::path::Path| path.display().to_string().replace('\'', "''");
+        let script = format!(
+            "$shell = New-Object -ComObject WScript.Shell; $link = $shell.CreateShortcut('{}'); $link.TargetPath = '{}'; $link.WorkingDirectory = '{}'; $link.Save()",
+            quote(lnk),
+            quote(target),
+            quote(workdir)
+        );
+        let output = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .creation_flags(0x0800_0000)
+            .output()
+            .expect("powershell");
+        assert!(
+            output.status.success() && lnk.exists(),
+            "shortcut: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    struct TempDir(std::path::PathBuf);
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 }
