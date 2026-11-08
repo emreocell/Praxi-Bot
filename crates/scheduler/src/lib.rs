@@ -9,14 +9,25 @@
 //! - [`Scheduler::start`] spawns a single Tokio background task that sleeps
 //!   until the nearest `next_run_at`, wakes immediately on store changes,
 //!   detects wall-clock jumps (sleep/resume, DST, manual clock changes) by
-//!   comparing monotonic vs. wall time, applies [`MisfirePolicy`], persists
-//!   state before executing so no occurrence fires twice across restarts, and
-//!   enforces a per-schedule concurrency limit of 1.
+//!   comparing monotonic vs. wall time, applies [`MisfirePolicy`], atomically
+//!   reserves occurrence intents with timer progress, and enforces a
+//!   per-schedule concurrency limit of 1. Definitions have an internal revision
+//!   so edits cannot overwrite timer progress or run stale catch-up payloads.
+//!
 //! - [`handle_webhook`] (and [`Scheduler::handle_webhook`]) verifies an
 //!   `HMAC-SHA256` signature and executes the schedule's payload with the
 //!   request body substituted for `{input}`.
 //! - [`parse_natural_language`] converts common English and Turkish schedule
 //!   phrases into a [`ScheduleSpec`] using a deterministic table-driven parser.
+//!
+//! # Durable dispatch boundary (task 136)
+//! An occurrence is identified by `schedule_id:due_ms`. Pending/dispatched
+//! intents survive restart, but the current [`ScheduleExecutor`] cannot
+//! durably deduplicate a start or return its `run_id`. The engine therefore
+//! logs unresolved intents without replaying them. Full no-loss/no-duplicate
+//! recovery, `started(run_id)`, and disabling one-shots after a durable start
+//! require the task-136 `AgentLoop::start_scheduled` contract. A reserved
+//! one-shot currently has an exhausted timer, not a fabricated start record.
 
 pub mod clock;
 pub mod engine;
