@@ -244,11 +244,38 @@ impl CdpDriver {
         }
     }
 
+    fn session_alive(sess: &Session) -> bool {
+        !sess.browser.client().is_closed()
+    }
+
+    async fn launch_session(&self, profile: Option<&str>) -> Result<Session, String> {
+        let opts = LaunchOptions {
+            executable: self.settings.executable.clone(),
+            headless: self.settings.headless,
+            user_data_dir: self.profile_path(profile)?,
+            ..LaunchOptions::default()
+        };
+        let browser = Browser::launch(opts).await.map_err(s)?;
+        let page = browser.first_page().await.map_err(s)?;
+        Ok(Session {
+            browser,
+            page,
+            profile: profile.map(str::to_string),
+        })
+    }
+
     async fn ensure<'a>(
         &self,
         guard: &'a mut Option<Session>,
         profile: Option<&str>,
     ) -> Result<&'a mut Session, String> {
+        // A crashed or closed browser must not stay cached until daemon restart.
+        if guard
+            .as_ref()
+            .is_some_and(|sess| !Self::session_alive(sess))
+        {
+            *guard = None;
+        }
         if let Some(existing) = guard.as_ref() {
             if let Some(p) = profile
                 && existing.profile.as_deref().unwrap_or("isolated") != p
@@ -259,19 +286,7 @@ impl CdpDriver {
                 ));
             }
         } else {
-            let opts = LaunchOptions {
-                executable: self.settings.executable.clone(),
-                headless: self.settings.headless,
-                user_data_dir: self.profile_path(profile)?,
-                ..LaunchOptions::default()
-            };
-            let browser = Browser::launch(opts).await.map_err(s)?;
-            let page = browser.first_page().await.map_err(s)?;
-            *guard = Some(Session {
-                browser,
-                page,
-                profile: profile.map(str::to_string),
-            });
+            *guard = Some(self.launch_session(profile).await?);
         }
         Ok(guard.as_mut().expect("session just ensured"))
     }
@@ -282,6 +297,35 @@ impl CdpDriver {
             let _ = sess.browser.close().await;
         }
     }
+
+    /// One extra launch after a dead session or a terminal transport error.
+    const RELAUNCH_LIMIT: u32 = 1;
+}
+
+/// Run `$body` against the cached session. A closed browser is replaced inside
+/// `ensure`. A terminal transport error evicts the session and retries once.
+macro_rules! with_session {
+    ($self:expr, $profile:expr, |$sess:ident| $body:block) => {{
+        let mut outcome = None;
+        for attempt in 0..=CdpDriver::RELAUNCH_LIMIT {
+            let mut guard = $self.session.lock().await;
+            let step = {
+                let $sess = $self.ensure(&mut guard, $profile).await?;
+                $body
+            };
+            match step {
+                Ok(value) => {
+                    outcome = Some(value);
+                    break;
+                }
+                Err(err) if err.is_fatal() && attempt < CdpDriver::RELAUNCH_LIMIT => {
+                    *guard = None;
+                }
+                Err(err) => return Err(s(err)),
+            }
+        }
+        outcome.ok_or_else(|| "browser session died and the relaunch failed".to_string())
+    }};
 }
 
 #[async_trait]
@@ -297,17 +341,16 @@ impl BrowserDriver for CdpDriver {
         dialog: Option<&str>,
         prompt_text: Option<&str>,
     ) -> Result<String, String> {
-        let mut g = self.session.lock().await;
-        let sess = self.ensure(&mut g, profile).await?;
         let dialog_opts = DialogOptions {
             action: DialogAction::from_str_opt(dialog),
             prompt_text: prompt_text.map(str::to_string),
         };
-        let r = sess
-            .page
-            .navigate_snapshot_with(url, &snap_opts(false), &dialog_opts)
-            .await
-            .map_err(s)?;
+        let snap = snap_opts(false);
+        let r = with_session!(self, profile, |sess| {
+            sess.page
+                .navigate_snapshot_with(url, &snap, &dialog_opts)
+                .await
+        })?;
         render_action(&r)
     }
 
@@ -316,13 +359,8 @@ impl BrowserDriver for CdpDriver {
     }
 
     async fn snapshot(&self, interactive_only: bool) -> Result<String, String> {
-        let mut g = self.session.lock().await;
-        let sess = self.ensure(&mut g, None).await?;
-        let snap = sess
-            .page
-            .snapshot(&snap_opts(interactive_only))
-            .await
-            .map_err(s)?;
+        let opts = snap_opts(interactive_only);
+        let snap = with_session!(self, None, |sess| { sess.page.snapshot(&opts).await })?;
         Ok(snap.render())
     }
 
@@ -332,13 +370,14 @@ impl BrowserDriver for CdpDriver {
         dialog: Option<&str>,
         prompt_text: Option<&str>,
     ) -> Result<String, String> {
-        let mut g = self.session.lock().await;
-        let sess = self.ensure(&mut g, None).await?;
         let dialog_opts = DialogOptions {
             action: DialogAction::from_str_opt(dialog),
             prompt_text: prompt_text.map(str::to_string),
         };
-        render_action(&sess.page.click_with(r, &dialog_opts).await.map_err(s)?)
+        let acted = with_session!(self, None, |sess| {
+            sess.page.click_with(r, &dialog_opts).await
+        })?;
+        render_action(&acted)
     }
 
     async fn click(&self, r: &str) -> Result<String, String> {
@@ -346,48 +385,46 @@ impl BrowserDriver for CdpDriver {
     }
 
     async fn fill(&self, r: &str, text: &str) -> Result<String, String> {
-        let mut g = self.session.lock().await;
-        let sess = self.ensure(&mut g, None).await?;
-        render_action(&sess.page.fill(r, text).await.map_err(s)?)
+        let acted = with_session!(self, None, |sess| { sess.page.fill(r, text).await })?;
+        render_action(&acted)
     }
 
     async fn select(&self, r: &str, value: &str) -> Result<String, String> {
-        let mut g = self.session.lock().await;
-        let sess = self.ensure(&mut g, None).await?;
-        render_action(&sess.page.select_option(r, value).await.map_err(s)?)
+        let acted = with_session!(self, None, |sess| {
+            sess.page.select_option(r, value).await
+        })?;
+        render_action(&acted)
     }
 
     async fn press(&self, key: &str) -> Result<String, String> {
-        let mut g = self.session.lock().await;
-        let sess = self.ensure(&mut g, None).await?;
-        render_action(&sess.page.press_key(key).await.map_err(s)?)
+        let acted = with_session!(self, None, |sess| { sess.page.press_key(key).await })?;
+        render_action(&acted)
     }
 
     async fn scroll(&self, r: Option<&str>, dx: f64, dy: f64) -> Result<String, String> {
-        let mut g = self.session.lock().await;
-        let sess = self.ensure(&mut g, None).await?;
-        render_action(&sess.page.scroll(r, dx, dy).await.map_err(s)?)
+        let acted = with_session!(self, None, |sess| { sess.page.scroll(r, dx, dy).await })?;
+        render_action(&acted)
     }
 
     async fn wait(&self, cond: Wait, timeout: Option<Duration>) -> Result<String, String> {
-        let mut g = self.session.lock().await;
-        let sess = self.ensure(&mut g, None).await?;
         let c = match cond {
             Wait::Text(t) => WaitCondition::Text(t),
             Wait::Selector(sel) => WaitCondition::Selector(sel),
             Wait::Idle => WaitCondition::NetworkIdle,
         };
-        render_action(&sess.page.wait_for(&c, timeout).await.map_err(s)?)
+        let acted = with_session!(self, None, |sess| { sess.page.wait_for(&c, timeout).await })?;
+        render_action(&acted)
     }
 
     async fn back_opts(&self, dialog: Option<&str>) -> Result<String, String> {
-        let mut g = self.session.lock().await;
-        let sess = self.ensure(&mut g, None).await?;
         let dialog_opts = DialogOptions {
             action: DialogAction::from_str_opt(dialog),
             prompt_text: None,
         };
-        render_action(&sess.page.back_with(&dialog_opts).await.map_err(s)?)
+        let acted = with_session!(self, None, |sess| {
+            sess.page.back_with(&dialog_opts).await
+        })?;
+        render_action(&acted)
     }
 
     async fn back(&self) -> Result<String, String> {
@@ -395,32 +432,37 @@ impl BrowserDriver for CdpDriver {
     }
 
     async fn tabs(&self, switch_to: Option<usize>) -> Result<String, String> {
-        let mut g = self.session.lock().await;
-        let sess = self.ensure(&mut g, None).await?;
-        let pages = sess.browser.pages().await.map_err(s)?;
-        if let Some(n) = switch_to {
-            let t = n
-                .checked_sub(1)
-                .and_then(|i| pages.get(i))
-                .ok_or_else(|| format!("no tab number {n}"))?;
-            sess.page = sess.browser.attach(&t.target_id).await.map_err(s)?;
-            sess.page.bring_to_front().await.map_err(s)?;
-        }
-        let current = sess.page.target_id().to_string();
-        Ok(pages
-            .iter()
-            .enumerate()
-            .map(|(i, t)| {
-                format!(
-                    "{}{} \"{}\" {}",
-                    i + 1,
-                    if t.target_id == current { "*" } else { "" },
-                    t.title.replace('"', "'"),
-                    t.url
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n"))
+        with_session!(self, None, |sess| {
+            let listed: Result<String, browser_cdp::Error> = async {
+                let pages = sess.browser.pages().await?;
+                if let Some(n) = switch_to {
+                    let t = n
+                        .checked_sub(1)
+                        .and_then(|i| pages.get(i))
+                        .ok_or_else(|| browser_cdp::Error::Json(format!("no tab number {n}")))?;
+                    sess.page = sess.browser.attach(&t.target_id).await?;
+                    sess.page.bring_to_front().await?;
+                }
+                let current = sess.page.target_id().to_string();
+                Ok(pages
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| {
+                        format!(
+                            "{}{} \"{}\" {}",
+                            i + 1,
+                            if t.target_id == current { "*" } else { "" },
+                            t.title.replace('"', "'"),
+                            t.url
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"))
+            }
+            .await;
+            listed
+        })
+        .map_err(|err| err.strip_prefix("json error: ").unwrap_or(&err).to_string())
     }
 
     async fn screenshot(
@@ -428,28 +470,24 @@ impl BrowserDriver for CdpDriver {
         full_page: bool,
         element: Option<&str>,
     ) -> Result<(Vec<u8>, &'static str), String> {
-        let mut g = self.session.lock().await;
-        let sess = self.ensure(&mut g, None).await?;
         let target = match (element, full_page) {
             (Some(r), _) => ScreenshotTarget::Element(r.to_string()),
             (None, true) => ScreenshotTarget::FullPage,
             (None, false) => ScreenshotTarget::Viewport,
         };
-        let bytes = sess
-            .page
-            .screenshot(&ScreenshotOptions {
-                target,
-                jpeg_quality: Some(80),
-            })
-            .await
-            .map_err(s)?;
+        let bytes = with_session!(self, None, |sess| {
+            sess.page
+                .screenshot(&ScreenshotOptions {
+                    target: target.clone(),
+                    jpeg_quality: Some(80),
+                })
+                .await
+        })?;
         Ok((bytes, "jpg"))
     }
 
     async fn eval(&self, js: &str) -> Result<Value, String> {
-        let mut g = self.session.lock().await;
-        let sess = self.ensure(&mut g, None).await?;
-        sess.page.evaluate(js).await.map_err(s)
+        with_session!(self, None, |sess| { sess.page.evaluate(js).await })
     }
 }
 
@@ -864,6 +902,13 @@ impl BrowserTool {
             }
             Op::Tabs => {
                 let i: TabsIn = parse(input)?;
+                // Listing stays a read. Activating a tab steals focus, so it
+                // goes through the same control gate as other mutations.
+                // The tool spec stays `Effect::Read` because the built-in
+                // inventory in `lib.rs` is owned by another change.
+                if let Some(n) = i.switch_to {
+                    self.gate(run_id, "tab", format!("tab {n}")).await?;
+                }
                 d.tabs(i.switch_to).await
             }
             Op::Screenshot => {
@@ -877,6 +922,8 @@ impl BrowserTool {
             }
             Op::Eval => {
                 let i: EvalIn = parse(input)?;
+                let label: String = i.js.trim().chars().take(80).collect();
+                self.gate(run_id, "eval", label).await?;
                 d.eval(&i.js).await.map(|v| v.to_string())
             }
         };
@@ -905,6 +952,8 @@ pub(crate) mod fake {
     #[derive(Default)]
     pub struct FakeBrowser {
         pub calls: PMutex<Vec<String>>,
+        /// When set, mutating actions go through the desktop control gate.
+        pub on_desktop: bool,
     }
 
     impl FakeBrowser {
@@ -920,6 +969,10 @@ pub(crate) mod fake {
 
     #[async_trait]
     impl BrowserDriver for FakeBrowser {
+        fn on_desktop(&self) -> bool {
+            self.on_desktop
+        }
+
         async fn open_opts(
             &self,
             url: &str,
@@ -1307,5 +1360,441 @@ mod tests {
             ..BrowserSettings::isolated(d.path())
         });
         assert_eq!(drv.profile_path(None).unwrap(), Some(d.path().join("p")));
+    }
+
+    struct RefuseGate;
+
+    #[async_trait]
+    impl DesktopControlGate for RefuseGate {
+        async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+            Err("the user has taken control".into())
+        }
+    }
+
+    #[tokio::test]
+    async fn refusing_control_gate_blocks_eval_and_tab_switch() {
+        let d = tempfile::tempdir().unwrap();
+        let fake = Arc::new(FakeBrowser {
+            on_desktop: true,
+            ..FakeBrowser::default()
+        });
+        let t = tools(fake.clone(), d.path(), Some(Arc::new(RefuseGate)));
+        let ctx = ToolContext::default();
+        let err = get(&t, "browser_eval")
+            .call(&ctx, json!({"js": "document.title"}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("taken control"), "{err}");
+        let err = get(&t, "browser_tabs")
+            .call(&ctx, json!({"switch_to": 2}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("taken control"), "{err}");
+        assert!(
+            fake.calls.lock().is_empty(),
+            "refused actions reached the browser: {:?}",
+            fake.calls.lock()
+        );
+        get(&t, "browser_tabs").call(&ctx, json!({})).await.unwrap();
+        assert_eq!(fake.calls.lock().as_slice(), ["tabs:None"]);
+    }
+
+    fn ws_accept(key: &str) -> String {
+        const GUID: &[u8] = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+        let mut data = key.as_bytes().to_vec();
+        data.extend_from_slice(GUID);
+        b64(&sha1(&data))
+    }
+
+    fn b64(data: &[u8]) -> String {
+        const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::new();
+        for chunk in data.chunks(3) {
+            let mut n = u32::from(chunk[0]) << 16;
+            if chunk.len() > 1 {
+                n |= u32::from(chunk[1]) << 8;
+            }
+            if chunk.len() > 2 {
+                n |= u32::from(chunk[2]);
+            }
+            out.push(TABLE[((n >> 18) & 0x3f) as usize] as char);
+            out.push(TABLE[((n >> 12) & 0x3f) as usize] as char);
+            if chunk.len() > 1 {
+                out.push(TABLE[((n >> 6) & 0x3f) as usize] as char);
+            } else {
+                out.push('=');
+            }
+            if chunk.len() > 2 {
+                out.push(TABLE[(n & 0x3f) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+        out
+    }
+
+    #[allow(clippy::many_single_char_names, clippy::needless_range_loop)]
+    fn sha1(message: &[u8]) -> [u8; 20] {
+        let mut h0: u32 = 0x6745_2301;
+        let mut h1: u32 = 0xEFCD_AB89;
+        let mut h2: u32 = 0x98BA_DCFE;
+        let mut h3: u32 = 0x1032_5476;
+        let mut h4: u32 = 0xC3D2_E1F0;
+        let bit_len = u64::try_from(message.len())
+            .unwrap_or(u64::MAX)
+            .saturating_mul(8);
+        let mut data = message.to_vec();
+        data.push(0x80);
+        while (data.len() % 64) != 56 {
+            data.push(0);
+        }
+        data.extend_from_slice(&bit_len.to_be_bytes());
+        for block in data.chunks(64) {
+            let mut w = [0u32; 80];
+            for i in 0..16 {
+                w[i] = u32::from_be_bytes(block[i * 4..i * 4 + 4].try_into().expect("4 bytes"));
+            }
+            for i in 16..80 {
+                w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
+            }
+            let (mut a, mut b, mut c, mut d, mut e) = (h0, h1, h2, h3, h4);
+            for i in 0..80 {
+                let (f, k) = match i {
+                    0..=19 => ((b & c) | ((!b) & d), 0x5A82_7999),
+                    20..=39 => (b ^ c ^ d, 0x6ED9_EBA1),
+                    40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1B_BCDC),
+                    _ => (b ^ c ^ d, 0xCA62_C1D6),
+                };
+                let temp = a
+                    .rotate_left(5)
+                    .wrapping_add(f)
+                    .wrapping_add(e)
+                    .wrapping_add(k)
+                    .wrapping_add(w[i]);
+                e = d;
+                d = c;
+                c = b.rotate_left(30);
+                b = a;
+                a = temp;
+            }
+            h0 = h0.wrapping_add(a);
+            h1 = h1.wrapping_add(b);
+            h2 = h2.wrapping_add(c);
+            h3 = h3.wrapping_add(d);
+            h4 = h4.wrapping_add(e);
+        }
+        let mut out = [0u8; 20];
+        out[0..4].copy_from_slice(&h0.to_be_bytes());
+        out[4..8].copy_from_slice(&h1.to_be_bytes());
+        out[8..12].copy_from_slice(&h2.to_be_bytes());
+        out[12..16].copy_from_slice(&h3.to_be_bytes());
+        out[16..20].copy_from_slice(&h4.to_be_bytes());
+        out
+    }
+
+    struct FakeCdp {
+        url: String,
+        shutdown: Arc<std::sync::atomic::AtomicBool>,
+        killer: Arc<std::sync::Mutex<Option<std::net::TcpStream>>>,
+    }
+
+    impl FakeCdp {
+        fn start() -> Self {
+            use std::io::{Read, Write};
+            use std::net::{Shutdown, TcpListener};
+            use std::sync::atomic::AtomicBool;
+            use std::sync::{Arc, Mutex};
+
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let shutdown = Arc::new(AtomicBool::new(false));
+            let killer = Arc::new(Mutex::new(None));
+            let flag = Arc::clone(&shutdown);
+            let slot = Arc::clone(&killer);
+            std::thread::spawn(move || {
+                let Ok((mut sock, _)) = listener.accept() else {
+                    return;
+                };
+                let _ = sock.set_read_timeout(Some(Duration::from_millis(200)));
+                if let Ok(clone) = sock.try_clone() {
+                    *slot.lock().expect("killer lock") = Some(clone);
+                }
+                let mut buf = Vec::new();
+                let mut tmp = [0u8; 2048];
+                loop {
+                    if flag.load(std::sync::atomic::Ordering::SeqCst) {
+                        return;
+                    }
+                    match sock.read(&mut tmp) {
+                        Ok(0) => return,
+                        Ok(n) => {
+                            buf.extend_from_slice(&tmp[..n]);
+                            if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                                break;
+                            }
+                        }
+                        Err(e)
+                            if e.kind() == std::io::ErrorKind::TimedOut
+                                || e.kind() == std::io::ErrorKind::WouldBlock => {}
+                        Err(_) => return,
+                    }
+                }
+                let header = String::from_utf8_lossy(&buf);
+                let key = header
+                    .lines()
+                    .find_map(|line| {
+                        line.split_once(':')
+                            .filter(|(n, _)| n.eq_ignore_ascii_case("Sec-WebSocket-Key"))
+                            .map(|(_, v)| v.trim().to_string())
+                    })
+                    .unwrap_or_default();
+                let accept = ws_accept(&key);
+                let response = format!(
+                    "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"
+                );
+                if sock.write_all(response.as_bytes()).is_err() {
+                    return;
+                }
+                let _ = sock.flush();
+                let header_end = buf
+                    .windows(4)
+                    .position(|w| w == b"\r\n\r\n")
+                    .map_or(buf.len(), |i| i + 4);
+                buf.drain(..header_end);
+                while !flag.load(std::sync::atomic::Ordering::SeqCst) {
+                    match read_ws_frame(&mut sock, &mut buf, &flag) {
+                        Ok(Some((opcode, payload))) => {
+                            if opcode == 0x8 {
+                                return;
+                            }
+                            if opcode == 0x9 {
+                                let _ = write_ws_frame(&mut sock, 0xA, &payload);
+                                continue;
+                            }
+                            if opcode != 0x1 {
+                                continue;
+                            }
+                            let Ok(text) = std::str::from_utf8(&payload) else {
+                                continue;
+                            };
+                            let Ok(req) = serde_json::from_str::<Value>(text) else {
+                                continue;
+                            };
+                            let reply = cdp_reply(&req);
+                            let _ = write_ws_frame(&mut sock, 0x1, reply.to_string().as_bytes());
+                        }
+                        Ok(None) | Err(_) => return,
+                    }
+                }
+                let _ = sock.shutdown(Shutdown::Both);
+            });
+            Self {
+                url: format!("ws://127.0.0.1:{port}/devtools/browser/fake"),
+                shutdown,
+                killer,
+            }
+        }
+
+        fn kill(&self) {
+            self.shutdown
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            if let Some(sock) = self.killer.lock().expect("killer lock").take() {
+                let _ = sock.shutdown(std::net::Shutdown::Both);
+            }
+        }
+    }
+
+    fn cdp_reply(req: &Value) -> Value {
+        let id = req.get("id").cloned().unwrap_or(Value::Null);
+        let method = req.get("method").and_then(Value::as_str).unwrap_or("");
+        let result = match method {
+            "Target.getTargets" => json!({
+                "targetInfos": [{
+                    "targetId": "t1",
+                    "type": "page",
+                    "title": "T",
+                    "url": "about:blank"
+                }]
+            }),
+            "Target.attachToTarget" => json!({"sessionId": "s1"}),
+            _ => json!({}),
+        };
+        json!({"id": id, "result": result})
+    }
+
+    fn write_ws_frame(
+        sock: &mut std::net::TcpStream,
+        opcode: u8,
+        payload: &[u8],
+    ) -> std::io::Result<()> {
+        use std::io::Write;
+        let mut hdr = vec![0x80 | opcode];
+        let n = payload.len();
+        if n < 126 {
+            hdr.push(u8::try_from(n).unwrap_or(125));
+        } else if u16::try_from(n).is_ok() {
+            hdr.push(126);
+            hdr.extend_from_slice(&u16::try_from(n).unwrap_or(u16::MAX).to_be_bytes());
+        } else {
+            hdr.push(127);
+            hdr.extend_from_slice(&u64::try_from(n).unwrap_or(u64::MAX).to_be_bytes());
+        }
+        sock.write_all(&hdr)?;
+        sock.write_all(payload)?;
+        sock.flush()
+    }
+
+    fn read_ws_frame(
+        sock: &mut std::net::TcpStream,
+        buf: &mut Vec<u8>,
+        shutdown: &std::sync::atomic::AtomicBool,
+    ) -> std::io::Result<Option<(u8, Vec<u8>)>> {
+        loop {
+            if buf.len() >= 2 {
+                break;
+            }
+            if !read_some(sock, buf, shutdown)? {
+                return Ok(None);
+            }
+        }
+        let opcode = buf[0] & 0x0f;
+        let masked = buf[1] & 0x80 != 0;
+        let mut len = usize::from(buf[1] & 0x7f);
+        let mut header = 2;
+        if len == 126 {
+            while buf.len() < 4 {
+                if !read_some(sock, buf, shutdown)? {
+                    return Ok(None);
+                }
+            }
+            len = usize::from(u16::from_be_bytes([buf[2], buf[3]]));
+            header = 4;
+        } else if len == 127 {
+            while buf.len() < 10 {
+                if !read_some(sock, buf, shutdown)? {
+                    return Ok(None);
+                }
+            }
+            let raw = u64::from_be_bytes(buf[2..10].try_into().unwrap_or([0; 8]));
+            len = usize::try_from(raw).unwrap_or(0);
+            header = 10;
+        }
+        let mask_len = usize::from(masked) * 4;
+        let total = header + mask_len + len;
+        while buf.len() < total {
+            if !read_some(sock, buf, shutdown)? {
+                return Ok(None);
+            }
+        }
+        let mask = if masked {
+            let mut m = [0u8; 4];
+            m.copy_from_slice(&buf[header..header + 4]);
+            Some(m)
+        } else {
+            None
+        };
+        let start = header + mask_len;
+        let mut payload = buf[start..total].to_vec();
+        if let Some(m) = mask {
+            for (i, b) in payload.iter_mut().enumerate() {
+                *b ^= m[i % 4];
+            }
+        }
+        buf.drain(..total);
+        Ok(Some((opcode, payload)))
+    }
+
+    fn read_some(
+        sock: &mut std::net::TcpStream,
+        buf: &mut Vec<u8>,
+        shutdown: &std::sync::atomic::AtomicBool,
+    ) -> std::io::Result<bool> {
+        use std::io::Read;
+        if shutdown.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(false);
+        }
+        let mut tmp = [0u8; 4096];
+        match sock.read(&mut tmp) {
+            Ok(0) => Ok(false),
+            Ok(n) => {
+                buf.extend_from_slice(&tmp[..n]);
+                Ok(true)
+            }
+            Err(e)
+                if e.kind() == std::io::ErrorKind::TimedOut
+                    || e.kind() == std::io::ErrorKind::WouldBlock =>
+            {
+                Ok(true)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn write_fake_launcher(dir: &Path, log: &Path) -> PathBuf {
+        let log_text = log.display().to_string();
+        assert!(!log_text.contains('"') && !log_text.contains('\''));
+        #[cfg(windows)]
+        {
+            let path = dir.join("fake-browser.cmd");
+            std::fs::write(
+                &path,
+                format!("@echo off\r\necho launched>>\"{log_text}\"\r\n"),
+            )
+            .unwrap();
+            path
+        }
+        #[cfg(not(windows))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let path = dir.join("fake-browser");
+            std::fs::write(&path, format!("#!/bin/sh\necho launched >> '{log_text}'\n")).unwrap();
+            let mut perms = std::fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&path, perms).unwrap();
+            path
+        }
+    }
+
+    #[tokio::test]
+    async fn killed_browser_fake_launcher_relaunches_on_next_open() {
+        assert_eq!(
+            ws_accept("dGhlIHNhbXBsZSBub25jZQ=="),
+            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("launches.txt");
+        let launcher = write_fake_launcher(dir.path(), &log);
+        let server = FakeCdp::start();
+        let browser = Browser::connect(&server.url)
+            .await
+            .expect("connect fake cdp");
+        let page = browser.first_page().await.expect("attach fake page");
+        server.kill();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while !browser.client().is_closed() && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let drv = Arc::new(CdpDriver::new(BrowserSettings {
+            executable: Some(launcher),
+            ..BrowserSettings::isolated(dir.path())
+        }));
+        *drv.session.lock().await = Some(Session {
+            browser,
+            page,
+            profile: None,
+        });
+        let tools = tools(drv, dir.path(), None);
+        let err = get(&tools, "browser_open")
+            .call(
+                &ToolContext::default(),
+                json!({"url": "https://example.com"}),
+            )
+            .await
+            .expect_err("fake launcher is not a browser");
+        let written = std::fs::read_to_string(&log).unwrap_or_default();
+        assert!(
+            written.contains("launched"),
+            "dead session was reused instead of relaunching the fake browser: {err}"
+        );
     }
 }
