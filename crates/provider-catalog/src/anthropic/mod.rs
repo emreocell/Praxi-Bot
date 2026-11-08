@@ -37,11 +37,12 @@ use serde_json::Value;
 use crate::{
     entry::{Auth, ProviderEntry},
     error::ProviderError,
+    limits::response_json,
     openai_compat::OpenAiCompatConfig,
     provider::{ChatChunk, ChatProvider, ChatRequest},
     util::{
-        Classify, Secret, build_client, error_message, event_stream, key_from_env,
-        map_reqwest_error, model_name, retry_after, send_with_retry,
+        Classify, Secret, build_client, error_message, event_stream, key_from_env, model_name,
+        retry_after, send_with_retry,
     },
 };
 
@@ -190,7 +191,7 @@ impl ChatProvider for AnthropicProvider {
             .unwrap_or_else(|| format!("{}/v1/models?limit=1000", self.base()));
         let make = || self.authed(self.client.get(&url));
         let resp = send_with_retry(&self.config, &make, classify as Classify).await?;
-        let v: Value = resp.json().await.map_err(map_reqwest_error)?;
+        let v = response_json(resp).await?;
         let items = v
             .get("data")
             .and_then(Value::as_array)

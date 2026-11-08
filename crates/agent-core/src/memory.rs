@@ -167,7 +167,10 @@ impl Exchange {
             user_id: run.user_id,
             bot_id: run.bot_id,
             chat_id,
-            excerpt: format!("User: {}\nAssistant: {final_text}", users.join("\nUser: ")),
+            excerpt: sh.redact(format!(
+                "User: {}\nAssistant: {final_text}",
+                users.join("\nUser: ")
+            )),
             untrusted,
         })
     }

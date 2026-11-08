@@ -32,8 +32,8 @@ mod tests;
 
 pub use agent::AgentLoop;
 pub use config::{
-    DEFAULT_DIRECT_TOOL_LIMIT, DEFAULT_SCHEDULE_APPROVAL_TIMEOUT, Guards, LoopConfig, MemoryConfig,
-    ModelPrice,
+    DEFAULT_DIRECT_TOOL_LIMIT, DEFAULT_SCHEDULE_APPROVAL_TIMEOUT, Guards, JournalSlot, LoopConfig,
+    MemoryConfig, ModelPrice, RedactorRefreshFn, SharedRedactor, secret_variants,
 };
 pub use control::{ControlGate, ControlRequest};
 pub use permission_engine::Decision as PolicyDecision;

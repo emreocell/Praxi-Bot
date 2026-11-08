@@ -29,9 +29,10 @@ use crate::util::{
 use crate::{
     entry::{Auth, ProviderEntry},
     error::ProviderError,
+    limits::{response_json, response_text},
     provider::{ChatChunk, ChatProvider, ChatRequest},
 };
-use sse::{Assembler, SseDecoder};
+use sse::{Assembler, Assembly, SseDecoder};
 
 /// Tunables for [`OpenAiCompatProvider`].
 #[derive(Debug, Clone)]
@@ -176,8 +177,8 @@ fn classify(status: u16, headers: &HeaderMap, body: &str) -> ProviderError {
     }
 }
 
-struct StreamState {
-    bytes: BoxStream<'static, Result<Vec<u8>, ProviderError>>,
+struct StreamState<B> {
+    bytes: BoxStream<'static, Result<B, ProviderError>>,
     sse: SseDecoder,
     asm: Assembler,
     pending: VecDeque<ChatChunk>,
@@ -185,17 +186,26 @@ struct StreamState {
     done: bool,
 }
 
-impl StreamState {
-    /// Absorb a payload; returns true when `[DONE]` was seen.
+impl<B: Send + 'static> StreamState<B> {
+    /// Absorb a payload and flush once when the assembler signals `[DONE]`.
     fn absorb(&mut self, payload: &str) -> Result<(), ProviderError> {
-        self.pending.extend(self.asm.feed(payload)?);
+        match self.asm.feed(payload)? {
+            Assembly::Chunks(chunks) => self.pending.extend(chunks),
+            Assembly::Done => {
+                self.pending.extend(self.asm.finish()?);
+                self.done = true;
+                // Release the response immediately, even if the consumer pauses
+                // while draining the final tool calls / usage / Done chunks.
+                self.bytes = stream::empty().boxed();
+            }
+        }
         Ok(())
     }
 }
 
-async fn next_chunk(
-    mut st: StreamState,
-) -> Result<Option<(ChatChunk, StreamState)>, ProviderError> {
+async fn next_chunk<B: AsRef<[u8]> + Send + 'static>(
+    mut st: StreamState<B>,
+) -> Result<Option<(ChatChunk, StreamState<B>)>, ProviderError> {
     loop {
         if let Some(c) = st.pending.pop_front() {
             return Ok(Some((c, st)));
@@ -204,17 +214,23 @@ async fn next_chunk(
             return Ok(None);
         }
         if st.eof {
-            if let Some(tail) = st.sse.finish() {
+            if let Some(tail) = st.sse.finish()? {
                 st.absorb(&tail)?;
             }
-            st.pending.extend(st.asm.finish()?);
-            st.done = true;
+            if !st.done {
+                st.pending.extend(st.asm.finish()?);
+                st.done = true;
+            }
             continue;
         }
         match st.bytes.next().await {
             Some(Ok(b)) => {
-                for payload in st.sse.push(&b) {
+                let mut input = b.as_ref();
+                while let Some(payload) = st.sse.next_event(&mut input)? {
                     st.absorb(&payload)?;
+                    if st.done {
+                        break;
+                    }
                 }
             }
             Some(Err(e)) => return Err(e),
@@ -243,9 +259,12 @@ impl ChatProvider for OpenAiCompatProvider {
         let resp = self.send(&url, Some(&body)).await?;
 
         if !streaming {
-            let text = resp.text().await.map_err(map_reqwest_error)?;
+            let text = response_text(resp).await?;
             let mut asm = Assembler::default();
-            let mut chunks = asm.feed(&text)?;
+            let mut chunks = match asm.feed(&text)? {
+                Assembly::Chunks(chunks) => chunks,
+                Assembly::Done => Vec::new(),
+            };
             asm.finished = true;
             chunks.extend(asm.finish()?);
             return Ok(stream::iter(chunks.into_iter().map(Ok)).boxed());
@@ -253,7 +272,7 @@ impl ChatProvider for OpenAiCompatProvider {
 
         let bytes = resp
             .bytes_stream()
-            .map(|r| r.map(|b| b.to_vec()).map_err(map_reqwest_error))
+            .map(|r| r.map_err(map_reqwest_error))
             .boxed();
         let state = StreamState {
             bytes,
@@ -271,7 +290,7 @@ impl ChatProvider for OpenAiCompatProvider {
             return Ok(Vec::new());
         };
         let resp = self.send(url, None).await?;
-        let v: Value = resp.json().await.map_err(map_reqwest_error)?;
+        let v = response_json(resp).await?;
         let items = v
             .get("data")
             .or_else(|| v.get("models"))

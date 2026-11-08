@@ -83,6 +83,33 @@ pub(crate) fn row_to_memory(r: &Row<'_>) -> rusqlite::Result<(i64, Memory)> {
 }
 
 impl MemoryStore {
+    /// Validate and migrate an existing staged database without loading an embedder.
+    /// Returns the resulting schema version and preserves the stored vector dimension.
+    /// Never creates a missing database.
+    ///
+    /// # Errors
+    /// Fails on corruption, an incompatible schema, or migration errors.
+    pub fn validate_and_migrate(path: impl AsRef<Path>) -> Result<u32> {
+        register();
+        let mut conn =
+            Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        let integrity: String = conn.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+        if integrity != "ok" {
+            return Err(MemoryError::Invalid(format!(
+                "database integrity check: {integrity}"
+            )));
+        }
+        migrate(&mut conn)?;
+        conn.prepare(&format!("SELECT {COLS} FROM memories"))?;
+        conn.prepare("SELECT key, value FROM meta")?;
+        conn.prepare("SELECT id, memory_id, user_id, op, before_json, after_json, reason, ts_ms, undone FROM memory_journal")?;
+        conn.prepare("SELECT rowid, message_id, user_id, chat_id, role, content, created_ms FROM session_msgs")?;
+        conn.prepare("SELECT rowid, content FROM memories_fts")?;
+        conn.prepare("SELECT rowid, content FROM session_fts")?;
+        Ok(conn.query_row("PRAGMA user_version", [], |row| row.get(0))?)
+    }
+
     /// Open (creating if needed) `<data_dir>/memory.db`.
     ///
     /// # Errors
