@@ -230,30 +230,23 @@ struct MovedSkill {
     backup: TempDir,
 }
 
-fn rollback(moved: &[MovedSkill], error: &str) -> String {
+fn rollback(moved: Vec<MovedSkill>, error: &str) -> String {
     let mut message = error.to_owned();
-    for entry in moved.iter().rev() {
+    for entry in moved.into_iter().rev() {
         let backup = entry.backup.path().join("skill");
         if let Err(e) = fs::rename(&backup, &entry.original) {
             // Keep the backup on rollback failure; TempDir must not delete the
-            // only surviving copy. The caller preserves it below.
+            // only surviving copy, even if metadata is inaccessible.
             let _ = write!(
                 message,
                 "; rollback {} failed: {e} (backup {})",
                 entry.original.display(),
                 backup.display()
             );
-        }
-    }
-    message
-}
-
-fn preserve_failed_rollbacks(moved: Vec<MovedSkill>) {
-    for entry in moved {
-        if entry.backup.path().join("skill").exists() {
             let _ = entry.backup.keep();
         }
     }
+    message
 }
 
 fn published_dirs(shared: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
@@ -360,21 +353,18 @@ fn publish_with(
         {
             Ok(backup) => backup,
             Err(e) => {
-                let message = rollback(&moved, &format!("stage publication backup: {e}"));
-                preserve_failed_rollbacks(moved);
+                let message = rollback(moved, &format!("stage publication backup: {e}"));
                 return Err(message);
             }
         };
         if let Err(e) = fs::rename(&original, backup.path().join("skill")) {
-            let message = rollback(&moved, &format!("back up {}: {e}", original.display()));
-            preserve_failed_rollbacks(moved);
+            let message = rollback(moved, &format!("back up {}: {e}", original.display()));
             return Err(message);
         }
         moved.push(MovedSkill { original, backup });
     }
     if let Err(e) = commit(staged.path(), &target) {
-        let message = rollback(&moved, &format!("publish {}: {e}", target.display()));
-        preserve_failed_rollbacks(moved);
+        let message = rollback(moved, &format!("publish {}: {e}", target.display()));
         return Err(message);
     }
     // Readers use the same scope lock, so they see the complete old or new
