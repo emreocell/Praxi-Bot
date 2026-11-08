@@ -3,6 +3,7 @@
 //! See the crate README for the format, trust model and swap limitations.
 
 mod install;
+mod policy;
 mod transfer;
 
 use std::{
@@ -16,16 +17,21 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use zeroize::Zeroizing;
 
+pub use policy::POLICY_SCHEMA_VERSION;
 pub use transfer::{EXCLUSIONS, INCLUDED_DIRECTORIES, INCLUDED_FILES};
 
 /// Supported archive format.
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 
 /// An error during either direction of transfer. Errors never contain values.
 #[derive(Debug, thiserror::Error)]
 pub enum ImportError {
     #[error("target contains bots or chats; replace is required")]
     TargetNotEmpty,
+    #[error(
+        "imported global policy may grant more permissions; allow_policy_relaxation is required"
+    )]
+    PolicyRelaxation,
     #[error("invalid bundle: {0}")]
     Invalid(String),
     #[error("database {db} has schema version {found}, newer than supported {supported}")]
@@ -131,11 +137,14 @@ impl Default for ExportOptions {
     }
 }
 
-/// Import limits and destination host policy. Host mode defaults to standalone,
-/// state to standby; activation and epoch advancement belong to handover.
+/// Import limits and destination host/permission policy. Host mode defaults to
+/// standalone, state to standby; activation and epoch advancement belong to handover.
 #[derive(Clone)]
 pub struct ImportOptions {
     pub replace: bool,
+    /// Explicitly approve replacing a valid destination policy with a more
+    /// permissive one. Does not bypass missing, malformed, or unknown policies.
+    pub allow_policy_relaxation: bool,
     pub max_bytes: u64,
     pub max_entry_bytes: u64,
     pub host_mode: String,
@@ -147,6 +156,7 @@ impl Default for ImportOptions {
     fn default() -> Self {
         Self {
             replace: false,
+            allow_policy_relaxation: false,
             max_bytes: 2 * 1024 * 1024 * 1024,
             max_entry_bytes: 1024 * 1024 * 1024,
             host_mode: "standalone".into(),
@@ -185,7 +195,7 @@ fn now() -> u64 {
 /// SQLite online backups; selected plaintext secrets never touch disk.
 ///
 /// # Errors
-/// Returns errors for I/O, invalid filesystem entries, or unavailable secrets.
+/// Returns errors for I/O, invalid filesystem entries/policies, or unavailable secrets.
 pub async fn export(
     data_dir: impl AsRef<Path>,
     store: &dyn SecretStore,
@@ -205,45 +215,14 @@ pub async fn export(
         files: Vec::new(),
     };
     let mut bytes = 0;
-    let mut paths = transfer::collect(data_dir)?;
-    paths.sort();
-    // Keep snapshots alive until their payloads have been streamed.
-    let snapshots = tempfile::tempdir()?;
-    for path in paths {
-        let mut source = data_dir.join(&path);
-        if matches!(path.as_str(), "bot.db" | "schedules.db" | "memory.db") {
-            let snapshot = snapshots.path().join(&path);
-            transfer::backup(&source, &snapshot)?;
-            source = snapshot;
-            let version = storage::migrate::current_version(&rusqlite::Connection::open(&source)?)?;
-            manifest
-                .db_schemas
-                .get_or_insert_default()
-                .insert(path.clone(), version);
-            if path == "bot.db" {
-                manifest.schema_version = version;
-                if manifest.schema_version > storage::migrate::latest_version() {
-                    return Err(invalid("database schema is too new"));
-                }
-            }
-        }
-        let size = std::fs::metadata(&source)?.len();
-        let mut file = tokio::fs::File::open(source).await?;
-        manifest.files.push(
-            transfer::write_entry(
-                &mut sink,
-                &path,
-                size,
-                &mut file,
-                &mut bytes,
-                opts.progress.as_ref(),
-            )
-            .await?,
-        );
-    }
-    if !manifest.files.iter().any(|f| f.path == "bot.db") {
-        return Err(invalid("bot.db is required"));
-    }
+    transfer::write_files(
+        data_dir,
+        &mut sink,
+        &mut manifest,
+        &mut bytes,
+        opts.progress.as_ref(),
+    )
+    .await?;
     let mut names = match opts.secrets {
         SecretSelection::None => Vec::new(),
         SecretSelection::All => store.list_names()?,
@@ -295,7 +274,8 @@ pub async fn export(
 /// on error and cancellation. Secrets are written only after validation.
 ///
 /// # Errors
-/// Rejects unsafe archives, incompatible schemas, limits and nonempty targets.
+/// Rejects unsafe archives, incompatible schemas, unapproved policy relaxations,
+/// limits and nonempty targets.
 pub async fn import(
     data_dir: impl AsRef<Path>,
     store: &dyn SecretStore,
@@ -308,13 +288,27 @@ pub async fn import(
     let staging = install::Staging::create(data_dir)?;
     let (manifest, secrets, bytes) = transfer::receive(&staging.0, source, &opts).await?;
     progress(opts.progress.as_ref(), bytes, Phase::Verify);
+    let incoming_policy = policy::imported(&staging.0)?;
+    policy::check_destination(data_dir, &incoming_policy, opts.allow_policy_relaxation)?;
     install::prepare(&staging.0, &manifest, &opts)?;
     progress(opts.progress.as_ref(), bytes, Phase::Migrate);
     // Recheck after the potentially long receive (callers must still serialize imports).
     install::check_target(data_dir, opts.replace)?;
     progress(opts.progress.as_ref(), bytes, Phase::Swap);
+    // The receive/migrations and even a progress callback can take time. Check
+    // the current destination ceiling immediately before any live-state write.
+    // commit checks the policy file it actually renames, so a write that lands
+    // after this call still cannot loosen the captured ceiling.
+    policy::check_destination(data_dir, &incoming_policy, opts.allow_policy_relaxation)?;
     // No await points after writes start: cancellation cannot interrupt rollback.
-    let backup_dir = install::commit(data_dir, &staging.0, store, &secrets)?;
+    let backup_dir = install::commit(
+        data_dir,
+        &staging.0,
+        store,
+        &secrets,
+        &incoming_policy,
+        opts.allow_policy_relaxation,
+    )?;
     progress(opts.progress.as_ref(), bytes, Phase::Complete);
     Ok(ImportOutcome {
         secrets_written: manifest.secret_names.clone(),
@@ -325,3 +319,6 @@ pub async fn import(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod policy_tests;

@@ -12,7 +12,7 @@ use secret_store::{MemoryStore, SecretError, SecretValue};
 
 use super::*;
 
-fn database(dir: &Path, populated: bool) {
+pub(super) fn database(dir: &Path, populated: bool) {
     drop(storage::Storage::open(dir).unwrap());
     if populated {
         Connection::open(dir.join("bot.db")).unwrap().execute_batch(
@@ -23,7 +23,7 @@ fn database(dir: &Path, populated: bool) {
     }
 }
 
-async fn bundle(dir: &Path) -> Vec<u8> {
+pub(super) async fn bundle(dir: &Path) -> Vec<u8> {
     let mut out = Vec::new();
     export(dir, &MemoryStore::new(), ExportOptions::default(), &mut out)
         .await
@@ -31,7 +31,7 @@ async fn bundle(dir: &Path) -> Vec<u8> {
     out
 }
 
-fn unpack(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
+pub(super) fn unpack(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
     tar::Archive::new(bytes)
         .entries()
         .unwrap()
@@ -45,7 +45,7 @@ fn unpack(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
         .collect()
 }
 
-fn pack(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
+pub(super) fn pack(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
     let mut builder = tar::Builder::new(Vec::new());
     for (path, bytes) in entries {
         let mut header = tar::Header::new_ustar();
@@ -59,7 +59,7 @@ fn pack(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
     builder.into_inner().unwrap()
 }
 
-fn alter_manifest(bytes: &[u8], change: impl FnOnce(&mut Manifest)) -> Vec<u8> {
+pub(super) fn alter_manifest(bytes: &[u8], change: impl FnOnce(&mut Manifest)) -> Vec<u8> {
     let mut entries = unpack(bytes);
     let last = entries.last_mut().unwrap();
     assert_eq!(last.0, "manifest.json");
@@ -69,7 +69,7 @@ fn alter_manifest(bytes: &[u8], change: impl FnOnce(&mut Manifest)) -> Vec<u8> {
     pack(&entries)
 }
 
-fn replace_database_payload(bytes: &[u8], name: &str, payload: Vec<u8>) -> Vec<u8> {
+pub(super) fn replace_payload(bytes: &[u8], name: &str, payload: Vec<u8>) -> Vec<u8> {
     use sha2::{Digest, Sha256};
 
     let mut entries = unpack(bytes);
@@ -96,7 +96,7 @@ async fn corrupt_secondary_database_preserves_destination() {
         .execute_batch("CREATE TABLE old_source(value TEXT)")
         .unwrap();
     drop(schedule);
-    let bytes = replace_database_payload(
+    let bytes = replace_payload(
         &bundle(source.path()).await,
         "schedules.db",
         b"not a SQLite database, with a correct archive checksum".to_vec(),
@@ -148,7 +148,7 @@ async fn corrupt_secondary_database_preserves_destination() {
     }));
 }
 
-async fn rejected(bytes: &[u8], opts: ImportOptions) -> ImportError {
+pub(super) async fn rejected(bytes: &[u8], opts: ImportOptions) -> ImportError {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("api-token"), "identity").unwrap();
     let result = import(dir.path(), &MemoryStore::new(), bytes, opts)
@@ -292,7 +292,7 @@ async fn exclusions_are_central_and_apply_at_every_depth() {
     }
     for (path, _) in unpack(&bundle(dir.path()).await) {
         assert!(
-            path == "bot.db" || path == "manifest.json",
+            matches!(path.as_str(), "bot.db" | "policy.json" | "manifest.json"),
             "unexpected {path}"
         );
     }
@@ -503,7 +503,7 @@ async fn database_manifest_mismatches_are_rejected() {
 }
 
 #[tokio::test]
-async fn old_manifest_without_database_schemas_imports() {
+async fn manifest_without_optional_database_schemas_imports() {
     let source = tempfile::tempdir().unwrap();
     database(source.path(), false);
     drop(scheduler::ScheduleStore::open(source.path()).unwrap());
@@ -686,7 +686,7 @@ async fn future_versions_schema_disagreement_and_missing_records_rejected() {
     database(dir.path(), false);
     let bytes = bundle(dir.path()).await;
     for change in [
-        |m: &mut Manifest| m.format_version = 2,
+        |m: &mut Manifest| m.format_version = FORMAT_VERSION + 1,
         |m: &mut Manifest| m.schema_version = 999,
         |m: &mut Manifest| m.schema_version = 1,
         |m: &mut Manifest| m.files.clear(),
@@ -996,7 +996,14 @@ fn swap_failure_restores_renamed_roots_and_secrets() {
     store.set("a", "old").unwrap();
     let secrets = BTreeMap::from([("a".into(), Zeroizing::new("new".into()))]);
     assert!(matches!(
-        install::commit(target.path(), &staging.0, &store, &secrets),
+        install::commit(
+            target.path(),
+            &staging.0,
+            &store,
+            &secrets,
+            &permission_engine::Policy::approve_destructive(),
+            true,
+        ),
         Err(ImportError::Io(_))
     ));
     assert_eq!(
@@ -1018,7 +1025,17 @@ fn swap_failure_restores_renamed_roots_and_secrets() {
     let store = MemoryStore::new();
     store.set("a", "old").unwrap();
     let secrets = BTreeMap::from([("a".into(), Zeroizing::new("new".into()))]);
-    assert!(install::commit(target.path(), &staging.0, &store, &secrets).is_err());
+    assert!(
+        install::commit(
+            target.path(),
+            &staging.0,
+            &store,
+            &secrets,
+            &permission_engine::Policy::approve_destructive(),
+            true,
+        )
+        .is_err()
+    );
     assert_eq!(
         fs::read_to_string(target.path().join("bots/original")).unwrap(),
         "old profile"

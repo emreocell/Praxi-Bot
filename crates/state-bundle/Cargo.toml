@@ -11,6 +11,9 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+daemon-api = { path = "../daemon-api", version = "0.1.0" }
+permission-engine = { path = "../permission-engine", version = "0.1.0" }
+protocol.workspace = true
 storage.workspace = true
 secret-store.workspace = true
 scheduler = { path = "../scheduler", version = "0.1.0" }
@@ -25,3 +28,7 @@ toml.workspace = true
 tar = "0.4"
 sha2 = "0.10"
 zeroize = { version = "1", features = ["serde"] }
+
+[dev-dependencies]
+agent-core = { path = "../agent-core", version = "0.1.0" }
+tool-registry = { path = "../tool-registry", version = "0.1.0" }
