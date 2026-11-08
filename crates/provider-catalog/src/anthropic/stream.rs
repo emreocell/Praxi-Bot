@@ -63,15 +63,18 @@ impl UsageAcc {
         }
     }
 
-    fn usage(&self) -> Usage {
-        Usage {
-            prompt_tokens: self.input
-                + self.cache_read.unwrap_or(0)
-                + self.cache_write.unwrap_or(0),
+    fn usage(&self) -> Result<Usage, ProviderError> {
+        let prompt_tokens = self
+            .input
+            .checked_add(self.cache_read.unwrap_or(0))
+            .and_then(|total| total.checked_add(self.cache_write.unwrap_or(0)))
+            .ok_or_else(|| ProviderError::Stream("Anthropic prompt-token total overflow".into()))?;
+        Ok(Usage {
+            prompt_tokens,
             completion_tokens: self.output,
             cached_tokens: self.cache_read,
             cache_write_tokens: self.cache_write,
-        }
+        })
     }
 }
 
@@ -250,7 +253,7 @@ impl EventDecoder for Decoder {
             }
         }
         if self.usage.seen {
-            out.push(ChatChunk::Usage(self.usage.usage()));
+            out.push(ChatChunk::Usage(self.usage.usage()?));
         }
         if let Some(e) = self.finish.as_ref().and_then(finish_error) {
             return Err(e);
