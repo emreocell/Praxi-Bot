@@ -242,16 +242,21 @@ impl Shared {
     }
 
     /// Park the run in `WaitingApproval` until `approve` / `deny` is called.
-    /// `Ok(())` = approved, `Err(reason)` = denied.
+    ///
+    /// `Ok(permit)` means the user approved and the post-approve recheck did
+    /// not see [`Decision::Deny`]. The caller must [`ExecPermit::commit`]
+    /// immediately before invoking the tool: that recheck runs under
+    /// [`Shared::exec_gate`] and is what creates a grant. `Err` means the
+    /// call is denied (no grant, tool must not run).
     pub(crate) async fn request_approval(
         self: &Arc<Self>,
-        ctx: &RunCtx,
+        ctx: &Arc<RunCtx>,
         call_id: ToolCallId,
         name: &str,
         effect: Effect,
         category: PermissionCategory,
         input: &Value,
-    ) -> Result<(), Option<String>> {
+    ) -> Result<ExecPermit, Option<String>> {
         let args = input.to_string();
         let summary = self.redact(format!("{name} {}", truncate_utf8(&args, 300)));
         let (approval_id, mut guard, rx) = self.park(ctx, call_id, &summary);
@@ -279,49 +284,32 @@ impl Shared {
                 // The policy may have tightened while this card was open.
                 // A hard deny wins over the click: do not run the tool and do
                 // not mint a grant from a decision the current policy rejects.
-                if matches!(
-                    self.decide(ctx, name, effect, category, input),
-                    Decision::Deny
-                ) {
-                    self.record_policy_denial(ctx, approval_id, call_id, name, by);
-                    return Err(Some("denied by policy".into()));
-                }
-                let _ = self.storage.decide_approval(approval_id, "approved");
-                let target = match scope {
-                    ApprovalScope::Once => None,
-                    ApprovalScope::ThisChat => {
-                        self.grants
-                            .lock()
-                            .this_chat
-                            .insert((ctx.chat_id, name.to_owned()));
-                        None
+                // The grant itself is deferred to [`ExecPermit::commit`], which
+                // repeats this check under the same mutex immediately before
+                // the tool is invoked.
+                {
+                    let _gate = self.exec_gate.lock();
+                    if matches!(
+                        self.decide(ctx, name, effect, category, input),
+                        Decision::Deny
+                    ) {
+                        self.record_policy_denial(ctx, approval_id, call_id, name, by);
+                        return Err(Some("denied by policy".into()));
                     }
-                    ApprovalScope::Always => Some(GrantTarget::Tool(name.to_owned())),
-                    ApprovalScope::AlwaysCategory => Some(GrantTarget::Category(category)),
-                };
-                if let Some(target) = target {
-                    self.add_grant(ctx, target);
                 }
-                self.audit(
-                    ctx,
-                    "user",
-                    "approval.approved",
-                    &json!({
-                        "tool": name,
-                        "scope": format!("{scope:?}"),
-                        "policy_revision": policy_revision(self),
-                        "parked_at": parked_at,
-                    }),
-                );
-                self.emit(
-                    ctx,
-                    Event::ToolCallApproved(ToolCallApproved {
-                        run_id: ctx.run_id,
-                        call_id,
-                        approved_by: by,
-                    }),
-                );
-                Ok(())
+                Ok(ExecPermit {
+                    sh: Arc::clone(self),
+                    ctx: Arc::clone(ctx),
+                    approval_id,
+                    call_id,
+                    name: name.to_owned(),
+                    effect,
+                    category,
+                    input: input.clone(),
+                    scope,
+                    by,
+                    parked_at,
+                })
             }
             Ok(Verdict::Denied { by, reason }) => {
                 let _ = self.storage.decide_approval(approval_id, "denied");
@@ -463,6 +451,104 @@ impl Shared {
     }
 }
 
+/// An approval the user accepted, not yet committed to execution.
+///
+/// [`ExecPermit::commit`] re-checks [`Decision::Deny`] under [`Shared::exec_gate`]
+/// and only then records the approval and any grant. Dropping the permit
+/// without committing runs nothing and keeps no grant.
+pub(crate) struct ExecPermit {
+    sh: Arc<Shared>,
+    ctx: Arc<RunCtx>,
+    approval_id: Uuid,
+    call_id: ToolCallId,
+    name: String,
+    effect: Effect,
+    category: PermissionCategory,
+    input: Value,
+    scope: ApprovalScope,
+    by: protocol::UserId,
+    parked_at: u64,
+}
+
+impl ExecPermit {
+    /// Last check before the tool runs. Holds `exec_gate` so
+    /// [`install_global_policy`] cannot change the policy between this
+    /// `decide` and the caller's decision to invoke the tool.
+    ///
+    /// `Err` — do not call the tool; no grant is stored.
+    pub(crate) fn commit(self) -> Result<(), Option<String>> {
+        let _gate = self.sh.exec_gate.lock();
+        #[cfg(test)]
+        {
+            let hook = self.sh.exec_commit_hook.lock().clone();
+            if let Some(hook) = hook {
+                hook(&self.sh);
+            }
+        }
+        if matches!(
+            self.sh.decide(
+                &self.ctx,
+                &self.name,
+                self.effect,
+                self.category,
+                &self.input
+            ),
+            Decision::Deny
+        ) {
+            self.sh.record_policy_denial(
+                &self.ctx,
+                self.approval_id,
+                self.call_id,
+                &self.name,
+                self.by,
+            );
+            return Err(Some("denied by policy".into()));
+        }
+        let _ = self
+            .sh
+            .storage
+            .decide_approval(self.approval_id, "approved");
+        match self.scope {
+            ApprovalScope::Once => {}
+            ApprovalScope::ThisChat => {
+                self.sh
+                    .grants
+                    .lock()
+                    .this_chat
+                    .insert((self.ctx.chat_id, self.name.clone()));
+            }
+            ApprovalScope::Always => {
+                self.sh
+                    .add_grant(&self.ctx, GrantTarget::Tool(self.name.clone()));
+            }
+            ApprovalScope::AlwaysCategory => {
+                self.sh
+                    .add_grant(&self.ctx, GrantTarget::Category(self.category));
+            }
+        }
+        self.sh.audit(
+            &self.ctx,
+            "user",
+            "approval.approved",
+            &json!({
+                "tool": self.name,
+                "scope": format!("{:?}", self.scope),
+                "policy_revision": policy_revision(&self.sh),
+                "parked_at": self.parked_at,
+            }),
+        );
+        self.sh.emit(
+            &self.ctx,
+            Event::ToolCallApproved(ToolCallApproved {
+                run_id: self.ctx.run_id,
+                call_id: self.call_id,
+                approved_by: self.by,
+            }),
+        );
+        Ok(())
+    }
+}
+
 /// One open approval. Re-checked against the live policy when the revision moves.
 #[derive(Clone)]
 struct ParkedCall {
@@ -512,11 +598,21 @@ fn forget_parked(sh: &Shared, id: ToolCallId) {
     }
 }
 
+/// Install `policy` and deny parked approvals it hard-denies.
+///
+/// Caller holds [`Shared::exec_gate`] for this whole update (the write, the
+/// revision bump, and the pending denial) so it cannot interleave with
+/// [`ExecPermit::commit`].
+pub(crate) fn install_global_policy(sh: &Shared, policy: Policy) {
+    *sh.global_policy.write() = policy;
+    on_global_policy_replaced(sh);
+}
+
 /// Bump the policy revision and deny parked approvals the new policy rejects.
 ///
-/// Called from [`crate::AgentLoop::set_global_policy`] after the new policy is
-/// installed. A pending card whose category is now [`Decision::Deny`] is
-/// failed closed: the tool does not run and no grant is created.
+/// Called from [`install_global_policy`] after the new policy is installed.
+/// A pending card whose category is now [`Decision::Deny`] is failed closed:
+/// the tool does not run and no grant is created.
 pub(crate) fn on_global_policy_replaced(sh: &Shared) {
     let stale: Vec<(ToolCallId, ParkedCall)> = {
         let mut slots = policy_slots().lock();
@@ -598,6 +694,7 @@ impl ToolGate for LoopGate {
                     &req.input,
                 )
                 .await
+                .and_then(ExecPermit::commit)
                 .map_err(|reason| {
                     format!(
                         "permission denied by the user{}",

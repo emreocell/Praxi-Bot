@@ -26,6 +26,7 @@ use task_runtime::{ExecError, RetryPolicy, StepExecutor, StepSpec, StepStatus};
 use tokio_util::sync::CancellationToken;
 use tool_registry::{ContentPart, Tool, ToolContext, ToolOutput, ToolSpec};
 
+use crate::approval::ExecPermit;
 use crate::history::{
     GUARD_NOTE, build_messages, expose, status_of, step_output, tool_defs, truncate_utf8,
 };
@@ -49,13 +50,32 @@ enum Slot {
         input: Value,
         call: ToolCallId,
         meta: bool,
+        /// Set when the call was approved. [`ExecPermit::commit`] runs under
+        /// the policy mutex immediately before the tool is invoked.
+        permit: Option<ExecPermit>,
     },
     /// A `spawn_subagent` call, executed by the loop itself.
     Spawn {
         input: Value,
         call: ToolCallId,
         model_call_id: String,
+        permit: Option<ExecPermit>,
     },
+}
+
+fn user_denied(reason: Option<String>) -> String {
+    format!(
+        "Permission denied by the user{}. Do not retry this call.",
+        reason.map_or_else(String::new, |r| format!(": {r}"))
+    )
+}
+
+/// `Ok` — the tool may run. `Err` — policy now denies it; nothing was granted.
+fn commit_or_deny(permit: Option<ExecPermit>) -> Result<(), Option<String>> {
+    match permit {
+        Some(permit) => permit.commit(),
+        None => Ok(()),
+    }
 }
 
 fn call_key(name: &str, args: &str) -> (String, Value) {
@@ -685,6 +705,7 @@ impl TurnExecutor {
                     input,
                     call: call_uuid,
                     meta,
+                    permit: None,
                 },
                 Decision::Deny => {
                     self.sh.emit(
@@ -724,27 +745,28 @@ impl TurnExecutor {
                         )
                         .await
                     {
-                        Ok(()) => Slot::Run {
+                        Ok(permit) => Slot::Run {
                             tool,
                             input,
                             call: call_uuid,
                             meta,
+                            permit: Some(permit),
                         },
                         Err(reason) => Slot::Done {
-                            text: format!(
-                                "Permission denied by the user{}. Do not retry this call.",
-                                reason.map_or_else(String::new, |r| format!(": {r}"))
-                            ),
+                            text: user_denied(reason),
                             is_error: true,
                         },
                     }
                 }
             };
             let slot = match slot {
-                Slot::Run { call: c, .. } if is_spawn => Slot::Spawn {
+                Slot::Run {
+                    call: c, permit, ..
+                } if is_spawn => Slot::Spawn {
                     input: spawn_input,
                     call: c,
                     model_call_id: call.id.clone(),
+                    permit,
                 },
                 other => other,
             };
@@ -760,7 +782,11 @@ impl TurnExecutor {
                     input,
                     call,
                     model_call_id,
+                    permit,
                 } => {
+                    if let Err(reason) = commit_or_deny(permit) {
+                        return (user_denied(reason), true, None, false);
+                    }
                     let (t, e, d) = self
                         .run_subagent(run, ctx_ref, call, &model_call_id, input)
                         .await;
@@ -771,7 +797,16 @@ impl TurnExecutor {
                     input,
                     call,
                     meta,
-                } => self.run_tool(run, ctx_ref, call, &tool, input, meta).await,
+                    permit,
+                } => {
+                    // Re-check under the policy mutex immediately before the
+                    // call. A deny that landed after approval does not run the
+                    // tool and does not keep a grant (`commit` stores it).
+                    if let Err(reason) = commit_or_deny(permit) {
+                        return (user_denied(reason), true, None, false);
+                    }
+                    self.run_tool(run, ctx_ref, call, &tool, input, meta).await
+                }
             }
         }))
         .await;

@@ -3849,3 +3849,208 @@ async fn finished_runs_leave_the_task_map_and_wait_still_returns_state() {
         assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
     }
 }
+
+#[tokio::test]
+async fn finishing_task_removes_only_its_own_handle_and_resume_refuses_while_it_remains() {
+    let env = setup();
+    let w = Arc::new(tool("t.write", Effect::Write, "written"));
+    let fake = Fake::new(vec![calls(&[("c1", "t.write", json!({}))]), text("never")]);
+    let mut config = cfg(Policy::approve_destructive());
+    config.schedule_approval_timeout = Duration::from_millis(80);
+    let lp = make_loop(&env.storage, env.bot, &fake, &[t(&w)], profile(""), config);
+    let barrier = Arc::new(Barrier::new(2));
+    *lp.sh.task_reap_gate.lock() = Some(Arc::clone(&barrier));
+    let run = lp
+        .run_scheduled(
+            env.chat,
+            protocol::TaskId::new(),
+            crate::ScheduleWork::Prompt("go".into()),
+        )
+        .unwrap();
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let paused = lp.runtime().state(run).ok() == Some(RunState::Paused);
+        let entered = lp.sh.task_reap_entered.load(Ordering::SeqCst);
+        if paused && entered {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "drive task never parked at the reap gate (state={:?})",
+            lp.runtime().state(run)
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let id_before = lp
+        .sh
+        .tasks
+        .lock()
+        .get(&run)
+        .map(tokio::task::JoinHandle::id)
+        .expect("finishing task still holds the map entry");
+    let err = lp.resume(run).unwrap_err();
+    assert!(
+        matches!(err, crate::LoopError::StillFinishing(id) if id == run),
+        "{err}"
+    );
+    assert_eq!(
+        lp.sh
+            .tasks
+            .lock()
+            .get(&run)
+            .map(tokio::task::JoinHandle::id),
+        Some(id_before),
+        "resume must not replace the live handle"
+    );
+    assert!(
+        !lp.sh.active.lock().contains_key(&env.chat),
+        "a refused resume must not keep the chat"
+    );
+
+    // A newer handle for the same run (what a racy insert would store). The
+    // finishing task must not remove it: dropping that JoinHandle detaches
+    // the resumed driver.
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let dummy = tokio::spawn(async move {
+        let _ = rx.await;
+    });
+    let dummy_id = dummy.id();
+    {
+        let mut tasks = lp.sh.tasks.lock();
+        let previous = tasks.insert(run, dummy);
+        drop(previous);
+    }
+    barrier.wait().await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !lp.sh.task_reap_done.load(Ordering::SeqCst) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "finishing task did not reach its remove"
+        );
+        tokio::task::yield_now().await;
+    }
+    let kept = lp
+        .sh
+        .tasks
+        .lock()
+        .remove(&run)
+        .expect("reap removed a different task's handle");
+    assert_eq!(kept.id(), dummy_id);
+    assert!(!kept.is_finished(), "the newer task must still be joinable");
+    let _ = tx.send(());
+    let _ = kept.await;
+    *lp.sh.task_reap_gate.lock() = None;
+}
+
+async fn until_flag(flag: &std::sync::atomic::AtomicBool, label: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !flag.load(Ordering::SeqCst) {
+        assert!(tokio::time::Instant::now() < deadline, "{label}");
+        tokio::task::yield_now().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn policy_deny_after_approval_recheck_does_not_run_the_tool_or_keep_the_grant() {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Condvar, Mutex as StdMutex};
+
+    let env = setup();
+    let mut shell = tool("shell_run", Effect::Write, "ran");
+    shell.spec.category = PermissionCategory::Shell;
+    let shell = Arc::new(shell);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "shell_run", json!({"command": "echo hi"}))]),
+        text("stopped"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&shell)],
+        profile(""),
+        cfg(Policy::approve_destructive()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+
+    let entered = Arc::new(AtomicBool::new(false));
+    let release = Arc::new((StdMutex::new(false), Condvar::new()));
+    let entered_h = Arc::clone(&entered);
+    let release_h = Arc::clone(&release);
+    *lp.sh.exec_commit_hook.lock() = Some(Arc::new(move |sh| {
+        entered_h.store(true, Ordering::SeqCst);
+        let (lock, cv) = &*release_h;
+        let mut go = lock.lock().unwrap();
+        while !*go {
+            go = cv.wait(go).unwrap();
+        }
+        drop(go);
+        // The policy moves to deny while the pre-tool check still holds
+        // `exec_gate`, before `decide` runs again.
+        crate::approval::install_global_policy(sh, shell_deny());
+    }));
+    lp.approve(a.call_id, ApprovalScope::Always, env.user)
+        .unwrap();
+
+    until_flag(&entered, "pre-tool commit hook did not run").await;
+    assert!(
+        lp.sh.exec_gate.try_lock().is_none(),
+        "the pre-tool recheck must hold exec_gate"
+    );
+
+    let saw_busy = Arc::new(AtomicBool::new(false));
+    let finished = Arc::new(AtomicBool::new(false));
+    let saw_busy_t = Arc::clone(&saw_busy);
+    let finished_t = Arc::clone(&finished);
+    let lp_t = lp.clone();
+    std::thread::spawn(move || {
+        loop {
+            if lp_t.sh.exec_gate.try_lock().is_none() {
+                saw_busy_t.store(true, Ordering::SeqCst);
+                break;
+            }
+            std::thread::yield_now();
+        }
+        lp_t.set_global_policy(shell_deny());
+        finished_t.store(true, Ordering::SeqCst);
+    });
+    until_flag(&saw_busy, "observer never saw exec_gate held").await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        !finished.load(Ordering::SeqCst),
+        "set_global_policy must block on the exec gate until the pre-tool recheck finishes"
+    );
+
+    {
+        let (lock, cv) = &*release;
+        *lock.lock().unwrap() = true;
+        cv.notify_one();
+    }
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(
+        shell.count.load(Ordering::SeqCst),
+        0,
+        "the command must not run"
+    );
+    assert!(
+        lp.list_grants(env.bot).is_empty(),
+        "a deny must not keep a grant"
+    );
+    let msg = tool_messages(&fake.request(1)).join("\n");
+    assert!(
+        msg.contains("denied by policy"),
+        "the model should see the policy denial, got {msg}"
+    );
+    until_flag(
+        &finished,
+        "set_global_policy did not finish after the gate was released",
+    )
+    .await;
+}

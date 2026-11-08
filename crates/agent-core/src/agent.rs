@@ -105,6 +105,15 @@ impl AgentLoop {
                 directives: Mutex::new(HashMap::new()),
                 approval_paused: Mutex::new(HashSet::new()),
                 parked: Mutex::new(HashMap::new()),
+                exec_gate: Mutex::new(()),
+                #[cfg(test)]
+                task_reap_gate: Mutex::new(None),
+                #[cfg(test)]
+                task_reap_entered: AtomicBool::new(false),
+                #[cfg(test)]
+                task_reap_done: AtomicBool::new(false),
+                #[cfg(test)]
+                exec_commit_hook: Mutex::new(None),
             }
         });
         let rt = Arc::new(Runtime::new(
@@ -229,8 +238,11 @@ impl AgentLoop {
     /// policy hard-denies (the tool is not run and no grant is created). The
     /// next tool call of every run sees the new policy.
     pub fn set_global_policy(&self, policy: Policy) {
-        *self.sh.global_policy.write() = policy;
-        crate::approval::on_global_policy_replaced(&self.sh);
+        // Same mutex the approve path holds for its post-approve recheck and
+        // again immediately before the tool runs. A deny cannot land in the
+        // gap where the command would still run and an `Always` grant stick.
+        let _gate = self.sh.exec_gate.lock();
+        crate::approval::install_global_policy(&self.sh, policy);
     }
 
     /// USD price of `model` (full `provider/model` reference): the loop config's
@@ -660,6 +672,8 @@ impl AgentLoop {
     ///
     /// # Errors
     /// Fails if the run does not exist, is not `Paused`, or its chat is busy.
+    /// [`LoopError::StillFinishing`] if the previous drive task has not yet
+    /// released its handle (retry; a second driver is not started).
     pub fn resume(&self, run_id: RunId) -> Result<()> {
         if self.sh.providers.read().setup_required() {
             return Err(LoopError::SetupRequired);
@@ -681,6 +695,7 @@ impl AgentLoop {
             .into());
         }
         // A subagent is not the chat's turn; its parent is.
+        let mut reserved_chat = None;
         if run.parent_run_id.is_none()
             && let Some(chat) = run.chat_id
         {
@@ -689,8 +704,20 @@ impl AgentLoop {
                 return Err(LoopError::Busy(chat));
             }
             active.insert(chat, run_id);
+            reserved_chat = Some(chat);
         }
-        self.spawn(run_id, Start::Resume);
+        // The finishing drive task still owns the map entry. Inserting here
+        // would drop its `JoinHandle` (tokio detaches on drop) and that task's
+        // later `remove` would then drop the resumed task.
+        if !self.spawn(run_id, Start::Resume) {
+            if let Some(chat) = reserved_chat {
+                let mut active = self.sh.active.lock();
+                if active.get(&chat) == Some(&run_id) {
+                    active.remove(&chat);
+                }
+            }
+            return Err(LoopError::StillFinishing(run_id));
+        }
         Ok(())
     }
 
@@ -887,23 +914,46 @@ impl AgentLoop {
         Ok(())
     }
 
-    pub(crate) fn spawn(&self, run_id: RunId, start: Start) {
+    /// Start the drive task. Returns `false` when a handle for `run_id` is
+    /// already in the map: the caller must not treat `insert` as taking
+    /// ownership of that older live task.
+    pub(crate) fn spawn(&self, run_id: RunId, start: Start) -> bool {
         // The task waits until its handle is in the map, then removes that
-        // entry when it finishes. `wait` tolerates the entry already being gone.
+        // entry only when it is still its own handle. `wait` tolerates the
+        // entry already being gone. The removed handle is dropped after the
+        // map lock is released (dropping a `JoinHandle` detaches).
         let (tx, rx) = tokio::sync::oneshot::channel();
         let this = self.clone();
         let sh = Arc::clone(&this.sh);
+        let mut tasks = self.sh.tasks.lock();
+        if tasks.contains_key(&run_id) {
+            return false;
+        }
         let handle = tokio::spawn(async move {
             let _ = rx.await;
+            let my_id = tokio::task::id();
             this.drive(run_id, start).await;
+            #[cfg(test)]
+            {
+                let gate = sh.task_reap_gate.lock().clone();
+                if let Some(gate) = gate {
+                    sh.task_reap_entered.store(true, Ordering::SeqCst);
+                    gate.wait().await;
+                }
+            }
             let finished = {
                 let mut tasks = sh.tasks.lock();
-                tasks.remove(&run_id)
+                let mine = tasks.get(&run_id).is_some_and(|h| h.id() == my_id);
+                if mine { tasks.remove(&run_id) } else { None }
             };
             drop(finished);
+            #[cfg(test)]
+            sh.task_reap_done.store(true, Ordering::SeqCst);
         });
-        self.sh.tasks.lock().insert(run_id, handle);
+        tasks.insert(run_id, handle);
+        drop(tasks);
         let _ = tx.send(());
+        true
     }
 
     // Boxed so the spawn / `conclude` / next-turn recursion has a nameable type.
