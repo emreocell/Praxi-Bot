@@ -17,6 +17,7 @@ const NOW = 1_000_000;
 
 interface Calls {
   put: ControlModeName[];
+  release: boolean[];
   decide: { id: string; decision: ControlVerdict; reason?: string }[];
   cancel: string[];
   begin: { rect: Rect | null; label: string; action: string }[];
@@ -28,6 +29,7 @@ interface Calls {
 function setup(beginResult: boolean | (() => boolean) = true) {
   const calls: Calls = {
     put: [],
+    release: [],
     decide: [],
     cancel: [],
     begin: [],
@@ -38,7 +40,10 @@ function setup(beginResult: boolean | (() => boolean) = true) {
   let now = NOW;
   const bridge = new ControlBridge({
     client: {
-      putControlState: async (m) => void calls.put.push(m),
+      putControlState: async (m, release) => {
+        calls.put.push(m);
+        calls.release.push(release === true);
+      },
       decideControl: async (id, decision, reason) =>
         void calls.decide.push({ id, decision, reason }),
       cancelRun: async (id) => void calls.cancel.push(id)
@@ -166,6 +171,26 @@ test("every native state change is reported to the daemon, and so is the heartbe
     "human_driving",
     "human_driving"
   ]);
+});
+
+test("only the user's explicit resume sends release:true, never a heartbeat or reopen", async () => {
+  const t = setup();
+  // Reopened UI: starts idle and heartbeats.
+  await t.bridge.heartbeat();
+  await t.bridge.onNativeState("human_driving");
+  await t.bridge.heartbeat();
+  await t.bridge.heartbeat();
+  assert.deepEqual(t.calls.release, [false, false, false, false]);
+  // The user hands the wheel back ("Bitirdim"): native state leaves human_driving.
+  await t.bridge.onNativeState("idle");
+  assert.equal(t.calls.release.at(-1), true);
+  await t.bridge.heartbeat();
+  assert.equal(t.calls.release.at(-1), false, "later heartbeats do not release");
+  // Pause then resume to bot_driving.
+  await t.bridge.onNativeState("paused");
+  assert.equal(t.calls.release.at(-1), false);
+  await t.bridge.onNativeState("bot_driving");
+  assert.equal(t.calls.release.at(-1), true);
 });
 
 test("Stop (state goes idle while runs are live) cancels those runs", async () => {
