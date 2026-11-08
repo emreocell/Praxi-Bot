@@ -1,3 +1,5 @@
+import { BellDot, CalendarDays, FlaskConical, Grid2X2, MessageSquare, Plus, Sparkles } from "lucide-react";
+import { isMockMode } from "./api/mock";
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -21,7 +23,7 @@ import { PRODUCT_CONFIG } from "./config/product";
 import { AccountMenu, type AccountAction } from "./components/AccountMenu";
 import { HealthIndicator } from "./components/HealthIndicator";
 import { HelpModal } from "./components/HelpModal";
-import { botView } from "./lib/botProfile";
+import { BOT_COLORS, botView } from "./lib/botProfile";
 import { getAutostart, setAutostart } from "./lib/providers";
 import { ToastProvider } from "./components/Toast";
 import { ControlBridgeHost } from "./state/ControlBridgeHost";
@@ -107,7 +109,18 @@ function AppShell() {
       if (!mounted) {
         return;
       }
-      const merged: AppSettings = { ...loaded, autostart: osAutostart };
+      const params = new URLSearchParams(window.location.search);
+      const requestedTheme = params.get("theme");
+      const mock = isMockMode();
+      const merged: AppSettings = { ...loaded, autostart: osAutostart,
+        ...(mock ? { onboardingCompleted: true, language: params.get("lang") === "en" ? "en" as const : "tr" as const } : {}),
+        ...(mock && ["obsidian", "cobalt", "raven", "clay", "system"].includes(requestedTheme ?? "") ? { themeMode: requestedTheme as ThemeMode, accentColor: "" } : {})
+      };
+      if (mock) {
+        setRoute({ kind: "chat", chatId: "33333333-3333-4333-8333-333333333333", botId: "11111111-1111-4111-8111-111111111111" });
+        if (params.get("screen") === "settings") setSettingsOpen("general");
+        if (params.get("screen") === "apps") setAppsOpen(true);
+      }
       setSettings(merged);
       if (shouldOpenOnboardingOnStart(merged)) {
         setRoute({ kind: "onboarding" });
@@ -293,7 +306,7 @@ function AppShell() {
       botId: view?.id ?? "atlas",
       botName: view?.name ?? "Atlas",
       botAvatar: view?.avatar,
-      botColor: view?.color ?? "#3b82f6",
+      botColor: view?.color ?? BOT_COLORS[0],
       botInitials: view?.initials ?? "AT"
     }).then(setControlState);
   };
@@ -397,7 +410,7 @@ function AppShell() {
         <Sidebar>
           <SidebarHeader>
             <div className={styles.brandBlock}>
-              <span className={styles.brandTitle}>{PRODUCT_CONFIG.appName}</span>
+              <span className={styles.brandTitle}><span className={styles.brandMark}><Sparkles /></span>{PRODUCT_CONFIG.appName}</span>
               <HealthIndicator />
             </div>
           </SidebarHeader>
@@ -408,7 +421,7 @@ function AppShell() {
                 active={route.kind === "needs"}
                 onClick={() => setRoute({ kind: "needs" })}
               >
-                <span className={styles.botName}>{t("sidebar.needsYou")}</span>
+                <BellDot /><span className={styles.botName}>{t("sidebar.needsYou")}</span>
                 <span
                   className={styles.needsBadge}
                   data-testid="needs-you-badge"
@@ -444,7 +457,7 @@ function AppShell() {
                   <div className={styles.botMeta}>
                     <span className={styles.botName}>{view.name}</span>
                     <span className={styles.botRole}>
-                      {view.executor || t("bots.noModel")}
+                      {view.executor.split("/").pop() || t("bots.noModel")}
                     </span>
                   </div>
                   <span
@@ -461,7 +474,7 @@ function AppShell() {
               fullWidth
               onClick={() => setRoute({ kind: "botForm" })}
             >
-              {t("sidebar.newBot")}
+              <Plus />{t("sidebar.newBot")}
             </Button>
           </SidebarSection>
 
@@ -469,27 +482,27 @@ function AppShell() {
             <div className={styles.footerActions}>
               {import.meta.env.DEV ? (
                 <Button
-                  variant="secondary"
+                  variant="ghost"
                   fullWidth
                   onClick={handleSimulateBotRun}
                 >
-                  {t("dev.simulateBotRun")}
+                  <FlaskConical />{t("dev.simulateBotRun")}
                 </Button>
               ) : null}
               <Button
-                variant={route.kind === "schedules" ? "primary" : "secondary"}
+                variant={route.kind === "schedules" ? "primary" : "ghost"}
                 fullWidth
                 onClick={() => setRoute({ kind: "schedules" })}
               >
-                {t("sidebar.schedules")}
+                <CalendarDays />{t("sidebar.schedules")}
               </Button>
               <Button
-                variant="secondary"
+                variant="ghost"
                 fullWidth
                 data-testid="open-apps"
                 onClick={() => setAppsOpen(true)}
               >
-                {t("sidebar.apps")}
+                <Grid2X2 />{t("sidebar.apps")}
               </Button>
               <AccountMenu
                 name={settings.accountName}
@@ -546,7 +559,7 @@ function AppShell() {
                   className={styles.selectedBotContent}
                   data-testid="daemon-offline-empty-state"
                 >
-                  <h1 className={styles.emptyStateTitle}>
+                  <MessageSquare className={styles.emptyIcon} /><h1 className={styles.emptyStateTitle}>
                     {t("main.daemonOfflineTitle")}
                   </h1>
                   <p className={styles.emptyStateDescription}>
@@ -569,7 +582,7 @@ function AppShell() {
                 </div>
               ) : phase === "connecting" && bots.length === 0 ? (
                 <div className={styles.selectedBotContent}>
-                  <h1 className={styles.emptyStateTitle}>
+                  <MessageSquare className={styles.emptyIcon} /><h1 className={styles.emptyStateTitle}>
                     {t("main.daemonConnectingTitle")}
                   </h1>
                   <p className={styles.emptyStateDescription}>
@@ -584,7 +597,7 @@ function AppShell() {
                   className={styles.selectedBotContent}
                   data-testid="home-empty-state"
                 >
-                  <h1 className={styles.emptyStateTitle}>
+                  <MessageSquare className={styles.emptyIcon} /><h1 className={styles.emptyStateTitle}>
                     {bots.length === 0
                       ? t("main.welcomeTitle")
                       : t("main.selectBotTitle")}
@@ -607,7 +620,7 @@ function AppShell() {
                           variant="secondary"
                           onClick={() => setRoute({ kind: "botForm" })}
                         >
-                          {t("sidebar.newBot")}
+                          <Plus />{t("sidebar.newBot")}
                         </Button>
                         <Button
                           variant="ghost"
@@ -621,7 +634,7 @@ function AppShell() {
                         variant="primary"
                         onClick={() => setRoute({ kind: "botForm" })}
                       >
-                        {t("sidebar.newBot")}
+                        <Plus />{t("sidebar.newBot")}
                       </Button>
                     )}
                   </div>

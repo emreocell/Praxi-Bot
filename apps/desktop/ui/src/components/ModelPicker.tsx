@@ -1,3 +1,4 @@
+import { BrainCircuit, Check, ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { filterModelGroups, type ModelGroup } from "../lib/modelPicker";
@@ -39,6 +40,12 @@ export function ModelPicker({
       if (e.key === "Escape") {
         e.stopPropagation();
         setOpen(false);
+        root.current?.querySelector<HTMLButtonElement>('[aria-haspopup="listbox"]')?.focus();
+      } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const items = [...(root.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])];
+        const index = items.indexOf(document.activeElement as HTMLButtonElement);
+        items[(index + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
       }
     };
     document.addEventListener("mousedown", onDown);
@@ -52,6 +59,7 @@ export function ModelPicker({
   const pick = (ref: string) => {
     setOpen(false);
     setQuery("");
+    root.current?.querySelector<HTMLButtonElement>('[aria-haspopup="listbox"]')?.focus();
     if (ref !== value) {
       onPick(ref);
     }
@@ -69,13 +77,13 @@ export function ModelPicker({
         data-testid="model-picker"
         onClick={() => setOpen((o) => !o)}
       >
-        <span className={styles.triggerText}>
-          {value || placeholder || t("modelPicker.none")}
+        <BrainCircuit /><span className={styles.triggerText}>
+          {value.split("/").pop() || placeholder || t("modelPicker.none")}
         </span>
-        <span className={styles.caret} aria-hidden="true" />
+        <ChevronDown />
       </button>
       {open ? (
-        <div className={styles.popover} role="listbox">
+        <div className={styles.popover}>
           <input
             className={styles.search}
             value={query}
@@ -84,12 +92,12 @@ export function ModelPicker({
             autoFocus
             onChange={(e) => setQuery(e.target.value)}
           />
-          <div className={styles.scroll}>
+          <div className={styles.scroll} role="listbox" aria-label={t("modelPicker.title")}>
             {shown.length === 0 ? (
               <p className={styles.empty}>{t("modelPicker.empty")}</p>
             ) : (
               shown.map((g) => (
-                <div key={g.provider} className={styles.group}>
+                <div key={g.provider} className={styles.group} role="group" aria-label={g.provider}>
                   <div className={styles.groupLabel}>{g.provider}</div>
                   {g.models.map((m) => (
                     <button
@@ -107,7 +115,7 @@ export function ModelPicker({
                     >
                       <span className={styles.optionText}>{m.model}</span>
                       {m.ref === value ? (
-                        <span className={styles.check} aria-hidden="true" />
+                        <Check />
                       ) : null}
                     </button>
                   ))}

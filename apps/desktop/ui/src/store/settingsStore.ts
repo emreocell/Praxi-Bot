@@ -48,7 +48,7 @@ export interface AppSettings {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  themeMode: "system",
+  themeMode: "obsidian",
   accentColor: "",
   backgroundUrl: "",
   backgroundFileName: "",

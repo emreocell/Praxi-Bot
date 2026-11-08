@@ -17,6 +17,7 @@ import {
 } from "../../config/product";
 import { SEND_WITH_VALUES } from "../../lib/settingsPrefs";
 import { NotificationSettings } from "../NotificationSettings";
+import { ThemePicker } from "../../components/ThemePicker";
 import styles from "../SettingsModal.module.css";
 import type { CardDef, SettingsBridge } from "./types";
 
@@ -140,19 +141,11 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
       t("settingsModal.general.theme.title"),
       t("settingsModal.general.theme.description"),
       <SettingRow
+        stacked
         title={t("settingsModal.general.theme.title")}
         description={t("settingsModal.general.theme.description")}
       >
-        <Segmented
-          label={t("settingsModal.general.theme.title")}
-          value={settings.themeMode}
-          onChange={b.onTheme}
-          options={[
-            { value: "system", label: t("settingsModal.general.theme.system") },
-            { value: "light", label: t("settings.theme.light") },
-            { value: "dark", label: t("settings.theme.dark") }
-          ]}
-        />
+        <ThemePicker value={settings.themeMode} onChange={b.onTheme} />
       </SettingRow>,
       { keywords: "dark light mode tema karanlik aydinlik" }
     ),
@@ -188,7 +181,7 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
               type="color"
               className={styles.colorInput}
               aria-label={t("settings.accent.custom")}
-              value={settings.accentColor || "#2563eb"}
+              value={settings.accentColor || ACCENT_PRESETS[0].value}
               onChange={(e) => b.onAccent(e.target.value)}
             />
           </label>

@@ -1,3 +1,4 @@
+import { BrainCircuit, ChartNoAxesCombined, Monitor, Search, Settings2, RefreshCw, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "../components/Modal";
@@ -14,6 +15,9 @@ import {
   type SettingsSectionId
 } from "./settings/types";
 import styles from "./SettingsModal.module.css";
+
+const SECTION_ICONS = { general: Settings2, ai: BrainCircuit, computer: Monitor, usage: ChartNoAxesCombined, updates: RefreshCw };
+
 
 /** Consecutive `row` cards share one rounded group; `block` cards stand alone. */
 function renderCards(cards: CardDef[]): ReactNode[] {
@@ -110,7 +114,8 @@ export function SettingsModal({
   return (
     <Modal open={open} onClose={onClose} label={t("settingsModal.title")}>
       <nav className={styles.nav} aria-label={t("settingsModal.title")}>
-        <input
+        <div className={styles.navHeading}><Settings2 />{t("settingsModal.title")}</div>
+        <div className={styles.searchWrap}><Search /><input
           className={styles.search}
           type="search"
           data-autofocus
@@ -119,8 +124,9 @@ export function SettingsModal({
           aria-label={t("settingsModal.search")}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <div className={styles.navList}>
+        </div><div className={styles.navList}>
           {SETTINGS_SECTIONS.map((s) => {
+            const SectionIcon = SECTION_ICONS[s];
             const dim = searching && !sectionsWithHits.has(s);
             return (
               <button
@@ -140,7 +146,7 @@ export function SettingsModal({
                   setSection(s);
                 }}
               >
-                {t(`settingsModal.nav.${s}`)}
+                <SectionIcon />{t(`settingsModal.nav.${s}`)}
               </button>
             );
           })}
@@ -159,12 +165,12 @@ export function SettingsModal({
             aria-label={t("common.close")}
             onClick={onClose}
           >
-            <span aria-hidden="true">×</span>
+            <X />
           </button>
         </header>
         <div className={styles.scroll}>
           {visible.length === 0 ? (
-            <p className={styles.empty}>{t("settingsModal.noResults")}</p>
+            <p className={styles.empty}><Search />{t("settingsModal.noResults")}</p>
           ) : (
             groups.map((s) => (
               <section key={s} className={styles.section}>

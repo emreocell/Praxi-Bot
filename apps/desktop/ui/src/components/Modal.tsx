@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import styles from "./Modal.module.css";
 
 const FOCUSABLE =
@@ -23,6 +24,8 @@ export function Modal({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; }, [onClose]);
 
   useEffect(() => {
     if (!open) {
@@ -30,11 +33,13 @@ export function Modal({
     }
     const previous = document.activeElement as HTMLElement | null;
     const node = ref.current;
+    const appRoot = document.getElementById("root");
+    if (appRoot) appRoot.inert = true;
     (node?.querySelector<HTMLElement>("[data-autofocus]") ?? node)?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        closeRef.current();
         return;
       }
       if (e.key === "Tab" && node) {
@@ -58,14 +63,15 @@ export function Modal({
     document.addEventListener("keydown", onKey, true);
     return () => {
       document.removeEventListener("keydown", onKey, true);
+      if (appRoot && ![...document.querySelectorAll('[aria-modal="true"]')].some(dialog => dialog !== node)) appRoot.inert = false;
       previous?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) {
     return null;
   }
-  return (
+  return createPortal(
     <div
       className={styles.backdrop}
       onMouseDown={(e) => {
@@ -86,6 +92,7 @@ export function Modal({
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

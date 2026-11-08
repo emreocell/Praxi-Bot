@@ -1,3 +1,5 @@
+import { Blocks, Cable, Check, FolderOpen, Plus, Search, Server, X } from "lucide-react";
+import { siGithub, siGitlab, siNotion, siGoogledrive, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siLinear, siTodoist, siObsidian, siHomeassistant } from "simple-icons";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
@@ -23,19 +25,11 @@ import { useDaemon } from "../state/DaemonContext";
 import { useMcp } from "../state/useMcp";
 import styles from "./AppsModal.module.css";
 
-const TILE_COLORS = 6;
-
-/** A letter tile in a stable per-name color (works offline, unlike brand icons). */
+const BRAND_ICONS = [siGithub, siGitlab, siNotion, siGoogledrive, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siLinear, siTodoist, siObsidian, siHomeassistant];
 function Tile({ name }: { name: string }) {
-  let h = 0;
-  for (const ch of name) {
-    h = (h * 31 + ch.charCodeAt(0)) % TILE_COLORS;
-  }
-  return (
-    <span className={`${styles.tile} ${styles[`tile${h}`]}`} aria-hidden="true">
-      {name.slice(0, 1).toUpperCase()}
-    </span>
-  );
+  const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const brand = BRAND_ICONS.find((icon) => normalized === icon.slug || normalized === icon.title.toLowerCase().replace(/[^a-z0-9]/g, ""));
+  return <span className={styles.tile} aria-hidden="true">{brand ? <svg viewBox="0 0 24 24"><path d={brand.path} fill="currentColor" /></svg> : normalized === "filesystem" ? <FolderOpen /> : <Blocks />}</span>;
 }
 
 function errorText(e: unknown): string {
@@ -118,7 +112,7 @@ function ConnectedRow({
             disabled={busy}
             onClick={() => setConfirm(true)}
           >
-            {t("apps.disconnect")}
+            <Cable />{t("apps.disconnect")}
           </Button>
         )}
       </div>
@@ -167,7 +161,7 @@ function CatalogCard({
           </span>
         </div>
         {connected ? (
-          <span className={styles.connectedTag}>{t("apps.connected")}</span>
+          <span className={styles.connectedTag}><Check />{t("apps.connected")}</span>
         ) : (
           <Button
             size="sm"
@@ -181,7 +175,7 @@ function CatalogCard({
               }
             }}
           >
-            {t("apps.connect")}
+            <Plus />{t("apps.connect")}
           </Button>
         )}
       </div>
@@ -433,7 +427,7 @@ export function AppsModal({
         <header className={styles.header}>
           <div className={styles.headTop}>
             <div>
-              <h2 className={styles.title}>{t("apps.title")}</h2>
+              <h2 className={styles.title}><Blocks />{t("apps.title")}</h2>
               <p className={styles.subtitle}>{t("apps.subtitle")}</p>
             </div>
             <div className={styles.headActions}>
@@ -444,7 +438,7 @@ export function AppsModal({
                 data-testid="apps-advanced"
                 onClick={() => setAdvanced((a) => !a)}
               >
-                {t("apps.mcpServers")}
+                <Server />{t("apps.mcpServers")}
               </Button>
               <button
                 type="button"
@@ -452,13 +446,13 @@ export function AppsModal({
                 aria-label={t("common.close")}
                 onClick={onClose}
               >
-                <span aria-hidden="true">×</span>
+                <X />
               </button>
             </div>
           </div>
           {advanced ? null : (
             <>
-              <input
+              <div className={styles.searchWrap}><Search /><input
                 className={styles.search}
                 type="search"
                 data-autofocus
@@ -467,7 +461,7 @@ export function AppsModal({
                 aria-label={t("apps.search")}
                 onChange={(e) => setQuery(e.target.value)}
               />
-              <div className={styles.chips} role="group" aria-label={t("apps.categoriesLabel")}>
+              </div><div className={styles.chips} role="group" aria-label={t("apps.categoriesLabel")}>
                 {[ALL_CATEGORIES, ...categories].map((c) => (
                   <button
                     key={c}
@@ -545,7 +539,7 @@ export function AppsModal({
               <section className={styles.section}>
                 <h3 className={styles.sectionLabel}>{t("apps.catalogSection")}</h3>
                 {shownCatalog.length === 0 ? (
-                  <p className={styles.empty}>
+                  <p className={styles.empty}><Search />
                     {loading ? t("apps.loading") : t("apps.noResults")}
                   </p>
                 ) : (

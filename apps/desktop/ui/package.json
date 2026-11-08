@@ -10,15 +10,20 @@
     "typecheck": "tsc --noEmit",
     "gen:api": "openapi-typescript ../../../docs/api/openapi.json -o src/api/schema.d.ts",
     "check:i18n": "node scripts/check-i18n.mjs",
-    "test": "node --test src/state/timeline.test.ts src/state/controlBridge.test.ts src/api/events.test.ts src/lib/providerView.test.ts src/lib/route.test.ts src/lib/notifyRules.test.ts src/lib/schedules.test.ts src/lib/fuzzy.test.ts src/lib/slash.test.ts src/lib/markdown.test.ts src/lib/highlight.test.ts src/overlay/tauriBridge.test.ts src/lib/mcpApps.test.ts src/lib/modelPicker.test.ts src/api/mcpClient.test.ts src/lib/settingsPrefs.test.ts"
+    "test": "node --test src/state/timeline.test.ts src/state/controlBridge.test.ts src/api/events.test.ts src/lib/providerView.test.ts src/lib/route.test.ts src/lib/notifyRules.test.ts src/lib/schedules.test.ts src/lib/fuzzy.test.ts src/lib/slash.test.ts src/lib/markdown.test.ts src/lib/highlight.test.ts src/overlay/tauriBridge.test.ts src/lib/mcpApps.test.ts src/lib/modelPicker.test.ts src/api/mcpClient.test.ts src/lib/settingsPrefs.test.ts",
+    "check:themes": "node ../../../packages/ui/scripts/check-themes.mjs"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
     "@tauri-apps/api": "^2.3.0",
     "@tauri-apps/plugin-store": "^2.2.0",
     "i18next": "^24.2.2",
+    "lucide-react": "^1.70.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-i18next": "^15.4.1",
+    "simple-icons": "^16.36.0",
     "ui": "workspace:*"
   },
   "devDependencies": {

@@ -2,6 +2,8 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "ui/tokens.css";
+import "@fontsource-variable/geist/wght.css";
+import "@fontsource-variable/geist-mono/wght.css";
 import { App } from "./App";
 import "./global.css";
 import "./i18n";

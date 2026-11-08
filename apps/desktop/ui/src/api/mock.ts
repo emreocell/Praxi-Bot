@@ -265,6 +265,17 @@ export class MockApiClient extends ApiClient {
       case "GET /bots":
         return ok(BOTS);
       case "GET /chats":
+        if (seg[2] === "messages") {
+          const tr = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("lang") !== "en";
+          const content = tr ? [
+            "Bu haftaki çalışma özetini hazırlar mısın? Tamamlanan işleri ve sonraki adımları görmek istiyorum.",
+            "## Haftalık çalışma özeti\n\nGitHub ve çalışma klasöründeki son değişiklikleri inceledim. Bu hafta üç başlık öne çıkıyor.\n\n- **Masaüstü deneyimi:** Ayarlar, uygulamalar ve model seçimi tek bir akışta toplandı.\n- **Entegrasyonlar:** GitHub ve dosya sistemi bağlantıları kullanıma hazır.\n- **Kalite:** Tip denetimi ve arayüz testleri tamamlandı.\n\n### Sonraki adımlar\n\nÖnce açık görevleri gözden geçirmeni, ardından sürüm kontrollerini çalıştırmanı öneriyorum:\n\n```sh\npnpm typecheck\npnpm --dir apps/desktop/ui test\n```\n\nİstersen bu özeti paylaşılabilir bir rapora dönüştürebilirim.",
+          ] : [
+            "Can you prepare this week's work summary? I'd like to see what shipped and what's next.",
+            "## Your weekly work summary\n\nI reviewed the latest changes in GitHub and your workspace. Three areas stood out this week.\n\n- **Desktop experience:** Settings, apps and model selection now share one flow.\n- **Integrations:** GitHub and filesystem connections are ready.\n- **Quality:** Type checks and UI tests are complete.\n\n### Next steps\n\nReview open tasks, then run the release checks:\n\n```sh\npnpm typecheck\npnpm --dir apps/desktop/ui test\n```\n\nI can turn this summary into a report for your team.",
+          ];
+          return ok(content.map((text, index) => ({ id: `mock-message-${index}`, chat_id: CHAT_ID, content: text, role: index % 2 === 0 ? "user" : "assistant", created_at_ms: NOW + index * 1000 })));
+        }
         return ok(CHATS);
       case "GET /runs":
       case "GET /approvals":

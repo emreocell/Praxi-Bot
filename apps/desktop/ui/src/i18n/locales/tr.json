@@ -341,7 +341,9 @@
       "menu": "Komutlar",
       "mentionMenu": "Botlar",
       "noMatch": "Eşleşme yok"
-    }
+    },
+    "conversationLabel": "Bugün",
+    "composerHint": "Göndermek için Enter · Komutlar için / · Bot seçmek için @"
   },
   "botForm": {
     "createTitle": "Yeni bot",
@@ -798,7 +800,7 @@
       },
       "theme": {
         "title": "Tema",
-        "description": "Sistemi izle veya açık/koyu seç.",
+        "description": "Çalışma alanına uygun bir görünüm seç.",
         "system": "Sistemi izle"
       },
       "frame": {

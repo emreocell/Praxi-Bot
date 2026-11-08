@@ -81,13 +81,13 @@
 
 .danger {
   background-color: var(--color-danger);
-  color: var(--color-text-inverse);
+  color: var(--color-danger-contrast);
   border-color: var(--color-danger);
 }
 
 .active {
   background-color: var(--color-accent-subtle);
-  color: var(--color-accent);
+  color: var(--color-accent-text);
   border-color: var(--color-accent);
 }
 

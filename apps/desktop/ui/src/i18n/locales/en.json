@@ -341,7 +341,9 @@
       "menu": "Commands",
       "mentionMenu": "Bots",
       "noMatch": "No match"
-    }
+    },
+    "conversationLabel": "Today",
+    "composerHint": "Enter to send · / for commands · @ to mention a bot"
   },
   "botForm": {
     "createTitle": "New bot",
@@ -798,7 +800,7 @@
       },
       "theme": {
         "title": "Theme",
-        "description": "Follow system, or pick light or dark.",
+        "description": "Choose a look for your workspace.",
         "system": "Follow system"
       },
       "frame": {

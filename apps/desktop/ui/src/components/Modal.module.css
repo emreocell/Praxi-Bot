@@ -6,8 +6,8 @@
   align-items: center;
   justify-content: center;
   padding: var(--space-6);
-  background-color: var(--color-surface-overlay);
-  backdrop-filter: blur(var(--space-1));
+  background-color: var(--color-modal-backdrop);
+  backdrop-filter: blur(var(--space-2));
 }
 
 .dialog {
@@ -15,8 +15,8 @@
   width: 100%;
   max-height: 100%;
   overflow: hidden;
-  border: var(--size-border) solid var(--color-border-strong);
-  border-radius: var(--radius-card);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-modal);
   background-color: var(--color-surface);
   box-shadow: var(--shadow-overlay);
   color: var(--color-text);
@@ -27,10 +27,14 @@
 }
 
 .lg {
-  max-width: calc(var(--size-content-max) * 1.45);
-  height: min(100%, 80vh);
+  max-width: var(--size-modal-width);
+  height: min(100%, var(--size-modal-height));
 }
 
 .md {
   max-width: var(--size-content-max);
 }
+
+
+.dialog { animation: enter var(--motion-duration-normal) ease-out; }
+@keyframes enter { from { opacity: 0; transform: translateY(var(--space-2)); } to { opacity: 1; transform: translateY(0); } }
