@@ -329,7 +329,9 @@ impl TurnExecutor {
                     }
                 }
             }
-            Some(RunState::Queued) if adopted && !live => lp.spawn(child, Start::Fresh),
+            Some(RunState::Queued) if adopted && !live => {
+                lp.spawn(child, Start::Fresh);
+            }
             _ => {}
         }
         if !adopted {

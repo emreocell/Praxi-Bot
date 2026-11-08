@@ -204,7 +204,7 @@ mod tests {
             ("browser_scroll", R, B),
             ("browser_wait", R, B),
             ("browser_back", W, B),
-            ("browser_tabs", R, B),
+            ("browser_tabs", W, B),
             ("browser_screenshot", R, B),
             ("browser_eval", W, Sc),
             ("fs_read", R, Fs),

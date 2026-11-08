@@ -90,6 +90,105 @@ fn is_link(m: &fs::Metadata) -> bool {
     m.file_type().is_symlink()
 }
 
+/// Stop a checkpoint that walks into its own output or a huge tree.
+const MAX_CHECKPOINT_ENTRIES: usize = 10_000;
+const MAX_CHECKPOINT_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_CHECKPOINT_DEPTH: usize = 32;
+
+struct CopyBudget {
+    entries: usize,
+    bytes: u64,
+}
+
+fn budget_err(msg: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, msg)
+}
+
+impl CopyBudget {
+    fn charge(&mut self, bytes: u64) -> io::Result<()> {
+        self.entries = self.entries.saturating_add(1);
+        self.bytes = self.bytes.saturating_add(bytes);
+        if self.entries > MAX_CHECKPOINT_ENTRIES {
+            return Err(budget_err(&format!(
+                "checkpoint file budget exceeded ({MAX_CHECKPOINT_ENTRIES} entries)"
+            )));
+        }
+        if self.bytes > MAX_CHECKPOINT_BYTES {
+            return Err(budget_err(&format!(
+                "checkpoint byte budget exceeded ({MAX_CHECKPOINT_BYTES} bytes)"
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// Removes a half-written checkpoint directory unless disarmed after success.
+struct PartialCheckpoint(Option<PathBuf>);
+
+impl Drop for PartialCheckpoint {
+    fn drop(&mut self) {
+        if let Some(dir) = self.0.take() {
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
+}
+
+impl PartialCheckpoint {
+    fn disarm(&mut self) {
+        self.0 = None;
+    }
+}
+
+/// Absolute path with symlinks resolved for the longest prefix that exists.
+/// Missing suffixes stay lexical so a not-yet-created backup can be compared.
+fn canonical_dir(path: &Path) -> io::Result<PathBuf> {
+    let abs = std::path::absolute(path)?;
+    if abs.symlink_metadata().is_ok() && abs.exists() {
+        return fs::canonicalize(&abs);
+    }
+    let mut base = PathBuf::new();
+    let mut rest = Vec::new();
+    let mut missing = false;
+    for c in abs.components() {
+        if missing {
+            rest.push(c.as_os_str().to_os_string());
+            continue;
+        }
+        let next = base.join(c);
+        if next.symlink_metadata().is_ok() {
+            base = next;
+        } else {
+            missing = true;
+            rest.push(c.as_os_str().to_os_string());
+        }
+    }
+    if base.as_os_str().is_empty() {
+        return Ok(abs);
+    }
+    let mut out = fs::canonicalize(&base)?;
+    for name in rest {
+        out.push(name);
+    }
+    Ok(out)
+}
+
+fn conflict_key(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+    if cfg!(windows) {
+        PathBuf::from(text.to_ascii_lowercase())
+    } else {
+        PathBuf::from(text)
+    }
+}
+
+/// True when `a` and `b` are the same path or one contains the other.
+fn paths_conflict(a: &Path, b: &Path) -> bool {
+    let a = conflict_key(a);
+    let b = conflict_key(b);
+    a == b || a.starts_with(&b) || b.starts_with(&a)
+}
+
 /// Copy `from` to `to` without following links. Links are appended to `links`
 /// with `rel` as their backup-relative path; no placeholder is written to `to`.
 fn link_dir_nofollow(meta: &fs::Metadata) -> bool {
@@ -129,7 +228,14 @@ fn copy_recursive(
     to: &Path,
     rel: &str,
     links: &mut Vec<LinkRecord>,
+    depth: usize,
+    budget: &mut CopyBudget,
 ) -> io::Result<()> {
+    if depth > MAX_CHECKPOINT_DEPTH {
+        return Err(budget_err(&format!(
+            "checkpoint depth budget exceeded ({MAX_CHECKPOINT_DEPTH})"
+        )));
+    }
     // A protected descendant is skipped (not copied, not followed). The
     // top-level path is rejected by `vet_checkpoint_path` in `create` before
     // this runs, so a request whose own path is credential still fails.
@@ -140,6 +246,7 @@ fn copy_recursive(
     }
     let meta = fs::symlink_metadata(from)?;
     if is_link(&meta) {
+        budget.charge(0)?;
         let target = fs::read_link(from)?;
         let dir = link_dir_nofollow(&meta);
         links.push(LinkRecord {
@@ -149,6 +256,7 @@ fn copy_recursive(
         });
         Ok(())
     } else if meta.is_dir() {
+        budget.charge(0)?;
         fs::create_dir_all(to)?;
         for e in fs::read_dir(from)? {
             let e = e?;
@@ -158,10 +266,13 @@ fn copy_recursive(
                 &to.join(&name),
                 &format!("{rel}/{}", name.to_string_lossy()),
                 links,
+                depth + 1,
+                budget,
             )?;
         }
         Ok(())
     } else {
+        budget.charge(meta.len())?;
         if let Some(p) = to.parent() {
             fs::create_dir_all(p)?;
         }
@@ -304,23 +415,51 @@ impl CheckpointStore {
 
     /// Back up `paths` (those that exist) and write a manifest. Returns the id.
     ///
+    /// Source and destination are canonicalized first. A source that is the
+    /// backup directory, contains it, or sits inside it is rejected before
+    /// anything is created. Copying is bounded by file, byte and depth budgets.
+    /// A failure deletes the partial checkpoint directory.
+    ///
     /// # Errors
-    /// I/O errors while copying or writing the manifest.
+    /// Ancestor overlap, a budget exceeded, or I/O errors while copying or
+    /// writing the manifest.
     pub fn create(&self, run_id: &str, op: &str, paths: &[&Path]) -> io::Result<String> {
         let id = format!("cp-{}", uuid::Uuid::now_v7().simple());
         let dir = self.root.join(sanitize(run_id)).join(&id);
-        fs::create_dir_all(dir.join("files"))?;
-        let mut entries = Vec::new();
-        let mut links = Vec::new();
-        for (n, p) in paths.iter().enumerate() {
+        let dest = canonical_dir(&dir)?;
+        let mut sources = Vec::with_capacity(paths.len());
+        for p in paths {
+            // Classify before `canonical_dir`, which stats and follows links.
             crate::files::vet_checkpoint_path(p)?;
             let abs = std::path::absolute(p)?;
-            let meta = fs::symlink_metadata(&abs).ok();
+            let canon = canonical_dir(&abs)?;
+            if paths_conflict(&canon, &dest) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "refusing checkpoint: source {} and backup {} are the same path or one is an ancestor of the other",
+                        canon.display(),
+                        dest.display()
+                    ),
+                ));
+            }
+            sources.push(abs);
+        }
+        fs::create_dir_all(dir.join("files"))?;
+        let mut partial = PartialCheckpoint(Some(dir.clone()));
+        let mut entries = Vec::new();
+        let mut links = Vec::new();
+        let mut budget = CopyBudget {
+            entries: 0,
+            bytes: 0,
+        };
+        for (n, abs) in sources.iter().enumerate() {
+            let meta = fs::symlink_metadata(abs).ok();
             let existed = meta.is_some();
             let is_dir = meta.as_ref().is_some_and(fs::Metadata::is_dir);
             let backup = if existed {
                 let rel = format!("files/{n}");
-                copy_recursive(&abs, &dir.join(&rel), &rel, &mut links)?;
+                copy_recursive(abs, &dir.join(&rel), &rel, &mut links, 0, &mut budget)?;
                 Some(rel)
             } else {
                 None
@@ -345,6 +484,7 @@ impl CheckpointStore {
             fs::write(dir.join(LINKS_FILE), lj)?;
         }
         fs::write(dir.join("manifest.json"), json)?;
+        partial.disarm();
         Ok(id)
     }
 
@@ -437,7 +577,11 @@ impl CheckpointStore {
                 let mut ignored = Vec::new();
                 let src = dir.join(rel);
                 if fs::symlink_metadata(&src).is_ok() {
-                    copy_recursive(&src, target, rel, &mut ignored)?;
+                    let mut budget = CopyBudget {
+                        entries: 0,
+                        bytes: 0,
+                    };
+                    copy_recursive(&src, target, rel, &mut ignored, 0, &mut budget)?;
                 }
                 // Recreate links recorded under this entry (including the
                 // entry itself when it was a link).
@@ -580,7 +724,11 @@ mod tests {
         let d = work.path().join("d");
         fs::create_dir_all(&d).unwrap();
         fs::write(d.join("f"), "x").unwrap();
-        // A link whose target can never be recreated or copied.
+        // `d/bad` is a real non-empty directory in the backup, so it is restored
+        // first and the link can then never be created at that path (no
+        // symlink privilege or platform quirk involved), nor copied over it.
+        fs::create_dir_all(d.join("bad")).unwrap();
+        fs::write(d.join("bad").join("keep"), "k").unwrap();
         let id = store.create("r", "fs_delete", &[&d]).unwrap();
         let (cp_dir, _) = store.find(&id).unwrap();
         let backup = store.list("r").unwrap()[0].entries[0]
@@ -596,6 +744,7 @@ mod tests {
         fs::remove_dir_all(&d).unwrap();
         let (_, _, warnings) = store.restore_with_warnings(&id).unwrap();
         assert_eq!(fs::read_to_string(d.join("f")).unwrap(), "x");
+        assert_eq!(fs::read_to_string(d.join("bad").join("keep")).unwrap(), "k");
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(warnings[0].contains("skipped"), "{warnings:?}");
     }
@@ -642,5 +791,73 @@ mod tests {
         let store = CheckpointStore::new(data.path());
         assert!(store.restore("../x").is_err());
         assert!(store.restore("").is_err());
+    }
+
+    fn assert_no_partial(data: &Path) {
+        let root = data.join("checkpoints");
+        if !root.exists() {
+            return;
+        }
+        for run in fs::read_dir(&root).unwrap() {
+            let run = run.unwrap().path();
+            if !run.is_dir() {
+                continue;
+            }
+            if let Some(id) = fs::read_dir(&run).unwrap().next() {
+                panic!(
+                    "partial checkpoint left at {}",
+                    id.unwrap().path().display()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn checkpoint_of_data_dir_and_checkpoints_dir_leaves_no_partial_backup() {
+        let data = tempfile::tempdir().unwrap();
+        fs::write(data.path().join("note.txt"), "keep").unwrap();
+        fs::create_dir_all(data.path().join("checkpoints")).unwrap();
+        fs::write(data.path().join("checkpoints").join("seed.txt"), "seed").unwrap();
+        let store = CheckpointStore::new(data.path());
+
+        let err = store
+            .create("run", "fs_delete", &[data.path()])
+            .unwrap_err();
+        assert!(err.to_string().contains("ancestor"), "{err}");
+        assert_no_partial(data.path());
+        assert_eq!(
+            fs::read_to_string(data.path().join("note.txt")).unwrap(),
+            "keep"
+        );
+
+        let checkpoints = data.path().join("checkpoints");
+        let err = store
+            .create("run", "fs_delete", &[&checkpoints])
+            .unwrap_err();
+        assert!(err.to_string().contains("ancestor"), "{err}");
+        assert_no_partial(data.path());
+        assert_eq!(
+            fs::read_to_string(checkpoints.join("seed.txt")).unwrap(),
+            "seed"
+        );
+
+        let work = tempfile::tempdir().unwrap();
+        let mut deep = work.path().to_path_buf();
+        for i in 0..=MAX_CHECKPOINT_DEPTH {
+            deep.push(i.to_string());
+        }
+        fs::create_dir_all(&deep).unwrap();
+        fs::write(deep.join("f.txt"), "z").unwrap();
+        let err = store
+            .create("run", "fs_delete", &[work.path()])
+            .unwrap_err();
+        assert!(err.to_string().contains("depth"), "{err}");
+        assert_no_partial(data.path());
+
+        fs::write(work.path().join("a.txt"), "a").unwrap();
+        let id = store
+            .create("run", "fs_write", &[work.path().join("a.txt").as_path()])
+            .unwrap();
+        assert_eq!(store.list("run").unwrap()[0].id, id);
     }
 }

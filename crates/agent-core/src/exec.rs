@@ -7,11 +7,12 @@
 
 use std::fmt::Write as _;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use builtin_tools::{QUESTION_CARD_KIND, TODO_LIST_KIND};
 use futures::StreamExt;
-use permission_engine::Decision;
+use permission_engine::{Decision, Limits};
 use protocol::PermissionCategory;
 use protocol::event::{
     MessageDelta, ModelFallback, TodoItem, TodoStatus, TodoUpdated, ToolCallCompleted,
@@ -21,10 +22,11 @@ use protocol::{Event, ToolCallId};
 use provider_catalog::{ChatChunk, ChatRequest, ModelRef, ProviderError};
 use serde_json::{Value, json};
 use storage::{Run, RunStep};
-use task_runtime::{ExecError, StepExecutor, StepSpec, StepStatus};
+use task_runtime::{ExecError, RetryPolicy, StepExecutor, StepSpec, StepStatus};
 use tokio_util::sync::CancellationToken;
 use tool_registry::{ContentPart, Tool, ToolContext, ToolOutput, ToolSpec};
 
+use crate::approval::ExecPermit;
 use crate::history::{
     GUARD_NOTE, build_messages, expose, status_of, step_output, tool_defs, truncate_utf8,
 };
@@ -48,13 +50,81 @@ enum Slot {
         input: Value,
         call: ToolCallId,
         meta: bool,
+        /// Set when the call was approved. [`ExecPermit::commit`] runs under
+        /// the policy mutex immediately before the tool is invoked.
+        permit: Option<ExecPermit>,
     },
     /// A `spawn_subagent` call, executed by the loop itself.
     Spawn {
         input: Value,
         call: ToolCallId,
         model_call_id: String,
+        permit: Option<ExecPermit>,
     },
+}
+
+fn user_denied(reason: Option<String>) -> String {
+    format!(
+        "Permission denied by the user{}. Do not retry this call.",
+        reason.map_or_else(String::new, |r| format!(": {r}"))
+    )
+}
+
+/// `Ok` — the tool may run. `Err` — policy now denies it; nothing was granted.
+fn commit_or_deny(permit: Option<ExecPermit>) -> Result<(), Option<String>> {
+    match permit {
+        Some(permit) => permit.commit(),
+        None => Ok(()),
+    }
+}
+
+/// One CLI approval the user already answered, for a single tool invocation.
+///
+/// `ExecPermit::commit` runs under the exec gate immediately before the tool.
+/// `honored_limits` is the unevaluated limits that forced the ask, when the
+/// card was answered for that reason.
+pub(crate) struct CliApproval {
+    pub name: String,
+    pub input: Value,
+    pub permit: ExecPermit,
+    pub honored_limits: Option<Limits>,
+}
+
+/// Whether `card` may stand in for asking again.
+///
+/// A plain card covers a still-plain ask, and a card covers the same limits
+/// it was answered for. A plain card does not waive limits the resolver is
+/// carrying now. Allow and deny still commit the verdict: allow records the
+/// grant, deny fails closed under the exec gate.
+#[must_use]
+fn card_covers(decision: &Decision, card: &CliApproval) -> bool {
+    match decision {
+        Decision::Ask {
+            unsupported_limits: Some(limits),
+        } => card.honored_limits.as_ref() == Some(limits),
+        Decision::Ask {
+            unsupported_limits: None,
+        }
+        | Decision::Allow
+        | Decision::Deny => true,
+    }
+}
+
+/// Remove the card for this exact invocation, leaving any other card in place.
+#[must_use]
+fn take_matching_card(
+    pending: &mut Option<CliApproval>,
+    name: &str,
+    input: &Value,
+) -> Option<CliApproval> {
+    match pending.take() {
+        Some(card) if card.name == name && card.input == *input => Some(card),
+        Some(card) => {
+            *pending = Some(card);
+            None
+        }
+        None => None,
+    }
 }
 
 fn call_key(name: &str, args: &str) -> (String, Value) {
@@ -543,8 +613,15 @@ impl TurnExecutor {
         (!block.is_empty()).then_some(block)
     }
 
-    /// One model, up to `model_retry.max_attempts` attempts; non-retryable
-    /// errors (bad credentials, bad request, 4xx) fail immediately.
+    /// One model, up to `model_retry.max_attempts` attempts inside one shared
+    /// sleep budget; non-retryable errors (bad credentials, bad request, 4xx)
+    /// fail immediately.
+    ///
+    /// The budget is the sum of the outer backoffs. A `Retry-After` that fits
+    /// is waited out and counts against that budget; one that does not is
+    /// returned as-is. Each `stream` call starts the provider catalog's
+    /// `send_with_retry` with a fresh counter, so refusing the extra attempt
+    /// is what keeps that inner budget from being reset.
     async fn call_with_retries(
         &self,
         ctx: &RunCtx,
@@ -554,6 +631,8 @@ impl TurnExecutor {
     ) -> Result<ModelOut, ProviderError> {
         let policy = self.sh.cfg.model_retry;
         let attempts = policy.max_attempts.max(1);
+        let budget = retry_time_budget(policy);
+        let mut slept = Duration::ZERO;
         let mut attempt = 1;
         let mut malformed_retried = false;
         loop {
@@ -563,13 +642,29 @@ impl TurnExecutor {
                 Err(e @ ProviderError::MalformedToolCall(_)) if malformed_retried => {
                     return Err(e);
                 }
-                Err(ProviderError::MalformedToolCall(_)) if attempt < attempts => {
+                Err(e @ ProviderError::MalformedToolCall(_)) if attempt < attempts => {
+                    let delay = policy.backoff(attempt);
+                    if !sleep_if_affordable(&mut slept, budget, delay).await {
+                        return Err(e);
+                    }
                     malformed_retried = true;
-                    tokio::time::sleep(policy.backoff(attempt)).await;
+                    attempt += 1;
+                }
+                // Honour Retry-After. Sleeping a shorter outer backoff and
+                // calling `stream` again would ignore the server and hand the
+                // inner retry loop a new full budget.
+                Err(ProviderError::RateLimited { retry_after }) if attempt < attempts => {
+                    let delay = retry_after.unwrap_or_else(|| policy.backoff(attempt));
+                    if !sleep_if_affordable(&mut slept, budget, delay).await {
+                        return Err(ProviderError::RateLimited { retry_after });
+                    }
                     attempt += 1;
                 }
                 Err(e) if attempt < attempts && is_retryable(&e) => {
-                    tokio::time::sleep(policy.backoff(attempt)).await;
+                    let delay = policy.backoff(attempt);
+                    if !sleep_if_affordable(&mut slept, budget, delay).await {
+                        return Err(e);
+                    }
                     attempt += 1;
                 }
                 Err(e) => return Err(e),
@@ -638,7 +733,7 @@ impl TurnExecutor {
         &self,
         run: &Run,
         step: &StepSpec,
-        approved: Option<(&str, &Value)>,
+        mut approved: Option<CliApproval>,
     ) -> Result<Value, ExecError> {
         let ctx = self.sh.ctx(run)?;
         let calls: Vec<CallRec> =
@@ -687,7 +782,7 @@ impl TurnExecutor {
                 .spec
                 .as_ref()
                 .is_some_and(|s| s.category == PermissionCategory::Meta);
-            let mut decision = match &resolved.spec {
+            let decision = match &resolved.spec {
                 Some(spec) => self.sh.decide(
                     &ctx,
                     &resolved.name,
@@ -698,77 +793,85 @@ impl TurnExecutor {
                 // Malformed `use_tool`: executes nothing, only reports the error.
                 None => Decision::Allow,
             };
-            // A CLI approval card covers exactly one matching MCP invocation.
-            // The normal resolver still runs above: a new Deny always wins.
-            if decision == Decision::Ask
-                && approved == Some((resolved.name.as_str(), &resolved.input))
-            {
-                decision = Decision::Allow;
-            }
+            // A CLI card covers one matching invocation, and only when it
+            // honors the limits this decision still carries. The permit is
+            // committed immediately before the tool, under the exec gate, so
+            // a policy revision or locked deny fails closed. Anything else
+            // stays on the interactive path.
+            let card = take_matching_card(&mut approved, &resolved.name, &resolved.input);
+            let carried = match card {
+                Some(card) if card_covers(&decision, &card) => Some(card.permit),
+                _ => None,
+            };
             let is_spawn = resolved.name == crate::subagent::SPAWN_SUBAGENT;
             let spawn_input = resolved.input.clone();
             let tool = resolved.tool;
-            let slot = match decision {
-                Decision::Allow => Slot::Run {
+            let slot = if matches!(decision, Decision::Deny) && carried.is_none() {
+                self.sh.emit(
+                    &ctx,
+                    Event::ToolCallDenied(ToolCallDenied {
+                        run_id: run.id,
+                        call_id: call_uuid,
+                        denied_by: ctx.user_id,
+                        reason: Some("denied by policy".into()),
+                    }),
+                );
+                Slot::Done {
+                    text: "Permission denied: policy does not allow this tool call. \
+                           Do not retry it; choose another approach or tell the user."
+                        .into(),
+                    is_error: true,
+                }
+            } else if matches!(decision, Decision::Ask { .. }) && carried.is_none() {
+                let category = resolved
+                    .spec
+                    .as_ref()
+                    .map_or(PermissionCategory::Script, |s| s.category);
+                let effect = resolved
+                    .spec
+                    .as_ref()
+                    .map_or(tool_registry::Effect::Write, |s| s.effect);
+                match self
+                    .sh
+                    .request_approval(
+                        &ctx,
+                        call_uuid,
+                        &resolved.name,
+                        effect,
+                        category,
+                        &resolved.input,
+                    )
+                    .await
+                {
+                    Ok(permit) => Slot::Run {
+                        tool,
+                        input,
+                        call: call_uuid,
+                        meta,
+                        permit: Some(permit),
+                    },
+                    Err(reason) => Slot::Done {
+                        text: user_denied(reason),
+                        is_error: true,
+                    },
+                }
+            } else {
+                Slot::Run {
                     tool,
                     input,
                     call: call_uuid,
                     meta,
-                },
-                Decision::Deny => {
-                    self.sh.emit(
-                        &ctx,
-                        Event::ToolCallDenied(ToolCallDenied {
-                            run_id: run.id,
-                            call_id: call_uuid,
-                            denied_by: ctx.user_id,
-                            reason: Some("denied by policy".into()),
-                        }),
-                    );
-                    Slot::Done {
-                        text: "Permission denied: policy does not allow this tool call. \
-                               Do not retry it; choose another approach or tell the user."
-                            .into(),
-                        is_error: true,
-                    }
-                }
-                Decision::Ask => {
-                    let category = resolved
-                        .spec
-                        .as_ref()
-                        .map_or(PermissionCategory::Script, |s| s.category);
-                    match self
-                        .sh
-                        .request_approval(
-                            &ctx,
-                            call_uuid,
-                            &resolved.name,
-                            category,
-                            &resolved.input,
-                        )
-                        .await
-                    {
-                        Ok(()) => Slot::Run {
-                            tool,
-                            input,
-                            call: call_uuid,
-                            meta,
-                        },
-                        Err(reason) => Slot::Done {
-                            text: format!(
-                                "Permission denied by the user{}. Do not retry this call.",
-                                reason.map_or_else(String::new, |r| format!(": {r}"))
-                            ),
-                            is_error: true,
-                        },
-                    }
+                    permit: carried,
                 }
             };
             let slot = match slot {
-                Slot::Run { call: c, .. } if is_spawn => Slot::Spawn {
+                Slot::Run {
+                    call: c, permit, ..
+                } if is_spawn => Slot::Spawn {
                     input: spawn_input,
                     call: c,
                     model_call_id: call.id.clone(),
+                    permit,
                 },
                 other => other,
             };
@@ -784,7 +887,11 @@ impl TurnExecutor {
                     input,
                     call,
                     model_call_id,
+                    permit,
                 } => {
+                    if let Err(reason) = commit_or_deny(permit) {
+                        return (user_denied(reason), true, None, false);
+                    }
                     let (t, e, d) = self
                         .run_subagent(run, ctx_ref, call, &model_call_id, input)
                         .await;
@@ -795,7 +902,16 @@ impl TurnExecutor {
                     input,
                     call,
                     meta,
-                } => self.run_tool(run, ctx_ref, call, &tool, input, meta).await,
+                    permit,
+                } => {
+                    // Re-check under the policy mutex immediately before the
+                    // call. A deny that landed after approval does not run the
+                    // tool and does not keep a grant (`commit` stores it).
+                    if let Err(reason) = commit_or_deny(permit) {
+                        return (user_denied(reason), true, None, false);
+                    }
+                    self.run_tool(run, ctx_ref, call, &tool, input, meta).await
+                }
             }
         }))
         .await;
@@ -1007,6 +1123,34 @@ fn unsupported_chain_message(misses: &[(String, String)]) -> String {
          Set model_caps in providers.toml (the user's values override the catalog); \
          for example, under [provider.model_caps.\"<model-id>\"] set tools = true or vision = true"
     )
+}
+
+/// Total time `call_with_retries` may spend *sleeping*, shared across every
+/// outer attempt. Each `stream` call starts the provider catalog's
+/// `send_with_retry` with a fresh counter, so a wait that does not fit is
+/// not started and that inner budget is not reset.
+fn retry_time_budget(policy: RetryPolicy) -> Duration {
+    let mut total = Duration::ZERO;
+    let mut attempt = 1u32;
+    let max = policy.max_attempts.max(1);
+    while attempt < max {
+        total = total.saturating_add(policy.backoff(attempt));
+        attempt += 1;
+    }
+    total
+}
+
+/// Sleep `delay` when it still fits in the remaining sleep budget.
+///
+/// The time spent inside the provider call itself is not charged: the budget
+/// is the sum of the backoffs the outer policy already allowed.
+async fn sleep_if_affordable(slept: &mut Duration, budget: Duration, delay: Duration) -> bool {
+    if slept.saturating_add(delay) > budget {
+        return false;
+    }
+    tokio::time::sleep(delay).await;
+    *slept = slept.saturating_add(delay);
+    true
 }
 
 /// Whether a provider failure is worth retrying (transient) as opposed to a

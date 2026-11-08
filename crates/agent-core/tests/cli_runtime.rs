@@ -106,13 +106,19 @@ fn claude_allowed_turn_streams_tools_and_usage() {
 fn claude_denied_tool_returns_error() {
     run_case("claude_denied_tool_returns_error");
 }
+// Approval plumbing is engine-independent: it runs through the Claude fixture
+// because Codex is deliberately never spawned (`codex_unconfinable`).
 #[test]
-fn codex_approval_allow_runs_once() {
-    run_case("codex_approval_allow_runs_once");
+fn cli_approval_allow_runs_once() {
+    run_case("cli_approval_allow_runs_once");
 }
 #[test]
-fn codex_approval_deny_skips_tool() {
-    run_case("codex_approval_deny_skips_tool");
+fn cli_approval_deny_skips_tool() {
+    run_case("cli_approval_deny_skips_tool");
+}
+#[test]
+fn codex_is_refused_fail_closed() {
+    run_case("codex_is_refused_fail_closed");
 }
 #[test]
 fn shutdown_reaps_cli_tree() {
@@ -153,7 +159,8 @@ async fn child(case: &str) {
             created_at_ms: 0,
         })
         .unwrap();
-    let codex = case.starts_with("codex") || case.starts_with("shutdown");
+    let codex = case.starts_with("codex");
+    let approval = case.contains("approval");
     let deny = case.contains("denied") || case.contains("deny");
     let id = if codex { "cli:codex" } else { "cli:claude" };
     let mut settings = ProviderSettings::new(id, 0);
@@ -189,7 +196,7 @@ async fn child(case: &str) {
         registry,
         Providers::single(Arc::new(NoHttp)),
         LoopConfig {
-            global_policy: if codex {
+            global_policy: if approval {
                 Policy::approve_destructive()
             } else if deny {
                 Policy::read_only()
@@ -270,7 +277,7 @@ async fn child(case: &str) {
         restarted.add_profile(
             bot,
             BotProfile::from_toml_str(
-                "[bot]\nid='fixture'\nname='Fixture'\n[models]\nexecutor='cli:codex'",
+                "[bot]\nid='fixture'\nname='Fixture'\n[models]\nexecutor='cli:claude'",
             )
             .unwrap(),
         );
@@ -287,6 +294,27 @@ async fn child(case: &str) {
         return;
     }
     if codex {
+        // Fail closed: the turn is refused before any process or tool runs.
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(20), lp.wait(run))
+                .await
+                .unwrap()
+                .unwrap(),
+            RunState::Failed
+        );
+        assert_eq!(tool.count.load(Ordering::SeqCst), 0);
+        assert!(!root.join("pid").exists(), "codex fixture was spawned");
+        let events = storage::read_event_log(root.join("store").as_path(), run).unwrap();
+        let event_text = format!("{events:?}");
+        assert!(
+            event_text.contains(cli_provider::detect::CODEX_UNCONFINABLE_MESSAGE),
+            "{event_text}"
+        );
+        assert!(!event_text.contains("ToolCallRequested"));
+        lp.shutdown(Duration::ZERO).await;
+        return;
+    }
+    if approval {
         let approval = tokio::time::timeout(Duration::from_secs(20), async {
             loop {
                 if let Event::ApprovalNeeded(a) = rx.recv().await.unwrap().envelope.event {
@@ -318,8 +346,8 @@ async fn child(case: &str) {
         .iter()
         .filter(|e| matches!(e.event, Event::ApprovalNeeded(_)))
         .count();
-    assert_eq!(approvals, usize::from(codex));
-    if !deny || !codex {
+    assert_eq!(approvals, usize::from(approval));
+    {
         assert!(event_text.contains("MessageDelta"));
         assert!(event_text.contains("ToolCallRequested"));
         assert!(event_text.contains("ToolCallCompleted"));

@@ -48,6 +48,10 @@ pub enum LoopError {
     /// The chat already has a running turn; use `send_user_message`.
     #[error("chat {0} already has an active turn")]
     Busy(ChatId),
+    /// A previous drive task for this run has not released its handle yet.
+    /// Resume would detach that task or drop the new one; retry once it finishes.
+    #[error("run {0} is still finishing; retry resume")]
+    StillFinishing(RunId),
     /// No approval is waiting under that call id (already decided, or lost in a restart).
     #[error("no pending approval for call {0}")]
     NoPendingApproval(ToolCallId),
@@ -479,7 +483,28 @@ pub(crate) struct Shared {
     /// How many approvals/questions each run has parked right now (parallel
     /// `ask_user` calls park several); the run is `WaitingApproval` while > 0.
     pub parked: Mutex<HashMap<RunId, usize>>,
+    /// Serialises a global-policy install with the decision to execute an
+    /// already-approved tool. Not held across `.await`.
+    pub exec_gate: Mutex<()>,
+    /// Test-only: the drive task waits here after `conclude` and before it
+    /// reaps its own [`JoinHandle`].
+    #[cfg(test)]
+    pub task_reap_gate: Mutex<Option<Arc<tokio::sync::Barrier>>>,
+    /// Test-only: set just before the reap-gate wait.
+    #[cfg(test)]
+    pub task_reap_entered: AtomicBool,
+    /// Test-only: set after that reap attempt, so a test can observe it.
+    #[cfg(test)]
+    pub task_reap_done: AtomicBool,
+    /// Test-only: invoked while `exec_gate` is held, immediately before the
+    /// pre-tool deny recheck.
+    #[cfg(test)]
+    pub exec_commit_hook: Mutex<Option<ExecCommitHook>>,
 }
+
+/// Test-only hook invoked under `exec_gate` before the pre-tool deny recheck.
+#[cfg(test)]
+pub(crate) type ExecCommitHook = Arc<dyn Fn(&Shared) + Send + Sync>;
 
 /// What a schedule-started run does (see
 /// [`AgentLoop::run_scheduled`](crate::AgentLoop::run_scheduled)).
