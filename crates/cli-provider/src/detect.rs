@@ -551,7 +551,8 @@ pub(crate) async fn kill_tree(child: &mut dyn ChildWrapper) {
         #[cfg(windows)]
         cmd.args(["/F", "/T", "/PID", &pid.to_string()]);
         #[cfg(not(windows))]
-        cmd.args(["-9", &format!("-{pid}")]);
+        // `--` is required: procps `kill -9 -<pgid>` otherwise ignores the group.
+        cmd.args(["-9", "--", &format!("-{pid}")]);
         scrub_process_env(&mut cmd);
         let _ = cmd.output().await;
     }
@@ -1425,6 +1426,8 @@ mod tests {
         );
     }
 
+    // `.cmd` shims only exist on Windows (PATHEXT is case-sensitive elsewhere).
+    #[cfg(windows)]
     #[test]
     fn node_cmd_is_refused_and_node_exe_is_used() {
         let dir = tempfile::tempdir().unwrap();
