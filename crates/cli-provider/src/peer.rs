@@ -216,7 +216,10 @@ fn is_descendant(pid: u32, ancestor: u32) -> bool {
     let mut current = pid;
     let mut seen = std::collections::HashSet::new();
     for _ in 0..64 {
-        let parent = parent_pid(current)?;
+        // A parent we cannot read is not proof of ancestry. Refuse the peer.
+        let Some(parent) = parent_pid(current) else {
+            return false;
+        };
         if parent == ancestor {
             return true;
         }
