@@ -311,14 +311,74 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap().len(), 64);
     }
 
+    // CreateFileW stores an explicit DACL with SE_DACL_PROTECTED even when the
+    // SDDL omits P. That result grants only the current user and is safe.
+    // Clear the bit afterwards so this fixture is actually unprotected.
+    fn reopen_with_unprotected_dacl(path: &Path) -> std::io::Result<File> {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        use windows::Win32::Security::Authorization::SetSecurityInfo;
+        use windows::Win32::Security::UNPROTECTED_DACL_SECURITY_INFORMATION;
+        use windows::Win32::Storage::FileSystem::{FILE_READ_ATTRIBUTES, WRITE_DAC};
+
+        let file = std::fs::OpenOptions::new()
+            .access_mode(READ_CONTROL.0 | WRITE_DAC.0 | FILE_READ_ATTRIBUTES.0)
+            .share_mode(0)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
+            .open(path)?;
+        let handle = HANDLE(file.as_raw_handle());
+        let mut dacl: *mut ACL = std::ptr::null_mut();
+        let mut security = PSECURITY_DESCRIPTOR::default();
+        // SAFETY: out pointers are valid. The DACL remains allocated until
+        // SetSecurityInfo has copied it and the descriptor is freed below.
+        unsafe {
+            GetSecurityInfo(
+                handle,
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                Some(&raw mut dacl),
+                None,
+                Some(&raw mut security),
+            )
+        }
+        .ok()
+        .map_err(|error| win_io(&error))?;
+        let _allocation = LocalMemory(security.0);
+        // SAFETY: this handle was opened with WRITE_DAC. `dacl` points into
+        // `_allocation` and is only read for the duration of this call.
+        unsafe {
+            SetSecurityInfo(
+                handle,
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION | UNPROTECTED_DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                Some(dacl.cast_const()),
+                None,
+            )
+        }
+        .ok()
+        .map_err(|error| win_io(&error))?;
+        Ok(file)
+    }
+
     #[test]
     fn existing_unprotected_acl_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("identity.key");
         let sid = CurrentUser::load().unwrap().string_sid().unwrap();
-        let file = create_with_security(&path, || descriptor(&format!("O:{sid}D:(A;;FA;;;{sid})")))
-            .unwrap();
-        assert!(verify_private(&file).is_err());
+        let created =
+            create_with_security(&path, || descriptor(&format!("O:{sid}D:(A;;FA;;;{sid})")))
+                .unwrap();
+        drop(created); // share=0: close before reopening, including in tests.
+        let file = reopen_with_unprotected_dacl(&path).unwrap();
+        let error = verify_private(&file).unwrap_err();
+        assert!(
+            error.to_string().contains("protected DACL"),
+            "unprotected ACL produced a different failure: {error}"
+        );
     }
 
     #[test]
