@@ -279,6 +279,9 @@ pub fn remove_dir_inside(root: &Path, dir: &Path) -> Result<(), HubError> {
     Ok(())
 }
 
+// NTFS alternate streams exist only on Windows. The `Result` stays so `walk`
+// can use `?` on every host; Unix has nothing to refuse.
+#[cfg_attr(not(windows), allow(clippy::unnecessary_wraps))]
 fn ensure_no_alternate_streams(root: &Path) -> Result<(), HubError> {
     #[cfg(windows)]
     {

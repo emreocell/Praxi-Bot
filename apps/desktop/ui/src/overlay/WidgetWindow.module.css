@@ -81,7 +81,7 @@
 
 .statusDriving {
   background-color: var(--color-accent-subtle);
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .statusPaused {

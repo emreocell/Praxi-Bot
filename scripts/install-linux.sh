@@ -2,17 +2,32 @@
 # Install Praxi-Bot as an always-on systemd service on a Linux server
 # (x86_64 or aarch64; Debian/Ubuntu or Fedora/RHEL/Oracle Linux family).
 #
-# Usage (as root):
-#   sudo ./install-linux.sh [options]
-#   # Script and binaries must come from the same release tag:
-#   curl -fsSL https://github.com/emreocell/Praxi-Bot/releases/download/v0.1.0/install-linux.sh | sudo bash -s -- --version v0.1.0
+# Trust: use an independently installed GitHub CLI (https://cli.github.com).
+# Verify the installer itself BEFORE running it, including with sudo. Copy this
+# bootstrap from a reviewed copy of this repository; replace the example tag:
+#   (
+#     set -euo pipefail
+#     version=v0.1.0
+#     work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+#     base="https://github.com/emreocell/Praxi-Bot/releases/download/$version"
+#     for asset in install-linux.sh praxi-linux.sigstore.json; do
+#       curl -fSL --proto '=https' --proto-redir '=https' --tlsv1.2 "$base/$asset" -o "$work/$asset"
+#     done
+#     gh attestation verify "$work/install-linux.sh" --bundle "$work/praxi-linux.sigstore.json" \
+#       --repo emreocell/Praxi-Bot --hostname github.com \
+#       --signer-workflow github.com/emreocell/Praxi-Bot/.github/workflows/linux-release.yml \
+#       --source-ref "refs/tags/$version" --deny-self-hosted-runners \
+#       --cert-oidc-issuer https://token.actions.githubusercontent.com \
+#       --predicate-type https://slsa.dev/provenance/v1 --digest-alg sha256
+#     sudo bash "$work/install-linux.sh" --version "$version"
+#   )
 #
 # Options:
 #   --version <tag>      Release tag to install, e.g. v0.1.0 (default: latest)
-#   --file <tarball>     Install from a local praxi-linux-<arch>.tar.gz instead of downloading
-#   --sha256 <hex>       Expected SHA-256 of the tarball (default: sibling .sha256, or the release checksum)
-#   --insecure-skip-verify
-#                        Allow a local --file that has no --sha256 and no sibling .sha256
+#   --file <tarball>     Use a local archive (requires an explicit --version)
+#   --bundle <file>      Local provenance bundle (default: sibling praxi-linux.sigstore.json)
+#   --sha256 <hex>       Additional checksum check; never replaces provenance verification
+#   --verify-only       Verify without installing; does not require root or Linux
 #   --port <port>        Daemon port on 127.0.0.1 (default: 47821)
 #   --with-desktop       Also install Xvfb + Chromium and a praxi-xvfb.service virtual display
 #   --without-desktop    Remove an existing praxi-xvfb unit and DISPLAY (updates keep both otherwise)
@@ -26,7 +41,9 @@
 
 set -euo pipefail
 
-REPO="emreocell/Praxi-Bot"
+readonly REPO="emreocell/Praxi-Bot"
+readonly SIGNER_WORKFLOW="github.com/emreocell/Praxi-Bot/.github/workflows/linux-release.yml"
+readonly BUNDLE_ASSET="praxi-linux.sigstore.json"
 PREFIX="/opt/praxi"
 DATA_DIR="/var/lib/praxi"
 CONF_DIR="/etc/praxi"
@@ -37,8 +54,9 @@ SVC_USER="praxi"
 
 VERSION="latest"
 LOCAL_FILE=""
+LOCAL_BUNDLE=""
 EXPECTED_SHA=""
-INSECURE_SKIP_VERIFY=0
+VERIFY_ONLY=0
 PORT="47821"
 PORT_SET=0
 DISPLAY_SET=0
@@ -61,17 +79,39 @@ usage() {
   cat <<'USAGE'
 Usage (as root):
   sudo ./install-linux.sh [options]
-  curl -fsSL https://github.com/emreocell/Praxi-Bot/releases/download/v0.1.0/install-linux.sh | sudo bash -s -- --version v0.1.0
 
-The curl URL tag and --version must be the same release. The release asset is
-install-linux.sh (not the copy on the main branch).
+Install a trusted GitHub CLI independently (https://cli.github.com); it must
+support `gh attestation verify` and the identity flags below. No verifier is
+downloaded or installed by this script. Old releases without provenance fail.
+
+Verified bootstrap (copy from a reviewed repository, choose a release tag):
+  (
+    set -euo pipefail
+    version=v0.1.0
+    work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+    base="https://github.com/emreocell/Praxi-Bot/releases/download/$version"
+    for asset in install-linux.sh praxi-linux.sigstore.json; do
+      curl -fSL --proto '=https' --proto-redir '=https' --tlsv1.2 "$base/$asset" -o "$work/$asset"
+    done
+    gh attestation verify "$work/install-linux.sh" --bundle "$work/praxi-linux.sigstore.json" \
+      --repo emreocell/Praxi-Bot --hostname github.com \
+      --signer-workflow github.com/emreocell/Praxi-Bot/.github/workflows/linux-release.yml \
+      --source-ref "refs/tags/$version" --deny-self-hosted-runners \
+      --cert-oidc-issuer https://token.actions.githubusercontent.com \
+      --predicate-type https://slsa.dev/provenance/v1 --digest-alg sha256
+    sudo bash "$work/install-linux.sh" --version "$version"
+  )
+
+Both the installer and archive must be attested by the pinned release workflow
+for the chosen tag. Checksums alone never authorize installation. `latest`
+selects the channel's current tag; choose an explicit tag to pin the version.
 
 Options:
   --version <tag>      Release tag to install, e.g. v0.1.0 (default: latest)
-  --file <tarball>     Install from a local praxi-linux-<arch>.tar.gz instead of downloading
-  --sha256 <hex>       Expected SHA-256 of the tarball
-  --insecure-skip-verify
-                       Allow a local --file with no --sha256 and no sibling .sha256
+  --file <tarball>     Use a local archive (requires an explicit --version)
+  --bundle <file>      Local provenance bundle (default: sibling praxi-linux.sigstore.json)
+  --sha256 <hex>       Additional checksum check; never replaces provenance verification
+  --verify-only       Verify without installing; does not require root or Linux
   --port <port>        Daemon port on 127.0.0.1 (default: 47821; kept on re-install unless given)
   --with-desktop       Also install Xvfb + Chromium and a praxi-xvfb.service virtual display
   --without-desktop    Remove praxi-xvfb.service and DISPLAY (an update keeps both unless this is set)
@@ -130,8 +170,9 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --version) need_arg "$@"; VERSION="$2"; shift 2 ;;
     --file) need_arg "$@"; LOCAL_FILE="$2"; shift 2 ;;
+    --bundle) need_arg "$@"; LOCAL_BUNDLE="$2"; shift 2 ;;
     --sha256) need_arg "$@"; EXPECTED_SHA="$(sha256_hex "$2")"; shift 2 ;;
-    --insecure-skip-verify) INSECURE_SKIP_VERIFY=1; shift ;;
+    --verify-only) VERIFY_ONLY=1; shift ;;
     --port) need_arg "$@"; PORT="$2"; PORT_SET=1; shift 2 ;;
     --with-desktop) WITH_DESKTOP=1; shift ;;
     --without-desktop) WITHOUT_DESKTOP=1; shift ;;
@@ -146,9 +187,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ "$(uname -s)" == "Linux" ]] || die "this script only supports Linux"
-[[ "${EUID:-$(id -u)}" -eq 0 ]] || die "run as root (use sudo)"
-command -v systemctl >/dev/null 2>&1 || die "systemd is required"
+if [[ "${VERIFY_ONLY}" -eq 0 ]]; then
+  [[ "$(uname -s)" == "Linux" ]] || die "installation only supports Linux (use --verify-only elsewhere)"
+  [[ "${EUID:-$(id -u)}" -eq 0 ]] || die "run as root (use sudo), or pass --verify-only"
+  command -v systemctl >/dev/null 2>&1 || die "systemd is required"
+fi
+[[ "${VERIFY_ONLY}" -eq 0 || "${UNINSTALL}" -eq 0 ]] || die "--verify-only cannot be combined with --uninstall"
 [[ "${PORT}" =~ ^[0-9]+$ && "${PORT}" -ge 1 && "${PORT}" -le 65535 ]] || die "invalid --port"
 [[ "${DISPLAY_NUM}" =~ ^:[0-9]+$ ]] || die "invalid --display (expected :N)"
 [[ "${SCREEN_SPEC}" =~ ^[0-9]+x[0-9]+x[0-9]+$ ]] || die "invalid --screen (expected WxHxD)"
@@ -314,12 +358,94 @@ install_packages() {
   fi
 }
 
+# ---------------------------------------------------------- verify release
+# curl/gh must already be trusted and installed. Do not change packages, users,
+# services or installation paths until the private copy passes verification.
+command -v gh >/dev/null 2>&1 || die "trusted GitHub CLI (gh) is required; install it independently from https://cli.github.com"
+[[ -z "${LOCAL_FILE}" || "${VERSION}" != "latest" ]] || die "--file requires an explicit --version tag"
+if [[ "${VERSION}" == "latest" ]]; then
+  # Resolve the tag before downloading. Never trust an arbitrary redirect host
+  # or a mutable 'latest' identity as the expected signer/source ref.
+  latest_url="$(curl -fsS --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 60 \
+    -o /dev/null --write-out '%{redirect_url}' "https://github.com/${REPO}/releases/latest")" \
+    || die "could not resolve the latest release tag"
+  latest_prefix="https://github.com/${REPO}/releases/tag/"
+  [[ "${latest_url}" == "${latest_prefix}"* ]] || die "latest release did not resolve to the expected repository"
+  VERSION="${latest_url#"${latest_prefix}"}"
+fi
+[[ "${VERSION}" =~ ^v[0-9][0-9A-Za-z._+-]*$ ]] || die "invalid release tag (expected v followed by a version)"
+[[ -z "${EXPECTED_SHA}" || "${EXPECTED_SHA}" =~ ^[0-9a-f]{64}$ ]] || die "invalid --sha256"
+
+WORK="$(umask 077; mktemp -d)"
+trap 'rm -rf "${WORK:?}"' EXIT
+BASE="https://github.com/${REPO}/releases/download/${VERSION}"
+
+download_release_asset() {
+  curl -fSL --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --max-time 300 \
+    -o "${WORK}/$1" "${BASE}/$1" || die "could not download release asset $1 for ${VERSION}"
+}
+
+if [[ -n "${LOCAL_FILE}" ]]; then
+  [[ -f "${LOCAL_FILE}" ]] || die "file not found: ${LOCAL_FILE}"
+  cp -- "${LOCAL_FILE}" "${WORK}/${ASSET}"
+  if [[ -z "${EXPECTED_SHA}" && -f "${LOCAL_FILE}.sha256" ]]; then
+    EXPECTED_SHA="$(sha256_hex "$(awk 'NR==1 { print; exit }' "${LOCAL_FILE}.sha256")")"
+  fi
+  [[ -n "${LOCAL_BUNDLE}" ]] || LOCAL_BUNDLE="$(dirname -- "${LOCAL_FILE}")/${BUNDLE_ASSET}"
+else
+  log "downloading ${BASE}/${ASSET}"
+  download_release_asset "${ASSET}"
+  if [[ -z "${EXPECTED_SHA}" ]]; then
+    download_release_asset "${ASSET}.sha256"
+    EXPECTED_SHA="$(sha256_hex "$(awk 'NR==1 { print; exit }' "${WORK}/${ASSET}.sha256")")"
+  fi
+fi
+
+if [[ -n "${EXPECTED_SHA}" ]]; then
+  [[ "${EXPECTED_SHA}" =~ ^[0-9a-f]{64}$ ]] || die "invalid SHA-256 checksum"
+  ACTUAL_SHA="$(sha256_hex "$(sha256sum "${WORK}/${ASSET}")")"
+  [[ "${ACTUAL_SHA}" == "${EXPECTED_SHA}" ]] || die "SHA-256 mismatch (expected ${EXPECTED_SHA}, got ${ACTUAL_SHA})"
+  log "checksum OK"
+fi
+
+if [[ -n "${LOCAL_BUNDLE}" ]]; then
+  [[ -f "${LOCAL_BUNDLE}" ]] || die "provenance bundle not found: ${LOCAL_BUNDLE}"
+  cp -- "${LOCAL_BUNDLE}" "${WORK}/${BUNDLE_ASSET}"
+else
+  download_release_asset "${BUNDLE_ASSET}"
+fi
+
+# The trust root is gh's Sigstore trust store and GitHub's OIDC certificate,
+# never a public key, checksum, or policy supplied by the release assets.
+# These flags deliberately have no environment/CLI overrides or bypass.
+gh attestation verify "${WORK}/${ASSET}" --bundle "${WORK}/${BUNDLE_ASSET}" \
+  --repo "${REPO}" --hostname github.com \
+  --signer-workflow "${SIGNER_WORKFLOW}" \
+  --source-ref "refs/tags/${VERSION}" --deny-self-hosted-runners \
+  --cert-oidc-issuer https://token.actions.githubusercontent.com \
+  --predicate-type https://slsa.dev/provenance/v1 --digest-alg sha256 \
+  || die "provenance verification failed; refusing to install (a checksum is not proof of origin)"
+log "verified release provenance for ${VERSION}"
+if [[ "${VERIFY_ONLY}" -eq 1 ]]; then
+  log "verification complete; no installation performed"
+  exit 0
+fi
+
+# List members before extracting as root. Absolute paths and '..' components
+# are rejected; the archive is extracted only into the temp dir.
+reject_unsafe_tar_members "${WORK}/${ASSET}"
+mkdir "${WORK}/x"
+tar -xzf "${WORK}/${ASSET}" -C "${WORK}/x"
+SRC="${WORK}/x/praxi-linux-${ARCH}"
+[[ -x "${SRC}/bin/bot" && -x "${SRC}/bin/bot-node" ]] || die "tarball does not contain bin/bot and bin/bot-node"
+
+# ------------------------------------------------------- privileged changes
 if [[ "${SKIP_PACKAGES}" -eq 0 ]]; then
   log "installing OS packages"
-  # Always clean up accidental print services, including on a package failure.
-  trap disable_print_services EXIT
+  # Also retain private-download cleanup when package installation fails.
+  trap 'disable_print_services || true; rm -rf "${WORK:?}"' EXIT
   install_packages
-  trap - EXIT
+  trap 'rm -rf "${WORK:?}"' EXIT
 fi
 disable_print_services
 
@@ -336,53 +462,6 @@ if [[ "${WITH_DESKTOP}" -eq 1 ]]; then
   done
   [[ "${browser_found}" -eq 1 ]] || die "no non-snap browser found; snap-only installs are unsupported. Install Chrome/Chromium (see docs/guide/remote-host.md)"
 fi
-
-# --------------------------------------------------------------- download
-WORK="$(mktemp -d)"
-trap 'rm -rf "${WORK:?}"' EXIT
-
-if [[ -n "${LOCAL_FILE}" ]]; then
-  [[ -f "${LOCAL_FILE}" ]] || die "file not found: ${LOCAL_FILE}"
-  cp "${LOCAL_FILE}" "${WORK}/${ASSET}"
-  if [[ -z "${EXPECTED_SHA}" && -f "${LOCAL_FILE}.sha256" ]]; then
-    EXPECTED_SHA="$(sha256_hex "$(awk 'NR==1 { print; exit }' "${LOCAL_FILE}.sha256")")"
-  fi
-  if [[ -z "${EXPECTED_SHA}" && "${INSECURE_SKIP_VERIFY}" -eq 0 ]]; then
-    die "no SHA-256 for local file ${LOCAL_FILE} (pass --sha256, provide ${LOCAL_FILE}.sha256, or pass --insecure-skip-verify)"
-  fi
-else
-  if [[ "${VERSION}" == "latest" ]]; then
-    BASE="https://github.com/${REPO}/releases/latest/download"
-  else
-    BASE="https://github.com/${REPO}/releases/download/${VERSION}"
-  fi
-  log "downloading ${BASE}/${ASSET}"
-  curl -fSL --proto '=https' --tlsv1.2 -o "${WORK}/${ASSET}" "${BASE}/${ASSET}" \
-    || die "download failed (no release published yet? build it with the 'Linux Server Packages' workflow and pass --file)"
-  if [[ -z "${EXPECTED_SHA}" ]]; then
-    curl -fSL --proto '=https' --tlsv1.2 -o "${WORK}/${ASSET}.sha256" "${BASE}/${ASSET}.sha256" \
-      || die "could not fetch the checksum file"
-    EXPECTED_SHA="$(sha256_hex "$(awk 'NR==1 { print; exit }' "${WORK}/${ASSET}.sha256")")"
-  fi
-fi
-
-if [[ -n "${EXPECTED_SHA}" ]]; then
-  ACTUAL_SHA="$(sha256_hex "$(sha256sum "${WORK}/${ASSET}")")"
-  [[ "${ACTUAL_SHA}" == "${EXPECTED_SHA}" ]] || die "SHA-256 mismatch (expected ${EXPECTED_SHA}, got ${ACTUAL_SHA})"
-  log "checksum OK"
-elif [[ "${INSECURE_SKIP_VERIFY}" -eq 1 ]]; then
-  warn "checksum verification skipped (--insecure-skip-verify)"
-else
-  die "no SHA-256 available to verify the tarball"
-fi
-
-# List members before extracting as root. Absolute paths and '..' components
-# are rejected; the archive is extracted only into the temp dir.
-reject_unsafe_tar_members "${WORK}/${ASSET}"
-mkdir "${WORK}/x"
-tar -xzf "${WORK}/${ASSET}" -C "${WORK}/x"
-SRC="${WORK}/x/praxi-linux-${ARCH}"
-[[ -x "${SRC}/bin/bot" && -x "${SRC}/bin/bot-node" ]] || die "tarball does not contain bin/bot and bin/bot-node"
 
 # ------------------------------------------------------------------ user
 if ! id -u "${SVC_USER}" >/dev/null 2>&1; then

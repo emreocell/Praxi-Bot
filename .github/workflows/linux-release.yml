@@ -1,30 +1,246 @@
 name: Linux Server Packages
 
-# Deliberately NOT triggered on push/PR: release builds for two architectures
-# are slow. Run manually or push a `v*` tag.
+# PRs/main run only lightweight trust checks. Native release builds remain
+# manual or v* tags; only tagged runs can attest or publish release assets.
 on:
+  pull_request:
+    paths: [".github/workflows/linux-release.yml", "scripts/install-linux.sh"]
   workflow_dispatch:
   push:
+    branches: [main]
     tags: ["v*"]
+    paths: [".github/workflows/linux-release.yml", "scripts/install-linux.sh"]
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: linux-release-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  validate:
+    name: Installer trust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Require immutable action pins
+        run: |
+          python - <<'PYTHON'
+          import pathlib, re
+          workflow = pathlib.Path(".github/workflows/linux-release.yml").read_text()
+          uses = re.findall(r"^\s*(?:-\s*)?uses:\s*(.+)$", workflow, re.MULTILINE)
+          assert uses, "no action references found"
+          for action in uses:
+              assert re.fullmatch(r"[^@\s]+@[0-9a-f]{40}(?:\s+#.*)?", action), action
+          print(f"Verified {len(uses)} immutable action references")
+          PYTHON
+
+      - name: Audit release workflow
+        if: runner.os == 'Linux'
+        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+        with:
+          inputs: .github/workflows/linux-release.yml
+          version: 1.32.0
+          online-audits: false
+          advanced-security: false
+
+      - name: Hermetic installer trust regressions
+        if: success() || failure()
+        run: |
+          set -euo pipefail
+          script="${INSTALLER_SCRIPT:-$PWD/scripts/install-linux.sh}"
+          bash -n "$script"
+          fixture_root="$(mktemp -d)"
+          trap 'rm -rf "$fixture_root"' EXIT
+          export FIXTURE_ROOT="$fixture_root"
+          export FIXTURE_MUTATIONS="$fixture_root/mutations"
+          export FIXTURE_CALLS="$fixture_root/verification-calls"
+          export FIXTURE_RELEASE="$fixture_root/release fixtures"
+          mkdir -p "$fixture_root/bin" "$FIXTURE_RELEASE" "$fixture_root/payload/praxi-linux-x86_64/bin"
+          for name in bot bot-node; do
+            printf '#!/bin/sh\necho trusted fixture\n' > "$fixture_root/payload/praxi-linux-x86_64/bin/$name"
+            chmod +x "$fixture_root/payload/praxi-linux-x86_64/bin/$name"
+          done
+          asset=praxi-linux-x86_64.tar.gz
+          tar -czf "$FIXTURE_RELEASE/$asset" -C "$fixture_root/payload" praxi-linux-x86_64
+          sha256sum "$FIXTURE_RELEASE/$asset" > "$FIXTURE_RELEASE/$asset.sha256"
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$fixture_root/key.pem" 2>/dev/null
+          openssl pkey -in "$fixture_root/key.pem" -pubout -out "$fixture_root/public.pem" 2>/dev/null
+
+          # The gh boundary double authenticates an independently signed fixture and
+          # checks the exact policy arguments. This tests installer enforcement, not
+          # GitHub/Sigstore's own cryptographic implementation or a live release.
+          make_bundle() {
+            local output="$1" repo="$2" ref="$3" runner="$4" subject="${5:-$FIXTURE_RELEASE/$asset}" digest
+            digest="$(sha256sum "$subject")"
+            printf '%s\n' "$repo" \
+              github.com/emreocell/Praxi-Bot/.github/workflows/linux-release.yml \
+              "$ref" https://token.actions.githubusercontent.com "$runner" \
+              https://slsa.dev/provenance/v1 "${digest%% *}" > "$fixture_root/statement"
+            cat "$fixture_root/statement" > "$output"
+            openssl dgst -sha256 -sign "$fixture_root/key.pem" "$fixture_root/statement" | openssl base64 -A >> "$output"
+            printf '\n' >> "$output"
+          }
+          make_bundle "$FIXTURE_RELEASE/praxi-linux.sigstore.json" emreocell/Praxi-Bot refs/tags/v0.0.0-audit github-hosted
+          make_bundle "$fixture_root/wrong-repo.bundle" attacker/Praxi-Bot refs/tags/v0.0.0-audit github-hosted
+          make_bundle "$fixture_root/wrong-ref.bundle" emreocell/Praxi-Bot refs/tags/v0.0.0-other github-hosted
+          make_bundle "$fixture_root/self-hosted.bundle" emreocell/Praxi-Bot refs/tags/v0.0.0-audit self-hosted
+          mkdir "$fixture_root/attacker"
+          printf '#!/bin/sh\necho attacker fixture\n' > "$fixture_root/payload/praxi-linux-x86_64/bin/bot"
+          tar -czf "$fixture_root/attacker/$asset" -C "$fixture_root/payload" praxi-linux-x86_64
+          sha256sum "$fixture_root/attacker/$asset" > "$fixture_root/attacker/$asset.sha256"
+          cp "$FIXTURE_RELEASE/praxi-linux.sigstore.json" "$fixture_root/attacker/praxi-linux.sigstore.json"
+
+          cat > "$fixture_root/bin/gh" <<'GH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          printf 'called\n' >> "$FIXTURE_CALLS"
+          [[ $# -ge 3 && "$1" == attestation && "$2" == verify ]] || exit 2
+          artifact="$3"; shift 3
+          declare -A flags=()
+          while [[ $# -gt 0 ]]; do
+            case "$1" in
+              --deny-self-hosted-runners) flags["$1"]=true; shift ;;
+              --bundle|--repo|--hostname|--signer-workflow|--source-ref|--cert-oidc-issuer|--predicate-type|--digest-alg)
+                [[ $# -ge 2 && ! -v "flags[$1]" ]] || exit 2
+                flags["$1"]="$2"; shift 2 ;;
+              *) exit 2 ;;
+            esac
+          done
+          [[ ${#flags[@]} -eq 9 && "${flags[--repo]}" == emreocell/Praxi-Bot ]]
+          [[ "${flags[--hostname]}" == github.com && "${flags[--digest-alg]}" == sha256 ]]
+          [[ "${flags[--signer-workflow]}" == github.com/emreocell/Praxi-Bot/.github/workflows/linux-release.yml ]]
+          [[ "${flags[--cert-oidc-issuer]}" == https://token.actions.githubusercontent.com ]]
+          [[ "${flags[--predicate-type]}" == https://slsa.dev/provenance/v1 && "${flags[--deny-self-hosted-runners]}" == true ]]
+          head -n 7 "${flags[--bundle]}" > "$FIXTURE_ROOT/verify-statement"
+          tail -n 1 "${flags[--bundle]}" | openssl base64 -d -A > "$FIXTURE_ROOT/verify-signature"
+          openssl dgst -sha256 -verify "$FIXTURE_ROOT/public.pem" -signature "$FIXTURE_ROOT/verify-signature" "$FIXTURE_ROOT/verify-statement"
+          mapfile -t claims < "$FIXTURE_ROOT/verify-statement"
+          [[ "${claims[0]}" == "${flags[--repo]}" && "${claims[1]}" == "${flags[--signer-workflow]}" ]]
+          [[ "${claims[2]}" == "${flags[--source-ref]}" && "${claims[3]}" == "${flags[--cert-oidc-issuer]}" ]]
+          [[ "${claims[4]}" == github-hosted && "${claims[5]}" == "${flags[--predicate-type]}" ]]
+          digest="$(sha256sum "$artifact")"
+          [[ "${claims[6]}" == "${digest%% *}" ]]
+          GH
+          cat > "$fixture_root/bin/curl" <<'CURL'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          output=""; url=""
+          while [[ $# -gt 0 ]]; do
+            case "$1" in
+              -o) output="$2"; shift 2 ;;
+              --proto|--proto-redir|--connect-timeout|--max-time|--write-out) shift 2 ;;
+              -fSL|-fsS|--tlsv1.2) shift ;;
+              https://*) url="$1"; shift ;;
+              *) exit 2 ;;
+            esac
+          done
+          if [[ "$url" == https://github.com/emreocell/Praxi-Bot/releases/latest ]]; then
+            printf '%s' "${FIXTURE_LATEST_URL:-https://github.com/emreocell/Praxi-Bot/releases/tag/v0.0.0-audit}"
+          else
+            [[ "$url" == https://github.com/emreocell/Praxi-Bot/releases/download/v0.0.0-audit/* ]] || exit 2
+            cp -- "$FIXTURE_RELEASE/${url##*/}" "$output"
+          fi
+          CURL
+          cat > "$fixture_root/bin/forbidden" <<'FORBIDDEN'
+          #!/usr/bin/env bash
+          printf '%s\n' "$0 $*" >> "$FIXTURE_MUTATIONS"
+          exit 90
+          FORBIDDEN
+          chmod +x "$fixture_root/bin/gh" "$fixture_root/bin/curl" "$fixture_root/bin/forbidden"
+          for command in apt-get dnf systemctl useradd userdel groupdel snap sudo install tar; do
+            cp "$fixture_root/bin/forbidden" "$fixture_root/bin/$command"
+          done
+          export PATH="$fixture_root/bin:$PATH"
+          expect_rejected() {
+            local name="$1" message="$2"; shift 2
+            if "$@" > "$fixture_root/$name.log" 2>&1; then
+              cat "$fixture_root/$name.log"
+              echo "FAIL: $name was accepted" >&2
+              exit 1
+            fi
+            grep -Fq "$message" "$fixture_root/$name.log" || { cat "$fixture_root/$name.log"; exit 1; }
+            echo "PASS: $name rejected before installation"
+          }
+
+          bash "$script" --verify-only --version v0.0.0-audit --file "$FIXTURE_RELEASE/$asset"
+          echo 'PASS: signed local fixture accepted'
+          bash "$script" --verify-only
+          echo 'PASS: latest resolved to a concrete tag and signed download accepted'
+          expect_rejected tampered-with-matching-checksum 'provenance verification failed' \
+            bash "$script" --verify-only --version v0.0.0-audit --file "$fixture_root/attacker/$asset"
+          grep -Fq 'checksum OK' "$fixture_root/tampered-with-matching-checksum.log"
+          for kind in wrong-repo wrong-ref self-hosted; do
+            expect_rejected "$kind" 'provenance verification failed' bash "$script" --verify-only \
+              --version v0.0.0-audit --file "$FIXTURE_RELEASE/$asset" --bundle "$fixture_root/$kind.bundle"
+          done
+          expect_rejected missing-bundle 'provenance bundle not found' bash "$script" --verify-only \
+            --version v0.0.0-audit --file "$FIXTURE_RELEASE/$asset" --bundle "$fixture_root/missing.bundle"
+          expect_rejected checksum-is-not-a-bypass "unknown argument '--insecure-skip-verify'" \
+            bash "$script" --verify-only --file "$fixture_root/attacker/$asset" --insecure-skip-verify
+          expect_rejected unexpected-latest-host 'latest release did not resolve to the expected repository' \
+            env FIXTURE_LATEST_URL=https://attacker.invalid/releases/tag/v0.0.0-audit bash "$script" --verify-only
+          mkdir "$fixture_root/no-gh"
+          cat > "$fixture_root/no-gh/uname" <<UNAME
+          #!$BASH
+          printf '%s\n' x86_64
+          UNAME
+          chmod +x "$fixture_root/no-gh/uname"
+          expect_rejected missing-verifier 'trusted GitHub CLI (gh) is required' \
+            env PATH="$fixture_root/no-gh" "$BASH" "$script" --verify-only --version v0.0.0-audit --file "$FIXTURE_RELEASE/$asset"
+          [[ ! -e "$FIXTURE_MUTATIONS" ]] || { cat "$FIXTURE_MUTATIONS"; exit 1; }
+          # Exercise the exact documented bootstrap, replacing only its example tag.
+          bash "$script" --help | awk '/^  \($/ {capture=1} capture {sub(/^  /, ""); print} /^\)$/ {capture=0}' \
+            | sed 's/version=v0.1.0/version=v0.0.0-audit/' > "$fixture_root/bootstrap.sh"
+          bash -n "$fixture_root/bootstrap.sh"
+          cp "$script" "$FIXTURE_RELEASE/install-linux.sh"
+          make_bundle "$FIXTURE_RELEASE/praxi-linux.sigstore.json" emreocell/Praxi-Bot refs/tags/v0.0.0-audit github-hosted \
+            "$FIXTURE_RELEASE/install-linux.sh"
+          mkdir "$fixture_root/bootstrap-bin"
+          cat > "$fixture_root/bootstrap-bin/sudo" <<'SUDO'
+          #!/usr/bin/env bash
+          printf '%s\n' "$*" > "$FIXTURE_ROOT/bootstrap-executed"
+          SUDO
+          chmod +x "$fixture_root/bootstrap-bin/sudo"
+          PATH="$fixture_root/bootstrap-bin:$PATH" bash "$fixture_root/bootstrap.sh"
+          [[ -s "$fixture_root/bootstrap-executed" ]]
+          rm "$fixture_root/bootstrap-executed"
+          printf '# attacker changed installer\n' >> "$FIXTURE_RELEASE/install-linux.sh"
+          expect_rejected tampered-bootstrap 'Verified OK' env PATH="$fixture_root/bootstrap-bin:$PATH" \
+            bash "$fixture_root/bootstrap.sh"
+          [[ ! -e "$fixture_root/bootstrap-executed" && ! -e "$FIXTURE_MUTATIONS" ]]
+          [[ "$(wc -l < "$FIXTURE_CALLS")" -eq 8 ]]
+          echo 'PASS: verified bootstrap reached sudo only after installer verification'
+          echo 'PASS: all identity checks exercised; no network or privileged commands executed'
+
   build:
     name: Build ${{ matrix.target }}
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    needs: validate
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Built on Ubuntu 22.04 (glibc 2.35) so the binaries should run on
-          # Ubuntu 22.04+ and Debian 12+. Oracle Linux 9 (glibc 2.34) is untested. Native runners, no cross toolchain.
+          # Ubuntu 22.04 (glibc 2.35): Ubuntu 22.04+ and Debian 12+.
+          # Oracle Linux 9 (glibc 2.34) is untested. Native runners only.
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-22.04
             arch: x86_64
@@ -33,7 +249,9 @@ jobs:
             arch: aarch64
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install system dependencies
         run: |
@@ -41,24 +259,25 @@ jobs:
           sudo apt-get install -y --no-install-recommends libdbus-1-dev libssl-dev pkg-config libxcb1-dev
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable (2026-10-16)
         with:
           targets: ${{ matrix.target }}
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
-
+      # Release builds intentionally do not restore mutable dependency/target
+      # caches from other workflows before producing signed artifacts.
       - name: Build bot and bot-node
-        run: cargo build --release --locked --target ${{ matrix.target }} -p cli -p node-agent
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --locked --target "$TARGET" -p cli -p node-agent
 
       - name: Package tarball
-        id: pkg
+        env:
+          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          out="target/${{ matrix.target }}/release"
-          name="praxi-linux-${{ matrix.arch }}"
+          out="target/${TARGET}/release"
+          name="praxi-linux-${ARCH}"
           mkdir -p "dist/${name}/bin"
           for b in bot bot-node; do
             test -x "${out}/${b}"
@@ -72,12 +291,14 @@ jobs:
           cat "dist/${name}.tar.gz.sha256"
 
       - name: Smoke test (native)
+        env:
+          ARCH: ${{ matrix.arch }}
         run: |
-          "dist/praxi-linux-${{ matrix.arch }}/bin/bot" --version
-          "dist/praxi-linux-${{ matrix.arch }}/bin/bot-node" --version
+          "dist/praxi-linux-${ARCH}/bin/bot" --version
+          "dist/praxi-linux-${ARCH}/bin/bot-node" --version
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: praxi-linux-${{ matrix.arch }}
           path: |
@@ -86,31 +307,108 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Attach to GitHub release
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: Attest and attach to GitHub release
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'emreocell/Praxi-Bot'
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
+      - name: Download this run's artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
+          pattern: praxi-linux-*
           merge-multiple: true
+          digest-mismatch: error
 
-      # The installer asset must be the script from this tag, so
-      # curl .../releases/download/<tag>/install-linux.sh matches the binaries.
-      - name: Stage installer
-        run: install -m 0755 scripts/install-linux.sh dist/install-linux.sh
+      - name: Stage the tagged installer
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9][0-9A-Za-z._+-]*$ ]]
+          test -f dist/praxi-linux-x86_64.tar.gz
+          test -f dist/praxi-linux-aarch64.tar.gz
+          (cd dist && sha256sum --check ./*.sha256)
+          install -m 0755 scripts/install-linux.sh dist/install-linux.sh
 
-      - name: Publish
-        uses: softprops/action-gh-release@v2
+      # Build jobs have no OIDC/attestation/release-write permission. This job
+      # attests only assets from this run and the installer from the same tag.
+      - name: Attest archives and installer
+        id: provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          files: |
+          subject-path: |
             dist/*.tar.gz
-            dist/*.tar.gz.sha256
             dist/install-linux.sh
+
+      - name: Verify and stage the provenance bundle
+        env:
+          BUNDLE_PATH: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          cp -- "$BUNDLE_PATH" dist/praxi-linux.sigstore.json
+          for asset in dist/*.tar.gz dist/install-linux.sh; do
+            gh attestation verify "$asset" --bundle dist/praxi-linux.sigstore.json \
+              --repo emreocell/Praxi-Bot --hostname github.com \
+              --signer-workflow github.com/emreocell/Praxi-Bot/.github/workflows/linux-release.yml \
+              --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA" --deny-self-hosted-runners \
+              --cert-oidc-issuer https://token.actions.githubusercontent.com \
+              --predicate-type https://slsa.dev/provenance/v1 --digest-alg sha256
+          done
+
+      - name: Publish verified assets and bootstrap instructions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes="$RUNNER_TEMP/linux-release-notes.md"
+          cat > "$notes" <<'NOTES'
+          ### Verified Linux installation
+
+          Install a trusted GitHub CLI independently from https://cli.github.com.
+          Copy the bootstrap from a reviewed copy of `scripts/install-linux.sh`
+          or this workflow. Verify the installer before executing it:
+
+          ```bash
+          (
+            set -euo pipefail
+            version='__PRAXI_TAG__'
+            work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+            base="https://github.com/emreocell/Praxi-Bot/releases/download/$version"
+            for asset in install-linux.sh praxi-linux.sigstore.json; do
+              curl -fSL --proto '=https' --proto-redir '=https' --tlsv1.2 "$base/$asset" -o "$work/$asset"
+            done
+            gh attestation verify "$work/install-linux.sh" --bundle "$work/praxi-linux.sigstore.json" \
+              --repo emreocell/Praxi-Bot --hostname github.com \
+              --signer-workflow github.com/emreocell/Praxi-Bot/.github/workflows/linux-release.yml \
+              --source-ref "refs/tags/$version" --deny-self-hosted-runners \
+              --cert-oidc-issuer https://token.actions.githubusercontent.com \
+              --predicate-type https://slsa.dev/provenance/v1 --digest-alg sha256
+            sudo bash "$work/install-linux.sh" --version "$version"
+          )
+          ```
+
+          The installer verifies the archive with the same pinned identity before
+          installing packages or changing services. `--verify-only` performs the
+          checks without installing. Local archives require `--version <tag>`
+          and the companion `praxi-linux.sigstore.json` bundle (or `--bundle <file>`).
+          A matching `.sha256` is an integrity check, never proof of origin.
+          Releases without signed provenance are rejected; there is no bypass.
+          NOTES
+          sed -i "s/__PRAXI_TAG__/${GITHUB_REF_NAME}/g" "$notes"
+          assets=(dist/*.tar.gz dist/*.sha256 dist/install-linux.sh dist/praxi-linux.sigstore.json)
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$GITHUB_REF_NAME" --notes-file "$notes" --draft=false --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" --verify-tag \
+              --title "$GITHUB_REF_NAME" --notes-file "$notes" --repo "$GITHUB_REPOSITORY"
+          fi

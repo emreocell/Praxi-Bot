@@ -1,0 +1,274 @@
+import type { ApiClient } from "../api/client.ts";
+import type {
+  Bot,
+  McpCatalogEntry,
+  McpServer,
+  McpServerConfig,
+  McpStatus
+} from "../api/types.ts";
+import { matchesQuery } from "./searchText.ts";
+
+/** The slice of the daemon client the Apps modal needs (a mock fits too). */
+export type McpApi = Pick<
+  ApiClient,
+  | "listMcpServers"
+  | "createMcpServer"
+  | "updateMcpServer"
+  | "deleteMcpServer"
+  | "reconnectMcpServer"
+  | "listMcpTools"
+  | "mcpCatalog"
+  | "setSecret"
+>;
+
+export const ALL_CATEGORIES = "all";
+
+/** Distinct catalog categories, sorted. */
+export function catalogCategories(catalog: McpCatalogEntry[]): string[] {
+  return [...new Set(catalog.map((c) => c.category))].sort();
+}
+
+/** Catalog entries matching the search box and the category chip. */
+export function filterCatalog(
+  catalog: McpCatalogEntry[],
+  query: string,
+  category: string
+): McpCatalogEntry[] {
+  return catalog.filter(
+    (c) =>
+      (category === ALL_CATEGORIES || c.category === category) &&
+      matchesQuery(query, c.name, c.description, c.category, c.id)
+  );
+}
+
+/** Connected servers matching the search box. */
+export function filterServers(
+  servers: McpServer[],
+  query: string
+): McpServer[] {
+  return servers.filter((s) => matchesQuery(query, s.name, s.category));
+}
+
+/** A catalog entry counts as connected when a server is named like its id. */
+export function isConnected(
+  entry: McpCatalogEntry,
+  servers: McpServer[]
+): boolean {
+  return servers.some((s) => s.name === entry.id);
+}
+
+/** Name under which the secret of a catalog entry is stored. */
+export function secretStoreName(entryId: string, secretName: string): string {
+  return `mcp_${entryId}_${secretName}`
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_");
+}
+
+/**
+ * Server config for a catalog entry.  Secrets are referenced by NAME: a stdio
+ * server receives them as environment variables, an http server as the
+ * `Authorization` header (the secret holds the full header value).
+ */
+export function configFromCatalog(entry: McpCatalogEntry): McpServerConfig {
+  const { install } = entry;
+  const config: McpServerConfig = {
+    name: entry.id,
+    transport: install.transport,
+    category: entry.category,
+    enabled: true
+  };
+  if (install.transport === "stdio") {
+    config.command = install.command;
+    config.args = install.args ?? [];
+  } else {
+    config.url = install.url;
+  }
+  if (install.required_secrets.length > 0) {
+    if (install.transport === "stdio") {
+      config.secret_env = Object.fromEntries(
+        install.required_secrets.map((s) => [
+          s.name,
+          secretStoreName(entry.id, s.name)
+        ])
+      );
+    } else {
+      config.secret_headers = {
+        Authorization: secretStoreName(
+          entry.id,
+          install.required_secrets[0].name
+        )
+      };
+    }
+  }
+  return config;
+}
+
+export class MissingSecretError extends Error {
+  readonly secrets: string[];
+  constructor(secrets: string[]) {
+    super(`missing: ${secrets.join(", ")}`);
+    this.name = "MissingSecretError";
+    this.secrets = secrets;
+  }
+}
+
+/**
+ * One-click connect: store each required secret (write-only), then register the
+ * server.  `values` maps the required secret name to what the user typed.
+ */
+export async function connectCatalogEntry(
+  api: Pick<McpApi, "setSecret" | "createMcpServer">,
+  entry: McpCatalogEntry,
+  values: Record<string, string>
+): Promise<McpServer> {
+  const missing = entry.install.required_secrets
+    .filter((s) => !(values[s.name] ?? "").trim())
+    .map((s) => s.name);
+  if (missing.length > 0) {
+    throw new MissingSecretError(missing);
+  }
+  for (const s of entry.install.required_secrets) {
+    await api.setSecret(
+      secretStoreName(entry.id, s.name),
+      values[s.name].trim()
+    );
+  }
+  return api.createMcpServer(configFromCatalog(entry));
+}
+
+/** Split a command line into arguments, honouring single and double quotes. */
+export function splitArgs(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let quote: string | null = null;
+  let has = false;
+  for (const ch of line) {
+    if (quote) {
+      if (ch === quote) {
+        quote = null;
+      } else {
+        cur += ch;
+      }
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      has = true;
+    } else if (/\s/.test(ch)) {
+      if (has || cur) {
+        out.push(cur);
+        cur = "";
+        has = false;
+      }
+    } else {
+      cur += ch;
+    }
+  }
+  if (has || cur) {
+    out.push(cur);
+  }
+  return out;
+}
+
+export interface CustomServerForm {
+  name: string;
+  transport: "stdio" | "http";
+  command: string;
+  url: string;
+  /** `KEY=value` per line; these values are not secrets. */
+  env: string;
+}
+
+export type CustomServerResult =
+  | { ok: true; config: McpServerConfig }
+  | { ok: false; error: "name" | "command" | "url" };
+
+const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,47}$/i;
+
+/** Validate the advanced "add MCP server" form and build the config. */
+export function customServerConfig(
+  form: CustomServerForm,
+  existing: string[] = []
+): CustomServerResult {
+  const name = form.name.trim();
+  if (!NAME_RE.test(name) || existing.includes(name)) {
+    return { ok: false, error: "name" };
+  }
+  const config: McpServerConfig = {
+    name,
+    transport: form.transport,
+    category: "other",
+    enabled: true
+  };
+  if (form.transport === "stdio") {
+    const parts = splitArgs(form.command.trim());
+    if (parts.length === 0) {
+      return { ok: false, error: "command" };
+    }
+    config.command = parts[0];
+    config.args = parts.slice(1);
+    const env: Record<string, string> = {};
+    for (const line of form.env.split(/\r?\n/)) {
+      const i = line.indexOf("=");
+      if (i > 0) {
+        env[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+      }
+    }
+    if (Object.keys(env).length > 0) {
+      config.env = env;
+    }
+  } else {
+    const url = form.url.trim();
+    if (!/^https?:\/\/\S+$/i.test(url)) {
+      return { ok: false, error: "url" };
+    }
+    config.url = url;
+  }
+  return { ok: true, config };
+}
+
+export type StatusTone = "ok" | "busy" | "bad" | "muted";
+
+export function statusTone(status: McpStatus): StatusTone {
+  switch (status) {
+    case "connected":
+      return "ok";
+    case "connecting":
+      return "busy";
+    case "error":
+    case "quarantined":
+      return "bad";
+    case "disconnected":
+      return "muted";
+  }
+}
+
+/** Which bots may use a server: everyone, or the named bots. */
+export function botAccess(
+  server: Pick<McpServer, "bots">,
+  bots: Pick<Bot, "id" | "name">[]
+): { all: true } | { all: false; names: string[] } {
+  if (server.bots === null || server.bots === undefined) {
+    return { all: true };
+  }
+  return {
+    all: false,
+    names: server.bots.map((id) => bots.find((b) => b.id === id)?.name ?? id)
+  };
+}
+
+/**
+ * Apply an `mcp_server_changed` event to the list.  `null` = the server is
+ * unknown here, so the list must be refetched.
+ */
+export function applyServerEvent(
+  servers: McpServer[],
+  ev: { name: string; status: McpStatus }
+): McpServer[] | null {
+  if (!servers.some((s) => s.name === ev.name)) {
+    return null;
+  }
+  return servers.map((s) =>
+    s.name === ev.name
+      ? { ...s, status: ev.status, error: ev.status === "error" ? s.error : null }
+      : s
+  );
+}

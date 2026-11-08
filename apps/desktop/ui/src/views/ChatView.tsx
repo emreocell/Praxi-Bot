@@ -1,3 +1,4 @@
+import { ArrowLeft, ArrowUp, Bookmark, MessageSquare, Square, Zap } from "lucide-react";
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -20,8 +21,16 @@ import {
   ToolCard
 } from "../components/ChatCards";
 import { Markdown } from "../components/Markdown";
+import { ModelPicker } from "../components/ModelPicker";
 import { useToast } from "../components/Toast";
-import { botView } from "../lib/botProfile";
+import {
+  botView,
+  configFromDraft,
+  draftFromBot,
+  parseModelRef
+} from "../lib/botProfile";
+import { modelGroups } from "../lib/modelPicker";
+import { type SendWith, shouldSend } from "../lib/settingsPrefs";
 import { rank } from "../lib/fuzzy";
 import {
   applyCompletion,
@@ -36,6 +45,7 @@ import {
   routeHoverValues
 } from "../lib/route";
 import { useDaemon } from "../state/DaemonContext";
+import { useProviders } from "../state/useProviders";
 import {
   assignChildRuns,
   itemTs,
@@ -73,7 +83,8 @@ export function ChatView({
   chatId,
   onBack,
   onSwitchChat,
-  showAgentRoute = false
+  showAgentRoute = false,
+  sendWith = "enter"
 }: {
   chatId: string;
   onBack: () => void;
@@ -81,6 +92,8 @@ export function ChatView({
   onSwitchChat?: (chatId: string) => void;
   /** Debug: also show the chip for a plain `Agent` decision at K4. */
   showAgentRoute?: boolean;
+  /** Key chord that sends the message (Settings, General). */
+  sendWith?: SendWith;
 }) {
   const { t } = useTranslation();
   const toast = useToast();
@@ -92,11 +105,36 @@ export function ChatView({
     runs,
     recordAnswer,
     refreshRuns,
-    refreshChats
+    refreshChats,
+    refreshBots
   } = useDaemon();
   const chat = chats.find((c) => c.id === chatId);
   const bot = bots.find((b) => b.id === chat?.bot_id);
   const view = bot ? botView(bot) : null;
+  const { dto: providersDto } = useProviders();
+  const pickerGroups = useMemo(
+    () => modelGroups(providersDto, view?.executor),
+    [providersDto, view?.executor]
+  );
+
+  // Switch the bot's executor model from the header (a profile update).
+  const pickModel = async (ref: string) => {
+    if (!client || !bot) {
+      return;
+    }
+    try {
+      const draft = draftFromBot(bot);
+      draft.executor = parseModelRef(ref);
+      await client.updateBot(bot.id, {
+        name: bot.name,
+        config: configFromDraft(draft, bot)
+      });
+      await refreshBots();
+      toast.show(t("modelPicker.switched", { model: ref }), "success");
+    } catch (e) {
+      toast.show(e instanceof Error ? e.message : String(e), "danger");
+    }
+  };
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
@@ -392,7 +430,18 @@ export function ChatView({
         return;
       }
     }
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (
+      shouldSend(
+        {
+          key: e.key,
+          shiftKey: e.shiftKey,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          isComposing: e.nativeEvent.isComposing
+        },
+        sendWith
+      )
+    ) {
       e.preventDefault();
       void send();
     }
@@ -539,7 +588,7 @@ export function ChatView({
       <div className={styles.empty}>
         <p>{t("chat.notFound")}</p>
         <Button variant="secondary" onClick={onBack}>
-          {t("common.back")}
+          <ArrowLeft />{t("common.back")}
         </Button>
       </div>
     );
@@ -549,16 +598,24 @@ export function ChatView({
     <div className={styles.root}>
       <header className={styles.header}>
         <Button size="sm" variant="ghost" onClick={onBack}>
-          {t("common.back")}
+          <ArrowLeft />{t("common.back")}
         </Button>
         {botAvatar}
         <div className={styles.headerText}>
           <span className={styles.title}>{chat.title}</span>
           <span className={styles.subtitle}>{view?.name}</span>
         </div>
+        {bot ? (
+          <ModelPicker
+            groups={pickerGroups}
+            value={view?.executor ?? ""}
+            disabled={!client}
+            onPick={(ref) => void pickModel(ref)}
+          />
+        ) : null}
         {active ? (
           <Button size="sm" variant="danger" onClick={() => void stop()}>
-            {t("chat.stop")}
+            <Square />{t("chat.stop")}
           </Button>
         ) : pausedRunId ? (
           <Button size="sm" variant="primary" onClick={() => void resume()}>
@@ -573,9 +630,9 @@ export function ChatView({
         onScroll={onScroll}
         data-testid="chat-timeline"
       >
-        <div className={styles.timeline}>
+        <div className={styles.timeline}><div className={styles.conversationLabel}>{t("chat.conversationLabel")}</div>
           {entries.length === 0 ? (
-            <p className={styles.hint}>{t("chat.emptyHint")}</p>
+            <div className={styles.emptyConversation}><MessageSquare /><p className={styles.hint}>{t("chat.emptyHint")}</p></div>
           ) : null}
           {entries.map((e) => {
             switch (e.kind) {
@@ -623,16 +680,7 @@ export function ChatView({
                       data-testid="route-chip"
                     >
                       {chip.cheap ? (
-                        <svg
-                          className={styles.routeIcon}
-                          viewBox="0 0 16 16"
-                          aria-hidden="true"
-                        >
-                          <path
-                            d="M9 1 3 9h4l-1 6 6-8H8z"
-                            fill="currentColor"
-                          />
-                        </svg>
+                        <Zap className={styles.routeIcon} />
                       ) : null}
                       <span className={styles.routeLabel}>{label}</span>
                     </span>
@@ -656,7 +704,7 @@ export function ChatView({
                         onClick={() => void rememberRun(e.run.id)}
                         data-testid="remember-run"
                       >
-                        {t("chat.remember.button")}
+                        <Bookmark />{t("chat.remember.button")}
                       </Button>
                     )}
                   </div>
@@ -767,10 +815,10 @@ export function ChatView({
             disabled={sending || !text.trim()}
             onClick={() => void send()}
           >
-            {t("chat.send")}
+            <ArrowUp />{t("chat.send")}
           </Button>
         </div>
-      </footer>
+      <p className={styles.composerHint}>{t("chat.composerHint")}</p></footer>
     </div>
   );
 }

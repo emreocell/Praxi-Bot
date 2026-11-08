@@ -72,7 +72,7 @@
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-pill);
   background-color: var(--color-accent-subtle);
-  color: var(--color-accent);
+  color: var(--color-accent-text);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
 }

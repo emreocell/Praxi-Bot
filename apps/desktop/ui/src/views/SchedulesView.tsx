@@ -1,3 +1,4 @@
+import { ArrowUpRight, CalendarDays, PenLine, Play, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Card } from "ui";
@@ -121,7 +122,7 @@ export function SchedulesView({
           </div>
           <div className={styles.headerActions}>
             <Button size="sm" variant="ghost" onClick={() => void load()}>
-              {t("schedules.refresh")}
+              <RefreshCw />{t("schedules.refresh")}
             </Button>
             <Button
               size="sm"
@@ -129,7 +130,7 @@ export function SchedulesView({
               disabled={bots.length === 0}
               onClick={() => setEditing("new")}
             >
-              {t("schedules.new")}
+              <Plus />{t("schedules.new")}
             </Button>
           </div>
         </header>
@@ -162,7 +163,7 @@ export function SchedulesView({
             {t("schedules.loading")}
           </p>
         ) : list.length === 0 ? (
-          <Card padding="md" className={styles.empty}>
+          <Card padding="md" className={styles.empty}><CalendarDays className={formStyles.emptyIcon} />
             <p className={styles.emptyTitle}>{t("schedules.empty.title")}</p>
             <p className={formStyles.hint}>
               {bots.length === 0
@@ -262,7 +263,7 @@ export function SchedulesView({
                           )
                         }
                       >
-                        {t("schedules.runNow")}
+                        <Play />{t("schedules.runNow")}
                       </Button>
                       <Button
                         size="sm"
@@ -270,7 +271,7 @@ export function SchedulesView({
                         disabled={busy}
                         onClick={() => setEditing(s.id)}
                       >
-                        {t("schedules.edit")}
+                        <PenLine />{t("schedules.edit")}
                       </Button>
                       {confirmDeleteId === s.id ? (
                         <>
@@ -300,7 +301,7 @@ export function SchedulesView({
                           disabled={busy}
                           onClick={() => setConfirmDeleteId(s.id)}
                         >
-                          {t("schedules.delete")}
+                          <Trash2 />{t("schedules.delete")}
                         </Button>
                       )}
                     </div>
@@ -333,7 +334,7 @@ export function SchedulesView({
                                   disabled={!r.chatId}
                                   onClick={() => onOpenChat(r.chatId)}
                                 >
-                                  {t("schedules.openRun")}
+                                  <ArrowUpRight />{t("schedules.openRun")}
                                 </Button>
                               </li>
                             );
