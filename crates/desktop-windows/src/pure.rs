@@ -394,7 +394,8 @@ mod tests {
 }
 
 const BATCH_REFUSAL: &str = "batch launches with cmd.exe metacharacters are refused; use an executable or pass plain arguments";
-const SHELL_REFUSAL: &str = "command interpreter arguments with shell metacharacters are refused";
+pub(crate) const SHELL_REFUSAL: &str =
+    "command interpreter arguments with shell metacharacters are refused";
 
 /// How a resolved launch image must be started.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -555,12 +556,15 @@ pub(crate) fn prepare_launch(
             {
                 return Err(desktop_api::DesktopError::Unsupported(BATCH_REFUSAL.into()));
             }
-            // cmd.exe parses `%` inside quotes and does not use the CRT
-            // backslash-before-quote rule. Double percents and quote every
-            // argument; parentheses and carets stay literal inside those quotes.
+            // Quote every argument. cmd.exe expands `%VAR%` inside those
+            // quotes; `%%` is not an escape on a command line (only inside a
+            // batch file), and an expanded value that contains `"` breaks out.
+            // `^` is not literal next to the quotes. `%`, `!`, and `^` are
+            // rejected above. Parentheses and a trailing backslash stay
+            // literal, so this is not CRT quoting.
             let mut quoted = Vec::with_capacity(app.args.len());
             for arg in &app.args {
-                quoted.push(format!("\"{}\"", arg.replace('%', "%%")));
+                quoted.push(format!("\"{arg}\""));
             }
             Ok(PreparedLaunch {
                 parameters: quoted.join(" "),
@@ -643,8 +647,24 @@ fn has_extension(lower_name: &str, extension: &str) -> bool {
 fn is_shell_interpreter(file_name: &str) -> bool {
     matches!(
         file_name,
-        "cmd.exe" | "powershell.exe" | "pwsh.exe" | "wscript.exe" | "cscript.exe"
+        "cmd"
+            | "cmd.exe"
+            | "powershell"
+            | "powershell.exe"
+            | "pwsh"
+            | "pwsh.exe"
+            | "wscript"
+            | "wscript.exe"
+            | "cscript"
+            | "cscript.exe"
     )
+}
+
+/// Final path component is `cmd`, PowerShell, `pwsh`, `wscript`, or `cscript`,
+/// with or without `.exe`.
+#[must_use]
+pub(crate) fn file_name_is_shell_interpreter(path: &str) -> bool {
+    is_shell_interpreter(&file_name_of(path).to_ascii_lowercase())
 }
 
 fn is_cmd_image(file_name: &str) -> bool {
@@ -657,7 +677,9 @@ fn has_shell_meta(value: &str) -> bool {
 }
 
 fn has_batch_breakout(value: &str) -> bool {
-    value.chars().any(|c| "&|<>\"!\r\n".contains(c))
+    // `%` expands inside the quotes this launcher adds. `^` escapes the next
+    // character even next to those quotes, so neither is literal.
+    value.chars().any(|c| "&|<>\"!%^\r\n".contains(c))
 }
 
 /// `%` cannot be doubled inside `lpFile`; the association quotes it as `"%1"`.
@@ -758,7 +780,21 @@ mod launch_tests {
     #[test]
     fn batch_launch_rejects_cmd_metacharacters() {
         for extension in ["cmd", "CMD", "bat", "BAT", "cmd. ", "lnk", "LNK", "lnk. "] {
-            for unsafe_argument in ["a&b", "a|b", "<in", ">out", "!VAR!", "a\nb", "a\rb", "a\"b"] {
+            for unsafe_argument in [
+                "a&b",
+                "a|b",
+                "<in",
+                ">out",
+                "!VAR!",
+                "a\nb",
+                "a\rb",
+                "a\"b",
+                "%COMSPEC%",
+                "100%",
+                "^quoted",
+                "foo^",
+                "foo^^",
+            ] {
                 let app = AppSpec {
                     executable: format!("C:\\Users\\Emre\\Masaüstü\\run.{extension}"),
                     args: vec![unsafe_argument.into()],
@@ -772,14 +808,12 @@ mod launch_tests {
     }
 
     #[test]
-    fn batch_quotes_parentheses_caret_percent_and_trailing_backslash() {
+    fn batch_quotes_parentheses_and_trailing_backslash() {
         let app = AppSpec {
             executable: r"C:\Program Files (x86)\Masaüstü\helper.cmd".into(),
             args: vec![
                 r"C:\Program Files (x86)\data".into(),
                 r"C:\Program Files (x86)\".into(),
-                "%COMSPEC%".into(),
-                "^quoted".into(),
                 "(x86)".into(),
             ],
         };
@@ -788,12 +822,23 @@ mod launch_tests {
             [
                 r#""C:\Program Files (x86)\data""#,
                 r#""C:\Program Files (x86)\""#,
-                r#""%%COMSPEC%%""#,
-                r#""^quoted""#,
                 r#""(x86)""#,
             ]
             .join(" ")
         );
+        for unsafe_argument in ["%COMSPEC%", "100%", "^quoted", "foo^", "a\"b"] {
+            let rejected = AppSpec {
+                executable: r"C:\Program Files (x86)\Masaüstü\helper.cmd".into(),
+                args: vec![unsafe_argument.into()],
+            };
+            assert!(
+                matches!(
+                    launch_parameters(&rejected),
+                    Err(DesktopError::Unsupported(_))
+                ),
+                "accepted {unsafe_argument:?}"
+            );
+        }
         let caret_path = AppSpec {
             executable: r"C:\a^b\run.cmd".into(),
             args: vec!["ok".into()],
@@ -813,6 +858,13 @@ mod launch_tests {
     fn shell_interpreter_paths_reject_metacharacters() {
         for executable in [
             "cmd.exe",
+            "cmd",
+            r"C:\Windows\System32\cmd",
+            "powershell",
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell",
+            "pwsh",
+            "wscript",
+            "cscript",
             "cmd.exe.",
             "cmd.exe. .",
             r"C:\Windows\System32\cmd.exe.",
