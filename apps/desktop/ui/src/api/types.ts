@@ -229,78 +229,14 @@ export interface GlobalEnvelope extends Envelope {
 }
 
 // ---- MCP management API (`/v1/mcp/*`, `/v1/secrets/*`) ---------------------
-// Hand-written until the daemon's OpenAPI document carries these routes.
 
-export type McpTransport = "stdio" | "http";
-export type McpStatus =
-  | "connected"
-  | "connecting"
-  | "disconnected"
-  | "error"
-  | "quarantined";
-
-/** One MCP server as `GET /v1/mcp/servers` reports it. */
-export interface McpServer {
-  name: string;
-  transport: McpTransport;
-  command?: string | null;
-  args?: string[] | null;
-  url?: string | null;
-  enabled: boolean;
-  status: McpStatus;
-  error?: string | null;
-  tool_count: number;
-  category: string;
-  trust_hints: string[] | Record<string, unknown> | null;
-  /** Bot ids allowed to use it; `null` = every bot. */
-  bots: string[] | null;
-}
-
-/**
- * Body of `POST /v1/mcp/servers` / `PUT /v1/mcp/servers/{name}` (mcp-bridge
- * `McpServerConfig`).  `secret_headers` / `secret_env` map a header / env var
- * to the NAME of a stored secret, never to its value.
- */
-export interface McpServerConfig {
-  name: string;
-  transport: McpTransport;
-  command?: string;
-  args?: string[];
-  url?: string;
-  env?: Record<string, string>;
-  headers?: Record<string, string>;
-  secret_env?: Record<string, string>;
-  secret_headers?: Record<string, string>;
-  enabled?: boolean;
-  category?: string;
-  bots?: string[] | null;
-}
-
-export interface McpTool {
-  name: string;
-  description: string;
-  effect: string;
-}
-
-export interface McpRequiredSecret {
-  name: string;
-  label: string;
-  help_url?: string | null;
-}
-
-export interface McpCatalogEntry {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  homepage: string;
-  /** simple-icons slug, or `null`. */
-  icon: string | null;
-  install: {
-    transport: McpTransport;
-    command?: string;
-    args?: string[];
-    url?: string;
-    required_secrets: McpRequiredSecret[];
-  };
-}
+export type McpTransport = S["McpTransportKind"];
+export type McpStatus = S["McpStatus"];
+export type McpServer = S["McpServerDto"];
+/** Body of `POST /v1/mcp/servers`. */
+export type McpServerConfig = S["McpServerInput"] & { name: string };
+/** Body of `PUT /v1/mcp/servers/{name}` (every field optional). */
+export type McpServerPatch = S["McpServerPatch"];
+export type McpTool = S["McpToolDto"];
+export type McpRequiredSecret = S["McpRequiredSecretDto"];
+export type McpCatalogEntry = S["McpCatalogEntryDto"];

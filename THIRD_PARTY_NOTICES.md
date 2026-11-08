@@ -1,5 +1,13 @@
 # Third-party notices
 
+## OpenMausBot (Apache-2.0)
+
+`apps/desktop/ui` settings and apps layout ideas are inspired by
+[OpenMausBot](https://github.com/felipebraz/OpenMausBot) (`src/` layout, modal
+settings with section nav, connected MCP apps). No source was copied from the
+`enterprise/` tree. Apache License, Version 2.0
+(http://www.apache.org/licenses/LICENSE-2.0).
+
 ## vercel-labs/agent-browser (Apache-2.0)
 
 `crates/browser-cdp` adapts ideas and portions of code from

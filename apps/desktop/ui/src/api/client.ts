@@ -15,6 +15,7 @@ import type {
   Health,
   McpCatalogEntry,
   McpServer,
+  McpServerPatch,
   McpServerConfig,
   McpTool,
   Message,
@@ -254,9 +255,9 @@ export class ApiClient {
   createMcpServer(config: McpServerConfig): Promise<McpServer> {
     return this.request("POST", "/mcp/servers", { body: config });
   }
-  updateMcpServer(name: string, config: McpServerConfig): Promise<McpServer> {
+  updateMcpServer(name: string, patch: McpServerPatch): Promise<McpServer> {
     return this.request("PUT", `/mcp/servers/${encodeURIComponent(name)}`, {
-      body: config
+      body: patch
     });
   }
   deleteMcpServer(name: string): Promise<void> {

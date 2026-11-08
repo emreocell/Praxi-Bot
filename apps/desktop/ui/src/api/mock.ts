@@ -22,14 +22,12 @@ export function isMockMode(): boolean {
   if (typeof window === "undefined") {
     return false;
   }
-  const meta = import.meta as unknown as {
-    env?: { DEV?: boolean; VITE_MOCK?: string };
-  };
-  if (meta.env?.VITE_MOCK === "1") {
+  // Use direct `import.meta.env` access so Vite can replace `VITE_MOCK` at build time.
+  if (import.meta.env.VITE_MOCK === "1") {
     return true;
   }
   return (
-    meta.env?.DEV === true &&
+    import.meta.env.DEV &&
     new URLSearchParams(window.location.search).get("mock") === "1"
   );
 }
@@ -56,9 +54,11 @@ const BOTS: Bot[] = [
   bot(NOVA, "Nova", "#10b981", "gemini/gemini-2.5-flash")
 ];
 
+const CHAT_ID = "33333333-3333-4333-8333-333333333333";
 const CHATS: Chat[] = [
   {
-    id: "33333333-3333-4333-8333-333333333333",
+    id: CHAT_ID,
+    chat_id: CHAT_ID,
     bot_id: ATLAS,
     title: "Weekly report",
     created_at_ms: NOW
@@ -178,10 +178,16 @@ const MCP_TOOLS: McpTool[] = [
   { name: "create", description: "Create an item", effect: "write" }
 ];
 
+function transportKind(
+  transport: McpServerConfig["transport"]
+): McpServer["transport"] {
+  return typeof transport === "string" ? transport : transport.type;
+}
+
 function serverFromConfig(c: McpServerConfig, category = "other"): McpServer {
   return {
     name: c.name,
-    transport: c.transport,
+    transport: transportKind(c.transport),
     command: c.command ?? null,
     args: c.args ?? null,
     url: c.url ?? null,
@@ -190,7 +196,7 @@ function serverFromConfig(c: McpServerConfig, category = "other"): McpServer {
     error: null,
     tool_count: 8,
     category: c.category ?? category,
-    trust_hints: [],
+    trust_hints: false,
     bots: c.bots ?? null
   };
 }
