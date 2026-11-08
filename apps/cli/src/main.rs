@@ -7,6 +7,7 @@ mod client;
 mod commands;
 mod doctor;
 mod mcp_host;
+mod peer;
 mod presets;
 mod prompt;
 mod remote;
@@ -57,6 +58,9 @@ struct Cli {
     /// Full daemon URL for client commands (overrides --port).
     #[arg(long, global = true, env = "BOT_URL")]
     url: Option<String>,
+    /// Use a paired daemon endpoint through iroh.
+    #[arg(long, global = true, conflicts_with = "url")]
+    remote: Option<String>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -85,6 +89,12 @@ enum Command {
     /// Exit codes of the client commands: 0 ok, 1 error, 2 usage, 3 daemon
     /// unreachable, 4 auth rejected, 5 not found, 6 request rejected, 7 run failed.
     Serve {
+        /// Run as an always-on host (peer networking defaults on).
+        #[arg(long)]
+        host: bool,
+        /// Enable paired remote API access over iroh.
+        #[arg(long)]
+        peer: bool,
         /// Use the built-in echo provider instead of configured providers.
         #[cfg(feature = "fake-provider")]
         #[arg(long)]
@@ -399,6 +409,26 @@ fn run() -> Result<()> {
     let data_dir = data_dir(&cli)?;
     let mut say = |s: &str| println!("{s}");
 
+    if cli.remote.is_some()
+        && !matches!(
+            command,
+            Command::Status
+                | Command::Chat { .. }
+                | Command::Bots { .. }
+                | Command::Approve { .. }
+                | Command::Answer { .. }
+                | Command::Schedules { .. }
+                | Command::Grants { .. }
+                | Command::Channels {
+                    action: ChannelsCmd::Telegram {
+                        action: TelegramCmd::Pair
+                    }
+                }
+        )
+    {
+        return Err("--remote supports daemon client commands (status, bots, chat, approve, answer, grants, schedules, channels telegram pair); this command manages the local installation".into());
+    }
+
     // Daemon commands (no secret store needed, except `serve` with real providers).
     match command {
         Command::Serve { .. } => return run_serve(&cli, command, &data_dir),
@@ -565,6 +595,10 @@ fn run_doctor(cli: &Cli, c: &DoctorCmd, data_dir: &std::path::Path) -> Result<()
 fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result<()> {
     use std::sync::Arc;
 
+    let (host_mode, peer_enabled) = match command {
+        Command::Serve { host, peer, .. } => (*host, *peer),
+        _ => (false, false),
+    };
     let grace = match command {
         Command::Serve { shutdown_grace, .. } => std::time::Duration::from_secs(*shutdown_grace),
         _ => daemon_api::DEFAULT_SHUTDOWN_GRACE,
@@ -584,6 +618,8 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
             json: cli.json,
             grace,
             telegram_store: None,
+            host_mode,
+            peer_enabled,
         };
         return serve::serve(data_dir, &opts, providers, None, Some(desktop));
     }
@@ -612,6 +648,8 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
         json: cli.json,
         grace,
         telegram_store: Some(telegram_store),
+        host_mode,
+        peer_enabled,
     };
     serve::serve(data_dir, &opts, providers, Some(host), desktop)
 }
@@ -688,13 +726,21 @@ fn run_telegram(
 }
 
 fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result<()> {
-    let c = make_client(cli, data_dir)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
+    let remote = if let Some(endpoint) = &cli.remote {
+        Some(rt.block_on(peer::start_client(data_dir, endpoint))?)
+    } else {
+        None
+    };
+    let c = match &remote {
+        Some((_, proxy)) => Client::new(&proxy.base_url, proxy.token.clone()),
+        None => make_client(cli, data_dir)?,
+    };
     let mut out = std::io::stdout().lock();
     let json = cli.json;
-    rt.block_on(async {
+    let outcome = rt.block_on(async {
         match command {
             Command::Status => remote::status(&c, json, &mut out).await,
             Command::Bots {
@@ -760,7 +806,12 @@ fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Resul
             }
             _ => Ok(()),
         }
-    })
+    });
+    if let Some((net, proxy)) = remote {
+        drop(proxy);
+        rt.block_on(net.shutdown());
+    }
+    outcome
 }
 
 async fn run_schedules(
@@ -925,6 +976,32 @@ mod tests {
                 .command,
             Some(Command::Schedules {
                 action: SchedulesCmd::RunNow { .. }
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_peer_and_remote_flags() {
+        let cli = Cli::try_parse_from(["bot", "--remote", "endpoint", "status"]).unwrap();
+        assert_eq!(cli.remote.as_deref(), Some("endpoint"));
+        assert!(
+            Cli::try_parse_from([
+                "bot",
+                "--remote",
+                "endpoint",
+                "--url",
+                "http://127.0.0.1",
+                "status"
+            ])
+            .is_err()
+        );
+        let cli = Cli::try_parse_from(["bot", "serve", "--host", "--peer"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Serve {
+                host: true,
+                peer: true,
+                ..
             })
         ));
     }
