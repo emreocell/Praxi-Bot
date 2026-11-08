@@ -1,0 +1,23 @@
+[package]
+name = "live-view"
+description = "Memory-only live screen contracts and bounded v1 binary records"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+openapi = ["dep:utoipa"]
+
+[dependencies]
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+utoipa = { version = "5", features = ["uuid"], optional = true }

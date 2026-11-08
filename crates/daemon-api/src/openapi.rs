@@ -8,7 +8,7 @@ use axum::Json;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
-use crate::{dto, error, mcp, mcp_routes, routes};
+use crate::{dto, error, live_view, mcp, mcp_routes, routes};
 
 struct Security;
 
@@ -41,6 +41,14 @@ impl Modify for Security {
     ),
     paths(
         routes::health,
+        live_view::targets,
+        live_view::create_session,
+        live_view::update_session,
+        live_view::heartbeat,
+        live_view::delete_session,
+        live_view::takeover,
+        live_view::input::input,
+        live_view::stream::frames,
         routes::list_bots,
         routes::create_bot,
         routes::get_bot,
@@ -92,7 +100,8 @@ impl Modify for Security {
         events_doc,
     ),
     components(schemas(
-        dto::Health, dto::BotDto, dto::BotInput, dto::ChatDto, dto::CreateChat,
+        ::live_view::RecordHeader, ::live_view::FrameMetadata, ::live_view::SourceRect,
+        dto::ReleaseResult, dto::Health, dto::BotDto, dto::BotInput, dto::ChatDto, dto::CreateChat,
         dto::MessageDto, dto::Mode, dto::SendMessage, dto::DeliveryKind, dto::SendResponse,
         dto::ApprovalDto, dto::Decision, dto::Scope, dto::DecideApproval,
         dto::DecisionResponse, dto::RunDto, dto::UsageTotals, dto::BotUsage,
@@ -110,7 +119,7 @@ impl Modify for Security {
     )),
     modifiers(&Security),
     tags(
-        (name = "meta"), (name = "bots"), (name = "chats"), (name = "approvals"),
+        (name = "view"), (name = "meta"), (name = "bots"), (name = "chats"), (name = "approvals"),
         (name = "runs"), (name = "usage"), (name = "events"), (name = "control"),
         (name = "policy"), (name = "providers"), (name = "schedules"), (name = "channels"),
         (name = "mcp"), (name = "secrets")

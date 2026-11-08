@@ -1,0 +1,648 @@
+    Blocking waiting for file lock on build directory
+   Compiling builtin-tools v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\builtin-tools)
+   Compiling workflow-replay v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\workflow-replay)
+   Compiling agent-core v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\agent-core)
+   Compiling daemon-api v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\daemon-api)
+   Compiling evals v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\evals)
+   Compiling remote-api v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\remote-api)
+   Compiling cli v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\apps\cli)
+    Finished `test` profile [unoptimized] target(s) in 1m 07s
+     Running unittests src\lib.rs (C:/praxi-target-ext\debug\deps\agent_core-368994d2aa520987.exe)
+
+running 143 tests
+test cli::tests::bridge_reuses_policy_and_tool_events ... ok
+test cli::tests::cli_executor_does_not_call_http_for_missing_binary ... ok
+test config::tests::cost_splits_cached_tokens ... ok
+test control::tests::human_pause_does_not_consume_tool_budget_and_remains_cancellable ... ok
+test history::tests::exposes_dotted_names ... ok
+test history::tests::truncates_on_char_boundary ... ok
+test memory::tests::only_meta_tools_keep_an_exchange_trusted ... ok
+test profile::tests::deserializes_from_json_config ... ok
+test profile::tests::empty_allow_means_all_and_no_policy_means_global ... ok
+test profile::tests::parses_and_filters_tools ... ok
+test profile::tests::rejects_unknown_preset_and_missing_executor ... ok
+test router_tests::a_classifier_timeout_is_fail_open_too ... ok
+test router_tests::a_disabled_router_changes_nothing ... ok
+test router_tests::a_slow_ladder_never_blocks_the_turn_beyond_its_budget ... ok
+test router_tests::a_workflow_the_model_ran_can_be_remembered ... ok
+test router_tests::an_edited_workflow_makes_the_cached_route_stale_even_without_a_notification ... ok
+test router_tests::an_unknown_workflow_command_falls_back_to_k4 ... ok
+test router_tests::can_remember_does_not_build_a_ladder_or_touch_the_disk ... ok
+test router_tests::classifier_routes_to_a_workflow_and_remember_makes_it_a_cache_hit ... ok
+test router_tests::new_command_starts_a_chat_without_a_model ... ok
+test router_tests::remember_refuses_runs_that_took_no_route_or_did_not_succeed ... ok
+test router_tests::replay_started_through_the_agent_is_refused_during_human_takeover ... ok
+test router_tests::scheduled_workflow_run_replays_through_the_gate_without_a_model ... ok
+test router_tests::skill_hint_lists_the_skill_first ... ok
+test router_tests::stop_command_cancels_the_run_that_carries_it ... ok
+test router_tests::stop_message_cancels_the_running_turn ... ok
+test router_tests::subagents_are_not_routed ... ok
+test router_tests::the_embedder_comes_from_the_providers_and_a_reload_rebuilds_the_ladder ... ok
+test router_tests::tool_hint_narrows_the_surface_and_keeps_discovery ... ok
+test router_tests::without_a_classifier_model_k3_is_off_and_k3_can_be_switched_off ... ok
+test router_tests::workflow_command_replays_through_the_gate_without_a_model ... ok
+test router_tests::workflow_handover_continues_in_k4_with_the_partial_state ... ok
+test router_tests::workflow_replay_asks_the_loops_approval_flow ... ok
+test subagent_tests::a_child_run_works_end_to_end ... ok
+test subagent_tests::a_child_sees_the_intersection_of_the_parents_tools_and_the_requested_ones ... ok
+test subagent_tests::a_childs_token_budget_is_a_quarter_of_the_parents_remainder ... ok
+test subagent_tests::a_providers_reload_replaces_the_catalog_prices ... ok
+test subagent_tests::an_approval_inside_a_child_bubbles_up_with_the_child_run_id ... ok
+test subagent_tests::cancelling_a_single_child_hands_the_parent_an_error_and_it_carries_on ... ok
+test subagent_tests::cancelling_the_parent_cancels_its_children ... ok
+test subagent_tests::cost_comes_from_the_catalog_unless_the_config_overrides_it ... ok
+test subagent_tests::crash_with_a_child_in_flight_then_resume_adopts_the_child ... ok
+test subagent_tests::depth_is_limited_to_two ... ok
+test subagent_tests::finished_children_are_charged_against_the_parents_budget ... ok
+test subagent_tests::graceful_shutdown_pauses_parent_and_child_and_the_restart_adopts_the_child ... ok
+test subagent_tests::live_gemini_parent_spawns_two_subagents ... ignored, live: needs GEMINI_API_KEY and spends a few requests
+test subagent_tests::model_role_and_max_steps_shape_the_child ... ok
+test subagent_tests::parallel_children_run_concurrently_up_to_three ... ok
+test subagent_tests::skills_index_is_in_the_system_prompt_and_skill_read_loads_the_body ... ok
+test subagent_tests::the_foreground_page_makes_matching_skills_suggested ... ok
+test tests::a_plain_human_turn_keeps_user_trust ... ok
+test tests::a_queued_follow_up_is_put_back_when_its_turn_cannot_start ... ok
+test tests::a_refusing_control_gate_fails_the_tool_call_with_its_message ... ok
+test tests::all_models_failing_fails_the_run ... ok
+test tests::allow_with_limits_read_still_parks_even_with_read_shortcut ... ok
+test tests::allow_with_limits_read_still_parks_when_a_grant_exists ... ok
+test tests::allowed_tool_call_executes_and_result_reaches_model ... ok
+test tests::always_grant_survives_restart_via_audit_log ... ok
+test tests::always_grants_are_listed_and_revocable ... ok
+test tests::approving_a_shell_call_after_shell_is_denied_does_not_run_or_grant ... ok
+test tests::ask_then_approve_continues ... ok
+test tests::ask_then_deny_tells_model_and_skips_tool ... ok
+test tests::ask_user_waits_for_the_answer_and_feeds_it_back ... ok
+test tests::bot_tool_allow_exclude_hides_and_blocks_tools ... ok
+test tests::category_grant_covers_other_tools_but_not_the_money_floor ... ok
+test tests::computer_slot_queues_another_run_and_outlives_a_cancelled_backend_awaiter ... ok
+test tests::concurrent_emit_keeps_gseq_and_seq_monotonic_in_journal_and_stream ... ok
+test tests::control_gate_sees_the_run_and_can_publish_the_request_event ... ok
+test tests::crash_mid_model_call_replays_the_model_step ... ok
+test tests::crash_mid_tool_then_recover_never_replays_the_tool ... ok
+test tests::crash_while_waiting_for_an_answer_recovers_to_paused ... ok
+test tests::crash_while_waiting_for_approval_recovers_to_paused ... ok
+test tests::declining_a_question_tells_the_model ... ok
+test tests::disabled_memory_does_nothing ... ok
+test tests::effective_policy_merges_category_grants_but_not_floors_or_denies ... ok
+test tests::emit_does_not_block_on_a_slow_fsync_and_barrier_events_are_durable ... ok
+test tests::encoded_forms_of_a_secret_are_masked ... ok
+test tests::events_carry_a_persisted_daemon_wide_sequence ... ok
+test tests::every_model_unsupported_names_the_gap_and_model_caps ... ok
+test tests::failing_closing_call_still_fails_the_run ... ok
+test tests::fallback_model_is_tried_after_retries_are_exhausted ... ok
+test tests::find_tool_and_get_tool_details_only_see_tools_visible_to_the_bot ... ok
+test tests::finished_runs_leave_the_task_map_and_wait_still_returns_state ... ok
+test tests::finished_turn_is_extracted_into_memory_in_the_background ... ok
+test tests::finishing_task_removes_only_its_own_handle_and_resume_refuses_while_it_remains ... ok
+test tests::global_policy_can_be_replaced_at_runtime ... ok
+test tests::hidden_native_tools_lower_the_counted_surface_size ... ok
+test tests::human_runs_have_no_schedule_id ... ok
+test tests::human_runs_wait_for_approvals_beyond_the_schedule_timeout ... ok
+test tests::independent_reads_run_concurrently_in_one_step ... ok
+test tests::invalid_request_on_the_primary_stops_the_chain ... ok
+test tests::k2_tool_candidates_carry_schema_parameters ... ok
+test tests::large_output_is_spilled_with_preview_and_path ... ok
+test tests::locked_policy_denies_everything_even_under_a_permissive_policy ... ok
+test tests::malformed_tool_call_is_retried_exactly_once ... ok
+test tests::many_tools_switch_to_discovery_and_use_tool_is_gated_by_the_target ... ok
+test tests::max_steps_guard_stops_the_turn ... ok
+test tests::mcp_tools_never_push_native_tools_behind_use_tool ... ok
+test tests::memory_from_a_turn_that_used_a_tool_is_stored_untrusted ... ok
+test tests::memory_from_non_human_turns_is_stored_untrusted ... ok
+test tests::model_call_timeout_covers_a_hanging_provider ... ok
+test tests::non_retryable_errors_are_not_retried ... ok
+test tests::output_preview_is_redacted_and_capped_at_2kb ... ok
+test tests::parallel_questions_keep_the_run_waiting_until_the_last_is_answered ... ok
+test tests::persisted_messages_and_provider_request_are_redacted ... ok
+test tests::platform_hidden_tool_cannot_be_called_by_name ... ok
+test tests::policy_deny_after_approval_recheck_does_not_run_the_tool_or_keep_the_grant ... ok
+test tests::policy_deny_never_asks ... ok
+test tests::queue_runs_as_next_turn_with_history ... ok
+test tests::recalled_memory_is_prepended_to_the_user_message_not_the_system_prompt ... ok
+test tests::redact_event_fails_closed_when_the_event_cannot_be_transformed ... ok
+test tests::redactor_is_refreshed_at_run_start_and_before_the_user_message_is_stored ... ok
+test tests::redactor_masks_tool_output_and_events ... ok
+test tests::refreshed_redactor_masks_a_newly_stored_secret_everywhere ... ok
+test tests::repeat_detector_warns_then_stops ... ok
+test tests::retry_after_beyond_budget_is_one_request_and_surfaces_rate_limited ... ok
+test tests::retry_after_within_budget_waits_then_retries_once ... ok
+test tests::retryable_classification ... ok
+test tests::schedule_runs_never_skip_the_money_floor_even_with_a_full_policy_and_grant ... ok
+test tests::scheduled_prompt_run_is_a_normal_turn_with_the_schedule_initiator ... ok
+test tests::scheduled_run_pauses_when_nobody_answers_the_approval ... ok
+test tests::scheduled_tool_run_calls_the_tool_without_a_model_and_carries_the_schedule_id ... ok
+test tests::script_inner_call_denied_by_the_user_throws_in_the_script ... ok
+test tests::script_inner_calls_ask_for_approval_interactively ... ok
+test tests::self_spilled_output_is_not_spilled_again ... ok
+test tests::shutdown_cancels_a_model_call_pauses_the_run_and_refuses_new_work ... ok
+test tests::shutdown_flushes_non_barrier_tail_events_to_the_journal ... ok
+test tests::shutdown_interrupts_a_tool_that_outlives_the_grace_period ... ok
+test tests::shutdown_pauses_a_run_waiting_for_approval_and_expires_the_request ... ok
+test tests::shutdown_waits_for_a_running_tool_step_within_the_grace_period ... ok
+test tests::shutdown_with_nothing_running_returns_immediately_and_flushes_memory ... ok
+test tests::steer_is_injected_before_next_model_call ... ok
+test tests::text_only_turn_persists_streams_and_records_usage ... ok
+test tests::this_chat_grant_skips_later_asks ... ok
+test tests::todo_tool_emits_event_without_permission ... ok
+test tests::token_budget_guard_stops_the_turn ... ok
+test tests::tool_duration_excludes_the_approval_wait ... ok
+test tests::tool_timeout_becomes_an_error_result ... ok
+test tests::transient_provider_failure_is_retried ... ok
+test tests::unsupported_on_the_primary_falls_back_and_records_the_reason ... ok
+test tests::use_tool_cannot_reach_tools_hidden_from_the_bot ... ok
+test tests::without_a_control_gate_the_action_just_runs ... ok
+test tests::writes_run_sequentially_one_step_each ... ok
+
+test result: ok. 142 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 14.25s
+
+     Running unittests ..\cli-provider\tests\fixtures\runtime_cli.rs (C:/praxi-target-ext\debug\deps\agent_cli_fixture-3834e5e217c8141c.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\cli_runtime.rs (C:/praxi-target-ext\debug\deps\cli_runtime-cb9234c7950064b0.exe)
+
+running 7 tests
+test claude_allowed_turn_streams_tools_and_usage ... ok
+test claude_denied_tool_returns_error ... ok
+test cli_approval_allow_runs_once ... ok
+test cli_approval_deny_skips_tool ... ok
+test codex_is_refused_fail_closed ... ok
+test http_fallback_hands_off_to_cli ... ok
+test shutdown_reaps_cli_tree ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.63s
+
+     Running unittests src\lib.rs (C:/praxi-target-ext\debug\deps\builtin_tools-82b14604b2822eb1.exe)
+
+running 86 tests
+test browser::tests::browser_open_rejects_non_web_schemes ... ok
+test browser::tests::dialog_and_settle_note_are_appended ... ok
+test browser::tests::driver_errors_become_execution_errors ... ok
+test browser::tests::eval_is_in_the_script_category ... ok
+test browser::tests::headless_mutations_all_obey_the_same_control_gate ... ok
+test browser::tests::killed_browser_fake_launcher_relaunches_on_next_open ... ok
+test browser::tests::navigating_click_renders_full_snapshot_without_minus_lines ... ok
+test browser::tests::profile_paths_follow_settings ... ok
+test browser::tests::read_only_browser_calls_cannot_implicitly_launch_outside_admission ... ok
+test browser::tests::refusing_control_gate_blocks_eval_and_tab_switch ... ok
+test browser::tests::screenshot_saves_a_file_and_eval_returns_json ... ok
+test browser::tests::small_in_page_change_keeps_the_diff ... ok
+test browser::tests::tab_activation_spec_effect_is_write ... ok
+test browser::tests::tools_forward_arguments_to_the_driver ... ok
+test browser::tests::tools_forward_dialog_options_to_the_driver ... ok
+test browser::tests::wait_needs_exactly_one_condition ... ok
+test browser::tests::watch_does_not_launch_and_takeover_pin_blocks_idle_close ... ok
+test checkpoint::tests::bad_ids_are_rejected ... ok
+test checkpoint::tests::checkpoint_of_data_dir_and_checkpoints_dir_leaves_no_partial_backup ... ok
+test checkpoint::tests::cmd_metacharacters_are_detected ... ok
+test checkpoint::tests::directories_are_backed_up_recursively ... ok
+test checkpoint::tests::failed_link_recreation_does_not_abort_restore ... ok
+test checkpoint::tests::link_fallback_copy_is_bounded_relative_and_skips_directories ... ok
+test checkpoint::tests::links_are_not_followed_and_are_restored_as_links ... ok
+test checkpoint::tests::round_trip_file_and_created_file ... ok
+test desktop::tests::a_refusing_gate_stops_the_action_before_it_is_dispatched ... ok
+test desktop::tests::active_run_is_not_evicted_from_state_map ... ok
+test desktop::tests::click_needs_a_snapshot_then_uses_its_generation_and_returns_refresh ... ok
+test desktop::tests::element_refs_parse ... ok
+test desktop::tests::filtered_snapshot_rejects_hidden_indexes_and_allows_shown_indexes ... ok
+test desktop::tests::fingerprint_mismatch_maps_to_the_stale_hint ... ok
+test desktop::tests::get_state_renders_indexed_tree ... ok
+test desktop::tests::interactive_only_and_query_keep_original_indexes ... ok
+test desktop::tests::keys_parse ... ok
+test desktop::tests::launch_and_list_apps ... ok
+test desktop::tests::launch_ignores_a_new_window_with_a_different_pid ... ok
+test desktop::tests::launch_pid_zero_accepts_any_new_window ... ok
+test desktop::tests::launch_returns_at_cap_when_no_new_window_appears ... ok
+test desktop::tests::launch_returns_early_when_new_window_appears_at_200ms ... ok
+test desktop::tests::launch_returns_immediately_when_the_window_is_already_there ... ok
+test desktop::tests::launch_with_zero_settings_skips_wait ... ok
+test desktop::tests::mutating_actions_ask_the_gate_with_rect_label_and_run_id ... ok
+test desktop::tests::old_gen_is_refused_without_dispatch_and_missing_gen_errors ... ok
+test desktop::tests::run_state_map_is_capped ... ok
+test desktop::tests::runs_do_not_see_each_others_windows_or_indexes ... ok
+test desktop::tests::screenshot_flag_saves_a_file ... ok
+test desktop::tests::strict_backend_rejects_another_runs_newer_generation ... ok
+test desktop::tests::type_focuses_by_index_then_types_and_state_shows_text ... ok
+test desktop::tests::typing_requires_an_index ... ok
+test desktop::tests::unknown_mark_is_an_error ... ok
+test desktop::tests::weak_tree_gets_ocr_marks_clickable_by_mark ... ok
+test files::tests::delete_directory_needs_recursive ... ok
+test files::tests::edit_requires_unique_match ... ok
+test files::tests::invalid_input_is_reported ... ok
+test files::tests::oversized_files_are_not_loaded_whole ... ok
+test files::tests::read_range_is_capped_in_total_and_keeps_line_numbers ... ok
+test files::tests::read_range_list_search_move ... ok
+test files::tests::write_edit_delete_checkpoint_round_trip ... ok
+test meta::tests::ask_user_returns_question_card ... ok
+test meta::tests::todo_write_validates_and_renders ... ok
+test script::tests::allowed_inner_calls_run_through_the_gate ... ok
+test script::tests::busy_loop_does_not_block_the_async_runtime ... ok
+test script::tests::denied_inner_call_never_executes_and_script_sees_the_error ... ok
+test script::tests::gate_receives_raw_command_for_never_list ... ok
+test script::tests::raw_command_extraction ... ok
+test script::tests::recursion_and_unknown_tools_are_refused ... ok
+test script::tests::resolver_gate_applies_policy_and_never_list ... ok
+test shell::tests::background_grandchild_holding_pipe_keeps_partial_output ... ok
+test shell::tests::child_env_omits_secrets_but_keeps_path ... ok
+test shell::tests::command_is_a_single_argument_no_injection_of_extra_args ... ok
+test shell::tests::empty_command_is_rejected ... ok
+test shell::tests::large_output_is_capped_and_spilled ... ok
+test shell::tests::runs_command_and_reports_exit_code ... ok
+test shell::tests::successful_shell_run_leaves_background_child_alive ... ok
+test shell::tests::timeout_and_cancel_kill_descendant_before_marker ... ok
+test shell::tests::timeout_kills_the_command ... ok
+test tests::email_tools_can_be_configured_and_send_is_destructive ... ok
+test tests::every_tool_has_description_schema_effect_and_platforms ... ok
+test tests::read_tools_are_never_in_destructive_or_write_set_by_accident ... ok
+test tests::script_can_call_registered_tools_through_the_registry ... ok
+test tests::script_computer_calls_inherit_one_lifetime_admission ... ok
+test tests::without_a_desktop_backend_desktop_tools_are_skipped ... ok
+test util::tests::inline_including_footer_fits_max_inline_bytes ... ok
+test util::tests::large_text_spills_and_truncates_on_char_boundary ... ok
+test util::tests::small_text_is_inline ... ok
+test util::tests::unwritable_spill_dir_still_respects_limit ... ok
+
+test result: ok. 86 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 31.67s
+
+     Running tests\integration.rs (C:/praxi-target-ext\debug\deps\integration-a585446dfb29c41d.exe)
+
+running 2 tests
+test browser_open_example_com_and_click ... ignored, needs Chrome and network access
+test notepad_launch_type_by_index_state_shows_text ... ignored, needs a desktop session; opens and closes Notepad
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (C:/praxi-target-ext\debug\deps\bot-9f1eb697bc681622.exe)
+
+running 68 tests
+test channels_tests::enabled_defaults_on_and_follows_the_switch ... ok
+test channels_tests::not_configured_or_disabled_means_not_running_and_no_codes ... ok
+test channels_tests::setup_stores_the_token_without_printing_it_and_disable_keeps_it ... ok
+test channels_tests::status_lines_and_json ... ok
+test channels_tests::the_channel_starts_polls_pairs_and_stops ... ok
+test channels_tests::the_daemon_runs_the_channel_and_stops_it_on_shutdown ... ok
+test client::tests::decision_bodies ... ok
+test client::tests::follow_tree_polls_the_run_when_it_reconnects_without_a_cursor ... ok
+test client::tests::parses_sse_blocks ... ok
+test client::tests::run_tree_follows_children_and_grandchildren_only ... ok
+test client::tests::sse_buffer_handles_crlf_and_several_blocks ... ok
+test client::tests::sse_buffer_keeps_multibyte_characters_split_across_chunks ... ok
+test client::tests::sse_ids_are_parsed ... ok
+test commands::tests::providers_default_and_list ... ok
+test commands::tests::secrets_commands_never_print_values ... ok
+test doctor::tests::browser_presence_does_not_imply_it_can_launch ... ok
+test doctor::tests::empty_data_dir_warns_but_nothing_panics ... ok
+test doctor::tests::foreign_listener_on_port_is_a_failure ... ok
+test doctor::tests::healthy_setup_passes ... ok
+test doctor::tests::missing_key_and_bad_files_fail_with_hints ... ok
+test doctor::tests::redaction_masks_tokens_and_home ... ok
+test doctor::tests::report_has_no_secrets ... ok
+test doctor::tests::secret_store_error_is_reported ... ok
+test doctor::tests::table_and_json_render ... ok
+test doctor::tests::unusable_browser_discovery_is_a_failure ... ok
+test mcp_host::tests::a_broken_file_is_never_overwritten ... ok
+test mcp_host::tests::catalog_is_the_curated_list ... ok
+test mcp_host::tests::config_is_saved_reloaded_and_rejects_bad_input ... ok
+test mcp_host::tests::dangerous_stdio_is_refused_and_mcp_toml_is_not_executed ... ok
+test mcp_host::tests::failed_connect_is_kept_and_announced ... ok
+test mcp_host::tests::put_merges_and_get_returns_config_without_secret_values ... ok
+test peer::tests::peer_defaults_and_config ... ok
+test peer::tests::remote_status_uses_persisted_pairing_and_proxy ... ok
+test remote::tests::answer_and_grants_commands_against_a_live_daemon ... ok
+test remote::tests::bots_chat_status_approve_against_a_live_daemon ... ok
+test remote::tests::dates_render_as_utc ... ok
+test remote::tests::schedules_add_list_run_now_rm_against_a_live_daemon ... ok
+test remote::tests::unreachable_daemon_has_its_own_exit_code ... ok
+test serve::tests::computer_limits_default_to_small_host_and_environment_overrides_host_file ... ok
+test serve::tests::email_accounts_load_from_email_toml_and_providers_toml ... ok
+test serve::tests::email_tools_register_into_tool_registry ... ok
+test serve::tests::env_only_provider_keys_are_collected ... ok
+test serve::tests::fresh_install_builds_unconfigured_agent ... ok
+test serve::tests::origin_list_is_trimmed_and_filtered ... ok
+test serve::tests::production_redactor_masks_store_token_and_passphrase ... ok
+test serve::tests::providers_carry_the_catalog_prices_and_a_reload_refreshes_them ... ok
+test serve::tests::redactor_refresh_picks_up_a_secret_stored_later ... ok
+test serve::tests::registering_store_masks_written_values_immediately ... ok
+test serve::tests::the_agent_has_subagent_and_skill_tools_and_a_skills_dir ... ok
+test tests::builtin_catalog_parses ... ok
+test tests::cli_definition_is_valid ... ok
+test tests::parses_channels_telegram_commands ... ok
+test tests::parses_daemon_commands ... ok
+test tests::parses_peer_and_remote_flags ... ok
+test tests::parses_schedules_commands ... ok
+test tests::parses_scripted_setup_flags ... ok
+test wizard::tests::apply_stores_key_in_secret_store_not_in_config ... ok
+test wizard::tests::failed_connection_can_retry_then_abort ... ok
+test wizard::tests::first_provider_stays_default_when_second_is_added ... ok
+test wizard::tests::keyless_catalog_provider_skips_key_prompt ... ok
+test wizard::tests::no_model_saves_provider_but_creates_no_bot ... ok
+test wizard::tests::non_interactive_custom_provider ... ok
+test wizard::tests::non_interactive_errors ... ok
+test wizard::tests::non_interactive_plan_reads_key_from_env_and_picks_first_model ... ok
+test wizard::tests::setup_bot_loads_as_agent_profile_for_every_preset ... ok
+test wizard::tests::slug_handles_odd_names ... ok
+test wizard::tests::wizard_happy_path_english ... ok
+test wizard::tests::wizard_turkish_messages_and_custom_provider ... ok
+
+test result: ok. 68 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.73s
+
+     Running unittests src\lib.rs (C:/praxi-target-ext\debug\deps\daemon_api-d7b9276a9d87606e.exe)
+
+running 114 tests
+test auth::tests::constant_time_compare ... ok
+test auth::tests::existing_token_file_acl_is_restricted ... ok
+test auth::tests::host_parsing ... ok
+test auth::tests::query_token_parsing ... ok
+test auth::tests::token_is_created_once_and_reread ... ok
+test control::owned::tests::acquire_closes_admission_drains_lifetime_permits_and_reobserves_on_release ... ok
+test control::owned::tests::cancelled_backend_awaiter_keeps_admission_until_actual_completion ... ok
+test control::owned::tests::late_overlay_proceed_and_cancelled_waiters_cannot_enter_the_barrier ... ok
+test control::owned::tests::old_format_corrupt_latch_and_restart_require_privileged_explicit_recovery ... ok
+test control::owned::tests::restart_at_each_release_journal_boundary_preserves_pause_and_request_identity ... ok
+test control::owned::tests::ten_second_drain_timeout_retains_pause_and_input_closed ... ok
+test control::owned::tests::write_failure_never_activates_or_releases_and_retries_restore_the_same_outbox ... ok
+test control::tests::a_proceed_is_overruled_when_the_human_took_the_wheel_meanwhile ... ok
+test control::tests::app_answers_proceed ... ok
+test control::tests::app_answers_refuse_with_its_reason ... ok
+test control::tests::connected_but_unregistered_app_that_is_silent_proceeds_after_the_short_timeout ... ok
+test control::tests::heartbeat_expires ... ok
+test control::tests::human_driving_and_paused_refuse_instantly_without_a_round_trip ... ok
+test control::tests::latched_pause_still_refuses_after_the_subscriber_is_dropped ... ok
+test control::tests::no_app_connected_is_a_no_op ... ok
+test control::tests::only_an_explicit_release_clears_the_latch_no_heartbeat_does ... ok
+test control::tests::pause_survives_the_heartbeat_ttl_and_only_release_resumes ... ok
+test control::tests::registered_controller_that_is_silent_is_refused_after_the_long_timeout ... ok
+test control::tests::the_latch_survives_a_restart_and_a_broken_file_fails_closed ... ok
+test control::tests::unknown_request_ids_are_rejected ... ok
+test live_view::tests::all_routes_require_auth_host_origin_and_never_query_tokens ... ok
+test live_view::tests::audit_failure_denies_new_view_and_interrupts_active_input ... ok
+test live_view::tests::blocked_body_is_cancelled_after_two_seconds_and_capture_is_dropped ... ok
+test live_view::tests::bounded_duplicate_window_requires_resync_after_sixty_four_batches ... ok
+test live_view::tests::cancelled_input_awaiter_invalidates_epoch_and_drains_actual_backend_before_recovery ... ok
+test live_view::tests::continuation_is_durable_exactly_once_and_does_not_restart_a_finished_run ... ok
+test live_view::tests::crash_after_note_delivery_reconciles_by_message_id_and_keeps_pause ... ok
+test live_view::tests::duplicate_results_never_reinject_gaps_mismatch_and_geometry_reject ... ok
+test live_view::tests::explicit_reacquisition_rotates_epoch_and_old_input_never_applies ... ok
+test live_view::tests::owner_only_input_release_and_legacy_release_bypasses_are_closed ... ok
+test live_view::tests::partial_injection_invalidates_input_and_retains_pause ... ok
+test live_view::tests::rate_overflow_suspends_input_instead_of_growing_a_queue ... ok
+test live_view::tests::release_is_a_barrier_for_in_flight_input_and_old_epochs ... ok
+test live_view::tests::revoke_closes_open_stream_resets_inputs_and_never_resumes ... ok
+test live_view::tests::secrets_never_enter_audit_latch_files_events_or_continuation ... ok
+test live_view::tests::separate_input_privilege_phone_scope_and_session_quotas ... ok
+test live_view::tests::session_ttl_is_not_extended_by_stream_and_heartbeat_cannot_revive ... ok
+test live_view::tests::takeover_session_binding_and_text_byte_rate_are_independent_limits ... ok
+test live_view::tests::watch_has_no_overlay_registration_one_stream_and_actor_binding ... ok
+test sse::tests::a_chunk_touching_more_runs_than_the_cache_holds_neither_stalls_nor_drops ... ok
+test sse::tests::a_long_run_is_decoded_once_across_replay_chunks ... ok
+test sse::tests::cursor_forms ... ok
+test sse::tests::global_replay_joins_the_index_with_the_run_logs ... ok
+test sse::tests::log_cache_is_bounded_and_refreshes_a_stale_log_once ... ok
+test sse::tests::replay_does_not_skip_a_row_whose_log_line_arrives_later ... ok
+test sse::tests::replay_skips_a_row_that_is_provably_lost ... ok
+test sse::tests::replay_stalls_on_an_unreadable_log_instead_of_dropping_it ... ok
+test tests::a_registered_app_confirms_each_click_before_it_runs ... ok
+test tests::an_app_refusal_reaches_the_model_and_nothing_is_dispatched ... ok
+test tests::approval_flow_approve ... ok
+test tests::approval_flow_deny_and_unknown ... ok
+test tests::auth_required_and_health_is_public ... ok
+test tests::bot_with_chats_cannot_be_deleted ... ok
+test tests::bots_crud ... ok
+test tests::browser_origin_must_be_the_desktop_app ... ok
+test tests::cancel_and_resume_rules ... ok
+test tests::channels_and_pair_code_need_auth_and_a_running_channel ... ok
+test tests::concurrent_policy_updates_are_not_lost_and_leave_no_temp_files ... ok
+test tests::control_routes_validate_and_report_the_registration ... ok
+test tests::corrupt_policy_file_locks_the_daemon_to_deny_all_missing_one_is_the_default ... ok
+test tests::create_chat_returns_chat_id_next_to_id ... ok
+test tests::events_route_accepts_the_token_in_the_query_only_there ... ok
+test tests::global_policy_is_editable_and_persisted ... ok
+test tests::global_stream_resumes_across_all_runs_with_gseq ... ok
+test tests::graceful_shutdown_checkpoints_running_runs_and_closes_streams ... ok
+test tests::grants_are_listed_revoked_and_shown_in_the_effective_policy ... ok
+test tests::heartbeats_never_release_a_pause_only_the_release_flag_does ... ok
+test tests::host_header_must_be_loopback ... ok
+test tests::human_driving_waits_then_discards_stale_click_without_model_retry ... ok
+test tests::latched_pause_survives_a_daemon_restart ... ok
+test tests::latest_cursor_endpoint_needs_auth_and_reports_the_newest_gseq ... ok
+test tests::listing_runs_writes_nothing_to_disk ... ok
+test tests::load_policy_distinguishes_missing_from_broken ... ok
+test tests::mcp::catalog_is_served ... ok
+test tests::mcp::mcp_changes_are_announced_on_the_global_stream ... ok
+test tests::mcp::mcp_routes_need_the_bearer_token ... ok
+test tests::mcp::put_keeps_omitted_fields_and_null_bots_means_all ... ok
+test tests::mcp::secrets_are_write_only ... ok
+test tests::mcp::server_crud_follows_the_contract ... ok
+test tests::mcp::without_an_embedder_the_routes_answer_503 ... ok
+test tests::openapi_snapshot ... ok
+test tests::pause_is_latched_until_an_explicit_release ... ok
+test tests::peer_control_state_changes_are_audited_with_the_device_as_actor ... ok
+test tests::providers_are_listed_with_models_and_reload_swaps_them ... ok
+test tests::providers_detected_reports_six_rows ... ok
+test tests::providers_detected_requires_auth ... ok
+test tests::providers_detected_sentinel_token_is_never_leaked_or_read ... ok
+test tests::providers_lists_secret_free_cli_records_without_probing ... ok
+test tests::providers_route_without_a_host_lists_only_what_is_loaded ... ok
+test tests::question_card_is_answered_through_the_api ... ok
+test tests::remember_is_refused_for_runs_without_a_route_and_unknown_runs ... ok
+test tests::schedules::a_due_schedule_fires_at_startup_and_starts_a_run_with_its_id ... ok
+test tests::schedules::parse_route_understands_english_and_turkish_or_says_422 ... ok
+test tests::schedules::run_now_dispatches_a_prompt_into_a_chat_named_after_the_schedule ... ok
+test tests::schedules::run_now_dispatches_a_workflow_and_a_tool_through_the_gate ... ok
+test tests::schedules::run_now_needs_a_running_scheduler_and_a_known_schedule ... ok
+test tests::schedules::schedule_crud_and_validation ... ok
+test tests::schedules::schedule_mutations_are_announced_on_the_global_stream ... ok
+test tests::schedules::schedule_runs_still_need_approval_and_the_schedule_stays_busy_meanwhile ... ok
+test tests::schedules::shutdown_stops_the_scheduler_before_the_agent_loop ... ok
+test tests::schedules::webhook_auth_size_and_status_codes ... ok
+test tests::schedules::webhook_is_409_while_a_run_is_in_flight_and_503_without_a_scheduler ... ok
+test tests::send_message_streams_events_in_order ... ok
+test tests::sse_resumes_from_last_event_id ... ok
+test tests::the_persisted_policy_changes_what_asks ... ok
+test tests::tool_completion_events_carry_a_preview_and_duration ... ok
+test tests::unconfigured_daemon_stays_live_and_rejects_chat_until_reload ... ok
+test tests::usage_carries_cost_only_when_a_price_is_known ... ok
+test tests::usage_cost_uses_the_providers_catalog_prices_and_follows_a_reload ... ok
+
+test result: ok. 114 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.76s
+
+     Running unittests src\lib.rs (C:/praxi-target-ext\debug\deps\evals-5b50d90c33b5e2d3.exe)
+
+running 10 tests
+test live::tests::gemini_preset_only_applies_to_native_gemini_catalog_entries ... ok
+test live::tests::live_needs_opt_in_and_refuses_ci ... ok
+test live::tests::no_configured_provider_is_an_error ... ok
+test live::tests::prices_parse_and_missing_file_is_empty ... ok
+test metrics::tests::jsonl_round_trip ... ok
+test metrics::tests::perception_counts_tree_ocr_grid ... ok
+test metrics::tests::tool_time_aggregates_by_tool ... ok
+test metrics::tests::usage_sums_and_cost_is_none_without_prices ... ok
+test report::tests::aggregate_averages_repeats ... ok
+test report::tests::report_shows_deltas_regressions_and_missing_tasks ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src\bin\eval.rs (C:/praxi-target-ext\debug\deps\bot_eval-76551319e8b146ed.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\harness.rs (C:/praxi-target-ext\debug\deps\harness-c7eea7f3bb278c2b.exe)
+
+running 12 tests
+test cost_comes_from_the_price_table ... ok
+test every_seed_scenario_passes ... ok
+test judge_receives_rubric_trajectory_and_screenshot ... ok
+test metrics_capture_tokens_cost_tools_and_perception ... ok
+test report_command_compares_two_jsonl_files ... ok
+test seed_scenarios_cover_the_required_topics ... ok
+test seed_tasks_parse_and_have_the_expected_mix ... ok
+test tier2_failed_check_and_failed_setup_still_clean_up ... ok
+test tier2_platform_mismatch_is_skipped ... ok
+test tier2_structure_setup_turn_checks_judge_and_cleanup ... ok
+test verdict_parsing_is_tolerant_but_strict ... ok
+test wrong_expectations_are_reported_as_failures ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.63s
+
+     Running unittests src\lib.rs (C:/praxi-target-ext\debug\deps\live_view-0be0adbefac55ddd.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\contracts.rs (C:/praxi-target-ext\debug\deps\contracts-bd0617c5fae6f4f6.exe)
+
+running 7 tests
+test every_fragment_boundary_and_concatenated_records ... ok
+test golden_binary_and_json_headers_round_trip ... ok
+test oversized_lengths_reject_before_body_allocation_and_poison_parser ... ok
+test source_rejects_native_pixel_bombs_and_empty_payloads ... ok
+test ten_thousand_frames_keep_only_latest_and_drop_pixels_after_last_subscriber ... ok
+test truncation_bad_json_version_and_nonframe_payload_fail ... ok
+test typed_input_bounds_and_no_raw_os_keycodes ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+
+     Running unittests src\lib.rs (C:/praxi-target-ext\debug\deps\remote_api-90b3cddc26d0832d.exe)
+
+running 10 tests
+test tests::concurrent_stream_cap_and_proxy_drop_release_bodies ... ok
+test tests::daemon_routes_and_two_live_sse_events ... ok
+test tests::five_megabyte_upload_cancel_and_stream_limits ... ok
+test tests::paired_node_and_host_roles_receive_http_forbidden ... ok
+test tests::peer_decision_audit_contains_key_and_name ... ok
+test tests::peer_http_header_read_deadline_closes_slow_stream ... ok
+test tests::phone_scope_and_other_roles_fail_closed ... ok
+test tests::proxy_guard_and_credential_stripping ... ok
+test tests::streaming_request_cap_includes_chunked_bodies ... ok
+test tests::unpaired_and_revoked_peers_refused_then_repair_recovers ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 28.57s
+
+     Running unittests src\lib.rs (C:/praxi-target-ext\debug\deps\workflow_replay-6fe11896f97ae8b3.exe)
+
+running 62 tests
+test format::tests::bind_params_applies_defaults_and_types ... ok
+test format::tests::rejects_undeclared_params_and_future_versions ... ok
+test format::tests::toml_and_json_round_trip ... ok
+test format::tests::wait_for_needs_exactly_one_condition ... ok
+test locator::tests::browser_snapshot_lines_parse ... ok
+test locator::tests::browser_strategies_and_ambiguity ... ok
+test locator::tests::exact_match_resolves ... ok
+test locator::tests::fuzzy_accepts_near_identical_names_only ... ok
+test locator::tests::glob_works ... ok
+test locator::tests::position_needs_a_similar_name_unless_recorded_unnamed ... ok
+test locator::tests::two_exact_matches_are_ambiguous_unless_nth ... ok
+test recorder::tests::browser_refs_become_locators_and_urls_become_params ... ok
+test recorder::tests::default_name_has_utc_timestamp_and_supports_unusual_ids ... ok
+test recorder::tests::duplicate_names_get_nth_and_marks_are_reported_dropped ... ok
+test recorder::tests::explicit_name_wins_and_reviewed_proposal_saves_create_only ... ok
+test recorder::tests::keeps_mutations_drops_reads_and_failures_and_lifts_params ... ok
+test recorder::tests::literal_braces_in_typed_text_are_escaped ... ok
+test recorder::tests::shell_run_command_is_never_lifted_into_a_parameter ... ok
+test recorder::tests::task_145_regression_distinct_run_ids_in_one_millisecond_have_distinct_names ... ok
+test store::tests::compare_and_swap_allows_exactly_one_writer_per_revision ... ok
+test store::tests::crashed_writer_temps_are_cleaned_without_removing_unrelated_files ... ok
+test store::tests::create_new_preserves_existing_workflow_and_legacy_save_overwrites ... ok
+test store::tests::create_new_publish_does_not_clobber_an_uncooperative_writer ... ok
+test store::tests::interrupted_index_commit_is_repaired_before_cached_list_is_returned ... ok
+test store::tests::legacy_workflow_without_revision_loads_as_one_and_migrates_on_save ... ok
+test store::tests::rejects_path_traversal_names_and_survives_a_lost_index ... ok
+test store::tests::revision_exhaustion_never_wraps_or_changes_the_workflow ... ok
+test store::tests::save_get_list_delete ... ok
+test store::tests::sixteen_writers_keep_all_workflows_and_a_complete_index ... ok
+test store::tests::task_145_regression_index_writes_never_mutate_an_existing_inode ... ok
+test store::tests::two_processes_keep_every_workflow_and_index_entry ... ok
+test store::tests::workflow_process_writer ... ignored, helper invoked by two_processes_keep_every_workflow_and_index_entry
+test template::tests::backslash_placeholder_never_executes_a_newline_value_on_real_sh ... ok
+test template::tests::caret_and_dollar_before_placeholder_are_rejected ... ok
+test template::tests::cmd_caret_quote_and_typographic_quotes_are_quoting_contexts ... ok
+test template::tests::dangling_escape_before_placeholder_is_rejected ... ok
+test template::tests::escape_round_trips ... ok
+test template::tests::newline_value_stays_one_word_on_real_sh ... ok
+test template::tests::referenced_lists_names ... ok
+test template::tests::rejects_unbound_unclosed_and_stray ... ok
+test template::tests::shell_rendering_quotes_values ... ok
+test template::tests::shell_templates_with_quoted_placeholders_are_rejected ... ok
+test template::tests::substitutes_and_unescapes ... ok
+test tests::agent_step_and_failed_success_check_hand_over ... ok
+test tests::ambiguous_locator_is_a_drift_never_a_first_pick ... ok
+test tests::ambiguous_window_is_a_drift_too ... ok
+test tests::browser_css_fallback_needs_a_unique_match ... ok
+test tests::browser_url_mismatch_is_a_drift ... ok
+test tests::gate_sees_the_resolved_tool_name_not_the_alias ... ok
+test tests::missing_control_gate_fails_closed_for_acting_steps ... ok
+test tests::non_cyclic_nesting_deeper_than_max_depth_is_refused ... ok
+test tests::params_are_substituted_typed_and_validated ... ok
+test tests::permission_deny_stops_the_replay ... ok
+test tests::record_from_scripted_run_then_replay_with_zero_model_calls ... ok
+test tests::refusing_control_gate_blocks_every_browser_action_and_navigate ... ok
+test tests::refusing_control_gate_blocks_every_desktop_action_kind ... ok
+test tests::refusing_control_gate_blocks_launch ... ok
+test tests::renamed_button_hands_over_at_the_right_step ... ok
+test tests::shell_step_quotes_parameter_values ... ok
+test tests::workflow_cannot_call_itself_through_workflow_run ... ok
+test tests::workflow_cannot_recurse_through_script_run ... ok
+test tests::workflow_run_tool_replays_and_reports_handover_and_denial ... ok
+
+test result: ok. 61 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.83s
+
+     Running tests\live.rs (C:/praxi-target-ext\debug\deps\live-093efc12e0822ea3.exe)
+
+running 1 test
+test record_open_notepad_type_text_then_replay ... ignored, needs a desktop session; opens and closes Notepad
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests agent_core
+error: extern location for builtin_tools does not exist: C:/praxi-target-ext\debug\deps\libbuiltin_tools-35e1f1919d29056e.rlib
+ --> crates\agent-core\src\agent.rs:9:5
+  |
+9 | use builtin_tools::BuiltinConfig;
+  |     ^^^^^^^^^^^^^
+
+error: extern location for cli_provider does not exist: C:/praxi-target-ext\debug\deps\libcli_provider-2bcc4f6ae33c9aa5.rlib
+ --> crates\agent-core\src\cli.rs:8:5
+  |
+8 | use cli_provider::runtime::{CliEngine, Engine, ToolReply, Turn, TurnHost};
+  |     ^^^^^^^^^^^^
+
+error[E0463]: can't find crate for `workflow_replay`
+  --> crates\agent-core\src\router.rs:42:5
+   |
+42 | use workflow_replay::{Handles, ReplayOptions, Replayer, WorkflowStore, summarize};
+   |     ^^^^^^^^^^^^^^^ can't find crate
+
+error: aborting due to 3 previous errors
+
+For more information about this error, try `rustc --explain E0463`.
+error: doctest failed, to rerun pass `-p agent-core --doc`
+
+Caused by:
+  process didn't exit successfully: `C:\Users\emreo\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\rustdoc.exe --edition=2024 --crate-type lib --color auto --crate-name agent_core --test 'crates\agent-core\src\lib.rs' --test-run-directory 'C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\agent-core' -L 'native=C:\Users\emreo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.48.5\lib' -L 'native=C:\Users\emreo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.53.1\lib' -L 'native=C:/praxi-target-ext\debug\build\blake3-860e38c66e2a8b88\out' -L 'native=C:/praxi-target-ext\debug\build\libsqlite3-sys-7dc9123470613387\out' -L 'native=C:/praxi-target-ext\debug\build\ring-83da57fcdb0ea12f\out' -L 'native=C:/praxi-target-ext\debug\build\rquickjs-sys-36d30023803bdc12\out' -L 'native=C:/praxi-target-ext\debug\build\sqlite-vec-2654459e0e808bed\out' --test-args --test-threads=1 --deny=unsafe_code '--warn=clippy::pedantic' --extern 'agent_core=C:/praxi-target-ext\debug\deps\libagent_core-5068fbdf04fbb258.rlib' --extern 'agent_router=C:/praxi-target-ext\debug\deps\libagent_router-c1a37092a63b3012.rlib' --extern 'async_trait=C:/praxi-target-ext\debug\deps\async_trait-3e10c3c39203effb.dll' --extern 'base64=C:/praxi-target-ext\debug\deps\libbase64-ce9221534c8e2940.rlib' --extern 'builtin_tools=C:/praxi-target-ext\debug\deps\libbuiltin_tools-35e1f1919d29056e.rlib' --extern 'cli_provider=C:/praxi-target-ext\debug\deps\libcli_provider-2bcc4f6ae33c9aa5.rlib' --extern 'futures=C:/praxi-target-ext\debug\deps\libfutures-5ba256f311952863.rlib' --extern 'globset=C:/praxi-target-ext\debug\deps\libglobset-5a9a11c554f3888b.rlib' --extern 'live_view=C:/praxi-target-ext\debug\deps\liblive_view-69bd47c323026ec7.rlib' --extern 'memory_store=C:/praxi-target-ext\debug\deps\libmemory_store-68e565ab7a08adca.rlib' --extern 'parking_lot=C:/praxi-target-ext\debug\deps\libparking_lot-345fe75994a3d4f2.rlib' --extern 'permission_engine=C:/praxi-target-ext\debug\deps\libpermission_engine-f14f61245cbac5bd.rlib' --extern 'protocol=C:/praxi-target-ext\debug\deps\libprotocol-e794e45aabcb0eba.rlib' --extern 'provider_catalog=C:/praxi-target-ext\debug\deps\libprovider_catalog-1e4edf3db9df8f5b.rlib' --extern 'secret_store=C:/praxi-target-ext\debug\deps\libsecret_store-69020acc466229ff.rlib' --extern 'serde=C:/praxi-target-ext\debug\deps\libserde-2c09b634455b64de.rlib' --extern 'serde_json=C:/praxi-target-ext\debug\deps\libserde_json-d5dc4d1bc28c2781.rlib' --extern 'skills=C:/praxi-target-ext\debug\deps\libskills-4b9585a1ef94f4e3.rlib' --extern 'storage=C:/praxi-target-ext\debug\deps\libstorage-a1e637a88f512f0b.rlib' --extern 'task_runtime=C:/praxi-target-ext\debug\deps\libtask_runtime-90069302e1b32a09.rlib' --extern 'tempfile=C:/praxi-target-ext\debug\deps\libtempfile-a2acde508481ab09.rlib' --extern 'thiserror=C:/praxi-target-ext\debug\deps\libthiserror-9fa5abafa170d8a4.rlib' --extern 'tokio=C:/praxi-target-ext\debug\deps\libtokio-a1ed0d2331394d3d.rlib' --extern 'tokio_util=C:/praxi-target-ext\debug\deps\libtokio_util-1e1025f127192bc3.rlib' --extern 'toml=C:/praxi-target-ext\debug\deps\libtoml-8c5e430da54f5fdd.rlib' --extern 'tool_registry=C:/praxi-target-ext\debug\deps\libtool_registry-f24b82834d8261f8.rlib' --extern 'tracing=C:/praxi-target-ext\debug\deps\libtracing-08d68c4b7a7c1e75.rlib' --extern 'uuid=C:/praxi-target-ext\debug\deps\libuuid-3384585ab08c8475.rlib' --extern 'workflow_replay=C:/praxi-target-ext\debug\deps\libworkflow_replay-b5f48cbdb0c4705f.rlib' -L 'dependency=C:/praxi-target-ext\debug\deps' -C embed-bitcode=no --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' --error-format human` (exit code: 1)
+note: test exited abnormally; to see the full output pass --no-capture to the harness.

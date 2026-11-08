@@ -31,6 +31,10 @@ pub const PHONE_DENIED_POST_PATHS: &[&str] = &["/v1/host/import", "/v1/host/hand
 /// Same API and permissions as loopback, with transport authentication.
 pub fn peer_router(state: AppState) -> Router {
     crate::api_routes()
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::live_view::audit_ingress,
+        ))
         .layer(axum::middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state)
 }
@@ -39,7 +43,7 @@ pub fn peer_router(state: AppState) -> Router {
 #[derive(Clone, Debug)]
 pub struct PeerName(pub String);
 
-async fn guard(State(state): State<AppState>, req: Request, next: Next) -> Response {
+async fn guard(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     let Some(peer) = req.extensions().get::<PeerIdentity>().cloned() else {
         return ApiError::forbidden("paired peer identity required").into_response();
     };
@@ -56,6 +60,11 @@ async fn guard(State(state): State<AppState>, req: Request, next: Next) -> Respo
     if denied {
         return ApiError::forbidden("peer role does not allow this operation").into_response();
     }
+    if crate::live_view::reject_query_credentials(&req) {
+        return ApiError::bad_request("URL credentials are forbidden").into_response();
+    }
+    req.extensions_mut()
+        .insert(crate::live_view::Actor::peer(&peer));
     // Record the initiator in the existing SQLite audit log before dispatch.
     // Fail closed if attribution cannot be persisted. The normal approval audit
     // and permission engine remain in place and record the resulting decision.

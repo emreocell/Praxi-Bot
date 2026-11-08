@@ -395,6 +395,12 @@ pub struct ControlStateDto {
     /// `POST /v1/control/release`, regardless of the heartbeat.  `null` when
     /// nothing is latched.
     pub latched: Option<ControlMode>,
+    /// Owned takeover; restored latches require explicit recovery.
+    #[serde(default)]
+    pub takeover: Option<live_view::TakeoverInfo>,
+    /// Idempotent release acknowledgement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release: Option<ReleaseResult>,
 }
 
 /// `GET /v1/events/latest`.
@@ -740,4 +746,11 @@ impl ScheduleChanged {
             kind,
         }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ReleaseResult {
+    pub takeover_id: Uuid,
+    pub request_id: Uuid,
+    pub state: String,
 }

@@ -314,6 +314,8 @@ impl JournalSlot {
 /// Configuration of an [`AgentLoop`](crate::AgentLoop).
 #[derive(Debug, Clone)]
 pub struct LoopConfig {
+    /// Root computer runs admitted at once on the small host; children share a slot.
+    pub max_computer_runs: usize,
     /// Guards.
     pub guards: Guards,
     /// Workspace-wide policy (ADR-0012); bots override per category.
@@ -353,6 +355,7 @@ pub struct LoopConfig {
 impl Default for LoopConfig {
     fn default() -> Self {
         Self {
+            max_computer_runs: 1,
             guards: Guards::default(),
             global_policy: Policy::approve_destructive(),
             model_retry: RetryPolicy {

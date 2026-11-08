@@ -65,6 +65,7 @@ dependencies = [
  "cli-provider",
  "futures",
  "globset",
+ "live-view",
  "memory-store",
  "parking_lot",
  "permission-engine",
@@ -860,6 +861,7 @@ dependencies = [
  "desktop-windows",
  "globset",
  "image",
+ "live-view",
  "parking_lot",
  "permission-engine",
  "process-wrap",
@@ -1235,6 +1237,7 @@ dependencies = [
  "dialoguer",
  "fs4",
  "futures-util",
+ "live-view",
  "mcp-bridge",
  "parking_lot",
  "peer-network",
@@ -1727,16 +1730,19 @@ dependencies = [
  "futures",
  "getrandom 0.3.4",
  "http-body-util",
+ "live-view",
  "parking_lot",
  "percent-encoding",
  "permission-engine",
  "protocol",
  "provider-catalog",
+ "rusqlite",
  "rustix",
  "scheduler",
  "secret-store",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "storage",
  "task-runtime",
  "tempfile",
@@ -4212,6 +4218,19 @@ name = "litrs"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4744e383959f0db86ede514b809b1c53251889093803c05267acc7d4e7030d70"
+
+[[package]]
+name = "live-view"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "utoipa",
+ "uuid",
+]
 
 [[package]]
 name = "lock_api"
@@ -10242,6 +10261,7 @@ dependencies = [
  "desktop-api",
  "desktop-windows",
  "fs4",
+ "live-view",
  "parking_lot",
  "protocol",
  "script-runtime",

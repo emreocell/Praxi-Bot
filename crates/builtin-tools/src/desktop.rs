@@ -29,7 +29,7 @@ use vision::{BoundingBox, OcrEngine};
 
 use protocol::event::ControlRect;
 
-use crate::control::{ControlRequest, DesktopControlGate};
+use crate::control::{ActionPermit, ControlRequest, DesktopControlGate};
 use crate::util::{exec_err, finish_text, parse, save_file, spec};
 
 /// An OCR engine usable from tools.
@@ -94,6 +94,7 @@ const MISSING_GEN_MSG: &str = "missing required parameter 'gen'; call desktop_ge
 // single-flight desktop actions).
 #[derive(Default)]
 struct State {
+    observation_epoch: u64,
     window_id: Option<u64>,
     generation: Option<u64>,
     /// Mark number to absolute screen centre.
@@ -360,12 +361,15 @@ impl Shared {
         action: &str,
         label: String,
         rect: Option<ControlRect>,
-    ) -> Result<(), ToolError> {
+    ) -> Result<ActionPermit, ToolError> {
         async {
+            if let Some(permit) = crate::control::inherited_action() {
+                return Ok(permit);
+            }
             let Some(gate) = &self.control else {
-                return Ok(());
+                return Ok(ActionPermit::default());
             };
-            gate.before_action(&ControlRequest {
+            gate.admit_action(&ControlRequest {
                 run_id: run_id.to_owned(),
                 rect,
                 label,
@@ -389,12 +393,12 @@ impl Shared {
         self.state.lock().get(run_id).and_then(|s| s.window_id)
     }
 
-    async fn act(&self, action: Action) -> Result<String, ToolError> {
-        let res = self
-            .backend
-            .act(action)
-            .instrument(tracing::info_span!("desktop.act"))
+    async fn act(&self, action: Action, permit: &ActionPermit) -> Result<String, ToolError> {
+        let backend = Arc::clone(&self.backend);
+        let res = permit
+            .protect(async move { backend.act(action).await })
             .await
+            .map_err(exec_err)?
             .map_err(|e| derr(&e))?;
         let mut head = format!("dispatched: {}", res.dispatched);
         if let Some(v) = res.verified {
@@ -411,7 +415,12 @@ impl Shared {
         filter: &ObsFilter,
     ) -> Result<String, ToolError> {
         async {
+            let observation_epoch=self.control.as_ref().map_or(0,|gate|gate.observation_epoch());
             let snap = self.backend.snapshot(scope).await.map_err(|e| derr(&e))?;
+            if self.control.as_ref().map_or(0,|gate|gate.observation_epoch()) != observation_epoch {
+                self.state.lock().map.remove(run_id);
+                return Err(exec_err("human intervention changed the display during observation; obtain a fresh observation"));
+            }
             let rendered_nodes: Vec<_> = if filter.is_active() {
                 snap.nodes
                     .iter()
@@ -427,6 +436,7 @@ impl Shared {
                 let st = states.entry(run_id);
                 st.window_id = Some(snap.window.id);
                 st.generation = Some(snap.generation);
+                st.observation_epoch = observation_epoch;
                 st.marks.clear();
                 st.targets = rendered_nodes
                     .iter()
@@ -906,8 +916,21 @@ impl DesktopTool {
             }
             Op::Launch => {
                 let i: LaunchIn = parse(input)?;
-                sh.gate(run_id, "launch", i.executable.clone(), None)
+                let permit = sh
+                    .gate(run_id, "launch", i.executable.clone(), None)
                     .await?;
+                if permit.needs_observation()
+                    || sh.state.lock().get(run_id).is_some_and(|s| {
+                        s.observation_epoch
+                            != sh.control.as_ref().map_or(0, |g| g.observation_epoch())
+                    })
+                {
+                    sh.state.lock().map.remove(run_id);
+                    let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
                 let before: HashSet<u64> = sh
                     .backend
                     .windows()
@@ -920,14 +943,18 @@ impl DesktopTool {
                 // `launch_settle` budget. Zero settle makes the deadline "now":
                 // one sample, no sleep.
                 let deadline = tokio::time::Instant::now() + sh.settings.launch_settle;
-                let pid = sh
-                    .backend
-                    .launch(AppSpec {
-                        executable: i.executable,
-                        args: i.args,
+                let backend = Arc::clone(&sh.backend);
+                let pid = permit
+                    .protect(async move {
+                        backend
+                            .launch(AppSpec {
+                                executable: i.executable,
+                                args: i.args,
+                            })
+                            .await
                     })
-                    .instrument(tracing::info_span!("desktop.act", op = "launch"))
                     .await
+                    .map_err(exec_err)?
                     .map_err(|e| derr(&e))?;
                 let wins = sh.poll_launched_windows(&before, pid, deadline).await?;
                 let mut out = format!("launched pid={pid}\nwindows:\n");
@@ -992,8 +1019,20 @@ impl DesktopTool {
                 let method = parse_method(i.method.as_deref(), Shared::default_method(r))?;
                 let target = sh.target(run_id, r, i.expect_gen)?;
                 let (label, rect) = sh.describe(run_id, r);
-                sh.gate(run_id, "click", label, rect).await?;
-                let head = sh.act(Action::Click { target, method }).await?;
+                let permit = sh.gate(run_id, "click", label, rect).await?;
+                if permit.needs_observation()
+                    || sh.state.lock().get(run_id).is_some_and(|s| {
+                        s.observation_epoch
+                            != sh.control.as_ref().map_or(0, |g| g.observation_epoch())
+                    })
+                {
+                    sh.state.lock().map.remove(run_id);
+                    let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
+                let head = sh.act(Action::Click { target, method }, &permit).await?;
                 sh.settle_and_refresh(run_id, head).await
             }
             Op::Type => {
@@ -1004,14 +1043,29 @@ impl DesktopTool {
                 let r = parse_ref(&i.index)?;
                 let target = sh.target(run_id, r, i.expect_gen)?;
                 let (label, rect) = sh.describe(run_id, r);
-                sh.gate(run_id, "type", label, rect).await?;
+                let permit = sh.gate(run_id, "type", label, rect).await?;
+                if permit.needs_observation()
+                    || sh.state.lock().get(run_id).is_some_and(|s| {
+                        s.observation_epoch
+                            != sh.control.as_ref().map_or(0, |g| g.observation_epoch())
+                    })
+                {
+                    sh.state.lock().map.remove(run_id);
+                    let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
                 // Focus the element with a real click, then type into the focus.
-                sh.act(Action::Click {
-                    target,
-                    method: ClickMethod::Global,
-                })
+                sh.act(
+                    Action::Click {
+                        target,
+                        method: ClickMethod::Global,
+                    },
+                    &permit,
+                )
                 .await?;
-                let head = sh.act(Action::TypeText { text: i.text }).await?;
+                let head = sh.act(Action::TypeText { text: i.text }, &permit).await?;
                 sh.settle_and_refresh(run_id, head).await
             }
             Op::SetValue => {
@@ -1022,12 +1076,27 @@ impl DesktopTool {
                 let r = parse_ref(&i.index)?;
                 let target = sh.target(run_id, r, i.expect_gen)?;
                 let (label, rect) = sh.describe(run_id, r);
-                sh.gate(run_id, "set_value", label, rect).await?;
-                let head = sh
-                    .act(Action::SetValue {
-                        target,
-                        value: i.value,
+                let permit = sh.gate(run_id, "set_value", label, rect).await?;
+                if permit.needs_observation()
+                    || sh.state.lock().get(run_id).is_some_and(|s| {
+                        s.observation_epoch
+                            != sh.control.as_ref().map_or(0, |g| g.observation_epoch())
                     })
+                {
+                    sh.state.lock().map.remove(run_id);
+                    let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
+                let head = sh
+                    .act(
+                        Action::SetValue {
+                            target,
+                            value: i.value,
+                        },
+                        &permit,
+                    )
                     .await?;
                 sh.settle_and_refresh(run_id, head).await
             }
@@ -1048,15 +1117,30 @@ impl DesktopTool {
                     }
                     None => (keys.join("+"), None),
                 };
-                sh.gate(run_id, "key", label, rect).await?;
-                if let Some(target) = focus_target {
-                    sh.act(Action::Click {
-                        target,
-                        method: ClickMethod::Global,
+                let permit = sh.gate(run_id, "key", label, rect).await?;
+                if permit.needs_observation()
+                    || sh.state.lock().get(run_id).is_some_and(|s| {
+                        s.observation_epoch
+                            != sh.control.as_ref().map_or(0, |g| g.observation_epoch())
                     })
+                {
+                    sh.state.lock().map.remove(run_id);
+                    let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
+                if let Some(target) = focus_target {
+                    sh.act(
+                        Action::Click {
+                            target,
+                            method: ClickMethod::Global,
+                        },
+                        &permit,
+                    )
                     .await?;
                 }
-                let head = sh.act(Action::KeyPress { keys }).await?;
+                let head = sh.act(Action::KeyPress { keys }, &permit).await?;
                 sh.settle_and_refresh(run_id, head).await
             }
             Op::Scroll => {
@@ -1082,13 +1166,28 @@ impl DesktopTool {
                         ));
                     }
                 };
-                sh.gate(run_id, "scroll", label, rect).await?;
-                let head = sh
-                    .act(Action::Scroll {
-                        target,
-                        delta_x: i.dx,
-                        delta_y: i.dy,
+                let permit = sh.gate(run_id, "scroll", label, rect).await?;
+                if permit.needs_observation()
+                    || sh.state.lock().get(run_id).is_some_and(|s| {
+                        s.observation_epoch
+                            != sh.control.as_ref().map_or(0, |g| g.observation_epoch())
                     })
+                {
+                    sh.state.lock().map.remove(run_id);
+                    let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
+                let head = sh
+                    .act(
+                        Action::Scroll {
+                            target,
+                            delta_x: i.dx,
+                            delta_y: i.dy,
+                        },
+                        &permit,
+                    )
                     .await?;
                 sh.settle_and_refresh(run_id, head).await
             }
@@ -1104,9 +1203,22 @@ impl DesktopTool {
                     sh.target(run_id, b, i.expect_gen)?,
                 );
                 let ((la, ra), (lb, rb)) = (sh.describe(run_id, a), sh.describe(run_id, b));
-                sh.gate(run_id, "drag", format!("{la} to {lb}"), union(ra, rb))
+                let permit = sh
+                    .gate(run_id, "drag", format!("{la} to {lb}"), union(ra, rb))
                     .await?;
-                let head = sh.act(Action::Drag { from, to, method }).await?;
+                if permit.needs_observation()
+                    || sh.state.lock().get(run_id).is_some_and(|s| {
+                        s.observation_epoch
+                            != sh.control.as_ref().map_or(0, |g| g.observation_epoch())
+                    })
+                {
+                    sh.state.lock().map.remove(run_id);
+                    let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
+                let head = sh.act(Action::Drag { from, to, method }, &permit).await?;
                 sh.settle_and_refresh(run_id, head).await
             }
         }

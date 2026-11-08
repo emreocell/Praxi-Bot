@@ -1596,7 +1596,7 @@ fn click_after_state(index: u32) -> String {
 }
 
 #[tokio::test]
-async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
+async fn human_driving_waits_then_discards_stale_click_without_model_retry() {
     let (t, desktop) = setup_desktop();
     let (_, chat) = make_chat(&t).await;
     let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
@@ -1617,15 +1617,14 @@ async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
     .await;
     let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
     assert!(state.contains("Button 2"), "reads are not gated: {state}");
-    let (r, events) = run_and_reply_seen(&t, &chat, &click_after_state(3)).await;
-    assert!(r.contains("taken control of the desktop"), "{r}");
-    // "At once" means no round trip to the app (which would have emitted a
-    // `control_requested` and waited for its answer), not a wall-clock bound.
+    let instruction = click_after_state(3);
+    let pending = run_and_reply_seen(&t, &chat, &instruction);
+    tokio::pin!(pending);
     assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, protocol::Event::ControlRequested(_))),
-        "no round trip while the human drives: {events:?}"
+        tokio::time::timeout(Duration::from_millis(100), &mut pending)
+            .await
+            .is_err(),
+        "paused call must wait"
     );
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
 
@@ -1648,6 +1647,16 @@ async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
         Some(json!({"mode": "idle", "release": true})),
     )
     .await;
+    let (r, events) = pending.await;
+    assert!(r.contains("previous action discarded"), "{r}");
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, protocol::Event::ControlRequested(_))),
+        "pause should not publish overlays"
+    );
+    assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
+
     assert!(t.state.hub().latched().is_none());
     // Registered but silent: refused after the long timeout (600 ms here).
     let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;

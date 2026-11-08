@@ -33,7 +33,7 @@ use tool_registry::{Tool, ToolRegistry};
 
 pub use browser::{BrowserDriver, BrowserSettings, CdpDriver, Wait};
 pub use checkpoint::{Checkpoint, CheckpointEntry, CheckpointStore};
-pub use control::{ControlRequest, DesktopControlGate};
+pub use control::{ActionPermit, ControlRequest, DesktopControlGate};
 pub use desktop::{DesktopSettings, SharedOcr};
 pub use meta::{META_TOOL_NAMES, QUESTION_CARD_KIND, TODO_LIST_KIND, TodoItem, TodoStatus};
 pub use script::{
@@ -46,6 +46,9 @@ pub use connector_email;
 pub struct BuiltinConfig {
     /// Application data directory (checkpoints, spill files, screenshots).
     pub data_dir: PathBuf,
+    /// Existing platform/CDP adapters only. No screenshot-tool fallback or new browser.
+    pub view_registry: Option<Arc<live_view::TargetRegistry>>,
+    pub view_targets: Vec<Arc<dyn live_view::ViewTarget>>,
     /// Desktop backend (local or remote). Desktop tools are skipped when `None`.
     pub desktop: Option<Arc<dyn DesktopBackend>>,
     /// OCR engine used for set-of-marks when the accessibility tree is weak.
@@ -76,6 +79,8 @@ impl BuiltinConfig {
             browser_settings: BrowserSettings::isolated(&data_dir),
             data_dir,
             desktop: None,
+            view_registry: None,
+            view_targets: Vec::new(),
             ocr: None,
             desktop_settings: DesktopSettings::default(),
             browser: None,
@@ -99,6 +104,11 @@ impl BuiltinConfig {
 /// tools will be registered in.
 #[must_use]
 pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<Arc<dyn Tool>> {
+    if let Some(registry) = &cfg.view_registry {
+        for target in &cfg.view_targets {
+            registry.register(Arc::clone(target));
+        }
+    }
     let mut all: Vec<Arc<dyn Tool>> = Vec::new();
     if let Some(backend) = cfg.desktop {
         all.extend(desktop::tools(
@@ -112,10 +122,15 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
     let driver: Arc<dyn BrowserDriver> = cfg
         .browser
         .unwrap_or_else(|| Arc::new(CdpDriver::new(cfg.browser_settings)));
-    all.extend(browser::tools(driver, &cfg.data_dir, cfg.control));
+    all.extend(browser::tools(driver, &cfg.data_dir, cfg.control.clone()));
     all.extend(files::tools(&cfg.data_dir));
     all.push(shell::tool(&cfg.data_dir));
-    all.push(script::tool(registry.clone(), cfg.gate, cfg.script_limits));
+    all.push(script::tool_with_control(
+        registry.clone(),
+        cfg.gate,
+        cfg.script_limits,
+        cfg.control,
+    ));
     all.extend(meta::tools());
     if let Some(email) = &cfg.email {
         all.extend(connector_email::tools(email));
@@ -273,6 +288,32 @@ mod tests {
         let _ = register_builtin_tools(&reg, cfg);
         assert!(reg.get("desktop_click").is_none());
         assert!(reg.get("fs_read").is_some());
+    }
+
+    struct OneAdmission(std::sync::atomic::AtomicUsize);
+    #[async_trait]
+    impl DesktopControlGate for OneAdmission {
+        async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+            if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                Ok(())
+            } else {
+                Err("new admission closed".into())
+            }
+        }
+    }
+    #[tokio::test]
+    async fn script_computer_calls_inherit_one_lifetime_admission() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::new();
+        let gate = Arc::new(OneAdmission(std::sync::atomic::AtomicUsize::new(0)));
+        let browser = Arc::new(browser::fake::FakeBrowser::default());
+        let mut config = BuiltinConfig::new(dir.path().into(), Arc::new(AllowAll));
+        config.browser = Some(browser.clone());
+        config.control = Some(gate.clone());
+        let _ = register_builtin_tools(&registry, config);
+        registry.get("script_run").unwrap().call(&tool_registry::ToolContext::default(),serde_json::json!({"code":"await tools.call('browser_click',{ref:'e1'}); return await tools.call('browser_press',{key:'Enter'});"})).await.unwrap();
+        assert_eq!(gate.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(browser.calls.lock().len(), 2);
     }
 
     #[tokio::test]

@@ -701,7 +701,7 @@ pub(crate) async fn usage(
 
 // --------------------------------------------------------------- control
 
-fn control_state_dto(s: &AppState) -> ControlStateDto {
+pub(crate) fn control_state_dto(s: &AppState) -> ControlStateDto {
     let reg = s.hub().registration();
     ControlStateDto {
         mode: reg.map(|(m, _)| m),
@@ -710,6 +710,8 @@ fn control_state_dto(s: &AppState) -> ControlStateDto {
         }),
         app_connected: s.hub().app_connected(),
         latched: s.hub().latched(),
+        takeover: s.hub().takeover().map(|t| t.info),
+        release: None,
     }
 }
 
@@ -717,10 +719,30 @@ fn control_state_dto(s: &AppState) -> ControlStateDto {
 /// desktop again.  This is the only way (besides a daemon restart) to end a
 /// pause; heartbeats and a lost app never do.  Idempotent.
 #[utoipa::path(post, path = "/v1/control/release", tag = "control", security(("bearer" = [])),
-    responses((status = 200, body = ControlStateDto)))]
-pub(crate) async fn release_control(State(s): State<AppState>) -> Json<ControlStateDto> {
-    s.hub().release();
-    Json(control_state_dto(&s))
+    request_body = Option<live_view::ReleaseRequest>,
+    responses((status = 200, body = ControlStateDto), (status = 403, body = ErrorBody), (status = 409, body = ErrorBody)))]
+pub(crate) async fn release_control(
+    State(s): State<AppState>,
+    axum::Extension(actor): axum::Extension<crate::live_view::Actor>,
+    body: axum::body::Bytes,
+) -> Result<Json<ControlStateDto>, ApiError> {
+    let mut dto;
+    if body.is_empty() {
+        s.hub().try_release().map_err(ApiError::conflict)?;
+        dto = control_state_dto(&s);
+    } else {
+        let request: live_view::ReleaseRequest = serde_json::from_slice(&body)
+            .map_err(|_| ApiError::bad_request("invalid release request"))?;
+        let result = crate::dto::ReleaseResult {
+            takeover_id: request.takeover_id,
+            request_id: request.request_id,
+            state: "released".into(),
+        };
+        crate::live_view::release(&s, &actor, request).await?;
+        dto = control_state_dto(&s);
+        dto.release = Some(result);
+    }
+    Ok(Json(dto))
 }
 
 /// The newest daemon-wide event cursor (`gseq`, `0` = no event yet): what a
@@ -759,9 +781,11 @@ pub(crate) async fn get_control_state(State(s): State<AppState>) -> Json<Control
 pub(crate) async fn put_control_state(
     State(s): State<AppState>,
     ApiJson(input): ApiJson<ControlStateInput>,
-) -> Json<ControlStateDto> {
-    s.hub().apply_state(input.mode, input.release);
-    Json(control_state_dto(&s))
+) -> Result<Json<ControlStateDto>, ApiError> {
+    s.hub()
+        .try_apply_state(input.mode, input.release)
+        .map_err(ApiError::conflict)?;
+    Ok(Json(control_state_dto(&s)))
 }
 
 /// Answer a `control_requested` event: let the action `proceed` (after the

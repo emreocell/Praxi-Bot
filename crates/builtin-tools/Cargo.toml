@@ -11,6 +11,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+live-view = { workspace = true }
 async-trait.workspace = true
 browser-cdp = { path = "../browser-cdp", version = "0.1.0" }
 connector-email = { path = "../connector-email", version = "0.1.0" }

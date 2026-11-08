@@ -18,6 +18,7 @@ pub mod dto;
 pub mod error;
 #[cfg(any(test, feature = "fake-provider"))]
 pub mod fake;
+pub mod live_view;
 pub mod mcp;
 mod mcp_routes;
 pub mod openapi;
@@ -130,6 +131,8 @@ struct Inner {
     started: Instant,
     shutdown: CancellationToken,
     hub: Arc<ControlHub>,
+    live_view: Arc<live_view::LiveView>,
+    refresh_rx: parking_lot::Mutex<Option<tokio::sync::watch::Receiver<u64>>>,
     provider_host: OnceLock<ProviderHost>,
     /// MCP server management (see [`AppState::set_mcp`]).
     mcp: OnceLock<Arc<dyn McpControl>>,
@@ -165,6 +168,23 @@ impl AppState {
         storage: Arc<Storage>,
         cfg: DaemonConfig,
     ) -> Result<Self, storage::StorageError> {
+        Self::with_view_registry(
+            agent,
+            storage,
+            cfg,
+            Arc::new(::live_view::TargetRegistry::default()),
+        )
+    }
+
+    /// Assemble with the same target registry supplied to `BuiltinConfig`.
+    /// # Errors
+    /// Returns storage errors while loading or creating the local user.
+    pub fn with_view_registry(
+        agent: AgentLoop,
+        storage: Arc<Storage>,
+        cfg: DaemonConfig,
+        registry: Arc<::live_view::TargetRegistry>,
+    ) -> Result<Self, storage::StorageError> {
         let user_id = if let Some(u) = storage.list_users()?.into_iter().next() {
             u.id
         } else {
@@ -181,6 +201,12 @@ impl AppState {
             storage.data_dir().join("control-latch.json"),
         ));
         agent.set_control_gate(hub.clone());
+        let live_view = Arc::new(live_view::LiveView::with_registry(registry));
+        // A watch channel coalesces completion refreshes, including partial failures.
+        let (refresh_tx, refresh_rx) = tokio::sync::watch::channel(0u64);
+        hub.set_refresh_hook(Arc::new(move |seq| {
+            refresh_tx.send_replace(seq);
+        }));
         let policy_load_error = match policy::load_policy(storage.data_dir()) {
             Ok(Some(p)) => {
                 agent.set_global_policy(p);
@@ -208,6 +234,8 @@ impl AppState {
             started: Instant::now(),
             shutdown: CancellationToken::new(),
             hub,
+            live_view,
+            refresh_rx: parking_lot::Mutex::new(Some(refresh_rx)),
             provider_host: OnceLock::new(),
             mcp: OnceLock::new(),
             secrets: OnceLock::new(),
@@ -336,6 +364,30 @@ impl AppState {
     pub(crate) fn set_detector(&self, detector: Arc<cli_provider::Detector>) {
         *self.0.detector.write() = detector;
     }
+    /// Existing capture/input instances are registered here by the embedder.
+    #[must_use]
+    pub fn live_view(&self) -> &Arc<live_view::LiveView> {
+        if let Ok(runtime) = tokio::runtime::Handle::try_current()
+            && let Some(mut receiver) = self.0.refresh_rx.lock().take()
+        {
+            let weak_live = Arc::downgrade(&self.0.live_view);
+            runtime.spawn(async move {
+                while receiver.changed().await.is_ok() {
+                    let seq = *receiver.borrow_and_update();
+                    let Some(live) = weak_live.upgrade() else {
+                        break;
+                    };
+                    for target in live.capture_targets() {
+                        if let Some(target) = live.registry.get(target) {
+                            let _ = target.frame_source().request_refresh(seq).await;
+                        }
+                    }
+                }
+            });
+        }
+        &self.0.live_view
+    }
+
     pub(crate) fn hub(&self) -> &Arc<ControlHub> {
         &self.0.hub
     }
@@ -428,16 +480,36 @@ pub fn router(state: AppState) -> Router {
     api_routes()
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
+            live_view::audit_ingress,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
             auth::guard,
         ))
         .with_state(state)
 }
 
 fn api_routes() -> Router<AppState> {
+    use live_view as v;
     use mcp_routes as m;
     use routes as r;
     Router::new()
         .route("/v1/health", get(r::health))
+        .route("/v1/view/targets", get(v::targets))
+        .route("/v1/view/sessions", post(v::create_session))
+        .route(
+            "/v1/view/sessions/{id}",
+            axum::routing::patch(v::update_session).delete(v::delete_session),
+        )
+        .route("/v1/view/sessions/{id}/heartbeat", put(v::heartbeat))
+        .route("/v1/view/sessions/{id}/frames", get(v::stream::frames))
+        .route(
+            "/v1/view/sessions/{id}/input",
+            post(v::input::input).layer(axum::extract::DefaultBodyLimit::max(
+                ::live_view::MAX_BATCH_BYTES,
+            )),
+        )
+        .route("/v1/control/takeover", post(v::takeover))
         .route("/v1/openapi.json", get(openapi::serve_openapi))
         .route("/v1/bots", get(r::list_bots).post(r::create_bot))
         .route(

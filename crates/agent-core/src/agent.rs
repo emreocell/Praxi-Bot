@@ -83,6 +83,10 @@ impl AgentLoop {
                 global_policy: RwLock::new(cfg.global_policy.clone()),
                 policy_locked: std::sync::atomic::AtomicBool::new(false),
                 control: RwLock::new(None),
+                computer_slots: Arc::new(tokio::sync::Semaphore::new(
+                    cfg.max_computer_runs
+                        .clamp(1, tokio::sync::Semaphore::MAX_PERMITS),
+                )),
                 resolver: PermissionResolver::new(),
                 cfg,
                 profiles: RwLock::new(HashMap::new()),

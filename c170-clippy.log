@@ -1,0 +1,7 @@
+    Checking builtin-tools v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\builtin-tools)
+    Checking workflow-replay v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\workflow-replay)
+    Checking agent-core v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\agent-core)
+    Checking daemon-api v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\daemon-api)
+    Checking remote-api v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\remote-api)
+    Checking cli v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\apps\cli)
+    Finished `dev` profile [unoptimized] target(s) in 17.12s

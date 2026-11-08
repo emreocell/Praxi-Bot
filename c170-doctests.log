@@ -1,0 +1,120 @@
+    Blocking waiting for file lock on build directory
+   Compiling windows-sys v0.61.2
+   Compiling uuid v1.26.1
+   Compiling schemars v0.8.22
+   Compiling digest v0.11.3
+   Compiling sha2 v0.11.1
+   Compiling curve25519-dalek v5.0.0
+   Compiling protocol v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\protocol)
+   Compiling tool-registry v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\tool-registry)
+   Compiling storage v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\storage)
+   Compiling permission-engine v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\permission-engine)
+   Compiling ed25519-dalek v3.0.0
+   Compiling iroh-base v1.4.1
+   Compiling memory-store v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\memory-store)
+   Compiling socket2 v0.6.5
+   Compiling mio v1.2.4
+   Compiling schannel v0.1.30
+   Compiling tempfile v3.27.0
+   Compiling fs4 v1.1.0
+   Compiling rustls-platform-verifier v0.7.1
+   Compiling netdev v0.45.1
+   Compiling anstyle-query v1.1.5
+   Compiling anstyle-wincon v3.0.11
+   Compiling anstream v1.0.0
+   Compiling noq-udp v1.4.0
+   Compiling ipconfig v0.3.4
+   Compiling skills v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\skills)
+   Compiling rustls-native-certs v0.8.5
+   Compiling tokio v1.54.1
+   Compiling clap_builder v4.6.7
+   Compiling clap v4.6.7
+   Compiling tokio-util v0.7.20
+   Compiling tokio-rustls v0.26.6
+   Compiling tower v0.5.3
+   Compiling live-view v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\live-view)
+   Compiling process-wrap v10.0.1
+   Compiling tokio-tungstenite v0.26.2
+   Compiling async-imap v0.12.0
+   Compiling script-runtime v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\script-runtime)
+   Compiling backon v1.6.0
+   Compiling mail-send v0.5.2
+   Compiling browser-cdp v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\browser-cdp)
+   Compiling tower-http v0.6.11
+   Compiling connector-email v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\connector-email)
+   Compiling h2 v0.4.20
+   Compiling n0-future v0.3.2
+   Compiling task-runtime v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\task-runtime)
+   Compiling tokio-stream v0.1.19
+   Compiling tokio-websockets v0.13.3
+   Compiling scheduler v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\scheduler)
+   Compiling n0-watcher v1.0.1
+   Compiling netwatch v0.19.3
+   Compiling noq v1.4.0
+   Compiling builtin-tools v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\builtin-tools)
+   Compiling hyper v1.12.0
+   Compiling workflow-replay v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\workflow-replay)
+   Compiling hyper-util v0.1.21
+   Compiling hyper-rustls v0.27.10
+   Compiling axum v0.8.9
+   Compiling igd-next v0.17.1
+   Compiling reqwest v0.12.28
+   Compiling reqwest v0.13.5
+   Compiling portmapper v0.19.3
+   Compiling agent-router v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\agent-router)
+   Compiling provider-catalog v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\provider-catalog)
+   Compiling n0-dns-resolver v0.1.0
+   Compiling iroh-dns v1.4.1
+   Compiling iroh-relay v1.4.1
+   Compiling cli-provider v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\cli-provider)
+   Compiling agent-core v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\agent-core)
+   Compiling iroh v1.4.1
+   Compiling daemon-api v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\daemon-api)
+   Compiling evals v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\evals)
+   Compiling peer-network v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\peer-network)
+   Compiling remote-api v0.1.0 (C:\Users\emreo\OneDrive\Masaüstü\emre\bot\project-wt-c170\crates\remote-api)
+    Finished `test` profile [unoptimized] target(s) in 1m 03s
+   Doc-tests agent_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests builtin_tools
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests daemon_api
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests evals
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests live_view
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests remote_api
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests workflow_replay
+
+running 1 test
+test crates\workflow-replay\src\tool.rs - tool (line 11) ... ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 1.87s; merged doctests compilation took 1.64s

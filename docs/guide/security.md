@@ -97,3 +97,30 @@ Please do not post exploit details in a public issue. The repository does not
 list a dedicated security contact yet (**Planned**); contact the maintainers
 privately through the channel you use to reach them, and keep the report
 confidential until it is fixed.
+
+
+## Live screen privacy and human control
+
+Live-view pixels can contain passwords, OTPs, private documents and notifications.
+They cannot be reliably redacted. A desktop target shares the entire selected
+screen; a browser target shares page content rather than OS dialogs or browser
+chrome. Treat `screen:view` and `screen:input` as separate powerful privileges.
+Human input into a desktop terminal carries full computer authority.
+
+Live-view frames and human input payloads stay in the dedicated memory-only
+transport. They never enter NDJSON/replay, chat attachments, audit, trace,
+telemetry, or model-provider requests. The live-view last-frame cache is never
+an input to screenshot tools. An explicit normal bot screenshot uses its
+existing permission and data path independently. Product-managed persistence is
+prohibited; OS swap/hibernation/dumps and third-party application recordings are
+outside that guarantee.
+
+Input requires the authenticated session owner to hold the active persistent
+global takeover latch, with a valid epoch and current target/frame geometry.
+Disconnect, expiry, revoke and restart invalidate input, reset injected keys best
+effort and retain pause. A legacy release request cannot release an owned or
+restored uncertain latch. Resume requires explicit owned release or privileged
+recovery, durable safe continuation notes and successful reset. Audit stores only
+actor/target IDs, event-type counts, sequence ranges, timing and fixed outcomes;
+audit failure denies authorization and suspends input. See the
+[live-view API and integration status](../api/live-view.md).

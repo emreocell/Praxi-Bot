@@ -1,30 +1,15 @@
-//! The desktop control bridge, daemon side.
+//! Persistent global computer-control authority (ADR 0029).
 //!
-//! Desktop actions of a bot run inside this process, but the on-screen overlay
-//! (and the "human has the wheel" state) live in the Tauri desktop app.  The
-//! [`ControlHub`] connects the two:
+//! Builtin desktop/browser tools and workflow replay retain an admission permit
+//! until backend completion. Takeover closes admission durably, cancels pending
+//! overlay decisions and drains admitted work before human input can become active.
+//! Headless mutations obey the same latch without asking for a local highlight.
+//! Paused tool admission is cancellable; resumption requests fresh observation.
 //!
-//! * before every mutating desktop action the agent loop calls
-//!   [`ControlGate::before_action`] on the hub;
-//! * the hub answers at once when it can (no desktop app connected: proceed;
-//!   the app reported `human_driving` / `paused`: refuse), otherwise it emits a
-//!   `control_requested` event and waits for the app's
-//!   `POST /v1/control/{request_id}`;
-//! * the app registers as *controller* with `PUT /v1/control/state`, a
-//!   heartbeat that expires after [`ControlConfig::heartbeat_ttl`].  Without an
-//!   answer the hub proceeds after [`ControlConfig::proceed_timeout`] for an
-//!   app that is merely connected, but refuses after
-//!   [`ControlConfig::refuse_timeout`] for a registered controller.
-//!
-//! `paused` / `human_driving` are **latched** (SEC-07): once reported they
-//! refuse every action until an explicit [`ControlHub::release`]
-//! (`POST /v1/control/release`).  The heartbeat TTL only decides whether a
-//! controller counts as live; losing the app (crash, restart, closed stream)
-//! never silently resumes the bot.  No heartbeat releases it, `idle` /
-//! `bot_driving` included (a restarted UI reports `idle`): only
-//! `POST /v1/control/release` or a `PUT /v1/control/state` that carries
-//! `release: true` does.  The latch is persisted in the data directory
-//! ([`ControlHub::with_latch_file`]), so it survives a daemon restart.
+//! Heartbeats, lost streams, expiry and restart never clear a latch. Owned input
+//! and release are actor/session/target/epoch bound. Legacy release works only on
+//! unowned, non-restored latches. Durable safe notes precede latch release and wakeup.
+//! Global SSE controller registration is separate from memory-only frame viewers.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -33,7 +18,10 @@ use std::time::{Duration, Instant};
 use agent_core::{ControlGate, ControlRequest};
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use tokio::sync::oneshot;
+use tokio::sync::{Notify, oneshot};
+
+mod owned;
+pub use owned::{OwnedTakeover, ReleaseJournal};
 use uuid::Uuid;
 
 use crate::dto::{ControlMode, ControlVerdict};
@@ -72,9 +60,19 @@ struct State {
     /// `Paused` / `HumanDriving`, kept until [`ControlHub::release`] (no TTL).
     latched: Option<ControlMode>,
     pending: HashMap<Uuid, oneshot::Sender<Answer>>,
+    owned: Option<OwnedTakeover>,
+    epoch: u64,
+    active_actions: usize,
+    active_runs: HashMap<protocol::RunId, usize>,
+    affected_runs: std::collections::BTreeSet<protocol::RunId>,
+    releases: Vec<ReleaseJournal>,
+    persistence_error: bool,
+    require_recovery: bool,
 }
 
 /// State of the bridge; see the module docs.
+type RefreshHook = std::sync::Arc<dyn Fn(u64) + Send + Sync>;
+
 pub struct ControlHub {
     cfg: ControlConfig,
     state: Mutex<State>,
@@ -82,6 +80,9 @@ pub struct ControlHub {
     subscribers: AtomicUsize,
     /// Where the latch is persisted (`None`: in memory only).
     latch_file: Option<std::path::PathBuf>,
+    changed: Notify,
+    refresh: Mutex<Option<RefreshHook>>,
+    action_seq: std::sync::atomic::AtomicU64,
 }
 
 /// Counts an open global event stream while it lives.
@@ -128,6 +129,9 @@ impl ControlHub {
             state: Mutex::new(State::default()),
             subscribers: AtomicUsize::new(0),
             latch_file: None,
+            changed: Notify::new(),
+            refresh: Mutex::new(None),
+            action_seq: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -136,47 +140,16 @@ impl ControlHub {
     #[must_use]
     pub fn with_latch_file(cfg: ControlConfig, path: std::path::PathBuf) -> Self {
         let mut hub = Self::new(cfg);
-        let latched = match std::fs::read_to_string(&path) {
-            Ok(text) => {
-                let mode = serde_json::from_str::<ControlMode>(text.trim())
-                    .ok()
-                    .filter(|m| refused_while(*m).is_some());
-                if mode.is_none() {
-                    eprintln!("daemon-api: WARNING: control latch file unreadable; staying paused");
-                }
-                Some(mode.unwrap_or(ControlMode::Paused))
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => {
-                eprintln!(
-                    "daemon-api: WARNING: control latch file unreadable ({e}); staying paused"
-                );
-                Some(ControlMode::Paused)
-            }
-        };
-        hub.state.get_mut().latched = latched;
+        owned::restore(hub.state.get_mut(), &path);
         hub.latch_file = Some(path);
         hub
     }
 
-    /// Write (or remove) the latch file; best effort, reported on stderr.
-    fn persist(&self, latched: Option<ControlMode>) {
-        let Some(path) = &self.latch_file else { return };
-        let result = match latched {
-            Some(m) => serde_json::to_vec(&m)
-                .map_err(std::io::Error::other)
-                .and_then(|bytes| {
-                    let tmp = path.with_extension("tmp");
-                    std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path))
-                }),
-            None => match std::fs::remove_file(path) {
-                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
-                _ => Ok(()),
-            },
-        };
-        if let Err(e) = result {
-            eprintln!("daemon-api: WARNING: could not persist the control latch: {e}");
-        }
+    /// Persist while holding the authority lock. Errors keep admission closed.
+    fn persist(&self, st: &State) -> Result<(), String> {
+        self.latch_file.as_ref().map_or(Ok(()), |p| {
+            owned::persist(st, p).map_err(|_| "control persistence failed".into())
+        })
     }
 
     /// Register the app as controller / refresh the heartbeat.
@@ -190,17 +163,38 @@ impl ControlHub {
     /// [`ControlHub::put_state`]; with `release` an `Idle` / `BotDriving` mode
     /// also clears the latch (the user's explicit resume).
     pub fn apply_state(&self, mode: ControlMode, release: bool) {
+        let _ = self.try_apply_state(mode, release);
+    }
+
+    /// Fallible compatibility path. Owned/restart pauses require explicit recovery.
+    /// # Errors
+    /// Rejects owned/restart release bypasses and failed durable writes.
+    pub fn try_apply_state(&self, mode: ControlMode, release: bool) -> Result<(), String> {
         let mut st = self.state.lock();
-        st.registration = Some((mode, Instant::now()));
+        if release && (st.owned.is_some() || st.require_recovery) {
+            return Err("owned takeover requires authenticated release/recovery".into());
+        }
+        if st.owned.is_some() && refused_while(mode).is_some() {
+            return Err("owned takeover controls the latch".into());
+        }
         let before = st.latched;
+        st.registration = Some((mode, Instant::now()));
         if refused_while(mode).is_some() {
             st.latched = Some(mode);
+            st.pending.clear();
         } else if release {
             st.latched = None;
         }
         if st.latched != before {
-            self.persist(st.latched);
+            st.epoch = st.epoch.saturating_add(1);
         }
+        if let Err(e) = self.persist(&st) {
+            st.latched = Some(ControlMode::Paused);
+            st.persistence_error = true;
+            return Err(e);
+        }
+        self.changed.notify_waiters();
+        Ok(())
     }
 
     /// The latched `Paused` / `HumanDriving` mode, if any (never expires).
@@ -213,17 +207,28 @@ impl ControlHub {
     /// returns the mode that was latched.  A registration that still reports
     /// the refused mode is reset to `idle`.
     pub fn release(&self) -> Option<ControlMode> {
+        self.try_release().ok().flatten()
+    }
+
+    /// # Errors
+    /// Rejects owned/restart release bypasses and failed durable writes.
+    pub fn try_release(&self) -> Result<Option<ControlMode>, String> {
         let mut st = self.state.lock();
+        if st.owned.is_some() || st.require_recovery {
+            return Err("owned takeover requires authenticated release/recovery".into());
+        }
         let was = st.latched.take();
         if was.is_some() {
-            self.persist(None);
+            st.epoch = st.epoch.saturating_add(1);
         }
-        if let Some((m, at)) = st.registration
-            && refused_while(m).is_some()
-        {
-            st.registration = Some((ControlMode::Idle, at));
+        if let Err(e) = self.persist(&st) {
+            st.latched = Some(ControlMode::Paused);
+            st.persistence_error = true;
+            return Err(e);
         }
-        was
+        st.registration = None;
+        self.changed.notify_waiters();
+        Ok(was)
     }
 
     /// The mode of a live registration and the time left, `None` when no app
@@ -257,7 +262,11 @@ impl ControlHub {
         verdict: ControlVerdict,
         reason: Option<String>,
     ) -> bool {
-        match self.state.lock().pending.remove(&request_id) {
+        let mut st = self.state.lock();
+        if st.latched.is_some() {
+            return false;
+        }
+        match st.pending.remove(&request_id) {
             Some(tx) => tx.send(Answer { verdict, reason }).is_ok(),
             None => false,
         }
@@ -266,6 +275,27 @@ impl ControlHub {
 
 #[async_trait]
 impl ControlGate for ControlHub {
+    async fn admit_background_action(
+        self: std::sync::Arc<Self>,
+        req: ControlRequest,
+    ) -> Result<builtin_tools::ActionPermit, String> {
+        self.admit_owned_action(req, &|| {}, false).await
+    }
+    fn observation_epoch(&self) -> u64 {
+        self.state.lock().epoch
+    }
+    fn is_paused(&self) -> bool {
+        self.latched().is_some()
+    }
+
+    async fn admit_action(
+        self: std::sync::Arc<Self>,
+        req: ControlRequest,
+        publish: &(dyn Fn() + Send + Sync),
+    ) -> Result<builtin_tools::ActionPermit, String> {
+        self.admit_owned_action(req, publish, true).await
+    }
+
     async fn before_action(
         &self,
         req: ControlRequest,
@@ -296,7 +326,11 @@ impl ControlGate for ControlHub {
         } else {
             self.cfg.proceed_timeout
         };
-        match tokio::time::timeout(wait, rx).await {
+        let answer = tokio::time::timeout(wait, rx).await;
+        if let Some(msg) = self.latched().and_then(refused_while) {
+            return Err(msg.into());
+        }
+        match answer {
             Ok(Ok(Answer {
                 verdict: ControlVerdict::Proceed,
                 ..
@@ -317,7 +351,10 @@ impl ControlGate for ControlHub {
                     .to_owned()
             })),
             // The sender vanished (hub state dropped): treat like no answer.
-            Ok(Err(_)) | Err(_) if !registered => Ok(()),
+            Ok(Err(_)) | Err(_) if !registered => match self.latched().and_then(refused_while) {
+                Some(msg) => Err(msg.into()),
+                None => Ok(()),
+            },
             Ok(Err(_)) | Err(_) => Err(format!(
                 "The desktop app did not confirm this action within {} s, so it was not \
                  performed. You may retry once; if it keeps failing, tell the user.",
@@ -574,7 +611,12 @@ mod tests {
         hub.put_state(ControlMode::HumanDriving);
         let again = ControlHub::with_latch_file(fast(), f.clone());
         assert_eq!(again.latched(), Some(ControlMode::HumanDriving));
-        assert_eq!(again.release(), Some(ControlMode::HumanDriving));
+        assert!(
+            again.try_release().is_err(),
+            "restart requires explicit ownerless recovery"
+        );
+        assert!(f.exists());
+        assert_eq!(hub.release(), Some(ControlMode::HumanDriving));
         assert!(!f.exists());
         assert_eq!(
             ControlHub::with_latch_file(fast(), f.clone()).latched(),

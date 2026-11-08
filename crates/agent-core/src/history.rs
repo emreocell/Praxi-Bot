@@ -89,14 +89,15 @@ pub(crate) fn build_messages(
         MessageRole::System,
         system_prompt(profile, subagent, skills),
     )];
-    if let Some(chat) = run.chat_id.filter(|_| !subagent) {
+    if let Some(chat) = run.chat_id {
         for m in storage.list_messages(chat)? {
-            if m.run_id == Some(run.id) {
+            if m.run_id == Some(run.id) || (subagent && m.role != "system") {
                 continue;
             }
             match m.role.as_str() {
                 "user" => out.push(Message::text(MessageRole::User, m.content)),
                 "assistant" => out.push(Message::text(MessageRole::Assistant, m.content)),
+                "system" => out.push(Message::text(MessageRole::System, m.content)),
                 _ => {}
             }
         }
