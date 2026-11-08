@@ -130,7 +130,14 @@ fn copy_recursive(
     rel: &str,
     links: &mut Vec<LinkRecord>,
 ) -> io::Result<()> {
-    crate::files::vet_checkpoint_path(from)?;
+    // A protected descendant is skipped (not copied, not followed). The
+    // top-level path is rejected by `vet_checkpoint_path` in `create` before
+    // this runs, so a request whose own path is credential still fails.
+    // Any other vet failure (UNC, device, roots) still aborts the checkpoint.
+    match crate::files::vet_checkpoint_node(from)? {
+        crate::files::CheckpointNode::SkipProtected => return Ok(()),
+        crate::files::CheckpointNode::Proceed => {}
+    }
     let meta = fs::symlink_metadata(from)?;
     if is_link(&meta) {
         let target = fs::read_link(from)?;
@@ -212,6 +219,22 @@ fn cmd_unsafe(s: &str) -> bool {
 /// target's content, and failing that skip it. Returns a warning if the link
 /// could not be restored as a link.
 fn restore_link(target: &Path, at: &Path, dir: bool) -> Option<String> {
+    // Classify the place and the target before creating the link. `mklink`
+    // that succeeds would otherwise exist even when the target is refused.
+    if let Err(e) = crate::files::vet_checkpoint_write(at) {
+        return Some(format!(
+            "link {} -> {} skipped: {e}",
+            at.display(),
+            target.display()
+        ));
+    }
+    if let Err(e) = crate::files::vet_link_target(at, target) {
+        return Some(format!(
+            "link {} -> {} skipped: {e}",
+            at.display(),
+            target.display()
+        ));
+    }
     let err = match make_link(target, at, dir) {
         Ok(()) => return None,
         Err(e) => e,
@@ -261,18 +284,6 @@ fn restore_link(target: &Path, at: &Path, dir: bool) -> Option<String> {
             target.display()
         )
     })
-}
-
-fn remove_any(p: &Path) -> io::Result<()> {
-    match fs::symlink_metadata(p) {
-        // A link is removed itself, never its target. A directory symlink or
-        // junction on Windows needs `remove_dir`.
-        Ok(m) if is_link(&m) => fs::remove_file(p).or_else(|_| fs::remove_dir(p)),
-        Ok(m) if m.is_dir() => fs::remove_dir_all(p),
-        Ok(_) => fs::remove_file(p),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e),
-    }
 }
 
 fn read_links(dir: &Path) -> Vec<LinkRecord> {
@@ -418,7 +429,10 @@ impl CheckpointStore {
         let mut warnings = Vec::new();
         for e in &cp.entries {
             let target = Path::new(&e.path);
-            remove_any(target)?;
+            // Walk ancestors and require an identity before delete or copy.
+            // A failed lookup is not an absent path that is safe to write.
+            crate::files::vet_checkpoint_write(target)?;
+            crate::files::remove_checkpoint_target(target)?;
             if let Some(rel) = &e.backup {
                 let mut ignored = Vec::new();
                 let src = dir.join(rel);

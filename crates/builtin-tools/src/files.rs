@@ -57,8 +57,10 @@ enum Op {
 struct Shared {
     checkpoints: CheckpointStore,
     spill_dir: PathBuf,
-    /// Application data directory, lexically absolute. Credential files under
-    /// it (and well-known credential names anywhere) are refused.
+    /// Application data directory. When the directory exists this is the long
+    /// path from `final_identity`, so an 8.3 `data_dir` still matches the
+    /// normalized path the tools compare. Credential files under it (and
+    /// well-known credential names anywhere) are refused.
     data_dir: PathBuf,
     /// When non-empty, every fs path must stay inside one of these directories.
     allowed_roots: Vec<PathBuf>,
@@ -101,8 +103,7 @@ pub(crate) fn tools_bounded(
         Err(()) => (Vec::new(), true),
     };
     let grants = prepare_grants(grants);
-    let data_dir =
-        lexical_absolute(&data_dir.to_string_lossy()).unwrap_or_else(|_| data_dir.to_path_buf());
+    let data_dir = canonical_data_dir(data_dir);
     let shared = Arc::new(Shared {
         checkpoints: CheckpointStore::new(&data_dir),
         spill_dir: data_dir.join("spill"),
@@ -1048,6 +1049,66 @@ fn normalize_final(path: &Path) -> Result<PathBuf, ToolError> {
     lexical_normalize(Path::new(&stripped))
 }
 
+/// Long path of `data_dir` when the directory exists.
+///
+/// Callers compare this prefix to paths that `GetFinalPathNameByHandleW` has
+/// already expanded. A lexical 8.3 `data_dir` would not match that long form,
+/// so `devices.json`, `peer-node`, `vault/`, and `secrets/` would look ordinary.
+fn canonical_data_dir(data_dir: &Path) -> PathBuf {
+    let lexical =
+        lexical_absolute(&data_dir.to_string_lossy()).unwrap_or_else(|_| data_dir.to_path_buf());
+    final_identity(&lexical).unwrap_or(lexical)
+}
+
+/// Identity of a path already observed with `symlink_metadata`.
+///
+/// `NotFound` and every other failure are denied. A failed lookup is not
+/// evidence that the path is an absent local file.
+fn identity_existing(path: &Path) -> Result<PathBuf, ToolError> {
+    #[cfg(windows)]
+    {
+        match win_fs::final_path_nofollow(path) {
+            Ok(opened) => normalize_final(&opened),
+            Err(_) => Err(denied("path could not be verified")),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(path.to_path_buf())
+    }
+}
+
+/// Name `path` after its ancestors have been walked.
+///
+/// The parent must already exist. A parent open that fails, including
+/// `NotFound`, is a deny — the lexical path is not treated as safe to write.
+fn identity_for_write(path: &Path) -> Result<PathBuf, ToolError> {
+    #[cfg(windows)]
+    {
+        match win_fs::final_path_nofollow(path) {
+            Ok(opened) => normalize_final(&opened),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                let parent = path
+                    .parent()
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .ok_or_else(|| denied("path could not be verified"))?;
+                let name = path
+                    .file_name()
+                    .ok_or_else(|| denied("path could not be verified"))?;
+                match win_fs::final_path_nofollow(parent) {
+                    Ok(parent) => normalize_final(&parent.join(name)),
+                    Err(_) => Err(denied("path could not be verified")),
+                }
+            }
+            Err(_) => Err(denied("path could not be verified")),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(path.to_path_buf())
+    }
+}
+
 /// Policy passed into checkpoint copies. Checkpoints run without `Shared`, so
 /// the file tool installs this for the duration of one call on this thread.
 #[derive(Clone)]
@@ -1102,56 +1163,190 @@ fn io_to_tool(err: &io::Error, context: &str) -> ToolError {
     }
 }
 
-/// Classify `path` before a checkpoint opens it. Remote targets are refused
-/// from `read_link` text; this function does not call `fs::metadata` or `fs::copy`.
-pub(crate) fn vet_checkpoint_path(path: &Path) -> io::Result<()> {
-    let deny = |msg: &str| io::Error::new(io::ErrorKind::PermissionDenied, msg);
+struct CpPolicy {
+    data_dir: PathBuf,
+    roots: Vec<PathBuf>,
+    grants: Vec<PathBuf>,
+    roots_unresolved: bool,
+}
+
+fn checkpoint_policy() -> CpPolicy {
+    current_gate().map_or_else(
+        || CpPolicy {
+            data_dir: PathBuf::from(r"\\.\no-data-dir"),
+            roots: Vec::new(),
+            grants: Vec::new(),
+            roots_unresolved: false,
+        },
+        |g| CpPolicy {
+            data_dir: g.data_dir,
+            roots: g.roots,
+            grants: g.grants,
+            roots_unresolved: g.roots_unresolved,
+        },
+    )
+}
+
+fn deny_io(msg: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::PermissionDenied, msg)
+}
+
+/// Component walk used by checkpoints. Ancestors are classified with
+/// `symlink_metadata` and `read_link` before any `CreateFile` of the full path.
+fn walk_checkpoint(path: &Path, policy: &CpPolicy) -> Result<(PathBuf, PathBuf), ToolError> {
+    if policy.roots_unresolved {
+        return Err(denied(ROOT_UNRESOLVED_MSG));
+    }
     let raw = path.to_string_lossy();
-    if reject_syntax(&raw).is_err() {
-        return Err(deny("checkpoint path is not a local path"));
-    }
-    let lexical = lexical_absolute(&raw).map_err(tool_to_io)?;
-    let lexical = confine_drive(&lexical).map_err(tool_to_io)?;
-    let gate = current_gate();
-    if let Some(gate) = &gate {
-        if gate.roots_unresolved {
-            return Err(deny(ROOT_UNRESOLVED_MSG));
-        }
-        if !gate.roots.is_empty() && !roots_contain(&gate.roots, &lexical) {
-            return Err(deny(ROOT_MSG));
-        }
-    }
-    let data_dir = gate
-        .as_ref()
-        .map_or(PathBuf::from(r"\\.\no-data-dir"), |g| g.data_dir.clone());
-    let grants = gate.as_ref().map_or(Vec::new(), |g| g.grants.clone());
-    let opened = match final_identity(&lexical) {
-        Ok(p) => p,
-        Err(ToolError::PermissionDenied(m)) => return Err(deny(&m)),
-        Err(other) => return Err(io::Error::other(other.to_string())),
+    reject_syntax(&raw)?;
+    let lexical = lexical_absolute(&raw)?;
+    let lexical = confine_drive(&lexical)?;
+    // Blobs under `<data_dir>/checkpoints` are the tool's own copies. The
+    // caller's roots still apply to every user path and link target.
+    let root_limit: &[PathBuf] = if in_checkpoint_store(&lexical, &policy.data_dir) {
+        &[]
+    } else {
+        &policy.roots
     };
-    if protected_ungranted(&lexical, &data_dir, &grants)
-        || protected_ungranted(&opened, &data_dir, &grants)
-    {
-        return Err(deny(GRANT_MSG));
+    let drives = DriveCache::new();
+    let ctx = ResolveCtx {
+        follow: Follow::Place,
+        roots: root_limit,
+        drives: &drives,
+        depth: 0,
+    };
+    let resolved = resolve_local(&lexical, &ctx)?;
+    if !root_limit.is_empty() && !roots_contain(root_limit, &resolved) {
+        return Err(denied(ROOT_MSG));
     }
-    match fs::symlink_metadata(&lexical) {
+    Ok((lexical, resolved))
+}
+
+fn in_checkpoint_store(path: &Path, data_dir: &Path) -> bool {
+    let store = data_dir.join("checkpoints");
+    let p = norm_parts(path);
+    let s = norm_parts(&store);
+    !s.is_empty() && p.len() >= s.len() && p[..s.len()] == s[..]
+}
+
+fn protected_paths(paths: &[&Path], policy: &CpPolicy) -> bool {
+    paths
+        .iter()
+        .any(|p| protected_ungranted(p, &policy.data_dir, &policy.grants))
+}
+
+/// What a checkpoint may do with one path after the ancestor walk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CheckpointNode {
+    /// The path is a local, non-credential location. Callers may copy it.
+    Proceed,
+    /// The path is a protected credential. Descendants are skipped: not copied,
+    /// not followed, and not deleted. The top-level path still fails the tool.
+    SkipProtected,
+}
+
+/// Classify `path` before a checkpoint reads it.
+///
+/// The walk matches `resolve_local`: each component is stated with
+/// `symlink_metadata`, link text is classified, and roots apply to the
+/// resolved path. `CreateFile` (`final_identity`) runs only after that walk,
+/// and only for a path the walk found. A failed identity lookup is denied.
+/// A path the walk found missing is not opened and is not treated as a
+/// destination that is safe to create.
+pub(crate) fn vet_checkpoint_node(path: &Path) -> io::Result<CheckpointNode> {
+    let policy = checkpoint_policy();
+    let (lexical, resolved) = walk_checkpoint(path, &policy).map_err(tool_to_io)?;
+    match fs::symlink_metadata(&resolved) {
         Ok(meta) if meta.file_type().is_symlink() || reparse_unsafe(&meta) => {
-            let target = fs::read_link(&lexical)?;
-            classify_link_target(&lexical, &target, &data_dir, &grants).map_err(tool_to_io)
+            let target = fs::read_link(&resolved)?;
+            classify_link_target(&resolved, &target, &policy).map_err(tool_to_io)?;
+            let opened = identity_existing(&resolved).map_err(tool_to_io)?;
+            Ok(finish_node(&policy, &[&lexical, &resolved, &opened]))
         }
-        Ok(_) => Ok(()),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Ok(_) => {
+            let opened = identity_existing(&resolved).map_err(tool_to_io)?;
+            if !in_checkpoint_store(&lexical, &policy.data_dir)
+                && !policy.roots.is_empty()
+                && !roots_contain(&policy.roots, &opened)
+            {
+                return Err(deny_io(ROOT_MSG));
+            }
+            Ok(finish_node(&policy, &[&lexical, &resolved, &opened]))
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            // Absence was established by the component walk, not by a
+            // `CreateFile` that followed an ancestor junction and returned
+            // `NotFound`. Do not open the path.
+            Ok(finish_node(&policy, &[&lexical, &resolved]))
+        }
         Err(e) => Err(e),
     }
+}
+
+fn finish_node(policy: &CpPolicy, paths: &[&Path]) -> CheckpointNode {
+    if protected_paths(paths, policy) {
+        CheckpointNode::SkipProtected
+    } else {
+        CheckpointNode::Proceed
+    }
+}
+
+/// Classify `path` before a checkpoint reads or records it.
+///
+/// A protected path is an error here. Directory copies use
+/// [`vet_checkpoint_node`] so a protected descendant can be skipped instead.
+pub(crate) fn vet_checkpoint_path(path: &Path) -> io::Result<()> {
+    match vet_checkpoint_node(path)? {
+        CheckpointNode::Proceed => Ok(()),
+        CheckpointNode::SkipProtected => Err(deny_io(GRANT_MSG)),
+    }
+}
+
+/// Classify a restore destination before `remove`, `fs::copy`, or `make_link`.
+///
+/// The ancestor walk runs first. The path is then named with
+/// `GetFinalPathNameByHandleW`. If that lookup fails, or the parent directory
+/// cannot be named, the write is denied. A `NotFound` from the open is not
+/// treated as an absent local path that is safe to create.
+pub(crate) fn vet_checkpoint_write(path: &Path) -> io::Result<()> {
+    let policy = checkpoint_policy();
+    let (lexical, resolved) = walk_checkpoint(path, &policy).map_err(tool_to_io)?;
+    let parent = resolved
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or_else(|| deny_io("path could not be verified"))?;
+    match fs::symlink_metadata(parent) {
+        Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() && !reparse_unsafe(&meta) => {}
+        Ok(_) => return Err(deny_io("path could not be verified")),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return Err(deny_io("path could not be verified"));
+        }
+        Err(e) => return Err(e),
+    }
+    let opened = identity_for_write(&resolved).map_err(tool_to_io)?;
+    if !policy.roots.is_empty() && !roots_contain(&policy.roots, &opened) {
+        return Err(deny_io(ROOT_MSG));
+    }
+    if protected_paths(&[&lexical, &resolved, &opened], &policy) {
+        return Err(deny_io(GRANT_MSG));
+    }
+    Ok(())
+}
+
+/// Classify a link target before `make_link`. The target text is rejected
+/// before the walk, so a UNC target is never created and never copied.
+pub(crate) fn vet_link_target(at: &Path, target: &Path) -> io::Result<()> {
+    let policy = checkpoint_policy();
+    let joined = classify_link_target(at, target, &policy).map_err(tool_to_io)?;
+    let _resolved = walk_checkpoint(&joined, &policy).map_err(tool_to_io)?;
+    Ok(())
 }
 
 fn classify_link_target(
     link: &Path,
     target: &Path,
-    data_dir: &Path,
-    grants: &[PathBuf],
-) -> Result<(), ToolError> {
+    policy: &CpPolicy,
+) -> Result<PathBuf, ToolError> {
     let raw = target.to_string_lossy();
     if dos_target_is_remote(&raw) || classify_path_str(&raw) != Class::Local {
         return Err(denied(UNC_MSG));
@@ -1167,11 +1362,139 @@ fn classify_link_target(
             .unwrap_or_else(|| Path::new(""))
             .join(&stripped)
     };
+    let joined = lexical_normalize(&joined)?;
     let joined = confine_drive(&joined)?;
-    if protected_ungranted(&joined, data_dir, grants) {
+    if !policy.roots.is_empty() && !roots_contain(&policy.roots, &joined) {
+        return Err(denied(ROOT_MSG));
+    }
+    if protected_ungranted(&joined, &policy.data_dir, &policy.grants) {
         return Err(denied(GRANT_MSG));
     }
-    Ok(())
+    Ok(joined)
+}
+
+fn entry_is_protected(path: &Path, data_dir: &Path, grants: &[PathBuf]) -> io::Result<bool> {
+    if protected_ungranted(path, data_dir, grants) {
+        return Ok(true);
+    }
+    match fs::symlink_metadata(path) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+        Ok(_) => {}
+    }
+    let opened = identity_existing(path).map_err(tool_to_io)?;
+    Ok(protected_ungranted(&opened, data_dir, grants))
+}
+
+fn is_link_meta(meta: &fs::Metadata) -> bool {
+    meta.file_type().is_symlink() || reparse_unsafe(meta)
+}
+
+/// Delete `path`, leaving protected files and directories in place.
+///
+/// Symlinks and junctions are removed as entries. Their targets are not walked.
+pub(crate) fn remove_tree_skip_protected(
+    path: &Path,
+    data_dir: &Path,
+    grants: &[PathBuf],
+) -> io::Result<()> {
+    if entry_is_protected(path, data_dir, grants)? {
+        return Ok(());
+    }
+    let meta = match fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    if is_link_meta(&meta) {
+        return fs::remove_file(path).or_else(|_| fs::remove_dir(path));
+    }
+    if meta.is_dir() {
+        for entry in fs::read_dir(path)? {
+            remove_tree_skip_protected(&entry?.path(), data_dir, grants)?;
+        }
+        if fs::read_dir(path)?.next().is_none() {
+            fs::remove_dir(path)?;
+        }
+        return Ok(());
+    }
+    fs::remove_file(path)
+}
+
+/// [`remove_tree_skip_protected`] using the checkpoint gate installed for restore.
+pub(crate) fn remove_checkpoint_target(path: &Path) -> io::Result<()> {
+    let policy = checkpoint_policy();
+    remove_tree_skip_protected(path, &policy.data_dir, &policy.grants)
+}
+
+fn has_protected_descendant(path: &Path, data_dir: &Path, grants: &[PathBuf]) -> io::Result<bool> {
+    let meta = match fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    if is_link_meta(&meta) || !meta.is_dir() {
+        return Ok(false);
+    }
+    for entry in fs::read_dir(path)? {
+        let child = entry?.path();
+        if entry_is_protected(&child, data_dir, grants)?
+            || has_protected_descendant(&child, data_dir, grants)?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn relocate_skip_protected(
+    from: &Path,
+    to: &Path,
+    data_dir: &Path,
+    grants: &[PathBuf],
+) -> io::Result<()> {
+    if entry_is_protected(from, data_dir, grants)? {
+        return Ok(());
+    }
+    let meta = match fs::symlink_metadata(from) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    if meta.is_dir() && !is_link_meta(&meta) && has_protected_descendant(from, data_dir, grants)? {
+        fs::create_dir_all(to)?;
+        for entry in fs::read_dir(from)? {
+            let entry = entry?;
+            relocate_skip_protected(&entry.path(), &to.join(entry.file_name()), data_dir, grants)?;
+        }
+        if fs::read_dir(from)?.next().is_none() {
+            fs::remove_dir(from)?;
+        }
+        return Ok(());
+    }
+    if let Some(parent) = to.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)?;
+    }
+    if fs::symlink_metadata(to).is_ok() {
+        remove_tree_skip_protected(to, data_dir, grants)?;
+    }
+    if fs::symlink_metadata(to).is_ok() {
+        if !meta.is_dir() || is_link_meta(&meta) {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "destination still contains a protected file",
+            ));
+        }
+        for entry in fs::read_dir(from)? {
+            let entry = entry?;
+            relocate_skip_protected(&entry.path(), &to.join(entry.file_name()), data_dir, grants)?;
+        }
+        if fs::read_dir(from)?.next().is_none() {
+            fs::remove_dir(from)?;
+        }
+        return Ok(());
+    }
+    fs::rename(from, to)
 }
 
 fn read_text(path: &Path) -> Result<String, ToolError> {
@@ -1521,18 +1844,6 @@ fn do_edit(sh: &Shared, run: &str, i: &EditIn) -> Result<String, ToolError> {
     ))
 }
 
-fn remove_entry(path: &Path, meta: &fs::Metadata) -> Result<(), ToolError> {
-    let r = if meta.file_type().is_symlink() {
-        // Remove the link itself. `remove_dir_all` would follow a junction.
-        fs::remove_file(path).or_else(|_| fs::remove_dir(path))
-    } else if meta.is_dir() {
-        fs::remove_dir_all(path)
-    } else {
-        fs::remove_file(path)
-    };
-    r.map_err(|e| exec_err(format!("delete {}: {e}", path.display())))
-}
-
 fn do_move(sh: &Shared, run: &str, i: &MoveIn) -> Result<String, ToolError> {
     let from = validate_path(sh, &i.from, Follow::Entry)?;
     let to = validate_path(sh, &i.to, Follow::Place)?;
@@ -1547,13 +1858,8 @@ fn do_move(sh: &Shared, run: &str, i: &MoveIn) -> Result<String, ToolError> {
         )));
     }
     let cp = sh.checkpoint(run, "fs_move", &[&from, &to])?;
-    if let Some(parent) = to.parent().filter(|d| !d.as_os_str().is_empty()) {
-        fs::create_dir_all(parent).map_err(|e| exec_err(format!("create dirs: {e}")))?;
-    }
-    if let Some(meta) = dest_meta {
-        remove_entry(&to, &meta)?;
-    }
-    fs::rename(&from, &to).map_err(|e| exec_err(format!("move failed: {e}")))?;
+    relocate_skip_protected(&from, &to, &sh.data_dir, &sh.grants)
+        .map_err(|e| io_to_tool(&e, "move failed"))?;
     Ok(format!("moved {} to {} (checkpoint {cp})", i.from, i.to))
 }
 
@@ -1567,7 +1873,8 @@ fn do_delete(sh: &Shared, run: &str, i: &DeleteIn) -> Result<String, ToolError> 
         )));
     }
     let cp = sh.checkpoint(run, "fs_delete", &[&p])?;
-    remove_entry(&p, &meta)?;
+    remove_tree_skip_protected(&p, &sh.data_dir, &sh.grants)
+        .map_err(|e| io_to_tool(&e, "delete failed"))?;
     Ok(format!("deleted {} (checkpoint {cp})", i.path))
 }
 
@@ -2460,6 +2767,173 @@ mod tests {
         );
     }
 
+    fn plant_blob(data: &Path, run: &str, path: &str, blob: &str) -> String {
+        let id = format!("cp-{}", uuid::Uuid::now_v7().simple());
+        let dir = data.join("checkpoints").join(run).join(&id);
+        fs::create_dir_all(dir.join("files")).unwrap();
+        fs::write(dir.join("files").join("0"), blob).unwrap();
+        let cp = crate::checkpoint::Checkpoint {
+            id: id.clone(),
+            run_id: run.into(),
+            created_ms: 0,
+            op: "forged".into(),
+            entries: vec![crate::checkpoint::CheckpointEntry {
+                path: path.into(),
+                existed: true,
+                is_dir: false,
+                backup: Some("files/0".into()),
+            }],
+        };
+        fs::write(dir.join("manifest.json"), serde_json::to_vec(&cp).unwrap()).unwrap();
+        id
+    }
+
+    #[tokio::test]
+    async fn ancestor_junction_is_classified_before_restore_write() {
+        let (d, w, t) = setup();
+        let c = ctx();
+        let secret = "PRAXI_SENTINEL_ancestor";
+        let tree = w.path().join("tree");
+        fs::create_dir_all(&tree).unwrap();
+        remote_link(&tree.join("link"));
+        let through = tree.join("link").join("file");
+        let id = plant_blob(d.path(), "run-1", &through.display().to_string(), secret);
+        let started = std::time::Instant::now();
+        let err = get(&t, "checkpoint_restore")
+            .call(&c, json!({"id": id}))
+            .await
+            .unwrap_err();
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "ancestor junction was opened: {:?}",
+            started.elapsed()
+        );
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+        assert!(
+            !tree_has(w.path(), secret),
+            "restore wrote the blob through the ancestor junction"
+        );
+
+        let missing = w.path().join("no-such-parent").join("file.txt");
+        let id = plant_blob(d.path(), "run-1", &missing.display().to_string(), secret);
+        let err = get(&t, "checkpoint_restore")
+            .call(&c, json!({"id": id}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+        assert!(
+            !missing.exists() && !w.path().join("no-such-parent").exists(),
+            "a failed identity lookup was treated as safe to write"
+        );
+
+        let root = w.path().join("root");
+        let proj = root.join("proj");
+        fs::create_dir_all(&proj).unwrap();
+        let outside = w.path().join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret.txt"), "OUTSIDE").unwrap();
+        let limited = tools_bounded(d.path(), std::slice::from_ref(&root), &[]);
+        let id = format!("cp-{}", uuid::Uuid::now_v7().simple());
+        let cp_dir = d.path().join("checkpoints").join("run-1").join(&id);
+        fs::create_dir_all(cp_dir.join("files").join("0")).unwrap();
+        fs::write(
+            cp_dir.join("files").join("0").join("keep.txt"),
+            "from-backup",
+        )
+        .unwrap();
+        let cp = crate::checkpoint::Checkpoint {
+            id: id.clone(),
+            run_id: "run-1".into(),
+            created_ms: 0,
+            op: "forged".into(),
+            entries: vec![crate::checkpoint::CheckpointEntry {
+                path: proj.display().to_string(),
+                existed: true,
+                is_dir: true,
+                backup: Some("files/0".into()),
+            }],
+        };
+        fs::write(
+            cp_dir.join("manifest.json"),
+            serde_json::to_vec(&cp).unwrap(),
+        )
+        .unwrap();
+        let links = json!([{
+            "rel": "files/0/junc",
+            "target": outside.display().to_string(),
+            "dir": true
+        }]);
+        fs::write(
+            cp_dir.join("links.json"),
+            serde_json::to_vec(&links).unwrap(),
+        )
+        .unwrap();
+        let out = text(
+            &get(&limited, "checkpoint_restore")
+                .call(&c, json!({"id": id}))
+                .await
+                .unwrap(),
+        );
+        assert!(
+            fs::read_to_string(proj.join("keep.txt"))
+                .unwrap()
+                .contains("from-backup"),
+            "restore did not reach the link records: {out}"
+        );
+        assert!(
+            !proj.join("junc").exists(),
+            "junction was created before its target was classified: {out}"
+        );
+        assert!(outside.join("secret.txt").is_file());
+    }
+
+    #[tokio::test]
+    async fn delete_and_move_leave_protected_descendants() {
+        let (d, w, t) = setup();
+        let c = ctx();
+        let secret = "PRAXI_SENTINEL_keepenv";
+        let dir = w.path().join("proj");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("keep.txt"), "keep").unwrap();
+        fs::write(dir.join(".env"), secret).unwrap();
+        get(&t, "fs_delete")
+            .call(&c, json!({"path": &dir, "recursive": true}))
+            .await
+            .unwrap();
+        assert!(!dir.join("keep.txt").exists(), "keep.txt was not deleted");
+        assert_eq!(fs::read_to_string(dir.join(".env")).unwrap(), secret);
+        assert!(
+            !tree_has(&d.path().join("checkpoints"), secret),
+            "credential bytes were copied into a checkpoint blob"
+        );
+
+        let env_only = w.path().join(".env");
+        fs::write(&env_only, secret).unwrap();
+        let err = get(&t, "fs_delete")
+            .call(&c, json!({"path": &env_only}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+        assert_eq!(fs::read_to_string(&env_only).unwrap(), secret);
+
+        let src = w.path().join("proj-move");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("keep.txt"), "keep").unwrap();
+        fs::write(src.join(".env"), secret).unwrap();
+        let dest = w.path().join("proj-dest");
+        get(&t, "fs_move")
+            .call(&c, json!({"from": &src, "to": &dest}))
+            .await
+            .unwrap();
+        assert_eq!(fs::read_to_string(dest.join("keep.txt")).unwrap(), "keep");
+        assert!(!dest.join(".env").exists(), ".env moved with the directory");
+        assert_eq!(fs::read_to_string(src.join(".env")).unwrap(), secret);
+        assert!(
+            !tree_has(&d.path().join("checkpoints"), secret),
+            "move copied credential bytes into a checkpoint blob"
+        );
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn unix_dos_names_and_colons_are_ordinary_files() {
@@ -2547,6 +3021,60 @@ mod tests {
         let ok = text(
             &get(&t, "fs_read")
                 .call(&c, json!({"path": &note}))
+                .await
+                .unwrap(),
+        );
+        assert!(ok.contains("ordinary"), "{ok}");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn short_data_dir_still_protects_sensitive_files() {
+        let base = tempfile::tempdir().unwrap();
+        let data = base.path().join("praxi-bot");
+        fs::create_dir_all(data.join("vault")).unwrap();
+        fs::create_dir_all(data.join("secrets")).unwrap();
+        let secret = "PRAXI_SENTINEL_datadir";
+        fs::write(data.join("devices.json"), secret).unwrap();
+        fs::write(data.join("peer-node"), secret).unwrap();
+        fs::write(data.join("vault").join("note.txt"), secret).unwrap();
+        fs::write(data.join("secrets").join("note.txt"), secret).unwrap();
+        fs::write(data.join("notes.txt"), "ordinary").unwrap();
+        let short = win_fs::short_path(&data).unwrap();
+        assert_ne!(
+            short
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_ascii_lowercase(),
+            "praxi-bot",
+            "this volume did not generate an 8.3 name for praxi-bot: {}",
+            short.display()
+        );
+        let t = tools(&short);
+        let c = ctx();
+        for path in [
+            data.join("devices.json"),
+            data.join("peer-node"),
+            data.join("vault").join("note.txt"),
+            data.join("secrets").join("note.txt"),
+            short.join("devices.json"),
+            short.join("vault").join("note.txt"),
+        ] {
+            let err = get(&t, "fs_read")
+                .call(&c, json!({"path": &path}))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "{}: {err}",
+                path.display()
+            );
+            assert!(!err.to_string().contains(secret), "{err}");
+        }
+        let ok = text(
+            &get(&t, "fs_read")
+                .call(&c, json!({"path": data.join("notes.txt")}))
                 .await
                 .unwrap(),
         );
