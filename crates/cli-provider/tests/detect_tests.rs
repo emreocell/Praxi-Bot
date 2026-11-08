@@ -1,4 +1,4 @@
-use cli_provider::detect::{AuthState, Detector, PathEnv};
+use cli_provider::detect::{AuthState, Detector, PathEnv, ShimError, resolve_spawn};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -107,6 +107,12 @@ async fn test_codex_status_variants() {
     assert!(codex.installed);
     assert_eq!(codex.auth, AuthState::SignedIn);
     assert_eq!(codex.version.as_deref(), Some("fake 1.2.3"));
+    assert!(!codex.runnable);
+    assert_eq!(codex.detail.as_deref(), Some("codex_unconfinable"));
+    assert_eq!(
+        codex.message.as_deref(),
+        Some("The installed Codex cannot disable unified_exec, so Praxi will not run it.")
+    );
 
     // chatgpt-plan follows codex installation, auth is unknown
     let chatgpt = detected.iter().find(|c| c.id == "chatgpt-plan").unwrap();
@@ -437,9 +443,156 @@ async fn only_installed_claude_and_codex_are_runnable() {
     for cli in detector.detect(true).await {
         assert_eq!(
             cli.runnable,
-            cli.installed && matches!(cli.id.as_str(), "claude" | "codex"),
+            cli.installed && cli.id == "claude",
             "{}",
             cli.id
         );
+        if cli.id == "codex" {
+            assert_eq!(cli.detail.as_deref(), Some("codex_unconfinable"));
+            assert!(
+                cli.message
+                    .as_deref()
+                    .is_some_and(|text| text.contains("unified_exec"))
+            );
+        }
     }
+}
+
+fn npm_shim(root: &Path, command: &str, package_rel: &str) {
+    let quoted = package_rel.replace('/', "\\");
+    std::fs::write(
+        root.join(format!("{command}.cmd")),
+        format!("@ECHO off\r\n\"%~dp0\\node_modules\\{quoted}\\bin\\{command}.exe\" %*\r\n"),
+    )
+    .unwrap();
+}
+
+fn write_package(root: &Path, rel: &str, name: &str, bin_key: &str, bin_rel: &str, payload: &[u8]) {
+    let pkg = root.join("node_modules").join(rel);
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(
+        pkg.join("package.json"),
+        format!(r#"{{"name":{name:?},"bin":{{{bin_key:?}:{bin_rel:?}}}}}"#),
+    )
+    .unwrap();
+    if payload.is_empty() {
+        return;
+    }
+    let dest = pkg.join(bin_rel);
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(dest, payload).unwrap();
+}
+
+#[test]
+fn npm_shim_uses_package_exe_and_js_bins_stay_refused() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let outside = root.join("outside.exe");
+    std::fs::write(&outside, b"nope").unwrap();
+
+    write_package(
+        root,
+        "@anthropic-ai/claude-code",
+        "@anthropic-ai/claude-code",
+        "claude",
+        "bin/claude.exe",
+        b"native",
+    );
+    npm_shim(root, "claude", "@anthropic-ai/claude-code");
+    let env = PathEnv::for_test(root.to_path_buf());
+    let candidate = root.join("claude.cmd");
+    let resolved = resolve_spawn(&candidate, &env).unwrap();
+    let package = root
+        .join("node_modules")
+        .join("@anthropic-ai")
+        .join("claude-code");
+    let exe = std::fs::canonicalize(package.join("bin").join("claude.exe")).unwrap();
+    assert_eq!(resolved.program, exe);
+    assert_eq!(resolved.args, [] as [String; 0]);
+    assert!(
+        resolved
+            .program
+            .starts_with(std::fs::canonicalize(&package).unwrap())
+    );
+
+    write_package(
+        root,
+        "native-tool",
+        "native-tool",
+        "native-tool",
+        "bin/native-tool.exe",
+        b"native",
+    );
+    npm_shim(root, "native-tool", "native-tool");
+    let generic = resolve_spawn(&root.join("native-tool.cmd"), &env).unwrap();
+    assert!(
+        generic
+            .program
+            .ends_with(std::path::Path::new("native-tool.exe"))
+    );
+
+    write_package(
+        root,
+        "left-as-js",
+        "left-as-js",
+        "left-as-js",
+        "cli.js",
+        b"console.log('nope')\n",
+    );
+    npm_shim(root, "left-as-js", "left-as-js");
+    std::fs::write(root.join("node.cmd"), "@echo off\r\necho RAN\r\n").unwrap();
+    assert!(matches!(
+        resolve_spawn(&root.join("left-as-js.cmd"), &env),
+        Err(ShimError::Refused)
+    ));
+
+    write_package(
+        root,
+        "@anthropic-ai/claude-code",
+        "@anthropic-ai/claude-code",
+        "claude",
+        "../../outside.exe",
+        b"",
+    );
+    assert!(matches!(
+        resolve_spawn(&candidate, &env),
+        Err(ShimError::Refused)
+    ));
+    assert!(outside.is_file());
+}
+
+#[tokio::test]
+async fn npm_claude_package_exe_is_the_probed_binary() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let pkg = root
+        .join("node_modules")
+        .join("@anthropic-ai")
+        .join("claude-code");
+    std::fs::create_dir_all(pkg.join("bin")).unwrap();
+    std::fs::copy(fake_cli_path(), pkg.join("bin").join("claude.exe")).unwrap();
+    std::fs::write(
+        pkg.join("package.json"),
+        r#"{"name":"@anthropic-ai/claude-code","bin":{"claude":"bin/claude.exe"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("claude.cmd"),
+        "@ECHO off\r\n\"%~dp0\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe\" %*\r\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("node.cmd"),
+        "@echo off\r\necho RAN>spawned.txt\r\n",
+    )
+    .unwrap();
+    let detector = Detector::with_env(PathEnv::for_test(root.to_path_buf()));
+    let detected = detector.detect(false).await;
+    let claude = detected.iter().find(|cli| cli.id == "claude").unwrap();
+    assert_eq!(claude.version.as_deref(), Some("fake 1.2.3"));
+    assert!(claude.runnable);
+    assert!(claude.detail.is_none());
+    assert!(!root.join("spawned.txt").exists());
 }

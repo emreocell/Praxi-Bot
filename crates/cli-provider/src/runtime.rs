@@ -1,13 +1,12 @@
 //! Per-turn CLI sessions. Wire dialects are locked by `tests/fixtures/runtime_cli.rs`.
 //! No credential files are opened here. Prompts and results only cross stdin/MCP.
+#[cfg(not(windows))]
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::{
     io::Write,
     net::SocketAddr,
     process::Stdio,
-    sync::{
-        Arc, OnceLock,
-        atomic::{AtomicU32, Ordering},
-    },
+    sync::{Arc, OnceLock},
 };
 
 use async_trait::async_trait;
@@ -23,7 +22,8 @@ use tokio_util::sync::CancellationToken;
 use tool_registry::ToolSpec;
 
 use crate::detect::{
-    PathEnv, apply_sanitized_env, find_candidate, isolate, kill_tree, resolve_spawn,
+    self, PathEnv, apply_sanitized_env, binary_pin, find_candidate, isolate, kill_tree,
+    resolve_spawn,
 };
 
 /// Supported session dialect.
@@ -50,6 +50,12 @@ pub enum CliError {
     Protocol,
     #[error("cli_io_error")]
     Io,
+    /// The installed Codex still has `unified_exec`, so the turn is not started.
+    #[error("The installed Codex cannot disable unified_exec, so Praxi will not run it.")]
+    CodexUnconfinable,
+    /// The file at the exact path that would be spawned changed between probes.
+    #[error("binary_changed")]
+    BinaryChanged,
 }
 impl From<std::io::Error> for CliError {
     fn from(_: std::io::Error) -> Self {
@@ -148,7 +154,11 @@ struct Bridge {
     host: Arc<dyn TurnHost>,
     stop: CancellationToken,
     /// `0` until the turn's CLI process exists. Connections are refused until then.
+    #[cfg(not(windows))]
     child_pid: Arc<AtomicU32>,
+    /// Kill-on-close job created by `isolate` for this turn. Empty until spawn.
+    #[cfg(windows)]
+    job: detect::SharedJob,
     listen: Arc<OnceLock<SocketAddr>>,
 }
 
@@ -200,13 +210,25 @@ async fn mcp(
     Json(req): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>), StatusCode> {
     // The bearer is not enough: any same-user process can read the sidecar.
-    // Only this turn's child, or a descendant of that child, may call a tool.
-    let root = b.child_pid.load(Ordering::SeqCst);
+    // Windows accepts the socket only when its owner is inside this turn's job.
+    // Unix still requires the child or a real forking descendant.
     let allowed = match b.listen.get().copied() {
         Some(listen) => {
-            tokio::task::spawn_blocking(move || crate::peer::peer_is_allowed(peer, listen, root))
-                .await
-                .unwrap_or(false)
+            #[cfg(windows)]
+            let gate = {
+                let job = b.job.clone();
+                tokio::task::spawn_blocking(move || {
+                    crate::peer::peer_is_allowed(peer, listen, &job)
+                })
+            };
+            #[cfg(not(windows))]
+            let gate = {
+                let root = b.child_pid.load(Ordering::SeqCst);
+                tokio::task::spawn_blocking(move || {
+                    crate::peer::peer_is_allowed(peer, listen, root)
+                })
+            };
+            gate.await.unwrap_or(false)
         }
         None => false,
     };
@@ -230,6 +252,7 @@ struct BridgeServer {
     stop: CancellationToken,
     url: String,
     authorization: String,
+    #[cfg(not(windows))]
     child_pid: Arc<AtomicU32>,
 }
 impl Drop for BridgeServer {
@@ -245,6 +268,7 @@ impl BridgeServer {
         bridge.listen.set(listen).map_err(|_| CliError::Io)?;
         let url = format!("http://127.0.0.1:{}/mcp", listen.port());
         let authorization = bridge.capability.clone();
+        #[cfg(not(windows))]
         let child_pid = Arc::clone(&bridge.child_pid);
         let config = json!({"mcpServers":{"praxi":{"type":"http","url":url,"headers":{"Authorization":authorization}}}});
         let mut file = tempfile::Builder::new()
@@ -271,10 +295,12 @@ impl BridgeServer {
             stop,
             url,
             authorization,
+            #[cfg(not(windows))]
             child_pid,
         })
     }
 
+    #[cfg(not(windows))]
     fn allow_child(&self, pid: u32) {
         self.child_pid.store(pid, Ordering::SeqCst);
     }
@@ -330,7 +356,6 @@ async fn restrict_sidecar(_: &std::path::Path) -> Result<(), CliError> {
 const MIN_CLAUDE_VERSION: (u32, u32, u32) = (2, 1, 257);
 const MIN_CLAUDE_VERSION_STRIC_MCP: (u32, u32, u32) = (1, 0, 60);
 const MIN_CLAUDE_VERSION_SETTING_SOURCES: (u32, u32, u32) = (1, 0, 122);
-const MIN_CODEX_VERSION: (u32, u32, u32) = (1, 0, 0);
 
 /// Permission mode accepted by Claude Code 2.1.314 (`claude --help`).
 const CLAUDE_PERMISSION_MODE: &str = "manual";
@@ -500,6 +525,7 @@ fn quoted_strings(blob: &str) -> Vec<String> {
     out
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn codex_config_path(env: &PathEnv) -> Result<std::path::PathBuf, CliError> {
     if let Some(home) = env
         .env_vars
@@ -524,6 +550,7 @@ fn codex_config_path(env: &PathEnv) -> Result<std::path::PathBuf, CliError> {
 /// Names of MCP servers in the user's Codex config. Missing file means none.
 /// An unreadable file, an include, or a name that cannot be targeted with `-c`
 /// refuses the turn: those servers would stay enabled.
+#[cfg_attr(not(test), allow(dead_code))]
 fn codex_user_mcp_servers(env: &PathEnv) -> Result<Vec<String>, CliError> {
     let path = codex_config_path(env)?;
     match std::fs::read_to_string(&path) {
@@ -533,6 +560,7 @@ fn codex_user_mcp_servers(env: &PathEnv) -> Result<Vec<String>, CliError> {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn codex_mcp_server_names(text: &str) -> Result<Vec<String>, CliError> {
     let parsed: toml::Value = toml::from_str(text).map_err(|_| CliError::NativeToolsOpen)?;
     let Some(root) = parsed.as_table() else {
@@ -558,6 +586,7 @@ fn codex_mcp_server_names(text: &str) -> Result<Vec<String>, CliError> {
     Ok(names)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn mcp_server_name_ok(name: &str) -> bool {
     !name.is_empty()
         && name
@@ -600,6 +629,23 @@ fn codex_confinement_echoed(result: &Value) -> bool {
     sandbox_closed && environments.as_array().is_some_and(Vec::is_empty)
 }
 
+async fn measured_version(
+    engine: Engine,
+    resolved: &crate::detect::ResolvedCommand,
+    env: &PathEnv,
+    stop: &CancellationToken,
+) -> Result<Option<(u32, u32, u32)>, CliError> {
+    if engine == Engine::Claude {
+        tokio::select! {
+            () = stop.cancelled() => Err(CliError::Cancelled),
+            v = crate::detect::claude_version(resolved, env) => Ok(v),
+        }
+    } else {
+        // Same path the turn would spawn. Codex is still not started.
+        crate::detect::codex_version(resolved, env).await
+    }
+}
+
 async fn send(stdin: &mut tokio::process::ChildStdin, value: Value) -> Result<(), CliError> {
     let mut bytes = serde_json::to_vec(&value).map_err(|_| CliError::Protocol)?;
     bytes.push(b'\n');
@@ -619,56 +665,42 @@ async fn session(
 ) -> Result<TurnUsage, CliError> {
     let candidate = find_candidate(command, env).ok_or(CliError::NotInstalled)?;
     let resolved = resolve_spawn(&candidate, env).map_err(|_| CliError::ShimRefused)?;
+    #[cfg(windows)]
+    let job = detect::SharedJob::new();
     let bridge = Bridge {
         capability: format!("Bearer {}{}", uuid::Uuid::now_v7(), uuid::Uuid::now_v7()),
         tools: Arc::new(turn.tools.clone()),
         host: host.clone(),
         stop: stop.clone(),
+        #[cfg(not(windows))]
         child_pid: Arc::new(AtomicU32::new(0)),
+        #[cfg(windows)]
+        job: job.clone(),
         listen: Arc::new(OnceLock::new()),
     };
     let server = BridgeServer::open(bridge.clone()).await?;
     if stop.is_cancelled() {
         return Err(CliError::Cancelled);
     }
-    let version = if engine == Engine::Claude {
-        // Bounded, sanitized version probe; never runs a credential command.
-        tokio::select! {
-            () = stop.cancelled() => return Err(CliError::Cancelled),
-            v = crate::detect::claude_version(&resolved, env) => v,
-        }
-    } else {
-        // Probe Codex version for security floor enforcement
-        crate::detect::codex_version(&resolved, env).await?
-    };
-
-    // Enforce minimum version floors - refuse to spawn if below minimum
-    match engine {
-        Engine::Claude => {
-            let min_ver = MIN_CLAUDE_VERSION;
-            if let Some(v) = version {
-                if v < min_ver {
-                    eprintln!("Claude Code version {v:?} is below minimum required {min_ver:?}");
-                    return Err(CliError::NotInstalled);
-                }
-            } else {
-                // Missing version detection means we cannot verify security features
-                return Err(CliError::NotInstalled);
-            }
-        }
-        Engine::Codex => {
-            let min_ver = MIN_CODEX_VERSION;
-            if let Some(v) = version {
-                if v < min_ver {
-                    eprintln!("Codex version {v:?} is below minimum required {min_ver:?}");
-                    return Err(CliError::NotInstalled);
-                }
-            } else {
-                return Err(CliError::NotInstalled);
-            }
-        }
+    let pin = binary_pin(&resolved.program).ok_or(CliError::NotInstalled)?;
+    let version = measured_version(engine, &resolved, env, &stop).await?;
+    if binary_pin(&resolved.program).as_ref() != Some(&pin) {
+        return Err(CliError::BinaryChanged);
     }
+
+    // Enforce minimum version floors - refuse to spawn if below minimum.
+    // Codex is not started at all: this install cannot turn unified_exec off.
     if engine == Engine::Claude {
+        let min_ver = MIN_CLAUDE_VERSION;
+        if let Some(v) = version {
+            if v < min_ver {
+                eprintln!("Claude Code version {v:?} is below minimum required {min_ver:?}");
+                return Err(CliError::NotInstalled);
+            }
+        } else {
+            // Missing version detection means we cannot verify security features
+            return Err(CliError::NotInstalled);
+        }
         let help = crate::detect::claude_help(&resolved, env)
             .await
             .ok_or(CliError::NativeToolsOpen)?;
@@ -676,11 +708,15 @@ async fn session(
             return Err(CliError::NativeToolsOpen);
         }
     }
-    let mcp_servers = if engine == Engine::Codex {
-        codex_user_mcp_servers(env)?
-    } else {
-        Vec::new()
-    };
+    let version_now = measured_version(engine, &resolved, env, &stop).await?;
+    let pin_now = binary_pin(&resolved.program).ok_or(CliError::BinaryChanged)?;
+    if version_now != version || pin_now != pin {
+        return Err(CliError::BinaryChanged);
+    }
+    if engine == Engine::Codex {
+        return Err(CliError::CodexUnconfinable);
+    }
+    let mcp_servers = Vec::new();
 
     let argv = args(engine, &turn, server.file.path(), version, &mcp_servers);
     if resolved.program.to_string_lossy().encode_utf16().count()
@@ -712,18 +748,25 @@ async fn session(
     cmd.process_group(0);
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    let mut child = isolate(cmd).spawn().map_err(|e| {
+    #[cfg(windows)]
+    let mut isolated = isolate(cmd, job);
+    #[cfg(not(windows))]
+    let mut isolated = isolate(cmd);
+    let mut child = isolated.spawn().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             CliError::NotInstalled
         } else {
             CliError::Io
         }
     })?;
-    let child_pid = child
-        .id()
-        .filter(|pid| *pid != 0)
-        .ok_or(CliError::NativeToolsOpen)?;
-    server.allow_child(child_pid);
+    #[cfg(not(windows))]
+    {
+        let child_pid = child
+            .id()
+            .filter(|pid| *pid != 0)
+            .ok_or(CliError::NativeToolsOpen)?;
+        server.allow_child(child_pid);
+    }
 
     // Store workdir for lifetime of session so cwd stays isolated
     let _workdir = workdir;
@@ -1218,7 +1261,10 @@ mod tests {
             tools: Arc::new(vec![]),
             host: Arc::new(NoCalls),
             stop: CancellationToken::new(),
+            #[cfg(not(windows))]
             child_pid: Arc::new(AtomicU32::new(std::process::id())),
+            #[cfg(windows)]
+            job: detect::SharedJob::new(),
             listen: Arc::new(OnceLock::new()),
         }
     }
@@ -1253,6 +1299,8 @@ mod tests {
         let req = json!({"id":1,"method":"tools/call","params":{"name":"Bash","arguments":{}}});
         let reply = bridge.rpc(&req).await;
         assert_eq!(reply["result"]["isError"], true);
+        #[cfg(windows)]
+        let job = bridge.job.clone();
         let server = BridgeServer::open(bridge).await.unwrap();
         let path = server.file.path().to_owned();
         let config: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
@@ -1261,16 +1309,32 @@ mod tests {
             .unwrap()
             .to_owned();
         let body = req.to_string();
-        let unauth = post_off_runtime(url.clone(), None, body.clone()).await;
+        let unauth = post_allowed(
+            &url,
+            None,
+            &body,
+            #[cfg(windows)]
+            &job,
+        )
+        .await;
         assert!(unauth.starts_with("HTTP/1.1 401"), "{unauth}");
-        let wrong = post_off_runtime(
-            url.clone(),
-            Some("Bearer another-turn".into()),
-            body.clone(),
+        let wrong = post_allowed(
+            &url,
+            Some("Bearer another-turn"),
+            &body,
+            #[cfg(windows)]
+            &job,
         )
         .await;
         assert!(wrong.starts_with("HTTP/1.1 401"), "{wrong}");
-        let ok = post_off_runtime(url, Some("Bearer private-turn-capability".into()), body).await;
+        let ok = post_allowed(
+            &url,
+            Some("Bearer private-turn-capability"),
+            &body,
+            #[cfg(windows)]
+            &job,
+        )
+        .await;
         assert!(ok.starts_with("HTTP/1.1 200"), "{ok}");
         assert!(ok.contains("\"isError\":true"));
         assert!(path.exists());
@@ -1280,6 +1344,7 @@ mod tests {
     #[tokio::test]
     async fn non_child_connection_rejected() {
         let bridge = bridge();
+        #[cfg(not(windows))]
         bridge.child_pid.store(u32::MAX, Ordering::SeqCst);
         let server = BridgeServer::open(bridge).await.unwrap();
         let config: Value =
@@ -1300,6 +1365,71 @@ mod tests {
         tokio::task::spawn_blocking(move || http_post(&url, auth.as_deref(), &body))
             .await
             .unwrap()
+    }
+    async fn post_allowed(
+        url: &str,
+        auth: Option<&str>,
+        body: &str,
+        #[cfg(windows)] job: &detect::SharedJob,
+    ) -> String {
+        #[cfg(not(windows))]
+        {
+            post_off_runtime(url.to_owned(), auth.map(str::to_owned), body.to_owned()).await
+        }
+        #[cfg(windows)]
+        {
+            post_inside_job(job, url, auth, body).await
+        }
+    }
+    #[cfg(windows)]
+    async fn post_inside_job(
+        job: &detect::SharedJob,
+        url: &str,
+        auth: Option<&str>,
+        body: &str,
+    ) -> String {
+        let dir = tempfile::tempdir().unwrap();
+        let body_path = dir.path().join("body.json");
+        std::fs::write(&body_path, body).unwrap();
+        let curl = std::env::var_os("SYSTEMROOT")
+            .map_or_else(
+                || std::path::PathBuf::from(r"C:\Windows"),
+                std::path::PathBuf::from,
+            )
+            .join("System32")
+            .join("curl.exe");
+        let mut cmd = tokio::process::Command::new(curl);
+        cmd.arg("-sS").arg("-i");
+        if let Some(auth) = auth {
+            cmd.arg("-H").arg(format!("Authorization: {auth}"));
+        }
+        cmd.arg("-H")
+            .arg("Content-Type: application/json")
+            .arg("--data-binary")
+            .arg(format!("@{}", body_path.display()))
+            .arg(url)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
+        let mut wrap = isolate(cmd, job.clone());
+        let mut child = wrap.spawn().expect("curl inside the turn job");
+        let mut stdout = child.stdout().take().expect("stdout");
+        let mut stderr = child.stderr().take().expect("stderr");
+        let status = tokio::time::timeout(std::time::Duration::from_secs(20), child.wait())
+            .await
+            .expect("curl timed out")
+            .expect("curl wait");
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let _ = stdout.read_to_end(&mut out).await;
+        let _ = stderr.read_to_end(&mut err).await;
+        assert!(
+            status.success(),
+            "curl failed: {}",
+            String::from_utf8_lossy(&err)
+        );
+        String::from_utf8_lossy(&out).into_owned()
     }
     #[test]
     fn tool_names_are_collision_free() {

@@ -67,10 +67,20 @@ fn main() {
         );
     }
     if args.iter().any(|s| s == "--version") {
-        println!(
-            "{} (Fixture)",
-            std::env::var("FAKE_VERSION").unwrap_or_else(|_| "2.1.300".into())
-        );
+        let mut version = std::env::var("FAKE_VERSION").unwrap_or_else(|_| "2.1.300".into());
+        if std::env::var("FAKE_VERSION_STEP").is_ok() {
+            let dir = std::env::var("FAKE_LOG").unwrap_or_else(|_| ".".into());
+            let stamp = std::path::Path::new(&dir).join("version-probes");
+            let seen = std::fs::read_to_string(&stamp)
+                .ok()
+                .and_then(|text| text.trim().parse::<u32>().ok())
+                .unwrap_or(0);
+            std::fs::write(&stamp, (seen + 1).to_string()).unwrap();
+            if seen > 0 {
+                version = "9.9.9".into();
+            }
+        }
+        println!("{version} (Fixture)");
         return;
     }
     if args.iter().any(|s| s == "--help" || s == "-h") {

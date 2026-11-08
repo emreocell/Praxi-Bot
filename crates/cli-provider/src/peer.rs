@@ -1,15 +1,34 @@
-//! Accept a loopback MCP connection only when its owning pid is this turn's
-//! CLI child or a descendant of that child.
+//! Accept a loopback MCP connection only from this turn's CLI.
 //!
 //! Claude and Codex can both launch a stdio MCP server, but they spawn that
 //! process with an explicit handle list, so a pipe created here is not
 //! inherited by the server. The bridge stays on loopback and this check is
 //! what rejects every other same-user client.
+//!
+//! Windows does not treat the toolhelp parent id as ancestry. The socket is
+//! accepted only when its owner is inside the kill-on-close job `isolate`
+//! created for this turn. Unix still uses the real forking parent.
 
 use std::net::{Ipv4Addr, SocketAddr};
 
+/// `true` only when `peer` is an established socket owned by a process in
+/// this turn's job. Any lookup failure is a refusal.
+#[cfg(windows)]
+#[must_use]
+pub(crate) fn peer_is_allowed(
+    peer: SocketAddr,
+    listen: SocketAddr,
+    job: &crate::detect::SharedJob,
+) -> bool {
+    let Some(owner) = connection_owner(peer, listen) else {
+        return false;
+    };
+    job.contains(owner)
+}
+
 /// `true` only when `peer` is an established socket owned by `child_pid` or
-/// one of that process's descendants. Any lookup failure is a refusal.
+/// one of that process's real forking descendants. Any lookup failure is a refusal.
+#[cfg(not(windows))]
 #[must_use]
 pub(crate) fn peer_is_allowed(peer: SocketAddr, listen: SocketAddr, child_pid: u32) -> bool {
     if child_pid == 0 {
@@ -132,74 +151,6 @@ fn tcp_port(raw: u32) -> u16 {
     u16::from_be(u16::try_from(raw & 0xFFFF).unwrap_or(0))
 }
 
-#[cfg(windows)]
-struct Snapshot(windows::Win32::Foundation::HANDLE);
-
-#[cfg(windows)]
-#[allow(unsafe_code)]
-impl Drop for Snapshot {
-    fn drop(&mut self) {
-        use windows::Win32::Foundation::CloseHandle;
-        // SAFETY: `self.0` is the snapshot from CreateToolhelp32Snapshot and
-        // is closed exactly once.
-        unsafe {
-            let _ = CloseHandle(self.0);
-        }
-    }
-}
-
-#[cfg(windows)]
-#[allow(unsafe_code)]
-fn is_descendant(pid: u32, ancestor: u32) -> bool {
-    use std::collections::HashMap;
-
-    use windows::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
-        TH32CS_SNAPPROCESS,
-    };
-
-    if pid == 0 || ancestor == 0 {
-        return false;
-    }
-    // SAFETY: a process snapshot. The handle is closed on every return path.
-    let Ok(snap) = (unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }) else {
-        return false;
-    };
-    let snap = Snapshot(snap);
-    let mut entry = PROCESSENTRY32W::default();
-    let Ok(size) = u32::try_from(std::mem::size_of::<PROCESSENTRY32W>()) else {
-        return false;
-    };
-    entry.dwSize = size;
-    // SAFETY: `entry.dwSize` is set and `entry` outlives the call.
-    if unsafe { Process32FirstW(snap.0, &raw mut entry) }.is_err() {
-        return false;
-    }
-    let mut parents = HashMap::<u32, u32>::new();
-    loop {
-        parents.insert(entry.th32ProcessID, entry.th32ParentProcessID);
-        // SAFETY: the same sized entry and the still-open snapshot.
-        if unsafe { Process32NextW(snap.0, &raw mut entry) }.is_err() {
-            break;
-        }
-    }
-    let mut current = pid;
-    let mut seen = std::collections::HashSet::new();
-    for _ in 0..64 {
-        let Some(parent) = parents.get(&current).copied() else {
-            return false;
-        };
-        if parent == ancestor {
-            return true;
-        }
-        if parent == 0 || parent == current || !seen.insert(parent) {
-            return false;
-        }
-        current = parent;
-    }
-    false
-}
-
 #[cfg(not(windows))]
 fn connection_owner_once(peer: SocketAddr, listen: SocketAddr) -> Option<u32> {
     let (peer_ip, peer_port) = v4(peer)?;
@@ -289,10 +240,12 @@ fn parent_pid(pid: u32) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::peer_is_allowed;
-    use std::net::{Ipv4Addr, TcpListener, TcpStream};
+    use std::net::Ipv4Addr;
 
+    #[cfg(not(windows))]
     #[test]
     fn connecting_process_is_the_owner_and_other_pids_are_refused() {
+        use std::net::{TcpListener, TcpStream};
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let listen = listener.local_addr().unwrap();
         let client = TcpStream::connect(listen).unwrap();
@@ -301,5 +254,65 @@ mod tests {
         assert!(peer_is_allowed(peer, listen, std::process::id()));
         assert!(!peer_is_allowed(peer, listen, u32::MAX));
         assert!(!peer_is_allowed(peer, listen, 0));
+    }
+
+    /// A same-user process that is not in this turn's job is refused, even
+    /// though a parent-pid walk would have accepted a spoofed child.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn process_outside_the_job_is_rejected() {
+        use std::time::Duration;
+
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let listen = listener.local_addr().unwrap();
+        let port = listen.port();
+        let job = crate::detect::SharedJob::new();
+        let powershell = std::env::var_os("SYSTEMROOT")
+            .map_or_else(
+                || std::path::PathBuf::from(r"C:\Windows"),
+                std::path::PathBuf::from,
+            )
+            .join("System32")
+            .join("WindowsPowerShell")
+            .join("v1.0")
+            .join("powershell.exe");
+        let script = format!(
+            "$c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', {port}); Start-Sleep -Seconds 20"
+        );
+        let mut cmd = tokio::process::Command::new(powershell);
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
+        let mut wrap = crate::detect::isolate(cmd, job.clone());
+        let mut child = wrap.spawn().expect("connector inside the turn job");
+        let accepted = tokio::time::timeout(Duration::from_secs(20), listener.accept())
+            .await
+            .expect("in-job client did not connect");
+        let (_member, member_peer) = accepted.unwrap();
+        assert!(
+            peer_is_allowed(member_peer, listen, &job),
+            "owner inside the turn job must be accepted"
+        );
+        assert!(
+            job.contains(child.id().expect("child pid")),
+            "spawned client must be in the isolate job"
+        );
+        assert!(
+            !job.contains(std::process::id()),
+            "the parent process is not a member of the turn job"
+        );
+
+        let _outside = std::net::TcpStream::connect(listen).unwrap();
+        let (_outsider, outside_peer) = listener.accept().await.unwrap();
+        assert!(
+            !peer_is_allowed(outside_peer, listen, &job),
+            "a process outside the job must be rejected"
+        );
+        let _ = child.start_kill();
+        let _ = child.wait().await;
     }
 }

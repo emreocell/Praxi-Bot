@@ -210,24 +210,46 @@ async fn claude_deny() {
     run(Engine::Claude, false, false).await;
 }
 #[tokio::test]
-async fn codex_allow() {
-    run(Engine::Codex, true, false).await;
+async fn codex_unconfinable_is_not_spawned() {
+    for shim in [false, true] {
+        for version in ["0.167.0", "2.1.300"] {
+            let (dir, cli) = fixture_env(Engine::Codex, "", shim, &[("FAKE_VERSION", version)]);
+            let err = cli
+                .run_turn(turn(), Host::new(true), CancellationToken::new())
+                .await
+                .unwrap_err();
+            assert_eq!(err, CliError::CodexUnconfinable, "{version} shim={shim}");
+            assert_eq!(
+                err.to_string(),
+                cli_provider::detect::CODEX_UNCONFINABLE_MESSAGE
+            );
+            assert!(!dir.path().join("argv").exists(), "{version}");
+        }
+    }
 }
 #[tokio::test]
-async fn codex_deny() {
-    run(Engine::Codex, false, false).await;
+async fn codex_reprobe_refuses_when_the_spawn_path_changes() {
+    let (dir, cli) = fixture_env(
+        Engine::Codex,
+        "",
+        false,
+        &[("FAKE_VERSION", "0.167.0"), ("FAKE_VERSION_STEP", "1")],
+    );
+    assert_eq!(
+        cli.run_turn(turn(), Host::new(true), CancellationToken::new())
+            .await
+            .unwrap_err(),
+        CliError::BinaryChanged
+    );
+    assert!(!dir.path().join("argv").exists());
 }
 #[tokio::test]
 async fn claude_cmd_prompt_absent() {
     run(Engine::Claude, true, true).await;
 }
 #[tokio::test]
-async fn codex_cmd_prompt_absent() {
-    run(Engine::Codex, true, true).await;
-}
-#[tokio::test]
 async fn native_tools_are_refused() {
-    for (engine, mode) in [(Engine::Claude, "bash"), (Engine::Codex, "native")] {
+    for (engine, mode) in [(Engine::Claude, "bash")] {
         let (_dir, cli) = fixture(engine, mode, false);
         let host = Host::new(true);
         assert_eq!(
@@ -254,7 +276,7 @@ async fn quota_and_unbounded_lines_are_non_retryable() {
 #[tokio::test]
 async fn cancellation_and_future_drop_reap_child() {
     for abort in [false, true] {
-        let (dir, cli) = fixture(Engine::Codex, "hang-tree", false);
+        let (dir, cli) = fixture(Engine::Claude, "hang-tree", false);
         let cancel = CancellationToken::new();
         let c = cancel.clone();
         let task = tokio::spawn(async move { cli.run_turn(turn(), Host::new(true), c).await });
@@ -309,15 +331,16 @@ async fn unknown_and_approval_methods_end_the_turn() {
         "bad-method:item/fileChange/patchUpdated",
     ];
     for mode in methods {
-        let (_dir, cli) = fixture(Engine::Codex, mode, false);
+        let (dir, cli) = fixture(Engine::Codex, mode, false);
         let host = Host::new(true);
         assert_eq!(
             cli.run_turn(turn(), host.clone(), CancellationToken::new())
                 .await
                 .unwrap_err(),
-            CliError::NativeToolsOpen,
+            CliError::CodexUnconfinable,
             "{mode}"
         );
+        assert!(!dir.path().join("argv").exists(), "{mode}");
         assert_eq!(host.calls.load(Ordering::SeqCst), 0);
         assert!(!host.text.lock().contains("SHOULD_NOT_APPLY"));
     }
@@ -334,15 +357,16 @@ async fn unknown_and_approval_methods_end_the_turn() {
 #[tokio::test]
 async fn missing_echo_refuses_the_turn() {
     for mode in ["no-echo", "partial-echo"] {
-        let (_dir, cli) = fixture(Engine::Codex, mode, false);
+        let (dir, cli) = fixture(Engine::Codex, mode, false);
         let host = Host::new(true);
         assert_eq!(
             cli.run_turn(turn(), host.clone(), CancellationToken::new())
                 .await
                 .unwrap_err(),
-            CliError::NativeToolsOpen,
+            CliError::CodexUnconfinable,
             "{mode}"
         );
+        assert!(!dir.path().join("argv").exists(), "{mode}");
         assert_eq!(host.calls.load(Ordering::SeqCst), 0);
     }
 }
@@ -381,11 +405,13 @@ async fn codex_user_mcp_servers_are_disabled_on_argv() {
         "[mcp_servers.demo]\ncommand = \"helper\"\n",
     )
     .unwrap();
-    cli.run_turn(turn(), Host::new(true), CancellationToken::new())
-        .await
-        .unwrap();
-    let argv = std::fs::read_to_string(dir.path().join("argv")).unwrap();
-    assert!(argv.contains("mcp_servers.demo.enabled=false"));
+    assert_eq!(
+        cli.run_turn(turn(), Host::new(true), CancellationToken::new())
+            .await
+            .unwrap_err(),
+        CliError::CodexUnconfinable
+    );
+    assert!(!dir.path().join("argv").exists());
     let (dir, cli) = fixture(Engine::Codex, "", false);
     std::fs::write(
         dir.path().join("config.toml"),
@@ -396,7 +422,7 @@ async fn codex_user_mcp_servers_are_disabled_on_argv() {
         cli.run_turn(turn(), Host::new(true), CancellationToken::new())
             .await
             .unwrap_err(),
-        CliError::NativeToolsOpen
+        CliError::CodexUnconfinable
     );
     assert!(!dir.path().join("argv").exists());
 }
