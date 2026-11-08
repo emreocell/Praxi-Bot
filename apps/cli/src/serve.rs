@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use agent_core::{AgentLoop, LoopConfig, Providers};
+use agent_core::{AgentLoop, LoopConfig, Providers, SharedRedactor};
 use agent_router::ladder::{GeminiEmbedder, gemini};
 use builtin_tools::{BuiltinConfig, ResolverGate};
 use daemon_api::{
@@ -19,7 +19,7 @@ use provider_catalog::{
     Auth, Catalog, ChatProvider, ModelInfo, OpenAiCompatConfig, ProviderConfig, ProviderEntry,
     ProviderKind, ProviderSettings, config_path,
 };
-use secret_store::SecretStore;
+use secret_store::{PASSPHRASE_ENV, SecretStore};
 use serde::Deserialize;
 use skills::{SkillIndex, SkillPaths};
 use storage::Storage;
@@ -109,17 +109,87 @@ fn build_one(
     Ok((provider, entry.models))
 }
 
-/// Assemble the loop (tools + providers) over `storage`.
+/// How often the daemon re-reads the secret store into the redactor, so a
+/// secret stored after startup is masked too.
+pub const REDACTOR_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Literal secrets that live outside the secret store: the daemon bearer token
+/// and the vault passphrase (when it comes from the environment).
+fn redactor_extras(api_token: &str, passphrase: Option<&str>) -> Vec<String> {
+    let mut v = vec![api_token.to_owned()];
+    if let Some(p) = passphrase.filter(|p| !p.is_empty()) {
+        v.push(p.to_owned());
+    }
+    v
+}
+
+/// The vault passphrase from the environment, if any.
+fn env_passphrase() -> Option<String> {
+    std::env::var(PASSPHRASE_ENV).ok().filter(|p| !p.is_empty())
+}
+
+/// The production redactor: the built-in key shapes, every value in `store`,
+/// the daemon bearer token and the vault passphrase.  A store that cannot be
+/// read still yields the shapes plus the token and passphrase (fail closed).
+#[must_use]
+pub fn production_redactor(
+    store: Option<&dyn SecretStore>,
+    api_token: &str,
+    passphrase: Option<&str>,
+) -> SharedRedactor {
+    let extras = redactor_extras(api_token, passphrase);
+    let handle = SharedRedactor::default();
+    if let Err(e) = handle.refresh_from_store(store, &extras) {
+        eprintln!("warning: secret redaction: cannot read the secret store: {e}");
+        let _ = handle.refresh_from_store(None, &extras);
+    }
+    handle
+}
+
+/// Re-read `store` into `handle`; on failure the previous contents stay.
+fn refresh_redactor(
+    handle: &SharedRedactor,
+    store: &dyn SecretStore,
+    api_token: &str,
+    passphrase: Option<&str>,
+) {
+    let extras = redactor_extras(api_token, passphrase);
+    if let Err(e) = handle.refresh_from_store(Some(store), &extras) {
+        eprintln!("warning: secret redaction refresh failed (keeping the previous set): {e}");
+    }
+}
+
+/// Assemble the loop (tools + providers) over `storage` with only the built-in
+/// key-shape redaction (see [`build_agent_with_redactor`]).
 ///
 /// `desktop` is the backend of the desktop tools (`None` = no desktop tools).
 /// The loop installs its own permission gate for tool calls made from scripts,
 /// and the desktop control gate the daemon bridges to the app
 /// (see `daemon_api::ControlHub`).
+#[cfg(test)]
 pub fn build_agent(
     storage: &Arc<Storage>,
     providers: Providers,
     data_dir: &Path,
     desktop: Option<Arc<dyn DesktopBackend>>,
+) -> AgentLoop {
+    build_agent_with_redactor(
+        storage,
+        providers,
+        data_dir,
+        desktop,
+        SharedRedactor::default(),
+    )
+}
+
+/// [`build_agent`] with `redactor` masking secrets before they reach the model,
+/// the stored events and the event stream.
+pub fn build_agent_with_redactor(
+    storage: &Arc<Storage>,
+    providers: Providers,
+    data_dir: &Path,
+    desktop: Option<Arc<dyn DesktopBackend>>,
+    redactor: SharedRedactor,
 ) -> AgentLoop {
     // Placeholder: `with_builtin_tools` replaces it with the loop's own gate.
     let gate = ResolverGate::new(
@@ -135,7 +205,10 @@ pub fn build_agent(
         Arc::clone(storage),
         ToolRegistry::new(),
         providers,
-        LoopConfig::default(),
+        LoopConfig {
+            redactor: Some(redactor),
+            ..LoopConfig::default()
+        },
     )
     .with_builtin_tools(tools)
     .with_subagents()
@@ -369,11 +442,6 @@ pub fn serve(
     } = opts;
     let (port, json, grace) = (*port, *json, *grace);
     let storage = Arc::new(Storage::open(data_dir)?);
-    let agent = build_agent(&storage, providers, data_dir, desktop);
-    // Same registry the loop calls tools from: MCP servers and email register into it.
-    let mcp_tools = agent.tool_registry();
-    register_email(data_dir, &mcp_tools, telegram_store.as_ref());
-    let recovered = agent.recover()?;
     let token = load_or_create_token(data_dir)?;
     if !token.restricted {
         eprintln!(
@@ -382,6 +450,14 @@ pub fn serve(
         );
     }
     let api_token = token.token;
+    let passphrase = env_passphrase();
+    let redactor =
+        production_redactor(telegram_store.as_deref(), &api_token, passphrase.as_deref());
+    let agent = build_agent_with_redactor(&storage, providers, data_dir, desktop, redactor.clone());
+    // Same registry the loop calls tools from: MCP servers and email register into it.
+    let mcp_tools = agent.tool_registry();
+    register_email(data_dir, &mcp_tools, telegram_store.as_ref());
+    let recovered = agent.recover()?;
     let mut cfg = DaemonConfig::new(api_token.clone());
     cfg.shutdown_grace = grace;
     // Extra browser origins (e.g. the desktop app's dev server), comma separated.
@@ -397,6 +473,27 @@ pub fn serve(
         .enable_all()
         .build()?;
     rt.block_on(async {
+        // Pick up secrets stored after startup (the redactor is shared with the loop).
+        let refresher = telegram_store.clone().map(|store| {
+            let (handle, token, pass) = (redactor.clone(), api_token.clone(), passphrase.clone());
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(REDACTOR_REFRESH_INTERVAL);
+                tick.tick().await;
+                loop {
+                    tick.tick().await;
+                    let (h, s, t, p) = (
+                        handle.clone(),
+                        Arc::clone(&store),
+                        token.clone(),
+                        pass.clone(),
+                    );
+                    let _ = tokio::task::spawn_blocking(move || {
+                        refresh_redactor(&h, &*s, &t, p.as_deref());
+                    })
+                    .await;
+                }
+            })
+        });
         let peer =
             crate::peer::start_server(data_dir, *host_mode, *peer_enabled, state.clone()).await?;
         // Connect in the background (a slow `npx` must not delay the listener)
@@ -470,6 +567,9 @@ pub fn serve(
             peer.shutdown().await;
         }
         mcp.shutdown().await;
+        if let Some(r) = refresher {
+            r.abort();
+        }
         let paused = outcome?;
         if json {
             println!(
@@ -512,6 +612,41 @@ cached_per_mtok = 0.5
 [[models]]
 id = "unpriced"
 "#;
+
+    // SEC-02 (redaction half): production wiring masks stored secrets, the
+    // daemon bearer token and the vault passphrase, and follows later changes.
+    #[test]
+    fn production_redactor_masks_store_token_and_passphrase() {
+        let store = MemoryStore::new();
+        store
+            .set("provider.key", "stored-provider-secret-1")
+            .unwrap();
+        let r = production_redactor(
+            Some(&store),
+            "daemon-token-abcdef123456",
+            Some("vault-passphrase-xyz"),
+        );
+        let text =
+            "a stored-provider-secret-1 b daemon-token-abcdef123456 c vault-passphrase-xyz d";
+        let out = r.redact(text);
+        assert_eq!(out, "a [REDACTED] b [REDACTED] c [REDACTED] d");
+        // Built-in key shapes stay on.
+        assert!(r.contains_secret("sk-abcdefghijklmnopqrstuvwxyz123456"));
+        // Without a store the token and passphrase are still masked.
+        let r = production_redactor(None, "daemon-token-abcdef123456", None);
+        assert!(r.contains_secret("daemon-token-abcdef123456"));
+    }
+
+    #[test]
+    fn redactor_refresh_picks_up_a_secret_stored_later() {
+        let store = MemoryStore::new();
+        let r = production_redactor(Some(&store), "daemon-token-abcdef123456", None);
+        assert!(!r.contains_secret("late-secret-value-99"));
+        store.set("late", "late-secret-value-99").unwrap();
+        refresh_redactor(&r, &store, "daemon-token-abcdef123456", None);
+        assert!(r.contains_secret("late-secret-value-99"));
+        assert!(r.contains_secret("daemon-token-abcdef123456"));
+    }
 
     #[test]
     fn fresh_install_builds_unconfigured_agent() {

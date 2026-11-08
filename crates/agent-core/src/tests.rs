@@ -2330,7 +2330,7 @@ async fn redactor_masks_tool_output_and_events() {
         text("done"),
     ]);
     let mut config = cfg(Policy::full());
-    config.redactor = Some(secret_store::Redactor::new());
+    config.redactor = Some(secret_store::Redactor::new().into());
     let lp = make_loop(&env.storage, env.bot, &fake, &[t(&r)], profile(""), config);
     let mut rx = lp.subscribe();
     let run = lp.run_turn(env.chat, "go").unwrap();
@@ -2350,6 +2350,193 @@ async fn redactor_masks_tool_output_and_events() {
     let log = serde_json::to_string(&read_event_log(env.dir.path(), run).unwrap()).unwrap();
     assert!(log.contains("[REDACTED]"));
     assert!(!log.contains(secret));
+}
+
+// SEC-02 (redaction half): the production redactor is a shared handle that is
+// refreshed from the secret store; a secret stored after the loop started is
+// masked in the provider message, the broadcast stream and the stored log.
+#[tokio::test]
+async fn refreshed_redactor_masks_a_newly_stored_secret_everywhere() {
+    let env = setup();
+    let sentinel = "vault-sentinel-VALUE-4711";
+    let r = Arc::new(tool(
+        "t.read",
+        Effect::Read,
+        &format!("data {sentinel} end"),
+    ));
+    let fake = Fake::new(vec![
+        calls(&[("c1", "t.read", json!({"note": sentinel}))]),
+        text("done"),
+    ]);
+    let handle = crate::SharedRedactor::default();
+    let mut config = cfg(Policy::full());
+    config.redactor = Some(handle.clone());
+    let lp = make_loop(&env.storage, env.bot, &fake, &[t(&r)], profile(""), config);
+    // Not yet known: nothing to mask.
+    assert!(!handle.contains_secret(sentinel));
+    // A secret is stored later and the daemon refreshes the handle.
+    let store = secret_store::MemoryStore::new();
+    secret_store::SecretStore::set(&store, "k", sentinel).unwrap();
+    handle
+        .refresh_from_store(Some(&store), &["daemon-bearer-token-xyz".to_owned()])
+        .unwrap();
+    assert!(handle.contains_secret("daemon-bearer-token-xyz"));
+
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+
+    let to_model = tool_messages(&fake.request(1));
+    assert!(!to_model[0].contains(sentinel), "{to_model:?}");
+    assert!(to_model[0].contains("[REDACTED]"));
+    let mut n = 0;
+    while let Ok(i) = rx.try_recv() {
+        n += 1;
+        let json = serde_json::to_string(&i.envelope.event).unwrap();
+        assert!(!json.contains(sentinel), "leaked on the stream: {json}");
+    }
+    assert!(n > 0);
+    let log = serde_json::to_string(&read_event_log(env.dir.path(), run).unwrap()).unwrap();
+    assert!(
+        log.contains("[REDACTED]") && !log.contains(sentinel),
+        "{log}"
+    );
+}
+
+// ---------- event journal (REL-02) ----------
+
+#[derive(Clone, Default)]
+struct ProbeSink {
+    written: Arc<Mutex<Vec<storage::JournalRecord>>>,
+    sync_delay: Duration,
+}
+
+impl storage::JournalSink for ProbeSink {
+    fn write(&mut self, rec: &storage::JournalRecord) -> storage::Result<()> {
+        self.written.lock().push(rec.clone());
+        Ok(())
+    }
+    fn sync(&mut self) -> storage::Result<()> {
+        std::thread::sleep(self.sync_delay);
+        Ok(())
+    }
+}
+
+/// A loop with a finished run whose journal writes into `probe`.
+async fn loop_with_probe(probe: &ProbeSink) -> (Env, AgentLoop, protocol::RunId) {
+    let env = setup();
+    let fake = Fake::new(vec![text("hi")]);
+    let mut config = cfg(Policy::full());
+    config.journal = crate::JournalSlot::with_journal(storage::EventJournal::new(probe.clone()));
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    (env, lp, run)
+}
+
+fn run_ctx(lp: &AgentLoop, run: protocol::RunId) -> Arc<crate::shared::RunCtx> {
+    // A finished run has dropped its context; rebuild it from the stored row.
+    let row = lp.sh.storage.get_run(run).unwrap().unwrap();
+    lp.sh.ctx(&row).unwrap()
+}
+
+fn delta_event(run: protocol::RunId, text: &str) -> Event {
+    Event::MessageDelta(protocol::event::MessageDelta {
+        run_id: run,
+        text: text.into(),
+    })
+}
+
+fn barrier_event(run: protocol::RunId) -> Event {
+    Event::Error(protocol::event::RunError {
+        run_id: run,
+        message: "x".into(),
+        recoverable: true,
+    })
+}
+
+fn todo_event(run: protocol::RunId) -> Event {
+    Event::TodoUpdated(protocol::event::TodoUpdated {
+        run_id: run,
+        items: vec![],
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn emit_does_not_block_on_a_slow_fsync_and_barrier_events_are_durable() {
+    let probe = ProbeSink {
+        sync_delay: Duration::from_millis(400),
+        ..ProbeSink::default()
+    };
+    let (_env, lp, run) = loop_with_probe(&probe).await;
+    let ctx = run_ctx(&lp, run);
+    let start = std::time::Instant::now();
+    for i in 0..100 {
+        lp.sh.emit(&ctx, delta_event(run, &format!("t{i} ")));
+    }
+    assert!(
+        start.elapsed() < Duration::from_millis(300),
+        "emit waited for the disk: {:?}",
+        start.elapsed()
+    );
+    // A barrier event (approval/state) returns only once it is written.
+    lp.sh.emit(&ctx, barrier_event(run));
+    let w = probe.written.lock();
+    assert!(
+        w.iter()
+            .any(|r| matches!(r.envelope.event, Event::Error(_))),
+        "barrier event not durable on return"
+    );
+    // Every delta enqueued before it is there too, in order.
+    let text: String = w
+        .iter()
+        .filter_map(|r| match &r.envelope.event {
+            Event::MessageDelta(d) => Some(d.text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(text.ends_with("t99 "), "{text}");
+    assert!(text.contains("t0 t1 t2 "), "{text}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_emit_keeps_gseq_and_seq_monotonic_in_journal_and_stream() {
+    let probe = ProbeSink::default();
+    let (_env, lp, run) = loop_with_probe(&probe).await;
+    let ctx = run_ctx(&lp, run);
+    let lp = Arc::new(lp);
+    let mut rx = lp.subscribe();
+    let mut hs = Vec::new();
+    for _ in 0..8 {
+        let (lp, ctx) = (Arc::clone(&lp), Arc::clone(&ctx));
+        hs.push(std::thread::spawn(move || {
+            for _ in 0..50 {
+                lp.sh.emit(&ctx, todo_event(ctx.run_id));
+            }
+        }));
+    }
+    for h in hs {
+        h.join().unwrap();
+    }
+    lp.sh.emit(&ctx, barrier_event(run));
+    let mut streamed = Vec::new();
+    while let Ok(i) = rx.try_recv() {
+        streamed.push((i.gseq, i.envelope.seq));
+    }
+    assert_eq!(streamed.len(), 401);
+    assert!(
+        streamed
+            .windows(2)
+            .all(|p| p[0].0 < p[1].0 && p[0].1 < p[1].1)
+    );
+    let w = probe.written.lock();
+    let first = streamed[0].0;
+    let journaled: Vec<(u64, u64)> = w
+        .iter()
+        .filter(|r| r.gseq >= first)
+        .map(|r| (r.gseq, r.envelope.seq))
+        .collect();
+    assert_eq!(journaled, streamed, "journal order must equal stream order");
 }
 
 // ---------- memory ----------
@@ -2890,7 +3077,7 @@ async fn output_preview_is_redacted_and_capped_at_2kb() {
         text("done"),
     ]);
     let mut config = cfg(Policy::full());
-    config.redactor = Some(secret_store::Redactor::new());
+    config.redactor = Some(secret_store::Redactor::new().into());
     let lp = make_loop(
         &env.storage,
         env.bot,

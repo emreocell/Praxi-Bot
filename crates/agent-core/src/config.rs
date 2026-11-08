@@ -6,8 +6,10 @@ use std::time::Duration;
 use std::sync::Arc;
 
 use memory_store::MemoryStore;
+use parking_lot::RwLock;
 use permission_engine::Policy;
-use secret_store::Redactor;
+use secret_store::{Redactor, SecretStore};
+use storage::EventJournal;
 use task_runtime::RetryPolicy;
 
 /// Profile-visible, non-namespaced tool count above which the model sees the
@@ -109,6 +111,105 @@ impl MemoryConfig {
     }
 }
 
+/// A [`Redactor`] that can be replaced while the loop runs (secrets are added
+/// and rotated after startup).  Clones share the same underlying redactor, so
+/// the daemon keeps a handle to refresh what the loop already uses.
+#[derive(Clone, Default)]
+pub struct SharedRedactor(Arc<RwLock<Redactor>>);
+
+impl std::fmt::Debug for SharedRedactor {
+    // Never print the registered secret values.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SharedRedactor(..)")
+    }
+}
+
+impl From<Redactor> for SharedRedactor {
+    fn from(r: Redactor) -> Self {
+        Self::new(r)
+    }
+}
+
+impl SharedRedactor {
+    /// Share `r`.
+    #[must_use]
+    pub fn new(r: Redactor) -> Self {
+        Self(Arc::new(RwLock::new(r)))
+    }
+
+    /// Replace the redactor atomically.
+    pub fn replace(&self, r: Redactor) {
+        *self.0.write() = r;
+    }
+
+    /// Rebuild from every value in `store` plus `extra` literal secrets (the
+    /// daemon token, the vault passphrase).  On a backend failure the previous
+    /// redactor stays in place (fail closed: nothing already known is dropped)
+    /// and the error is returned.
+    ///
+    /// # Errors
+    /// Backend failures while reading the store.
+    pub fn refresh_from_store(
+        &self,
+        store: Option<&dyn SecretStore>,
+        extra: &[String],
+    ) -> Result<(), secret_store::SecretError> {
+        let mut r = match store {
+            Some(s) => Redactor::from_store(s)?,
+            None => Redactor::new(),
+        };
+        for e in extra {
+            r.add_secret(e);
+        }
+        self.replace(r);
+        Ok(())
+    }
+
+    /// Mask all known values and patterns in `text`.
+    #[must_use]
+    pub fn redact(&self, text: &str) -> String {
+        self.0.read().redact(text)
+    }
+
+    /// Whether `text` contains anything that would be masked.
+    #[must_use]
+    pub fn contains_secret(&self, text: &str) -> bool {
+        self.0.read().contains_secret(text)
+    }
+}
+
+/// Lazily created (or injected) event journal of one loop.  Cloning yields a
+/// fresh *empty* slot, so a cloned config never shares a writer with the loop
+/// it was cloned from.
+#[derive(Default)]
+pub struct JournalSlot(std::sync::OnceLock<Arc<EventJournal>>);
+
+impl Clone for JournalSlot {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl std::fmt::Debug for JournalSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("JournalSlot(..)")
+    }
+}
+
+impl JournalSlot {
+    /// A slot with `journal` preinstalled (custom sinks, tests).
+    #[must_use]
+    pub fn with_journal(journal: EventJournal) -> Self {
+        let slot = Self::default();
+        let _ = slot.0.set(Arc::new(journal));
+        slot
+    }
+
+    pub(crate) fn get_or_init(&self, init: impl FnOnce() -> EventJournal) -> &Arc<EventJournal> {
+        self.0.get_or_init(|| Arc::new(init()))
+    }
+}
+
 /// Configuration of an [`AgentLoop`](crate::AgentLoop).
 #[derive(Debug, Clone)]
 pub struct LoopConfig {
@@ -137,12 +238,15 @@ pub struct LoopConfig {
     /// turn goes to the main model (`Agent`, K4).
     pub router_budget: Duration,
     /// Masks secrets in tool outputs and emitted events when set.
-    pub redactor: Option<Redactor>,
+    pub redactor: Option<SharedRedactor>,
     /// Memory hook; `None` = no memory.
     pub memory: Option<MemoryConfig>,
     /// How long a schedule-started run waits for an approval (or a question
     /// answer) before it pauses (default [`DEFAULT_SCHEDULE_APPROVAL_TIMEOUT`]).
     pub schedule_approval_timeout: Duration,
+    /// Where events are journaled.  Empty by default: the loop then creates a
+    /// background writer over its own storage on first use.
+    pub journal: JournalSlot,
 }
 
 impl Default for LoopConfig {
@@ -166,6 +270,7 @@ impl Default for LoopConfig {
             redactor: None,
             memory: None,
             schedule_approval_timeout: DEFAULT_SCHEDULE_APPROVAL_TIMEOUT,
+            journal: JournalSlot::default(),
         }
     }
 }
