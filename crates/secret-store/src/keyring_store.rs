@@ -30,7 +30,7 @@ const INDEX_BACKUP_ENTRY: &str = "__index__.bak";
 #[derive(Clone)]
 pub struct KeyringStore {
     service: String,
-    lock_path: Option<PathBuf>,
+    lock_path: PathBuf,
     transaction: Arc<Mutex<()>>,
     #[cfg(all(test, any(windows, target_os = "macos", target_os = "linux")))]
     mock: Option<Arc<tests::MockEntries>>,
@@ -47,24 +47,19 @@ impl std::fmt::Debug for KeyringStore {
 
 impl KeyringStore {
     /// A store using `service` as the keychain service name (e.g. `praxi-bot`).
+    ///
+    /// The cross-process lock is one file per service on a stable per-user
+    /// path. That path ignores `XDG_CONFIG_HOME` and the roaming config
+    /// directory, so two processes that share a service and a user profile
+    /// share the lock even when their config homes differ. A missing profile
+    /// still yields a concrete file instead of reporting the keychain as
+    /// unavailable.
     #[must_use]
     pub fn new(service: impl Into<String>) -> Self {
         let service = service.into();
-        // A keyring service is shared even when callers use different data
-        // directories. Use one service-wide lock in the OS app config directory.
-        // FNV-1a is a stable filename encoding, not a security primitive;
-        // collisions only serialize otherwise independent services.
-        let hash = service
-            .as_bytes()
-            .iter()
-            .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
-                (h ^ u64::from(*b)).wrapping_mul(0x0000_0100_0000_01b3)
-            });
-        let lock_path = directories::ProjectDirs::from("dev", "praxi", "praxi-bot")
-            .map(|dirs| dirs.config_dir().join(format!("keyring-{hash:016x}.lock")));
         Self {
+            lock_path: lock_file(&service, &current_anchor()),
             service,
-            lock_path,
             transaction: Arc::new(Mutex::new(())),
             #[cfg(all(test, any(windows, target_os = "macos", target_os = "linux")))]
             mock: None,
@@ -72,10 +67,7 @@ impl KeyringStore {
     }
 
     fn lock(&self) -> Result<TransactionGuard<'_>, SecretError> {
-        let path = self.lock_path.as_ref().ok_or_else(|| {
-            SecretError::Unavailable("cannot locate the keyring lock directory".into())
-        })?;
-        transaction::acquire(&self.transaction, path)
+        transaction::acquire(&self.transaction, &self.lock_path)
     }
 
     /// Check that the keychain works by writing, reading and deleting a probe.
@@ -165,6 +157,63 @@ impl KeyringStore {
         }
         Ok(present)
     }
+}
+
+/// Where the per-service lock directory is anchored.
+///
+/// `Home` is `$HOME/.local/share`, not `$XDG_CONFIG_HOME` or `$HOME/.config`.
+/// `LocalData` is the Windows local application-data folder (a known folder,
+/// not the roaming config directory).
+#[derive(Clone, Debug)]
+enum UserAnchor {
+    // Constructed on Windows. The unix tests also build it to check the path.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    LocalData(PathBuf),
+    // Constructed on Unix. Windows tests build it to check the path formula.
+    #[cfg_attr(windows, allow(dead_code))]
+    Home(PathBuf),
+    Temporary(PathBuf),
+}
+
+fn service_hash(service: &str) -> u64 {
+    // FNV-1a is a stable filename encoding, not a security primitive.
+    // Collisions only serialize otherwise independent services.
+    service
+        .as_bytes()
+        .iter()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        })
+}
+
+fn current_anchor() -> UserAnchor {
+    match directories::BaseDirs::new() {
+        Some(base) => platform_anchor(&base),
+        None => UserAnchor::Temporary(std::env::temp_dir()),
+    }
+}
+
+#[cfg(windows)]
+fn platform_anchor(base: &directories::BaseDirs) -> UserAnchor {
+    UserAnchor::LocalData(base.data_local_dir().to_path_buf())
+}
+
+#[cfg(not(windows))]
+fn platform_anchor(base: &directories::BaseDirs) -> UserAnchor {
+    UserAnchor::Home(base.home_dir().to_path_buf())
+}
+
+fn lock_directory(anchor: &UserAnchor) -> PathBuf {
+    match anchor {
+        UserAnchor::LocalData(dir) => dir.join("praxi-bot"),
+        UserAnchor::Home(home) => home.join(".local").join("share").join("praxi-bot"),
+        UserAnchor::Temporary(temp) => temp.join("praxi-bot-keyring"),
+    }
+}
+
+/// Same service and anchor always produce the same lock file.
+fn lock_file(service: &str, anchor: &UserAnchor) -> PathBuf {
+    lock_directory(anchor).join(format!("keyring-{:016x}.lock", service_hash(service)))
 }
 
 impl SecretStore for KeyringStore {
@@ -344,7 +393,7 @@ mod tests {
     fn mock_store(dir: &Path) -> KeyringStore {
         KeyringStore {
             service: "test".into(),
-            lock_path: Some(dir.join("keyring.lock")),
+            lock_path: dir.join("keyring.lock"),
             transaction: Arc::new(Mutex::new(())),
             mock: Some(Arc::default()),
         }
@@ -508,6 +557,57 @@ mod tests {
             store.read_index(INDEX_ENTRY).unwrap(),
             store.read_index(INDEX_BACKUP_ENTRY).unwrap()
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_same_service_maps_to_one_lock_outside_config_home() {
+        let first = KeyringStore::new("shared/service");
+        let second = KeyringStore::new("shared/service");
+        assert_eq!(first.lock_path, second.lock_path);
+        assert_ne!(
+            first.lock_path,
+            KeyringStore::new("other-service").lock_path
+        );
+        if let Some(dirs) = directories::ProjectDirs::from("dev", "praxi", "praxi-bot") {
+            assert!(
+                !first.lock_path.starts_with(dirs.config_dir()),
+                "lock {} is still under the config home {}",
+                first.lock_path.display(),
+                dirs.config_dir().display()
+            );
+        }
+        match current_anchor() {
+            UserAnchor::LocalData(dir) => {
+                assert!(first.lock_path.starts_with(dir.join("praxi-bot")));
+            }
+            other => panic!("windows lock anchor should be local app data, got {other:?}"),
+        }
+
+        let home = PathBuf::from(r"C:\Users\alice");
+        let home_lock = lock_file("shared/service", &UserAnchor::Home(home.clone()));
+        assert_eq!(
+            home_lock,
+            lock_file("shared/service", &UserAnchor::Home(home.clone()))
+        );
+        assert!(home_lock.starts_with(home.join(".local").join("share").join("praxi-bot")));
+        assert!(!home_lock.starts_with(home.join(".config")));
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = KeyringStore {
+            service: "shared/service".into(),
+            lock_path: lock_file(
+                "shared/service",
+                &UserAnchor::Temporary(dir.path().to_path_buf()),
+            ),
+            transaction: Arc::new(Mutex::new(())),
+            mock: None,
+        };
+        assert!(
+            store.lock().is_ok(),
+            "a missing profile must not make the keychain Unavailable"
+        );
+        assert!(store.lock_path.is_file());
     }
 
     #[test]

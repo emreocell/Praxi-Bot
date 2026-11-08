@@ -7130,6 +7130,8 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "uuid",
+ "windows 0.62.2",
+ "zeroize",
 ]
 
 [[package]]
