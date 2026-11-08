@@ -996,7 +996,14 @@ fn swap_failure_restores_renamed_roots_and_secrets() {
     store.set("a", "old").unwrap();
     let secrets = BTreeMap::from([("a".into(), Zeroizing::new("new".into()))]);
     assert!(matches!(
-        install::commit(target.path(), &staging.0, &store, &secrets),
+        install::commit(
+            target.path(),
+            &staging.0,
+            &store,
+            &secrets,
+            &permission_engine::Policy::approve_destructive(),
+            true,
+        ),
         Err(ImportError::Io(_))
     ));
     assert_eq!(
@@ -1018,7 +1025,17 @@ fn swap_failure_restores_renamed_roots_and_secrets() {
     let store = MemoryStore::new();
     store.set("a", "old").unwrap();
     let secrets = BTreeMap::from([("a".into(), Zeroizing::new("new".into()))]);
-    assert!(install::commit(target.path(), &staging.0, &store, &secrets).is_err());
+    assert!(
+        install::commit(
+            target.path(),
+            &staging.0,
+            &store,
+            &secrets,
+            &permission_engine::Policy::approve_destructive(),
+            true,
+        )
+        .is_err()
+    );
     assert_eq!(
         fs::read_to_string(target.path().join("bots/original")).unwrap(),
         "old profile"

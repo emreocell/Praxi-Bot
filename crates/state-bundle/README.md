@@ -72,14 +72,29 @@ malformed, or unsupported policy payload, including legacy v1 bundles that did
 not reliably include the policy. Re-export legacy state with the current
 exporter; `allow_policy_relaxation` does not bypass format or validation errors.
 
-Import accepts a valid policy when the destination has none. Otherwise it must
-preserve the destination's permission ceiling for every category and initiator,
-including missing-category `Ask` defaults and schedule-to-human inheritance.
-Equal levels/limits, a new `Deny`, or replacing an `Allow` are safe without an
-override. Other changes require `ImportOptions::allow_policy_relaxation: true`,
-which defaults to `false` and is separate from `replace`. A malformed existing
-destination policy is rejected even with that flag; it cannot be treated as a
-missing policy or an approval of an unknown ceiling.
+A destination with no `policy.json` is not an absent ceiling. The daemon's
+effective policy for a missing file is `approve_destructive` (Ask everywhere),
+on a fresh empty target and on an initialized host (`replace: true`). The
+incoming policy must preserve that default. A fresh empty target still accepts
+the default, or a stricter policy, without `allow_policy_relaxation`.
+
+When a destination policy file exists, import must preserve its permission
+ceiling for every category and initiator, including missing-category `Ask`
+defaults and schedule-to-human inheritance. Equal levels/limits, a new `Deny`,
+or replacing an `Allow` are safe without an override. Other changes, including
+any loosening of the missing-file default, require
+`ImportOptions::allow_policy_relaxation: true`, which defaults to `false` and
+is separate from `replace`. A malformed, unreadable, or non-regular destination
+policy is rejected even with that flag; it cannot be treated as a missing
+policy or an approval of an unknown ceiling.
+
+To recover a corrupt destination `policy.json` and import again, move that file
+aside or repair the JSON, then retry the import. While the daemon is running,
+`PUT /v1/policy` with a preset such as `approve-destructive` replaces the file
+and clears the deny-all lock; stop the daemon before importing. A failed load
+may already have kept a copy named `policy.json.corrupt-<ms>`. Deleting the
+file does not approve a looser bundle: a missing file is still the
+`approve_destructive` ceiling.
 
 The comparison deliberately does not rank `Ask` below `AllowWithLimits`:
 persisted grants in `bot.db` can waive ordinary `Ask`, whereas the runtime keeps
@@ -87,8 +102,13 @@ unsupported limits subject to approval. Switching between those levels, or
 changing any limit, therefore needs explicit approval even if the caller
 expects the change to be stricter. The destination policy is checked again at
 the swap boundary, after progress callbacks, before any secret or live state
-write. Database grants are preserved together with the imported policy, so a
-source `Deny` does not become the daemon's weaker default on the destination.
+write. `commit` then captures the policy file actually present at the rename,
+including one created or replaced after that check, and rolls the swap back
+when the incoming policy would relax it. This crate does not hold the daemon's
+policy lock. Stop the target daemon, or otherwise serialize the import with
+`PUT /v1/policy`. Database grants are preserved together with the imported
+policy, so a source `Deny` does not become the daemon's weaker default on the
+destination.
 
 ## Secrets and trust
 
@@ -145,7 +165,10 @@ Backups contain old portable filesystem state, not old secrets or identities.
 single crash-atomic directory exchange or a transaction spanning SQLite files
 and arbitrary secret backends. A process/power failure during installation can
 require manual recovery from the backup/staging directories. Secret-store
-rollback can itself fail. Do not allow concurrent readers/writers during swap.
+rollback can itself fail. Do not allow concurrent readers or writers during
+swap, including `PUT /v1/policy`. Commit re-checks the policy it moved into the
+backup and rolls back when that captured file is tighter than the pre-check
+saw, but it does not take the daemon's policy lock.
 A crash journal/platform-specific exchange is a follow-up for stronger recovery.
 
 The latest three timestamped backup directories are retained; successive imports

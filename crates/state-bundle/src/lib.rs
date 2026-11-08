@@ -297,9 +297,18 @@ pub async fn import(
     progress(opts.progress.as_ref(), bytes, Phase::Swap);
     // The receive/migrations and even a progress callback can take time. Check
     // the current destination ceiling immediately before any live-state write.
+    // commit checks the policy file it actually renames, so a write that lands
+    // after this call still cannot loosen the captured ceiling.
     policy::check_destination(data_dir, &incoming_policy, opts.allow_policy_relaxation)?;
     // No await points after writes start: cancellation cannot interrupt rollback.
-    let backup_dir = install::commit(data_dir, &staging.0, store, &secrets)?;
+    let backup_dir = install::commit(
+        data_dir,
+        &staging.0,
+        store,
+        &secrets,
+        &incoming_policy,
+        opts.allow_policy_relaxation,
+    )?;
     progress(opts.progress.as_ref(), bytes, Phase::Complete);
     Ok(ImportOutcome {
         secrets_written: manifest.secret_names.clone(),

@@ -13,6 +13,13 @@ fn save_policy(dir: &Path, policy: &Policy) {
     fs::write(dir.join("policy.json"), serde_json::to_vec(policy).unwrap()).unwrap();
 }
 
+async fn bundle_with_policy(policy: &Policy) -> Vec<u8> {
+    let source = tempfile::tempdir().unwrap();
+    tests::database(source.path(), false);
+    save_policy(source.path(), policy);
+    tests::bundle(source.path()).await
+}
+
 fn database_with_grant(dir: &Path) {
     tests::database(dir, true);
     let storage = storage::Storage::open(dir).unwrap();
@@ -409,6 +416,231 @@ async fn sec16_rechecks_a_destination_tightened_at_the_swap_boundary() {
 }
 
 #[tokio::test]
+async fn sec16_fresh_empty_target_uses_the_default_ceiling() {
+    let default_bundle = {
+        let source = tempfile::tempdir().unwrap();
+        tests::database(source.path(), false);
+        tests::bundle(source.path()).await
+    };
+    let stricter = bundle_with_policy(&Policy::read_only()).await;
+    let loosened = bundle_with_policy(&Policy::full()).await;
+
+    // A fresh empty target has the daemon default as its ceiling. Matching and
+    // stricter bundles install without the relaxation flag.
+    let fresh = tempfile::tempdir().unwrap();
+    import(
+        fresh.path(),
+        &MemoryStore::new(),
+        default_bundle.as_slice(),
+        ImportOptions::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        daemon_api::load_policy(fresh.path())
+            .unwrap()
+            .unwrap()
+            .categories,
+        Policy::approve_destructive().categories
+    );
+
+    let fresh = tempfile::tempdir().unwrap();
+    import(
+        fresh.path(),
+        &MemoryStore::new(),
+        stricter.as_slice(),
+        ImportOptions::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        daemon_api::load_policy(fresh.path())
+            .unwrap()
+            .unwrap()
+            .categories,
+        Policy::read_only().categories
+    );
+
+    let fresh = tempfile::tempdir().unwrap();
+    let rejected = import(
+        fresh.path(),
+        &MemoryStore::new(),
+        loosened.as_slice(),
+        ImportOptions::default(),
+    )
+    .await;
+    assert!(matches!(
+        rejected,
+        Err(crate::ImportError::PolicyRelaxation)
+    ));
+    assert!(!fresh.path().join("policy.json").exists());
+    assert!(!fresh.path().join("bot.db").exists());
+    assert!(!fresh.path().join("import-staging").exists());
+
+    import(
+        fresh.path(),
+        &MemoryStore::new(),
+        loosened.as_slice(),
+        ImportOptions {
+            allow_policy_relaxation: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        daemon_api::load_policy(fresh.path())
+            .unwrap()
+            .unwrap()
+            .categories,
+        Policy::full().categories
+    );
+}
+
+#[tokio::test]
+async fn sec16_initialized_host_without_policy_uses_the_default_ceiling() {
+    let default_bundle = {
+        let source = tempfile::tempdir().unwrap();
+        tests::database(source.path(), false);
+        tests::bundle(source.path()).await
+    };
+    let loosened = bundle_with_policy(&Policy::full()).await;
+    let target = tempfile::tempdir().unwrap();
+    database_with_grant(target.path());
+    let before = fs::read(target.path().join("bot.db")).unwrap();
+    let rejected = import(
+        target.path(),
+        &MemoryStore::new(),
+        loosened.as_slice(),
+        ImportOptions {
+            replace: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(matches!(
+        rejected,
+        Err(crate::ImportError::PolicyRelaxation)
+    ));
+    assert!(!target.path().join("policy.json").exists());
+    assert_eq!(fs::read(target.path().join("bot.db")).unwrap(), before);
+    assert!(!target.path().join("import-staging").exists());
+
+    import(
+        target.path(),
+        &MemoryStore::new(),
+        default_bundle.as_slice(),
+        ImportOptions {
+            replace: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        daemon_api::load_policy(target.path())
+            .unwrap()
+            .unwrap()
+            .categories,
+        Policy::approve_destructive().categories
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn sec16_commit_revalidates_the_policy_captured_at_rename() {
+    use secret_store::SecretStore;
+
+    let source = tempfile::tempdir().unwrap();
+    tests::database(source.path(), false);
+    let source_store = MemoryStore::new();
+    source_store.set("incoming", "new").unwrap();
+    let mut bytes = Vec::new();
+    crate::export(
+        source.path(),
+        &source_store,
+        crate::ExportOptions {
+            secrets: crate::SecretSelection::All,
+            ..Default::default()
+        },
+        &mut bytes,
+    )
+    .await
+    .unwrap();
+
+    // The pre-check sees the default ceiling. The hook then either replaces
+    // that file or creates one, which is the ceiling `commit` must capture.
+    for preexisting in [true, false] {
+        let target = tempfile::tempdir().unwrap();
+        database_with_grant(target.path());
+        if preexisting {
+            save_policy(target.path(), &Policy::approve_destructive());
+        }
+        let before = fs::read(target.path().join("bot.db")).unwrap();
+        let store = MemoryStore::new();
+        store.set("incoming", "old").unwrap();
+        let _hook = BeforeMoves::install(write_read_only_policy);
+        let result = import(
+            target.path(),
+            &store,
+            bytes.as_slice(),
+            ImportOptions {
+                replace: true,
+                ..Default::default()
+            },
+        )
+        .await;
+        assert!(
+            matches!(result, Err(crate::ImportError::PolicyRelaxation)),
+            "preexisting={preexisting}: {result:?}"
+        );
+        assert_eq!(
+            daemon_api::load_policy(target.path())
+                .unwrap()
+                .unwrap()
+                .categories,
+            Policy::read_only().categories,
+            "preexisting={preexisting}"
+        );
+        assert_eq!(
+            fs::read(target.path().join("bot.db")).unwrap(),
+            before,
+            "preexisting={preexisting}"
+        );
+        assert_eq!(store.get("incoming").unwrap().unwrap().expose(), "old");
+        assert!(!target.path().join("import-staging").exists());
+        assert!(
+            !fs::read_dir(target.path()).unwrap().any(|entry| {
+                entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("backup-")
+            }),
+            "preexisting={preexisting}"
+        );
+    }
+}
+
+fn write_read_only_policy(data: &Path) {
+    save_policy(data, &Policy::read_only());
+}
+
+struct BeforeMoves;
+
+impl BeforeMoves {
+    fn install(hook: fn(&Path)) -> Self {
+        crate::install::set_before_root_moves(Some(hook));
+        Self
+    }
+}
+
+impl Drop for BeforeMoves {
+    fn drop(&mut self) {
+        crate::install::set_before_root_moves(None);
+    }
+}
+
+#[tokio::test]
 async fn sec16_non_regular_and_oversized_policy_files_fail_closed() {
     let source = tempfile::tempdir().unwrap();
     tests::database(source.path(), false);
@@ -503,7 +735,14 @@ fn sec16_windows_policy_and_database_roll_back_after_a_locked_staged_database() 
     let store = MemoryStore::new();
     store.set("incoming", "old").unwrap();
     let secrets = [("incoming".into(), zeroize::Zeroizing::new("new".into()))].into();
-    let result = crate::install::commit(target.path(), &staging.0, &store, &secrets);
+    let result = crate::install::commit(
+        target.path(),
+        &staging.0,
+        &store,
+        &secrets,
+        &Policy::read_only(),
+        false,
+    );
     // Explicitly release the denied-sharing handle before any temp cleanup.
     drop(lock);
     assert!(matches!(result, Err(crate::ImportError::Io(_))));

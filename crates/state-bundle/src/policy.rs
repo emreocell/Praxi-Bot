@@ -47,10 +47,11 @@ pub(crate) fn check_destination(
 ) -> Result<()> {
     // Even an approved relaxation must not treat an unreadable/malformed
     // destination policy as absent. Its current permission ceiling is unknown.
-    if let Some(current) = load_existing(data, false)?
-        && !allow_relaxation
-        && !preserves_ceiling(incoming, &current)
-    {
+    // A missing file is not an open ceiling either. The daemon's effective
+    // policy is `approve_destructive` (Ask everywhere), on a fresh empty target
+    // as well as on an initialized host. Loosening that default needs approval.
+    let current = load_existing(data, false)?.unwrap_or_else(Policy::approve_destructive);
+    if !allow_relaxation && !preserves_ceiling(incoming, &current) {
         return Err(ImportError::PolicyRelaxation);
     }
     Ok(())

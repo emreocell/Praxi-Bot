@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use permission_engine::Policy;
 use rusqlite::{Connection, OpenFlags};
 use secret_store::SecretStore;
 use zeroize::Zeroizing;
@@ -248,11 +249,16 @@ fn restore_secrets(
 
 /// Each root rename is atomic; the transaction as a whole is rollback protected,
 /// with no asynchronous cancellation points. See README for crash limitations.
+///
+/// The policy file present at the rename is checked again here. A concurrent
+/// writer can replace or create it after the caller's last `check_destination`.
 pub(crate) fn commit(
     data: &Path,
     staging: &Path,
     store: &dyn SecretStore,
     secrets: &Secrets,
+    incoming_policy: &Policy,
+    allow_policy_relaxation: bool,
 ) -> Result<Option<PathBuf>> {
     let roots = roots();
     let mut old_roots = Vec::new();
@@ -284,10 +290,27 @@ pub(crate) fn commit(
             secret_attempts += 1;
             store.set(name, value)?;
         }
+        #[cfg(test)]
+        BEFORE_ROOT_MOVES.with(|slot| {
+            if let Some(hook) = slot.get() {
+                hook(data);
+            }
+        });
         for root in &old_roots {
+            // Captured below, after a writer may have replaced or created it.
+            if *root == POLICY_FILE {
+                continue;
+            }
             fs::rename(data.join(root), backup.join(root))?;
             moved.push(*root);
         }
+        if exists(&data.join(POLICY_FILE))? {
+            fs::rename(data.join(POLICY_FILE), backup.join(POLICY_FILE))?;
+            moved.push(POLICY_FILE);
+        }
+        // This is the ceiling the rename would overwrite, not the one observed
+        // before secrets and the move. A missing file is the daemon default.
+        crate::policy::check_destination(&backup, incoming_policy, allow_policy_relaxation)?;
         // Publish the incoming permission ceiling before any imported grants.
         // Reverse rollback removes databases before removing this policy, and
         // restores the old policy before restoring its databases.
@@ -387,4 +410,17 @@ fn backup_path(data: &Path) -> Result<PathBuf> {
             .ok_or_else(|| invalid("backup timestamp overflow"))?;
     };
     Ok(backup)
+}
+
+#[cfg(test)]
+thread_local! {
+    static BEFORE_ROOT_MOVES: std::cell::Cell<Option<fn(&Path)>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Test seam: runs after secret writes and before root renames, on the
+/// `commit` caller thread. Production builds have no hook.
+#[cfg(test)]
+pub(crate) fn set_before_root_moves(hook: Option<fn(&Path)>) {
+    BEFORE_ROOT_MOVES.with(|slot| slot.set(hook));
 }
