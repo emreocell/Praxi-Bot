@@ -122,6 +122,12 @@ impl PathEnv {
                 ".EXE".to_owned(),
                 ".BAT".to_owned(),
                 ".CMD".to_owned(),
+                // Linux fixture paths are case-sensitive even when exercising
+                // Windows npm shims and their native .exe targets.
+                ".com".to_owned(),
+                ".exe".to_owned(),
+                ".bat".to_owned(),
+                ".cmd".to_owned(),
                 String::new(),
             ],
             home_dir: None,
@@ -512,8 +518,9 @@ where
 
 /// Drop inherited environment, including `KEY` / `TOKEN` / `SECRET` / `CREDENTIAL`.
 ///
-/// `PATH` and the Windows system-root variables stay so `taskkill` / `kill` can
-/// still be resolved and can start. Nothing else is copied from the parent.
+/// `PATH` and the Windows system-root variables stay so the helper can be
+/// resolved and can start. Nothing else is copied from the parent.
+#[cfg(any(unix, test))]
 fn scrub_process_env(cmd: &mut tokio::process::Command) {
     cmd.env_clear();
     // Names only. None of these contain KEY, TOKEN, SECRET, or CREDENTIAL.
@@ -526,38 +533,81 @@ fn scrub_process_env(cmd: &mut tokio::process::Command) {
     }
 }
 
+#[cfg(unix)]
 fn tree_kill_program() -> PathBuf {
-    #[cfg(windows)]
-    {
-        std::env::var_os("SYSTEMROOT")
-            .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
-            .join("System32")
-            .join("taskkill.exe")
-    }
-    #[cfg(not(windows))]
-    {
-        let bin = PathBuf::from("/bin/kill");
-        if bin.is_file() {
-            bin
-        } else {
-            PathBuf::from("kill")
-        }
+    let bin = PathBuf::from("/bin/kill");
+    if bin.is_file() {
+        bin
+    } else {
+        PathBuf::from("kill")
     }
 }
 
-pub(crate) async fn kill_tree(child: &mut dyn ChildWrapper) {
-    if let Some(pid) = child.id() {
+async fn kill_tree(child: &mut dyn ChildWrapper, original_pid: Option<u32>) {
+    // The native wrappers retain the process group / job even after wait() has
+    // cleared Child::id(). In particular, never taskkill a possibly reused
+    // Windows leader PID: JobChild terminates the exact owned job instead.
+    let _ = child.start_kill();
+    #[cfg(unix)]
+    if let Some(pid) = original_pid {
         let mut cmd = tokio::process::Command::new(tree_kill_program());
-        #[cfg(windows)]
-        cmd.args(["/F", "/T", "/PID", &pid.to_string()]);
-        #[cfg(not(windows))]
         // `--` is required: procps `kill -9 -<pgid>` otherwise ignores the group.
         cmd.args(["-9", "--", &format!("-{pid}")]);
         scrub_process_env(&mut cmd);
         let _ = cmd.output().await;
     }
-    let _ = child.start_kill();
+    #[cfg(windows)]
+    let _ = original_pid;
     let _ = child.wait().await;
+}
+
+/// Own the tree, not just its leader. Dropping a future cannot await cleanup,
+/// so Drop uses the native wrapper's synchronous group/job termination.
+pub(crate) struct ChildTree {
+    child: Box<dyn ChildWrapper>,
+    original_pid: Option<u32>,
+    armed: bool,
+}
+
+impl ChildTree {
+    pub(crate) fn new(child: Box<dyn ChildWrapper>) -> Self {
+        let original_pid = child.id().filter(|pid| *pid != 0);
+        Self {
+            child,
+            original_pid,
+            armed: true,
+        }
+    }
+
+    pub(crate) async fn terminate(&mut self) {
+        if self.armed {
+            kill_tree(self.child.as_mut(), self.original_pid).await;
+            // Keep the drop guard armed across every await in kill_tree.
+            self.armed = false;
+        }
+    }
+}
+
+impl std::ops::Deref for ChildTree {
+    type Target = dyn ChildWrapper;
+
+    fn deref(&self) -> &Self::Target {
+        self.child.as_ref()
+    }
+}
+
+impl std::ops::DerefMut for ChildTree {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.child.as_mut()
+    }
+}
+
+impl Drop for ChildTree {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = self.child.start_kill();
+        }
+    }
 }
 
 /// The same isolation for probes and sessions: groups on Unix, kill-on-close
@@ -692,13 +742,14 @@ async fn run_process_probe(
     #[cfg(windows)]
     let job = SharedJob::new();
     #[cfg(windows)]
-    let mut child = isolate(cmd, job.clone())
+    let child = isolate(cmd, job.clone())
         .spawn()
         .map_err(|_| ProbeError::SpawnFailed)?;
     #[cfg(not(windows))]
-    let mut child = isolate(cmd).spawn().map_err(|_| ProbeError::SpawnFailed)?;
+    let child = isolate(cmd).spawn().map_err(|_| ProbeError::SpawnFailed)?;
     #[cfg(windows)]
     let _job = job;
+    let mut child = ChildTree::new(child);
     let mut stdout = child.stdout().take().expect("piped");
     let mut stderr = child.stderr().take().expect("piped");
 
@@ -734,6 +785,9 @@ async fn run_process_probe(
                 }
                 status = child.wait() => {
                     let status = status.map_err(|_| ProbeError::Io)?;
+                    // A wrapper may exit while a descendant still owns these
+                    // pipes. End the owned tree before draining to EOF.
+                    child.terminate().await;
                     if !stdout_done {
                         read_capped(&mut stdout, &mut stdout_buf, MAX_OUTPUT_BYTES).await?;
                     }
@@ -750,21 +804,9 @@ async fn run_process_probe(
         }
     };
 
-    match tokio::time::timeout(PROBE_TIMEOUT, read_fut).await {
-        Ok(Ok(res)) => Ok(res),
-        Ok(Err(ProbeError::OutputTooLarge)) => {
-            kill_tree(child.as_mut()).await;
-            Err(ProbeError::OutputTooLarge)
-        }
-        Ok(Err(e)) => {
-            kill_tree(child.as_mut()).await;
-            Err(e)
-        }
-        Err(_) => {
-            kill_tree(child.as_mut()).await;
-            Err(ProbeError::Timeout)
-        }
-    }
+    let result = tokio::time::timeout(PROBE_TIMEOUT, read_fut).await;
+    child.terminate().await;
+    result.unwrap_or(Err(ProbeError::Timeout))
 }
 
 /// Probe a version without opening login files or exposing raw diagnostics.
@@ -1159,14 +1201,16 @@ impl Detector {
 
         // 1. Try `status --format json`
         match run_process_probe(&resolved, &["status", "--format", "json"], &self.env).await {
-            Ok((_status, stdout, _stderr)) => {
+            Ok((status, stdout, _stderr)) => {
                 if let Some(auth_bool) = parse_cursor_json(&stdout) {
-                    cli.auth = if auth_bool {
+                    let auth = if auth_bool {
                         AuthState::SignedIn
                     } else {
                         AuthState::SignedOut
                     };
-                    cli.detail = None;
+                    let (auth, detail) = auth_for_exit_status(status.success(), (auth, None));
+                    cli.auth = auth;
+                    cli.detail = detail.map(str::to_owned);
                     return cli;
                 }
             }
@@ -1185,27 +1229,12 @@ impl Detector {
 
         // 2. Fall back to plain `status`
         match run_process_probe(&resolved, &["status"], &self.env).await {
-            Ok((_status, stdout, stderr)) => {
-                let combined = format!("{stdout}\n{stderr}").to_ascii_lowercase();
-                if combined.contains("login successful")
-                    || combined.contains("logged in")
-                    || combined.contains("signed in")
-                    || combined.contains("authenticated")
-                {
-                    cli.auth = AuthState::SignedIn;
-                    cli.detail = None;
-                } else if combined.contains("not logged in")
-                    || combined.contains("not signed in")
-                    || combined.contains("not authenticated")
-                    || combined.contains("unauthenticated")
-                    || combined.contains("logged out")
-                {
-                    cli.auth = AuthState::SignedOut;
-                    cli.detail = None;
-                } else {
-                    cli.auth = AuthState::Unknown;
-                    cli.detail = Some("auth_unparsed".to_owned());
-                }
+            Ok((status, stdout, stderr)) => {
+                let combined = format!("{stdout}\n{stderr}");
+                let (auth, detail) =
+                    auth_for_exit_status(status.success(), classify_status_text(&combined));
+                cli.auth = auth;
+                cli.detail = detail.map(str::to_owned);
             }
             Err(ProbeError::Timeout) => {
                 cli.auth = AuthState::Unknown;
@@ -1332,6 +1361,105 @@ impl Detector {
     }
 }
 
+type AuthClassification = (AuthState, Option<&'static str>);
+
+fn auth_for_exit_status(success: bool, classification: AuthClassification) -> AuthClassification {
+    if !success && classification.0 == AuthState::SignedIn {
+        (AuthState::Unknown, Some("auth_unparsed"))
+    } else {
+        classification
+    }
+}
+
+/// Keep detail separate because the public `AuthState` enum has no reason payload.
+fn classify_status_text(out: &str) -> AuthClassification {
+    let normalized = strip_ansi(out).to_lowercase();
+    let mut positive = false;
+    let mut negative = false;
+    for line in normalized.lines() {
+        // A negative wins on its own line, including "not authenticated" and
+        // "unauthenticated", which contain the old positive substring.
+        if [
+            "not logged in",
+            "not signed in",
+            "not authenticated",
+            "unauthenticated",
+            "logged out",
+            "signed out",
+            "no account",
+            "please log in",
+            "please sign in",
+            "please login",
+        ]
+        .iter()
+        .any(|phrase| contains_status_phrase(line, phrase))
+        {
+            negative = true;
+        } else if ["logged in", "signed in", "authenticated"]
+            .iter()
+            .any(|phrase| {
+                line.trim_start()
+                    .strip_prefix(phrase)
+                    .is_some_and(|tail| !tail.chars().next().is_some_and(is_word_char))
+            })
+        {
+            positive = true;
+        }
+    }
+    match (negative, positive) {
+        (true, true) => (AuthState::Unknown, Some("auth_ambiguous")),
+        (true, false) => (AuthState::SignedOut, None),
+        (false, true) => (AuthState::SignedIn, None),
+        (false, false) => (AuthState::Unknown, Some("auth_unparsed")),
+    }
+}
+
+fn is_word_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_'
+}
+
+fn contains_status_phrase(line: &str, phrase: &str) -> bool {
+    line.match_indices(phrase).any(|(start, matched)| {
+        !line[..start].chars().next_back().is_some_and(is_word_char)
+            && !line[start + matched.len()..]
+                .chars()
+                .next()
+                .is_some_and(is_word_char)
+    })
+}
+
+fn strip_ansi(out: &str) -> String {
+    let mut clean = String::with_capacity(out.len());
+    let mut chars = out.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\u{1b}' {
+            clean.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('[') => {
+                // CSI (including SGR colours): parameters end at a final byte.
+                for ch in chars.by_ref() {
+                    if ('\u{40}'..='\u{7e}').contains(&ch) {
+                        break;
+                    }
+                }
+            }
+            Some(']' | 'P' | 'X' | '^' | '_') => {
+                // OSC / string controls end at BEL or ST; their payload is not
+                // visible status text (for example an OSC hyperlink target).
+                while let Some(ch) = chars.next() {
+                    if ch == '\u{7}' || (ch == '\u{1b}' && chars.next_if_eq(&'\\').is_some()) {
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    clean
+}
+
 fn truthy_auth_flag(val: &serde_json::Value) -> Option<bool> {
     match val {
         serde_json::Value::Bool(b) => Some(*b),
@@ -1382,6 +1510,118 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::task::{Context, Poll};
     use tokio::io::{AsyncRead, ReadBuf};
+
+    #[test]
+    fn status_text_negatives_win_with_noise_and_ansi() {
+        for phrase in [
+            "not logged in",
+            "not signed in",
+            "not authenticated",
+            "unauthenticated",
+            "logged out",
+            "signed out",
+            "no account",
+            "please log in",
+            "please sign in",
+            "please login",
+        ] {
+            for text in [
+                phrase.to_owned(),
+                format!("Warning: ({phrase}). Run cursor-agent login."),
+                format!("\u{1b}[31m{}\u{1b}[0m", phrase.to_uppercase()),
+                format!("Status: {}.", phrase.replace(' ', "\u{1b}[0m ")),
+                format!("Authenticated? {phrase}."),
+            ] {
+                assert_eq!(
+                    classify_status_text(&text),
+                    (AuthState::SignedOut, None),
+                    "{text:?}"
+                );
+            }
+        }
+        assert_eq!(
+            classify_status_text("You are not logged in. Run `cursor-agent login`"),
+            (AuthState::SignedOut, None)
+        );
+    }
+
+    #[test]
+    fn status_text_positive_lines_and_boundaries() {
+        for text in [
+            "Logged in as foo@bar.com",
+            " \tSIGNED IN\r\n",
+            "\u{1b}[32mAuthenticated\u{1b}[0m",
+            "notice\nLogged in using an account",
+            "\u{1b}]8;;https://example.invalid/not%20logged%20in\u{1b}\\Authenticated\u{1b}]8;;\u{7}",
+        ] {
+            assert_eq!(
+                classify_status_text(text),
+                (AuthState::SignedIn, None),
+                "{text:?}"
+            );
+        }
+        for text in [
+            "",
+            " \r\n\t",
+            "unexpected output",
+            "Login successful",
+            "Help: when logged in, use this command",
+            "authenticatedly",
+            "logged into something",
+            "unauthenticatedly",
+            "not authenticatedly",
+            "no accounting available",
+            "please log into an account",
+            "xunauthenticated",
+            "_unauthenticated_",
+        ] {
+            assert_eq!(
+                classify_status_text(text),
+                (AuthState::Unknown, Some("auth_unparsed")),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn status_text_conflicting_lines_are_ambiguous() {
+        for text in [
+            "Authenticated\nNot logged in",
+            "not signed in\r\n\u{1b}[32mLogged in as foo@bar.com\u{1b}[0m",
+            "signed out\nSigned in\nnotice",
+        ] {
+            assert_eq!(
+                classify_status_text(text),
+                (AuthState::Unknown, Some("auth_ambiguous")),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn failing_status_never_promotes_positive_help_to_signed_in() {
+        for text in [
+            "Usage: status\nLogged in as <account>\nExample output",
+            "Authenticated",
+        ] {
+            assert_eq!(
+                auth_for_exit_status(false, classify_status_text(text)),
+                (AuthState::Unknown, Some("auth_unparsed"))
+            );
+        }
+        assert_eq!(
+            auth_for_exit_status(false, classify_status_text("not logged in")),
+            (AuthState::SignedOut, None)
+        );
+        assert_eq!(
+            auth_for_exit_status(false, classify_status_text("Authenticated\nLogged out")),
+            (AuthState::Unknown, Some("auth_ambiguous"))
+        );
+        assert_eq!(
+            auth_for_exit_status(false, classify_status_text("")),
+            (AuthState::Unknown, Some("auth_unparsed"))
+        );
+    }
 
     struct ChunkReader {
         left: usize,

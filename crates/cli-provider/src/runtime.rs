@@ -21,9 +21,10 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio_util::sync::CancellationToken;
 use tool_registry::ToolSpec;
 
+#[cfg(windows)]
+use crate::detect;
 use crate::detect::{
-    self, PathEnv, apply_sanitized_env, binary_pin, find_candidate, isolate, kill_tree,
-    resolve_spawn,
+    ChildTree, PathEnv, apply_sanitized_env, binary_pin, find_candidate, isolate, resolve_spawn,
 };
 
 /// Supported session dialect.
@@ -348,6 +349,7 @@ async fn restrict_sidecar(path: &std::path::Path) -> Result<(), CliError> {
     Ok(())
 }
 #[cfg(not(windows))]
+#[allow(clippy::unused_async)] // Match the Windows implementation's async interface.
 async fn restrict_sidecar(_: &std::path::Path) -> Result<(), CliError> {
     Ok(())
 }
@@ -752,13 +754,14 @@ async fn session(
     let mut isolated = isolate(cmd, job);
     #[cfg(not(windows))]
     let mut isolated = isolate(cmd);
-    let mut child = isolated.spawn().map_err(|e| {
+    let child = isolated.spawn().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             CliError::NotInstalled
         } else {
             CliError::Io
         }
     })?;
+    let mut child = ChildTree::new(child);
     #[cfg(not(windows))]
     {
         let child_pid = child
@@ -796,7 +799,7 @@ async fn session(
         r = protocol(engine, &turn, &bridge, &server, host.as_ref(), &mut stdin, stdout) => r,
     };
     stop.cancel();
-    kill_tree(child.as_mut()).await;
+    child.terminate().await;
     stderr_task.abort();
     result
 }
