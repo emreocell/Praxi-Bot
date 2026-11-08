@@ -69,6 +69,85 @@ fn alter_manifest(bytes: &[u8], change: impl FnOnce(&mut Manifest)) -> Vec<u8> {
     pack(&entries)
 }
 
+fn replace_database_payload(bytes: &[u8], name: &str, payload: Vec<u8>) -> Vec<u8> {
+    use sha2::{Digest, Sha256};
+
+    let mut entries = unpack(bytes);
+    let manifest_entry = entries.pop().unwrap();
+    let mut manifest: Manifest = serde_json::from_slice(&manifest_entry.1).unwrap();
+    let record = manifest.files.iter_mut().find(|f| f.path == name).unwrap();
+    record.size = payload.len() as u64;
+    record.sha256 = format!("{:x}", Sha256::digest(&payload));
+    entries.iter_mut().find(|(path, _)| path == name).unwrap().1 = payload;
+    entries.push((
+        "manifest.json".into(),
+        serde_json::to_vec(&manifest).unwrap(),
+    ));
+    pack(&entries)
+}
+
+// BUG-23: a valid archive checksum does not establish SQLite integrity.
+#[tokio::test]
+async fn corrupt_secondary_database_preserves_destination() {
+    let source = tempfile::tempdir().unwrap();
+    database(source.path(), false);
+    let schedule = Connection::open(source.path().join("schedules.db")).unwrap();
+    schedule
+        .execute_batch("CREATE TABLE old_source(value TEXT)")
+        .unwrap();
+    drop(schedule);
+    let bytes = replace_database_payload(
+        &bundle(source.path()).await,
+        "schedules.db",
+        b"not a SQLite database, with a correct archive checksum".to_vec(),
+    );
+    let target = tempfile::tempdir().unwrap();
+    database(target.path(), true);
+    fs::write(
+        target.path().join("schedules.db"),
+        "existing schedule bytes",
+    )
+    .unwrap();
+    fs::write(target.path().join("memory.db"), "existing memory bytes").unwrap();
+    let originals: Vec<_> = ["bot.db", "schedules.db", "memory.db"]
+        .into_iter()
+        .map(|name| (name, fs::read(target.path().join(name)).unwrap()))
+        .collect();
+    let store = MemoryStore::new();
+    store.set("existing", "untouched").unwrap();
+    let result = import(
+        target.path(),
+        &store,
+        bytes.as_slice(),
+        ImportOptions {
+            replace: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(result.is_err(), "corrupt schedules.db was committed");
+    assert!(result.unwrap_err().to_string().contains("schedules.db"));
+    for (name, before) in originals {
+        assert_eq!(
+            fs::read(target.path().join(name)).unwrap(),
+            before,
+            "{name}"
+        );
+    }
+    assert_eq!(
+        store.get("existing").unwrap().unwrap().expose(),
+        "untouched"
+    );
+    assert!(!target.path().join("import-staging").exists());
+    assert!(!fs::read_dir(target.path()).unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("backup-")
+    }));
+}
+
 async fn rejected(bytes: &[u8], opts: ImportOptions) -> ImportError {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("api-token"), "identity").unwrap();
@@ -97,7 +176,7 @@ async fn populated_round_trip_with_selected_secrets_and_progress() {
             "../../scheduler/migrations/0001_schedules.sql"
         ))
         .unwrap();
-    schedule.execute_batch("PRAGMA journal_mode=WAL; INSERT INTO schedules VALUES ('s', 'b', NULL, 'daily', '{}', '{}', 1, 0, NULL, 123, 'skip')").unwrap();
+    schedule.execute_batch("PRAGMA user_version=1; PRAGMA journal_mode=WAL; INSERT INTO schedules VALUES ('s', 'b', NULL, 'daily', '{}', '{}', 1, 0, NULL, 123, 'skip')").unwrap();
     for (path, value) in [
         ("skills/demo/SKILL.md", "skill"),
         ("workflows/test.toml", "workflow"),
@@ -279,6 +358,184 @@ async fn symlinks_hardlinks_and_special_entries_are_rejected() {
 }
 
 #[tokio::test]
+async fn secondary_future_schemas_name_the_database() {
+    for db in ["memory.db", "schedules.db"] {
+        let source = tempfile::tempdir().unwrap();
+        database(source.path(), false);
+        let conn = Connection::open(source.path().join(db)).unwrap();
+        conn.execute_batch("CREATE TABLE future_table(value TEXT); PRAGMA user_version=999;")
+            .unwrap();
+        drop(conn);
+        let error = rejected(&bundle(source.path()).await, ImportOptions::default()).await;
+        assert!(
+            matches!(error, ImportError::IncompatibleSchema { db: name, found: 999, supported: 1 } if name == db)
+        );
+    }
+}
+
+#[tokio::test]
+async fn older_secondary_schemas_migrate_and_are_self_contained() {
+    let source = tempfile::tempdir().unwrap();
+    database(source.path(), false);
+    for db in ["schedules.db", "memory.db"] {
+        let conn = Connection::open(source.path().join(db)).unwrap();
+        conn.execute_batch("CREATE TABLE legacy_marker(value TEXT); PRAGMA journal_mode=WAL; INSERT INTO legacy_marker VALUES ('preserved');").unwrap();
+    }
+    let bytes = bundle(source.path()).await;
+    let target = tempfile::tempdir().unwrap();
+    import(
+        target.path(),
+        &MemoryStore::new(),
+        bytes.as_slice(),
+        ImportOptions::default(),
+    )
+    .await
+    .unwrap();
+    for db in ["bot.db", "schedules.db", "memory.db"] {
+        let conn = Connection::open(target.path().join(db)).unwrap();
+        let version: u32 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert!(version > 0, "{db}");
+        let journal: String = conn
+            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(journal, "delete", "{db}");
+        assert!(!target.path().join(format!("{db}-wal")).exists());
+        assert!(!target.path().join(format!("{db}-shm")).exists());
+        if db != "bot.db" {
+            assert_eq!(
+                conn.query_row("SELECT value FROM legacy_marker", [], |r| r
+                    .get::<_, String>(0))
+                    .unwrap(),
+                "preserved"
+            );
+        }
+    }
+    drop(scheduler::ScheduleStore::open(target.path()).unwrap());
+    drop(
+        memory_store::MemoryStore::open(
+            target.path(),
+            Arc::new(memory_store::HashEmbedder::new(8)),
+        )
+        .unwrap(),
+    );
+}
+
+#[tokio::test]
+async fn memory_vectors_import_without_an_embedder_or_dimension_change() {
+    let source = tempfile::tempdir().unwrap();
+    database(source.path(), false);
+    drop(
+        memory_store::MemoryStore::open(
+            source.path(),
+            Arc::new(memory_store::HashEmbedder::new(32)),
+        )
+        .unwrap(),
+    );
+    drop(scheduler::ScheduleStore::open(source.path()).unwrap());
+    let bytes = bundle(source.path()).await;
+    let target = tempfile::tempdir().unwrap();
+    let imported = import(
+        target.path(),
+        &MemoryStore::new(),
+        bytes.as_slice(),
+        ImportOptions::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        imported
+            .manifest
+            .db_schemas
+            .as_ref()
+            .unwrap()
+            .get("memory.db"),
+        Some(&1)
+    );
+    let conn = Connection::open(target.path().join("memory.db")).unwrap();
+    let dim: String = conn
+        .query_row(
+            "SELECT value FROM meta WHERE key='embedding_dim'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(dim, "32");
+    drop(conn);
+    drop(
+        memory_store::MemoryStore::open(
+            target.path(),
+            Arc::new(memory_store::HashEmbedder::new(32)),
+        )
+        .unwrap(),
+    );
+}
+
+#[tokio::test]
+async fn database_manifest_mismatches_are_rejected() {
+    let source = tempfile::tempdir().unwrap();
+    database(source.path(), false);
+    drop(scheduler::ScheduleStore::open(source.path()).unwrap());
+    let bytes = bundle(source.path()).await;
+    for change in [
+        |m: &mut Manifest| {
+            m.db_schemas
+                .as_mut()
+                .unwrap()
+                .insert("schedules.db".into(), 0);
+        },
+        |m: &mut Manifest| {
+            m.db_schemas.as_mut().unwrap().remove("schedules.db");
+        },
+        |m: &mut Manifest| {
+            m.db_schemas
+                .as_mut()
+                .unwrap()
+                .insert("unknown.db".into(), 1);
+        },
+    ] {
+        assert!(matches!(
+            rejected(&alter_manifest(&bytes, change), ImportOptions::default()).await,
+            ImportError::InvalidDatabase { .. }
+        ));
+    }
+}
+
+#[tokio::test]
+async fn old_manifest_without_database_schemas_imports() {
+    let source = tempfile::tempdir().unwrap();
+    database(source.path(), false);
+    drop(scheduler::ScheduleStore::open(source.path()).unwrap());
+    let bytes = alter_manifest(&bundle(source.path()).await, |m| m.db_schemas = None);
+    let target = tempfile::tempdir().unwrap();
+    let imported = import(
+        target.path(),
+        &MemoryStore::new(),
+        bytes.as_slice(),
+        ImportOptions::default(),
+    )
+    .await
+    .unwrap();
+    assert!(imported.manifest.db_schemas.is_none());
+    drop(scheduler::ScheduleStore::open(target.path()).unwrap());
+}
+
+#[tokio::test]
+async fn secondary_schema_version_without_tables_is_rejected() {
+    for db in ["memory.db", "schedules.db"] {
+        let source = tempfile::tempdir().unwrap();
+        database(source.path(), false);
+        let conn = Connection::open(source.path().join(db)).unwrap();
+        conn.execute_batch("PRAGMA user_version=1;").unwrap();
+        drop(conn);
+        assert!(
+            matches!(rejected(&bundle(source.path()).await, ImportOptions::default()).await, ImportError::InvalidDatabase { db: name, .. } if name == db)
+        );
+    }
+}
+
+#[tokio::test]
 async fn caps_apply_to_stream_entries_and_trailing_padding() {
     let dir = tempfile::tempdir().unwrap();
     database(dir.path(), false);
@@ -438,6 +695,8 @@ async fn future_versions_schema_disagreement_and_missing_records_rejected() {
         assert!(matches!(
             rejected(&alter_manifest(&bytes, change), ImportOptions::default()).await,
             ImportError::Invalid(_)
+                | ImportError::InvalidDatabase { .. }
+                | ImportError::IncompatibleSchema { .. }
         ));
     }
 }
