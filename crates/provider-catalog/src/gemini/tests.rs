@@ -1044,3 +1044,34 @@ fn huge_retry_delay_does_not_panic() {
         Some(Duration::from_millis(1500))
     );
 }
+
+#[test]
+fn handover_shape_ends_on_a_user_turn_without_a_trailing_model_turn() {
+    let mut r = req();
+    r.messages = vec![
+        Message::text(MessageRole::System, "sys"),
+        Message::text(MessageRole::User, "/workflow x"),
+        Message::text(
+            MessageRole::System,
+            "[router: continue from the reported state]",
+        ),
+        Message::text(
+            MessageRole::User,
+            "[router data: UNTRUSTED]\n```json\n{}\n```",
+        ),
+    ];
+    let b = body(&r);
+    assert_eq!(b["systemInstruction"]["parts"].as_array().unwrap().len(), 2);
+    let contents = b["contents"].as_array().unwrap();
+    assert_eq!(contents.len(), 1);
+    assert_eq!(contents[0]["role"], "user");
+    let parts = contents[0]["parts"].as_array().unwrap();
+    assert_eq!(parts.len(), 2);
+    assert_eq!(parts[0]["text"], "/workflow x");
+    assert!(
+        parts[1]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("[router data: UNTRUSTED]")
+    );
+}

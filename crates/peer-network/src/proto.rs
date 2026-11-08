@@ -1,8 +1,9 @@
 //! Wire protocol: ALPNs, framing, JSON-RPC 2.0 types, pairing and event messages.
 
-use iroh::{EndpointAddr, endpoint::RecvStream, endpoint::SendStream};
+use iroh::EndpointAddr;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::error::{PeerError, Result};
 use crate::store::Role;
@@ -25,6 +26,8 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Largest accepted RPC / event frame (screenshots travel base64-encoded).
 pub const MAX_FRAME: usize = 32 * 1024 * 1024;
+/// Request frames never carry screenshots; reserve the large limit for replies.
+pub const MAX_RPC_REQUEST: usize = 1024 * 1024;
 /// Largest accepted pairing frame.
 pub const MAX_PAIR_FRAME: usize = 64 * 1024;
 
@@ -34,8 +37,12 @@ pub const CLOSE_NOT_PAIRED: u32 = 403;
 pub const CLOSE_REVOKED: u32 = 410;
 /// QUIC application close code: the endpoint is shutting down.
 pub const CLOSE_SHUTDOWN: u32 = 0;
+/// QUIC application close code: a newer RPC connection from the same peer replaced this one.
+pub const CLOSE_REPLACED: u32 = 409;
 /// Stream stop code used when a caller cancels a request.
 pub const STOP_CANCELLED: u32 = 499;
+/// Stream stop code used when the serving side has no admission budget.
+pub const STOP_BUSY: u32 = 429;
 
 // ── Framing ───────────────────────────────────────────────────────────────────
 
@@ -44,7 +51,11 @@ pub const STOP_CANCELLED: u32 = 499;
 /// # Errors
 ///
 /// Fails if the frame exceeds `max` or the stream is broken.
-pub async fn write_frame(send: &mut SendStream, payload: &[u8], max: usize) -> Result<()> {
+pub async fn write_frame<W: AsyncWrite + Unpin + ?Sized>(
+    send: &mut W,
+    payload: &[u8],
+    max: usize,
+) -> Result<()> {
     if payload.len() > max {
         return Err(PeerError::Protocol(format!(
             "message of {} bytes exceeds the {max} byte limit",
@@ -70,13 +81,23 @@ const READ_CHUNK: usize = 64 * 1024;
 /// # Errors
 ///
 /// Fails on oversize frames, truncated frames and stream errors.
-pub async fn read_frame(recv: &mut RecvStream, max: usize) -> Result<Option<Vec<u8>>> {
+pub async fn read_frame<R: AsyncRead + Unpin + ?Sized>(
+    recv: &mut R,
+    max: usize,
+) -> Result<Option<Vec<u8>>> {
     let mut header = [0u8; 4];
-    match recv.read_exact(&mut header).await {
-        Ok(()) => {}
-        Err(iroh::endpoint::ReadExactError::FinishedEarly(0)) => return Ok(None),
-        Err(e) => return Err(PeerError::Connection(e.to_string())),
+    // Distinguish a clean EOF from a partially written length prefix.
+    if recv
+        .read(&mut header[..1])
+        .await
+        .map_err(|e| PeerError::Connection(e.to_string()))?
+        == 0
+    {
+        return Ok(None);
     }
+    recv.read_exact(&mut header[1..])
+        .await
+        .map_err(|e| PeerError::Connection(e.to_string()))?;
     let len = u32::from_be_bytes(header) as usize;
     if len > max {
         return Err(PeerError::Protocol(format!(

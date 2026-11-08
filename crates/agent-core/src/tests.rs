@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use parking_lot::Mutex;
-use permission_engine::Policy;
+use permission_engine::{Level, Limits, Policy, Rule};
 use protocol::event::TodoStatus;
 use protocol::{BotId, ChatId, Event, UserId};
 use provider_catalog::{
@@ -41,6 +41,8 @@ enum Reply {
     /// (hard stop), `unsupported` (not retried, but the chain continues),
     /// or `malformed` (retried once).
     Fail(&'static str),
+    /// HTTP 429 with an optional `Retry-After` duration.
+    RateLimited(Option<Duration>),
 }
 
 fn text(s: &str) -> Reply {
@@ -126,6 +128,9 @@ impl ChatProvider for Fake {
                     message: "bad".into(),
                 },
             }),
+            Some(Reply::RateLimited(retry_after)) => {
+                Err(ProviderError::RateLimited { retry_after })
+            }
             None => Err(ProviderError::InvalidRequest("script exhausted".into())),
         }
     }
@@ -711,7 +716,7 @@ async fn token_budget_guard_stops_the_turn() {
             );
             Reply::Chunks(c)
         }
-        Reply::Hang | Reply::Fail(_) => unreachable!(),
+        Reply::Hang | Reply::Fail(_) | Reply::RateLimited(_) => unreachable!(),
     };
     let fake = Fake::new(vec![with_usage("1", 1), text("never")]);
     let mut config = cfg(Policy::full());
@@ -2906,7 +2911,7 @@ async fn effective_policy_merges_category_grants_but_not_floors_or_denies() {
     assert!(before.policy.is_none() && before.grants.is_empty());
     assert_eq!(
         before.categories[&PermissionCategory::Fs].decision,
-        crate::PolicyDecision::Ask
+        crate::PolicyDecision::ask()
     );
     for c in [PermissionCategory::Fs, PermissionCategory::Money] {
         lp.sh.grants.lock().always.push(crate::Grant {
@@ -2929,12 +2934,12 @@ async fn effective_policy_merges_category_grants_but_not_floors_or_denies() {
     let money = &eff.categories[&PermissionCategory::Money];
     assert_eq!(
         (money.decision.clone(), money.via_grant),
-        (crate::PolicyDecision::Ask, false),
+        (crate::PolicyDecision::ask(), false),
         "the money floor is never waived"
     );
     assert_eq!(
         eff.categories[&PermissionCategory::Shell].decision,
-        crate::PolicyDecision::Ask
+        crate::PolicyDecision::ask()
     );
     assert_eq!(eff.grants.len(), 3);
     assert!(!eff.categories.contains_key(&PermissionCategory::Meta));
@@ -3416,6 +3421,50 @@ async fn a_refusing_control_gate_fails_the_tool_call_with_its_message() {
     assert!(tool_messages(&fake.request(1))[0].contains("taken control"));
 }
 
+fn desk_req(run_id: String) -> builtin_tools::ControlRequest {
+    builtin_tools::ControlRequest {
+        run_id,
+        rect: None,
+        label: "Save".into(),
+        action: "click".into(),
+    }
+}
+
+#[tokio::test]
+async fn control_bridge_fails_closed_for_unknown_runs_and_a_dropped_loop() {
+    use builtin_tools::DesktopControlGate as _;
+    let env = setup();
+    let fake = Fake::new(vec![]);
+    let lp = gate_loop(&env, &fake);
+    lp.set_control_gate(Arc::new(TestGate {
+        refuse: false,
+        seen: Mutex::new(Vec::new()),
+    }));
+    let bridge = crate::control::LoopControl {
+        sh: Arc::downgrade(&lp.sh),
+    };
+    // Unknown (never live) run id and an unparsable id both refuse.
+    let err = bridge
+        .before_action(&desk_req(uuid::Uuid::now_v7().to_string()))
+        .await
+        .unwrap_err();
+    assert!(err.contains("not active"), "{err}");
+    assert!(
+        bridge
+            .before_action(&desk_req("nope".into()))
+            .await
+            .is_err()
+    );
+    // Dropped loop refuses too.
+    drop(lp);
+    assert!(
+        bridge
+            .before_action(&desk_req(uuid::Uuid::now_v7().to_string()))
+            .await
+            .is_err()
+    );
+}
+
 #[tokio::test]
 async fn without_a_control_gate_the_action_just_runs() {
     let env = setup();
@@ -3628,4 +3677,444 @@ async fn a_queued_follow_up_is_put_back_when_its_turn_cannot_start() {
         !lp.sh.active.lock().contains_key(&env.chat),
         "the chat slot is released"
     );
+}
+
+// ---------- SEC-01 / SEC-09 / REL-20 / REL-21 ----------
+
+fn fs_limits() -> Policy {
+    let mut policy = Policy::full();
+    policy.categories.insert(
+        PermissionCategory::Fs,
+        Rule::new(Level::AllowWithLimits(Limits {
+            max_per_hour: Some(1),
+            max_amount_minor: None,
+            path_patterns: vec!["workspace/**".into()],
+        })),
+    );
+    policy
+}
+
+fn shell_deny() -> Policy {
+    let mut policy = Policy::approve_destructive();
+    policy
+        .categories
+        .insert(PermissionCategory::Shell, Rule::new(Level::Deny));
+    policy
+}
+
+#[tokio::test]
+async fn allow_with_limits_read_still_parks_even_with_read_shortcut() {
+    let env = setup();
+    let read = Arc::new(tool("fs_read", Effect::Read, "contents"));
+    let fake = Fake::new(vec![calls(&[("c1", "fs_read", json!({}))]), text("done")]);
+    let mut config = cfg(fs_limits());
+    config.read_tools_skip_ask = true;
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&read)],
+        profile(""),
+        config,
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "read it").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(a.tool_name, "fs_read");
+    assert_eq!(
+        read.count.load(Ordering::SeqCst),
+        0,
+        "limits are not waived"
+    );
+    lp.approve(a.call_id, ApprovalScope::Once, env.user)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(read.count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn allow_with_limits_read_still_parks_when_a_grant_exists() {
+    let env = setup();
+    let read = Arc::new(tool("fs_read", Effect::Read, "contents"));
+    let fake = Fake::new(vec![calls(&[("c1", "fs_read", json!({}))]), text("done")]);
+    let mut config = cfg(fs_limits());
+    config.read_tools_skip_ask = true;
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&read)],
+        profile(""),
+        config,
+    );
+    lp.sh.grants.lock().always.push(crate::Grant {
+        bot_id: env.bot,
+        target: GrantTarget::Tool("fs_read".into()),
+        granted_at_ms: 1,
+    });
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "read it").unwrap();
+    until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await;
+    assert_eq!(
+        read.count.load(Ordering::SeqCst),
+        0,
+        "an existing grant must not waive unsupported limits"
+    );
+    lp.cancel(run).unwrap();
+}
+
+#[tokio::test]
+async fn approving_a_shell_call_after_shell_is_denied_does_not_run_or_grant() {
+    let env = setup();
+    let mut shell = tool("shell_run", Effect::Write, "ran");
+    shell.spec.category = PermissionCategory::Shell;
+    let shell = Arc::new(shell);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "shell_run", json!({"command": "echo hi"}))]),
+        text("stopped"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&shell)],
+        profile(""),
+        cfg(Policy::approve_destructive()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(shell.count.load(Ordering::SeqCst), 0);
+    lp.set_global_policy(shell_deny());
+    let _ = lp.approve(a.call_id, ApprovalScope::Always, env.user);
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(
+        shell.count.load(Ordering::SeqCst),
+        0,
+        "the command must not run"
+    );
+    assert!(
+        lp.list_grants(env.bot).is_empty(),
+        "a deny must not create a grant"
+    );
+    let msg = tool_messages(&fake.request(1)).join("\n");
+    assert!(
+        msg.contains("denied by policy"),
+        "the model should see the policy denial, got {msg}"
+    );
+}
+
+#[tokio::test]
+async fn retry_after_beyond_budget_is_one_request_and_surfaces_rate_limited() {
+    let env = setup();
+    let fake = Fake::new(vec![
+        Reply::RateLimited(Some(Duration::from_secs(60))),
+        text("should not be asked"),
+    ]);
+    let mut config = cfg(Policy::full());
+    // More than one attempt, with a budget far below 60s, so the old loop
+    // would send again after a short backoff.
+    config.model_retry.max_attempts = 3;
+    config.model_retry.initial_backoff_ms = 500;
+    config.model_retry.multiplier = 2;
+    config.model_retry.max_backoff_ms = 8_000;
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
+    let run = lp.run_turn(env.chat, "hi").unwrap();
+    let state = tokio::time::timeout(Duration::from_secs(3), lp.wait(run))
+        .await
+        .expect("must not sleep for Retry-After: 60")
+        .unwrap();
+    assert_eq!(state, RunState::Failed);
+    assert_eq!(
+        fake.n_requests(),
+        1,
+        "no second request after a 60s Retry-After"
+    );
+    let err = env.storage.get_run(run).unwrap().unwrap().error.unwrap();
+    assert!(err.contains("rate limited"), "{err}");
+}
+
+#[tokio::test]
+async fn retry_after_within_budget_waits_then_retries_once() {
+    let env = setup();
+    let fake = Fake::new(vec![
+        Reply::RateLimited(Some(Duration::from_millis(200))),
+        text("recovered"),
+    ]);
+    let mut config = cfg(Policy::full());
+    config.model_retry.max_attempts = 2;
+    // The outer backoff is much longer than Retry-After. Honouring the header
+    // finishes well inside 3s; using the backoff does not.
+    config.model_retry.initial_backoff_ms = 5_000;
+    config.model_retry.multiplier = 1;
+    config.model_retry.max_backoff_ms = 5_000;
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
+    let started = std::time::Instant::now();
+    let run = lp.run_turn(env.chat, "hi").unwrap();
+    let state = tokio::time::timeout(Duration::from_secs(3), lp.wait(run))
+        .await
+        .expect("must wait Retry-After, not the 5s backoff")
+        .unwrap();
+    let elapsed = started.elapsed();
+    assert_eq!(state, RunState::Succeeded);
+    assert_eq!(fake.n_requests(), 2);
+    assert!(
+        elapsed >= Duration::from_millis(150),
+        "Retry-After was not waited, elapsed {elapsed:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "waited longer than Retry-After, elapsed {elapsed:?}"
+    );
+}
+
+#[tokio::test]
+async fn finished_runs_leave_the_task_map_and_wait_still_returns_state() {
+    let env = setup();
+    let fake = Fake::new(vec![text("a"), text("b"), text("c")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let mut ids = Vec::new();
+    for msg in ["a", "b", "c"] {
+        let run = lp.run_turn(env.chat, msg).unwrap();
+        let mut reaped = false;
+        for _ in 0..200 {
+            let done = lp.runtime().state(run).ok() == Some(RunState::Succeeded);
+            let gone = !lp.sh.tasks.lock().contains_key(&run);
+            if done && gone {
+                reaped = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            reaped,
+            "run {run} finished but its task handle is still tracked"
+        );
+        ids.push(run);
+    }
+    assert!(
+        lp.sh.tasks.lock().is_empty(),
+        "finished handles must not accumulate"
+    );
+    for run in ids {
+        assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    }
+}
+
+#[tokio::test]
+async fn finishing_task_removes_only_its_own_handle_and_resume_refuses_while_it_remains() {
+    let env = setup();
+    let w = Arc::new(tool("t.write", Effect::Write, "written"));
+    let fake = Fake::new(vec![calls(&[("c1", "t.write", json!({}))]), text("never")]);
+    let mut config = cfg(Policy::approve_destructive());
+    config.schedule_approval_timeout = Duration::from_millis(80);
+    let lp = make_loop(&env.storage, env.bot, &fake, &[t(&w)], profile(""), config);
+    let barrier = Arc::new(Barrier::new(2));
+    *lp.sh.task_reap_gate.lock() = Some(Arc::clone(&barrier));
+    let run = lp
+        .run_scheduled(
+            env.chat,
+            protocol::TaskId::new(),
+            crate::ScheduleWork::Prompt("go".into()),
+        )
+        .unwrap();
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let paused = lp.runtime().state(run).ok() == Some(RunState::Paused);
+        let entered = lp.sh.task_reap_entered.load(Ordering::SeqCst);
+        if paused && entered {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "drive task never parked at the reap gate (state={:?})",
+            lp.runtime().state(run)
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let id_before = lp
+        .sh
+        .tasks
+        .lock()
+        .get(&run)
+        .map(tokio::task::JoinHandle::id)
+        .expect("finishing task still holds the map entry");
+    let err = lp.resume(run).unwrap_err();
+    assert!(
+        matches!(err, crate::LoopError::StillFinishing(id) if id == run),
+        "{err}"
+    );
+    assert_eq!(
+        lp.sh
+            .tasks
+            .lock()
+            .get(&run)
+            .map(tokio::task::JoinHandle::id),
+        Some(id_before),
+        "resume must not replace the live handle"
+    );
+    assert!(
+        !lp.sh.active.lock().contains_key(&env.chat),
+        "a refused resume must not keep the chat"
+    );
+
+    // A newer handle for the same run (what a racy insert would store). The
+    // finishing task must not remove it: dropping that JoinHandle detaches
+    // the resumed driver.
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let dummy = tokio::spawn(async move {
+        let _ = rx.await;
+    });
+    let dummy_id = dummy.id();
+    {
+        let mut tasks = lp.sh.tasks.lock();
+        let previous = tasks.insert(run, dummy);
+        drop(previous);
+    }
+    barrier.wait().await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !lp.sh.task_reap_done.load(Ordering::SeqCst) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "finishing task did not reach its remove"
+        );
+        tokio::task::yield_now().await;
+    }
+    let kept = lp
+        .sh
+        .tasks
+        .lock()
+        .remove(&run)
+        .expect("reap removed a different task's handle");
+    assert_eq!(kept.id(), dummy_id);
+    assert!(!kept.is_finished(), "the newer task must still be joinable");
+    let _ = tx.send(());
+    let _ = kept.await;
+    *lp.sh.task_reap_gate.lock() = None;
+}
+
+async fn until_flag(flag: &std::sync::atomic::AtomicBool, label: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !flag.load(Ordering::SeqCst) {
+        assert!(tokio::time::Instant::now() < deadline, "{label}");
+        tokio::task::yield_now().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn policy_deny_after_approval_recheck_does_not_run_the_tool_or_keep_the_grant() {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Condvar, Mutex as StdMutex};
+
+    let env = setup();
+    let mut shell = tool("shell_run", Effect::Write, "ran");
+    shell.spec.category = PermissionCategory::Shell;
+    let shell = Arc::new(shell);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "shell_run", json!({"command": "echo hi"}))]),
+        text("stopped"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&shell)],
+        profile(""),
+        cfg(Policy::approve_destructive()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+
+    let entered = Arc::new(AtomicBool::new(false));
+    let release = Arc::new((StdMutex::new(false), Condvar::new()));
+    let entered_h = Arc::clone(&entered);
+    let release_h = Arc::clone(&release);
+    *lp.sh.exec_commit_hook.lock() = Some(Arc::new(move |sh| {
+        entered_h.store(true, Ordering::SeqCst);
+        let (lock, cv) = &*release_h;
+        let mut go = lock.lock().unwrap();
+        while !*go {
+            go = cv.wait(go).unwrap();
+        }
+        drop(go);
+        // The policy moves to deny while the pre-tool check still holds
+        // `exec_gate`, before `decide` runs again.
+        crate::approval::install_global_policy(sh, shell_deny());
+    }));
+    lp.approve(a.call_id, ApprovalScope::Always, env.user)
+        .unwrap();
+
+    until_flag(&entered, "pre-tool commit hook did not run").await;
+    assert!(
+        lp.sh.exec_gate.try_lock().is_none(),
+        "the pre-tool recheck must hold exec_gate"
+    );
+
+    let saw_busy = Arc::new(AtomicBool::new(false));
+    let finished = Arc::new(AtomicBool::new(false));
+    let saw_busy_t = Arc::clone(&saw_busy);
+    let finished_t = Arc::clone(&finished);
+    let lp_t = lp.clone();
+    std::thread::spawn(move || {
+        loop {
+            if lp_t.sh.exec_gate.try_lock().is_none() {
+                saw_busy_t.store(true, Ordering::SeqCst);
+                break;
+            }
+            std::thread::yield_now();
+        }
+        lp_t.set_global_policy(shell_deny());
+        finished_t.store(true, Ordering::SeqCst);
+    });
+    until_flag(&saw_busy, "observer never saw exec_gate held").await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        !finished.load(Ordering::SeqCst),
+        "set_global_policy must block on the exec gate until the pre-tool recheck finishes"
+    );
+
+    {
+        let (lock, cv) = &*release;
+        *lock.lock().unwrap() = true;
+        cv.notify_one();
+    }
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(
+        shell.count.load(Ordering::SeqCst),
+        0,
+        "the command must not run"
+    );
+    assert!(
+        lp.list_grants(env.bot).is_empty(),
+        "a deny must not keep a grant"
+    );
+    let msg = tool_messages(&fake.request(1)).join("\n");
+    assert!(
+        msg.contains("denied by policy"),
+        "the model should see the policy denial, got {msg}"
+    );
+    until_flag(
+        &finished,
+        "set_global_policy did not finish after the gate was released",
+    )
+    .await;
 }

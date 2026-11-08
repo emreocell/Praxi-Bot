@@ -630,9 +630,12 @@ async fn providers_cli(
     daemon::run_providers_cli(args, key).await
 }
 
+#[cfg(windows)]
 const DEFAULT_AUTOSTART_REG_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+#[cfg(windows)]
 const AUTOSTART_VALUE_NAME: &str = "Praxi-Bot";
 
+#[cfg(windows)]
 fn autostart_reg_key() -> String {
     std::env::var("PRAXIBOT_AUTOSTART_REG_KEY")
         .ok()
@@ -680,15 +683,26 @@ fn write_windows_autostart(reg_key: &str, enabled: bool) -> Result<bool, String>
         if !status.success() {
             return Err("failed to enable Windows autostart".into());
         }
+        if !query_windows_autostart(reg_key) {
+            return Err("autostart was not enabled (registry read-back failed)".into());
+        }
         Ok(true)
     } else {
         if query_windows_autostart(reg_key) {
-            let _ = std::process::Command::new("reg")
+            let status = std::process::Command::new("reg")
                 .args(["delete", reg_key, "/v", AUTOSTART_VALUE_NAME, "/f"])
                 .creation_flags(CREATE_NO_WINDOW)
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
-                .status();
+                .status()
+                .map_err(|e| format!("cannot update autostart registry entry: {e}"))?;
+            if !status.success() {
+                return Err("failed to disable Windows autostart".into());
+            }
+        }
+        // Read back so a silent no-op is reported instead of trusted.
+        if query_windows_autostart(reg_key) {
+            return Err("autostart is still enabled after disabling it".into());
         }
         Ok(false)
     }
@@ -708,17 +722,40 @@ fn get_autostart() -> bool {
     }
 }
 
-/// Enable or disable per-user Windows autostart (`HKCU\...\Run\Praxi-Bot`).
+/// Whether this platform can register per-user autostart (Windows only).
+fn autostart_supported_impl() -> bool {
+    cfg!(windows)
+}
+
+/// Whether autostart can be toggled on this platform (the UI disables the
+/// toggle when this is false).
 #[tauri::command]
-fn set_autostart(enabled: bool) -> Result<bool, String> {
+fn autostart_supported() -> bool {
+    autostart_supported_impl()
+}
+
+fn set_autostart_impl(enabled: bool) -> Result<bool, String> {
+    if !autostart_supported_impl() {
+        let _ = enabled;
+        return Err("autostart is not supported on this platform".into());
+    }
     #[cfg(windows)]
     {
         write_windows_autostart(&autostart_reg_key(), enabled)
     }
     #[cfg(not(windows))]
     {
-        Ok(enabled)
+        unreachable!("checked by autostart_supported_impl")
     }
+}
+
+/// Enable or disable per-user Windows autostart (`HKCU\...\Run\Praxi-Bot`).
+///
+/// # Errors
+/// Off Windows, or when the registry write/read-back disagrees with `enabled`.
+#[tauri::command]
+fn set_autostart(enabled: bool) -> Result<bool, String> {
+    set_autostart_impl(enabled)
 }
 
 fn setup_dev_menu(app: &tauri::App, control: ControlHandle) {
@@ -859,6 +896,7 @@ pub fn run() {
             providers_cli,
             get_autostart,
             set_autostart,
+            autostart_supported,
             shell::notify_show,
             shell::set_needs_count,
             shell::set_tray_labels,
@@ -888,6 +926,17 @@ mod tests {
         assert!(!valid_provider_id("a;b"));
     }
 
+    #[cfg(not(windows))]
+    #[test]
+    fn autostart_is_unsupported_off_windows() {
+        assert!(!super::autostart_supported_impl());
+        assert!(!super::get_autostart());
+        assert_eq!(
+            super::set_autostart_impl(true),
+            Err("autostart is not supported on this platform".to_owned())
+        );
+    }
+
     #[cfg(windows)]
     #[test]
     fn windows_autostart_defaults_off_and_toggles_cleanly() {
@@ -900,6 +949,8 @@ mod tests {
         assert!(super::query_windows_autostart(&test_key));
         assert_eq!(super::write_windows_autostart(&test_key, false), Ok(false));
         assert!(!super::query_windows_autostart(&test_key));
+        // Disabling a missing value is fine.
+        assert_eq!(super::write_windows_autostart(&test_key, false), Ok(false));
         let _ = std::process::Command::new("reg")
             .args(["delete", &test_key, "/f"])
             .stdout(std::process::Stdio::null())

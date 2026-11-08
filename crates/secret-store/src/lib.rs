@@ -15,8 +15,12 @@ mod file;
 mod keyring_store;
 mod memory;
 mod open;
+#[cfg(windows)]
+mod publish;
 mod redact;
 mod secret;
+mod transaction;
+mod wipe;
 
 pub use error::SecretError;
 pub use file::{EncryptedFileStore, KdfParams};
@@ -26,5 +30,5 @@ pub use open::{
     BackendChoice, BackendKind, KEYRING_SERVICE, PASSPHRASE_ENV, SECRETS_FILE_NAME, open_store,
     secrets_file_path,
 };
-pub use redact::{REDACTED, Redactor};
+pub use redact::{REDACTED, Redactor, secret_variants};
 pub use secret::{SecretRef, SecretStore, SecretValue, resolve, validate_name};

@@ -6,9 +6,9 @@
   vertical-align: middle;
   overflow: hidden;
   user-select: none;
-  border-radius: var(--radius-pill);
-  background-color: var(--avatar-bg, var(--color-accent));
-  color: var(--color-text-inverse);
+  border-radius: var(--radius-card);
+  background-color: color-mix(in srgb, var(--avatar-bg, var(--color-accent)) 18%, var(--color-surface));
+  color: var(--color-text);
   font-family: var(--font-sans);
   font-weight: var(--font-weight-semibold);
   flex-shrink: 0;
@@ -46,7 +46,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--avatar-bg, var(--color-accent));
-  color: var(--color-text-inverse);
+  background-color: color-mix(in srgb, var(--avatar-bg, var(--color-accent)) 18%, var(--color-surface));
+  color: var(--color-text);
   line-height: var(--line-height-tight);
 }

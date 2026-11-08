@@ -1,7 +1,8 @@
 //! Hermetic tests for `channel-telegram` using a local `wiremock` Telegram Bot API server.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -54,6 +55,12 @@ struct FakeDaemon {
     queue_next_message: Mutex<bool>,
     /// Runs `find_chat_run` hands out (the turns the daemon "started later").
     started_later: Mutex<VecDeque<RunId>>,
+    send_failures: Mutex<HashMap<String, VecDeque<crate::TelegramError>>>,
+    send_attempts: Mutex<Vec<String>>,
+    idempotency_keys: Mutex<Vec<String>>,
+    subscribe_failures: Mutex<usize>,
+    cancel_seen: tokio::sync::Notify,
+    cancel_failures: Mutex<VecDeque<crate::TelegramError>>,
 }
 
 impl FakeDaemon {
@@ -68,6 +75,12 @@ impl FakeDaemon {
             run_streams: Mutex::new(VecDeque::new()),
             queue_next_message: Mutex::new(false),
             started_later: Mutex::new(VecDeque::new()),
+            send_failures: Mutex::new(HashMap::new()),
+            send_attempts: Mutex::new(Vec::new()),
+            idempotency_keys: Mutex::new(Vec::new()),
+            subscribe_failures: Mutex::new(0),
+            cancel_seen: tokio::sync::Notify::new(),
+            cancel_failures: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -119,6 +132,15 @@ impl DaemonClient for FakeDaemon {
     }
 
     async fn send_message(&self, chat_id: ChatId, text: &str) -> Result<SendOutcome> {
+        self.send_attempts.lock().push(text.to_owned());
+        if let Some(error) = self
+            .send_failures
+            .lock()
+            .get_mut(text)
+            .and_then(VecDeque::pop_front)
+        {
+            return Err(error);
+        }
         self.sent_messages.lock().push((chat_id, text.to_owned()));
         if std::mem::take(&mut *self.queue_next_message.lock()) {
             return Ok(SendOutcome {
@@ -135,6 +157,16 @@ impl DaemonClient for FakeDaemon {
             delivery: DeliveryKind::NewTurn,
             run_id: Some(run_id),
         })
+    }
+
+    async fn send_message_idempotent(
+        &self,
+        chat_id: ChatId,
+        text: &str,
+        key: &str,
+    ) -> Result<SendOutcome> {
+        self.idempotency_keys.lock().push(key.to_owned());
+        self.send_message(chat_id, text).await
     }
 
     async fn decide_approval(
@@ -161,7 +193,11 @@ impl DaemonClient for FakeDaemon {
     }
 
     async fn cancel_run(&self, run_id: RunId) -> Result<()> {
+        if let Some(error) = self.cancel_failures.lock().pop_front() {
+            return Err(error);
+        }
         self.cancelled_runs.lock().push(run_id);
+        self.cancel_seen.notify_one();
         Ok(())
     }
 
@@ -184,6 +220,15 @@ impl DaemonClient for FakeDaemon {
     }
 
     async fn subscribe_run(&self, run_id: RunId) -> Result<BoxStream<'static, Envelope>> {
+        {
+            let mut failures = self.subscribe_failures.lock();
+            if *failures > 0 {
+                *failures -= 1;
+                return Err(crate::TelegramError::Daemon(
+                    "injected subscription failure".into(),
+                ));
+            }
+        }
         let mut guard = self.run_streams.lock();
         if let Some(pos) = guard.iter().position(|(r, _)| *r == run_id) {
             let (_, s) = guard.remove(pos).expect("position exists");
@@ -2390,5 +2435,716 @@ async fn a_stream_that_drops_without_run_finished_still_shows_the_last_word() {
     assert!(
         all.iter().any(|t| t.contains("hello world")),
         "last word must be flushed when the stream ends: {all:?}"
+    );
+}
+
+// Audit BUG-18: failed persistence must not grant access, consume an invite, or
+// publish a different bot/thread/offset. Failure injection is independent of OS ACLs.
+#[test]
+fn failed_pairing_save_preserves_invite_and_all_live_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("telegram_state.json");
+    let store = crate::PairingStore::open(&path).unwrap();
+    let old_bot = BotId::new();
+    let old_chat = ChatId::new();
+    store.add_paired_user(1).unwrap();
+    store.set_bot_for_chat(1, old_bot).unwrap();
+    store.set_thread_for(1, old_bot, old_chat).unwrap();
+    store.save_offset("test", 10).unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let code = store.create_code();
+    store.fail_saves(true);
+    assert!(store.redeem_code(2, &code).is_err());
+    assert!(!store.is_paired(2));
+    assert!(store.add_paired_user(3).is_err());
+    assert!(!store.is_paired(3));
+    assert!(store.set_bot_for_chat(1, BotId::new()).is_err());
+    assert_eq!(store.bot_for_chat(1), Some(old_bot));
+    assert!(store.set_thread_for(1, old_bot, ChatId::new()).is_err());
+    assert_eq!(store.thread_for(1, old_bot), Some(old_chat));
+    assert!(store.save_offset("test", 99).is_err());
+    assert_eq!(store.saved_offset("test"), Some(10));
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    store.fail_saves(false);
+    assert_eq!(
+        store.redeem_code(2, &code).unwrap(),
+        crate::PairAttempt::Paired
+    );
+    assert!(crate::PairingStore::open(&path).unwrap().is_paired(2));
+}
+
+#[test]
+fn failed_pairing_rename_cleans_temp_and_keeps_previous_route() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("telegram_state.json");
+    let store = crate::PairingStore::open(&path).unwrap();
+    let old_bot = BotId::new();
+    store.set_bot_for_chat(1, old_bot).unwrap();
+    let backup = dir.path().join("before.json");
+    std::fs::rename(&path, &backup).unwrap();
+    // A file cannot replace a directory on Windows or Unix; no root/ACL exception.
+    std::fs::create_dir(&path).unwrap();
+    assert!(store.set_bot_for_chat(1, BotId::new()).is_err());
+    assert_eq!(store.bot_for_chat(1), Some(old_bot));
+    assert!(std::fs::read_dir(dir.path()).unwrap().all(|item| {
+        !item
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".tmp")
+    }));
+    std::fs::remove_dir(&path).unwrap();
+    std::fs::rename(&backup, &path).unwrap();
+    let new_bot = BotId::new();
+    store.set_bot_for_chat(1, new_bot).unwrap();
+    assert_eq!(
+        crate::PairingStore::open(path).unwrap().bot_for_chat(1),
+        Some(new_bot)
+    );
+}
+
+fn inbox_records(dir: &std::path::Path) -> Vec<Value> {
+    std::fs::read_to_string(dir.join("telegram-inbox.jsonl"))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+async fn mock_updates(server: &MockServer, updates: Value) {
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("getUpdates")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"ok": true, "result": updates})),
+        )
+        .mount(server)
+        .await;
+}
+
+fn durable_config(server: &MockServer, dir: &std::path::Path) -> TelegramConfig {
+    TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+        .with_api_base_url(server.uri())
+        .with_state_path(dir.join("telegram_state.json"))
+        .with_paired_users([PAIRED_USER_ID])
+        .with_edit_interval(Duration::ZERO)
+}
+
+// Audit BUG-17: failure on #2 retains it, blocks #3 until retry, and all duplicate
+// batches are deduplicated before the daemon. Time advances via an injected clock.
+#[tokio::test]
+async fn inbox_retries_in_order_without_redelivering_acknowledged_updates() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    mock_updates(
+        &server,
+        json!([
+            text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, "one"),
+            text_update(2, PAIRED_USER_ID, TEST_CHAT_ID, "two"),
+            text_update(3, PAIRED_USER_ID, TEST_CHAT_ID, "three"),
+        ]),
+    )
+    .await;
+    let daemon = one_bot_daemon();
+    daemon.send_failures.lock().insert(
+        "two".into(),
+        VecDeque::from([crate::TelegramError::Daemon(
+            "temporarily unavailable".into(),
+        )]),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let channel =
+        TelegramChannel::new(durable_config(&server, dir.path()), daemon.clone()).unwrap();
+    assert!(channel.poll_once().await.is_err());
+    assert_eq!(*daemon.send_attempts.lock(), vec!["one", "two"]);
+    assert_eq!(channel.pairing().saved_offset("123456789"), Some(4));
+    channel.advance_retry_clock(Duration::from_secs(2));
+    channel.poll_once().await.unwrap();
+    channel.poll_once().await.unwrap();
+    assert_eq!(
+        daemon
+            .sent_messages
+            .lock()
+            .iter()
+            .map(|(_, text)| text.clone())
+            .collect::<Vec<_>>(),
+        vec!["one", "two", "three"]
+    );
+    assert_eq!(
+        *daemon.idempotency_keys.lock(),
+        vec!["tg:1", "tg:2", "tg:2", "tg:3"]
+    );
+    let records = inbox_records(dir.path());
+    let first_delivery = records.iter().position(|r| r["delivered"] == true).unwrap();
+    assert_eq!(
+        records[..first_delivery]
+            .iter()
+            .filter(|r| r["attempts"] == 0)
+            .count(),
+        3
+    );
+    for id in 1..=3 {
+        assert_eq!(
+            records.iter().rev().find(|r| r["update_id"] == id).unwrap()["state"],
+            "done"
+        );
+    }
+}
+
+#[tokio::test]
+async fn restart_after_inbox_fsync_replays_pending_once() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    mock_updates(
+        &server,
+        json!([text_update(
+            41,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "survives restart"
+        )]),
+    )
+    .await;
+    let daemon = one_bot_daemon();
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = durable_config(&server, dir.path());
+    let first = TelegramChannel::new(cfg.clone(), daemon.clone()).unwrap();
+    // Raw receive persists the batch and offset before handing it to a consumer.
+    // Drop that consumer to model a crash before bridge delivery.
+    drop(first.receive().await.unwrap());
+    assert!(daemon.sent_messages.lock().is_empty());
+    assert_eq!(first.pairing().saved_offset("123456789"), Some(42));
+    drop(first);
+    let restarted = TelegramChannel::new(cfg.clone(), daemon.clone()).unwrap();
+    restarted.poll_once().await.unwrap();
+    drop(restarted);
+    let restarted = TelegramChannel::new(cfg, daemon.clone()).unwrap();
+    restarted.poll_once().await.unwrap();
+    assert_eq!(daemon.sent_messages.lock().len(), 1);
+}
+
+#[tokio::test]
+async fn persisted_daemon_ack_prevents_resend_after_subscription_failure_and_restart() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    mock_updates(
+        &server,
+        json!([text_update(50, PAIRED_USER_ID, TEST_CHAT_ID, "accepted")]),
+    )
+    .await;
+    let daemon = one_bot_daemon();
+    *daemon.subscribe_failures.lock() = 1;
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = durable_config(&server, dir.path());
+    let first = TelegramChannel::new(cfg.clone(), daemon.clone()).unwrap();
+    assert!(first.poll_once().await.is_err());
+    assert_eq!(daemon.sent_messages.lock().len(), 1);
+    drop(first);
+    let restarted = TelegramChannel::new(cfg, daemon.clone()).unwrap();
+    restarted.advance_retry_clock(Duration::from_secs(2));
+    restarted.poll_once().await.unwrap();
+    assert_eq!(daemon.send_attempts.lock().len(), 1);
+    assert_eq!(inbox_records(dir.path()).last().unwrap()["state"], "done");
+}
+
+#[tokio::test]
+async fn poison_update_is_dead_lettered_once_and_later_updates_flow() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    mock_updates(
+        &server,
+        json!([
+            text_update(61, PAIRED_USER_ID, TEST_CHAT_ID, "poison"),
+            text_update(62, PAIRED_USER_ID, TEST_CHAT_ID, "healthy"),
+        ]),
+    )
+    .await;
+    let daemon = one_bot_daemon();
+    daemon.send_failures.lock().insert(
+        "poison".into(),
+        VecDeque::from([crate::TelegramError::DaemonHttp {
+            status: 400,
+            message: "invalid message".into(),
+        }]),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = durable_config(&server, dir.path());
+    let channel = TelegramChannel::new(cfg.clone(), daemon.clone()).unwrap();
+    assert!(channel.poll_once().await.is_err());
+    assert_eq!(*daemon.send_attempts.lock(), vec!["poison", "healthy"]);
+    drop(channel);
+    TelegramChannel::new(cfg, daemon.clone())
+        .unwrap()
+        .poll_once()
+        .await
+        .unwrap();
+    assert_eq!(daemon.sent_messages.lock().len(), 1);
+    let records = inbox_records(dir.path());
+    let poison = records.iter().rev().find(|r| r["update_id"] == 61).unwrap();
+    assert_eq!(poison["state"], "dead");
+    assert_eq!(poison["attempts"], 1);
+    let texts = sent_texts(&server.received_requests().await.unwrap());
+    assert_eq!(
+        texts
+            .iter()
+            .filter(|s| s.contains("Could not process message 61."))
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn retry_limit_is_durable_and_notifies_once() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    mock_updates(
+        &server,
+        json!([text_update(71, PAIRED_USER_ID, TEST_CHAT_ID, "offline")]),
+    )
+    .await;
+    let daemon = one_bot_daemon();
+    daemon.send_failures.lock().insert(
+        "offline".into(),
+        (0..8)
+            .map(|_| crate::TelegramError::Daemon("offline".into()))
+            .collect(),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let channel =
+        TelegramChannel::new(durable_config(&server, dir.path()), daemon.clone()).unwrap();
+    for _ in 0..8 {
+        assert!(channel.poll_once().await.is_err());
+        channel.advance_retry_clock(Duration::from_secs(300));
+    }
+    channel.poll_once().await.unwrap();
+    assert_eq!(daemon.send_attempts.lock().len(), 8);
+    let records = inbox_records(dir.path());
+    let last = records.last().unwrap();
+    assert_eq!(last["state"], "dead");
+    assert_eq!(last["attempts"], 8);
+    assert_eq!(
+        sent_texts(&server.received_requests().await.unwrap())
+            .iter()
+            .filter(|s| s.contains("Could not process message 71."))
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn offset_cannot_advance_past_a_failed_inbox_write() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    mock_updates(
+        &server,
+        json!([text_update(
+            81,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "durable first"
+        )]),
+    )
+    .await;
+    let daemon = one_bot_daemon();
+    let dir = tempfile::tempdir().unwrap();
+    let channel =
+        TelegramChannel::new(durable_config(&server, dir.path()), daemon.clone()).unwrap();
+    channel.fail_inbox_writes(true);
+    assert!(channel.poll_once().await.is_err());
+    assert_eq!(channel.pairing().saved_offset("123456789"), None);
+    assert!(daemon.send_attempts.lock().is_empty());
+    assert_eq!(inbox_records(dir.path()), Vec::<Value>::new());
+    channel.fail_inbox_writes(false);
+    channel.poll_once().await.unwrap();
+    assert_eq!(channel.pairing().saved_offset("123456789"), Some(82));
+    let requests = server.received_requests().await.unwrap();
+    let offsets: Vec<Value> = requests
+        .iter()
+        .filter(|r| r.url.path().ends_with("/getUpdates"))
+        .map(|r| serde_json::from_slice::<Value>(&r.body).unwrap()["offset"].clone())
+        .collect();
+    assert_eq!(offsets, vec![Value::Null, Value::Null]);
+}
+
+#[tokio::test]
+async fn failed_offset_save_keeps_durable_inbox_and_published_offset_safe() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    mock_updates(
+        &server,
+        json!([text_update(91, PAIRED_USER_ID, TEST_CHAT_ID, "retry state")]),
+    )
+    .await;
+    let daemon = one_bot_daemon();
+    let dir = tempfile::tempdir().unwrap();
+    let channel =
+        TelegramChannel::new(durable_config(&server, dir.path()), daemon.clone()).unwrap();
+    channel.pairing().fail_saves(true);
+    assert!(channel.poll_once().await.is_err());
+    assert_eq!(channel.pairing().saved_offset("123456789"), None);
+    assert!(
+        inbox_records(dir.path())
+            .iter()
+            .any(|r| r["update_id"] == 91 && r["state"] == "pending")
+    );
+    channel.pairing().fail_saves(false);
+    channel.advance_retry_clock(Duration::from_secs(2));
+    channel.poll_once().await.unwrap();
+    assert_eq!(channel.pairing().saved_offset("123456789"), Some(92));
+    assert_eq!(daemon.sent_messages.lock().len(), 1);
+}
+
+// Audit REL-15: Stop's daemon cancellation must happen while a previous Telegram
+// send is still blocked. The deadline uses paused Tokio time after the send starts.
+#[tokio::test]
+async fn stop_cancels_run_while_telegram_send_is_blocked() {
+    let server = MockServer::start().await;
+    let send_started = Arc::new(tokio::sync::Notify::new());
+    let observed = send_started.clone();
+    Mock::given(method("POST")).and(path(tg_endpoint("sendMessage")))
+        .respond_with(move |request: &Request| {
+            observed.notify_one();
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            ResponseTemplate::new(200).set_body_json(json!({"ok": true, "result": {"message_id": 1, "chat": {"id": body["chat_id"]}, "text": body["text"]}})).set_delay(Duration::from_secs(3600))
+        }).mount(&server).await;
+    let daemon = one_bot_daemon();
+    let run = RunId::new();
+    let tx = daemon.queue_open_run(run);
+    tx.send(Envelope::new(
+        0,
+        Event::MessageDelta(MessageDelta {
+            run_id: run,
+            text: "blocked output ".into(),
+        }),
+    ))
+    .unwrap();
+    let channel = TelegramChannel::new(
+        TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+            .with_api_base_url(server.uri())
+            .with_paired_users([PAIRED_USER_ID]),
+        daemon.clone(),
+    )
+    .unwrap();
+    let first = channel.clone();
+    let first = tokio::spawn(async move {
+        first
+            .handle_update(update(text_update(
+                101,
+                PAIRED_USER_ID,
+                TEST_CHAT_ID,
+                "start",
+            )))
+            .await
+    });
+    send_started.notified().await;
+    tokio::time::pause();
+    let stop = channel.clone();
+    let stop = tokio::spawn(async move {
+        stop.handle_update(update(text_update(
+            102,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "/stop",
+        )))
+        .await
+    });
+    let cancelled =
+        tokio::time::timeout(Duration::from_secs(1), daemon.cancel_seen.notified()).await;
+    channel.stop();
+    first.await.unwrap().unwrap();
+    stop.await.unwrap().unwrap();
+    assert!(
+        cancelled.is_ok(),
+        "Stop waited behind the blocked Telegram send"
+    );
+    assert_eq!(*daemon.cancelled_runs.lock(), vec![run]);
+    tokio::time::resume();
+}
+
+#[tokio::test]
+async fn ready_event_stream_yields_at_the_drain_quota() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let daemon = one_bot_daemon();
+    let run = RunId::new();
+    let polled = Arc::new(AtomicUsize::new(0));
+    let count = polled.clone();
+    let events = (0..100).map(move |seq| {
+        Envelope::new(
+            seq,
+            Event::MessageDelta(MessageDelta {
+                run_id: run,
+                text: "x".into(),
+            }),
+        )
+    });
+    let stream = stream::iter(events)
+        .inspect(move |_| {
+            count.fetch_add(1, Ordering::SeqCst);
+        })
+        .chain(stream::pending());
+    daemon.queue_run_stream(run, Box::pin(stream));
+    let channel = TelegramChannel::new(
+        TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+            .with_api_base_url(server.uri())
+            .with_paired_users([PAIRED_USER_ID]),
+        daemon.clone(),
+    )
+    .unwrap();
+    tokio::time::pause();
+    channel
+        .handle_update(update(text_update(
+            111,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "start",
+        )))
+        .await
+        .unwrap();
+    assert!(
+        (1..=32).contains(&polled.load(Ordering::SeqCst)),
+        "one drain consumed the whole ready stream"
+    );
+    tokio::time::resume();
+    channel
+        .handle_update(update(text_update(
+            112,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "/stop",
+        )))
+        .await
+        .unwrap();
+    assert_eq!(*daemon.cancelled_runs.lock(), vec![run]);
+}
+
+#[tokio::test]
+async fn daemon_delivery_sends_stable_idempotency_header_and_preserves_status() {
+    use wiremock::matchers::header;
+    let server = MockServer::start().await;
+    let chat = ChatId::new();
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/chats/{}/messages", chat.0)))
+        .and(header("idempotency-key", "tg:121"))
+        .respond_with(
+            ResponseTemplate::new(409)
+                .set_body_json(json!({"error": {"message": "conflicting payload"}})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = HttpDaemonClient::new(server.uri(), SecretValue::new("fake-token"));
+    assert!(matches!(
+        client
+            .send_message_idempotent(chat, "hello", "tg:121")
+            .await,
+        Err(crate::TelegramError::DaemonHttp { status: 409, .. })
+    ));
+}
+
+// Audit REL-16: an oversized chunked body never finishes, so a post-read size
+// check would hang. Deliver bytes first, then use a paused clock for the bound.
+#[tokio::test]
+async fn oversized_chunked_telegram_body_is_rejected_before_eof() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (sent_tx, sent_rx) = tokio::sync::oneshot::channel();
+    let (end_tx, end_rx) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0u8; 4096];
+        while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+            let count = socket.read(&mut buffer).await.unwrap();
+            assert_ne!(count, 0);
+            request.extend_from_slice(&buffer[..count]);
+        }
+        socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n").await.unwrap();
+        let body = vec![b'x'; 64 * 1024];
+        for _ in 0..129 {
+            if socket.write_all(b"10000\r\n").await.is_err()
+                || socket.write_all(&body).await.is_err()
+                || socket.write_all(b"\r\n").await.is_err()
+            {
+                break;
+            }
+        }
+        let _ = sent_tx.send(());
+        // Intentionally no terminal chunk. The client must stop reading at the cap.
+        let _ = end_rx.await;
+    });
+    let client = crate::BotApiClient::with_base_url(
+        SecretValue::new(TEST_BOT_TOKEN),
+        format!("http://{address}"),
+    );
+    let request = tokio::spawn(async move { client.get_updates(None, 0).await });
+    sent_rx.await.unwrap();
+    tokio::time::pause();
+    let result = tokio::time::timeout(Duration::from_secs(1), request).await;
+    tokio::time::resume();
+    let _ = end_tx.send(());
+    server.await.unwrap();
+    let error = result
+        .expect("reader waited for EOF after exceeding cap")
+        .unwrap()
+        .unwrap_err();
+    assert!(error.to_string().contains("response too large"), "{error}");
+}
+
+// A regression using only pre-fix public APIs, so the same test can run unchanged
+// on main: after Telegram confirms the offset, a transient daemon error must not
+// lose the message. Only the retry clock advances; all HTTP stays on loopback.
+#[tokio::test]
+async fn failed_daemon_delivery_is_retried_after_poll_offset_advances() {
+    let telegram = MockServer::start().await;
+    mount_telegram_mocks(&telegram).await;
+    Mock::given(method("POST")).and(path(tg_endpoint("getUpdates")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true, "result": [text_update(131, PAIRED_USER_ID, TEST_CHAT_ID, "must survive")]})))
+        .up_to_n_times(1).mount(&telegram).await;
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("getUpdates")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true, "result": []})))
+        .mount(&telegram)
+        .await;
+    let daemon = MockServer::start().await;
+    let bot = BotId::new();
+    let chat = ChatId::new();
+    Mock::given(method("POST"))
+        .and(path("/v1/chats"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"id": chat.0, "bot_id": bot.0, "title": "telegram"})),
+        )
+        .mount(&daemon)
+        .await;
+    let message_path = format!("/v1/chats/{}/messages", chat.0);
+    Mock::given(method("POST"))
+        .and(path(&message_path))
+        .respond_with(
+            ResponseTemplate::new(503)
+                .set_body_json(json!({"error": {"message": "temporary failure"}})),
+        )
+        .up_to_n_times(1)
+        .mount(&daemon)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(&message_path))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"delivery": "queued", "run_id": null})),
+        )
+        .mount(&daemon)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/runs"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&daemon)
+        .await;
+    let channel = TelegramChannel::new(
+        TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+            .with_api_base_url(telegram.uri())
+            .with_paired_users([PAIRED_USER_ID])
+            .with_default_bot(bot),
+        Arc::new(HttpDaemonClient::new(
+            daemon.uri(),
+            SecretValue::new("fake-daemon-token"),
+        )),
+    )
+    .unwrap();
+    assert!(channel.poll_once().await.is_err());
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(2)).await;
+    tokio::time::resume();
+    channel.poll_once().await.unwrap();
+    let requests = daemon.received_requests().await.unwrap();
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|r| r.url.path() == message_path)
+            .count(),
+        2,
+        "the failed update was acknowledged to Telegram and then lost"
+    );
+}
+
+#[tokio::test]
+async fn stop_retries_its_persisted_run_target_after_daemon_failure() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let daemon = one_bot_daemon();
+    let run = RunId::new();
+    let _tx = daemon.queue_open_run(run);
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = durable_config(&server, dir.path());
+    let first = TelegramChannel::new(cfg.clone(), daemon.clone()).unwrap();
+    first
+        .handle_update(update(text_update(
+            141,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "start",
+        )))
+        .await
+        .unwrap();
+    daemon
+        .cancel_failures
+        .lock()
+        .push_back(crate::TelegramError::Daemon("offline".into()));
+    assert!(
+        first
+            .handle_update(update(text_update(
+                142,
+                PAIRED_USER_ID,
+                TEST_CHAT_ID,
+                "/stop"
+            )))
+            .await
+            .is_err()
+    );
+    assert!(daemon.cancelled_runs.lock().is_empty());
+    drop(first);
+    let restarted = TelegramChannel::new(cfg, daemon.clone()).unwrap();
+    restarted.advance_retry_clock(Duration::from_secs(2));
+    restarted
+        .handle_update(update(text_update(
+            142,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "/stop",
+        )))
+        .await
+        .unwrap();
+    assert_eq!(*daemon.cancelled_runs.lock(), vec![run]);
+}
+
+#[tokio::test]
+async fn priority_stop_does_not_start_older_messages_from_the_same_batch() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    mock_updates(
+        &server,
+        json!([
+            text_update(151, PAIRED_USER_ID, TEST_CHAT_ID, "start something"),
+            text_update(152, PAIRED_USER_ID, TEST_CHAT_ID, "/stop"),
+            text_update(153, PAIRED_USER_ID, TEST_CHAT_ID, "later new request"),
+        ]),
+    )
+    .await;
+    let daemon = one_bot_daemon();
+    let channel = TelegramChannel::new(
+        TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+            .with_api_base_url(server.uri())
+            .with_paired_users([PAIRED_USER_ID]),
+        daemon.clone(),
+    )
+    .unwrap();
+    channel.poll_once().await.unwrap();
+    assert_eq!(
+        daemon
+            .sent_messages
+            .lock()
+            .iter()
+            .map(|(_, text)| text.clone())
+            .collect::<Vec<_>>(),
+        vec!["later new request"]
     );
 }

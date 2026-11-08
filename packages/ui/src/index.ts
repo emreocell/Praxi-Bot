@@ -26,6 +26,10 @@ export {
 } from "./components/Sidebar";
 export {
   applyTheme,
+  THEME_NAMES,
+  themes,
+  contrastRatio,
+  type ThemeName,
   darkTheme,
   isReducedMotionPreferred,
   lightTheme,

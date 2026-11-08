@@ -11,9 +11,9 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-5);
+  padding: var(--space-4) var(--space-6);
   border-bottom: var(--size-border) solid var(--color-border);
-  background-color: var(--color-surface);
+  background-color: var(--color-background);
 }
 
 .headerText {
@@ -41,13 +41,13 @@
   flex: 1;
   min-height: var(--space-0);
   overflow-y: auto;
-  padding: var(--space-5);
+  padding: var(--space-8) var(--space-6);
 }
 
 .timeline {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-6);
   max-width: var(--size-content-max);
   margin: 0 auto;
 }
@@ -66,10 +66,11 @@
 
 .userBubble {
   max-width: 80%;
-  padding: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-card);
-  background-color: var(--color-accent);
-  color: var(--color-text-inverse);
+  background-color: var(--color-surface-elevated);
+  border: var(--size-border) solid var(--color-border);
+  color: var(--color-text);
   font-size: var(--font-size-sm);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -82,14 +83,14 @@
 }
 
 .assistantBubble {
-  max-width: 85%;
-  padding: var(--space-2) var(--space-4);
+  flex: 1; min-width: var(--space-0); max-width: 100%;
+  padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-card);
-  background-color: var(--color-surface-elevated);
-  border: var(--size-border) solid var(--color-border);
+  background-color: transparent;
+  border: none;
   color: var(--color-text);
-  font-size: var(--font-size-sm);
-  line-height: var(--line-height-normal);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-chat);
   overflow-wrap: anywhere;
 }
 
@@ -145,9 +146,9 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-5) var(--space-4);
-  border-top: var(--size-border) solid var(--color-border);
-  background-color: var(--color-surface);
+  padding: var(--space-4) var(--space-6) var(--space-5);
+  border-top: none;
+  background-color: var(--color-background);
 }
 
 .modeRow {
@@ -173,7 +174,7 @@
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
   border: var(--size-border) solid var(--color-border-strong);
-  background-color: var(--color-background);
+  background-color: transparent;
   color: var(--color-text);
   font-family: inherit;
   font-size: var(--font-size-sm);
@@ -236,7 +237,7 @@
   flex: none;
   width: var(--font-size-sm);
   height: var(--font-size-sm);
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .routeLabel {
@@ -291,3 +292,13 @@
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
 }
+
+
+.conversationLabel { text-align: center; color: var(--color-text-muted); font-size: var(--font-size-xs); margin-bottom: var(--space-4); }
+.assistantBubble { padding-top: var(--space-0); }
+.inputRow { width: 100%; max-width: var(--size-content-max); margin: 0 auto; padding: var(--space-3); border: var(--size-border) solid var(--color-border-strong); background: var(--color-surface); border-radius: var(--radius-modal); box-shadow: var(--shadow-card); }
+.inputRow:focus-within { border-color: var(--color-focus); }
+.input { border: none; padding: var(--space-2); min-height: var(--space-12); }
+.input:focus-visible { outline: none; box-shadow: none; }
+.composerHint { margin: var(--space-1) 0 0; text-align: center; font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.emptyConversation { display: flex; flex-direction: column; align-items: center; gap: var(--space-4); margin: var(--space-12) 0; color: var(--color-accent-text); }

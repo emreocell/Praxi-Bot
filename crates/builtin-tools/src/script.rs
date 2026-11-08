@@ -97,7 +97,7 @@ impl ToolGate for ResolverGate {
             .resolve(&self.global, self.bot.as_ref(), None, &action)
         {
             Decision::Allow => Ok(()),
-            Decision::Ask => Err(format!(
+            Decision::Ask { .. } => Err(format!(
                 "permission denied: {} needs approval, which is not available inside scripts",
                 req.tool
             )),

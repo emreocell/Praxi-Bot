@@ -17,10 +17,12 @@
 //! A browser `EventSource` cannot set headers, so this route (and only this
 //! route) also accepts the API token as `?token=...` (see `auth`).
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
+use std::io::{BufRead, Read};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use agent_core::StreamItem;
@@ -30,7 +32,7 @@ use axum::response::IntoResponse;
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use futures::stream::{self, Stream};
 use protocol::{Envelope, Event, RunId};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use storage::{Storage, read_event_log};
 use tokio::sync::broadcast::{self, error::RecvError};
 use tokio_util::sync::CancellationToken;
@@ -108,6 +110,20 @@ struct Feed {
     replaying: bool,
     /// Since when the replay waits for an index row whose log line is missing.
     stalled_since: Option<Instant>,
+    stalled_row: Option<u64>,
+    failures: u32,
+    retry_at: Option<tokio::time::Instant>,
+    pending: VecDeque<Out>,
+    live: BTreeMap<u64, StreamItem>,
+    live_bytes: usize,
+    live_closed: bool,
+    /// Last event or explicit gap actually yielded, never merely scanned.
+    delivered: u64,
+    user_id: protocol::UserId,
+    gaps_total: Arc<AtomicU64>,
+    audited_gaps: Arc<parking_lot::Mutex<HashSet<(Uuid, u64)>>>,
+    /// Releases this stream's subscriber slot on drop.
+    _slot: Option<SseSlot>,
     // ---- global form ----
     /// `schedule_changed` notifications (global stream only).
     sched_rx: Option<broadcast::Receiver<ScheduleChanged>>,
@@ -121,6 +137,27 @@ struct Feed {
     cancel: CancellationToken,
     /// Marks a global stream (the desktop app's) as open for the control bridge.
     _app: Option<crate::control::SubscriberGuard>,
+}
+
+/// One open stream's claim on the subscriber cap.
+struct SseSlot(Arc<AtomicUsize>);
+
+impl SseSlot {
+    #[allow(deprecated)] // `try_update` is newer than the MSRV
+    fn acquire(counter: &Arc<AtomicUsize>, max: usize) -> Option<Self> {
+        counter
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                (n < max).then_some(n + 1)
+            })
+            .ok()?;
+        Some(Self(Arc::clone(counter)))
+    }
+}
+
+impl Drop for SseSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl Feed {
@@ -158,32 +195,172 @@ impl Feed {
         true
     }
 
-    /// Global form: load the next chunk of index rows after `scan`.
+    fn unavailable(&mut self) {
+        self.done = true;
+        self.pending.push_back(Out::Unavailable(self.delivered));
+    }
+
+    fn replay_failed(&mut self) {
+        self.failures += 1;
+        self.replaying = true;
+        self.stalled_since.get_or_insert_with(Instant::now);
+        if self.failures >= REPLAY_FAILURES {
+            self.unavailable();
+        } else {
+            let delay = (REPLAY_BACKOFF * (1 << (self.failures - 1))).min(REPLAY_BACKOFF_MAX);
+            self.retry_at = Some(tokio::time::Instant::now() + delay);
+        }
+    }
+
+    fn buffer_live(&mut self, item: StreamItem) -> bool {
+        if item.gseq <= self.scan || self.live.contains_key(&item.gseq) {
+            return true;
+        }
+        let bytes = serde_json::to_vec(&item.envelope).map_or(MAX_EVENT_BYTES + 1, |v| v.len());
+        if self.live.len() >= LIVE_BUFFER_EVENTS || self.live_bytes + bytes > LIVE_BUFFER_BYTES {
+            self.unavailable();
+            return false;
+        }
+        self.live_bytes += bytes;
+        self.live.insert(item.gseq, item);
+        true
+    }
+
+    fn receive_replay_live(&mut self, received: Result<StreamItem, RecvError>) -> bool {
+        match received {
+            Ok(item) => self.buffer_live(item),
+            Err(RecvError::Closed) => {
+                self.live_closed = true;
+                true
+            }
+            Err(RecvError::Lagged(_)) => {
+                // A reconnect can recover from the persisted cursor; never
+                // silently drop an overflowing subscriber's live buffer.
+                self.unavailable();
+                false
+            }
+        }
+    }
+
+    /// Backoff has a fixed deadline: incoming live traffic cannot postpone it.
+    async fn wait_for_retry(&mut self, until: tokio::time::Instant) {
+        loop {
+            tokio::select! {
+                () = self.cancel.cancelled() => { self.done = true; return; },
+                () = tokio::time::sleep_until(until) => { self.retry_at = None; return; },
+                r = self.rx.recv(), if !self.live_closed => {
+                    if !self.receive_replay_live(r) { return; }
+                }
+            }
+        }
+    }
+
+    /// Global form: retry both index and worker failures without advancing the
+    /// cursor. Audit every explicit gap before publishing it or its successor.
     async fn replay_chunk(&mut self) {
         let (st, dir, after) = (Arc::clone(&self.storage), self.data_dir.clone(), self.scan);
         let logs = Arc::clone(&self.logs);
-        let force = self
-            .stalled_since
-            .is_some_and(|t| t.elapsed() >= PENDING_LINE_GRACE);
-        let loaded =
-            tokio::task::spawn_blocking(move || load_global(&st, &dir, after, force, &logs)).await;
-        if let Ok(Some(chunk)) = loaded {
-            self.scan = self.scan.max(chunk.max_gseq);
-            self.replaying = chunk.more;
-            if !chunk.more && !chunk.stalled {
-                // Replay over: the decoded logs are no longer needed.
-                self.logs.lock().clear();
+        let user = self.user_id;
+        let audited = Arc::clone(&self.audited_gaps);
+        let force = self.stalled_row.filter(|_| {
+            self.stalled_since
+                .is_some_and(|t| t.elapsed() >= PENDING_LINE_GRACE)
+        });
+        let mut worker = tokio::task::spawn_blocking(move || {
+            let chunk = load_global(&st, &dir, after, force, &logs)?;
+            #[cfg(test)]
+            if !chunk.gaps.is_empty() {
+                let mut cache = logs.lock();
+                if cache.audit_failures > 0 {
+                    cache.audit_failures -= 1;
+                    return None;
+                }
             }
-            if chunk.stalled {
-                self.stalled_since.get_or_insert_with(Instant::now);
-            } else {
-                self.stalled_since = None;
+            for gap in &chunk.gaps {
+                let key = (gap.run_id, gap.from_gseq);
+                if audited.lock().contains(&key) {
+                    continue;
+                }
+                st.append_audit(
+                    user,
+                    None,
+                    "system",
+                    "sse.gap",
+                    &serde_json::to_value(gap).ok()?,
+                )
+                .ok()?;
+                let mut seen = audited.lock();
+                if seen.len() >= AUDITED_GAPS_MAX {
+                    seen.clear();
+                }
+                seen.insert(key);
             }
-            self.backlog.extend(chunk.items);
+            // Speculative reads must not erase evidence until every gap audit
+            // write succeeded. A failed commit retries from the same cursor.
+            logs.lock()
+                .read_errors
+                .retain(|run, _| !chunk.gaps.iter().any(|gap| gap.run_id == run.0));
+            Some(chunk)
+        });
+        let loaded = loop {
+            tokio::select! {
+                () = self.cancel.cancelled() => { self.done = true; return; },
+                result = &mut worker => break result,
+                r = self.rx.recv(), if !self.live_closed => {
+                    if !self.receive_replay_live(r) { return; }
+                }
+            }
+        };
+        let Ok(Some(chunk)) = loaded else {
+            self.replay_failed();
+            return;
+        };
+        if chunk.max_gseq == after && !chunk.stalled && !self.live.is_empty() {
+            // The journal broadcasts ordinary events before its index commit.
+            // Wait with a bounded retry, rather than spin or pass an unseen row.
+            self.replay_failed();
+            return;
+        }
+        self.failures = 0;
+        self.scan = chunk.max_gseq;
+        self.replaying = chunk.more || chunk.stalled;
+        if chunk.stalled {
+            if self.stalled_row != chunk.stalled_gseq {
+                self.stalled_since = Some(Instant::now());
+            }
+            self.stalled_row = chunk.stalled_gseq;
+            self.retry_at = Some(tokio::time::Instant::now() + PENDING_RETRY);
         } else {
-            // Storage trouble: carry on live rather than stall the stream.
-            self.replaying = false;
             self.stalled_since = None;
+            self.stalled_row = None;
+            self.retry_at = None;
+        }
+        let mut ordered: Vec<(u64, Out)> = chunk
+            .items
+            .into_iter()
+            .map(|item| (item.gseq, Out::Run(item)))
+            .collect();
+        self.gaps_total
+            .fetch_add(chunk.gaps.len() as u64, Ordering::Relaxed);
+        ordered.extend(
+            chunk
+                .gaps
+                .into_iter()
+                .map(|gap| (gap.to_gseq, Out::Gap(gap))),
+        );
+        ordered.sort_by_key(|(gseq, _)| *gseq);
+        self.pending.extend(ordered.into_iter().map(|(_, out)| out));
+        self.live.retain(|gseq, _| *gseq > self.scan);
+        self.live_bytes = self
+            .live
+            .values()
+            .map(|item| serde_json::to_vec(&item.envelope).map_or(MAX_EVENT_BYTES + 1, |v| v.len()))
+            .sum();
+        // Items received while the index was being queried must be replayed
+        // after the current chunk, never jump ahead of an unresolved row.
+        self.replaying |= !self.live.is_empty();
+        if !self.replaying {
+            self.logs.lock().clear();
         }
     }
 
@@ -251,28 +428,30 @@ impl Feed {
             if self.cancel.is_cancelled() {
                 return None;
             }
-            if let Some(item) = self.backlog.pop_front() {
-                return Some(Out::Run(item));
+            if let Some(out) = self.pending.pop_front() {
+                match &out {
+                    Out::Run(item) => self.delivered = item.gseq,
+                    Out::Gap(gap) => self.delivered = gap.to_gseq,
+                    // Everything queued ahead has been yielded by now, so the
+                    // reported cursor is exactly what the client holds.
+                    Out::Unavailable(_) => return Some(Out::Unavailable(self.delivered)),
+                    _ => {}
+                }
+                return Some(out);
+            }
+            if self.done {
+                return None;
+            }
+            if let Some(until) = self.retry_at {
+                self.wait_for_retry(until).await;
+                continue;
             }
             if self.replaying {
                 self.replay_chunk().await;
                 continue;
             }
-            if self.stalled_since.is_some() {
-                // The next index row's log line is not on disk yet.  Delivering
-                // a later live event would move the cursor past it for good, so
-                // wait (live events are re-read from the index) and retry.
-                tokio::select! {
-                    () = self.cancel.cancelled() => return None,
-                    () = tokio::time::sleep(PENDING_RETRY) => {}
-                    r = self.rx.recv() => {
-                        if matches!(r, Err(RecvError::Closed)) {
-                            return None;
-                        }
-                    }
-                }
-                self.replaying = true;
-                continue;
+            if self.live_closed {
+                return None;
             }
             let (rx, sched_rx, mcp_rx) = (&mut self.rx, &mut self.sched_rx, &mut self.mcp_rx);
             let received = tokio::select! {
@@ -312,7 +491,14 @@ impl Feed {
                     if item.gseq <= self.scan {
                         continue;
                     }
+                    if item.gseq > self.scan.saturating_add(1) {
+                        if self.buffer_live(item) {
+                            self.replaying = true;
+                        }
+                        continue;
+                    }
                     self.scan = item.gseq;
+                    self.delivered = item.gseq;
                     return Some(Out::Run(item));
                 }
                 // Recover what the buffer dropped from the index.
@@ -328,6 +514,8 @@ enum Out {
     Run(StreamItem),
     Schedule(ScheduleChanged),
     Mcp(McpServerChanged),
+    Gap(Gap),
+    Unavailable(u64),
 }
 
 /// One batch of the global replay.
@@ -340,124 +528,318 @@ struct Chunk {
     /// The batch stopped before an index row whose log line may still be
     /// written (or whose log could not be read): retry from `max_gseq`.
     stalled: bool,
+    stalled_gseq: Option<u64>,
+    gaps: Vec<Gap>,
 }
 
-/// Runs whose decoded logs the replay keeps (least recently used go first).
+/// Per-subscriber limits apply during and between chunks. Cached payloads stay
+/// serialized, so the byte limit measures owned bytes rather than an estimate
+/// of arbitrary nested JSON allocations. Oversized runs are streamed again.
 const LOG_CACHE_RUNS: usize = 8;
+const LOG_CACHE_BYTES: usize = 4 * 1024 * 1024;
+const LOG_CACHE_EVENTS: usize = 8_192;
+/// Serialized bytes per replay chunk.  Decoded `Envelope`s are a few times
+/// larger than their JSON, so this also bounds the decoded footprint (~4x).
+const REPLAY_BYTES: usize = 2 * 1024 * 1024;
+const LIVE_BUFFER_BYTES: usize = 4 * 1024 * 1024;
+/// A single event must fit one replay chunk.
+const MAX_EVENT_BYTES: usize = REPLAY_BYTES;
+/// Audited-gap keys remembered (cleared when full; a duplicate row is harmless).
+const AUDITED_GAPS_MAX: usize = 4_096;
+const LIVE_BUFFER_EVENTS: usize = 1_000;
+const REPLAY_FAILURES: u32 = 3;
+const REPLAY_BACKOFF: Duration = Duration::from_millis(250);
+const REPLAY_BACKOFF_MAX: Duration = Duration::from_secs(5);
 
-/// Decoded run logs shared by the chunks of one replay, so a long run is
-/// decoded once instead of once per [`REPLAY_CHUNK`] rows (REL-04).
+pub(crate) const GAP_EVENT: &str = "gap";
+pub(crate) const REPLAY_UNAVAILABLE: &str = "replay_unavailable";
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub(crate) struct Gap {
+    from_gseq: u64,
+    to_gseq: u64,
+    run_id: Uuid,
+    reason: GapReason,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+enum GapReason {
+    LogLineMissing,
+    LogUnreadable,
+}
+
+#[derive(Default)]
+struct CachedLog {
+    lines: HashMap<u64, Vec<u8>>,
+    bytes: usize,
+    max_seq: Option<u64>,
+}
+
 #[derive(Default)]
 struct LogCache {
-    /// Least recently used first.
-    entries: Vec<(RunId, HashMap<u64, Envelope>)>,
-    /// How many logs were read from disk (tests assert on it).
+    entries: Vec<(RunId, CachedLog)>,
     reads: usize,
+    /// Only unresolved read errors survive a chunk; resolved/skipped runs are removed.
+    read_errors: HashMap<RunId, u32>,
+    #[cfg(test)]
+    index_failures: u32,
+    #[cfg(test)]
+    index_panics: u32,
+    #[cfg(test)]
+    audit_failures: u32,
 }
 
 impl LogCache {
-    /// Drop the least recently used logs beyond [`LOG_CACHE_RUNS`].  Only
-    /// called between chunks: within one chunk every run it touches stays
-    /// cached, so a row never meets a log evicted a moment ago.
-    fn trim(&mut self) {
-        let extra = self.entries.len().saturating_sub(LOG_CACHE_RUNS);
-        self.entries.drain(..extra);
+    fn retained_bytes(&self) -> usize {
+        self.entries.iter().map(|(_, log)| log.bytes).sum()
+    }
+
+    fn retained_events(&self) -> usize {
+        self.entries.iter().map(|(_, log)| log.lines.len()).sum()
     }
 
     fn clear(&mut self) {
         self.entries.clear();
+        self.read_errors.clear();
     }
 
-    /// The cached log of `run`, marked as most recently used.
-    fn get(&mut self, run: RunId) -> Option<&HashMap<u64, Envelope>> {
+    fn get(&mut self, run: RunId) -> Option<&CachedLog> {
         let i = self.entries.iter().position(|(r, _)| *r == run)?;
-        let e = self.entries.remove(i);
-        self.entries.push(e);
-        self.entries.last().map(|(_, m)| m)
+        let entry = self.entries.remove(i);
+        self.entries.push(entry);
+        self.entries.last().map(|(_, log)| log)
     }
 
-    /// (Re)read `run`'s log from disk; `false` when it cannot be read (and it
-    /// is then not cached).
-    fn load(&mut self, dir: &std::path::Path, run: RunId) -> bool {
-        self.reads += 1;
+    fn insert(&mut self, run: RunId, log: CachedLog) {
         self.entries.retain(|(r, _)| *r != run);
-        match read_event_log(dir, run) {
-            Ok(l) => {
-                self.entries
-                    .push((run, l.into_iter().map(|e| (e.seq, e)).collect()));
-                true
-            }
-            Err(_) => false,
+        while !self.entries.is_empty()
+            && (self.entries.len() >= LOG_CACHE_RUNS
+                || self.retained_bytes() + log.bytes > LOG_CACHE_BYTES
+                || self.retained_events() + log.lines.len() > LOG_CACHE_EVENTS)
+        {
+            self.entries.remove(0);
+        }
+        self.entries.push((run, log));
+    }
+}
+
+#[derive(Default)]
+struct SelectedLog {
+    lines: HashMap<u64, Vec<u8>>,
+    present: HashSet<u64>,
+    bytes: usize,
+    max_seq: Option<u64>,
+    unreadable: bool,
+    failed_reads: u32,
+}
+
+impl SelectedLog {
+    fn remember(&mut self, seq: u64, line: &[u8], budget: usize) {
+        self.present.insert(seq);
+        if self.bytes + line.len() <= budget {
+            self.bytes += line.len();
+            self.lines.insert(seq, line.to_vec());
         }
     }
 }
 
-/// Index rows `> after` joined with the runs' NDJSON logs.
-///
-/// The writer indexes a row *before* it appends the log line, and this reader
-/// takes no lock, so a missing line is usually just "not written yet".  The
-/// batch then stops *before* that row (the cursor must not pass it) and sets
-/// `stalled`.  A row is skipped only when its loss is certain: a later line of
-/// the same run is on disk (lines of a run are appended in order), or `force`
-/// is set because the grace period for a crash gap ran out.  An unreadable log
-/// stalls the same way.
-///
-/// A cached log is re-read only when it lacks the wanted line (the run may
-/// have appended since), at most once per call and run.
+enum LogFailure {
+    Unreadable,
+    /// A single event cannot fit safely. Close and preserve the cursor; never
+    /// turn a resource limit into a false claim that a valid event was lost.
+    Oversized,
+}
+
+/// Read one line at a time. At most one cache budget and the caller's remaining
+/// chunk budget are retained, even for a many-gigabyte run or torn long line.
+fn read_selected(
+    dir: &std::path::Path,
+    run: RunId,
+    wanted: &BTreeSet<u64>,
+    budget: usize,
+) -> Result<(SelectedLog, Option<CachedLog>), LogFailure> {
+    let file = match std::fs::File::open(storage::event_log_path(dir, run)) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((SelectedLog::default(), Some(CachedLog::default())));
+        }
+        Err(_) => return Err(LogFailure::Unreadable),
+    };
+    let mut reader = std::io::BufReader::new(file);
+    let mut selected = SelectedLog::default();
+    let mut complete = Some(CachedLog::default());
+    loop {
+        let mut line = Vec::new();
+        Read::by_ref(&mut reader)
+            .take((MAX_EVENT_BYTES + 1) as u64)
+            .read_until(b'\n', &mut line)
+            .map_err(|_| LogFailure::Unreadable)?;
+        if line.is_empty() {
+            break;
+        }
+        if line.len() > MAX_EVENT_BYTES {
+            return Err(LogFailure::Oversized);
+        }
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        let env: Envelope = match serde_json::from_slice(&line) {
+            Ok(env) => env,
+            Err(_) if !line.ends_with(b"\n") => break, // torn tail
+            Err(_) => return Err(LogFailure::Unreadable),
+        };
+        selected.max_seq = Some(selected.max_seq.map_or(env.seq, |s| s.max(env.seq)));
+        if wanted.contains(&env.seq) {
+            selected.remember(env.seq, &line, budget);
+        }
+        if let Some(log) = complete.as_mut() {
+            if log.bytes + line.len() > LOG_CACHE_BYTES || log.lines.len() >= LOG_CACHE_EVENTS {
+                complete = None;
+            } else {
+                log.bytes += line.len();
+                log.max_seq = selected.max_seq;
+                log.lines.insert(env.seq, line);
+            }
+        }
+    }
+    Ok((selected, complete))
+}
+
+fn select_log(
+    cache: &mut LogCache,
+    dir: &std::path::Path,
+    run: RunId,
+    wanted: &BTreeSet<u64>,
+    budget: usize,
+) -> Result<SelectedLog, LogFailure> {
+    if let Some(log) = cache.get(run)
+        && wanted.iter().all(|seq| log.lines.contains_key(seq))
+    {
+        let mut selected = SelectedLog {
+            max_seq: log.max_seq,
+            ..SelectedLog::default()
+        };
+        for seq in wanted {
+            selected.remember(*seq, &log.lines[seq], budget);
+        }
+        return Ok(selected);
+    }
+    cache.reads += 1;
+    cache.entries.retain(|(r, _)| *r != run);
+    let (selected, complete) = read_selected(dir, run, wanted, budget)?;
+    cache.read_errors.remove(&run);
+    if let Some(log) = complete {
+        cache.insert(run, log);
+    }
+    Ok(selected)
+}
+
+/// Index rows after `after`, with bounded streaming reads of their run logs.
+/// A missing line stalls until a later line proves loss or grace expires.
+/// An unreadable log requires two failed reads AND grace. Every skipped row
+/// becomes an explicit gap; the caller audits gaps before committing its cursor.
 fn load_global(
     st: &Storage,
     dir: &std::path::Path,
     after: u64,
-    force: bool,
+    force: Option<u64>,
     cache: &parking_lot::Mutex<LogCache>,
 ) -> Option<Chunk> {
+    #[cfg(test)]
+    {
+        let mut c = cache.lock();
+        if c.index_panics > 0 {
+            c.index_panics -= 1;
+            panic!("injected index worker failure");
+        }
+        if c.index_failures > 0 {
+            c.index_failures -= 1;
+            return None;
+        }
+    }
     let rows = st.list_event_index(after, REPLAY_CHUNK).ok()?;
-    let more = rows.len() >= REPLAY_CHUNK as usize;
+    let mut wanted: HashMap<RunId, BTreeSet<u64>> = HashMap::new();
+    for row in &rows {
+        wanted.entry(row.run_id).or_default().insert(row.seq);
+    }
+    let mut more = rows.len() >= REPLAY_CHUNK as usize;
     let mut cache = cache.lock();
-    // Runs read from disk during this call (a second read cannot know more).
-    let mut read_now: HashSet<RunId> = HashSet::new();
+    let mut selected: HashMap<RunId, SelectedLog> = HashMap::new();
+    let mut selected_bytes = 0;
     let mut items = Vec::with_capacity(rows.len());
+    let mut gaps = Vec::new();
     let mut max_gseq = after;
-    let mut stalled = false;
+    let mut stalled_gseq = None;
     for row in rows {
         let run = row.run_id;
-        let mut have = cache.get(run).is_some();
-        if !have && read_now.insert(run) {
-            have = cache.load(dir, run);
-        }
-        let missing = cache.get(run).is_some_and(|m| !m.contains_key(&row.seq));
-        if missing && read_now.insert(run) {
-            have = cache.load(dir, run);
-        }
-        let log = if have { cache.get(run) } else { None };
-        match log {
-            Some(m) => {
-                if let Some(env) = m.get(&row.seq) {
-                    items.push(StreamItem {
-                        gseq: row.gseq,
-                        run_id: row.run_id,
-                        envelope: env.clone(),
-                    });
-                } else if !force && !m.keys().any(|s| *s > row.seq) {
-                    stalled = true;
-                    break;
+        if let std::collections::hash_map::Entry::Vacant(entry) = selected.entry(run) {
+            let log = match select_log(
+                &mut cache,
+                dir,
+                run,
+                &wanted[&run],
+                REPLAY_BYTES - selected_bytes,
+            ) {
+                Ok(log) => log,
+                Err(LogFailure::Oversized) => return None,
+                Err(LogFailure::Unreadable) => {
+                    let failed_reads = cache.read_errors.entry(run).or_default();
+                    *failed_reads += 1;
+                    SelectedLog {
+                        unreadable: true,
+                        failed_reads: *failed_reads,
+                        ..SelectedLog::default()
+                    }
                 }
-            }
-            None if force => {}
-            None => {
-                stalled = true;
+            };
+            selected_bytes += log.bytes;
+            entry.insert(log);
+        }
+        let log = &selected[&run];
+        if let Some(line) = log.lines.get(&row.seq) {
+            let envelope = serde_json::from_slice(line).ok()?;
+            items.push(StreamItem {
+                gseq: row.gseq,
+                run_id: run,
+                envelope,
+            });
+        } else if log.present.contains(&row.seq) {
+            // The row exists but this chunk's byte budget is full. Resume at
+            // exactly this row with a fresh budget, without a gap or a stall.
+            more = true;
+            break;
+        } else {
+            let may_skip = if log.unreadable {
+                force == Some(row.gseq) && log.failed_reads >= 2
+            } else {
+                force == Some(row.gseq) || log.max_seq.is_some_and(|seq| seq > row.seq)
+            };
+            if !may_skip {
+                stalled_gseq = Some(row.gseq);
+                more = false;
                 break;
             }
+            gaps.push(Gap {
+                from_gseq: row.gseq,
+                to_gseq: row.gseq,
+                run_id: run.0,
+                reason: if log.unreadable {
+                    GapReason::LogUnreadable
+                } else {
+                    GapReason::LogLineMissing
+                },
+            });
         }
-        max_gseq = max_gseq.max(row.gseq);
+        max_gseq = row.gseq;
     }
-    cache.trim();
     Some(Chunk {
         items,
         max_gseq,
-        // Stopped early: the rest is re-read from the cursor after the pause.
-        more: more && !stalled,
-        stalled,
+        more,
+        stalled: stalled_gseq.is_some(),
+        stalled_gseq,
+        gaps,
     })
 }
 
@@ -487,6 +869,17 @@ fn event_stream(feed: Feed) -> impl Stream<Item = Result<SseEvent, Infallible>> 
                 .event("schedule_changed")
                 .json_data(&change)
                 .unwrap_or_else(|_| SseEvent::default().comment("unserialisable event")),
+            Out::Gap(gap) => SseEvent::default()
+                .id(gap.to_gseq.to_string())
+                .event(GAP_EVENT)
+                .json_data(&gap)
+                .unwrap_or_else(|_| SseEvent::default().comment("unserialisable gap")),
+            Out::Unavailable(last_event_id) => SseEvent::default()
+                .event("error")
+                .json_data(
+                    serde_json::json!({"code": REPLAY_UNAVAILABLE, "last_event_id": last_event_id}),
+                )
+                .unwrap_or_else(|_| SseEvent::default().comment(REPLAY_UNAVAILABLE)),
             Out::Mcp(change) => SseEvent::default()
                 .event("mcp_server_changed")
                 .json_data(&change)
@@ -503,6 +896,13 @@ pub(crate) async fn events(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, ApiError> {
     let scoped_run = q.run_id.map(RunId);
+    let slot = SseSlot::acquire(&state.0.sse_subscribers, state.0.cfg.max_sse_subscribers)
+        .ok_or_else(|| {
+            ApiError::unavailable(format!(
+                "too many open event streams (limit {}); close one and retry",
+                state.0.cfg.max_sse_subscribers
+            ))
+        })?;
     if let Some(run) = scoped_run {
         state.run_of_user(run)?;
     }
@@ -524,6 +924,18 @@ pub(crate) async fn events(
         scan: 0,
         replaying: false,
         stalled_since: None,
+        stalled_row: None,
+        failures: 0,
+        retry_at: None,
+        pending: VecDeque::new(),
+        live: BTreeMap::new(),
+        live_bytes: 0,
+        live_closed: false,
+        delivered: 0,
+        user_id: state.user_id(),
+        gaps_total: Arc::clone(&state.0.sse_gaps_total),
+        audited_gaps: Arc::clone(&state.0.sse_audited_gaps),
+        _slot: Some(slot),
         sched_rx: scoped_run
             .is_none()
             .then(|| state.subscribe_schedule_events()),
@@ -550,9 +962,8 @@ pub(crate) async fn events(
             let st = Arc::clone(&feed.storage);
             let newest = tokio::task::spawn_blocking(move || st.last_gseq())
                 .await
-                .ok()
-                .and_then(Result::ok)
-                .unwrap_or(0);
+                .map_err(ApiError::internal)?
+                .map_err(ApiError::internal)?;
             match resume {
                 // Replay everything after the cursor (a cursor from the future,
                 // e.g. a reset database, is clamped).
@@ -563,9 +974,31 @@ pub(crate) async fn events(
                 // Live only: events up to now are history.
                 None => feed.scan = newest,
             }
+            feed.delivered = feed.scan;
         }
     }
     Ok(Sse::new(event_stream(feed)).keep_alive(KeepAlive::default()))
+}
+
+/// Counters of the SSE machinery (authenticated, unlike `/v1/health`).
+#[derive(Serialize, utoipa::ToSchema)]
+pub(crate) struct SseStatus {
+    /// Gap notifications emitted by this daemon (per subscriber, since startup).
+    sse_gaps_total: u64,
+    /// Event streams open right now.
+    sse_subscribers: u64,
+    /// Configured cap on open event streams.
+    max_sse_subscribers: u64,
+}
+
+#[utoipa::path(get, path = "/v1/events/status", tag = "events", security(("bearer" = [])),
+    responses((status = 200, body = SseStatus)))]
+pub(crate) async fn status(State(state): State<AppState>) -> axum::Json<SseStatus> {
+    axum::Json(SseStatus {
+        sse_gaps_total: state.0.sse_gaps_total.load(Ordering::Relaxed),
+        sse_subscribers: state.0.sse_subscribers.load(Ordering::Relaxed) as u64,
+        max_sse_subscribers: state.0.cfg.max_sse_subscribers as u64,
+    })
 }
 
 #[cfg(test)]
@@ -620,7 +1053,7 @@ mod tests {
         for (g, run, seq) in [(1, a, 0), (2, b, 0), (3, a, 1), (4, b, 1), (5, a, 2)] {
             st.index_event(g, run, seq).unwrap();
         }
-        let chunk = load_global(&st, dir.path(), 0, false, &LogCache::default().into()).unwrap();
+        let chunk = load_global(&st, dir.path(), 0, None, &LogCache::default().into()).unwrap();
         let got: Vec<(u64, RunId, u64)> = chunk
             .items
             .iter()
@@ -631,12 +1064,12 @@ mod tests {
         assert_eq!(chunk.max_gseq, 3, "the cursor must not pass a pending row");
         assert!(chunk.stalled && !chunk.more);
         // Once the grace period is over the line counts as lost to a crash.
-        let forced = load_global(&st, dir.path(), 3, true, &LogCache::default().into()).unwrap();
+        let forced = load_global(&st, dir.path(), 3, Some(4), &LogCache::default().into()).unwrap();
         assert_eq!(forced.items.len(), 1);
         assert_eq!(forced.items[0].gseq, 5);
         assert!(!forced.stalled);
         assert_eq!(forced.max_gseq, 5);
-        let none = load_global(&st, dir.path(), 5, false, &LogCache::default().into()).unwrap();
+        let none = load_global(&st, dir.path(), 5, None, &LogCache::default().into()).unwrap();
         assert!(none.items.is_empty() && none.max_gseq == 5 && !none.stalled);
     }
 
@@ -662,12 +1095,12 @@ mod tests {
         st.index_event(1, a, 0).unwrap();
         st.index_event(2, a, 1).unwrap();
         let cache = parking_lot::Mutex::new(LogCache::default());
-        let first = load_global(&st, dir.path(), 0, false, &cache).unwrap();
+        let first = load_global(&st, dir.path(), 0, None, &cache).unwrap();
         assert_eq!(first.items.len(), 1);
         assert_eq!((first.max_gseq, first.stalled), (1, true));
         // The line lands; resuming from the stalled cursor delivers it.
         w.append(&msg(a, 1)).unwrap();
-        let second = load_global(&st, dir.path(), first.max_gseq, false, &cache).unwrap();
+        let second = load_global(&st, dir.path(), first.max_gseq, None, &cache).unwrap();
         assert_eq!(second.items.len(), 1);
         assert_eq!(second.items[0].gseq, 2);
         assert!(!second.stalled);
@@ -685,7 +1118,7 @@ mod tests {
         for (g, seq) in [(1, 0), (2, 1), (3, 2)] {
             st.index_event(g, a, seq).unwrap();
         }
-        let chunk = load_global(&st, dir.path(), 0, false, &LogCache::default().into()).unwrap();
+        let chunk = load_global(&st, dir.path(), 0, None, &LogCache::default().into()).unwrap();
         let got: Vec<u64> = chunk.items.iter().map(|i| i.gseq).collect();
         assert_eq!(got, [1, 3]);
         assert!(!chunk.stalled);
@@ -702,7 +1135,7 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "not json\n{\"also\": \"bad\"}\n").unwrap();
         st.index_event(1, a, 0).unwrap();
-        let chunk = load_global(&st, dir.path(), 0, false, &LogCache::default().into()).unwrap();
+        let chunk = load_global(&st, dir.path(), 0, None, &LogCache::default().into()).unwrap();
         assert!(chunk.items.is_empty());
         assert_eq!((chunk.max_gseq, chunk.stalled), (0, true));
     }
@@ -722,7 +1155,7 @@ mod tests {
         let cache = parking_lot::Mutex::new(LogCache::default());
         let (mut after, mut delivered, mut chunks) = (0, 0u64, 0);
         loop {
-            let c = load_global(&st, dir.path(), after, false, &cache).unwrap();
+            let c = load_global(&st, dir.path(), after, None, &cache).unwrap();
             delivered += c.items.len() as u64;
             after = c.max_gseq;
             chunks += 1;
@@ -747,7 +1180,7 @@ mod tests {
             w.append(&msg(r, 0)).unwrap();
             st.index_event(g, r, 0).unwrap();
         }
-        let c = load_global(&st, dir.path(), 0, false, &cache).unwrap();
+        let c = load_global(&st, dir.path(), 0, None, &cache).unwrap();
         assert_eq!(c.items.len(), LOG_CACHE_RUNS + 4);
         assert_eq!(cache.lock().entries.len(), LOG_CACHE_RUNS);
     }
@@ -771,12 +1204,448 @@ mod tests {
         }
         for force in [false, true] {
             let cache = parking_lot::Mutex::new(LogCache::default());
-            let c = load_global(&st, dir.path(), 0, force, &cache).unwrap();
+            let c = load_global(&st, dir.path(), 0, force.then_some(1), &cache).unwrap();
             assert!(!c.stalled, "force={force}");
             assert_eq!(c.items.len(), 24, "force={force}");
             assert_eq!(c.max_gseq, 24);
             assert_eq!(cache.lock().reads, 12, "each log decoded once");
             assert_eq!(cache.lock().entries.len(), LOG_CACHE_RUNS);
         }
+    }
+
+    fn replay_fixture() -> (
+        tempfile::TempDir,
+        Arc<Storage>,
+        Feed,
+        broadcast::Sender<StreamItem>,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Arc::new(Storage::open(dir.path()).unwrap());
+        let user_id = protocol::UserId::new();
+        storage
+            .insert_user(&storage::User {
+                id: user_id,
+                name: "SSE fixture".into(),
+                created_at_ms: 0,
+            })
+            .unwrap();
+        let (tx, rx) = broadcast::channel(2_048);
+        let feed = Feed {
+            rx,
+            backlog: VecDeque::new(),
+            scoped: false,
+            run: None,
+            last: None,
+            done: false,
+            finished_in_log: false,
+            scan: 0,
+            replaying: true,
+            stalled_since: None,
+            stalled_row: None,
+            failures: 0,
+            retry_at: None,
+            pending: VecDeque::new(),
+            live: BTreeMap::new(),
+            live_bytes: 0,
+            live_closed: false,
+            delivered: 0,
+            user_id,
+            gaps_total: Arc::default(),
+            audited_gaps: Arc::default(),
+            _slot: None,
+            sched_rx: None,
+            mcp_rx: None,
+            storage: Arc::clone(&storage),
+            data_dir: dir.path().to_owned(),
+            logs: Arc::default(),
+            cancel: CancellationToken::new(),
+            _app: None,
+        };
+        (dir, storage, feed, tx)
+    }
+
+    fn append_indexed(st: &Storage, run: RunId, gseq: u64, seq: u64) -> StreamItem {
+        let envelope = msg(run, seq);
+        storage::EventLogWriter::open(st.data_dir(), run)
+            .unwrap()
+            .append(&envelope)
+            .unwrap();
+        st.index_event(gseq, run, seq).unwrap();
+        StreamItem {
+            gseq,
+            run_id: run,
+            envelope,
+        }
+    }
+
+    #[tokio::test]
+    async fn transient_index_failures_preserve_live_order_exactly_once() {
+        let (_dir, st, mut feed, tx) = replay_fixture();
+        let run = RunId::new();
+        append_indexed(&st, run, 1, 0);
+        append_indexed(&st, run, 2, 1);
+        feed.logs.lock().index_failures = 2;
+        let producer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            for (gseq, seq) in [(3, 2), (4, 3)] {
+                tx.send(append_indexed(&st, run, gseq, seq)).unwrap();
+            }
+        });
+        let mut ids = Vec::new();
+        for _ in 0..4 {
+            let out = tokio::time::timeout(Duration::from_secs(3), feed.next_global_item())
+                .await
+                .unwrap();
+            let Some(Out::Run(item)) = out else {
+                panic!("expected an ordered replay event")
+            };
+            ids.push(item.gseq);
+        }
+        producer.await.unwrap();
+        assert_eq!(ids, [1, 2, 3, 4]);
+        assert_eq!((feed.scan, feed.delivered, feed.failures), (4, 4, 0));
+        assert!(feed.live.is_empty());
+        assert!(
+            feed.next_global_item().await.is_none(),
+            "closed source has no duplicate events"
+        );
+    }
+
+    #[tokio::test]
+    async fn replay_failure_keeps_cursor_and_replaying_until_terminal_error() {
+        let (_dir, _st, mut feed, _tx) = replay_fixture();
+        feed.scan = 7;
+        feed.delivered = 7;
+        feed.logs.lock().index_failures = REPLAY_FAILURES;
+        feed.replay_chunk().await;
+        assert_eq!(feed.scan, 7);
+        assert!(
+            feed.replaying,
+            "BUG-16: storage failure must not switch to live delivery"
+        );
+        assert!(feed.stalled_since.is_some());
+        let started = Instant::now();
+        let out = tokio::time::timeout(Duration::from_secs(3), feed.next_global_item())
+            .await
+            .unwrap();
+        assert!(matches!(out, Some(Out::Unavailable(7))));
+        assert!(
+            started.elapsed() >= Duration::from_millis(700),
+            "exponential retry backoff"
+        );
+        assert_eq!((feed.scan, feed.delivered, feed.failures), (7, 7, 3));
+        assert!(feed.next_global_item().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn replay_worker_join_failure_retries_from_the_same_cursor() {
+        let (_dir, st, mut feed, _tx) = replay_fixture();
+        append_indexed(&st, RunId::new(), 1, 0);
+        feed.logs.lock().index_panics = 1;
+        feed.replay_chunk().await;
+        assert_eq!(feed.scan, 0);
+        assert!(feed.replaying);
+        let out = tokio::time::timeout(Duration::from_secs(2), feed.next_global_item())
+            .await
+            .unwrap();
+        assert!(matches!(out, Some(Out::Run(StreamItem { gseq: 1, .. }))));
+    }
+
+    #[tokio::test]
+    async fn missing_line_grace_emits_an_audited_gap_before_its_successor() {
+        let (_dir, st, mut feed, _tx) = replay_fixture();
+        let lost = RunId::new();
+        st.index_event(1, lost, 0).unwrap();
+        append_indexed(&st, RunId::new(), 2, 0);
+        feed.replay_chunk().await;
+        assert_eq!(feed.scan, 0);
+        assert!(feed.pending.is_empty());
+        assert_eq!(feed.gaps_total.load(Ordering::Relaxed), 0);
+        feed.stalled_since = Some(Instant::now().checked_sub(PENDING_LINE_GRACE).unwrap());
+        feed.replay_chunk().await;
+        let audit = st.list_audit(feed.user_id).unwrap();
+        assert_eq!(audit.len(), 1, "gap is durable before it can be yielded");
+        assert_eq!(audit[0].action, "sse.gap");
+        assert_eq!(audit[0].detail["reason"], "log_line_missing");
+        assert!(matches!(
+            feed.next_global_item().await,
+            Some(Out::Gap(Gap {
+                from_gseq: 1,
+                to_gseq: 1,
+                ..
+            }))
+        ));
+        assert!(matches!(
+            feed.next_global_item().await,
+            Some(Out::Run(StreamItem { gseq: 2, .. }))
+        ));
+        assert_eq!(feed.gaps_total.load(Ordering::Relaxed), 1);
+        assert_eq!(feed.delivered, 2);
+    }
+
+    #[tokio::test]
+    async fn unavailable_reports_the_cursor_after_the_events_queued_ahead_of_it() {
+        let (_dir, st, mut feed, _tx) = replay_fixture();
+        let run = RunId::new();
+        feed.replaying = false;
+        for g in 1..=2 {
+            let item = append_indexed(&st, run, g, g - 1);
+            feed.pending.push_back(Out::Run(item));
+        }
+        feed.unavailable();
+        assert!(matches!(feed.next_global_item().await, Some(Out::Run(_))));
+        assert!(matches!(feed.next_global_item().await, Some(Out::Run(_))));
+        assert!(matches!(
+            feed.next_global_item().await,
+            Some(Out::Unavailable(2))
+        ));
+        assert!(feed.next_global_item().await.is_none());
+    }
+
+    #[test]
+    fn subscriber_slots_are_capped_and_released_on_drop() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let a = SseSlot::acquire(&counter, 2).unwrap();
+        let _b = SseSlot::acquire(&counter, 2).unwrap();
+        assert!(SseSlot::acquire(&counter, 2).is_none());
+        drop(a);
+        assert!(SseSlot::acquire(&counter, 2).is_some());
+    }
+
+    #[tokio::test]
+    async fn a_gap_is_audited_once_even_when_replayed_again() {
+        let (_dir, st, mut feed, _tx) = replay_fixture();
+        let lost = RunId::new();
+        st.index_event(1, lost, 0).unwrap();
+        append_indexed(&st, RunId::new(), 2, 0);
+        for _ in 0..2 {
+            feed.scan = 0;
+            feed.pending.clear();
+            feed.replaying = true;
+            feed.stalled_row = Some(1);
+            feed.stalled_since = Some(Instant::now().checked_sub(PENDING_LINE_GRACE).unwrap());
+            feed.replay_chunk().await;
+            assert!(matches!(feed.pending.front(), Some(Out::Gap(_))));
+        }
+        assert_eq!(st.list_audit(feed.user_id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn unreadable_log_needs_two_attempts_even_when_grace_is_expired() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = Storage::open(dir.path()).unwrap();
+        let run = RunId::new();
+        let path = storage::event_log_path(dir.path(), run);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"broken\n").unwrap();
+        for seq in 0..2 {
+            st.index_event(seq + 1, run, seq).unwrap();
+        }
+        let cache = parking_lot::Mutex::new(LogCache::default());
+        let first = load_global(&st, dir.path(), 0, Some(1), &cache).unwrap();
+        assert!(first.stalled && first.gaps.is_empty());
+        assert_eq!(first.max_gseq, 0);
+        let second = load_global(&st, dir.path(), 0, Some(1), &cache).unwrap();
+        assert!(second.stalled);
+        assert_eq!(second.max_gseq, 1);
+        assert_eq!(second.gaps.len(), 1);
+        assert!(
+            second
+                .gaps
+                .iter()
+                .all(|gap| matches!(gap.reason, GapReason::LogUnreadable))
+        );
+    }
+
+    #[tokio::test]
+    async fn stalled_live_buffer_overflow_closes_without_advancing_cursor() {
+        let (_dir, _st, mut feed, tx) = replay_fixture();
+        feed.logs.lock().index_failures = REPLAY_FAILURES;
+        let run = RunId::new();
+        for gseq in 1..=LIVE_BUFFER_EVENTS as u64 + 1 {
+            tx.send(StreamItem {
+                gseq,
+                run_id: run,
+                envelope: msg(run, gseq),
+            })
+            .unwrap();
+        }
+        let out = tokio::time::timeout(Duration::from_secs(2), feed.next_global_item())
+            .await
+            .unwrap();
+        assert!(matches!(out, Some(Out::Unavailable(0))));
+        assert_eq!(feed.scan, 0);
+        assert!(feed.live.len() <= LIVE_BUFFER_EVENTS);
+        assert!(feed.next_global_item().await.is_none());
+    }
+
+    #[test]
+    fn oversized_run_is_reread_with_bounded_cache_without_stalls_or_skips() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = Storage::open(dir.path()).unwrap();
+        let run = RunId::new();
+        let mut writer = storage::EventLogWriter::open(dir.path(), run).unwrap();
+        let count = 1_101u64;
+        for seq in 0..count {
+            let env = Envelope::new(
+                seq,
+                Event::MessageDelta(protocol::event::MessageDelta {
+                    run_id: run,
+                    text: "x".repeat(8_192),
+                }),
+            );
+            writer.append_buffered(&env).unwrap();
+            st.index_event(seq + 1, run, seq).unwrap();
+        }
+        writer.sync().unwrap();
+        drop(writer);
+        let cache = parking_lot::Mutex::new(LogCache::default());
+        let (mut after, mut chunks) = (0, 0);
+        let mut got = Vec::new();
+        loop {
+            let chunk = load_global(&st, dir.path(), after, None, &cache).unwrap();
+            assert!(!chunk.stalled && chunk.gaps.is_empty());
+            assert!(chunk.max_gseq > after);
+            after = chunk.max_gseq;
+            got.extend(chunk.items.iter().map(|item| item.gseq));
+            chunks += 1;
+            assert!(
+                cache.lock().retained_bytes() <= LOG_CACHE_BYTES,
+                "REL-04: oversized decoded log retained across chunks"
+            );
+            assert!(cache.lock().retained_events() <= LOG_CACHE_EVENTS);
+            if !chunk.more {
+                break;
+            }
+        }
+        assert_eq!(got, (1..=count).collect::<Vec<_>>());
+        assert_eq!(cache.lock().reads, chunks);
+        assert!(chunks >= 3);
+        assert_eq!(
+            cache.lock().retained_bytes(),
+            0,
+            "oversized logs are never retained"
+        );
+    }
+
+    #[test]
+    fn chunk_byte_budget_restarts_at_the_first_unreturned_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = Storage::open(dir.path()).unwrap();
+        let run = RunId::new();
+        let mut writer = storage::EventLogWriter::open(dir.path(), run).unwrap();
+        for seq in 0..4 {
+            writer
+                .append_buffered(&Envelope::new(
+                    seq,
+                    Event::MessageDelta(protocol::event::MessageDelta {
+                        run_id: run,
+                        text: "x".repeat(700 * 1024),
+                    }),
+                ))
+                .unwrap();
+            st.index_event(seq + 1, run, seq).unwrap();
+        }
+        writer.sync().unwrap();
+        drop(writer);
+        let cache = parking_lot::Mutex::new(LogCache::default());
+        let first = load_global(&st, dir.path(), 0, None, &cache).unwrap();
+        assert_eq!(first.max_gseq, 2);
+        assert!(first.more && !first.stalled && first.gaps.is_empty());
+        let second = load_global(&st, dir.path(), first.max_gseq, None, &cache).unwrap();
+        assert_eq!(
+            second
+                .items
+                .iter()
+                .map(|item| item.gseq)
+                .collect::<Vec<_>>(),
+            [3, 4]
+        );
+        assert_eq!(second.max_gseq, 4);
+        assert!(!second.more && !second.stalled && second.gaps.is_empty());
+    }
+
+    #[tokio::test]
+    async fn expired_gap_does_not_force_a_new_pending_row() {
+        let (_dir, st, mut feed, _tx) = replay_fixture();
+        st.index_event(1, RunId::new(), 0).unwrap();
+        st.index_event(2, RunId::new(), 0).unwrap();
+        feed.replay_chunk().await;
+        feed.stalled_since = Some(Instant::now().checked_sub(PENDING_LINE_GRACE).unwrap());
+        feed.replay_chunk().await;
+        assert_eq!(feed.scan, 1);
+        assert_eq!(feed.stalled_row, Some(2));
+        assert_eq!(feed.pending.len(), 1);
+        assert!(matches!(
+            feed.next_global_item().await,
+            Some(Out::Gap(Gap { to_gseq: 1, .. }))
+        ));
+        assert!(feed.stalled_since.unwrap().elapsed() < PENDING_LINE_GRACE);
+    }
+
+    #[tokio::test]
+    async fn buffered_live_waits_for_the_index_without_spinning() {
+        let (_dir, st, mut feed, _tx) = replay_fixture();
+        let run = RunId::new();
+        let item = StreamItem {
+            gseq: 1,
+            run_id: run,
+            envelope: msg(run, 0),
+        };
+        feed.buffer_live(item);
+        feed.replay_chunk().await;
+        assert_eq!((feed.scan, feed.failures), (0, 1));
+        assert!(feed.retry_at.is_some());
+        let writer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            append_indexed(&st, run, 1, 0);
+        });
+        let out = tokio::time::timeout(Duration::from_secs(2), feed.next_global_item())
+            .await
+            .unwrap();
+        writer.await.unwrap();
+        assert!(matches!(out, Some(Out::Run(StreamItem { gseq: 1, .. }))));
+        assert_eq!(feed.failures, 0);
+        assert!(feed.live.is_empty());
+    }
+
+    #[tokio::test]
+    async fn permanently_unindexed_live_event_closes_at_the_old_cursor() {
+        let (_dir, _st, mut feed, _tx) = replay_fixture();
+        let run = RunId::new();
+        feed.buffer_live(StreamItem {
+            gseq: 1,
+            run_id: run,
+            envelope: msg(run, 0),
+        });
+        let out = tokio::time::timeout(Duration::from_secs(2), feed.next_global_item())
+            .await
+            .unwrap();
+        assert!(matches!(out, Some(Out::Unavailable(0))));
+        assert_eq!((feed.scan, feed.failures), (0, 3));
+        assert!(feed.next_global_item().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn persistent_gap_audit_failure_closes_without_losing_read_evidence() {
+        let (_dir, st, mut feed, _tx) = replay_fixture();
+        let run = RunId::new();
+        st.index_event(1, run, 0).unwrap();
+        let path = storage::event_log_path(st.data_dir(), run);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"broken\n").unwrap();
+        feed.replay_chunk().await;
+        feed.stalled_since = Some(Instant::now().checked_sub(PENDING_LINE_GRACE).unwrap());
+        feed.logs.lock().audit_failures = 3;
+        let out = tokio::time::timeout(Duration::from_secs(2), feed.next_global_item())
+            .await
+            .unwrap();
+        assert!(matches!(out, Some(Out::Unavailable(0))));
+        assert_eq!((feed.scan, feed.failures), (0, 3));
+        assert_eq!(feed.gaps_total.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            st.list_audit(feed.user_id).unwrap(),
+            Vec::<storage::AuditEntry>::new()
+        );
     }
 }

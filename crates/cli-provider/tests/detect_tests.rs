@@ -270,6 +270,8 @@ async fn test_timeout_and_overflow() {
     assert_eq!(claude.detail.as_deref(), Some("timeout"));
 }
 
+// `.cmd` shims only exist on Windows.
+#[cfg(windows)]
 #[tokio::test]
 async fn test_windows_cmd_shim_refused_and_multiline() {
     let temp = tempfile::tempdir().unwrap();
@@ -338,6 +340,8 @@ async fn test_secret_env_is_not_passed_to_the_probe() {
     assert!(!rendered.contains("LEAKED"), "{rendered}");
 }
 
+// `.cmd` shims only exist on Windows.
+#[cfg(windows)]
 #[tokio::test]
 async fn test_batch_node_shim_is_not_executed() {
     let temp = tempfile::tempdir().unwrap();
@@ -352,12 +356,12 @@ async fn test_batch_node_shim_is_not_executed() {
     .unwrap();
     #[cfg(not(windows))]
     {
+        use std::os::unix::fs::PermissionsExt;
         std::fs::write(
             dir.join("node.cmd"),
             "#!/bin/sh\necho RAN > \"$(dirname \"$0\")/spawned.txt\"\necho fake 1.2.3\n",
         )
         .unwrap();
-        use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(dir.join("node.cmd"), std::fs::Permissions::from_mode(0o755))
             .unwrap();
     }
@@ -563,6 +567,8 @@ fn npm_shim_uses_package_exe_and_js_bins_stay_refused() {
     assert!(outside.is_file());
 }
 
+// Detection finds `claude.cmd` through PATHEXT, which Linux does not apply.
+#[cfg(windows)]
 #[tokio::test]
 async fn npm_claude_package_exe_is_the_probed_binary() {
     let temp = tempfile::tempdir().unwrap();
