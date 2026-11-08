@@ -108,20 +108,17 @@ fn read_verified(data_dir: &Path, path: &Path) -> std::io::Result<(String, bool)
     use std::io::Read;
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
     let deny = |m: &str| std::io::Error::new(std::io::ErrorKind::PermissionDenied, m.to_owned());
-    // The data directory must not be writable by others (they could swap the
-    // file).
-    if std::fs::metadata(data_dir)?.mode() & 0o022 != 0 {
-        return Err(deny("data directory is group/world writable"));
+    // The data directory must not be world writable (anyone could swap the
+    // file); group-writable stays allowed (umask 002 is the common default).
+    if std::fs::metadata(data_dir)?.mode() & 0o002 != 0 {
+        return Err(deny("data directory is world writable"));
     }
+    let flags =
+        rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK | rustix::fs::OFlags::CLOEXEC;
     // No symlink is followed (O_NOFOLLOW, atomic with the open), no FIFO blocks.
     let mut f = std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(
-            (rustix::fs::OFlags::NOFOLLOW
-                | rustix::fs::OFlags::NONBLOCK
-                | rustix::fs::OFlags::CLOEXEC)
-                .bits() as i32,
-        )
+        .custom_flags(i32::try_from(flags.bits()).unwrap_or(0))
         .open(path)?;
     let meta = f.metadata()?;
     let euid = rustix::process::geteuid().as_raw();
