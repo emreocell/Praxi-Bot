@@ -346,12 +346,12 @@ async fn test_batch_node_shim_is_not_executed() {
     .unwrap();
     #[cfg(not(windows))]
     {
+        use std::os::unix::fs::PermissionsExt;
         std::fs::write(
             dir.join("node.cmd"),
             "#!/bin/sh\necho RAN > \"$(dirname \"$0\")/spawned.txt\"\necho fake 1.2.3\n",
         )
         .unwrap();
-        use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(dir.join("node.cmd"), std::fs::Permissions::from_mode(0o755))
             .unwrap();
     }
