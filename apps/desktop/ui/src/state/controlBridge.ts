@@ -16,7 +16,10 @@ import type {
  *   highlight, refuses while the human drives) and post the decision;
  * - run lifecycle: a run starts -> `bot_driving`; the last run ends -> idle;
  * - every control state change (and a 5 s heartbeat) is reported with
- *   `PUT /v1/control/state`, which also registers the app as controller;
+ *   `PUT /v1/control/state`, which also registers the app as controller.
+ *   The daemon latches `paused` / `human_driving`; only the user's explicit
+ *   resume (native state leaves one of them) sends `release: true`.  Heartbeats
+ *   and app (re)opens never do, so a restarted UI cannot un-pause the bot;
  * - Stop (widget button, hotkey): the state machine goes idle while runs are
  *   live -> `POST /v1/runs/{id}/cancel` for each.
  */
@@ -38,7 +41,7 @@ export interface BotMeta {
 
 export interface BridgeDeps {
   client: {
-    putControlState(mode: ControlModeName): Promise<unknown>;
+    putControlState(mode: ControlModeName, release?: boolean): Promise<unknown>;
     decideControl(
       requestId: string,
       decision: ControlVerdict,
@@ -120,9 +123,9 @@ export class ControlBridge {
   }
 
   /** Send the current mode (call every `HEARTBEAT_MS` and on connect). */
-  async heartbeat(): Promise<void> {
+  async heartbeat(release = false): Promise<void> {
     try {
-      await this.deps.client.putControlState(this.mode);
+      await this.deps.client.putControlState(this.mode, release || undefined);
     } catch {
       // daemon unreachable: the next beat retries
     }
@@ -131,7 +134,11 @@ export class ControlBridge {
   private async nativeState(mode: ControlModeName): Promise<void> {
     const previous = this.mode;
     this.mode = mode;
-    await this.heartbeat();
+    // Explicit user resume: the human gave control back / ended the pause.
+    const resumed =
+      (previous === "human_driving" || previous === "paused") &&
+      (mode === "idle" || mode === "bot_driving");
+    await this.heartbeat(resumed);
     if (mode === "idle" && previous !== "idle") {
       // Stop (widget button, hotkey, menu): cancel what the bot is running.
       const runs = [...this.active];

@@ -119,11 +119,11 @@ impl StepExecutor for TurnExecutor {
         &self,
         run: &Run,
         step: &StepSpec,
-        _cancel: &CancellationToken,
+        cancel: &CancellationToken,
     ) -> Result<Value, ExecError> {
         match step.name.as_str() {
             STEP_USER => Ok(json!({ "text": step.input["text"] })),
-            STEP_MODEL => self.exec_model(run, step).await,
+            STEP_MODEL => self.exec_model(run, step, cancel).await,
             STEP_TOOLS => self.exec_tools(run, step).await,
             STEP_WORKFLOW => self.exec_workflow(run, step).await,
             STEP_COMMAND => self.exec_command(run, step),
@@ -176,6 +176,20 @@ impl TurnExecutor {
 
     fn plan_next(&self, run: &Run, history: &[RunStep]) -> Result<Option<StepSpec>, ExecError> {
         let ctx = self.sh.ctx(run)?;
+        // A session can have performed side effects before its model step was
+        // interrupted. Replaying the prompt would replay those effects.
+        if history.last().is_some_and(|s| {
+            s.name == STEP_MODEL
+                && status_of(s) == Some(StepStatus::Interrupted)
+                && (s.input["cli_session"] == true
+                    || s.input["model"]
+                        .as_str()
+                        .is_some_and(|m| m.starts_with("cli:")))
+        }) {
+            return Err(xe(
+                "CLI session was interrupted; its tool outcomes are unknown. Start a new turn.",
+            ));
+        }
         if history.is_empty() {
             if let Some(sub) = &ctx.sub {
                 return Ok(Some(user_step(&sub.first_message())));
@@ -234,10 +248,17 @@ impl TurnExecutor {
             let reason = format!("token budget exhausted: {tokens} >= {max_tokens}");
             return Ok(Some(Self::guard_step(&ctx, model_steps, &reason)));
         }
+        let cli_session = std::iter::once(&ctx.profile.models.executor)
+            .chain(&ctx.profile.models.fallback)
+            .any(|m| m.starts_with("cli:"));
+        let mut input = json!({ "model": ctx.profile.models.executor, "n": model_steps });
+        if cli_session {
+            input["cli_session"] = json!(true);
+        }
         Ok(Some(StepSpec {
             name: STEP_MODEL.to_owned(),
-            input: json!({ "model": ctx.profile.models.executor, "n": model_steps }),
-            idempotent: true,
+            input,
+            idempotent: !cli_session,
             // Retries (and fallbacks) happen inside `exec_model`, which knows
             // which provider errors are worth retrying.
             retry: None,
@@ -255,7 +276,7 @@ impl TurnExecutor {
                 "final": true,
                 "guard": reason,
             }),
-            idempotent: true,
+            idempotent: !ctx.profile.models.executor.starts_with("cli:"),
             retry: None,
         }
     }
@@ -366,7 +387,13 @@ impl TurnExecutor {
 
     // ---- model step ----
 
-    async fn exec_model(&self, run: &Run, step: &StepSpec) -> Result<Value, ExecError> {
+    #[allow(clippy::too_many_lines)] // Shared request construction precedes the CLI/HTTP handoff.
+    async fn exec_model(
+        &self,
+        run: &Run,
+        step: &StepSpec,
+        cancel: &CancellationToken,
+    ) -> Result<Value, ExecError> {
         let ctx = self.sh.ctx(run)?;
         let steps = self.sh.storage.list_steps(run.id).map_err(xe)?;
         let guard_reason = step.input["final"]
@@ -397,6 +424,12 @@ impl TurnExecutor {
         req.tools = tool_defs(&specs);
         req.max_tokens = self.sh.cfg.max_tokens;
         req.temperature = self.sh.cfg.temperature;
+
+        if primary.starts_with("cli:") {
+            let out = self.exec_cli(run, &req, &specs, cancel).await?;
+            self.audit_usage(&ctx, &out);
+            return serde_json::to_value(out).map_err(xe);
+        }
 
         let models: Vec<&String> = std::iter::once(&primary)
             .chain(ctx.profile.models.fallback.iter())
@@ -482,18 +515,17 @@ impl TurnExecutor {
                 .sh
                 .price_for(&out.model)
                 .map(|p| p.cost(u.prompt_tokens, u.completion_tokens, u.cached_tokens));
-            self.sh.audit(
-                ctx,
-                "bot",
-                "usage",
-                &json!({
-                    "model": out.model,
-                    "prompt_tokens": u.prompt_tokens,
-                    "completion_tokens": u.completion_tokens,
-                    "cached_tokens": u.cached_tokens,
-                    "cost_usd": cost,
-                }),
-            );
+            let mut detail = json!({
+                "model": out.model,
+                "prompt_tokens": u.prompt_tokens,
+                "completion_tokens": u.completion_tokens,
+                "cached_tokens": u.cached_tokens,
+                "cost_usd": cost,
+            });
+            if out.model.starts_with("cli:") {
+                detail["cost_source"] = json!("subscription_estimate");
+            }
+            self.sh.audit(ctx, "bot", "usage", &detail);
         }
     }
 
@@ -598,6 +630,13 @@ impl TurnExecutor {
         req: ChatRequest,
         specs: &[ToolSpec],
     ) -> Result<ModelOut, ProviderError> {
+        // A CLI selected by the HTTP fallback chain is also a whole session.
+        if req.model.0.starts_with("cli:") {
+            return self
+                .exec_cli(run, &req, specs, &CancellationToken::new())
+                .await
+                .map_err(|e| ProviderError::InvalidRequest(e.0));
+        }
         let model = req.model.clone();
         let provider = self.sh.providers.read().pick(&model)?;
         let mut stream = provider.stream(req).await?;
@@ -636,8 +675,17 @@ impl TurnExecutor {
 
     // ---- tool step ----
 
+    pub(crate) async fn exec_tools(&self, run: &Run, step: &StepSpec) -> Result<Value, ExecError> {
+        self.exec_tools_approved(run, step, None).await
+    }
+
     #[allow(clippy::too_many_lines)]
-    async fn exec_tools(&self, run: &Run, step: &StepSpec) -> Result<Value, ExecError> {
+    pub(crate) async fn exec_tools_approved(
+        &self,
+        run: &Run,
+        step: &StepSpec,
+        approved: Option<(&str, &Value)>,
+    ) -> Result<Value, ExecError> {
         let ctx = self.sh.ctx(run)?;
         let calls: Vec<CallRec> =
             serde_json::from_value(step.input["calls"].clone()).map_err(xe)?;
@@ -685,7 +733,7 @@ impl TurnExecutor {
                 .spec
                 .as_ref()
                 .is_some_and(|s| s.category == PermissionCategory::Meta);
-            let decision = match &resolved.spec {
+            let mut decision = match &resolved.spec {
                 Some(spec) => self.sh.decide(
                     &ctx,
                     &resolved.name,
@@ -696,6 +744,13 @@ impl TurnExecutor {
                 // Malformed `use_tool`: executes nothing, only reports the error.
                 None => Decision::Allow,
             };
+            // A CLI approval card covers exactly one matching MCP invocation.
+            // The normal resolver still runs above: a new Deny always wins.
+            if decision == Decision::Ask
+                && approved == Some((resolved.name.as_str(), &resolved.input))
+            {
+                decision = Decision::Allow;
+            }
             let is_spawn = resolved.name == crate::subagent::SPAWN_SUBAGENT;
             let spawn_input = resolved.input.clone();
             let tool = resolved.tool;

@@ -13,7 +13,9 @@ workspace = true
 [dependencies]
 async-trait.workspace = true
 builtin-tools = { path = "../builtin-tools", version = "0.1.0" }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 desktop-api = { path = "../desktop-api", version = "0.1.0" }
+fs4 = "1"
 parking_lot.workspace = true
 protocol.workspace = true
 serde.workspace = true
