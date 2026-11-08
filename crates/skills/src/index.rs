@@ -9,7 +9,8 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 
 use crate::bundled::BUNDLED;
-use crate::skill::{Skill, SkillContext, Source, parse_skill, validate_name};
+use crate::scoped_store::{self, ScopeLock};
+use crate::skill::{Skill, SkillContext, Source, parse_skill};
 
 /// Byte budget of [`SkillIndex::prompt_block`].
 pub const PROMPT_BUDGET_BYTES: usize = 1536;
@@ -52,6 +53,72 @@ impl SkillPaths {
     }
 }
 
+/// The three skill scopes. `None` for `bundled` uses the embedded skills only;
+/// an optional on-disk bundled root is also read-only.
+#[derive(Debug, Clone, Default)]
+pub struct SkillRoots {
+    /// Additional shipped skills, never a write destination.
+    pub bundled: Option<PathBuf>,
+    /// Shared user skills (`<data_dir>/skills/`), including hub installs.
+    pub shared: Option<PathBuf>,
+    /// Parent of per-bot directories (`<data_dir>/bots/`).
+    pub bots_dir: Option<PathBuf>,
+}
+
+impl SkillRoots {
+    /// The standard layout. Existing shared skills are left in place.
+    #[must_use]
+    pub fn from_data_dir(data_dir: &Path) -> Self {
+        Self {
+            bundled: None,
+            shared: Some(data_dir.join("skills")),
+            bots_dir: Some(data_dir.join("bots")),
+        }
+    }
+
+    /// Resolve one caller without granting a bot-less caller a write root.
+    ///
+    /// # Errors
+    /// An invalid bot id or a symlink/reparse point in its scope path.
+    pub fn resolve(&self, bot_id: Option<&str>) -> Result<SkillPaths, String> {
+        let bot = match bot_id {
+            Some(id) => {
+                validate_bot_id(id)?;
+                self.bots_dir
+                    .as_ref()
+                    .map(|root| -> Result<PathBuf, String> {
+                        scoped_store::check_bot_path(root, id)?;
+                        Ok(root.join(id).join("skills"))
+                    })
+                    .transpose()?
+            }
+            None => None,
+        };
+        Ok(SkillPaths {
+            user: self.shared.clone(),
+            bot,
+        })
+    }
+}
+
+/// A bot id is a single safe segment, using the workflow-name grammar.
+/// Windows device names are rejected on every platform as well.
+///
+/// # Errors
+/// Empty/overlong ids, anything outside `[a-z0-9_-]`, or a device name.
+pub fn validate_bot_id(id: &str) -> Result<(), String> {
+    if id.is_empty()
+        || id.len() > 64
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '-'))
+        || scoped_store::is_device_name(id)
+    {
+        return Err("bot_id must be a safe path segment: 1-64 a-z, 0-9, '_' or '-' characters (no Windows device names)".into());
+    }
+    Ok(())
+}
+
 #[derive(Default)]
 struct State {
     skills: BTreeMap<String, Skill>,
@@ -60,11 +127,13 @@ struct State {
 
 struct Shared {
     paths: SkillPaths,
+    roots: SkillRoots,
     state: RwLock<State>,
 }
 
-/// The set of loaded skills. Cheap to clone; clones share state, so a
-/// `skill_write` is visible to every holder.
+/// The set of loaded skills. Cheap to clone; clones share state, so
+/// writes through this bound index are visible to its clones. Tool calls resolve
+/// a fresh view for the calling bot; the root index exposes shared/bundled only.
 #[derive(Clone)]
 pub struct SkillIndex {
     inner: Arc<Shared>,
@@ -79,22 +148,64 @@ impl std::fmt::Debug for SkillIndex {
 }
 
 fn load_dir(dir: &Path, source: Source, out: &mut Vec<Skill>, issues: &mut Vec<SkillIssue>) {
+    if !dir.exists() {
+        return;
+    }
+    let guard = if source == Source::Bundled {
+        None
+    } else {
+        match ScopeLock::acquire(dir) {
+            Ok(guard) => Some(guard),
+            Err(message) => {
+                issues.push(SkillIssue {
+                    source,
+                    path: dir.display().to_string(),
+                    message,
+                });
+                return;
+            }
+        }
+    };
+    load_dir_locked(dir, source, out, issues);
+    drop(guard);
+}
+
+/// The caller holds the scope lock (or this is the read-only bundled layer).
+pub(crate) fn load_dir_locked(
+    dir: &Path,
+    source: Source,
+    out: &mut Vec<Skill>,
+    issues: &mut Vec<SkillIssue>,
+) {
     let Ok(entries) = fs::read_dir(dir) else {
         return; // a missing directory is normal
     };
     let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
     entries.sort_by_key(fs::DirEntry::file_name);
+    let mut published = Vec::new();
     for e in entries {
-        let path = e.path();
-        if !path.is_dir() {
-            continue;
+        if e.file_name().to_string_lossy().starts_with('.') {
+            continue; // transaction staging and lock files are not skills
         }
+        let path = e.path();
         let issue = |message: String| SkillIssue {
             source,
             path: path.display().to_string(),
             message,
         };
-        let text = match fs::read_to_string(path.join(SKILL_FILE)) {
+        if let Err(message) = scoped_store::check_plain_path(&path) {
+            issues.push(issue(message));
+            continue;
+        }
+        if !path.is_dir() {
+            continue;
+        }
+        let file = path.join(SKILL_FILE);
+        if let Err(message) = scoped_store::check_plain_path(&file) {
+            issues.push(issue(message));
+            continue;
+        }
+        let text = match fs::read_to_string(&file) {
             Ok(t) => t,
             Err(err) => {
                 issues.push(issue(format!("cannot read {SKILL_FILE}: {err}")));
@@ -102,24 +213,98 @@ fn load_dir(dir: &Path, source: Source, out: &mut Vec<Skill>, issues: &mut Vec<S
             }
         };
         match parse_skill(&text, source, Some(path.clone())) {
+            Ok(s)
+                if source == Source::User
+                    && e.file_name().to_string_lossy() == format!("{}@{}", s.name, s.version) =>
+            {
+                published.push(s);
+            }
             Ok(s) => out.push(s),
             Err(m) => issues.push(issue(m)),
         }
     }
+    // An actual published version overrides legacy/hub directories by name.
+    // Merely containing '@' does not make an arbitrary legacy folder published.
+    out.extend(published);
 }
 
 impl SkillIndex {
-    /// Load bundled, user and bot skills. Later sources override earlier ones by name.
+    /// Load a fixed view. Existing embedders remain source compatible.
+    /// Tool calls infer roots only from the standard `<data>/skills` or
+    /// `<data>/bots/<id>/skills` layout. An arbitrary fixed directory never
+    /// grants another bot access.
     #[must_use]
     pub fn load(paths: SkillPaths) -> Self {
+        let bots_dir = match &paths.bot {
+            Some(path) => path.parent().and_then(|bot| {
+                let id = bot.file_name()?.to_str()?;
+                let bots_dir = bot.parent()?;
+                (path.file_name()? == "skills"
+                    && bots_dir.file_name()? == "bots"
+                    && validate_bot_id(id).is_ok())
+                .then(|| bots_dir.to_path_buf())
+            }),
+            None => paths.user.as_ref().and_then(|shared| {
+                (shared.file_name()? == "skills")
+                    .then(|| shared.parent().map(|data_dir| data_dir.join("bots")))
+                    .flatten()
+            }),
+        };
+        let roots = SkillRoots {
+            bundled: None,
+            shared: paths.user.clone(),
+            bots_dir,
+        };
+        Self::load_resolved(paths, roots)
+    }
+
+    /// Load a registry's shared/bundled view. Every tool call resolves a
+    /// separate view with [`Self::for_bot`]. No bot directory is global.
+    #[must_use]
+    pub fn load_roots(roots: SkillRoots) -> Self {
+        let paths = SkillPaths {
+            user: roots.shared.clone(),
+            bot: None,
+        };
+        Self::load_resolved(paths, roots)
+    }
+
+    fn load_resolved(paths: SkillPaths, roots: SkillRoots) -> Self {
         let index = Self {
             inner: Arc::new(Shared {
                 paths,
+                roots,
                 state: RwLock::default(),
             }),
         };
         index.reload();
         index
+    }
+
+    /// Re-read the scopes visible to one caller. A missing id means only
+    /// shared and bundled skills, never another bot's bound view.
+    ///
+    /// # Errors
+    /// An invalid bot id or an unsafe bot scope path.
+    pub fn for_bot(&self, bot_id: Option<&str>) -> Result<Self, String> {
+        let paths = self.inner.roots.resolve(bot_id)?;
+        Ok(Self::load_resolved(paths, self.inner.roots.clone()))
+    }
+
+    /// Build a per-bot prompt through the same resolver used by the tools.
+    /// Embedders must pass the run's bot id; there is no ambient current bot.
+    ///
+    /// # Errors
+    /// An invalid bot id or unsafe scope path.
+    pub fn prompt_block_for_bot(
+        &self,
+        bot_id: Option<&str>,
+        ctx: &SkillContext,
+        suggested: &[String],
+    ) -> Result<String, String> {
+        Ok(self
+            .for_bot(bot_id)?
+            .prompt_block_suggesting(ctx, suggested))
     }
 
     /// Re-read all sources from disk.
@@ -136,6 +321,9 @@ impl SkillIndex {
                 }),
             }
         }
+        if let Some(d) = &self.inner.roots.bundled {
+            load_dir(d, Source::Bundled, &mut all, &mut issues);
+        }
         if let Some(d) = &self.inner.paths.user {
             load_dir(d, Source::User, &mut all, &mut issues);
         }
@@ -147,6 +335,22 @@ impl SkillIndex {
             skills.insert(s.name.clone(), s); // later source wins
         }
         *self.inner.state.write() = State { skills, issues };
+    }
+
+    fn check_bound_scope(&self) -> Result<(), String> {
+        if let (Some(bot), Some(root)) = (&self.inner.paths.bot, &self.inner.roots.bots_dir) {
+            let id = bot
+                .parent()
+                .and_then(Path::file_name)
+                .and_then(|name| name.to_str())
+                .ok_or("invalid bound bot skills path")?;
+            validate_bot_id(id)?;
+            if bot != &root.join(id).join("skills") {
+                return Err("bound bot skills path does not match its root".into());
+            }
+            scoped_store::check_bot_path(root, id)?;
+        }
+        Ok(())
     }
 
     /// All skills, sorted by name.
@@ -223,6 +427,7 @@ impl SkillIndex {
     /// # Errors
     /// Unknown skill, invalid or escaping path, missing/oversized/non-text file.
     pub fn read(&self, name: &str, file: Option<&str>) -> Result<String, String> {
+        self.check_bound_scope()?;
         let skill = self
             .get(name)
             .ok_or_else(|| format!("unknown skill `{name}` (use skill_list)"))?;
@@ -257,6 +462,9 @@ impl SkillIndex {
     /// Extra files (relative, `/`-separated) of a skill, excluding `SKILL.md`.
     #[must_use]
     pub fn extra_files(&self, name: &str) -> Vec<String> {
+        if self.check_bound_scope().is_err() {
+            return Vec::new();
+        }
         let Some(dir) = self.get(name).and_then(|s| s.dir) else {
             return Vec::new();
         };
@@ -267,28 +475,58 @@ impl SkillIndex {
         out
     }
 
-    /// Validate `content` and save it as `<bot skills dir>/<name>/SKILL.md`, then reload.
+    /// Save against the per-bot version observed by this index, then reload.
+    /// Prefer [`Self::write_versioned`] for tool/API calls, where the caller
+    /// explicitly supplies the version it read.
     ///
     /// # Errors
-    /// No bot directory, invalid name/content, name mismatch, or I/O failure.
+    /// No bot root, invalid content, a version conflict, or an I/O error.
     pub fn write(&self, name: &str, content: &str) -> Result<PathBuf, String> {
-        validate_name(name)?;
-        let dir = self
+        let expected = self.get(name).filter(|s| s.source == Source::Bot);
+        self.write_versioned(name, content, expected.as_ref().map(|s| s.version.as_str()))
+            .map(|written| written.path)
+    }
+
+    /// Compare the current per-bot version and atomically save a new version.
+    /// `None` is create-only, even when a shared/bundled skill has that name.
+    ///
+    /// # Errors
+    /// Missing bot root, malformed input, version conflict, or an I/O error.
+    pub fn write_versioned(
+        &self,
+        name: &str,
+        content: &str,
+        expected_version: Option<&str>,
+    ) -> Result<scoped_store::WrittenSkill, String> {
+        self.check_bound_scope()?;
+        let root = self
             .write_dir()
-            .ok_or("no per-bot skills directory is configured")?
-            .join(name);
-        let skill = parse_skill(content, Source::Bot, Some(dir.clone()))?;
-        if skill.name != name {
-            return Err(format!(
-                "frontmatter name `{}` does not match requested name `{name}`",
-                skill.name
-            ));
-        }
-        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let file = dir.join(SKILL_FILE);
-        fs::write(&file, content).map_err(|e| e.to_string())?;
+            .ok_or("skill_write requires a bot_id and a configured per-bot skills directory")?;
+        let written = scoped_store::write(root, name, content, expected_version)?;
         self.reload();
-        Ok(file)
+        Ok(written)
+    }
+
+    /// Publish this bot's skill as `<shared>/<name>@<version>/`, preserving
+    /// existing legacy/hub directories and their provenance. A different
+    /// effective shared skill requires explicit `replace` authorization.
+    ///
+    /// # Errors
+    /// Missing scopes/skill, unsafe paths, a replacement conflict, or I/O error.
+    pub fn publish(&self, name: &str, replace: bool) -> Result<PathBuf, String> {
+        self.check_bound_scope()?;
+        let bot = self
+            .write_dir()
+            .ok_or("skill_publish requires a bot_id and a configured per-bot skills directory")?;
+        let shared = self
+            .inner
+            .paths
+            .user
+            .as_deref()
+            .ok_or("no shared skills directory is configured")?;
+        let path = scoped_store::publish(bot, shared, name, replace)?;
+        self.reload();
+        Ok(path)
     }
 }
 
@@ -301,6 +539,11 @@ fn collect_files(root: &Path, dir: &Path, depth: usize, out: &mut Vec<String>) {
     };
     for e in entries.filter_map(Result::ok) {
         let p = e.path();
+        if e.file_name().to_string_lossy().starts_with(".praxi-")
+            || scoped_store::check_plain_path(&p).is_err()
+        {
+            continue;
+        }
         if p.is_dir() {
             collect_files(root, &p, depth + 1, out);
         } else if let Ok(rel) = p.strip_prefix(root) {
