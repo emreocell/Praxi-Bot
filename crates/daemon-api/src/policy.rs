@@ -59,12 +59,50 @@ pub fn validate_policy(text: &str) -> Result<Policy, PolicyLoadError> {
     serde_json::from_str(text).map_err(|e| PolicyLoadError::Parse(e.to_string()))
 }
 
-/// Keep a copy of an unusable `policy.json` as `policy.json.corrupt` (the
-/// original stays, so the next start is locked again instead of falling back
-/// to the default).  Best effort.
+/// Keep a copy of an unusable `policy.json` as `policy.json.corrupt-<ms>`
+/// (never overwriting an earlier copy; skipped when an identical copy already
+/// exists).  The original stays, so the next start is locked again instead of
+/// falling back to the default.  Best effort, failures are reported.
 pub(crate) fn preserve_corrupt(data_dir: &Path) {
-    let _ = std::fs::copy(
-        data_dir.join(POLICY_FILE),
-        data_dir.join(format!("{POLICY_FILE}.corrupt")),
-    );
+    let prefix = format!("{POLICY_FILE}.corrupt-");
+    let Ok(bytes) = std::fs::read(data_dir.join(POLICY_FILE)) else {
+        return;
+    };
+    if let Ok(rd) = std::fs::read_dir(data_dir) {
+        for e in rd.flatten() {
+            if e.file_name().to_string_lossy().starts_with(&prefix)
+                && std::fs::read(e.path()).is_ok_and(|b| b == bytes)
+            {
+                return;
+            }
+        }
+    }
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    for n in 0..100u32 {
+        let name = if n == 0 {
+            format!("{prefix}{ms}")
+        } else {
+            format!("{prefix}{ms}-{n}")
+        };
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(data_dir.join(&name))
+        {
+            Ok(mut f) => {
+                use std::io::Write;
+                if let Err(e) = f.write_all(&bytes) {
+                    eprintln!("daemon-api: WARNING: could not keep a copy of {POLICY_FILE}: {e}");
+                }
+                return;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => {
+                eprintln!("daemon-api: WARNING: could not keep a copy of {POLICY_FILE}: {e}");
+                return;
+            }
+        }
+    }
 }

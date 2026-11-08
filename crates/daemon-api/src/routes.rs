@@ -750,7 +750,9 @@ pub(crate) async fn get_control_state(State(s): State<AppState>) -> Json<Control
 /// Register the desktop app as controller and report its mode (heartbeat: send
 /// it on every state change and at least every 5 s; it expires after 15 s).
 /// While the mode is `human_driving` or `paused`, desktop actions of bots are
-/// refused immediately.
+/// refused immediately.  A latched pause is never released by a heartbeat
+/// (`idle` included): send `release: true` with `idle` / `bot_driving` (the
+/// user's resume), or use `POST /v1/control/release`.
 #[utoipa::path(put, path = "/v1/control/state", tag = "control", security(("bearer" = [])),
     request_body = ControlStateInput,
     responses((status = 200, body = ControlStateDto), (status = 400, body = ErrorBody)))]
@@ -758,7 +760,7 @@ pub(crate) async fn put_control_state(
     State(s): State<AppState>,
     ApiJson(input): ApiJson<ControlStateInput>,
 ) -> Json<ControlStateDto> {
-    s.hub().put_state(input.mode);
+    s.hub().apply_state(input.mode, input.release);
     Json(control_state_dto(&s))
 }
 
@@ -895,6 +897,7 @@ pub(crate) async fn put_policy(
     s.agent().set_global_policy(policy.clone());
     // The user replaced the policy: the locked deny-all mode ends here.
     s.set_policy_load_error(None);
+    s.agent().set_policy_locked(false);
     Ok(Json(policy_dto(&policy)))
 }
 

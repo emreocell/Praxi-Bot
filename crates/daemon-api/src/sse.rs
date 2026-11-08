@@ -356,6 +356,14 @@ struct LogCache {
 }
 
 impl LogCache {
+    /// Drop the least recently used logs beyond [`LOG_CACHE_RUNS`].  Only
+    /// called between chunks: within one chunk every run it touches stays
+    /// cached, so a row never meets a log evicted a moment ago.
+    fn trim(&mut self) {
+        let extra = self.entries.len().saturating_sub(LOG_CACHE_RUNS);
+        self.entries.drain(..extra);
+    }
+
     fn clear(&mut self) {
         self.entries.clear();
     }
@@ -377,9 +385,6 @@ impl LogCache {
             Ok(l) => {
                 self.entries
                     .push((run, l.into_iter().map(|e| (e.seq, e)).collect()));
-                if self.entries.len() > LOG_CACHE_RUNS {
-                    self.entries.remove(0);
-                }
                 true
             }
             Err(_) => false,
@@ -446,6 +451,7 @@ fn load_global(
         }
         max_gseq = max_gseq.max(row.gseq);
     }
+    cache.trim();
     Some(Chunk {
         items,
         max_gseq,
@@ -744,5 +750,33 @@ mod tests {
         let c = load_global(&st, dir.path(), 0, false, &cache).unwrap();
         assert_eq!(c.items.len(), LOG_CACHE_RUNS + 4);
         assert_eq!(cache.lock().entries.len(), LOG_CACHE_RUNS);
+    }
+
+    #[test]
+    fn a_chunk_touching_more_runs_than_the_cache_holds_neither_stalls_nor_drops() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = Storage::open(dir.path()).unwrap();
+        let runs: Vec<RunId> = (0..12).map(|_| RunId::new()).collect();
+        let mut writers: Vec<_> = runs
+            .iter()
+            .map(|r| storage::EventLogWriter::open(dir.path(), *r).unwrap())
+            .collect();
+        let mut g = 0;
+        for seq in 0..2 {
+            for (i, r) in runs.iter().enumerate() {
+                writers[i].append(&msg(*r, seq)).unwrap();
+                g += 1;
+                st.index_event(g, *r, seq).unwrap();
+            }
+        }
+        for force in [false, true] {
+            let cache = parking_lot::Mutex::new(LogCache::default());
+            let c = load_global(&st, dir.path(), 0, force, &cache).unwrap();
+            assert!(!c.stalled, "force={force}");
+            assert_eq!(c.items.len(), 24, "force={force}");
+            assert_eq!(c.max_gseq, 24);
+            assert_eq!(cache.lock().reads, 12, "each log decoded once");
+            assert_eq!(cache.lock().entries.len(), LOG_CACHE_RUNS);
+        }
     }
 }

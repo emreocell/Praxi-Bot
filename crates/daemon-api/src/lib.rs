@@ -176,7 +176,10 @@ impl AppState {
             storage.insert_user(&u)?;
             u.id
         };
-        let hub = Arc::new(ControlHub::new(cfg.control));
+        let hub = Arc::new(ControlHub::with_latch_file(
+            cfg.control,
+            storage.data_dir().join("control-latch.json"),
+        ));
         agent.set_control_gate(hub.clone());
         let policy_load_error = match policy::load_policy(storage.data_dir()) {
             Ok(Some(p)) => {
@@ -189,6 +192,7 @@ impl AppState {
                 // because the saved one is unusable.
                 policy::preserve_corrupt(storage.data_dir());
                 agent.set_global_policy(permission_engine::Policy::read_only());
+                agent.set_policy_locked(true);
                 let msg = format!("{e}; all tool actions are denied until a policy is saved");
                 eprintln!("daemon-api: WARNING: {msg}");
                 Some(msg)

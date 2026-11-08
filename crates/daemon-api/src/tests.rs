@@ -1636,7 +1636,15 @@ async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
         Some(json!({"mode": "idle"})),
     )
     .await;
-    // SEC-07: an explicit PUT idle releases (pre-108 UI resume path).
+    // SEC-07: the idle heartbeat did not release; only the flagged PUT does.
+    assert!(t.state.hub().latched().is_some());
+    call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "idle", "release": true})),
+    )
+    .await;
     assert!(t.state.hub().latched().is_none());
     // Registered but silent: refused after the long timeout (600 ms here).
     let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
@@ -2344,7 +2352,28 @@ async fn corrupt_policy_file_locks_the_daemon_to_deny_all_missing_one_is_the_def
             .unwrap()
             .contains("policy.json")
     );
-    assert!(t._dir.path().join("policy.json.corrupt").exists());
+    let copies = |t: &T| {
+        std::fs::read_dir(t._dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("policy.json.corrupt-")
+            })
+            .count()
+    };
+    assert_eq!(copies(&t), 1);
+    // A different corrupt file later keeps the first copy next to its own.
+    std::fs::write(t._dir.path().join("policy.json"), "{ other junk").unwrap();
+    crate::policy::preserve_corrupt(t._dir.path());
+    crate::policy::preserve_corrupt(t._dir.path());
+    assert_eq!(
+        copies(&t),
+        2,
+        "first copy kept, identical content not duplicated"
+    );
+    std::fs::write(t._dir.path().join("policy.json"), "{ not json").unwrap();
     assert!(
         t._dir.path().join("policy.json").exists(),
         "original kept: next start stays locked"
@@ -2385,7 +2414,7 @@ fn load_policy_distinguishes_missing_from_broken() {
 }
 
 #[tokio::test]
-async fn explicit_put_bot_driving_releases_a_latched_pause() {
+async fn heartbeats_never_release_a_pause_only_the_release_flag_does() {
     let t = setup();
     call(
         &t,
@@ -2394,14 +2423,85 @@ async fn explicit_put_bot_driving_releases_a_latched_pause() {
         Some(json!({"mode": "human_driving"})),
     )
     .await;
-    assert!(t.state.hub().latched().is_some());
+    // A reopened UI heartbeats idle, a stale beat says bot_driving.
+    for mode in ["idle", "bot_driving", "idle"] {
+        let r = call(
+            &t,
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode": mode})),
+        )
+        .await;
+        assert_eq!(r.json()["latched"], "human_driving", "{mode}");
+    }
     let r = call(
         &t,
         Method::PUT,
         "/v1/control/state",
-        Some(json!({"mode": "bot_driving"})),
+        Some(json!({"mode": "bot_driving", "release": true})),
     )
     .await;
     assert!(r.json()["latched"].is_null());
-    assert!(t.state.hub().latched().is_none());
+}
+
+#[tokio::test]
+async fn latched_pause_survives_a_daemon_restart() {
+    let t = setup();
+    call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "paused"})),
+    )
+    .await;
+    // New daemon over the same data directory.
+    let storage = Arc::new(Storage::open(t._dir.path()).unwrap());
+    let agent = AgentLoop::new(
+        Arc::clone(&storage),
+        ToolRegistry::new(),
+        Providers::single(Arc::new(FakeProvider)),
+        LoopConfig::default(),
+    );
+    let state = AppState::new(agent, storage, DaemonConfig::new(TOKEN)).unwrap();
+    assert_eq!(state.hub().latched(), Some(crate::dto::ControlMode::Paused));
+}
+
+#[tokio::test]
+async fn peer_control_state_changes_are_audited_with_the_device_as_actor() {
+    let t = setup();
+    for (method, path, body) in [
+        (
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode": "paused"})),
+        ),
+        (Method::POST, "/v1/control/release", None),
+    ] {
+        let mut b = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("content-type", "application/json");
+        b = b.header("host", "127.0.0.1");
+        let mut req = b
+            .body(Body::from(body.map(|v| v.to_string()).unwrap_or_default()))
+            .unwrap();
+        req.extensions_mut().insert(crate::PeerIdentity {
+            key: "paired-key".into(),
+            role: crate::PeerRole::Phone,
+        });
+        req.extensions_mut()
+            .insert(crate::peer::PeerName("Alice".into()));
+        let resp = crate::peer_router(t.state.clone())
+            .oneshot(req)
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{path}");
+    }
+    let user = t.state.storage().list_users().unwrap().remove(0);
+    let audit = t.state.storage().list_audit(user.id).unwrap();
+    let n = audit
+        .iter()
+        .filter(|e| format!("{e:?}").contains("phone:Alice"))
+        .count();
+    assert_eq!(n, 4, "requested+completed for both calls: {audit:?}");
 }

@@ -375,6 +375,10 @@ pub enum ControlMode {
 pub struct ControlStateInput {
     /// The app's current mode.
     pub mode: ControlMode,
+    /// With `idle` / `bot_driving`: the user's explicit resume, clears a
+    /// latched pause.  Plain heartbeats (without it) never release.
+    #[serde(default)]
+    pub release: bool,
 }
 
 /// The daemon's view of the controller registration.

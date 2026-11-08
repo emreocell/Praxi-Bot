@@ -805,7 +805,7 @@
         "tags": [
           "control"
         ],
-        "summary": "Register the desktop app as controller and report its mode (heartbeat: send\nit on every state change and at least every 5 s; it expires after 15 s).\nWhile the mode is `human_driving` or `paused`, desktop actions of bots are\nrefused immediately.",
+        "summary": "Register the desktop app as controller and report its mode (heartbeat: send\nit on every state change and at least every 5 s; it expires after 15 s).\nWhile the mode is `human_driving` or `paused`, desktop actions of bots are\nrefused immediately.  A latched pause is never released by a heartbeat\n(`idle` included): send `release: true` with `idle` / `bot_driving` (the\nuser's resume), or use `POST /v1/control/release`.",
         "operationId": "put_control_state",
         "requestBody": {
           "content": {
@@ -2936,6 +2936,10 @@
           "mode": {
             "$ref": "#/components/schemas/ControlMode",
             "description": "The app's current mode."
+          },
+          "release": {
+            "type": "boolean",
+            "description": "With `idle` / `bot_driving`: the user's explicit resume, clears a\nlatched pause.  Plain heartbeats (without it) never release."
           }
         }
       },

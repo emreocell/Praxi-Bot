@@ -20,9 +20,11 @@
 //! refuse every action until an explicit [`ControlHub::release`]
 //! (`POST /v1/control/release`).  The heartbeat TTL only decides whether a
 //! controller counts as live; losing the app (crash, restart, closed stream)
-//! never silently resumes the bot.  An explicit `PUT` of `idle` /
-//! `bot_driving` (the pre-108 UI's way to resume) does release it, and
-//! `paused` / `human_driving` heartbeats keep it latched.
+//! never silently resumes the bot.  No heartbeat releases it, `idle` /
+//! `bot_driving` included (a restarted UI reports `idle`): only
+//! `POST /v1/control/release` or a `PUT /v1/control/state` that carries
+//! `release: true` does.  The latch is persisted in the data directory
+//! ([`ControlHub::with_latch_file`]), so it survives a daemon restart.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -78,6 +80,8 @@ pub struct ControlHub {
     state: Mutex<State>,
     /// Open global event streams (the desktop app's).
     subscribers: AtomicUsize,
+    /// Where the latch is persisted (`None`: in memory only).
+    latch_file: Option<std::path::PathBuf>,
 }
 
 /// Counts an open global event stream while it lives.
@@ -123,18 +127,80 @@ impl ControlHub {
             cfg,
             state: Mutex::new(State::default()),
             subscribers: AtomicUsize::new(0),
+            latch_file: None,
+        }
+    }
+
+    /// A hub whose latch is persisted in `path` (atomic write) and restored
+    /// from it.  An unreadable file latches `Paused` (fail closed).
+    #[must_use]
+    pub fn with_latch_file(cfg: ControlConfig, path: std::path::PathBuf) -> Self {
+        let mut hub = Self::new(cfg);
+        let latched = match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                let mode = serde_json::from_str::<ControlMode>(text.trim())
+                    .ok()
+                    .filter(|m| refused_while(*m).is_some());
+                if mode.is_none() {
+                    eprintln!("daemon-api: WARNING: control latch file unreadable; staying paused");
+                }
+                Some(mode.unwrap_or(ControlMode::Paused))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => {
+                eprintln!(
+                    "daemon-api: WARNING: control latch file unreadable ({e}); staying paused"
+                );
+                Some(ControlMode::Paused)
+            }
+        };
+        hub.state.get_mut().latched = latched;
+        hub.latch_file = Some(path);
+        hub
+    }
+
+    /// Write (or remove) the latch file; best effort, reported on stderr.
+    fn persist(&self, latched: Option<ControlMode>) {
+        let Some(path) = &self.latch_file else { return };
+        let result = match latched {
+            Some(m) => serde_json::to_vec(&m)
+                .map_err(std::io::Error::other)
+                .and_then(|bytes| {
+                    let tmp = path.with_extension("tmp");
+                    std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path))
+                }),
+            None => match std::fs::remove_file(path) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            },
+        };
+        if let Err(e) = result {
+            eprintln!("daemon-api: WARNING: could not persist the control latch: {e}");
         }
     }
 
     /// Register the app as controller / refresh the heartbeat.
     ///
-    /// `Paused` / `HumanDriving` latch (see the module docs); an explicit
-    /// `Idle` / `BotDriving` clears the latch (as does [`ControlHub::release`]);
-    /// TTL expiry never does.
+    /// `Paused` / `HumanDriving` latch (see the module docs); no mode, and no
+    /// TTL expiry, ever clears a latch here.
     pub fn put_state(&self, mode: ControlMode) {
+        self.apply_state(mode, false);
+    }
+
+    /// [`ControlHub::put_state`]; with `release` an `Idle` / `BotDriving` mode
+    /// also clears the latch (the user's explicit resume).
+    pub fn apply_state(&self, mode: ControlMode, release: bool) {
         let mut st = self.state.lock();
         st.registration = Some((mode, Instant::now()));
-        st.latched = refused_while(mode).map(|_| mode);
+        let before = st.latched;
+        if refused_while(mode).is_some() {
+            st.latched = Some(mode);
+        } else if release {
+            st.latched = None;
+        }
+        if st.latched != before {
+            self.persist(st.latched);
+        }
     }
 
     /// The latched `Paused` / `HumanDriving` mode, if any (never expires).
@@ -149,6 +215,9 @@ impl ControlHub {
     pub fn release(&self) -> Option<ControlMode> {
         let mut st = self.state.lock();
         let was = st.latched.take();
+        if was.is_some() {
+            self.persist(None);
+        }
         if let Some((m, at)) = st.registration
             && refused_while(m).is_some()
         {
@@ -479,15 +548,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn explicit_put_bot_driving_releases_but_a_heartbeat_timeout_does_not() {
+    async fn only_an_explicit_release_clears_the_latch_no_heartbeat_does() {
         let hub = Arc::new(ControlHub::new(fast()));
         hub.put_state(ControlMode::Paused);
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert!(gate(&hub, None).await.0.is_err(), "timeout keeps the latch");
+        // A reopened UI heartbeats idle / bot_driving: the pause stays.
+        hub.put_state(ControlMode::Idle);
         hub.put_state(ControlMode::BotDriving);
+        hub.apply_state(ControlMode::Idle, false);
+        assert_eq!(hub.latched(), Some(ControlMode::Paused));
+        // The flag releases, but only with a non-refusing mode.
+        hub.apply_state(ControlMode::Paused, true);
+        assert_eq!(hub.latched(), Some(ControlMode::Paused));
+        hub.apply_state(ControlMode::Idle, true);
+        assert_eq!(hub.latched(), None);
+    }
+
+    #[test]
+    fn the_latch_survives_a_restart_and_a_broken_file_fails_closed() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("control-latch.json");
+        let hub = ControlHub::with_latch_file(fast(), f.clone());
         assert_eq!(hub.latched(), None);
         hub.put_state(ControlMode::HumanDriving);
-        hub.put_state(ControlMode::Idle);
-        assert_eq!(hub.latched(), None, "explicit idle releases too");
+        let again = ControlHub::with_latch_file(fast(), f.clone());
+        assert_eq!(again.latched(), Some(ControlMode::HumanDriving));
+        assert_eq!(again.release(), Some(ControlMode::HumanDriving));
+        assert!(!f.exists());
+        assert_eq!(
+            ControlHub::with_latch_file(fast(), f.clone()).latched(),
+            None
+        );
+        std::fs::write(&f, "garbage").unwrap();
+        assert_eq!(
+            ControlHub::with_latch_file(fast(), f).latched(),
+            Some(ControlMode::Paused)
+        );
     }
 }
