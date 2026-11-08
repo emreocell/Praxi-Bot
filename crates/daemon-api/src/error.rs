@@ -142,6 +142,9 @@ impl From<LoopError> for ApiError {
             LoopError::NotFound(w) => Self::not_found(w),
             LoopError::Profile(m) => Self::new(StatusCode::UNPROCESSABLE_ENTITY, "bad_profile", m),
             LoopError::Busy(c) => Self::conflict(format!("chat {c} already has an active turn")),
+            LoopError::StillFinishing(run) => {
+                Self::conflict(format!("run {run} is still finishing; retry resume"))
+            }
             LoopError::Router(m) => Self::conflict(m),
             LoopError::ShuttingDown => Self::unavailable("the daemon is shutting down"),
             LoopError::NoPendingApproval(c) => {

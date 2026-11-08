@@ -15,7 +15,7 @@ use protocol::{InitiatorKind, PermissionCategory};
 
 use crate::{
     never_list::NeverList,
-    policy::{Level, Policy, Rule},
+    policy::{Level, Limits, Policy, Rule},
 };
 
 /// A request to perform a potentially restricted action.
@@ -37,19 +37,63 @@ pub enum Decision {
     /// The action is allowed without further approval.
     Allow,
     /// The action requires real-time human approval before proceeding.
-    Ask,
+    ///
+    /// `unsupported_limits` is set when this ask exists because
+    /// [`Level::AllowWithLimits`] cannot be evaluated yet: [`ActionRequest`]
+    /// carries no path, URL, or amount and there is no rate counter. Those
+    /// constraints are preserved here so callers can refuse to waive the ask
+    /// through read shortcuts or existing grants. `None` is an ordinary
+    /// policy-level ask, which those shortcuts may still waive.
+    Ask { unsupported_limits: Option<Limits> },
     /// The action is unconditionally denied.
     Deny,
 }
 
 impl Decision {
+    /// A policy-level ask that is not caused by unevaluated limits.
+    #[must_use]
+    pub const fn ask() -> Self {
+        Self::Ask {
+            unsupported_limits: None,
+        }
+    }
+
+    /// Whether this decision requires approval (plain or unsupported-limit).
+    #[must_use]
+    pub const fn is_ask(&self) -> bool {
+        matches!(self, Self::Ask { .. })
+    }
+
+    /// Limits that were configured but could not be enforced, when this ask
+    /// exists for that reason.
+    #[must_use]
+    pub fn unsupported_limits(&self) -> Option<&Limits> {
+        match self {
+            Self::Ask { unsupported_limits } => unsupported_limits.as_ref(),
+            _ => None,
+        }
+    }
+
     /// Return the stricter (least permissive) of two decisions.
+    ///
+    /// An unsupported-limit ask is preserved when combined with a plain ask:
+    /// the flag must not disappear just because another rule also asks.
     #[must_use]
     pub fn stricter(self, other: Decision) -> Decision {
         match (self, other) {
             (Decision::Deny, _) | (_, Decision::Deny) => Decision::Deny,
-            (Decision::Ask, _) | (_, Decision::Ask) => Decision::Ask,
-            _ => Decision::Allow,
+            (
+                Decision::Ask {
+                    unsupported_limits: a,
+                },
+                Decision::Ask {
+                    unsupported_limits: b,
+                },
+            ) => Decision::Ask {
+                unsupported_limits: a.or(b),
+            },
+            (ask @ Decision::Ask { .. }, _) | (_, ask @ Decision::Ask { .. }) => ask,
+            (Decision::Allow, Decision::Allow) => Decision::Allow,
         }
     }
 }
@@ -108,12 +152,12 @@ impl PermissionResolver {
         // Step 4 — absolute floors.
         // 4a. Money always requires at least Ask.
         if req.category == PermissionCategory::Money && decision == Decision::Allow {
-            decision = Decision::Ask;
+            decision = Decision::ask();
         }
 
         // 4b. Never-list match always requires Ask.
         if !req.raw_command.is_empty() && self.never_list.matches(&req.raw_command) {
-            decision = decision.stricter(Decision::Ask);
+            decision = decision.stricter(Decision::ask());
         }
 
         decision
@@ -174,10 +218,14 @@ impl Default for PermissionResolver {
 fn level_to_decision(level: &Level) -> Decision {
     match level {
         Level::Deny => Decision::Deny,
+        Level::Ask => Decision::ask(),
         // Limits (`path_patterns`, `max_per_hour`, `max_amount_minor`) are not
         // enforced yet: `ActionRequest` carries no path/URL/amount and there is
-        // no rate counter.  Until they are, fail closed and ask for approval.
-        Level::Ask | Level::AllowWithLimits(_) => Decision::Ask,
+        // no rate counter.  Until they are, fail closed and ask, and keep the
+        // constraints on the decision so a later layer cannot waive them.
+        Level::AllowWithLimits(limits) => Decision::Ask {
+            unsupported_limits: Some(limits.clone()),
+        },
         Level::Allow => Decision::Allow,
     }
 }
@@ -185,7 +233,7 @@ fn level_to_decision(level: &Level) -> Decision {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::policy::{Level, Policy, Rule};
+    use crate::policy::{Level, Limits, Policy, Rule};
     use protocol::InitiatorKind;
 
     fn req_human(cat: PermissionCategory) -> ActionRequest {
@@ -260,7 +308,7 @@ mod tests {
             &req_human(PermissionCategory::Shell),
         );
         // Sub-agent wants Allow but bot ceiling is Ask → must be Ask.
-        assert_eq!(decision, Decision::Ask);
+        assert_eq!(decision, Decision::ask());
     }
 
     #[test]
@@ -300,7 +348,53 @@ mod tests {
         );
         let resolver = PermissionResolver::new();
         let d = resolver.resolve(&global, None, None, &req_human(PermissionCategory::Fs));
-        assert_eq!(d, Decision::Ask);
+        let Some(limits) = d.unsupported_limits() else {
+            panic!("AllowWithLimits must stay an ask and carry the limits, got {d:?}");
+        };
+        assert_eq!(limits.max_per_hour, Some(1));
+        assert_eq!(limits.path_patterns, vec!["src/**".to_string()]);
+    }
+
+    #[test]
+    fn allow_with_limits_flag_survives_a_plain_ask_floor() {
+        // A never-list hit is a plain ask. Combining it with AllowWithLimits
+        // must not clear the unsupported-limits flag.
+        let mut global = Policy::default();
+        global.categories.insert(
+            PermissionCategory::Shell,
+            Rule::new(Level::AllowWithLimits(Limits {
+                max_per_hour: None,
+                max_amount_minor: None,
+                path_patterns: vec!["workspace/**".into()],
+            })),
+        );
+        let resolver = PermissionResolver::new();
+        let d = resolver.resolve(
+            &global,
+            None,
+            None,
+            &ActionRequest {
+                category: PermissionCategory::Shell,
+                raw_command: "rm -rf /".into(),
+                initiator: InitiatorKind::Human,
+            },
+        );
+        let Some(limits) = d.unsupported_limits() else {
+            panic!("flag dropped when combined with the never-list, got {d:?}");
+        };
+        assert_eq!(limits.path_patterns, vec!["workspace/**".to_string()]);
+        // A plain ask (no limits configured) does not carry the flag.
+        assert!(
+            resolver
+                .resolve(
+                    &Policy::approve_destructive(),
+                    None,
+                    None,
+                    &req_human(PermissionCategory::Fs)
+                )
+                .unsupported_limits()
+                .is_none()
+        );
     }
 
     // ── Meta category ─────────────────────────────────────────────────────────
@@ -331,7 +425,7 @@ mod tests {
         let global = Policy::full();
         let resolver = PermissionResolver::new();
         let decision = resolver.resolve(&global, None, None, &req_human(PermissionCategory::Money));
-        assert_eq!(decision, Decision::Ask);
+        assert_eq!(decision, Decision::ask());
     }
 
     // ── Rule 3b: Never-list match forces Ask ──────────────────────────────────
@@ -346,7 +440,7 @@ mod tests {
             initiator: InitiatorKind::Human,
         };
         let decision = resolver.resolve(&global, None, None, &r);
-        assert_eq!(decision, Decision::Ask);
+        assert_eq!(decision, Decision::ask());
     }
 
     // ── Rule 4: by_initiator data-driven overrides ───────────────────────────
@@ -370,7 +464,7 @@ mod tests {
         let routine_req = req_routine(PermissionCategory::Messaging);
         assert_eq!(
             resolver.resolve(&global, Some(&bot), None, &routine_req),
-            Decision::Ask
+            Decision::ask()
         );
 
         // Human gets Allow.
@@ -450,7 +544,7 @@ mod tests {
                 Some(&subagent),
                 &req_routine(PermissionCategory::Messaging)
             ),
-            Decision::Ask
+            Decision::ask()
         );
         assert_eq!(
             resolver.resolve(
@@ -499,7 +593,7 @@ mod tests {
                 None,
                 &req_schedule(PermissionCategory::Money, "")
             ),
-            Decision::Ask
+            Decision::ask()
         );
         assert_eq!(
             resolver.resolve(
@@ -508,7 +602,7 @@ mod tests {
                 None,
                 &req_schedule(PermissionCategory::Shell, "rm -rf /")
             ),
-            Decision::Ask
+            Decision::ask()
         );
         // A schedule-specific Allow override cannot lower the floors either.
         let mut bot = Policy::default();
@@ -523,7 +617,7 @@ mod tests {
                 None,
                 &req_schedule(PermissionCategory::Money, "")
             ),
-            Decision::Ask
+            Decision::ask()
         );
     }
 
