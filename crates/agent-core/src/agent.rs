@@ -81,6 +81,7 @@ impl AgentLoop {
                 tools,
                 providers: RwLock::new(providers),
                 global_policy: RwLock::new(cfg.global_policy.clone()),
+                policy_locked: std::sync::atomic::AtomicBool::new(false),
                 control: RwLock::new(None),
                 resolver: PermissionResolver::new(),
                 cfg,
@@ -229,6 +230,14 @@ impl AgentLoop {
         *self.sh.global_policy.write() = policy;
     }
 
+    /// Lock (or unlock) deny-all mode: while locked every tool decision except
+    /// agent-internal `Meta` tools is `Deny`, bot-specific policies included.
+    pub fn set_policy_locked(&self, locked: bool) {
+        self.sh
+            .policy_locked
+            .store(locked, std::sync::atomic::Ordering::SeqCst);
+    }
+
     /// USD price of `model` (full `provider/model` reference): the loop config's
     /// override, else the price the providers' catalog carries.
     #[must_use]
@@ -266,6 +275,11 @@ impl AgentLoop {
                 if let Some(ctx) = ctx {
                     sh.emit(&ctx, ev);
                 }
+            })),
+            // Same control gate as the desktop/browser tools: a replay is refused
+            // while the human has the wheel.
+            control: Some(Arc::new(LoopControl {
+                sh: Arc::downgrade(&self.sh),
             })),
             ..workflow_replay::ReplayOptions::default()
         };

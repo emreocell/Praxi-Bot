@@ -11,6 +11,7 @@ use serde_json::Value;
 use super::{classify, request::make_call_id};
 use crate::{
     error::ProviderError,
+    limits::ToolArgumentBudget,
     provider::{ChatChunk, FinishReason, ToolCall, Usage},
     util::{EventDecoder, ThoughtFilter, finish_error},
 };
@@ -18,6 +19,7 @@ use crate::{
 #[derive(Debug, Default)]
 pub(super) struct Decoder {
     calls: Vec<ToolCall>,
+    arguments: ToolArgumentBudget,
     usage: Option<Usage>,
     finish: Option<FinishReason>,
     finished: bool,
@@ -32,16 +34,19 @@ fn parse_finish(s: &str) -> FinishReason {
     }
 }
 
-fn parse_usage(u: &Value) -> Usage {
+fn parse_usage(u: &Value) -> Result<Usage, ProviderError> {
     let get = |k: &str| u.get(k).and_then(Value::as_u64);
-    Usage {
+    // Thinking tokens are billed as output; reject totals that cannot be represented.
+    let completion_tokens = get("candidatesTokenCount")
+        .unwrap_or(0)
+        .checked_add(get("thoughtsTokenCount").unwrap_or(0))
+        .ok_or_else(|| ProviderError::Stream("Gemini completion-token total overflow".into()))?;
+    Ok(Usage {
         prompt_tokens: get("promptTokenCount").unwrap_or(0),
-        // Thinking tokens are billed as output.
-        completion_tokens: get("candidatesTokenCount").unwrap_or(0)
-            + get("thoughtsTokenCount").unwrap_or(0),
+        completion_tokens,
         cached_tokens: get("cachedContentTokenCount"),
         cache_write_tokens: None,
-    }
+    })
 }
 
 fn unique_id(index: usize) -> u64 {
@@ -78,7 +83,7 @@ impl EventDecoder for Decoder {
             return Err(classify(status, &HeaderMap::new(), payload));
         }
         if let Some(u) = v.get("usageMetadata") {
-            self.usage = Some(parse_usage(u));
+            self.usage = Some(parse_usage(u)?);
         }
         let mut out = Vec::new();
         // A blocked prompt has no candidates, only a block reason.
@@ -100,6 +105,7 @@ impl EventDecoder for Decoder {
                     let args = fc
                         .get("args")
                         .map_or_else(|| "{}".to_owned(), Value::to_string);
+                    self.arguments.charge(0, args.len())?;
                     let sig = p.get("thoughtSignature").and_then(Value::as_str);
                     let id = make_call_id(unique_id(self.calls.len()), sig);
                     out.push(ChatChunk::ToolCallDelta {

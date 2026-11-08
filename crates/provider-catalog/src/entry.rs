@@ -130,6 +130,8 @@ pub enum ProviderKind {
     Anthropic,
     /// Google Gemini API.
     Gemini,
+    /// A locally installed agent session, never an HTTP chat provider.
+    Cli,
     /// Any other provider.
     Other(String),
 }

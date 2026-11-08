@@ -64,7 +64,13 @@ struct T {
 }
 
 fn setup() -> T {
+    setup_with(|_| {})
+}
+
+/// `setup` after `prepare` ran on the (still empty) data directory.
+fn setup_with(prepare: impl FnOnce(&std::path::Path)) -> T {
     let dir = tempfile::tempdir().unwrap();
+    prepare(dir.path());
     let storage = Arc::new(Storage::open(dir.path()).unwrap());
     let tools = ToolRegistry::new();
     tools.register(Arc::new(Danger));
@@ -76,6 +82,9 @@ fn setup() -> T {
         LoopConfig::default(),
     );
     let state = AppState::new(agent.clone(), storage, DaemonConfig::new(TOKEN)).unwrap();
+    state.set_detector(Arc::new(cli_provider::Detector::with_env(
+        cli_provider::PathEnv::for_test(dir.path().join("sealed-cli-path")),
+    )));
     T {
         app: router(state.clone()),
         state,
@@ -1412,6 +1421,8 @@ fn openapi_snapshot() {
         "/v1/bots/{id}/grants",
         "/v1/control/state",
         "/v1/control/{request_id}",
+        "/v1/control/release",
+        "/v1/events/latest",
         "/v1/policy",
         "/v1/providers",
         "/v1/providers/detected",
@@ -1628,6 +1639,16 @@ async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
         Some(json!({"mode": "idle"})),
     )
     .await;
+    // SEC-07: the idle heartbeat did not release; only the flagged PUT does.
+    assert!(t.state.hub().latched().is_some());
+    call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "idle", "release": true})),
+    )
+    .await;
+    assert!(t.state.hub().latched().is_none());
     // Registered but silent: refused after the long timeout (600 ms here).
     let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
     assert!(state.contains("Button"), "{state}");
@@ -1815,7 +1836,9 @@ async fn concurrent_policy_updates_are_not_lost_and_leave_no_temp_files() {
         );
     }
     // Memory and the persisted file agree (no diverging write order).
-    let saved = crate::routes::load_policy(t._dir.path()).expect("policy.json parses");
+    let saved = crate::policy::load_policy(t._dir.path())
+        .unwrap()
+        .expect("policy.json parses");
     assert_eq!(saved.categories, t.agent.global_policy().categories);
     let leftovers: Vec<_> = std::fs::read_dir(t._dir.path())
         .unwrap()
@@ -2252,4 +2275,265 @@ async fn tool_completion_events_carry_a_preview_and_duration() {
     let done = fr.iter().find(|f| f.1 == "tool_call_completed").unwrap();
     assert_eq!(done.2["event"]["output_preview"], "boom done");
     assert!(done.2["event"]["duration_ms"].is_u64());
+}
+
+// ------------------------------------------------- card 107 (audit fixes)
+
+#[tokio::test]
+async fn pause_is_latched_until_an_explicit_release() {
+    // SEC-07
+    let t = setup();
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "paused"})),
+    )
+    .await;
+    assert_eq!(r.json()["latched"], "paused");
+    // A paused heartbeat keeps it.
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "paused"})),
+    )
+    .await;
+    assert_eq!(r.json()["latched"], "paused");
+    assert!(t.state.hub().latched().is_some());
+    let r = send(&t.app, Method::POST, "/v1/control/release", None, &[]).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    assert!(
+        t.state.hub().latched().is_some(),
+        "unauthenticated release is a no-op"
+    );
+    let r = call(&t, Method::POST, "/v1/control/release", None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert!(r.json()["latched"].is_null());
+    assert!(t.state.hub().latched().is_none());
+}
+
+#[tokio::test]
+async fn latest_cursor_endpoint_needs_auth_and_reports_the_newest_gseq() {
+    // REL-07 (server half)
+    let t = setup();
+    let r = send(&t.app, Method::GET, "/v1/events/latest", None, &[]).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    let r = call(&t, Method::GET, "/v1/events/latest", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json()["gseq"], 0);
+    let run = crate::RunId::new();
+    t.state.storage().index_event(7, run, 0).unwrap();
+    let r = call(&t, Method::GET, "/v1/events/latest", None).await;
+    assert_eq!(r.json()["gseq"], 7);
+    // The token query parameter is accepted on /v1/events only.
+    let r = send(
+        &t.app,
+        Method::GET,
+        &format!("/v1/events/latest?token={TOKEN}"),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn corrupt_policy_file_locks_the_daemon_to_deny_all_missing_one_is_the_default() {
+    // SEC-13
+    let missing = setup();
+    let r = call(&missing, Method::GET, "/v1/policy", None).await;
+    assert!(r.json().get("load_error").is_none(), "{:?}", r.json());
+    assert_eq!(r.json()["preset"], "approve-destructive");
+
+    let t = setup_with(|d| std::fs::write(d.join("policy.json"), "{ not json").unwrap());
+    let r = call(&t, Method::GET, "/v1/policy", None).await;
+    assert_eq!(r.json()["preset"], "read-only", "{:?}", r.json());
+    assert!(
+        r.json()["load_error"]
+            .as_str()
+            .unwrap()
+            .contains("policy.json")
+    );
+    let copies = |t: &T| {
+        std::fs::read_dir(t._dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("policy.json.corrupt-")
+            })
+            .count()
+    };
+    assert_eq!(copies(&t), 1);
+    // A different corrupt file later keeps the first copy next to its own.
+    std::fs::write(t._dir.path().join("policy.json"), "{ other junk").unwrap();
+    crate::policy::preserve_corrupt(t._dir.path());
+    crate::policy::preserve_corrupt(t._dir.path());
+    assert_eq!(
+        copies(&t),
+        2,
+        "first copy kept, identical content not duplicated"
+    );
+    std::fs::write(t._dir.path().join("policy.json"), "{ not json").unwrap();
+    assert!(
+        t._dir.path().join("policy.json").exists(),
+        "original kept: next start stays locked"
+    );
+    // Saving a new policy ends the locked mode.
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/policy",
+        Some(json!({"preset": "approve-destructive"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let r = call(&t, Method::GET, "/v1/policy", None).await;
+    assert!(r.json().get("load_error").is_none());
+    assert_eq!(r.json()["preset"], "approve-destructive");
+}
+
+#[test]
+fn load_policy_distinguishes_missing_from_broken() {
+    let d = tempfile::tempdir().unwrap();
+    assert!(matches!(crate::load_policy(d.path()), Ok(None)));
+    std::fs::write(d.path().join("policy.json"), "[1,2").unwrap();
+    assert!(matches!(
+        crate::load_policy(d.path()),
+        Err(crate::PolicyLoadError::Parse(_))
+    ));
+    // A directory in place of the file is an I/O error, not "missing".
+    let d2 = tempfile::tempdir().unwrap();
+    std::fs::create_dir(d2.path().join("policy.json")).unwrap();
+    assert!(matches!(
+        crate::load_policy(d2.path()),
+        Err(crate::PolicyLoadError::Io(_))
+    ));
+    let ok = serde_json::to_string(&permission_engine::Policy::full()).unwrap();
+    assert!(crate::validate_policy(&ok).is_ok());
+    assert!(crate::validate_policy("nope").is_err());
+}
+
+#[tokio::test]
+async fn heartbeats_never_release_a_pause_only_the_release_flag_does() {
+    let t = setup();
+    call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "human_driving"})),
+    )
+    .await;
+    // A reopened UI heartbeats idle, a stale beat says bot_driving.
+    for mode in ["idle", "bot_driving", "idle"] {
+        let r = call(
+            &t,
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode": mode})),
+        )
+        .await;
+        assert_eq!(r.json()["latched"], "human_driving", "{mode}");
+    }
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "bot_driving", "release": true})),
+    )
+    .await;
+    assert!(r.json()["latched"].is_null());
+}
+
+#[tokio::test]
+async fn latched_pause_survives_a_daemon_restart() {
+    let t = setup();
+    call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "paused"})),
+    )
+    .await;
+    // New daemon over the same data directory.
+    let storage = Arc::new(Storage::open(t._dir.path()).unwrap());
+    let agent = AgentLoop::new(
+        Arc::clone(&storage),
+        ToolRegistry::new(),
+        Providers::single(Arc::new(FakeProvider)),
+        LoopConfig::default(),
+    );
+    let state = AppState::new(agent, storage, DaemonConfig::new(TOKEN)).unwrap();
+    assert_eq!(state.hub().latched(), Some(crate::dto::ControlMode::Paused));
+}
+
+#[tokio::test]
+async fn peer_control_state_changes_are_audited_with_the_device_as_actor() {
+    let t = setup();
+    for (method, path, body) in [
+        (
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode": "paused"})),
+        ),
+        (Method::POST, "/v1/control/release", None),
+    ] {
+        let mut b = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("content-type", "application/json");
+        b = b.header("host", "127.0.0.1");
+        let mut req = b
+            .body(Body::from(body.map(|v| v.to_string()).unwrap_or_default()))
+            .unwrap();
+        req.extensions_mut().insert(crate::PeerIdentity {
+            key: "paired-key".into(),
+            role: crate::PeerRole::Phone,
+        });
+        req.extensions_mut()
+            .insert(crate::peer::PeerName("Alice".into()));
+        let resp = crate::peer_router(t.state.clone())
+            .oneshot(req)
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{path}");
+    }
+    let user = t.state.storage().list_users().unwrap().remove(0);
+    let audit = t.state.storage().list_audit(user.id).unwrap();
+    let n = audit
+        .iter()
+        .filter(|e| format!("{e:?}").contains("phone:Alice"))
+        .count();
+    assert_eq!(n, 4, "requested+completed for both calls: {audit:?}");
+}
+
+#[tokio::test]
+async fn providers_lists_secret_free_cli_records_without_probing() {
+    let t = setup();
+    let mut p = provider_catalog::ProviderSettings::new("cli:codex", 0);
+    p.cli = Some(provider_catalog::config::CliSettings::Cli {
+        engine: provider_catalog::config::CliEngine::Codex,
+        command: "missing-c062-fixture".into(),
+    });
+    let cfg = provider_catalog::ProviderConfig {
+        providers: vec![p],
+        default_provider: None,
+    };
+    cfg.save(&provider_catalog::config_path(t.state.storage().data_dir()))
+        .unwrap();
+    let response = call(&t, Method::GET, "/v1/providers", None).await;
+    assert_eq!(response.status, StatusCode::OK);
+    let v = response.json();
+    assert_eq!(v["configured"][0]["id"], "cli:codex");
+    assert_eq!(v["configured"][0]["has_key"], false);
+    assert_eq!(v["configured"][0]["active"], true);
+    assert!(
+        v["catalog"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["id"] == "cli:codex" && r["kind"] == "cli")
+    );
 }
