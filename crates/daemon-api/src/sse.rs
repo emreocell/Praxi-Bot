@@ -17,7 +17,7 @@
 //! A browser `EventSource` cannot set headers, so this route (and only this
 //! route) also accepts the API token as `?token=...` (see `auth`).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -116,6 +116,8 @@ struct Feed {
     // ---- both ----
     storage: Arc<Storage>,
     data_dir: PathBuf,
+    /// Decoded run logs kept across replay chunks (REL-04).
+    logs: Arc<parking_lot::Mutex<LogCache>>,
     cancel: CancellationToken,
     /// Marks a global stream (the desktop app's) as open for the control bridge.
     _app: Option<crate::control::SubscriberGuard>,
@@ -159,14 +161,19 @@ impl Feed {
     /// Global form: load the next chunk of index rows after `scan`.
     async fn replay_chunk(&mut self) {
         let (st, dir, after) = (Arc::clone(&self.storage), self.data_dir.clone(), self.scan);
+        let logs = Arc::clone(&self.logs);
         let force = self
             .stalled_since
             .is_some_and(|t| t.elapsed() >= PENDING_LINE_GRACE);
         let loaded =
-            tokio::task::spawn_blocking(move || load_global(&st, &dir, after, force)).await;
+            tokio::task::spawn_blocking(move || load_global(&st, &dir, after, force, &logs)).await;
         if let Ok(Some(chunk)) = loaded {
             self.scan = self.scan.max(chunk.max_gseq);
             self.replaying = chunk.more;
+            if !chunk.more && !chunk.stalled {
+                // Replay over: the decoded logs are no longer needed.
+                self.logs.lock().clear();
+            }
             if chunk.stalled {
                 self.stalled_since.get_or_insert_with(Instant::now);
             } else {
@@ -335,8 +342,50 @@ struct Chunk {
     stalled: bool,
 }
 
-/// One run's log as the replay sees it (`None`: it could not be read).
-type RunLog = Option<HashMap<u64, Envelope>>;
+/// Runs whose decoded logs the replay keeps (least recently used go first).
+const LOG_CACHE_RUNS: usize = 8;
+
+/// Decoded run logs shared by the chunks of one replay, so a long run is
+/// decoded once instead of once per [`REPLAY_CHUNK`] rows (REL-04).
+#[derive(Default)]
+struct LogCache {
+    /// Least recently used first.
+    entries: Vec<(RunId, HashMap<u64, Envelope>)>,
+    /// How many logs were read from disk (tests assert on it).
+    reads: usize,
+}
+
+impl LogCache {
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    /// The cached log of `run`, marked as most recently used.
+    fn get(&mut self, run: RunId) -> Option<&HashMap<u64, Envelope>> {
+        let i = self.entries.iter().position(|(r, _)| *r == run)?;
+        let e = self.entries.remove(i);
+        self.entries.push(e);
+        self.entries.last().map(|(_, m)| m)
+    }
+
+    /// (Re)read `run`'s log from disk; `false` when it cannot be read (and it
+    /// is then not cached).
+    fn load(&mut self, dir: &std::path::Path, run: RunId) -> bool {
+        self.reads += 1;
+        self.entries.retain(|(r, _)| *r != run);
+        match read_event_log(dir, run) {
+            Ok(l) => {
+                self.entries
+                    .push((run, l.into_iter().map(|e| (e.seq, e)).collect()));
+                if self.entries.len() > LOG_CACHE_RUNS {
+                    self.entries.remove(0);
+                }
+                true
+            }
+            Err(_) => false,
+        }
+    }
+}
 
 /// Index rows `> after` joined with the runs' NDJSON logs.
 ///
@@ -347,19 +396,35 @@ type RunLog = Option<HashMap<u64, Envelope>>;
 /// the same run is on disk (lines of a run are appended in order), or `force`
 /// is set because the grace period for a crash gap ran out.  An unreadable log
 /// stalls the same way.
-fn load_global(st: &Storage, dir: &std::path::Path, after: u64, force: bool) -> Option<Chunk> {
+///
+/// A cached log is re-read only when it lacks the wanted line (the run may
+/// have appended since), at most once per call and run.
+fn load_global(
+    st: &Storage,
+    dir: &std::path::Path,
+    after: u64,
+    force: bool,
+    cache: &parking_lot::Mutex<LogCache>,
+) -> Option<Chunk> {
     let rows = st.list_event_index(after, REPLAY_CHUNK).ok()?;
     let more = rows.len() >= REPLAY_CHUNK as usize;
-    let mut logs: HashMap<RunId, RunLog> = HashMap::new();
+    let mut cache = cache.lock();
+    // Runs read from disk during this call (a second read cannot know more).
+    let mut read_now: HashSet<RunId> = HashSet::new();
     let mut items = Vec::with_capacity(rows.len());
     let mut max_gseq = after;
     let mut stalled = false;
     for row in rows {
-        let log = logs.entry(row.run_id).or_insert_with(|| {
-            read_event_log(dir, row.run_id)
-                .ok()
-                .map(|l| l.into_iter().map(|e| (e.seq, e)).collect())
-        });
+        let run = row.run_id;
+        let mut have = cache.get(run).is_some();
+        if !have && read_now.insert(run) {
+            have = cache.load(dir, run);
+        }
+        let missing = cache.get(run).is_some_and(|m| !m.contains_key(&row.seq));
+        if missing && read_now.insert(run) {
+            have = cache.load(dir, run);
+        }
+        let log = if have { cache.get(run) } else { None };
         match log {
             Some(m) => {
                 if let Some(env) = m.get(&row.seq) {
@@ -462,6 +527,7 @@ pub(crate) async fn events(
             .flatten(),
         storage: state.storage_arc(),
         data_dir: state.data_dir(),
+        logs: Arc::default(),
         cancel: state.shutdown_token(),
         _app: scoped_run.is_none().then(|| state.hub().subscribe()),
     };
@@ -548,7 +614,7 @@ mod tests {
         for (g, run, seq) in [(1, a, 0), (2, b, 0), (3, a, 1), (4, b, 1), (5, a, 2)] {
             st.index_event(g, run, seq).unwrap();
         }
-        let chunk = load_global(&st, dir.path(), 0, false).unwrap();
+        let chunk = load_global(&st, dir.path(), 0, false, &LogCache::default().into()).unwrap();
         let got: Vec<(u64, RunId, u64)> = chunk
             .items
             .iter()
@@ -559,12 +625,12 @@ mod tests {
         assert_eq!(chunk.max_gseq, 3, "the cursor must not pass a pending row");
         assert!(chunk.stalled && !chunk.more);
         // Once the grace period is over the line counts as lost to a crash.
-        let forced = load_global(&st, dir.path(), 3, true).unwrap();
+        let forced = load_global(&st, dir.path(), 3, true, &LogCache::default().into()).unwrap();
         assert_eq!(forced.items.len(), 1);
         assert_eq!(forced.items[0].gseq, 5);
         assert!(!forced.stalled);
         assert_eq!(forced.max_gseq, 5);
-        let none = load_global(&st, dir.path(), 5, false).unwrap();
+        let none = load_global(&st, dir.path(), 5, false, &LogCache::default().into()).unwrap();
         assert!(none.items.is_empty() && none.max_gseq == 5 && !none.stalled);
     }
 
@@ -589,12 +655,13 @@ mod tests {
         // The writer has indexed seq 1 but not appended it yet.
         st.index_event(1, a, 0).unwrap();
         st.index_event(2, a, 1).unwrap();
-        let first = load_global(&st, dir.path(), 0, false).unwrap();
+        let cache = parking_lot::Mutex::new(LogCache::default());
+        let first = load_global(&st, dir.path(), 0, false, &cache).unwrap();
         assert_eq!(first.items.len(), 1);
         assert_eq!((first.max_gseq, first.stalled), (1, true));
         // The line lands; resuming from the stalled cursor delivers it.
         w.append(&msg(a, 1)).unwrap();
-        let second = load_global(&st, dir.path(), first.max_gseq, false).unwrap();
+        let second = load_global(&st, dir.path(), first.max_gseq, false, &cache).unwrap();
         assert_eq!(second.items.len(), 1);
         assert_eq!(second.items[0].gseq, 2);
         assert!(!second.stalled);
@@ -612,7 +679,7 @@ mod tests {
         for (g, seq) in [(1, 0), (2, 1), (3, 2)] {
             st.index_event(g, a, seq).unwrap();
         }
-        let chunk = load_global(&st, dir.path(), 0, false).unwrap();
+        let chunk = load_global(&st, dir.path(), 0, false, &LogCache::default().into()).unwrap();
         let got: Vec<u64> = chunk.items.iter().map(|i| i.gseq).collect();
         assert_eq!(got, [1, 3]);
         assert!(!chunk.stalled);
@@ -629,8 +696,53 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "not json\n{\"also\": \"bad\"}\n").unwrap();
         st.index_event(1, a, 0).unwrap();
-        let chunk = load_global(&st, dir.path(), 0, false).unwrap();
+        let chunk = load_global(&st, dir.path(), 0, false, &LogCache::default().into()).unwrap();
         assert!(chunk.items.is_empty());
         assert_eq!((chunk.max_gseq, chunk.stalled), (0, true));
+    }
+
+    #[test]
+    fn a_long_run_is_decoded_once_across_replay_chunks() {
+        // REL-04: 5.2k events of one run replayed in 500-row chunks.
+        let dir = tempfile::tempdir().unwrap();
+        let st = Storage::open(dir.path()).unwrap();
+        let a = RunId::new();
+        let mut w = storage::EventLogWriter::open(dir.path(), a).unwrap();
+        let total = 5_200u64;
+        for seq in 0..total {
+            w.append(&msg(a, seq)).unwrap();
+            st.index_event(seq + 1, a, seq).unwrap();
+        }
+        let cache = parking_lot::Mutex::new(LogCache::default());
+        let (mut after, mut delivered, mut chunks) = (0, 0u64, 0);
+        loop {
+            let c = load_global(&st, dir.path(), after, false, &cache).unwrap();
+            delivered += c.items.len() as u64;
+            after = c.max_gseq;
+            chunks += 1;
+            assert!(!c.stalled);
+            if !c.more {
+                break;
+            }
+        }
+        assert_eq!(delivered, total);
+        assert!(chunks >= 11, "{chunks}");
+        assert_eq!(cache.lock().reads, 1, "the log must be decoded once");
+    }
+
+    #[test]
+    fn log_cache_is_bounded_and_refreshes_a_stale_log_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = Storage::open(dir.path()).unwrap();
+        let cache = parking_lot::Mutex::new(LogCache::default());
+        for g in 1..=(LOG_CACHE_RUNS as u64 + 4) {
+            let r = RunId::new();
+            let mut w = storage::EventLogWriter::open(dir.path(), r).unwrap();
+            w.append(&msg(r, 0)).unwrap();
+            st.index_event(g, r, 0).unwrap();
+        }
+        let c = load_global(&st, dir.path(), 0, false, &cache).unwrap();
+        assert_eq!(c.items.len(), LOG_CACHE_RUNS + 4);
+        assert_eq!(cache.lock().entries.len(), LOG_CACHE_RUNS);
     }
 }

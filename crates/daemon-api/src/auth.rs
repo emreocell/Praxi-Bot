@@ -53,17 +53,19 @@ pub fn read_token(data_dir: &Path) -> std::io::Result<String> {
 
 /// Load the install's token, creating a random one (256 bits) on first use.
 ///
-/// On Unix the file is created `0600`; on Windows it is restricted to the
-/// current user with `icacls` (best effort, see [`TokenInfo::restricted`]).
+/// On Unix the file is created `0600`; an existing file is checked through
+/// the open descriptor (owner = the data directory's owner, no group / other
+/// bits) and repaired to `0600`, or rejected.  On Windows the file is created
+/// empty, restricted to the current user with `icacls`, and only then filled;
+/// an existing file gets the same restriction re-applied.
+/// [`TokenInfo::restricted`] reports what really happened.
 ///
 /// # Errors
-/// I/O errors or no OS randomness.
+/// I/O errors, no OS randomness, or an existing token file that is a symlink,
+/// owned by someone else, or whose permissions cannot be repaired.
 pub fn load_or_create_token(data_dir: &Path) -> std::io::Result<TokenInfo> {
-    if let Ok(token) = read_token(data_dir) {
-        return Ok(TokenInfo {
-            token,
-            restricted: true,
-        });
+    if let Some(info) = existing_token(data_dir)? {
+        return Ok(info);
     }
     std::fs::create_dir_all(data_dir)?;
     let mut bytes = [0u8; 32];
@@ -74,15 +76,67 @@ pub fn load_or_create_token(data_dir: &Path) -> std::io::Result<TokenInfo> {
         let _ = write!(token, "{b:02x}");
     }
     let path = token_path(data_dir);
-    write_private(&path, &token)?;
-    Ok(TokenInfo {
-        token,
-        restricted: restrict_permissions(&path),
-    })
+    let restricted = write_private(&path, &token)?;
+    Ok(TokenInfo { token, restricted })
+}
+
+/// The token of an existing, usable file with its permissions verified;
+/// `None` when there is none or it is malformed (a new one replaces it).
+fn existing_token(data_dir: &Path) -> std::io::Result<Option<TokenInfo>> {
+    let path = token_path(data_dir);
+    match std::fs::symlink_metadata(&path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+        Ok(m) if m.file_type().is_symlink() || !m.is_file() => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "api-token is not a regular file",
+            ));
+        }
+        Ok(_) => {}
+    }
+    let (content, restricted) = read_verified(data_dir, &path)?;
+    let t = content.trim();
+    Ok(valid_token(t).then(|| TokenInfo {
+        token: t.to_owned(),
+        restricted,
+    }))
 }
 
 #[cfg(unix)]
-fn write_private(path: &Path, content: &str) -> std::io::Result<()> {
+fn read_verified(data_dir: &Path, path: &Path) -> std::io::Result<(String, bool)> {
+    use std::io::Read;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let mut f = std::fs::File::open(path)?;
+    let meta = f.metadata()?;
+    if meta.uid() != std::fs::metadata(data_dir)?.uid() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "api-token is not owned by the data directory's owner",
+        ));
+    }
+    if meta.mode() & 0o077 != 0 {
+        f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        if f.metadata()?.mode() & 0o077 != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "api-token permissions could not be restricted",
+            ));
+        }
+    }
+    let mut s = String::new();
+    f.read_to_string(&mut s)?;
+    Ok((s, true))
+}
+
+#[cfg(not(unix))]
+fn read_verified(_data_dir: &Path, path: &Path) -> std::io::Result<(String, bool)> {
+    let s = std::fs::read_to_string(path)?;
+    Ok((s, restrict_permissions(path)))
+}
+
+#[cfg(unix)]
+fn write_private(path: &Path, content: &str) -> std::io::Result<bool> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let _ = std::fs::remove_file(path);
@@ -91,17 +145,23 @@ fn write_private(path: &Path, content: &str) -> std::io::Result<()> {
         .create_new(true)
         .mode(0o600)
         .open(path)?;
-    f.write_all(content.as_bytes())
+    f.write_all(content.as_bytes())?;
+    Ok(true)
 }
 
+/// Create the file empty, restrict it, then write the secret: the token never
+/// sits in a file with inherited (wider) permissions.
 #[cfg(not(unix))]
-fn write_private(path: &Path, content: &str) -> std::io::Result<()> {
-    std::fs::write(path, content)
-}
-
-#[cfg(unix)]
-fn restrict_permissions(_path: &Path) -> bool {
-    true
+fn write_private(path: &Path, content: &str) -> std::io::Result<bool> {
+    use std::io::Write;
+    let _ = std::fs::remove_file(path);
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    let restricted = restrict_permissions(path);
+    f.write_all(content.as_bytes())?;
+    Ok(restricted)
 }
 
 #[cfg(not(unix))]
@@ -109,14 +169,24 @@ fn restrict_permissions(path: &Path) -> bool {
     let Ok(user) = std::env::var("USERNAME") else {
         return false;
     };
-    std::process::Command::new("icacls")
-        .arg(path)
-        .args(["/inheritance:r", "/grant:r"])
-        .arg(format!("{user}:(R,W)"))
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+    let icacls = |args: &[&std::ffi::OsStr]| {
+        std::process::Command::new("icacls")
+            .arg(path)
+            .args(args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    let grant = std::ffi::OsString::from(format!("{user}:(R,W)"));
+    // Drop explicit entries first (a pre-existing file may carry any), then
+    // the inherited ones, then grant the current user alone.
+    icacls(&["/reset".as_ref()])
+        && icacls(&[
+            "/inheritance:r".as_ref(),
+            "/grant:r".as_ref(),
+            grant.as_ref(),
+        ])
 }
 
 /// Constant-time equality (length leaks, content does not).
@@ -287,6 +357,55 @@ mod tests {
         std::fs::write(token_path(d.path()), "short").unwrap();
         assert!(read_token(d.path()).is_err());
         assert_ne!(load_or_create_token(d.path()).unwrap().token, a.token);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn loose_token_file_is_repaired_to_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let a = load_or_create_token(d.path()).unwrap();
+        let p = token_path(d.path());
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let b = load_or_create_token(d.path()).unwrap();
+        assert_eq!(a.token, b.token);
+        assert!(b.restricted);
+        let mode = std::fs::metadata(&p).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn token_symlink_is_rejected() {
+        let d = tempfile::tempdir().unwrap();
+        let target = d.path().join("elsewhere");
+        std::fs::write(&target, "a".repeat(64)).unwrap();
+        std::os::unix::fs::symlink(&target, token_path(d.path())).unwrap();
+        assert!(load_or_create_token(d.path()).is_err());
+    }
+
+    /// An existing token file with a wider ACL is tightened (SEC-14).
+    #[cfg(windows)]
+    #[test]
+    fn existing_token_file_acl_is_restricted() {
+        let d = tempfile::tempdir().unwrap();
+        let p = token_path(d.path());
+        std::fs::write(&p, "ab".repeat(32)).unwrap();
+        let st = std::process::Command::new("icacls")
+            .arg(&p)
+            .args(["/grant", "*S-1-1-0:(R)"])
+            .output()
+            .unwrap();
+        assert!(st.status.success());
+        let info = load_or_create_token(d.path()).unwrap();
+        assert_eq!(info.token, "ab".repeat(32));
+        assert!(info.restricted, "restriction must succeed and be reported");
+        let acl = std::process::Command::new("icacls")
+            .arg(&p)
+            .output()
+            .unwrap();
+        let acl = String::from_utf8_lossy(&acl.stdout).to_lowercase();
+        assert!(!acl.contains("everyone"), "{acl}");
     }
 
     #[test]

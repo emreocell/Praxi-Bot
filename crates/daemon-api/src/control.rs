@@ -15,6 +15,13 @@
 //!   answer the hub proceeds after [`ControlConfig::proceed_timeout`] for an
 //!   app that is merely connected, but refuses after
 //!   [`ControlConfig::refuse_timeout`] for a registered controller.
+//!
+//! `paused` / `human_driving` are **latched** (SEC-07): once reported they
+//! refuse every action until an explicit [`ControlHub::release`]
+//! (`POST /v1/control/release`).  The heartbeat TTL only decides whether a
+//! controller counts as live; losing the app (crash, restart, closed stream)
+//! never silently resumes the bot.  A later `idle` / `bot_driving` heartbeat
+//! does not release the latch either.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -59,6 +66,8 @@ struct Answer {
 struct State {
     /// Last reported mode and when.
     registration: Option<(ControlMode, Instant)>,
+    /// `Paused` / `HumanDriving`, kept until [`ControlHub::release`] (no TTL).
+    latched: Option<ControlMode>,
     pending: HashMap<Uuid, oneshot::Sender<Answer>>,
 }
 
@@ -117,8 +126,35 @@ impl ControlHub {
     }
 
     /// Register the app as controller / refresh the heartbeat.
+    ///
+    /// `Paused` / `HumanDriving` latch (see the module docs); other modes never
+    /// clear a latch, only [`ControlHub::release`] does.
     pub fn put_state(&self, mode: ControlMode) {
-        self.state.lock().registration = Some((mode, Instant::now()));
+        let mut st = self.state.lock();
+        st.registration = Some((mode, Instant::now()));
+        if refused_while(mode).is_some() {
+            st.latched = Some(mode);
+        }
+    }
+
+    /// The latched `Paused` / `HumanDriving` mode, if any (never expires).
+    #[must_use]
+    pub fn latched(&self) -> Option<ControlMode> {
+        self.state.lock().latched
+    }
+
+    /// Explicitly give the desktop back to the bots: clears the latch and
+    /// returns the mode that was latched.  A registration that still reports
+    /// the refused mode is reset to `idle`.
+    pub fn release(&self) -> Option<ControlMode> {
+        let mut st = self.state.lock();
+        let was = st.latched.take();
+        if let Some((m, at)) = st.registration
+            && refused_while(m).is_some()
+        {
+            st.registration = Some((ControlMode::Idle, at));
+        }
+        was
     }
 
     /// The mode of a live registration and the time left, `None` when no app
@@ -167,8 +203,9 @@ impl ControlGate for ControlHub {
         publish: &(dyn Fn() + Send + Sync),
     ) -> Result<(), String> {
         let registration = self.registration();
-        // The human has the wheel: refuse without a round trip.
-        if let Some(msg) = registration.and_then(|(m, _)| refused_while(m)) {
+        // The human has the wheel (latched, independent of any heartbeat or
+        // subscriber): refuse without a round trip.
+        if let Some(msg) = self.latched().and_then(refused_while) {
             return Err(msg.to_owned());
         }
         let registered = registration.is_some();
@@ -197,7 +234,7 @@ impl ControlGate for ControlHub {
             })) => {
                 // The human may have taken the wheel while the target was
                 // highlighted.
-                match self.registration().and_then(|(m, _)| refused_while(m)) {
+                match self.latched().and_then(refused_while) {
                     Some(msg) => Err(msg.to_owned()),
                     None => Ok(()),
                 }
@@ -367,8 +404,14 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(180)).await;
         assert!(hub.registration().is_none(), "expired after the ttl");
         let (out, published, _) = gate(&hub, None).await;
-        assert!(out.is_ok(), "an expired registration no longer blocks");
+        assert!(out.is_err(), "the latch outlives the heartbeat (SEC-07)");
         assert_eq!(published, 0);
+        assert_eq!(hub.release(), Some(ControlMode::HumanDriving));
+        let (out, _, _) = gate(&hub, None).await;
+        assert!(
+            out.is_ok(),
+            "released: an expired registration does not block"
+        );
         // A fresh heartbeat re-registers.
         hub.put_state(ControlMode::BotDriving);
         assert_eq!(
@@ -402,5 +445,37 @@ mod tests {
     fn unknown_request_ids_are_rejected() {
         let hub = ControlHub::new(fast());
         assert!(!hub.decide(Uuid::now_v7(), ControlVerdict::Proceed, None));
+    }
+
+    #[tokio::test]
+    async fn pause_survives_the_heartbeat_ttl_and_only_release_resumes() {
+        let hub = Arc::new(ControlHub::new(fast()));
+        hub.put_state(ControlMode::Paused);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(hub.registration().is_none(), "heartbeat expired");
+        let msg = gate(&hub, None).await.0.unwrap_err();
+        assert!(msg.contains("paused"), "{msg}");
+        // A bot_driving / idle heartbeat is not a release.
+        hub.put_state(ControlMode::BotDriving);
+        hub.put_state(ControlMode::Idle);
+        assert!(gate(&hub, None).await.0.is_err());
+        assert_eq!(hub.release(), Some(ControlMode::Paused));
+        assert_eq!(hub.latched(), None);
+        tokio::time::sleep(Duration::from_millis(200)).await; // idle heartbeat expires
+        assert!(gate(&hub, None).await.0.is_ok());
+        assert_eq!(hub.release(), None, "second release is a no-op");
+    }
+
+    #[tokio::test]
+    async fn latched_pause_still_refuses_after_the_subscriber_is_dropped() {
+        let hub = Arc::new(ControlHub::new(fast()));
+        let sub = hub.subscribe();
+        hub.put_state(ControlMode::HumanDriving);
+        drop(sub);
+        assert!(!hub.app_connected());
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let (out, published, _) = gate(&hub, None).await;
+        assert!(out.unwrap_err().contains("taken control"));
+        assert_eq!(published, 0);
     }
 }

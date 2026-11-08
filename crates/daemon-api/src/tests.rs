@@ -64,7 +64,13 @@ struct T {
 }
 
 fn setup() -> T {
+    setup_with(|_| {})
+}
+
+/// `setup` after `prepare` ran on the (still empty) data directory.
+fn setup_with(prepare: impl FnOnce(&std::path::Path)) -> T {
     let dir = tempfile::tempdir().unwrap();
+    prepare(dir.path());
     let storage = Arc::new(Storage::open(dir.path()).unwrap());
     let tools = ToolRegistry::new();
     tools.register(Arc::new(Danger));
@@ -1412,6 +1418,8 @@ fn openapi_snapshot() {
         "/v1/bots/{id}/grants",
         "/v1/control/state",
         "/v1/control/{request_id}",
+        "/v1/control/release",
+        "/v1/events/latest",
         "/v1/policy",
         "/v1/providers",
         "/v1/providers/detected",
@@ -1628,6 +1636,14 @@ async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
         Some(json!({"mode": "idle"})),
     )
     .await;
+    // SEC-07: an idle heartbeat is not a release; only the explicit one is.
+    assert!(t.state.hub().latched().is_some());
+    assert_eq!(
+        call(&t, Method::POST, "/v1/control/release", None)
+            .await
+            .status,
+        StatusCode::OK
+    );
     // Registered but silent: refused after the long timeout (600 ms here).
     let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
     assert!(state.contains("Button"), "{state}");
@@ -1815,7 +1831,9 @@ async fn concurrent_policy_updates_are_not_lost_and_leave_no_temp_files() {
         );
     }
     // Memory and the persisted file agree (no diverging write order).
-    let saved = crate::routes::load_policy(t._dir.path()).expect("policy.json parses");
+    let saved = crate::policy::load_policy(t._dir.path())
+        .unwrap()
+        .expect("policy.json parses");
     assert_eq!(saved.categories, t.agent.global_policy().categories);
     let leftovers: Vec<_> = std::fs::read_dir(t._dir.path())
         .unwrap()
@@ -2252,4 +2270,122 @@ async fn tool_completion_events_carry_a_preview_and_duration() {
     let done = fr.iter().find(|f| f.1 == "tool_call_completed").unwrap();
     assert_eq!(done.2["event"]["output_preview"], "boom done");
     assert!(done.2["event"]["duration_ms"].is_u64());
+}
+
+// ------------------------------------------------- card 107 (audit fixes)
+
+#[tokio::test]
+async fn pause_is_latched_until_an_explicit_release() {
+    // SEC-07
+    let t = setup();
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "paused"})),
+    )
+    .await;
+    assert_eq!(r.json()["latched"], "paused");
+    // An idle heartbeat does not release it.
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "idle"})),
+    )
+    .await;
+    assert_eq!(r.json()["latched"], "paused");
+    assert!(t.state.hub().latched().is_some());
+    let r = send(&t.app, Method::POST, "/v1/control/release", None, &[]).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    assert!(
+        t.state.hub().latched().is_some(),
+        "unauthenticated release is a no-op"
+    );
+    let r = call(&t, Method::POST, "/v1/control/release", None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert!(r.json()["latched"].is_null());
+    assert!(t.state.hub().latched().is_none());
+}
+
+#[tokio::test]
+async fn latest_cursor_endpoint_needs_auth_and_reports_the_newest_gseq() {
+    // REL-07 (server half)
+    let t = setup();
+    let r = send(&t.app, Method::GET, "/v1/events/latest", None, &[]).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    let r = call(&t, Method::GET, "/v1/events/latest", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json()["gseq"], 0);
+    let run = crate::RunId::new();
+    t.state.storage().index_event(7, run, 0).unwrap();
+    let r = call(&t, Method::GET, "/v1/events/latest", None).await;
+    assert_eq!(r.json()["gseq"], 7);
+    // The token query parameter is accepted on /v1/events only.
+    let r = send(
+        &t.app,
+        Method::GET,
+        &format!("/v1/events/latest?token={TOKEN}"),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn corrupt_policy_file_locks_the_daemon_to_deny_all_missing_one_is_the_default() {
+    // SEC-13
+    let missing = setup();
+    let r = call(&missing, Method::GET, "/v1/policy", None).await;
+    assert!(r.json().get("load_error").is_none(), "{:?}", r.json());
+    assert_eq!(r.json()["preset"], "approve-destructive");
+
+    let t = setup_with(|d| std::fs::write(d.join("policy.json"), "{ not json").unwrap());
+    let r = call(&t, Method::GET, "/v1/policy", None).await;
+    assert_eq!(r.json()["preset"], "read-only", "{:?}", r.json());
+    assert!(
+        r.json()["load_error"]
+            .as_str()
+            .unwrap()
+            .contains("policy.json")
+    );
+    assert!(t._dir.path().join("policy.json.corrupt").exists());
+    assert!(
+        t._dir.path().join("policy.json").exists(),
+        "original kept: next start stays locked"
+    );
+    // Saving a new policy ends the locked mode.
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/policy",
+        Some(json!({"preset": "approve-destructive"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let r = call(&t, Method::GET, "/v1/policy", None).await;
+    assert!(r.json().get("load_error").is_none());
+    assert_eq!(r.json()["preset"], "approve-destructive");
+}
+
+#[test]
+fn load_policy_distinguishes_missing_from_broken() {
+    let d = tempfile::tempdir().unwrap();
+    assert!(matches!(crate::load_policy(d.path()), Ok(None)));
+    std::fs::write(d.path().join("policy.json"), "[1,2").unwrap();
+    assert!(matches!(
+        crate::load_policy(d.path()),
+        Err(crate::PolicyLoadError::Parse(_))
+    ));
+    // A directory in place of the file is an I/O error, not "missing".
+    let d2 = tempfile::tempdir().unwrap();
+    std::fs::create_dir(d2.path().join("policy.json")).unwrap();
+    assert!(matches!(
+        crate::load_policy(d2.path()),
+        Err(crate::PolicyLoadError::Io(_))
+    ));
+    let ok = serde_json::to_string(&permission_engine::Policy::full()).unwrap();
+    assert!(crate::validate_policy(&ok).is_ok());
+    assert!(crate::validate_policy("nope").is_err());
 }

@@ -387,6 +387,17 @@ pub struct ControlStateDto {
     pub expires_in_ms: u64,
     /// A desktop app is listening on the global event stream.
     pub app_connected: bool,
+    /// `paused` / `human_driving` while latched: refuses bot actions until
+    /// `POST /v1/control/release`, regardless of the heartbeat.  `null` when
+    /// nothing is latched.
+    pub latched: Option<ControlMode>,
+}
+
+/// `GET /v1/events/latest`.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct LatestCursor {
+    /// Highest daemon-wide event `gseq` (`0` = none yet).
+    pub gseq: u64,
 }
 
 /// The app's answer to a `control_requested` event.
@@ -426,6 +437,10 @@ pub struct PolicyDto {
     /// Name of the preset the policy equals (`read-only`,
     /// `approve-destructive`, `read-and-draft`, `full`); `null` = custom.
     pub preset: Option<String>,
+    /// Set when the persisted `policy.json` could not be loaded: the daemon is
+    /// locked to deny-all until a new policy is saved with `PUT /v1/policy`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub load_error: Option<String>,
     /// Level per category: `deny`, `ask`, `allow` or `allow_with_limits`.
     pub categories: BTreeMap<String, String>,
 }

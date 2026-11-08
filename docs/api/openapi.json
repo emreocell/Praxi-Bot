@@ -750,6 +750,32 @@
         ]
       }
     },
+    "/v1/control/release": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Explicitly release a latched `paused` / `human_driving`: bots may use the\ndesktop again.  This is the only way (besides a daemon restart) to end a\npause; heartbeats and a lost app never do.  Idempotent.",
+        "operationId": "release_control",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlStateDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/control/state": {
       "get": {
         "tags": [
@@ -936,6 +962,32 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/events/latest": {
+      "get": {
+        "tags": [
+          "events"
+        ],
+        "summary": "The newest daemon-wide event cursor (`gseq`, `0` = no event yet): what a\nclient stores as its resume point after loading a snapshot, so a later\n`GET /v1/events` with `Last-Event-ID: <gseq>` replays exactly what came\nafter.",
+        "operationId": "latest_cursor",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LatestCursor"
                 }
               }
             }
@@ -2850,6 +2902,17 @@
             "description": "Milliseconds until the registration expires; `0` when not registered.",
             "minimum": 0
           },
+          "latched": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ControlMode",
+                "description": "`paused` / `human_driving` while latched: refuses bot actions until\n`POST /v1/control/release`, regardless of the heartbeat.  `null` when\nnothing is latched."
+              }
+            ]
+          },
           "mode": {
             "oneOf": [
               {
@@ -3167,6 +3230,21 @@
           "version": {
             "type": "string",
             "description": "Daemon crate version."
+          }
+        }
+      },
+      "LatestCursor": {
+        "type": "object",
+        "description": "`GET /v1/events/latest`.",
+        "required": [
+          "gseq"
+        ],
+        "properties": {
+          "gseq": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Highest daemon-wide event `gseq` (`0` = none yet).",
+            "minimum": 0
           }
         }
       },
@@ -4038,6 +4116,13 @@
             "propertyNames": {
               "type": "string"
             }
+          },
+          "load_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Set when the persisted `policy.json` could not be loaded: the daemon is\nlocked to deny-all until a new policy is saved with `PUT /v1/policy`."
           },
           "preset": {
             "type": [
