@@ -9,6 +9,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     ImportError, ImportOptions, Manifest, Result, invalid, now,
+    policy::POLICY_FILE,
     transfer::{INCLUDED_DIRECTORIES, INCLUDED_FILES, Secrets},
 };
 
@@ -213,6 +214,7 @@ fn roots() -> Vec<&'static str> {
         .iter()
         .chain(INCLUDED_FILES)
         .copied()
+        .filter(|root| *root != POLICY_FILE)
         .chain([
             "bot.db-wal",
             "bot.db-shm",
@@ -224,6 +226,8 @@ fn roots() -> Vec<&'static str> {
             "memory.db-shm",
             "memory.db-journal",
         ])
+        // Keep the old policy until every old database and sidecar is gone.
+        .chain([POLICY_FILE])
         .collect()
 }
 
@@ -284,10 +288,15 @@ pub(crate) fn commit(
             fs::rename(data.join(root), backup.join(root))?;
             moved.push(*root);
         }
-        for root in &roots {
+        // Publish the incoming permission ceiling before any imported grants.
+        // Reverse rollback removes databases before removing this policy, and
+        // restores the old policy before restoring its databases.
+        for root in std::iter::once(POLICY_FILE)
+            .chain(roots.iter().copied().filter(|root| *root != POLICY_FILE))
+        {
             if exists(&staging.join(root))? {
                 fs::rename(staging.join(root), data.join(root))?;
-                installed.push(*root);
+                installed.push(root);
             }
         }
         Ok(())

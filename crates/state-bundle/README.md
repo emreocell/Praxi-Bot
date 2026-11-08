@@ -6,7 +6,7 @@ are streamed in 64 KiB chunks, with backpressure. SQLite snapshots, migrations,
 filesystem traversal and the final installation use synchronous APIs; call from
 a dedicated Tokio worker/runtime when latency on the caller's thread matters.
 
-## Format v1
+## Format v2
 
 An uncompressed tar stream of regular files, followed by `manifest.json` as the
 last entry and two zero end blocks. USTAR paths are UTF-8; export fails rather
@@ -16,13 +16,13 @@ special files, duplicate/case-aliasing paths, traversal, absolute paths, Windows
 device names, alternate data streams, and paths outside the allowlist. Additional
 zero record padding at EOF is accepted and counted against the stream limit.
 
-The JSON manifest contains `format_version` (1), `schema_version` (SQLite
+The JSON manifest contains `format_version` (2), `schema_version` (SQLite
 `user_version` for `bot.db`), `app_version`, `epoch`, `created_at` (Unix seconds),
 optional public `source_key`, sorted `secret_names`, and ordered
 `files: [{path, size, sha256}]`. SHA-256 is lowercase hexadecimal over each
 payload's exact bytes. The manifest lists every payload, including `secrets.json`,
 but does not hash itself. Missing, extra, reordered, or altered entries fail
-verification. Newer format/schema versions fail before target writes. Older
+verification. Unsupported format/schema versions fail before target writes. Older
 `bot.db` schemas are migrated with `storage::migrate` only after verification;
 the returned manifest continues to describe the received snapshot.
 
@@ -34,6 +34,7 @@ define the format's filesystem policy.
 | Relative path | Content |
 | --- | --- |
 | `bot.db` (required) | Bots, JSON bot profiles, users, chats, messages and runs |
+| `policy.json` (required) | Versioned global permission policy, including initiator overrides and limits |
 | `memory.db` (optional) | Semantic memory and indexes, stored separately by memory-store |
 | `schedules.db` (optional) | Schedules and triggers; the current scheduler uses a separate DB |
 | `bots/`, `profiles/` | Optional file-based bot profiles |
@@ -53,6 +54,41 @@ Always excluded, case insensitively at every depth: `api-token`, `identity.key`,
 `browser-profiles/`, `browser_profiles/`, `logs/`, `backup-*`, `import-staging/`.
 All other non-allowlisted roots are excluded too, including run event logs.
 Unknown and machine-local target roots are preserved during replacement.
+
+## Global permission policy
+
+Every v2 bundle contains a hashed `policy.json` with `schema_version: 1` and the
+daemon's existing top-level `categories` object. The installed file is readable
+by `daemon-api::load_policy`; migration uses its canonical `validate_policy`
+function. Unknown policy fields and unsupported policy versions are rejected
+rather than silently dropping constraints. The manifest's SQLite
+`schema_version` is independent of this policy schema version.
+
+An existing unversioned local policy remains supported. When the source file is
+absent, export records the daemon's `approve_destructive` default explicitly.
+Unreadable, malformed, non-regular, and oversized source policies fail export.
+The source policy is never rewritten. Import rejects a missing, unversioned,
+malformed, or unsupported policy payload, including legacy v1 bundles that did
+not reliably include the policy. Re-export legacy state with the current
+exporter; `allow_policy_relaxation` does not bypass format or validation errors.
+
+Import accepts a valid policy when the destination has none. Otherwise it must
+preserve the destination's permission ceiling for every category and initiator,
+including missing-category `Ask` defaults and schedule-to-human inheritance.
+Equal levels/limits, a new `Deny`, or replacing an `Allow` are safe without an
+override. Other changes require `ImportOptions::allow_policy_relaxation: true`,
+which defaults to `false` and is separate from `replace`. A malformed existing
+destination policy is rejected even with that flag; it cannot be treated as a
+missing policy or an approval of an unknown ceiling.
+
+The comparison deliberately does not rank `Ask` below `AllowWithLimits`:
+persisted grants in `bot.db` can waive ordinary `Ask`, whereas the runtime keeps
+unsupported limits subject to approval. Switching between those levels, or
+changing any limit, therefore needs explicit approval even if the caller
+expects the change to be stricter. The destination policy is checked again at
+the swap boundary, after progress callbacks, before any secret or live state
+write. Database grants are preserved together with the imported policy, so a
+source `Deny` does not become the daemon's weaker default on the destination.
 
 ## Secrets and trust
 
@@ -78,10 +114,12 @@ Stop the target daemon, close **all** target SQLite handles and serialize import
 The fixed `<data>/import-staging/` directory is created exclusively, with mode
 0700 on Unix; an existing staging path is refused. The owned staging directory
 is removed on ordinary failure or async cancellation. The default archive cap
-is 2 GiB and the default per-entry cap is 1 GiB. Manifest and secrets entries
+is 2 GiB and the default per-entry cap is 1 GiB. Manifest, secrets, and policy entries
 have a further 8 MiB cap, and entry count is capped at 100,000. Limits include
 tar headers/padding/trailing data. Only manifest/secrets payloads and transfer
-chunks are buffered; ordinary files go straight to staging.
+chunks are buffered during transfer; ordinary files go straight to staging.
+Policy validation separately reads at most 8 MiB, with all handles closed
+before replacement or staging cleanup on Windows as well as Unix.
 
 Nonempty targets (bots **or** chats) require `replace: true`. Verification,
 SQLite integrity checking and migrations, host config validation, and reading
@@ -93,6 +131,10 @@ Explicit activation/epoch advancement is the handover caller's responsibility.
 The install phase has no async cancellation points. Original values are retained
 in memory for secret rollback; old portable roots and DB sidecars are renamed
 into `<data>/backup-<unix-ts>/`, then staged roots are renamed into place.
+The previous policy moves after the old databases and their sidecars; the
+incoming policy is installed before the imported databases. Reverse rollback
+likewise restores the previous policy before its databases. This ordering keeps
+the policy in place whenever the imported grant database becomes live.
 Each rename is atomic. Errors trigger reverse renames and secret restoration;
 rollback failure produces `ImportError::Recovery` with the retained backup path.
 Existing machine identity and `secrets.enc` remain at their original paths.
