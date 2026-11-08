@@ -12,7 +12,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use builtin_tools::{QUESTION_CARD_KIND, TODO_LIST_KIND};
 use futures::StreamExt;
-use permission_engine::Decision;
+use permission_engine::{Decision, Limits};
 use protocol::PermissionCategory;
 use protocol::event::{
     MessageDelta, ModelFallback, TodoItem, TodoStatus, TodoUpdated, ToolCallCompleted,
@@ -75,6 +75,55 @@ fn commit_or_deny(permit: Option<ExecPermit>) -> Result<(), Option<String>> {
     match permit {
         Some(permit) => permit.commit(),
         None => Ok(()),
+    }
+}
+
+/// One CLI approval the user already answered, for a single tool invocation.
+///
+/// `ExecPermit::commit` runs under the exec gate immediately before the tool.
+/// `honored_limits` is the unevaluated limits that forced the ask, when the
+/// card was answered for that reason.
+pub(crate) struct CliApproval {
+    pub name: String,
+    pub input: Value,
+    pub permit: ExecPermit,
+    pub honored_limits: Option<Limits>,
+}
+
+/// Whether `card` may stand in for asking again.
+///
+/// A plain card covers a still-plain ask, and a card covers the same limits
+/// it was answered for. A plain card does not waive limits the resolver is
+/// carrying now. Allow and deny still commit the verdict: allow records the
+/// grant, deny fails closed under the exec gate.
+#[must_use]
+fn card_covers(decision: &Decision, card: &CliApproval) -> bool {
+    match decision {
+        Decision::Ask {
+            unsupported_limits: Some(limits),
+        } => card.honored_limits.as_ref() == Some(limits),
+        Decision::Ask {
+            unsupported_limits: None,
+        }
+        | Decision::Allow
+        | Decision::Deny => true,
+    }
+}
+
+/// Remove the card for this exact invocation, leaving any other card in place.
+#[must_use]
+fn take_matching_card(
+    pending: &mut Option<CliApproval>,
+    name: &str,
+    input: &Value,
+) -> Option<CliApproval> {
+    match pending.take() {
+        Some(card) if card.name == name && card.input == *input => Some(card),
+        Some(card) => {
+            *pending = Some(card);
+            None
+        }
+        None => None,
     }
 }
 
@@ -684,7 +733,7 @@ impl TurnExecutor {
         &self,
         run: &Run,
         step: &StepSpec,
-        approved: Option<(&str, &Value)>,
+        mut approved: Option<CliApproval>,
     ) -> Result<Value, ExecError> {
         let ctx = self.sh.ctx(run)?;
         let calls: Vec<CallRec> =
@@ -733,7 +782,7 @@ impl TurnExecutor {
                 .spec
                 .as_ref()
                 .is_some_and(|s| s.category == PermissionCategory::Meta);
-            let mut decision = match &resolved.spec {
+            let decision = match &resolved.spec {
                 Some(spec) => self.sh.decide(
                     &ctx,
                     &resolved.name,
@@ -744,74 +793,75 @@ impl TurnExecutor {
                 // Malformed `use_tool`: executes nothing, only reports the error.
                 None => Decision::Allow,
             };
-            // A CLI approval card covers exactly one matching MCP invocation.
-            // The normal resolver still runs above: a new Deny always wins.
-            if decision == Decision::Ask
-                && approved == Some((resolved.name.as_str(), &resolved.input))
-            {
-                decision = Decision::Allow;
-            }
+            // A CLI card covers one matching invocation, and only when it
+            // honors the limits this decision still carries. The permit is
+            // committed immediately before the tool, under the exec gate, so
+            // a policy revision or locked deny fails closed. Anything else
+            // stays on the interactive path.
+            let card = take_matching_card(&mut approved, &resolved.name, &resolved.input);
+            let carried = match card {
+                Some(card) if card_covers(&decision, &card) => Some(card.permit),
+                _ => None,
+            };
             let is_spawn = resolved.name == crate::subagent::SPAWN_SUBAGENT;
             let spawn_input = resolved.input.clone();
             let tool = resolved.tool;
-            let slot = match decision {
-                Decision::Allow => Slot::Run {
+            let slot = if matches!(decision, Decision::Deny) && carried.is_none() {
+                self.sh.emit(
+                    &ctx,
+                    Event::ToolCallDenied(ToolCallDenied {
+                        run_id: run.id,
+                        call_id: call_uuid,
+                        denied_by: ctx.user_id,
+                        reason: Some("denied by policy".into()),
+                    }),
+                );
+                Slot::Done {
+                    text: "Permission denied: policy does not allow this tool call. \
+                           Do not retry it; choose another approach or tell the user."
+                        .into(),
+                    is_error: true,
+                }
+            } else if matches!(decision, Decision::Ask { .. }) && carried.is_none() {
+                let category = resolved
+                    .spec
+                    .as_ref()
+                    .map_or(PermissionCategory::Script, |s| s.category);
+                let effect = resolved
+                    .spec
+                    .as_ref()
+                    .map_or(tool_registry::Effect::Write, |s| s.effect);
+                match self
+                    .sh
+                    .request_approval(
+                        &ctx,
+                        call_uuid,
+                        &resolved.name,
+                        effect,
+                        category,
+                        &resolved.input,
+                    )
+                    .await
+                {
+                    Ok(permit) => Slot::Run {
+                        tool,
+                        input,
+                        call: call_uuid,
+                        meta,
+                        permit: Some(permit),
+                    },
+                    Err(reason) => Slot::Done {
+                        text: user_denied(reason),
+                        is_error: true,
+                    },
+                }
+            } else {
+                Slot::Run {
                     tool,
                     input,
                     call: call_uuid,
                     meta,
-                    permit: None,
-                },
-                Decision::Deny => {
-                    self.sh.emit(
-                        &ctx,
-                        Event::ToolCallDenied(ToolCallDenied {
-                            run_id: run.id,
-                            call_id: call_uuid,
-                            denied_by: ctx.user_id,
-                            reason: Some("denied by policy".into()),
-                        }),
-                    );
-                    Slot::Done {
-                        text: "Permission denied: policy does not allow this tool call. \
-                               Do not retry it; choose another approach or tell the user."
-                            .into(),
-                        is_error: true,
-                    }
-                }
-                Decision::Ask { .. } => {
-                    let category = resolved
-                        .spec
-                        .as_ref()
-                        .map_or(PermissionCategory::Script, |s| s.category);
-                    let effect = resolved
-                        .spec
-                        .as_ref()
-                        .map_or(tool_registry::Effect::Write, |s| s.effect);
-                    match self
-                        .sh
-                        .request_approval(
-                            &ctx,
-                            call_uuid,
-                            &resolved.name,
-                            effect,
-                            category,
-                            &resolved.input,
-                        )
-                        .await
-                    {
-                        Ok(permit) => Slot::Run {
-                            tool,
-                            input,
-                            call: call_uuid,
-                            meta,
-                            permit: Some(permit),
-                        },
-                        Err(reason) => Slot::Done {
-                            text: user_denied(reason),
-                            is_error: true,
-                        },
-                    }
+                    permit: carried,
                 }
             };
             let slot = match slot {
