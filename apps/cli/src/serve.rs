@@ -20,6 +20,7 @@ use provider_catalog::{
     ProviderKind, ProviderSettings, config_path,
 };
 use secret_store::SecretStore;
+use serde::Deserialize;
 use skills::{SkillIndex, SkillPaths};
 use storage::Storage;
 use tool_registry::ToolRegistry;
@@ -240,6 +241,74 @@ async fn shutdown_signal() {
     }
 }
 
+/// Filename of the email connector configuration in `<data_dir>`.
+pub const EMAIL_FILE: &str = "email.toml";
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct EmailConfigFile {
+    #[serde(default, alias = "account")]
+    pub accounts: Vec<connector_email::AccountConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ProviderEmailSection {
+    #[serde(default)]
+    email: Option<EmailConfigFile>,
+}
+
+/// Load email accounts from `<data_dir>/email.toml` (or fallback to `[email]` in `providers.toml`).
+#[must_use]
+pub fn load_email_accounts(data_dir: &Path) -> Vec<connector_email::AccountConfig> {
+    let email_path = data_dir.join(EMAIL_FILE);
+    if email_path.exists() {
+        match std::fs::read_to_string(&email_path) {
+            Ok(s) => match toml::from_str::<EmailConfigFile>(&s) {
+                Ok(cfg) => return cfg.accounts,
+                Err(e) => eprintln!("warning: {}: {e}", email_path.display()),
+            },
+            Err(e) => eprintln!("warning: cannot read {}: {e}", email_path.display()),
+        }
+    }
+    let providers_path = provider_catalog::config_path(data_dir);
+    if providers_path.exists()
+        && let Ok(s) = std::fs::read_to_string(&providers_path)
+        && let Ok(cfg) = toml::from_str::<ProviderEmailSection>(&s)
+        && let Some(email_cfg) = cfg.email
+    {
+        return email_cfg.accounts;
+    }
+    Vec::new()
+}
+
+/// Register e-mail tools into `registry` if accounts are configured and `store` is available.
+pub fn register_email(
+    data_dir: &Path,
+    registry: &ToolRegistry,
+    store: Option<&Arc<dyn SecretStore>>,
+) -> usize {
+    let accounts = load_email_accounts(data_dir);
+    if accounts.is_empty() {
+        return 0;
+    }
+    let Some(store) = store else {
+        eprintln!("warning: email accounts configured but secret store is not available");
+        return 0;
+    };
+    match connector_email::EmailConnector::new(accounts, Arc::clone(store)) {
+        Ok(conn) => {
+            let conn = Arc::new(conn);
+            let added = connector_email::register(registry, &conn);
+            let count = conn.account_names().len();
+            eprintln!("email: {added} tool(s) registered ({count} account(s))");
+            added
+        }
+        Err(e) => {
+            eprintln!("warning: cannot initialize email connector: {e}");
+            0
+        }
+    }
+}
+
 /// How `bot serve` runs.
 pub struct ServeOptions {
     /// Use the host pairing role and default peer networking on.
@@ -301,8 +370,9 @@ pub fn serve(
     let (port, json, grace) = (*port, *json, *grace);
     let storage = Arc::new(Storage::open(data_dir)?);
     let agent = build_agent(&storage, providers, data_dir, desktop);
-    // Same registry the loop calls tools from: MCP servers register into it.
+    // Same registry the loop calls tools from: MCP servers and email register into it.
     let mcp_tools = agent.tool_registry();
+    register_email(data_dir, &mcp_tools, telegram_store.as_ref());
     let recovered = agent.recover()?;
     let token = load_or_create_token(data_dir)?;
     if !token.restricted {
@@ -518,5 +588,94 @@ id = "unpriced"
             vec!["http://localhost:1420", "http://a.test"]
         );
         assert_eq!(parse_origins("").len(), 0);
+    }
+
+    #[test]
+    fn email_accounts_load_from_email_toml_and_providers_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        // Initially empty
+        assert_eq!(load_email_accounts(dir.path()), Vec::new());
+
+        // Test loading from email.toml
+        let email_toml = r#"
+[[accounts]]
+name = "work"
+address = "alice@example.com"
+password = "email/work/password"
+
+[accounts.imap]
+host = "imap.example.com"
+port = 993
+
+[accounts.smtp]
+host = "smtp.example.com"
+port = 465
+security = "implicit"
+"#;
+        std::fs::write(dir.path().join(EMAIL_FILE), email_toml).unwrap();
+        let loaded = load_email_accounts(dir.path());
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].name, "work");
+        assert_eq!(loaded[0].address, "alice@example.com");
+        assert_eq!(loaded[0].imap.host, "imap.example.com");
+
+        // Remove email.toml and test fallback to providers.toml
+        std::fs::remove_file(dir.path().join(EMAIL_FILE)).unwrap();
+        let providers_toml = r#"
+[email]
+[[email.accounts]]
+name = "personal"
+address = "bob@example.com"
+password = "email/personal/password"
+
+[email.accounts.imap]
+host = "imap.mail.com"
+
+[email.accounts.smtp]
+host = "smtp.mail.com"
+"#;
+        std::fs::write(config_path(dir.path()), providers_toml).unwrap();
+        let loaded_fallback = load_email_accounts(dir.path());
+        assert_eq!(loaded_fallback.len(), 1);
+        assert_eq!(loaded_fallback[0].name, "personal");
+        assert_eq!(loaded_fallback[0].address, "bob@example.com");
+    }
+
+    #[test]
+    fn email_tools_register_into_tool_registry() {
+        use tool_registry::{Effect, PermissionCategory};
+
+        let dir = tempfile::tempdir().unwrap();
+        let reg = ToolRegistry::new();
+        let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
+        store.set("email/work/password", "secret").unwrap();
+
+        let email_toml = r#"
+[[accounts]]
+name = "work"
+address = "alice@example.com"
+password = "email/work/password"
+
+[accounts.imap]
+host = "imap.example.com"
+
+[accounts.smtp]
+host = "smtp.example.com"
+"#;
+        std::fs::write(dir.path().join(EMAIL_FILE), email_toml).unwrap();
+        let added = register_email(dir.path(), &reg, Some(&store));
+        assert_eq!(added, 6);
+
+        let send = reg.get("email_send").expect("email_send registered");
+        assert_eq!(send.spec().effect, Effect::Destructive);
+        assert_eq!(send.spec().category, PermissionCategory::Messaging);
+
+        let draft = reg.get("email_draft").expect("email_draft registered");
+        assert_eq!(draft.spec().effect, Effect::Write);
+        assert_eq!(draft.spec().category, PermissionCategory::Messaging);
+
+        let read = reg.get("email_read").expect("email_read registered");
+        assert_eq!(read.spec().effect, Effect::Read);
+        assert_eq!(read.spec().category, PermissionCategory::Messaging);
     }
 }
