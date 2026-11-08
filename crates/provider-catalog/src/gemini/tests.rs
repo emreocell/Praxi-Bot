@@ -71,6 +71,19 @@ fn sse(events: &[Value]) -> ResponseTemplate {
         .set_body_string(body)
 }
 
+#[test]
+fn oversized_function_call_arguments_are_rejected() {
+    use crate::util::EventDecoder;
+
+    let mut decoder = super::stream::Decoder::default();
+    let payload = json!({"candidates": [{"content": {"parts": [{"functionCall": {
+        "name": "read", "args": {"text": "x".repeat(crate::limits::MAX_TOOL_ARGUMENT_BYTES)}
+    }}]}}]})
+    .to_string();
+    let error = decoder.feed(&payload).unwrap_err();
+    assert!(matches!(error, ProviderError::Stream(message) if message.contains("tool arguments")));
+}
+
 fn text_chunk(t: &str) -> Value {
     json!({"candidates":[{"content":{"role":"model","parts":[{"text":t}]},"index":0}]})
 }

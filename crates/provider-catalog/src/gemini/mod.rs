@@ -37,12 +37,12 @@ use serde_json::Value;
 use crate::{
     entry::{Auth, ProviderEntry},
     error::ProviderError,
+    limits::response_json,
     openai_compat::OpenAiCompatConfig,
     provider::{ChatChunk, ChatProvider, ChatRequest},
     util::{
         ChunkStream, Classify, Reopen, Secret, build_client, dump_failed_request, error_message,
-        event_stream, key_from_env, map_reqwest_error, model_name, retry_after,
-        retry_malformed_once, send_with_retry,
+        event_stream, key_from_env, model_name, retry_after, retry_malformed_once, send_with_retry,
     },
 };
 
@@ -169,7 +169,7 @@ impl ChatProvider for GeminiProvider {
             .unwrap_or_else(|| format!("{}/models?pageSize=1000", self.base()));
         let make = || self.authed(self.client.get(&url));
         let resp = send_with_retry(&self.config, &make, classify as Classify).await?;
-        let v: Value = resp.json().await.map_err(map_reqwest_error)?;
+        let v = response_json(resp).await?;
         let items = v
             .get("models")
             .and_then(Value::as_array)
