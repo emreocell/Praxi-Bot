@@ -21,8 +21,6 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio_util::sync::CancellationToken;
 use tool_registry::ToolSpec;
 
-#[cfg(windows)]
-use crate::detect;
 use crate::detect::{
     ChildTree, PathEnv, apply_sanitized_env, binary_pin, find_candidate, isolate, resolve_spawn,
 };
@@ -159,7 +157,7 @@ struct Bridge {
     child_pid: Arc<AtomicU32>,
     /// Kill-on-close job created by `isolate` for this turn. Empty until spawn.
     #[cfg(windows)]
-    job: detect::SharedJob,
+    job: crate::detect::SharedJob,
     listen: Arc<OnceLock<SocketAddr>>,
 }
 
@@ -348,6 +346,8 @@ async fn restrict_sidecar(path: &std::path::Path) -> Result<(), CliError> {
     }
     Ok(())
 }
+// NamedTempFile is already mode 0600 here, so there is no ACL step to await.
+// `async` stays so the call site can `.await` on every host.
 #[cfg(not(windows))]
 #[allow(clippy::unused_async)] // Match the Windows implementation's async interface.
 async fn restrict_sidecar(_: &std::path::Path) -> Result<(), CliError> {
@@ -668,7 +668,7 @@ async fn session(
     let candidate = find_candidate(command, env).ok_or(CliError::NotInstalled)?;
     let resolved = resolve_spawn(&candidate, env).map_err(|_| CliError::ShimRefused)?;
     #[cfg(windows)]
-    let job = detect::SharedJob::new();
+    let job = crate::detect::SharedJob::new();
     let bridge = Bridge {
         capability: format!("Bearer {}{}", uuid::Uuid::now_v7(), uuid::Uuid::now_v7()),
         tools: Arc::new(turn.tools.clone()),
@@ -1267,7 +1267,7 @@ mod tests {
             #[cfg(not(windows))]
             child_pid: Arc::new(AtomicU32::new(std::process::id())),
             #[cfg(windows)]
-            job: detect::SharedJob::new(),
+            job: crate::detect::SharedJob::new(),
             listen: Arc::new(OnceLock::new()),
         }
     }
@@ -1373,7 +1373,7 @@ mod tests {
         url: &str,
         auth: Option<&str>,
         body: &str,
-        #[cfg(windows)] job: &detect::SharedJob,
+        #[cfg(windows)] job: &crate::detect::SharedJob,
     ) -> String {
         #[cfg(not(windows))]
         {
@@ -1386,7 +1386,7 @@ mod tests {
     }
     #[cfg(windows)]
     async fn post_inside_job(
-        job: &detect::SharedJob,
+        job: &crate::detect::SharedJob,
         url: &str,
         auth: Option<&str>,
         body: &str,

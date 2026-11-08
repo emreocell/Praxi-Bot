@@ -220,7 +220,7 @@
 
 .todo_in_progress {
   font-weight: var(--font-weight-semibold);
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .srOnly {

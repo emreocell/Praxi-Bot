@@ -197,6 +197,7 @@ export type DaemonEvent =
       action: string;
     }
   | { type: "error"; run_id: string; message: string; recoverable: boolean }
+  | { type: "mcp_server_changed"; name: string; status: McpStatus }
   | {
       type: "subagent_started";
       run_id: string;
@@ -226,3 +227,16 @@ export interface Envelope {
 export interface GlobalEnvelope extends Envelope {
   gseq: number;
 }
+
+// ---- MCP management API (`/v1/mcp/*`, `/v1/secrets/*`) ---------------------
+
+export type McpTransport = S["McpTransportKind"];
+export type McpStatus = S["McpStatus"];
+export type McpServer = S["McpServerDto"];
+/** Body of `POST /v1/mcp/servers`. */
+export type McpServerConfig = S["McpServerInput"] & { name: string };
+/** Body of `PUT /v1/mcp/servers/{name}` (every field optional). */
+export type McpServerPatch = S["McpServerPatch"];
+export type McpTool = S["McpToolDto"];
+export type McpRequiredSecret = S["McpRequiredSecretDto"];
+export type McpCatalogEntry = S["McpCatalogEntryDto"];

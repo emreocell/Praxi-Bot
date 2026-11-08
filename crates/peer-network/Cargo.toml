@@ -24,8 +24,17 @@ thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+# Verify the effective owner and open without following symlinks, using safe APIs.
+rustix = { version = "1", features = ["fs", "process"] }
+
+[target.'cfg(windows)'.dependencies]
+# Set the DACL at CreateFileW time and verify security on the opened handle.
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
+
 [dev-dependencies]
 tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 [[example]]
 name = "core"

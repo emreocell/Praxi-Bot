@@ -44,7 +44,7 @@
   width: var(--size-icon);
   height: var(--size-icon);
   margin: var(--space-0);
-  accent-color: var(--color-accent);
+  accent-color: var(--color-accent-text);
   cursor: pointer;
 }
 

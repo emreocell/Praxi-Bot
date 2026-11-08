@@ -511,27 +511,66 @@ mod tests {
 
     #[tokio::test]
     async fn background_grandchild_holding_pipe_keeps_partial_output() {
-        // NOTE: only a true regression test on Unix (`sleep 8 &` inherits the pipe).
+        // NOTE: only a true regression test on Unix (`sleep … &` inherits the pipe).
         // On Windows `Start-Process -NoNewWindow` may not inherit the handles, so
         // this can pass even without the drain/grace fix.
+        //
+        // The grandchild writes `done` only after `BACKGROUND_LIFE_SECS`. Returning
+        // before that file exists, under `SHELL_RETURN_BOUND`, is what proves the
+        // tool did not wait out the child. Startup on a slow runner may itself
+        // exceed a few seconds, so the bound is generous and the signal is the marker.
         let d = tempfile::tempdir().unwrap();
         let t = tool(d.path());
+        let done = d.path().join("grandchild-done.txt");
+        let pidfile = d.path().join("grandchild-pid.txt");
+        let _cleanup = KillLater {
+            pidfile: pidfile.clone(),
+        };
         let cmd = if cfg!(windows) {
-            "Start-Process -NoNewWindow powershell -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 8'; echo started-bg"
+            format!(
+                "$p = Start-Process -NoNewWindow -PassThru -FilePath (Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe') -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds {life}; Set-Content -LiteralPath {done} -Value done'; \
+                 Set-Content -LiteralPath {pid} -Value $p.Id -Encoding Ascii; \
+                 Write-Output started-bg",
+                life = BACKGROUND_LIFE_SECS,
+                done = ps_nested(&done),
+                pid = ps_single(&pidfile),
+            )
         } else {
-            "sleep 8 & echo started-bg"
+            format!(
+                "(sleep {life}; echo done > '{done}') & echo $! > '{pid}'; echo started-bg",
+                life = BACKGROUND_LIFE_SECS,
+                done = done.display(),
+                pid = pidfile.display(),
+            )
         };
         let started = std::time::Instant::now();
         let out = t
             .call(
                 &ToolContext::default(),
-                json!({"command": cmd, "shell": shell_for_tests()}),
+                json!({"command": cmd, "shell": shell_for_tests(), "timeout": SHELL_CALL_TIMEOUT_SECS}),
             )
             .await
-            .unwrap();
+            .unwrap_or_else(|err| {
+                panic!(
+                    "shell_run did not finish while the grandchild was still running: {err}"
+                )
+            });
         let s = text(&out);
         assert!(s.contains("started-bg"), "{s}");
-        assert!(started.elapsed() < Duration::from_secs(7));
+        assert!(
+            started.elapsed() < SHELL_RETURN_BOUND,
+            "shell_run waited out the background grandchild ({:?})",
+            started.elapsed()
+        );
+        assert!(
+            !done.exists(),
+            "background grandchild finished before shell_run returned"
+        );
+        let pid = read_pid(&pidfile).await;
+        assert!(
+            became_alive(pid, READY_BOUND).await,
+            "background grandchild {pid} was not running after shell_run returned"
+        );
     }
 
     #[tokio::test]
@@ -554,30 +593,61 @@ mod tests {
         format!("''{}''", path.display().to_string().replace('\'', "''"))
     }
 
-    /// Parent stays in the foreground; a descendant writes `marker` after a delay.
-    /// `spawned` is written once that descendant exists. `pidfile` is for cleanup.
-    fn descendant_command(marker: &Path, spawned: &Path, pidfile: &Path) -> String {
+    /// Cold process start on a busy runner can take well over a minute.
+    /// Tests wait for marker files until this cap instead of a fixed 1s budget.
+    const READY_BOUND: Duration = Duration::from_secs(120);
+    /// A background child stays up this long, so a slow-but-successful return
+    /// still happens before it exits or writes its done marker.
+    const BACKGROUND_LIFE_SECS: u64 = 300;
+    /// Upper bound for a `shell_run` that must return while that child is alive.
+    const SHELL_RETURN_BOUND: Duration = Duration::from_secs(180);
+    /// Tool timeout above `SHELL_RETURN_BOUND` and below `BACKGROUND_LIFE_SECS`,
+    /// so waiting out the child fails and a slow start is not killed.
+    const SHELL_CALL_TIMEOUT_SECS: u64 = 240;
+    /// Tool timeout for the kill-on-timeout path. Longer than runner startup,
+    /// shorter than the descendant's marker delay below.
+    const TIMEOUT_KILL_SECS: u64 = 90;
+    /// Descendant writes the leaked marker only after this delay, which is
+    /// longer than `TIMEOUT_KILL_SECS`, so a timeout always lands first.
+    const TIMEOUT_DESCENDANT_DELAY_SECS: u64 = 130;
+    /// Cancel path: short delay, because the future is dropped as soon as the
+    /// spawned marker exists. The post-drop wait is this plus `MARKER_GRACE`.
+    const CANCEL_DESCENDANT_DELAY_SECS: u64 = 10;
+    /// Slack after the scheduled marker write so a late timer still fails the test.
+    const MARKER_GRACE: Duration = Duration::from_secs(20);
+
+    /// Parent stays in the foreground; a descendant writes `marker` after
+    /// `delay_secs`. `spawned` is written once that descendant exists.
+    /// `pidfile` is for cleanup.
+    fn descendant_command(
+        marker: &Path,
+        spawned: &Path,
+        pidfile: &Path,
+        delay_secs: u64,
+    ) -> String {
         if cfg!(windows) {
             format!(
                 "$psi = New-Object System.Diagnostics.ProcessStartInfo; \
                  $psi.FileName = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'; \
-                 $psi.Arguments = '-NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 5; Set-Content -LiteralPath {marker} -Value leaked\"'; \
+                 $psi.Arguments = '-NoProfile -NonInteractive -Command \"Start-Sleep -Seconds {delay}; Set-Content -LiteralPath {marker} -Value leaked\"'; \
                  $psi.UseShellExecute = $false; \
                  $psi.CreateNoWindow = $true; \
                  $p = [System.Diagnostics.Process]::Start($psi); \
                  Set-Content -LiteralPath {pid} -Value $p.Id -Encoding Ascii; \
                  Set-Content -LiteralPath {spawned} -Value ok -Encoding Ascii; \
-                 Start-Sleep -Seconds 60",
+                 Start-Sleep -Seconds 300",
+                delay = delay_secs,
                 marker = ps_nested(marker),
                 pid = ps_single(pidfile),
                 spawned = ps_single(spawned),
             )
         } else {
             format!(
-                "(sleep 5; echo leaked > '{}') & echo $! > '{}' && echo ok > '{}' && wait",
-                marker.display(),
-                pidfile.display(),
-                spawned.display(),
+                "(sleep {delay}; echo leaked > '{marker}') & echo $! > '{pid}' && echo ok > '{spawned}' && wait",
+                delay = delay_secs,
+                marker = marker.display(),
+                pid = pidfile.display(),
+                spawned = spawned.display(),
             )
         }
     }
@@ -620,21 +690,52 @@ mod tests {
         let _cleanup = KillLater {
             pidfile: pidfile.clone(),
         };
-        let cmd = descendant_command(&marker, &spawned, &pidfile);
+        let delay = Duration::from_secs(TIMEOUT_DESCENDANT_DELAY_SECS);
+        let cmd = descendant_command(&marker, &spawned, &pidfile, TIMEOUT_DESCENDANT_DELAY_SECS);
 
-        let err = t
-            .call(
-                &ToolContext::default(),
-                json!({"command": cmd, "shell": shell_for_tests(), "timeout": 1}),
-            )
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("timed out"), "{err}");
-        assert!(
-            spawned.exists(),
-            "descendant was not started before the timeout, so the test is inconclusive: {err}"
+        // The tool timeout is the kill under test and the upper bound on startup.
+        // Readiness is the spawned marker, not a 1s budget. The descendant's own
+        // delay is longer than the timeout, so the kill lands before the marker.
+        let started = std::time::Instant::now();
+        let ctx = ToolContext::default();
+        let call = t.call(
+            &ctx,
+            json!({"command": cmd, "shell": shell_for_tests(), "timeout": TIMEOUT_KILL_SECS}),
         );
-        tokio::time::sleep(Duration::from_secs(6)).await;
+        tokio::pin!(call);
+        let mut spawned_at = None;
+        let result = loop {
+            tokio::select! {
+                biased;
+                result = &mut call => break result,
+                () = tokio::time::sleep(Duration::from_millis(50)) => {
+                    if spawned_at.is_none() && spawned.exists() {
+                        spawned_at = Some(started.elapsed());
+                        let pid = read_pid(&pidfile).await;
+                        assert!(
+                            process_alive(pid),
+                            "descendant {pid} was not alive when the spawned marker appeared"
+                        );
+                    }
+                }
+            }
+        };
+        if spawned_at.is_none() && spawned.exists() {
+            spawned_at = Some(started.elapsed());
+        }
+        let err = result.expect_err("shell succeeded instead of timing out");
+        assert!(err.to_string().contains("timed out"), "{err}");
+        let spawned_at = spawned_at.unwrap_or_else(|| {
+            panic!(
+                "descendant was not started before the timeout, so the test is inconclusive: {err}"
+            )
+        });
+        // `delay` exceeds the tool timeout, so the deadline is before this write
+        // even when the descendant was created on the first instant.
+        let marker_due = spawned_at + delay + MARKER_GRACE;
+        if let Some(remaining) = marker_due.checked_sub(started.elapsed()) {
+            tokio::time::sleep(remaining).await;
+        }
         assert!(
             !marker.exists(),
             "descendant wrote the marker after timeout"
@@ -648,31 +749,31 @@ mod tests {
         let _cleanup_cancel = KillLater {
             pidfile: pidfile.clone(),
         };
-        let cmd = descendant_command(&marker, &spawned, &pidfile);
-        let ctx = ToolContext::default();
+        let cmd = descendant_command(&marker, &spawned, &pidfile, CANCEL_DESCENDANT_DELAY_SECS);
         {
             let call = t.call(
                 &ctx,
-                json!({"command": cmd, "shell": shell_for_tests(), "timeout": 30}),
+                json!({"command": cmd, "shell": shell_for_tests(), "timeout": SHELL_CALL_TIMEOUT_SECS}),
             );
             tokio::pin!(call);
             let started = std::time::Instant::now();
             loop {
                 tokio::select! {
+                    biased;
                     result = &mut call => panic!("shell returned before cancellation: {result:?}"),
                     () = tokio::time::sleep(Duration::from_millis(50)) => {
                         if spawned.exists() {
                             break;
                         }
                         assert!(
-                            started.elapsed() < Duration::from_secs(10),
+                            started.elapsed() < READY_BOUND,
                             "descendant was not started"
                         );
                     }
                 }
             }
         }
-        tokio::time::sleep(Duration::from_secs(6)).await;
+        tokio::time::sleep(Duration::from_secs(CANCEL_DESCENDANT_DELAY_SECS) + MARKER_GRACE).await;
         assert!(
             !marker.exists(),
             "descendant wrote the marker after the shell future was dropped"
@@ -722,54 +823,112 @@ mod tests {
         let _cleanup = KillLater {
             pidfile: pidfile.clone(),
         };
+        let done = work.path().join("child-done.txt");
         let cmd = if cfg!(windows) {
             format!(
                 "$psi = New-Object System.Diagnostics.ProcessStartInfo; \
                  $psi.FileName = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'; \
-                 $psi.Arguments = '-NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 30\"'; \
+                 $psi.Arguments = '-NoProfile -NonInteractive -Command \"Start-Sleep -Seconds {life}; Set-Content -LiteralPath {done} -Value done\"'; \
                  $psi.UseShellExecute = $false; \
                  $psi.CreateNoWindow = $true; \
                  $p = [System.Diagnostics.Process]::Start($psi); \
                  Set-Content -LiteralPath {pid} -Value $p.Id -Encoding Ascii; \
                  Write-Output started-bg",
+                life = BACKGROUND_LIFE_SECS,
+                done = ps_nested(&done),
                 pid = ps_single(&pidfile),
             )
         } else {
             format!(
-                "sleep 30 & echo $! > '{}' ; echo started-bg",
-                pidfile.display()
+                "(sleep {life}; echo done > '{done}') & echo $! > '{pid}'; echo started-bg",
+                life = BACKGROUND_LIFE_SECS,
+                done = done.display(),
+                pid = pidfile.display(),
             )
         };
         let started = std::time::Instant::now();
         let out = t
             .call(
                 &ToolContext::default(),
-                json!({"command": cmd, "shell": shell_for_tests(), "timeout": 15}),
+                json!({"command": cmd, "shell": shell_for_tests(), "timeout": SHELL_CALL_TIMEOUT_SECS}),
             )
             .await
-            .unwrap();
+            .unwrap_or_else(|err| {
+                panic!("shell_run did not finish while the background child was still running: {err}")
+            });
         let s = text(&out);
         assert!(s.contains("exit_code: 0"), "{s}");
         assert!(s.contains("started-bg"), "{s}");
         assert!(
-            started.elapsed() < Duration::from_secs(12),
+            started.elapsed() < SHELL_RETURN_BOUND,
             "shell_run waited out the background child ({:?})",
             started.elapsed()
         );
-        let pid_text = std::fs::read_to_string(&pidfile).expect("background pid file");
-        let pid = pid_text
-            .chars()
-            .filter(char::is_ascii_digit)
-            .collect::<String>()
-            .parse::<u32>()
-            .unwrap_or_else(|_| panic!("pid file {pid_text:?}"));
-        // A job-close kill lands before `call` returns. The pause covers a
-        // kill that is only queued by the time the tool result is observed.
-        tokio::time::sleep(Duration::from_millis(500)).await;
         assert!(
-            process_alive(pid),
+            !done.exists(),
+            "background child finished before shell_run returned"
+        );
+        let pid = read_pid(&pidfile).await;
+        // A job-close kill lands before `call` returns. The first wait absorbs a
+        // task list that has not observed the new pid yet. The second covers a
+        // kill that is only queued when the result is observed, including on a
+        // slow runner where 500ms is not enough to see it.
+        assert!(
+            became_alive(pid, Duration::from_secs(10)).await,
+            "background child {pid} was not running after a successful shell_run"
+        );
+        assert!(
+            stays_alive(pid, Duration::from_secs(5)).await,
             "background child {pid} was killed after a successful shell_run"
         );
+    }
+
+    async fn read_pid(path: &Path) -> u32 {
+        let started = std::time::Instant::now();
+        loop {
+            if let Ok(text) = std::fs::read_to_string(path) {
+                let digits: String = text.chars().filter(char::is_ascii_digit).collect();
+                if let Ok(pid) = digits.parse::<u32>()
+                    && pid > 0
+                {
+                    return pid;
+                }
+            }
+            assert!(
+                started.elapsed() < READY_BOUND,
+                "background pid file {} was not written",
+                path.display()
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    async fn became_alive(pid: u32, bound: Duration) -> bool {
+        let started = std::time::Instant::now();
+        loop {
+            if process_alive(pid) {
+                return true;
+            }
+            if started.elapsed() >= bound {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    /// `true` when `pid` is still alive at the end of `window`.
+    /// A death at any poll is `false` (the child was killed).
+    async fn stays_alive(pid: u32, window: Duration) -> bool {
+        let started = std::time::Instant::now();
+        loop {
+            if !process_alive(pid) {
+                return false;
+            }
+            if started.elapsed() >= window {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
     }
 
     #[tokio::test]

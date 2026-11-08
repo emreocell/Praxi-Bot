@@ -84,6 +84,7 @@ const INTERACTIVE_ROLES: &[&str] = &[
 
 const STALE_HINT: &str = " (the index is stale; call desktop_get_state and use the new indexes)";
 const MISSING_GEN_MSG: &str = "missing required parameter 'gen'; call desktop_get_state first and pass gen from that observation";
+const NO_OBSERVATION_MSG: &str = "no observation for this run; call desktop_get_state first";
 
 /// Desktop state of one run. Runs must never see each other's indexes.
 // NOTE(concurrency): While `State` (`window_id`, `generation`, `targets`, `marks`) is tracked per `run_id`
@@ -121,10 +122,7 @@ impl RunStates {
 
     fn get(&mut self, run_id: &str) -> Option<&State> {
         self.touch(run_id);
-        if let Some(s) = self.map.get(run_id) {
-            return Some(s);
-        }
-        self.order.back().and_then(|last| self.map.get(last))
+        self.map.get(run_id)
     }
 
     fn entry(&mut self, run_id: &str) -> &mut State {
@@ -297,10 +295,10 @@ impl Shared {
             return Err(ToolError::InvalidInput(MISSING_GEN_MSG.into()));
         };
         let mut states = self.state.lock();
-        let st = states.get(run_id);
-        let generation = st
-            .and_then(|s| s.generation)
-            .ok_or_else(|| exec_err("no snapshot yet; call desktop_get_state first"))?;
+        let st = states
+            .get(run_id)
+            .ok_or_else(|| exec_err(NO_OBSERVATION_MSG))?;
+        let generation = st.generation.ok_or_else(|| exec_err(NO_OBSERVATION_MSG))?;
         match elem_ref {
             ElementRef::Index(index) => {
                 if expected_gen != generation {
@@ -308,7 +306,7 @@ impl Shared {
                         "index {index} is from generation {expected_gen}, but the current generation is {generation}{STALE_HINT}"
                     )));
                 }
-                if !st.is_some_and(|s| s.targets.contains_key(&index)) {
+                if !st.targets.contains_key(&index) {
                     return Err(exec_err(format!(
                         "index {index} was not shown in the observation (omitted by filter or does not exist); call desktop_get_state{STALE_HINT}"
                     )));
@@ -322,7 +320,9 @@ impl Shared {
                     )));
                 }
                 let (mark_x, mark_y) = st
-                    .and_then(|s| s.marks.get(&mark_idx).copied())
+                    .marks
+                    .get(&mark_idx)
+                    .copied()
                     .ok_or_else(|| {
                         exec_err(format!(
                             "mark:{mark_idx} is unknown; marks exist only after desktop_get_state on a window with a weak tree"
@@ -338,19 +338,27 @@ impl Shared {
     }
 
     /// Label and on-screen bounds of the element a mutating action targets.
-    fn describe(&self, run_id: &str, elem_ref: ElementRef) -> (String, Option<ControlRect>) {
+    fn describe(
+        &self,
+        run_id: &str,
+        elem_ref: ElementRef,
+    ) -> Result<(String, Option<ControlRect>), ToolError> {
         let mut states = self.state.lock();
-        let st = states.get(run_id);
-        match elem_ref {
+        let st = states
+            .get(run_id)
+            .filter(|s| s.generation.is_some())
+            .ok_or_else(|| exec_err(NO_OBSERVATION_MSG))?;
+        Ok(match elem_ref {
             ElementRef::Index(idx) => st
-                .and_then(|s| s.targets.get(&idx).cloned())
+                .targets
+                .get(&idx)
+                .cloned()
                 .unwrap_or_else(|| (format!("element {idx}"), None)),
             ElementRef::Mark(mark_idx) => (
                 format!("mark {mark_idx}"),
-                st.and_then(|s| s.marks.get(&mark_idx))
-                    .map(|(mx, my)| point_rect(*mx, *my)),
+                st.marks.get(&mark_idx).map(|(mx, my)| point_rect(*mx, *my)),
             ),
-        }
+        })
     }
 
     /// Ask the control gate (if any) whether this mutating action may run.
@@ -385,8 +393,19 @@ impl Shared {
         }
     }
 
+    /// An unobserved run has no preferred window: `snapshot(None)` observes the
+    /// backend's foreground window, never the most recently observed other run.
     fn scope(&self, run_id: &str) -> Option<u64> {
-        self.state.lock().get(run_id).and_then(|s| s.window_id)
+        self.state
+            .lock()
+            .get(run_id)
+            .filter(|s| s.generation.is_some())
+            .and_then(|s| s.window_id)
+    }
+
+    fn observed_scope(&self, run_id: &str) -> Result<u64, ToolError> {
+        self.scope(run_id)
+            .ok_or_else(|| exec_err(NO_OBSERVATION_MSG))
     }
 
     async fn act(&self, action: Action) -> Result<String, ToolError> {
@@ -556,8 +575,10 @@ impl Shared {
         }
         .instrument(tracing::info_span!("desktop.settle", op = "action"))
         .await;
-        let scope = self.scope(run_id);
-        let state = self.refresh(run_id, scope, &ObsFilter::default()).await?;
+        let scope = self.observed_scope(run_id)?;
+        let state = self
+            .refresh(run_id, Some(scope), &ObsFilter::default())
+            .await?;
         Ok(format!("{prefix}\n{state}"))
     }
 
@@ -991,7 +1012,7 @@ impl DesktopTool {
                 let r = parse_ref(&i.index)?;
                 let method = parse_method(i.method.as_deref(), Shared::default_method(r))?;
                 let target = sh.target(run_id, r, i.expect_gen)?;
-                let (label, rect) = sh.describe(run_id, r);
+                let (label, rect) = sh.describe(run_id, r)?;
                 sh.gate(run_id, "click", label, rect).await?;
                 let head = sh.act(Action::Click { target, method }).await?;
                 sh.settle_and_refresh(run_id, head).await
@@ -1003,7 +1024,7 @@ impl DesktopTool {
                 }
                 let r = parse_ref(&i.index)?;
                 let target = sh.target(run_id, r, i.expect_gen)?;
-                let (label, rect) = sh.describe(run_id, r);
+                let (label, rect) = sh.describe(run_id, r)?;
                 sh.gate(run_id, "type", label, rect).await?;
                 // Focus the element with a real click, then type into the focus.
                 sh.act(Action::Click {
@@ -1021,7 +1042,7 @@ impl DesktopTool {
                 }
                 let r = parse_ref(&i.index)?;
                 let target = sh.target(run_id, r, i.expect_gen)?;
-                let (label, rect) = sh.describe(run_id, r);
+                let (label, rect) = sh.describe(run_id, r)?;
                 sh.gate(run_id, "set_value", label, rect).await?;
                 let head = sh
                     .act(Action::SetValue {
@@ -1034,6 +1055,9 @@ impl DesktopTool {
             Op::Key => {
                 let i: KeyIn = parse(input)?;
                 let keys = parse_keys(&i.keys)?;
+                // Even a shortcut without an element index needs an observation
+                // owned by this run before it can affect the shared desktop.
+                sh.observed_scope(run_id)?;
                 let focus = i.index.as_ref().map(parse_ref).transpose()?;
                 if focus.is_some() && i.expect_gen.is_none() {
                     return Err(ToolError::InvalidInput(MISSING_GEN_MSG.into()));
@@ -1043,7 +1067,7 @@ impl DesktopTool {
                     .transpose()?;
                 let (label, rect) = match focus {
                     Some(r) => {
-                        let (l, rect) = sh.describe(run_id, r);
+                        let (l, rect) = sh.describe(run_id, r)?;
                         (format!("{} in {l}", keys.join("+")), rect)
                     }
                     None => (keys.join("+"), None),
@@ -1061,11 +1085,12 @@ impl DesktopTool {
             }
             Op::Scroll => {
                 let i: ScrollIn = parse(input)?;
+                sh.observed_scope(run_id)?;
                 if i.index.is_some() && i.expect_gen.is_none() {
                     return Err(ToolError::InvalidInput(MISSING_GEN_MSG.into()));
                 }
                 let (label, rect) = match (&i.index, i.x, i.y) {
-                    (Some(idx), _, _) => sh.describe(run_id, parse_ref(idx)?),
+                    (Some(idx), _, _) => sh.describe(run_id, parse_ref(idx)?)?,
                     (None, Some(x), Some(y)) => ("point".to_owned(), Some(point_rect(x, y))),
                     _ => (String::new(), None),
                 };
@@ -1103,7 +1128,7 @@ impl DesktopTool {
                     sh.target(run_id, a, i.expect_gen)?,
                     sh.target(run_id, b, i.expect_gen)?,
                 );
-                let ((la, ra), (lb, rb)) = (sh.describe(run_id, a), sh.describe(run_id, b));
+                let ((la, ra), (lb, rb)) = (sh.describe(run_id, a)?, sh.describe(run_id, b)?);
                 sh.gate(run_id, "drag", format!("{la} to {lb}"), union(ra, rb))
                     .await?;
                 let head = sh.act(Action::Drag { from, to, method }).await?;
@@ -1873,6 +1898,20 @@ mod tests {
         let st = get(&tools, "desktop_get_state");
         st.call(&ctx_a, json!({"window_id": 1})).await.unwrap();
         st.call(&ctx_b, json!({"window_id": 2})).await.unwrap();
+        // C knows B's current generation and index, but has never observed them.
+        // This must fail before consulting either the control gate or backend.
+        let ctx_c = ToolContext {
+            run_id: "run-c".into(),
+            ..ToolContext::default()
+        };
+        let err = get(&tools, "desktop_click")
+            .call(&ctx_c, json!({"index": 1, "gen": 2}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains(NO_OBSERVATION_MSG), "{err}");
+        assert!(!err.to_string().contains("stale"), "{err}");
+        assert!(fake.actions.lock().is_empty());
+        assert!(gate.seen.lock().is_empty());
         let out = get(&tools, "desktop_click")
             .call(&ctx_a, json!({"index": 1, "gen": 1}))
             .await
@@ -1898,16 +1937,135 @@ mod tests {
             ));
         }
         assert_eq!(gate.seen.lock()[0].label, "button \"w1_el1\"");
-        // A run that never observed anything has no state.
-        let ctx_c = ToolContext {
-            run_id: "run-c".into(),
+    }
+
+    async fn assert_unobserved_run_cannot_act(lenient_gen: bool) {
+        let mut backend = FakeDesktop::new(false);
+        backend.lenient_gen = lenient_gen;
+        let fake = Arc::new(backend);
+        let (_d, tools, gate) = gated(fake.clone(), false);
+        let ctx_a = ToolContext {
+            run_id: "observed-a".into(),
             ..ToolContext::default()
         };
+        let ctx_b = ToolContext {
+            run_id: "observed-b".into(),
+            ..ToolContext::default()
+        };
+        let ctx_c = ToolContext {
+            run_id: "unobserved-c".into(),
+            ..ToolContext::default()
+        };
+        let state = get(&tools, "desktop_get_state");
+        state.call(&ctx_a, json!({"window_id": 1})).await.unwrap();
+        state
+            .call(&ctx_b, json!({"window_id": 2, "query": "w2_el3"}))
+            .await
+            .unwrap();
+        for (name, input) in [
+            ("desktop_click", json!({"index": 3, "gen": 2})),
+            (
+                "desktop_type",
+                json!({"index": 3, "gen": 2, "text": "blocked"}),
+            ),
+            (
+                "desktop_set_value",
+                json!({"index": 3, "gen": 2, "value": "blocked"}),
+            ),
+            (
+                "desktop_key",
+                json!({"index": 3, "gen": 2, "keys": "enter"}),
+            ),
+            ("desktop_key", json!({"keys": "enter"})),
+            ("desktop_scroll", json!({"index": 3, "gen": 2, "dy": 1})),
+            ("desktop_scroll", json!({"x": 1, "y": 2, "dy": 1})),
+            ("desktop_drag", json!({"from": 3, "to": 3, "gen": 2})),
+            ("desktop_click", json!({"index": "mark:1", "gen": 2})),
+        ] {
+            let err = get(&tools, name).call(&ctx_c, input).await.unwrap_err();
+            assert!(
+                err.to_string().contains(NO_OBSERVATION_MSG),
+                "{name}: {err}"
+            );
+            assert!(!err.to_string().contains("stale"), "{name}: {err}");
+            assert!(fake.actions.lock().is_empty(), "{name} reached backend");
+            assert!(gate.seen.lock().is_empty(), "{name} reached control gate");
+            assert_eq!(fake.scopes.lock().len(), 2, "{name} took a snapshot");
+        }
+    }
+
+    #[tokio::test]
+    async fn unobserved_run_cannot_act_even_with_current_generation() {
+        assert_unobserved_run_cannot_act(false).await;
+    }
+
+    #[tokio::test]
+    async fn unobserved_run_cannot_act_with_lenient_generation_backend() {
+        assert_unobserved_run_cannot_act(true).await;
+    }
+
+    #[tokio::test]
+    async fn default_window_uses_only_own_observation_or_foreground() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (_d, tools) = build(fake.clone(), None);
+        let ctx_a = ToolContext {
+            run_id: "a".into(),
+            ..ToolContext::default()
+        };
+        let ctx_b = ToolContext {
+            run_id: "b".into(),
+            ..ToolContext::default()
+        };
+        let ctx_c = ToolContext {
+            run_id: "c".into(),
+            ..ToolContext::default()
+        };
+        let state = get(&tools, "desktop_get_state");
+        state.call(&ctx_a, json!({"window_id": 1})).await.unwrap();
+        state.call(&ctx_b, json!({"window_id": 2})).await.unwrap();
+        let own = state.call(&ctx_a, json!({})).await.unwrap();
+        assert!(text(&own).contains("window_id: 1"));
+        let fresh = state.call(&ctx_c, json!({})).await.unwrap();
+        assert!(text(&fresh).contains("window_id: 77"));
+        assert_eq!(*fake.scopes.lock(), [Some(1), Some(2), Some(1), None]);
+    }
+
+    #[tokio::test]
+    async fn launch_and_list_do_not_inherit_another_runs_observation() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (_d, tools) = build(fake.clone(), None);
+        let observed = ToolContext {
+            run_id: "observed".into(),
+            ..ToolContext::default()
+        };
+        let fresh = ToolContext {
+            run_id: "fresh".into(),
+            ..ToolContext::default()
+        };
+        get(&tools, "desktop_get_state")
+            .call(&observed, json!({"window_id": 2}))
+            .await
+            .unwrap();
+        get(&tools, "desktop_list_apps")
+            .call(&fresh, json!({}))
+            .await
+            .unwrap();
+        get(&tools, "desktop_launch")
+            .call(&fresh, json!({"executable": "fake"}))
+            .await
+            .unwrap();
         let err = get(&tools, "desktop_click")
-            .call(&ctx_c, json!({"index": 1, "gen": 1}))
+            .call(&fresh, json!({"index": 1, "gen": 1}))
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("desktop_get_state"), "{err}");
+        assert!(err.to_string().contains(NO_OBSERVATION_MSG), "{err}");
+        assert!(fake.actions.lock().is_empty());
+        let out = get(&tools, "desktop_get_state")
+            .call(&fresh, json!({}))
+            .await
+            .unwrap();
+        assert!(text(&out).contains("window_id: 77"));
+        assert_eq!(fake.scopes.lock().last(), Some(&None));
     }
 
     #[tokio::test]
@@ -1993,7 +2151,7 @@ mod tests {
     #[tokio::test]
     async fn run_state_map_is_capped() {
         let fake = Arc::new(FakeDesktop::new(false));
-        let (_d, t) = build(fake, None);
+        let (_d, t) = build(fake.clone(), None);
         let st = get(&t, "desktop_get_state");
         for n in 0..(MAX_RUNS + 4) {
             let ctx = ToolContext {
@@ -2007,10 +2165,15 @@ mod tests {
             ..ToolContext::default()
         };
         let err = get(&t, "desktop_click")
-            .call(&oldest, json!({"index": 1, "gen": 1}))
+            .call(
+                &oldest,
+                json!({"index": 1, "gen": u64::try_from(MAX_RUNS + 4).unwrap()}),
+            )
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("desktop_get_state"), "{err}");
+        assert!(err.to_string().contains(NO_OBSERVATION_MSG), "{err}");
+        assert!(!err.to_string().contains("stale"), "{err}");
+        assert!(fake.actions.lock().is_empty());
         let newest = ToolContext {
             run_id: format!("r{}", MAX_RUNS + 3),
             ..ToolContext::default()

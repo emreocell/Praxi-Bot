@@ -99,6 +99,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Messaging channels hosted by the daemon (Telegram). */
+        get: operations["list_channels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/channels/telegram/pair-code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a one-time pairing code for the Telegram channel (valid 10 minutes;
+         *     the user sends `/pair <code>` to the bot).
+         */
+        post: operations["telegram_pair_code"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/chats": {
         parameters: {
             query?: never;
@@ -199,6 +236,17 @@ export interface paths {
          *     headers on `EventSource`, so this route (and only this one) also accepts the
          *     API token as the `token` query parameter (Host / Origin checks still apply;
          *     the token is compared in constant time; beware that URLs may be logged).
+         *
+         *     The daemon-wide stream (no `run_id`) also carries `schedule_changed` events
+         *     (`dto::ScheduleChanged`: `{"type":"schedule_changed","schedule_id","kind"}`,
+         *     kind `created` / `updated` / `toggled` / `deleted`) when a schedule is changed
+         *     through the API.  They have no SSE `id`, are not replayed and are not
+         *     envelopes: treat them as a hint to refetch `/v1/schedules`.
+         *
+         *     It likewise carries `mcp_server_changed` events (`mcp::McpServerChanged`:
+         *     `{"type":"mcp_server_changed","name","status"}`) when an MCP server is
+         *     added, updated, removed or changes status (connecting / connected / error /
+         *     quarantined ...); same rules: a hint to refetch `/v1/mcp/servers`.
          */
         get: operations["events_doc"];
         put?: never;
@@ -218,6 +266,110 @@ export interface paths {
         };
         /** Liveness probe (no auth; still Host / Origin checked). */
         get: operations["health"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The curated catalog of popular MCP servers (one-click install data). */
+        get: operations["mcp_catalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp/servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * All configured MCP servers with their live status and full config.
+         *     Secret values are never included; `secret_env` and `secret_headers` list
+         *     secret names.
+         */
+        get: operations["list_mcp_servers"];
+        put?: never;
+        /**
+         * Add an MCP server, connect it (when enabled) and save `mcp.toml`.  A server
+         *     that cannot connect is still added (`status: error`).  Secrets are given as
+         *     secret names (`secret_env` / `secret_headers`), never as values; `category`
+         *     defaults to `accounts`, `meta` is rejected, `trust_hints` defaults to `false`.
+         */
+        post: operations["create_mcp_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp/servers/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Merge a partial config onto the stored server (it reconnects) and save
+         *     `mcp.toml`.  Omitted fields keep their previous values.  `bots: null`
+         *     means every bot.  Secret values are never accepted or returned; send
+         *     secret **names** in `secret_env` / `secret_headers`.
+         */
+        put: operations["update_mcp_server"];
+        post?: never;
+        /** Disconnect and remove a server (its tools disappear) and save `mcp.toml`. */
+        delete: operations["delete_mcp_server"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp/servers/{name}/reconnect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reconnect a server (also lifts a quarantine) and refresh its tools.  A
+         *     failed connect is reported as `status: error`, not as an HTTP error.
+         */
+        post: operations["reconnect_mcp_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp/servers/{name}/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The tools a server currently exposes (after its allow / exclude filters). */
+        get: operations["list_mcp_tools"];
         put?: never;
         post?: never;
         delete?: never;
@@ -264,6 +416,23 @@ export interface paths {
          *     per provider and never fail the route).
          */
         get: operations["list_providers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/detected": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Detect installed, signed-in coding CLIs. */
+        get: operations["detect_providers"];
         put?: never;
         post?: never;
         delete?: never;
@@ -476,6 +645,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/secrets/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Store a secret (create or overwrite).  **Write-only**: no route returns a
+         *     secret value.  The name may contain `/` (e.g. `mcp/github-token`).
+         */
+        post: operations["set_secret"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/usage": {
         parameters: {
             query?: never;
@@ -505,8 +694,13 @@ export interface paths {
         /**
          * Fire a schedule from outside.  No bearer token: the body is authenticated
          *     with `X-Signature-256: sha256=<hex HMAC-SHA256(secret, body)>` (the secret
-         *     is the schedule's `webhook_secret`).  Host / Origin checks still apply and
-         *     the body may be at most 256 KB.  The body replaces `{input}` in the payload.
+         *     is the schedule's `webhook_secret`).  Optional replay protection:
+         *     `X-Webhook-Timestamp` (Unix ms; then the HMAC must cover `"{timestamp}.{body}"`
+         *     and the timestamp must be within 5 minutes) and `X-Delivery-Id` /
+         *     `X-GitHub-Delivery` (informational).  A signed request is accepted once per
+         *     5-minute window whether or not those headers are sent, so the same body fired
+         *     twice in that time needs a timestamp (fresh signature) or a different body.  Host / Origin checks still
+         *     apply and the body may be at most 256 KB.  The body replaces `{input}` in the payload.
          *     `202` once accepted (the run goes on in the background).
          */
         post: operations["webhook"];
@@ -640,6 +834,19 @@ export interface components {
             /** @description `true` when `allow` holds only because of a category grant. */
             via_grant: boolean;
         };
+        /** @description A messaging channel (e.g. Telegram) as seen by the daemon. */
+        ChannelDto: {
+            /** @description Credentials are stored. */
+            configured: boolean;
+            /** @description The user has not turned the channel off. */
+            enabled: boolean;
+            /** @description Channel id (`telegram`). */
+            id: string;
+            /** @description Number of paired (allowed) remote users. */
+            paired_users: number;
+            /** @description The channel is running inside this daemon. */
+            running: boolean;
+        };
         /** @description A chat thread. */
         ChatDto: {
             /**
@@ -647,6 +854,12 @@ export interface components {
              * @description Bot the chat talks to.
              */
             bot_id: string;
+            /**
+             * Format: uuid
+             * @description Same as `id`, under the name clients that treat `POST /v1/chats` as
+             *     "create chat" expect.
+             */
+            chat_id: string;
             /**
              * Format: int64
              * @description Creation time.
@@ -660,6 +873,11 @@ export interface components {
             /** @description Title. */
             title: string;
         };
+        /**
+         * @description Authentication status reported by a CLI provider (`GET /v1/providers/detected`).
+         * @enum {string}
+         */
+        CliAuthState: "signed_in" | "signed_out" | "unknown";
         /** @description A configured provider (never carries a key). */
         ConfiguredProviderDto: {
             /** @description Loaded in the running loop (a restart or `reload` picks up changes). */
@@ -771,6 +989,25 @@ export interface components {
          * @enum {string}
          */
         DeliveryKind: "new_turn" | "steered" | "queued" | "stopped";
+        /** @description A detected coding CLI engine (`GET /v1/providers/detected`). */
+        DetectedProviderDto: {
+            /** @description Account label (email or org name, max 160 chars, or null). */
+            account_label?: string | null;
+            /** @description Authentication status (`signed_in`, `signed_out`, `unknown`). */
+            auth: components["schemas"]["CliAuthState"];
+            /** @description Stable detail code (`not_on_path`, `timeout`, `auth_unparsed`, etc., or null). */
+            detail?: string | null;
+            /** @description Display name. */
+            display_name: string;
+            /** @description Engine id (`claude`, `codex`, `cursor`, `opencode`, `gemini`, `chatgpt-plan`). */
+            id: string;
+            /** @description Whether the CLI binary was found on PATH and `--version` succeeded. */
+            installed: boolean;
+            /** @description Whether this engine can currently run turns (always false in this task). */
+            runnable: boolean;
+            /** @description CLI version (first line, trimmed, max 80 chars, or null). */
+            version?: string | null;
+        };
         /** @description A bot's permission picture (`GET /v1/bots/{id}`). */
         EffectivePolicyDto: {
             /**
@@ -827,7 +1064,7 @@ export interface components {
         };
         /** @description `GET /v1/health`. */
         Health: {
-            /** @description Always `ok`. */
+            /** @description `ok` when ready for inference, or `setup_required` before provider setup. */
             status: string;
             /**
              * Format: int64
@@ -836,6 +1073,277 @@ export interface components {
             uptime_secs: number;
             /** @description Daemon crate version. */
             version: string;
+        };
+        /** @description An entry of the curated MCP catalog (`GET /v1/mcp/catalog`). */
+        McpCatalogEntryDto: {
+            /** @description Permission category of its tools. */
+            category: string;
+            /** @description One-line description. */
+            description: string;
+            /** @description Project page. */
+            homepage: string;
+            /** @description simple-icons slug, or `null`. */
+            icon?: string | null;
+            /** @description Stable id. */
+            id: string;
+            /** @description How to install it. */
+            install: components["schemas"]["McpCatalogInstallDto"];
+            /** @description Display name. */
+            name: string;
+        };
+        /**
+         * @description How to install a catalog entry: send it (plus `name` and `category`) to
+         *     `POST /v1/mcp/servers` after storing the `required_secrets`.
+         */
+        McpCatalogInstallDto: {
+            /** @description Arguments (stdio). */
+            args?: string[] | null;
+            /** @description Executable (stdio). */
+            command?: string | null;
+            /** @description Non-secret environment variables (stdio). */
+            env?: {
+                [key: string]: string;
+            };
+            /** @description Secrets to collect first. */
+            required_secrets: components["schemas"]["McpRequiredSecretDto"][];
+            /** @description Environment variable -> secret name (stdio). */
+            secret_env?: {
+                [key: string]: string;
+            };
+            /** @description Header -> secret name (http). */
+            secret_headers?: {
+                [key: string]: string;
+            };
+            /** @description `stdio` or `http`. */
+            transport: components["schemas"]["McpTransportKind"];
+            /** @description Endpoint (http). */
+            url?: string | null;
+        };
+        /** @description A secret the user must provide to install a catalog entry. */
+        McpRequiredSecretDto: {
+            /** @description Where the user can get the value. */
+            help_url?: string | null;
+            /** @description Label for the input field. */
+            label: string;
+            /** @description Secret name (store it with `POST /v1/secrets/{name}`). */
+            name: string;
+        };
+        /**
+         * @description Data of the `mcp_server_changed` SSE event of the daemon-wide stream: a
+         *     server was added, changed, removed, or its status moved.  A notification
+         *     only (refetch `/v1/mcp/servers`); no SSE `id`, not replayed, not an envelope.
+         */
+        McpServerChanged: {
+            /** @description Server name. */
+            name: string;
+            /** @description New status; `disconnected` for a removed server. */
+            status: components["schemas"]["McpStatus"];
+            /** @description Always `mcp_server_changed`. */
+            type: string;
+        };
+        /**
+         * @description A configured MCP server (`GET /v1/mcp/servers`).  The full stored config,
+         *     except secret *values*: `secret_env` / `secret_headers` carry secret
+         *     **names** only.
+         */
+        McpServerDto: {
+            /** @description Arguments (stdio). */
+            args?: string[] | null;
+            /** @description Bots that may use the server; `null` = all bots. */
+            bots?: string[] | null;
+            /** @description Permission category of every tool of the server. */
+            category: string;
+            /** @description Executable (stdio). */
+            command?: string | null;
+            /** @description Working directory (stdio). */
+            cwd?: string | null;
+            /** @description Disabled servers are kept but never connected. */
+            enabled: boolean;
+            /** @description Plain environment variables (stdio). Not secrets. */
+            env?: {
+                [key: string]: string;
+            };
+            /** @description Most recent error, if any. */
+            error?: string | null;
+            /** @description Plain request headers (http). Not secrets. */
+            headers?: {
+                [key: string]: string;
+            };
+            /** @description Server name (the `<server>` of `mcp:<server>/<tool>`). */
+            name: string;
+            /** @description Environment variable -> secret name (stdio). */
+            secret_env?: {
+                [key: string]: string;
+            };
+            /** @description HTTP header -> secret name (http). */
+            secret_headers?: {
+                [key: string]: string;
+            };
+            /** @description Connection state. */
+            status: components["schemas"]["McpStatus"];
+            /** @description Glob allow list over server-side tool names; empty = all. */
+            tool_allow?: string[];
+            /**
+             * Format: int32
+             * @description Number of tools currently registered.
+             */
+            tool_count: number;
+            /** @description Glob exclude list over server-side tool names. */
+            tool_exclude?: string[];
+            /** @description Transport. */
+            transport: components["schemas"]["McpTransportKind"];
+            /** @description Whether the readOnlyHint annotations of the server are believed. */
+            trust_hints: boolean;
+            /** @description Endpoint (http). */
+            url?: string | null;
+        };
+        /**
+         * @description Body of `POST /v1/mcp/servers`: the `mcp-bridge` server config.  Secrets go
+         *     in `secret_headers` / `secret_env` as secret **names** (store the value with
+         *     `POST /v1/secrets/{name}`).
+         */
+        McpServerInput: {
+            /** @description Arguments (stdio, with `transport: "stdio"`). */
+            args?: string[] | null;
+            /** @description Bots that may use the server; absent / `null` = all bots. */
+            bots?: string[] | null;
+            /** @description Permission category of the tools; default `accounts`; `meta` is rejected. */
+            category?: string | null;
+            /** @description Executable (stdio, with `transport: "stdio"`). */
+            command?: string | null;
+            /** @description Working directory (stdio, with `transport: "stdio"`). */
+            cwd?: string | null;
+            /** @description Default `true`. */
+            enabled?: boolean | null;
+            /** @description Plain environment variables (stdio, with `transport: "stdio"`). */
+            env?: {
+                [key: string]: string;
+            };
+            /** @description Plain request headers (http, with `transport: "http"`). */
+            headers?: {
+                [key: string]: string;
+            };
+            /**
+             * @description Server name; `id` is accepted as an alias.  Required on POST; on PUT the
+             *     path wins (a different name in the body is rejected).
+             */
+            name?: string | null;
+            /** @description Environment variable -> secret name. */
+            secret_env?: {
+                [key: string]: string;
+            };
+            /** @description HTTP header -> secret name. */
+            secret_headers?: {
+                [key: string]: string;
+            };
+            /** @description Glob allow list over server-side tool names; empty = all. */
+            tool_allow?: string[];
+            /** @description Glob exclude list over server-side tool names. */
+            tool_exclude?: string[];
+            /** @description Transport (see [`McpTransportInput`]). */
+            transport: components["schemas"]["McpTransportInput"];
+            /** @description Believe the readOnlyHint annotations of the server.  Default `false`. */
+            trust_hints?: boolean;
+            /** @description Endpoint (http, with `transport: "http"`). */
+            url?: string | null;
+        };
+        /**
+         * @description Body of `PUT /v1/mcp/servers/{name}`.  Every field is optional: a field left
+         *     out keeps the stored value.  `bots: null` means every bot.  The handler
+         *     reads the raw JSON so an omitted field is not the same as `null`.
+         */
+        McpServerPatch: {
+            /** @description Arguments (stdio). */
+            args?: string[] | null;
+            /** @description Bots that may use the server.  Omit to keep the list; `null` = all bots. */
+            bots?: string[] | null;
+            /** @description Permission category of the tools; `null` clears it; `meta` is rejected. */
+            category?: string | null;
+            /** @description Executable (stdio). */
+            command?: string | null;
+            /** @description Working directory (stdio).  `null` clears it. */
+            cwd?: string | null;
+            /** @description Disabled servers are kept but never connected. */
+            enabled?: boolean | null;
+            /** @description Plain environment variables (stdio).  Present object replaces the map. */
+            env?: {
+                [key: string]: string;
+            } | null;
+            /** @description Plain request headers (http).  Present object replaces the map. */
+            headers?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * @description Server name; `id` is accepted as an alias.  The path wins (a different
+             *     name in the body is rejected).
+             */
+            name?: string | null;
+            /** @description Environment variable -> secret name.  Present object replaces the map. */
+            secret_env?: {
+                [key: string]: string;
+            } | null;
+            /** @description HTTP header -> secret name.  Present object replaces the map. */
+            secret_headers?: {
+                [key: string]: string;
+            } | null;
+            /** @description Glob allow list over server-side tool names; empty = all. */
+            tool_allow?: string[] | null;
+            /** @description Glob exclude list over server-side tool names. */
+            tool_exclude?: string[] | null;
+            transport?: null | components["schemas"]["McpTransportInput"];
+            /** @description Believe the readOnlyHint annotations of the server. */
+            trust_hints?: boolean | null;
+            /** @description Endpoint (http). */
+            url?: string | null;
+        };
+        /**
+         * @description Connection state of an MCP server.
+         * @enum {string}
+         */
+        McpStatus: "connected" | "connecting" | "disconnected" | "error" | "quarantined";
+        /** @description A tool of an MCP server (`GET /v1/mcp/servers/{name}/tools`). */
+        McpToolDto: {
+            /** @description Description given by the server. */
+            description: string;
+            /** @description `read`, `write` or `destructive` (`destructive` unless the server is trusted). */
+            effect: string;
+            /** @description Qualified tool name (`mcp:<server>/<tool>`). */
+            name: string;
+        };
+        /**
+         * @description `transport` of an MCP server body: either the kind (`"stdio"` / `"http"`,
+         *     with `command` / `args` / `url` as sibling fields, the shape of
+         *     [`McpServerDto`]) or the nested `McpServerConfig` object.
+         */
+        McpTransportInput: components["schemas"]["McpTransportKind"] | components["schemas"]["McpTransportObject"];
+        /**
+         * @description Transport of an MCP server.
+         * @enum {string}
+         */
+        McpTransportKind: "stdio" | "http";
+        /** @description Detailed transport of an MCP server body (the `McpServerConfig` shape). */
+        McpTransportObject: {
+            /** @description Arguments. */
+            args?: string[];
+            /** @description Executable. */
+            command: string;
+            /** @description Working directory. */
+            cwd?: string | null;
+            /** @description Plain (non-secret) environment variables. */
+            env?: {
+                [key: string]: string;
+            };
+            /** @enum {string} */
+            type: "stdio";
+        } | {
+            /** @description Plain (non-secret) request headers. */
+            headers?: {
+                [key: string]: string;
+            };
+            /** @enum {string} */
+            type: "http";
+            /** @description Endpoint URL. */
+            url: string;
         };
         /** @description A stored chat message. */
         MessageDto: {
@@ -869,6 +1377,16 @@ export interface components {
          * @enum {string}
          */
         Mode: "steer" | "queue";
+        /** @description A one-time pairing code (`POST /v1/channels/telegram/pair-code`). */
+        PairCodeDto: {
+            /** @description The 6-digit code the user sends as `/pair <code>`. */
+            code: string;
+            /**
+             * Format: int64
+             * @description Seconds until it expires.
+             */
+            expires_in_secs: number;
+        };
         /** @description Body of `POST /v1/schedules/parse`. */
         ParseSchedule: {
             /** @description English or Turkish phrase, e.g. `every weekday at 9`, `her gün 09:00`. */
@@ -951,6 +1469,11 @@ export interface components {
              */
             bot_id: string;
             /**
+             * @description Whether `POST /v1/runs/{id}/remember` would accept this run (same
+             *     checks; nothing is cached by asking).
+             */
+            can_remember?: boolean;
+            /**
              * Format: uuid
              * @description Chat, if any.
              */
@@ -974,13 +1497,40 @@ export interface components {
              * @description The run that spawned this one when it is a subagent run.
              */
             parent_run_id?: string | null;
-            /** @description `pending` / `running` / `waiting_approval` / `paused` / `succeeded` / `failed` / `cancelled`. */
+            /**
+             * Format: uuid
+             * @description The schedule that started this run (`null` for runs the user started).
+             */
+            schedule_id?: string | null;
+            /** @description `queued` / `running` / `waiting_approval` / `paused` / `succeeded` / `failed` / `cancelled`. */
             state: string;
             /**
              * Format: int64
              * @description Last state change.
              */
             updated_at_ms: number;
+        };
+        /**
+         * @description What happened to a schedule (see [`ScheduleChanged`]).
+         * @enum {string}
+         */
+        ScheduleChangeKind: "created" | "updated" | "toggled" | "deleted";
+        /**
+         * @description Data of the `schedule_changed` SSE event of the daemon-wide stream
+         *     (`GET /v1/events` without `run_id`).  It is a notification only (refetch
+         *     the schedule): it has no SSE `id`, is not replayed with `Last-Event-ID`
+         *     and is not part of `protocol::Envelope`.
+         */
+        ScheduleChanged: {
+            /** @description What happened. */
+            kind: components["schemas"]["ScheduleChangeKind"];
+            /**
+             * Format: uuid
+             * @description The schedule.
+             */
+            schedule_id: string;
+            /** @description Always `schedule_changed`. */
+            type: string;
         };
         /** @description A schedule (`/v1/schedules`). */
         ScheduleDto: {
@@ -1090,6 +1640,11 @@ export interface components {
              * @description The run to follow (`null` when queued: the turn has no run yet).
              */
             run_id?: string | null;
+        };
+        /** @description Body of `POST /v1/secrets/{name}`. */
+        SetSecret: {
+            /** @description The secret value.  Write-only: no route returns it. */
+            value: string;
         };
         /** @description `GET /v1/usage`. */
         UsageSummary: {
@@ -1445,6 +2000,61 @@ export interface operations {
             };
         };
     };
+    list_channels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelDto"][];
+                };
+            };
+        };
+    };
+    telegram_pair_code: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PairCodeDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the channel is not running */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     list_chats: {
         parameters: {
             query?: never;
@@ -1550,6 +2160,15 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Setup required or chat busy */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1707,6 +2326,279 @@ export interface operations {
             };
         };
     };
+    mcp_catalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpCatalogEntryDto"][];
+                };
+            };
+            /** @description MCP management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_mcp_servers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerDto"][];
+                };
+            };
+            /** @description MCP management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_mcp_server: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpServerInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerDto"];
+                };
+            };
+            /** @description the name is taken */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid config */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description MCP management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_mcp_server: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Server name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpServerPatch"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid config */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description MCP management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_mcp_server: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Server name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description MCP management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    reconnect_mcp_server: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Server name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description MCP management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_mcp_tools: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Server name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpToolDto"][];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description MCP management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     get_policy: {
         parameters: {
             query?: never;
@@ -1772,6 +2664,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProvidersDto"];
+                };
+            };
+        };
+    };
+    detect_providers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description When set to 1, bypasses the in-process 60-second cache. */
+                refresh: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DetectedProviderDto"][];
                 };
             };
         };
@@ -2239,6 +3153,48 @@ export interface operations {
                 };
             };
             /** @description the scheduler is not running */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    set_secret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Secret name, `[A-Za-z0-9._:/-]`, at most 128 bytes */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetSecret"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description bad name or value */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description no secret store */
             503: {
                 headers: {
                     [name: string]: unknown;

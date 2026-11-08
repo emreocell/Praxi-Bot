@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "../overlay/events";
+import { isMockMode, MOCK_BASE_URL } from "./mock";
 
 /** What the shell hands us after starting / finding the daemon. */
 export interface Connection {
@@ -18,6 +19,15 @@ export interface Connection {
  * started by hand.
  */
 export async function connectDaemon(restart = false): Promise<Connection> {
+  if (isMockMode()) {
+    return {
+      base_url: MOCK_BASE_URL,
+      token: "mock",
+      started_by_app: false,
+      fake_provider: true,
+      data_dir: ""
+    };
+  }
   if (isTauriRuntime()) {
     return invoke<Connection>(restart ? "daemon_restart" : "daemon_connect");
   }

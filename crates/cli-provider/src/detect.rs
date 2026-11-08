@@ -545,19 +545,24 @@ fn tree_kill_program() -> PathBuf {
 
 async fn kill_tree(child: &mut dyn ChildWrapper, original_pid: Option<u32>) {
     // The native wrappers retain the process group / job even after wait() has
-    // cleared Child::id(). In particular, never taskkill a possibly reused
-    // Windows leader PID: JobChild terminates the exact owned job instead.
-    let _ = child.start_kill();
+    // cleared Child::id(). Never taskkill a possibly reused Windows leader PID:
+    // JobChild terminates the exact owned job instead.
     #[cfg(unix)]
     if let Some(pid) = original_pid {
-        let mut cmd = tokio::process::Command::new(tree_kill_program());
-        // `--` is required: procps `kill -9 -<pgid>` otherwise ignores the group.
-        cmd.args(["-9", "--", &format!("-{pid}")]);
-        scrub_process_env(&mut cmd);
-        let _ = cmd.output().await;
+        // Only signal by number while the leader is still unreaped (a zombie
+        // keeps its pid and thus the pgid), so a reused pid cannot be hit. If it
+        // was already reaped, start_kill below uses the wrapper's retained group.
+        if matches!(child.try_wait(), Ok(None)) {
+            let mut cmd = tokio::process::Command::new(tree_kill_program());
+            // `--` is required: procps `kill -9 -<pgid>` otherwise ignores the group.
+            cmd.args(["-9", "--", &format!("-{pid}")]);
+            scrub_process_env(&mut cmd);
+            let _ = cmd.output().await;
+        }
     }
     #[cfg(windows)]
     let _ = original_pid;
+    let _ = child.start_kill();
     let _ = child.wait().await;
 }
 
@@ -1145,27 +1150,9 @@ impl Detector {
 
         match run_process_probe(&resolved, &["login", "status"], &self.env).await {
             Ok((_status, stdout, stderr)) => {
-                let first_line = stdout
-                    .lines()
-                    .next()
-                    .filter(|l| !l.trim().is_empty())
-                    .or_else(|| stderr.lines().next().filter(|l| !l.trim().is_empty()))
-                    .unwrap_or("")
-                    .trim();
-
-                let lower = first_line.to_ascii_lowercase();
-                if lower.starts_with("logged in") {
-                    cli.auth = AuthState::SignedIn;
-                    cli.detail = None;
-                } else if lower.starts_with("not logged in")
-                    || lower.starts_with("error checking login status")
-                {
-                    cli.auth = AuthState::SignedOut;
-                    cli.detail = None;
-                } else {
-                    cli.auth = AuthState::Unknown;
-                    cli.detail = Some("auth_unparsed".to_owned());
-                }
+                let (auth, detail) = classify_codex_status(&stdout, &stderr);
+                cli.auth = auth;
+                cli.detail = detail.map(str::to_owned);
             }
             Err(ProbeError::Timeout) => {
                 cli.auth = AuthState::Unknown;
@@ -1230,9 +1217,10 @@ impl Detector {
         // 2. Fall back to plain `status`
         match run_process_probe(&resolved, &["status"], &self.env).await {
             Ok((status, stdout, stderr)) => {
-                let combined = format!("{stdout}\n{stderr}");
-                let (auth, detail) =
-                    auth_for_exit_status(status.success(), classify_status_text(&combined));
+                let (auth, detail) = auth_for_exit_status(
+                    status.success(),
+                    classify_status_streams(&stdout, &stderr),
+                );
                 cli.auth = auth;
                 cli.detail = detail.map(str::to_owned);
             }
@@ -1361,6 +1349,31 @@ impl Detector {
     }
 }
 
+/// `codex login status` prints one line: "Logged in using ..." or "Not logged in".
+/// stderr can only produce a signed-out verdict, never a signed-in one.
+fn classify_codex_status(stdout: &str, stderr: &str) -> AuthClassification {
+    let first = |text: &str| {
+        strip_ansi(text)
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .unwrap_or("")
+            .to_ascii_lowercase()
+    };
+    let signed_out =
+        |l: &str| l.starts_with("not logged in") || l.starts_with("error checking login status");
+    let out = first(stdout);
+    if signed_out(&out) {
+        (AuthState::SignedOut, None)
+    } else if out.starts_with("logged in using ") && is_positive_status_line(&out) {
+        (AuthState::SignedIn, None)
+    } else if out.is_empty() && signed_out(&first(stderr)) {
+        (AuthState::SignedOut, None)
+    } else {
+        (AuthState::Unknown, Some("auth_unparsed"))
+    }
+}
+
 type AuthClassification = (AuthState, Option<&'static str>);
 
 fn auth_for_exit_status(success: bool, classification: AuthClassification) -> AuthClassification {
@@ -1393,16 +1406,10 @@ fn classify_status_text(out: &str) -> AuthClassification {
         ]
         .iter()
         .any(|phrase| contains_status_phrase(line, phrase))
+            || is_negated_flag_line(line)
         {
             negative = true;
-        } else if ["logged in", "signed in", "authenticated"]
-            .iter()
-            .any(|phrase| {
-                line.trim_start()
-                    .strip_prefix(phrase)
-                    .is_some_and(|tail| !tail.chars().next().is_some_and(is_word_char))
-            })
-        {
+        } else if is_positive_status_line(line) {
             positive = true;
         }
     }
@@ -1411,6 +1418,69 @@ fn classify_status_text(out: &str) -> AuthClassification {
         (true, false) => (AuthState::SignedOut, None),
         (false, true) => (AuthState::SignedIn, None),
         (false, false) => (AuthState::Unknown, Some("auth_unparsed")),
+    }
+}
+
+const AUTH_WORDS: [&str; 3] = ["logged in", "signed in", "authenticated"];
+
+/// `Logged in: false`, `Authenticated? no`, `signed in = 0`, ...
+fn is_negated_flag_line(line: &str) -> bool {
+    let line = line.trim();
+    AUTH_WORDS.iter().any(|word| {
+        line.strip_prefix(word).is_some_and(|tail| {
+            let value = tail.trim_start_matches(|c: char| c.is_whitespace() || ":=?-".contains(c));
+            value.len() < tail.len()
+                && matches!(
+                    value.trim_end_matches(['.', '!']),
+                    "false" | "no" | "none" | "0"
+                )
+        })
+    })
+}
+
+/// Only exact anchored forms count: the bare word, `<word> as|using <short value>`,
+/// or `<word>: true|yes|ok`. Anything else (help text, prose, placeholders) is not
+/// evidence of a signed-in session.
+fn is_positive_status_line(line: &str) -> bool {
+    let line = line.trim();
+    for word in AUTH_WORDS {
+        let Some(tail) = line.strip_prefix(word) else {
+            continue;
+        };
+        let tail = tail.trim_end_matches(['.', '!']);
+        if tail.trim().is_empty() {
+            return true;
+        }
+        if !tail.starts_with(|c: char| c.is_whitespace() || ":=-".contains(c)) {
+            continue;
+        }
+        if tail.contains(['<', '>', '[', ']', '{', '}', '`']) {
+            return false;
+        }
+        let rest = tail.trim_start_matches(|c: char| c.is_whitespace() || ":=-".contains(c));
+        if matches!(rest, "true" | "yes" | "ok") {
+            return true;
+        }
+        if word != "authenticated" {
+            for prefix in ["as ", "using ", "with ", "via "] {
+                if let Some(value) = rest.strip_prefix(prefix) {
+                    return (1..=4).contains(&value.split_whitespace().count())
+                        && !value.contains([',', ';', '(', ')']);
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Classify stdout; stderr may only contradict (never create) a signed-in result.
+fn classify_status_streams(stdout: &str, stderr: &str) -> AuthClassification {
+    let out = classify_status_text(stdout);
+    let err = classify_status_text(stderr);
+    match (out.0, err.0) {
+        (AuthState::SignedIn, AuthState::SignedOut) => (AuthState::Unknown, Some("auth_ambiguous")),
+        (AuthState::Unknown, AuthState::SignedOut) => (AuthState::SignedOut, None),
+        _ => out,
     }
 }
 
@@ -1578,6 +1648,94 @@ mod tests {
             assert_eq!(
                 classify_status_text(text),
                 (AuthState::Unknown, Some("auth_unparsed")),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn status_text_rejects_negated_flags_and_help_text() {
+        for text in [
+            "Logged in: false",
+            "Logged in: no",
+            "Authenticated: no",
+            "Authenticated? no",
+            "Signed in = 0",
+            "signed in: none",
+        ] {
+            assert_eq!(
+                classify_status_text(text),
+                (AuthState::SignedOut, None),
+                "{text:?}"
+            );
+        }
+        for text in [
+            "Authenticated users only may run this command",
+            "Signed in as <placeholder>",
+            "Logged in as `name`",
+            "Logged in, use the --help flag for more",
+            "Logged in: maybe",
+            "Usage: status\nLogged in users are listed below",
+        ] {
+            assert_eq!(
+                classify_status_text(text),
+                (AuthState::Unknown, Some("auth_unparsed")),
+                "{text:?}"
+            );
+        }
+        for text in [
+            "Logged in: true",
+            "Authenticated: yes",
+            "Signed in as a@b.co",
+        ] {
+            assert_eq!(
+                classify_status_text(text),
+                (AuthState::SignedIn, None),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn stderr_never_creates_signed_in() {
+        assert_eq!(
+            classify_status_streams("", "Authenticated"),
+            (AuthState::Unknown, Some("auth_unparsed"))
+        );
+        assert_eq!(
+            classify_status_streams("", "Not logged in"),
+            (AuthState::SignedOut, None)
+        );
+        assert_eq!(
+            classify_status_streams("Logged in as a@b.co", "Not logged in"),
+            (AuthState::Unknown, Some("auth_ambiguous"))
+        );
+        assert_eq!(
+            classify_codex_status("", "Logged in using ChatGPT").0,
+            AuthState::Unknown
+        );
+    }
+
+    #[test]
+    fn codex_status_first_line_forms() {
+        assert_eq!(
+            classify_codex_status("Logged in using ChatGPT\n", "").0,
+            AuthState::SignedIn
+        );
+        assert_eq!(
+            classify_codex_status("Not logged in\n", "").0,
+            AuthState::SignedOut
+        );
+        for text in [
+            "Logged in: false",
+            "Logged in using",
+            "Logged in using <x>",
+            "logged in",
+            "Usage: codex login status",
+        ] {
+            assert_eq!(
+                classify_codex_status(text, "").0,
+                AuthState::Unknown,
                 "{text:?}"
             );
         }

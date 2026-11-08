@@ -65,6 +65,13 @@ pub struct BuiltinConfig {
     pub control: Option<Arc<dyn DesktopControlGate>>,
     /// Email connector (IMAP/SMTP tools). `None` = email tools skipped.
     pub email: Option<Arc<connector_email::EmailConnector>>,
+    /// Directories `fs_*` may read and write. Empty does not add a root limit.
+    /// A non-empty list that cannot be resolved denies every `fs_*` call.
+    /// UNC paths, device paths, and credential files are still refused.
+    pub fs_allowed_roots: Vec<PathBuf>,
+    /// Credential paths the host explicitly grants to `fs_*`. A grant does not
+    /// permit UNC, device, or out-of-root paths.
+    pub fs_granted_paths: Vec<PathBuf>,
 }
 
 impl BuiltinConfig {
@@ -83,6 +90,8 @@ impl BuiltinConfig {
             script_limits: script_runtime::Limits::default(),
             control: None,
             email: None,
+            fs_allowed_roots: Vec::new(),
+            fs_granted_paths: Vec::new(),
         }
     }
 
@@ -113,7 +122,11 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         .browser
         .unwrap_or_else(|| Arc::new(CdpDriver::new(cfg.browser_settings)));
     all.extend(browser::tools(driver, &cfg.data_dir, cfg.control));
-    all.extend(files::tools(&cfg.data_dir));
+    all.extend(files::tools_bounded(
+        &cfg.data_dir,
+        &cfg.fs_allowed_roots,
+        &cfg.fs_granted_paths,
+    ));
     all.push(shell::tool(&cfg.data_dir));
     all.push(script::tool(registry.clone(), cfg.gate, cfg.script_limits));
     all.extend(meta::tools());
