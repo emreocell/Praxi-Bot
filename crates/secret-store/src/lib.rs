@@ -26,5 +26,5 @@ pub use open::{
     BackendChoice, BackendKind, KEYRING_SERVICE, PASSPHRASE_ENV, SECRETS_FILE_NAME, open_store,
     secrets_file_path,
 };
-pub use redact::{REDACTED, Redactor};
+pub use redact::{REDACTED, Redactor, secret_variants};
 pub use secret::{SecretRef, SecretStore, SecretValue, resolve, validate_name};

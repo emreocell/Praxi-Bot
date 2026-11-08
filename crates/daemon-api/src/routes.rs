@@ -111,7 +111,7 @@ fn effective_policy_dto(e: EffectivePolicy) -> EffectivePolicyDto {
             .map(|(c, d)| {
                 let decision = match d.decision {
                     PolicyDecision::Allow => "allow",
-                    PolicyDecision::Ask => "ask",
+                    PolicyDecision::Ask { .. } => "ask",
                     PolicyDecision::Deny => "deny",
                 };
                 (

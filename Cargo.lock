@@ -862,6 +862,7 @@ dependencies = [
  "image",
  "parking_lot",
  "permission-engine",
+ "process-wrap",
  "protocol",
  "script-runtime",
  "secret-store",
@@ -874,6 +875,7 @@ dependencies = [
  "tracing",
  "uuid",
  "vision",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -4407,6 +4409,7 @@ version = "0.1.0"
 dependencies = [
  "agent-router",
  "async-trait",
+ "base64 0.22.1",
  "futures",
  "globset",
  "http",
