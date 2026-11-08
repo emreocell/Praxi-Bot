@@ -55,6 +55,28 @@ fn provider(server: &MockServer, retries: u32) -> AnthropicProvider {
     .unwrap()
 }
 
+#[test]
+fn streamed_tool_argument_fragments_have_a_cumulative_limit() {
+    let mut decoder = Decoder::default();
+    decoder
+        .feed(
+            &json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "tool_use", "id": "call", "name": "read"}
+            })
+            .to_string(),
+        )
+        .unwrap();
+    let delta = json!({
+        "type": "content_block_delta", "index": 0,
+        "delta": {"type": "input_json_delta", "partial_json": "x".repeat(crate::limits::MAX_TOOL_ARGUMENT_BYTES / 2)}
+    }).to_string();
+    decoder.feed(&delta).unwrap();
+    decoder.feed(&delta).unwrap();
+    let error = decoder.feed(&delta).unwrap_err();
+    assert!(matches!(error, ProviderError::Stream(message) if message.contains("tool arguments")));
+}
+
 fn req() -> ChatRequest {
     ChatRequest::new(
         ModelRef("anthropic/claude-test".into()),

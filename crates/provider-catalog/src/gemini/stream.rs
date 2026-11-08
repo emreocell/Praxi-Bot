@@ -11,6 +11,7 @@ use serde_json::Value;
 use super::{classify, request::make_call_id};
 use crate::{
     error::ProviderError,
+    limits::ToolArgumentBudget,
     provider::{ChatChunk, FinishReason, ToolCall, Usage},
     util::{EventDecoder, ThoughtFilter, finish_error},
 };
@@ -18,6 +19,7 @@ use crate::{
 #[derive(Debug, Default)]
 pub(super) struct Decoder {
     calls: Vec<ToolCall>,
+    arguments: ToolArgumentBudget,
     usage: Option<Usage>,
     finish: Option<FinishReason>,
     finished: bool,
@@ -100,6 +102,7 @@ impl EventDecoder for Decoder {
                     let args = fc
                         .get("args")
                         .map_or_else(|| "{}".to_owned(), Value::to_string);
+                    self.arguments.charge(0, args.len())?;
                     let sig = p.get("thoughtSignature").and_then(Value::as_str);
                     let id = make_call_id(unique_id(self.calls.len()), sig);
                     out.push(ChatChunk::ToolCallDelta {

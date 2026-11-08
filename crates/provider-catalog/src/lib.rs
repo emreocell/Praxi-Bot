@@ -10,6 +10,7 @@ pub mod entry;
 pub mod error;
 pub mod factory;
 pub mod gemini;
+mod limits;
 pub mod openai_compat;
 pub mod provider;
 pub mod selector;

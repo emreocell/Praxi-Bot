@@ -6,6 +6,10 @@ use serde_json::Value;
 
 use crate::{
     error::ProviderError,
+    limits::{
+        MAX_SSE_EVENT_BYTES, MAX_SSE_LINE_BYTES, MAX_SSE_TOTAL_BYTES, ToolArgumentBudget,
+        checked_size,
+    },
     provider::{ChatChunk, FinishReason, ToolCall, Usage},
     util::{ThoughtFilter, finish_error},
 };
@@ -15,43 +19,82 @@ use crate::{
 #[derive(Debug, Default)]
 pub(crate) struct SseDecoder {
     buf: Vec<u8>,
-    data: Vec<String>,
+    data: String,
+    has_data: bool,
+    event_bytes: usize,
+    total_bytes: usize,
 }
 
 impl SseDecoder {
-    pub(crate) fn push(&mut self, bytes: &[u8]) -> Vec<String> {
-        self.buf.extend_from_slice(bytes);
-        let mut events = Vec::new();
-        while let Some(pos) = self.buf.iter().position(|&b| b == b'\n') {
-            let raw: Vec<u8> = self.buf.drain(..=pos).collect();
-            let line = String::from_utf8_lossy(&raw);
-            let line = line.trim_end_matches(['\n', '\r']);
-            if line.is_empty() {
-                if !self.data.is_empty() {
-                    events.push(std::mem::take(&mut self.data).join("\n"));
-                }
-            } else if let Some(rest) = line.strip_prefix("data:") {
-                self.data
-                    .push(rest.strip_prefix(' ').unwrap_or(rest).to_owned());
+    /// Consume only through the next event. The caller can stop at a terminal
+    /// payload without parsing or buffering any following data in the same read.
+    pub(crate) fn next_event(
+        &mut self,
+        bytes: &mut &[u8],
+    ) -> Result<Option<String>, ProviderError> {
+        while !bytes.is_empty() {
+            let newline = bytes.iter().position(|&byte| byte == b'\n');
+            let count = newline.map_or(bytes.len(), |pos| pos + 1);
+            checked_size(self.buf.len(), count, MAX_SSE_LINE_BYTES, "SSE line")?;
+            self.event_bytes =
+                checked_size(self.event_bytes, count, MAX_SSE_EVENT_BYTES, "SSE event")?;
+            self.total_bytes =
+                checked_size(self.total_bytes, count, MAX_SSE_TOTAL_BYTES, "SSE stream")?;
+            self.buf.extend_from_slice(&bytes[..count]);
+            *bytes = &bytes[count..];
+            if newline.is_some()
+                && let Some(event) = self.line()?
+            {
+                return Ok(Some(event));
             }
         }
-        events
+        Ok(None)
+    }
+
+    fn take_event(&mut self) -> Option<String> {
+        if std::mem::take(&mut self.has_data) {
+            Some(std::mem::take(&mut self.data))
+        } else {
+            None
+        }
+    }
+
+    fn line(&mut self) -> Result<Option<String>, ProviderError> {
+        let raw = String::from_utf8_lossy(&self.buf);
+        let line = raw.trim_end_matches(['\n', '\r']);
+        if line.is_empty() {
+            self.buf.clear();
+            self.event_bytes = 0;
+            return Ok(self.take_event());
+        }
+        if let Some(rest) = line.strip_prefix("data:") {
+            let rest = rest.strip_prefix(' ').unwrap_or(rest);
+            // Lossy UTF-8 decoding can expand the raw bytes; also budget the
+            // decoded payload and the newline inserted between data fields.
+            checked_size(
+                self.data.len(),
+                rest.len() + usize::from(self.has_data),
+                MAX_SSE_EVENT_BYTES,
+                "SSE event data",
+            )?;
+            if self.has_data {
+                self.data.push('\n');
+            }
+            self.data.push_str(rest);
+            self.has_data = true;
+        }
+        self.buf.clear();
+        Ok(None)
     }
 
     /// Flush a trailing event that was not terminated by a blank line.
-    pub(crate) fn finish(&mut self) -> Option<String> {
-        if !self.buf.is_empty() {
-            let rest = std::mem::take(&mut self.buf);
-            let line = String::from_utf8_lossy(&rest);
-            if let Some(d) = line.trim_end_matches(['\n', '\r']).strip_prefix("data:") {
-                self.data.push(d.strip_prefix(' ').unwrap_or(d).to_owned());
-            }
+    pub(crate) fn finish(&mut self) -> Result<Option<String>, ProviderError> {
+        if !self.buf.is_empty()
+            && let Some(event) = self.line()?
+        {
+            return Ok(Some(event));
         }
-        if self.data.is_empty() {
-            None
-        } else {
-            Some(std::mem::take(&mut self.data).join("\n"))
-        }
+        Ok(self.take_event())
     }
 }
 
@@ -68,11 +111,18 @@ struct PartialCall {
 #[derive(Debug, Default)]
 pub(super) struct Assembler {
     calls: BTreeMap<u64, PartialCall>,
+    arguments: ToolArgumentBudget,
     finish: Option<FinishReason>,
     usage: Option<Usage>,
     thoughts: ThoughtFilter,
     /// Set once `[DONE]` or a finish reason has been seen.
     pub(super) finished: bool,
+}
+
+/// A finish reason is metadata; only an explicit `[DONE]` ends transport reads.
+pub(super) enum Assembly {
+    Chunks(Vec<ChatChunk>),
+    Done,
 }
 
 fn parse_finish(s: &str) -> FinishReason {
@@ -132,11 +182,11 @@ impl Assembler {
     }
 
     /// Apply one JSON payload (a streamed chunk or a full non-stream response).
-    pub(super) fn feed(&mut self, data: &str) -> Result<Vec<ChatChunk>, ProviderError> {
+    pub(super) fn feed(&mut self, data: &str) -> Result<Assembly, ProviderError> {
         let data = data.trim();
         if data == "[DONE]" {
             self.finished = true;
-            return Ok(Vec::new());
+            return Ok(Assembly::Done);
         }
         let v: Value = serde_json::from_str(data)
             .map_err(|e| ProviderError::Stream(format!("invalid JSON chunk: {e}")))?;
@@ -148,7 +198,7 @@ impl Assembler {
             self.usage = Some(u);
         }
         let Some(choice) = v.pointer("/choices/0") else {
-            return Ok(out);
+            return Ok(Assembly::Chunks(out));
         };
         // Streamed chunks use `delta`; non-streamed responses use `message`.
         let delta = choice.get("delta").or_else(|| choice.get("message"));
@@ -189,6 +239,7 @@ impl Assembler {
                             n.clone_into(&mut p.name);
                         }
                         if let Some(a) = f.get("arguments").and_then(Value::as_str) {
+                            self.arguments.charge(p.arguments.len(), a.len())?;
                             p.arguments.push_str(a);
                         }
                     }
@@ -199,7 +250,7 @@ impl Assembler {
             self.finish = Some(parse_finish(fr));
             self.finished = true;
         }
-        Ok(out)
+        Ok(Assembly::Chunks(out))
     }
 
     /// Emit assembled tool calls, usage and `Done`. Errors if the stream ended
@@ -245,5 +296,63 @@ impl Assembler {
             finish_reason: reason,
         });
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::limits::MAX_TOOL_ARGUMENT_BYTES;
+
+    #[test]
+    fn oversized_line_is_rejected_before_copying() {
+        let mut decoder = SseDecoder::default();
+        let bytes = vec![b'x'; MAX_SSE_LINE_BYTES + 1];
+        let error = decoder.next_event(&mut bytes.as_slice()).unwrap_err();
+        assert!(matches!(error, ProviderError::Stream(message) if message.contains("SSE line")));
+        assert_eq!(decoder.buf, Vec::<u8>::new());
+    }
+
+    #[test]
+    fn multiline_event_budget_applies_across_chunks() {
+        let mut decoder = SseDecoder::default();
+        let line = format!("data: {}\n", "x".repeat(MAX_SSE_LINE_BYTES / 2));
+        for _ in 0..3 {
+            assert!(decoder.next_event(&mut line.as_bytes()).unwrap().is_none());
+        }
+        let error = decoder.next_event(&mut line.as_bytes()).unwrap_err();
+        assert!(matches!(error, ProviderError::Stream(message) if message.contains("SSE event")));
+        assert!(decoder.data.len() < MAX_SSE_EVENT_BYTES);
+    }
+
+    #[test]
+    fn total_stream_budget_includes_ignored_comments_and_empty_events() {
+        let mut decoder = SseDecoder::default();
+        let bytes = format!(":{}\n\n", "x".repeat(64 * 1024));
+        let chunks = MAX_SSE_TOTAL_BYTES / bytes.len();
+        for _ in 0..chunks {
+            assert!(decoder.next_event(&mut bytes.as_bytes()).unwrap().is_none());
+        }
+        let error = decoder.next_event(&mut bytes.as_bytes()).unwrap_err();
+        assert!(matches!(error, ProviderError::Stream(message) if message.contains("SSE stream")));
+        assert_eq!(decoder.data, "");
+    }
+
+    #[test]
+    fn split_tool_arguments_are_bounded_before_append() {
+        let mut assembler = Assembler::default();
+        let payload = json!({"choices": [{"delta": {"tool_calls": [{
+            "index": 0, "function": {"arguments": "x".repeat(MAX_TOOL_ARGUMENT_BYTES / 2)}
+        }]}}]})
+        .to_string();
+        assembler.feed(&payload).unwrap();
+        assembler.feed(&payload).unwrap();
+        let error = assembler.feed(&payload).err().unwrap();
+        assert!(
+            matches!(error, ProviderError::Stream(message) if message.contains("tool arguments"))
+        );
+        assert_eq!(assembler.calls[&0].arguments.len(), MAX_TOOL_ARGUMENT_BYTES);
     }
 }
