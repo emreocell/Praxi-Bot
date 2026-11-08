@@ -610,3 +610,90 @@ fn invalid_limits_fail_closed() {
         .is_err()
     );
 }
+
+/// `QuicTransportConfig` keeps its fields private. `Debug` is the supported way
+/// to read the handshake limits back, which is what the endpoint builder installs.
+fn transport_debug_field(text: &str, field: &str) -> u64 {
+    let marker = format!("{field}: ");
+    let mut from = 0;
+    while let Some(rel) = text[from..].find(&marker) {
+        let at = from + rel;
+        let previous = at.checked_sub(1).map(|index| text.as_bytes()[index]);
+        let boundary = previous.is_none_or(|byte| !(byte.is_ascii_alphanumeric() || byte == b'_'));
+        if boundary {
+            let digits: String = text[at + marker.len()..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            return digits
+                .parse()
+                .unwrap_or_else(|_| panic!("non-numeric {field} in {text}"));
+        }
+        from = at + marker.len();
+    }
+    panic!("missing {field} in {text}");
+}
+
+#[test]
+fn endpoint_transport_config_reads_back_stream_caps_and_receive_window() {
+    let limits = RpcLimits {
+        streams_per_connection: 3,
+        bytes_per_connection: 3 * STREAM_BYTES,
+        ..RpcLimits::default()
+    };
+    assert!(limits.validate().is_ok());
+    let text = format!("{:?}", endpoint_transport_config(limits));
+    assert_eq!(
+        transport_debug_field(&text, "max_concurrent_bidi_streams"),
+        3,
+        "{text}"
+    );
+    assert_eq!(
+        transport_debug_field(&text, "max_concurrent_uni_streams"),
+        1,
+        "{text}"
+    );
+    assert_eq!(
+        transport_debug_field(&text, "receive_window"),
+        u64::try_from(limits.bytes_per_connection).unwrap(),
+        "{text}"
+    );
+    // The connection window, not the per-stream window, is the byte budget.
+    assert_ne!(
+        transport_debug_field(&text, "receive_window"),
+        transport_debug_field(&text, "stream_receive_window"),
+        "{text}"
+    );
+
+    let defaults = RpcLimits::default();
+    let text = format!("{:?}", endpoint_transport_config(defaults));
+    assert_eq!(
+        transport_debug_field(&text, "max_concurrent_bidi_streams"),
+        u64::try_from(defaults.streams_per_connection).unwrap(),
+        "{text}"
+    );
+    assert_eq!(
+        transport_debug_field(&text, "max_concurrent_uni_streams"),
+        1,
+        "{text}"
+    );
+    assert_eq!(
+        transport_debug_field(&text, "receive_window"),
+        u64::try_from(defaults.bytes_per_connection).unwrap(),
+        "{text}"
+    );
+    assert_ne!(
+        transport_debug_field(&text, "max_concurrent_bidi_streams"),
+        100,
+        "{text}"
+    );
+    assert_ne!(
+        transport_debug_field(&text, "max_concurrent_uni_streams"),
+        100,
+        "{text}"
+    );
+    assert!(
+        transport_debug_field(&text, "receive_window") < (1_u64 << 62) - 1,
+        "{text}"
+    );
+}

@@ -37,6 +37,8 @@ pub const CLOSE_NOT_PAIRED: u32 = 403;
 pub const CLOSE_REVOKED: u32 = 410;
 /// QUIC application close code: the endpoint is shutting down.
 pub const CLOSE_SHUTDOWN: u32 = 0;
+/// QUIC application close code: a newer RPC connection from the same peer replaced this one.
+pub const CLOSE_REPLACED: u32 = 409;
 /// Stream stop code used when a caller cancels a request.
 pub const STOP_CANCELLED: u32 = 499;
 /// Stream stop code used when the serving side has no admission budget.

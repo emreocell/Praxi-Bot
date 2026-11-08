@@ -18,9 +18,9 @@ use crate::error::{PeerError, Result};
 use crate::identity::{key_to_string, load_or_create_secret_key};
 use crate::invite::{INVITE_TTL, Invite, InviteBook, MAX_INVITE_TTL, PairTicket, RedeemError};
 use crate::proto::{
-    ALPN_EVENTS, ALPN_PAIR, ALPN_RPC, CLOSE_NOT_PAIRED, CLOSE_REVOKED, CLOSE_SHUTDOWN, Event,
-    LeaderInfo, MAX_FRAME, MAX_PAIR_FRAME, PROTOCOL_VERSION, PairRequest, PairResponse,
-    RejectReason, read_frame, write_frame,
+    ALPN_EVENTS, ALPN_PAIR, ALPN_RPC, CLOSE_NOT_PAIRED, CLOSE_REPLACED, CLOSE_REVOKED,
+    CLOSE_SHUTDOWN, Event, LeaderInfo, MAX_FRAME, MAX_PAIR_FRAME, PROTOCOL_VERSION, PairRequest,
+    PairResponse, RejectReason, read_frame, write_frame,
 };
 use crate::rpc::{
     DEFAULT_RPC_TIMEOUT, RpcBudget, RpcClient, RpcHandler, RpcLimits, map_conn_err,
@@ -195,7 +195,21 @@ impl Inner {
             conn.close(CLOSE_NOT_PAIRED.into(), b"not paired");
             return Err(PeerError::UnknownDevice(key_to_string(peer)));
         };
-        conns.retain(|(_, c)| c.close_reason().is_none());
+        // One live RPC connection per peer. A newer `bot/rpc/1` connection
+        // closes the previous one so a paired key cannot repeat the handshake
+        // stream grant. Event connections are left in place; heartbeats
+        // reconnect on their own ALPN and only need the uni limit of 1.
+        let replacing_rpc = conn.alpn() == ALPN_RPC;
+        conns.retain(|(id, existing)| {
+            if existing.close_reason().is_some() {
+                return false;
+            }
+            if replacing_rpc && id == peer && existing.alpn() == ALPN_RPC {
+                existing.close(CLOSE_REPLACED.into(), b"replaced");
+                return false;
+            }
+            true
+        });
         conns.push((*peer, conn.clone()));
         Ok(device)
     }
@@ -256,7 +270,10 @@ impl PeerNetwork {
                 Endpoint::builder(presets::Minimal).relay_mode(RelayMode::Disabled)
             }
         };
-        let mut builder = builder.secret_key(key).alpns(alpns);
+        let mut builder = builder
+            .transport_config(crate::rpc::endpoint_transport_config(config.rpc_limits))
+            .secret_key(key)
+            .alpns(alpns);
         if let Some(addr) = config.bind_addr {
             builder = builder
                 .bind_addr(addr)
@@ -1261,6 +1278,171 @@ mod tests {
         assert!(api.close_reason().is_none());
         assert!(rpc.close_reason().is_none());
         assert!(events.close_reason().is_none());
+
+        other.shutdown().await;
+        desktop.shutdown().await;
+        core.shutdown().await;
+    }
+
+    fn live(inner: &Inner, peer: &PublicKey, alpn: &[u8]) -> usize {
+        inner
+            .conns
+            .lock()
+            .iter()
+            .filter(|(id, conn)| id == peer && conn.alpn() == alpn && conn.close_reason().is_none())
+            .count()
+    }
+
+    async fn wait_live(inner: &Inner, peer: &PublicKey, alpn: &[u8], count: usize) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while live(inner, peer, alpn) != count {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn handshake_grants_configured_bidi_cap_and_one_uni_stream() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = loopback(dir.path(), "core");
+        cfg.rpc_limits.streams_per_connection = 2;
+        let core = PeerNetwork::start(cfg, Some(Arc::new(NopRpc)))
+            .await
+            .unwrap();
+        let desktop = PeerNetwork::start(loopback(dir.path(), "desktop"), None)
+            .await
+            .unwrap();
+        let invite = core.create_invite(Role::Desktop).await;
+        desktop
+            .pair(&PairTicket::parse(&invite.ticket).unwrap())
+            .await
+            .unwrap();
+
+        // Events connections are not accepted as bidirectional, so opened bidi
+        // streams stay outstanding and the next grant has to come from the
+        // handshake credit rather than from the server resetting them.
+        let events = desktop
+            .inner
+            .endpoint
+            .connect(core.addr(), ALPN_EVENTS)
+            .await
+            .unwrap();
+        let mut bidi = Vec::new();
+        let mut slowest = Duration::from_millis(50);
+        for _ in 0..core.inner.config.rpc_limits.streams_per_connection {
+            let started = Instant::now();
+            bidi.push(
+                tokio::time::timeout(Duration::from_secs(5), events.open_bi())
+                    .await
+                    .expect("configured bidi grant")
+                    .unwrap(),
+            );
+            slowest = slowest.max(started.elapsed());
+        }
+        let patience = slowest.saturating_mul(5).max(Duration::from_millis(300));
+        let extra_bidi = tokio::time::timeout(patience, events.open_bi()).await;
+        assert!(
+            extra_bidi.is_err(),
+            "handshake granted more bidirectional streams than streams_per_connection"
+        );
+        let started = Instant::now();
+        let uni = tokio::time::timeout(Duration::from_secs(5), events.open_uni())
+            .await
+            .expect("one unidirectional stream for heartbeats")
+            .unwrap();
+        slowest = slowest.max(started.elapsed());
+        let patience = slowest.saturating_mul(5).max(Duration::from_millis(300));
+        let extra_uni = tokio::time::timeout(patience, events.open_uni()).await;
+        assert!(
+            extra_uni.is_err(),
+            "handshake granted more than one unidirectional stream"
+        );
+        assert!(events.close_reason().is_none());
+        drop(uni);
+        drop(bidi);
+        desktop.shutdown().await;
+        core.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_new_rpc_connection_closes_only_the_previous_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = PeerNetwork::start(loopback(dir.path(), "core"), Some(Arc::new(NopRpc)))
+            .await
+            .unwrap();
+        let desktop = PeerNetwork::start(loopback(dir.path(), "desktop"), None)
+            .await
+            .unwrap();
+        let other = PeerNetwork::start(loopback(dir.path(), "other"), None)
+            .await
+            .unwrap();
+        let invite = core.create_invite(Role::Desktop).await;
+        desktop
+            .pair(&PairTicket::parse(&invite.ticket).unwrap())
+            .await
+            .unwrap();
+        let invite = core.create_invite(Role::Desktop).await;
+        other
+            .pair(&PairTicket::parse(&invite.ticket).unwrap())
+            .await
+            .unwrap();
+
+        let events = desktop
+            .inner
+            .endpoint
+            .connect(core.addr(), ALPN_EVENTS)
+            .await
+            .unwrap();
+        let first = desktop
+            .inner
+            .endpoint
+            .connect(core.addr(), ALPN_RPC)
+            .await
+            .unwrap();
+        let other_rpc = other
+            .inner
+            .endpoint
+            .connect(core.addr(), ALPN_RPC)
+            .await
+            .unwrap();
+        wait_live(&core.inner, &desktop.id(), ALPN_RPC, 1).await;
+        wait_live(&core.inner, &other.id(), ALPN_RPC, 1).await;
+        wait_live(&core.inner, &desktop.id(), ALPN_EVENTS, 1).await;
+
+        let second = desktop
+            .inner
+            .endpoint
+            .connect(core.addr(), ALPN_RPC)
+            .await
+            .unwrap();
+        let closed = tokio::time::timeout(Duration::from_secs(5), first.closed())
+            .await
+            .unwrap();
+        assert!(
+            matches!(closed, iroh::endpoint::ConnectionError::ApplicationClosed(ref c) if c.error_code.into_inner() == u64::from(CLOSE_REPLACED)),
+            "{closed}"
+        );
+        wait_live(&core.inner, &desktop.id(), ALPN_RPC, 1).await;
+        assert!(second.close_reason().is_none());
+        assert!(events.close_reason().is_none());
+        assert!(other_rpc.close_reason().is_none());
+        assert_eq!(live(&core.inner, &other.id(), ALPN_RPC), 1);
+
+        let events_again = desktop
+            .inner
+            .endpoint
+            .connect(core.addr(), ALPN_EVENTS)
+            .await
+            .unwrap();
+        wait_live(&core.inner, &desktop.id(), ALPN_EVENTS, 2).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(events.close_reason().is_none());
+        assert!(events_again.close_reason().is_none());
+        assert!(second.close_reason().is_none());
+        assert_eq!(live(&core.inner, &desktop.id(), ALPN_RPC), 1);
+        assert_eq!(live(&core.inner, &other.id(), ALPN_RPC), 1);
 
         other.shutdown().await;
         desktop.shutdown().await;

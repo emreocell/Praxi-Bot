@@ -7,7 +7,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use iroh::endpoint::{Connection, ConnectionError, RecvStream, SendStream};
+use iroh::endpoint::{
+    Connection, ConnectionError, QuicTransportConfig, RecvStream, SendStream, VarInt,
+};
 use serde::Serialize;
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -72,6 +74,37 @@ impl RpcLimits {
         }
         Ok(())
     }
+}
+
+/// Unidirectional streams the shared endpoint advertises.
+///
+/// Heartbeats open one unidirectional stream. Zero would stop that link from
+/// reconnecting; the RPC task simply never accepts unidirectional streams.
+const ENDPOINT_UNI_STREAMS: u32 = 1;
+
+/// QUIC transport limits installed on the endpoint before `bind`.
+///
+/// The handshake advertises these values, and `set_max_concurrent_*` after
+/// accept cannot take that credit back. `max_concurrent_bidi_streams` is
+/// `limits.streams_per_connection` (pairing opens one bidirectional stream).
+/// `max_concurrent_uni_streams` is [`ENDPOINT_UNI_STREAMS`]. `receive_window`
+/// is `limits.bytes_per_connection`, so per-stream windows cannot stack up to
+/// the QUIC maximum.
+///
+/// `limits` must already have passed [`RpcLimits::validate`].
+#[must_use]
+pub(crate) fn endpoint_transport_config(limits: RpcLimits) -> QuicTransportConfig {
+    let bidi =
+        u32::try_from(limits.streams_per_connection).expect("RPC limits were validated at startup");
+    let window =
+        u64::try_from(limits.bytes_per_connection).expect("RPC limits were validated at startup");
+    QuicTransportConfig::builder()
+        .max_concurrent_bidi_streams(VarInt::from_u32(bidi))
+        .max_concurrent_uni_streams(VarInt::from_u32(ENDPOINT_UNI_STREAMS))
+        .receive_window(
+            VarInt::from_u64(window).expect("per-connection byte budget fits a QUIC varint"),
+        )
+        .build()
 }
 
 pub(crate) struct RpcBudget {
@@ -292,15 +325,9 @@ pub(crate) async fn serve_connection(
     global: Arc<RpcBudget>,
 ) {
     let local = RpcBudget::new(limits.streams_per_connection, limits.bytes_per_connection);
-    // Set only the RPC connection's limits, leaving HTTP/event ALPNs alone.
-    // QUIC cannot retract previously advertised credit; application admission
-    // above remains authoritative for streams opened before this adjustment.
-    conn.set_max_concurrent_bi_streams(
-        u32::try_from(limits.streams_per_connection)
-            .expect("RPC limits were validated at startup")
-            .into(),
-    );
-    conn.set_max_concurrent_uni_streams(0_u32.into());
+    // Stream credit was fixed in the handshake by `endpoint_transport_config`.
+    // Admission still rejects bidi work that exceeds the byte budget. This
+    // loop does not accept unidirectional streams.
     let peer = Arc::new(peer);
     while let Ok((send, recv)) = conn.accept_bi().await {
         let Ok(deadline) = deadline(timeout) else {
