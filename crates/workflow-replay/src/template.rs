@@ -228,9 +228,17 @@ fn reject_quoted_placeholders(t: &str, dialect: ShellDialect) -> Result<(), Work
             || (dialect != ShellDialect::Posix && matches!(c, '\u{201C}' | '\u{201D}' | '\u{201E}'))
     };
     let mut q = Q::None;
+    // A trailing escape at the end of a literal escapes whatever the next
+    // piece starts with, so a following placeholder is not a separate word.
+    let mut pending_escape = false;
     for p in parse(t)? {
         match p {
             Piece::Var(v) => {
+                if pending_escape {
+                    return Err(WorkflowError::Template(format!(
+                        "placeholder `{{{v}}}` follows a dangling escape character in a shell                          template: {t:?}"
+                    )));
+                }
                 if q != Q::None {
                     return Err(WorkflowError::Template(format!(
                         "placeholder `{{{v}}}` is inside a quoted string in a shell template; \
@@ -239,6 +247,7 @@ fn reject_quoted_placeholders(t: &str, dialect: ShellDialect) -> Result<(), Work
                 }
             }
             Piece::Lit(l) => {
+                pending_escape = false;
                 let mut chars = l.chars();
                 while let Some(c) = chars.next() {
                     match q {
@@ -257,7 +266,9 @@ fn reject_quoted_placeholders(t: &str, dialect: ShellDialect) -> Result<(), Work
                                 chars.next();
                                 q = if q == Q::Double { Q::None } else { Q::Double };
                             } else if Some(c) == escape {
-                                chars.next();
+                                if chars.next().is_none() {
+                                    pending_escape = true;
+                                }
                             } else if is_double(c) {
                                 q = if q == Q::Double { Q::None } else { Q::Double };
                             } else if q == Q::None && is_single(c) {
@@ -460,5 +471,42 @@ mod tests {
             render_shell("echo {x}", &vars(&[("x", "a & b")]), ShellDialect::Cmd).unwrap(),
             "echo \"a & b\""
         );
+    }
+
+    #[test]
+    fn dangling_escape_before_placeholder_is_rejected() {
+        let v = vars(&[("x", "a\nb")]);
+        for (t, d) in [
+            (r"printf %s \{x}", ShellDialect::Posix),
+            (r"echo a\{x}", ShellDialect::Posix),
+            ("echo `{x}", ShellDialect::PowerShell),
+        ] {
+            assert!(render_shell(t, &v, d).is_err(), "{t} {d:?}");
+        }
+        // An escaped escape is complete, so the placeholder is its own word.
+        assert!(render_shell(r"printf %s \ {x}", &v, ShellDialect::Posix).is_ok());
+        assert!(render_shell("echo `` {x}", &v, ShellDialect::PowerShell).is_ok());
+    }
+
+    #[test]
+    fn newline_value_stays_one_word_on_real_sh() {
+        let Ok(probe) = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("true")
+            .status()
+        else {
+            return; // no sh here
+        };
+        if !probe.success() {
+            return;
+        }
+        let v = vars(&[("x", "a\nb;echo pwned")]);
+        let cmd = render_shell("printf %s {x}", &v, ShellDialect::Posix).unwrap();
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&cmd)
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "a\nb;echo pwned");
     }
 }
