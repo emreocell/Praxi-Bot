@@ -92,16 +92,49 @@ fn is_link(m: &fs::Metadata) -> bool {
 
 /// Copy `from` to `to` without following links. Links are appended to `links`
 /// with `rel` as their backup-relative path; no placeholder is written to `to`.
+fn link_dir_nofollow(meta: &fs::Metadata) -> bool {
+    // Directory junctions and directory symlinks carry the directory attribute
+    // on the link itself. `fs::metadata` would follow the target.
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+        meta.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = meta;
+        false
+    }
+}
+
+fn is_reparse(meta: &fs::Metadata) -> bool {
+    if is_link(meta) {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
 fn copy_recursive(
     from: &Path,
     to: &Path,
     rel: &str,
     links: &mut Vec<LinkRecord>,
 ) -> io::Result<()> {
+    crate::files::vet_checkpoint_path(from)?;
     let meta = fs::symlink_metadata(from)?;
     if is_link(&meta) {
         let target = fs::read_link(from)?;
-        let dir = fs::metadata(from).is_ok_and(|m| m.is_dir());
+        let dir = link_dir_nofollow(&meta);
         links.push(LinkRecord {
             rel: rel.to_owned(),
             target: target.display().to_string(),
@@ -190,7 +223,19 @@ fn restore_link(target: &Path, at: &Path, dir: bool) -> Option<String> {
     } else {
         target.to_path_buf()
     };
-    let (copied, skip_reason) = match fs::metadata(&resolved) {
+    if let Err(e) = crate::files::vet_checkpoint_path(&resolved) {
+        return Some(format!(
+            "link {} -> {} could not be recreated ({err}); skipped: {e}",
+            at.display(),
+            target.display()
+        ));
+    }
+    // `symlink_metadata` does not follow. A reparse point is never copied.
+    let (copied, skip_reason) = match fs::symlink_metadata(&resolved) {
+        Ok(m) if is_reparse(&m) => (
+            false,
+            Some("target is a reparse point (not copied)".to_owned()),
+        ),
         Ok(m) if m.is_file() && m.len() > MAX_LINK_COPY_BYTES => (
             false,
             Some(format!(
@@ -257,6 +302,7 @@ impl CheckpointStore {
         let mut entries = Vec::new();
         let mut links = Vec::new();
         for (n, p) in paths.iter().enumerate() {
+            crate::files::vet_checkpoint_path(p)?;
             let abs = std::path::absolute(p)?;
             let meta = fs::symlink_metadata(&abs).ok();
             let existed = meta.is_some();

@@ -65,7 +65,8 @@ pub struct BuiltinConfig {
     pub control: Option<Arc<dyn DesktopControlGate>>,
     /// Email connector (IMAP/SMTP tools). `None` = email tools skipped.
     pub email: Option<Arc<connector_email::EmailConnector>>,
-    /// Directories `fs_*` may read and write. Empty does not add a root limit;
+    /// Directories `fs_*` may read and write. Empty does not add a root limit.
+    /// A non-empty list that cannot be resolved denies every `fs_*` call.
     /// UNC paths, device paths, and credential files are still refused.
     pub fs_allowed_roots: Vec<PathBuf>,
     /// Credential paths the host explicitly grants to `fs_*`. A grant does not

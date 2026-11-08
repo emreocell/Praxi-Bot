@@ -3,15 +3,25 @@
 //! `validate_path` runs before any stat or open. It rejects UNC and device
 //! paths (including verbatim `\\?\UNC` and `\\.\` forms), refuses mapped
 //! drives and reparse points that leave the local machine, and blocks
-//! credential files unless the host granted that exact path. Configured read
-//! roots are enforced on the lexical path and again after symlink resolution.
+//! credential files unless the host granted that exact path. On Windows the
+//! opened long path (8.3 names included) is checked before any byte is read.
+//! Configured read roots are enforced on the lexical path and again after
+//! symlink resolution. A non-empty root list that does not resolve denies
+//! every call.
 
+use std::cell::RefCell;
+#[cfg(test)]
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::fs;
+use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+
+#[cfg(windows)]
+#[path = "win_fs.rs"]
+mod win_fs;
 
 use async_trait::async_trait;
 use globset::Glob;
@@ -53,8 +63,11 @@ struct Shared {
     /// When non-empty, every fs path must stay inside one of these directories.
     allowed_roots: Vec<PathBuf>,
     /// Credential paths the host explicitly granted. Does not permit UNC,
-    /// device, or out-of-root access.
+    /// device, or out-of-root access. Each protected path must be listed itself.
     grants: Vec<PathBuf>,
+    /// The caller passed a non-empty root list and at least one root could
+    /// not be resolved. Every `fs_*` call fails until this is false.
+    roots_unresolved: bool,
     drives: DriveCache,
 }
 
@@ -83,7 +96,10 @@ pub(crate) fn tools_bounded(
     grants: &[PathBuf],
 ) -> Vec<Arc<dyn Tool>> {
     let drives = DriveCache::new();
-    let allowed_roots = prepare_roots(allowed_roots, &drives);
+    let (allowed_roots, roots_unresolved) = match prepare_roots(allowed_roots, &drives) {
+        Ok(roots) => (roots, false),
+        Err(()) => (Vec::new(), true),
+    };
     let grants = prepare_grants(grants);
     let data_dir =
         lexical_absolute(&data_dir.to_string_lossy()).unwrap_or_else(|_| data_dir.to_path_buf());
@@ -93,6 +109,7 @@ pub(crate) fn tools_bounded(
         data_dir,
         allowed_roots,
         grants,
+        roots_unresolved,
         drives,
     });
     let fs = PermissionCategory::Fs;
@@ -299,6 +316,7 @@ const MAX_LINK_DEPTH: usize = 8;
 const UNC_MSG: &str = "UNC paths are not allowed";
 const DEVICE_MSG: &str = "device paths are not allowed";
 const ROOT_MSG: &str = "path is outside the allowed roots";
+const ROOT_UNRESOLVED_MSG: &str = "allowed root could not be resolved";
 const GRANT_MSG: &str = "credential or control file requires an explicit grant";
 const REPARSE_MSG: &str = "reparse points are not allowed";
 const LINK_MSG: &str = "symlink chain is too deep";
@@ -343,47 +361,26 @@ struct ResolveCtx<'a> {
     depth: usize,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug)]
 struct DriveSnapshot {
     mapped: HashSet<char>,
     subst: HashMap<char, PathBuf>,
 }
 
-struct DriveCache {
-    #[cfg(windows)]
-    snapshot: parking_lot::Mutex<Option<DriveSnapshot>>,
-}
+/// Drive letters are classified on each use. Nothing is cached: a mapping
+/// created after the first file call must still be visible, and a failed
+/// query must not become an empty allow-list.
+struct DriveCache;
 
 impl DriveCache {
     fn new() -> Self {
-        Self {
-            #[cfg(windows)]
-            snapshot: parking_lot::Mutex::new(None),
-        }
+        Self
     }
 
     fn apply(&self, path: &Path) -> Result<PathBuf, ToolError> {
-        #[cfg(windows)]
-        {
-            let snap = self.loaded()?;
-            rewrite_drive(path, &snap, 0)
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = self;
-            Ok(path.to_path_buf())
-        }
-    }
-
-    #[cfg(windows)]
-    fn loaded(&self) -> Result<DriveSnapshot, ToolError> {
-        let mut guard = self.snapshot.lock();
-        if let Some(snap) = guard.as_ref() {
-            return Ok(snap.clone());
-        }
-        let snap = load_drive_snapshot()?;
-        *guard = Some(snap.clone());
-        Ok(snap)
+        let _ = self;
+        confine_drive(path)
     }
 }
 
@@ -474,18 +471,29 @@ fn strip_local_prefix(raw: &str) -> String {
 }
 
 fn component_is_device(name: &str) -> bool {
-    if name.contains([':', '\0']) {
-        return true;
+    // DOS device names and `:` (alternate data streams) are a Windows
+    // `CreateFileW` rule. The same byte strings are ordinary file names on
+    // Unix and must not be refused there.
+    #[cfg(not(windows))]
+    {
+        let _ = name;
+        return false;
     }
-    let n = name.trim_end_matches([' ', '.']).to_ascii_uppercase();
-    matches!(
-        n.as_str(),
-        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
-    ) || (n.len() == 4
-        && (n.starts_with("COM") || n.starts_with("LPT"))
-        && n.as_bytes()
-            .get(3)
-            .is_some_and(|b| (b'1'..=b'9').contains(b)))
+    #[cfg(windows)]
+    {
+        if name.contains([':', '\0']) {
+            return true;
+        }
+        let n = name.trim_end_matches([' ', '.']).to_ascii_uppercase();
+        matches!(
+            n.as_str(),
+            "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+        ) || (n.len() == 4
+            && (n.starts_with("COM") || n.starts_with("LPT"))
+            && n.as_bytes()
+                .get(3)
+                .is_some_and(|b| (b'1'..=b'9').contains(b)))
+    }
 }
 
 fn lexical_normalize(path: &Path) -> Result<PathBuf, ToolError> {
@@ -621,6 +629,9 @@ fn join_link(parent: &Path, target: &Path, rest: &[OsString]) -> Result<PathBuf,
 /// filesystem call. Roots are checked on the lexical path before the walk, and
 /// again on every symlink target before that target is stated.
 fn validate_path(sh: &Shared, raw: &str, follow: Follow) -> Result<PathBuf, ToolError> {
+    if sh.roots_unresolved {
+        return Err(denied(ROOT_UNRESOLVED_MSG));
+    }
     let lexical = lexical_absolute(raw)?;
     let ctx = ResolveCtx {
         follow,
@@ -629,10 +640,16 @@ fn validate_path(sh: &Shared, raw: &str, follow: Follow) -> Result<PathBuf, Tool
         depth: 0,
     };
     let resolved = resolve_local(&lexical, &ctx)?;
-    if credential_blocked(sh, &lexical, &resolved) {
+    // The reparse-safe long path is the name Win32 will open. Check it before
+    // any caller reads bytes. `resolved` may still be an 8.3 alias.
+    let opened = final_identity(&resolved)?;
+    if !sh.allowed_roots.is_empty() && !roots_contain(&sh.allowed_roots, &opened) {
+        return Err(denied(ROOT_MSG));
+    }
+    if credential_blocked(sh, &lexical, &resolved) || credential_blocked(sh, &lexical, &opened) {
         return Err(denied(GRANT_MSG));
     }
-    Ok(resolved)
+    Ok(opened)
 }
 
 fn resolve_local(path: &Path, ctx: &ResolveCtx<'_>) -> Result<PathBuf, ToolError> {
@@ -725,23 +742,27 @@ fn reparse_unsafe(meta: &fs::Metadata) -> bool {
     }
 }
 
-fn prepare_roots(roots: &[PathBuf], drives: &DriveCache) -> Vec<PathBuf> {
-    let mut out = Vec::new();
+/// Resolve every configured root. An empty input stays empty (no limit).
+/// Any root that cannot be resolved is an error: dropping it would leave an
+/// empty list and turn the limit off.
+fn prepare_roots(roots: &[PathBuf], drives: &DriveCache) -> Result<Vec<PathBuf>, ()> {
+    if roots.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::with_capacity(roots.len());
     for root in roots {
-        let Ok(abs) = lexical_absolute(&root.to_string_lossy()) else {
-            continue;
-        };
+        let abs = lexical_absolute(&root.to_string_lossy()).map_err(|_| ())?;
         let ctx = ResolveCtx {
             follow: Follow::Content,
             roots: &[],
             drives,
             depth: 0,
         };
-        if let Ok(resolved) = resolve_local(&abs, &ctx) {
-            out.push(resolved);
-        }
+        let resolved = resolve_local(&abs, &ctx).map_err(|_| ())?;
+        let opened = final_identity(&resolved).map_err(|_| ())?;
+        out.push(opened);
     }
-    out
+    Ok(out)
 }
 
 fn prepare_grants(grants: &[PathBuf]) -> Vec<PathBuf> {
@@ -789,15 +810,16 @@ fn under_data_sensitive(path: &Path, data_dir: &Path) -> bool {
         || rel.iter().any(|s| s == "vault" || s == "secrets")
 }
 
+/// A protected path is readable only when that path itself is granted.
+/// A grant of the lexical path does not authorize a different resolved path,
+/// and a grant of the resolved path does not authorize a different lexical one.
 fn credential_blocked(sh: &Shared, lexical: &Path, resolved: &Path) -> bool {
-    let protected = is_protected(lexical, &sh.data_dir) || is_protected(resolved, &sh.data_dir);
-    protected && !has_grant(&sh.grants, lexical, resolved)
+    protected_ungranted(lexical, &sh.data_dir, &sh.grants)
+        || protected_ungranted(resolved, &sh.data_dir, &sh.grants)
 }
 
-fn has_grant(grants: &[PathBuf], lexical: &Path, resolved: &Path) -> bool {
-    grants
-        .iter()
-        .any(|g| same_path(g, lexical) || same_path(g, resolved))
+fn protected_ungranted(path: &Path, data_dir: &Path, grants: &[PathBuf]) -> bool {
+    is_protected(path, data_dir) && !grants.iter().any(|g| same_path(g, path))
 }
 
 fn same_path(a: &Path, b: &Path) -> bool {
@@ -837,6 +859,7 @@ fn dos_target_is_remote(target: &str) -> bool {
         || t.starts_with(r"\\")
 }
 
+#[cfg(test)]
 fn parse_mapped_drives(output: &str) -> HashSet<char> {
     let mut set = HashSet::new();
     for line in output.lines() {
@@ -858,6 +881,7 @@ fn parse_mapped_drives(output: &str) -> HashSet<char> {
     set
 }
 
+#[cfg(test)]
 fn parse_subst_listing(output: &str) -> HashMap<char, String> {
     let mut map = HashMap::new();
     for line in output.lines() {
@@ -894,6 +918,7 @@ fn local_subst_target(target: &str) -> Option<PathBuf> {
     Some(path)
 }
 
+#[cfg(test)]
 fn snapshot_from(reg_out: &str, subst_out: &str) -> DriveSnapshot {
     let mut mapped = parse_mapped_drives(reg_out);
     let mut subst = HashMap::new();
@@ -908,22 +933,65 @@ fn snapshot_from(reg_out: &str, subst_out: &str) -> DriveSnapshot {
 }
 
 #[cfg(windows)]
-fn rewrite_drive(path: &Path, snap: &DriveSnapshot, depth: u8) -> Result<PathBuf, ToolError> {
+const DRIVE_UNKNOWN: u32 = 0;
+#[cfg(windows)]
+const DRIVE_REMOTE: u32 = 4;
+
+/// Classify one letter from a DOS-device query and a `GetDriveTypeW` code.
+/// `Failed` and `DRIVE_UNKNOWN` deny the path. A remote target denies it.
+/// A local `subst` (`\??\C:\...`) is rewritten; a fixed volume is kept.
+#[cfg(windows)]
+fn drive_decision(query: win_fs::DosQuery, drive_type: u32) -> Result<Option<PathBuf>, ToolError> {
+    match query {
+        win_fs::DosQuery::Failed => Err(denied("drive mapping could not be verified")),
+        win_fs::DosQuery::Target(target) => {
+            if dos_target_is_remote(&target) || drive_type == DRIVE_REMOTE {
+                return Err(denied("mapped network drives are not allowed"));
+            }
+            if drive_type == DRIVE_UNKNOWN {
+                return Err(denied("drive mapping could not be verified"));
+            }
+            Ok(local_subst_target(&target))
+        }
+        win_fs::DosQuery::Missing => {
+            if drive_type == DRIVE_REMOTE {
+                return Err(denied("mapped network drives are not allowed"));
+            }
+            if drive_type == DRIVE_UNKNOWN {
+                return Err(denied("drive mapping could not be verified"));
+            }
+            Ok(None)
+        }
+    }
+}
+
+#[cfg(windows)]
+fn rewrite_drive_live(path: &Path, depth: u8) -> Result<PathBuf, ToolError> {
     if depth > 4 {
         return Err(denied("drive substitution is too deep"));
     }
     let Some(letter) = drive_letter(path) else {
         return Ok(path.to_path_buf());
     };
-    if snap.mapped.contains(&letter) {
-        return Err(denied("mapped network drives are not allowed"));
-    }
-    let Some(target) = snap.subst.get(&letter) else {
+    let query = win_fs::query_dos_device(&format!("{letter}:"));
+    let kind = win_fs::drive_type(&format!(r"{letter}:\"));
+    let Some(target) = drive_decision(query, kind)? else {
         return Ok(path.to_path_buf());
     };
     let rewritten = lexical_normalize(&target.join(path_after_drive(path)))?;
     reject_syntax(&rewritten.to_string_lossy())?;
-    rewrite_drive(&rewritten, snap, depth + 1)
+    rewrite_drive_live(&rewritten, depth + 1)
+}
+
+fn confine_drive(path: &Path) -> Result<PathBuf, ToolError> {
+    #[cfg(windows)]
+    {
+        rewrite_drive_live(path, 0)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(path.to_path_buf())
+    }
 }
 
 #[cfg(windows)]
@@ -937,36 +1005,173 @@ fn path_after_drive(path: &Path) -> PathBuf {
     rest
 }
 
-#[cfg(windows)]
-fn load_drive_snapshot() -> Result<DriveSnapshot, ToolError> {
-    let reg = run_hidden("reg", &["query", r"HKCU\Network"])?;
-    let reg_text = if reg.status.success() {
-        String::from_utf8_lossy(&reg.stdout).into_owned()
-    } else if reg.status.code() == Some(1) {
-        String::new()
-    } else {
-        return Err(denied("drive mapping could not be verified"));
-    };
-    let subst = run_hidden("subst", &[])?;
-    if !subst.status.success() {
-        return Err(denied("drive mapping could not be verified"));
+/// Long path of an existing file, or the caller's path when it does not exist yet.
+///
+/// On Windows the name comes from `GetFinalPathNameByHandleW` on a reparse-safe
+/// handle, so `ENV~1` becomes `.env` before the denylist runs. File bytes are
+/// not read. A failure to name an existing path is denied (fail closed).
+fn final_identity(path: &Path) -> Result<PathBuf, ToolError> {
+    #[cfg(windows)]
+    {
+        match win_fs::final_path_nofollow(path) {
+            Ok(opened) => normalize_final(&opened),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => final_missing(path),
+            Err(_) => Err(denied("path could not be verified")),
+        }
     }
-    let subst_text = String::from_utf8_lossy(&subst.stdout);
-    Ok(snapshot_from(&reg_text, &subst_text))
+    #[cfg(not(windows))]
+    {
+        Ok(path.to_path_buf())
+    }
 }
 
 #[cfg(windows)]
-fn run_hidden(program: &str, args: &[&str]) -> Result<std::process::Output, ToolError> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    std::process::Command::new(program)
-        .args(args)
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .map_err(|_| denied("drive mapping could not be verified"))
+fn final_missing(path: &Path) -> Result<PathBuf, ToolError> {
+    let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) else {
+        return Ok(path.to_path_buf());
+    };
+    let Some(name) = path.file_name() else {
+        return Ok(path.to_path_buf());
+    };
+    match win_fs::final_path_nofollow(parent) {
+        Ok(parent) => normalize_final(&parent.join(name)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(path.to_path_buf()),
+        Err(_) => Err(denied("path could not be verified")),
+    }
+}
+
+#[cfg(windows)]
+fn normalize_final(path: &Path) -> Result<PathBuf, ToolError> {
+    let raw = path.to_string_lossy();
+    let stripped = strip_local_prefix(&raw);
+    reject_syntax(&stripped)?;
+    lexical_normalize(Path::new(&stripped))
+}
+
+/// Policy passed into checkpoint copies. Checkpoints run without `Shared`, so
+/// the file tool installs this for the duration of one call on this thread.
+#[derive(Clone)]
+struct CpGate {
+    data_dir: PathBuf,
+    roots: Vec<PathBuf>,
+    grants: Vec<PathBuf>,
+    roots_unresolved: bool,
+}
+
+thread_local! {
+    static CP_GATE: RefCell<Option<CpGate>> = const { RefCell::new(None) };
+}
+
+struct ClearGate;
+
+impl Drop for ClearGate {
+    fn drop(&mut self) {
+        CP_GATE.with(|slot| *slot.borrow_mut() = None);
+    }
+}
+
+fn with_checkpoint_gate<T>(sh: &Shared, f: impl FnOnce() -> T) -> T {
+    CP_GATE.with(|slot| {
+        *slot.borrow_mut() = Some(CpGate {
+            data_dir: sh.data_dir.clone(),
+            roots: sh.allowed_roots.clone(),
+            grants: sh.grants.clone(),
+            roots_unresolved: sh.roots_unresolved,
+        });
+    });
+    let _clear = ClearGate;
+    f()
+}
+
+fn current_gate() -> Option<CpGate> {
+    CP_GATE.with(|slot| slot.borrow().clone())
+}
+
+fn tool_to_io(err: ToolError) -> io::Error {
+    match err {
+        ToolError::PermissionDenied(m) => io::Error::new(io::ErrorKind::PermissionDenied, m),
+        other => io::Error::other(other.to_string()),
+    }
+}
+
+fn io_to_tool(err: &io::Error, context: &str) -> ToolError {
+    if err.kind() == io::ErrorKind::PermissionDenied {
+        ToolError::PermissionDenied(err.to_string())
+    } else {
+        exec_err(format!("{context}: {err}"))
+    }
+}
+
+/// Classify `path` before a checkpoint opens it. Remote targets are refused
+/// from `read_link` text; this function does not call `fs::metadata` or `fs::copy`.
+pub(crate) fn vet_checkpoint_path(path: &Path) -> io::Result<()> {
+    let deny = |msg: &str| io::Error::new(io::ErrorKind::PermissionDenied, msg);
+    let raw = path.to_string_lossy();
+    if reject_syntax(&raw).is_err() {
+        return Err(deny("checkpoint path is not a local path"));
+    }
+    let lexical = lexical_absolute(&raw).map_err(tool_to_io)?;
+    let lexical = confine_drive(&lexical).map_err(tool_to_io)?;
+    let gate = current_gate();
+    if let Some(gate) = &gate {
+        if gate.roots_unresolved {
+            return Err(deny(ROOT_UNRESOLVED_MSG));
+        }
+        if !gate.roots.is_empty() && !roots_contain(&gate.roots, &lexical) {
+            return Err(deny(ROOT_MSG));
+        }
+    }
+    let data_dir = gate
+        .as_ref()
+        .map_or(PathBuf::from(r"\\.\no-data-dir"), |g| g.data_dir.clone());
+    let grants = gate.as_ref().map_or(Vec::new(), |g| g.grants.clone());
+    let opened = match final_identity(&lexical) {
+        Ok(p) => p,
+        Err(ToolError::PermissionDenied(m)) => return Err(deny(&m)),
+        Err(other) => return Err(io::Error::other(other.to_string())),
+    };
+    if protected_ungranted(&lexical, &data_dir, &grants)
+        || protected_ungranted(&opened, &data_dir, &grants)
+    {
+        return Err(deny(GRANT_MSG));
+    }
+    match fs::symlink_metadata(&lexical) {
+        Ok(meta) if meta.file_type().is_symlink() || reparse_unsafe(&meta) => {
+            let target = fs::read_link(&lexical)?;
+            classify_link_target(&lexical, &target, &data_dir, &grants).map_err(tool_to_io)
+        }
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+fn classify_link_target(
+    link: &Path,
+    target: &Path,
+    data_dir: &Path,
+    grants: &[PathBuf],
+) -> Result<(), ToolError> {
+    let raw = target.to_string_lossy();
+    if dos_target_is_remote(&raw) || classify_path_str(&raw) != Class::Local {
+        return Err(denied(UNC_MSG));
+    }
+    let stripped = strip_local_prefix(&raw);
+    if dos_target_is_remote(&stripped) || classify_path_str(&stripped) != Class::Local {
+        return Err(denied(UNC_MSG));
+    }
+    let joined = if Path::new(&stripped).is_absolute() {
+        PathBuf::from(&stripped)
+    } else {
+        link.parent()
+            .unwrap_or_else(|| Path::new(""))
+            .join(&stripped)
+    };
+    let joined = confine_drive(&joined)?;
+    if protected_ungranted(&joined, data_dir, grants) {
+        return Err(denied(GRANT_MSG));
+    }
+    Ok(())
 }
 
 fn read_text(path: &Path) -> Result<String, ToolError> {
@@ -1203,13 +1408,18 @@ fn search_file(sh: &Shared, path: &Path, q: &str, root: &Path, out: &mut Vec<Str
     if meta.file_type().is_symlink() || reparse_unsafe(&meta) {
         return;
     }
-    if is_protected(path, &sh.data_dir) && !has_grant(&sh.grants, path, path) {
+    // The directory entry name can be the long name while the caller opened a
+    // short path. Name the handle before reading bytes.
+    let Ok(opened) = final_identity(path) else {
+        return;
+    };
+    if credential_blocked(sh, path, &opened) {
         return;
     }
     if meta.len() > MAX_SEARCH_FILE_BYTES {
         return;
     }
-    let Ok(bytes) = fs::read(path) else { return };
+    let Ok(bytes) = fs::read(&opened) else { return };
     if bytes.iter().take(8192).any(|b| *b == 0) {
         return;
     }
@@ -1265,9 +1475,11 @@ fn do_search(sh: &Shared, i: &SearchIn) -> Result<String, ToolError> {
 
 impl Shared {
     fn checkpoint(&self, run: &str, op: &str, paths: &[&Path]) -> Result<String, ToolError> {
-        self.checkpoints
-            .create(run, op, paths)
-            .map_err(|e| exec_err(format!("checkpoint failed, nothing changed: {e}")))
+        with_checkpoint_gate(self, || {
+            self.checkpoints
+                .create(run, op, paths)
+                .map_err(|e| io_to_tool(&e, "checkpoint failed, nothing changed"))
+        })
     }
 }
 
@@ -1376,10 +1588,11 @@ fn do_cp_list(sh: &Shared, run: &str) -> Result<String, ToolError> {
 }
 
 fn do_cp_restore(sh: &Shared, id: &str) -> Result<String, ToolError> {
-    let (paths, safety, warnings) = sh
-        .checkpoints
-        .restore_with_warnings(id)
-        .map_err(|e| exec_err(format!("restore failed: {e}")))?;
+    let (paths, safety, warnings) = with_checkpoint_gate(sh, || {
+        sh.checkpoints
+            .restore_with_warnings(id)
+            .map_err(|e| io_to_tool(&e, "restore failed"))
+    })?;
     let mut out = format!(
         "restored {} path(s): {} (previous state saved as {safety})",
         paths.len(),
@@ -1406,6 +1619,9 @@ impl Tool for FsTool {
     }
 
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
+        if self.shared.roots_unresolved {
+            return Err(denied(ROOT_UNRESOLVED_MSG));
+        }
         let sh = self.shared.clone();
         let run = ctx.run_id.clone();
         let text = match self.op {
@@ -1736,7 +1952,10 @@ mod tests {
             "NUL", "nul", "CON", "PRN", "AUX", "COM1", "LPT9", "NUL.", "NUL ", "NUL:", "CONIN$",
             "CONOUT$",
         ] {
+            #[cfg(windows)]
             assert!(component_is_device(n), "{n}");
+            #[cfg(not(windows))]
+            assert!(!component_is_device(n), "{n} is a normal name off Windows");
         }
         for n in ["NULL", "COM", "COM0", "LPT0", "COM10", "file.txt", ".env"] {
             assert!(!component_is_device(n), "{n}");
@@ -2059,5 +2278,352 @@ mod tests {
             );
         }
         let _ = d;
+    }
+
+    fn shared_with(data: &Path, grants: Vec<PathBuf>) -> Shared {
+        Shared {
+            checkpoints: crate::checkpoint::CheckpointStore::new(data),
+            spill_dir: data.join("spill"),
+            data_dir: data.to_path_buf(),
+            allowed_roots: Vec::new(),
+            grants,
+            roots_unresolved: false,
+            drives: DriveCache::new(),
+        }
+    }
+
+    fn tree_has(root: &Path, needle: &str) -> bool {
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let Ok(rd) = fs::read_dir(&dir) else {
+                continue;
+            };
+            for e in rd.flatten() {
+                let p = e.path();
+                let Ok(meta) = fs::symlink_metadata(&p) else {
+                    continue;
+                };
+                if meta.file_type().is_symlink() {
+                    continue;
+                }
+                if meta.is_dir() {
+                    stack.push(p);
+                } else if fs::read(&p).is_ok_and(|b| String::from_utf8_lossy(&b).contains(needle)) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Directory reparse point whose target is `\\192.0.2.1\share`.
+    fn remote_link(link: &Path) {
+        #[cfg(windows)]
+        win_fs::mount_unc(link).expect("unc mount point");
+        #[cfg(not(windows))]
+        link_dir(Path::new(r"\\192.0.2.1\share"), link).expect("remote link");
+    }
+
+    fn plant_manifest(data: &Path, run: &str, path: &str) -> String {
+        let id = format!("cp-{}", uuid::Uuid::now_v7().simple());
+        let dir = data.join("checkpoints").join(run).join(&id);
+        fs::create_dir_all(dir.join("files")).unwrap();
+        let cp = crate::checkpoint::Checkpoint {
+            id: id.clone(),
+            run_id: run.into(),
+            created_ms: 0,
+            op: "forged".into(),
+            entries: vec![crate::checkpoint::CheckpointEntry {
+                path: path.into(),
+                existed: true,
+                is_dir: false,
+                backup: Some("files/0".into()),
+            }],
+        };
+        fs::write(dir.join("manifest.json"), serde_json::to_vec(&cp).unwrap()).unwrap();
+        id
+    }
+
+    #[test]
+    fn grant_must_cover_each_protected_path() {
+        let data = tempfile::tempdir().unwrap();
+        let notes = data.path().join("notes.txt");
+        let envf = data.path().join(".env");
+        let token = data.path().join("api-token");
+        let sh = shared_with(data.path(), vec![notes.clone()]);
+        assert!(
+            credential_blocked(&sh, &notes, &envf),
+            "a grant of the lexical path must not authorize a resolved .env"
+        );
+        let sh_env = shared_with(data.path(), vec![envf.clone()]);
+        assert!(
+            credential_blocked(&sh_env, &envf, &token),
+            "a grant of .env must not authorize api-token"
+        );
+        assert!(
+            !credential_blocked(&sh_env, &notes, &envf),
+            "a grant of the resolved .env covers that path when the lexical name is not protected"
+        );
+    }
+
+    #[tokio::test]
+    async fn unresolved_allowed_root_does_not_disable_the_limit() {
+        let (d, w, _) = setup();
+        let missing = w.path().join("missing-root");
+        let t = tools_bounded(d.path(), std::slice::from_ref(&missing), &[]);
+        let file = w.path().join("plain.txt");
+        let marker = "visible-if-roots-dropped";
+        fs::write(&file, marker).unwrap();
+        let err = get(&t, "fs_read")
+            .call(&ctx(), json!({"path": &file}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+        assert!(!err.to_string().contains(marker), "{err}");
+
+        let root = w.path().join("root");
+        fs::create_dir_all(&root).unwrap();
+        let inside = root.join("ok.txt");
+        fs::write(&inside, "inside").unwrap();
+        let ok_tools = tools_bounded(d.path(), std::slice::from_ref(&root), &[]);
+        let ok = text(
+            &get(&ok_tools, "fs_read")
+                .call(&ctx(), json!({"path": &inside}))
+                .await
+                .unwrap(),
+        );
+        assert!(ok.contains("inside"), "{ok}");
+        let mixed = tools_bounded(d.path(), &[root, missing], &[]);
+        let err = get(&mixed, "fs_read")
+            .call(&ctx(), json!({"path": &inside}))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ToolError::PermissionDenied(_)),
+            "one unresolved root must not leave the others in force: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn checkpoint_paths_are_classified_before_copy() {
+        let (d, w, t) = setup();
+        let c = ctx();
+        let secret = "PRAXI_SENTINEL_cp";
+        let envf = w.path().join(".env");
+        fs::write(&envf, secret).unwrap();
+        let devices = d.path().join("devices.json");
+        fs::write(&devices, secret).unwrap();
+        let id_unc = plant_manifest(d.path(), "run-1", r"\\192.0.2.1\share\file");
+        let started = std::time::Instant::now();
+        let err = get(&t, "checkpoint_restore")
+            .call(&c, json!({"id": id_unc}))
+            .await
+            .unwrap_err();
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+
+        for path in [envf.display().to_string(), devices.display().to_string()] {
+            let id = plant_manifest(d.path(), "run-1", &path);
+            let err = get(&t, "checkpoint_restore")
+                .call(&c, json!({"id": id}))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "{path}: {err}"
+            );
+        }
+        assert_eq!(fs::read_to_string(&envf).unwrap(), secret);
+        assert!(
+            !tree_has(&d.path().join("checkpoints"), secret),
+            "credential bytes were copied into a checkpoint blob"
+        );
+
+        let dir = w.path().join("tree");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("keep.txt"), "keep").unwrap();
+        remote_link(&dir.join("junc"));
+        let started = std::time::Instant::now();
+        let err = get(&t, "fs_delete")
+            .call(&c, json!({"path": &dir, "recursive": true}))
+            .await
+            .unwrap_err();
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+        assert!(
+            dir.join("keep.txt").exists(),
+            "delete ran after a remote link"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unix_dos_names_and_colons_are_ordinary_files() {
+        let (_d, w, t) = setup();
+        let c = ctx();
+        for name in ["nul", "con", "aux", "prn", "com1", "lpt1", "a:b"] {
+            let file = w.path().join(name);
+            let body = format!("ok-{name}");
+            fs::write(&file, &body).unwrap();
+            let ok = text(
+                &get(&t, "fs_read")
+                    .call(&c, json!({"path": &file}))
+                    .await
+                    .unwrap(),
+            );
+            assert!(ok.contains(&body), "{name}: {ok}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn short_names_of_credential_files_are_refused() {
+        let base = tempfile::tempdir().unwrap();
+        let data = base.path().join("praxi-bot");
+        fs::create_dir_all(&data).unwrap();
+        let secret = "PRAXI_SENTINEL_83";
+        fs::write(data.join("devices.json"), secret).unwrap();
+        let envf = base.path().join(".env");
+        fs::write(&envf, secret).unwrap();
+        let t = tools(&data);
+        let c = ctx();
+        let short_env = win_fs::short_path(&envf).unwrap();
+        assert_ne!(
+            short_env
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_ascii_lowercase(),
+            ".env",
+            "this volume did not generate an 8.3 name for .env: {}",
+            short_env.display()
+        );
+        let err = get(&t, "fs_read")
+            .call(&c, json!({"path": &short_env}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+        assert!(!err.to_string().contains(secret), "{err}");
+        let err = get(&t, "fs_search")
+            .call(&c, json!({"query": secret, "path": &short_env}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+        let err = get(&t, "fs_write")
+            .call(&c, json!({"path": &short_env, "content": "replaced"}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+        assert_eq!(fs::read_to_string(&envf).unwrap(), secret);
+
+        let short_data = win_fs::short_path(&data).unwrap();
+        assert_ne!(
+            short_data
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_ascii_lowercase(),
+            "praxi-bot",
+            "this volume did not generate an 8.3 name for praxi-bot: {}",
+            short_data.display()
+        );
+        let via = short_data.join("devices.json");
+        let err = get(&t, "fs_read")
+            .call(&c, json!({"path": &via}))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ToolError::PermissionDenied(_)),
+            "{via:?}: {err}"
+        );
+        assert!(!err.to_string().contains(secret), "{err}");
+
+        let note = base.path().join("notes.txt");
+        fs::write(&note, "ordinary").unwrap();
+        let ok = text(
+            &get(&t, "fs_read")
+                .call(&c, json!({"path": &note}))
+                .await
+                .unwrap(),
+        );
+        assert!(ok.contains("ordinary"), "{ok}");
+    }
+
+    #[cfg(windows)]
+    struct RemoveDos(char, &'static str);
+
+    #[cfg(windows)]
+    impl Drop for RemoveDos {
+        fn drop(&mut self) {
+            let _ = win_fs::define_dos_device(self.0, self.1, true);
+        }
+    }
+
+    #[cfg(windows)]
+    struct RemoveSubst(char);
+
+    #[cfg(windows)]
+    impl Drop for RemoveSubst {
+        fn drop(&mut self) {
+            let _ = std::process::Command::new("subst")
+                .args([format!("{}:", self.0), "/d".into()])
+                .status();
+        }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn live_remote_drive_letter_is_refused_without_network_io() {
+        let failed = drive_decision(win_fs::DosQuery::Failed, DRIVE_UNKNOWN).unwrap_err();
+        assert!(matches!(failed, ToolError::PermissionDenied(_)), "{failed}");
+        let remote = drive_decision(
+            win_fs::DosQuery::Target(r"\Device\Mup\192.0.2.1\share".into()),
+            DRIVE_REMOTE,
+        )
+        .unwrap_err();
+        assert!(matches!(remote, ToolError::PermissionDenied(_)), "{remote}");
+
+        let letter = win_fs::unused_drive_letter().expect("an unused drive letter");
+        let target = r"\Device\Mup\192.0.2.1\share";
+        win_fs::define_dos_device(letter, target, false).unwrap();
+        let guard = RemoveDos(letter, target);
+        let (_d, w, t) = setup();
+        let c = ctx();
+        let path = format!(r"{letter}:\file.txt");
+        let started = std::time::Instant::now();
+        let err = get(&t, "fs_read")
+            .call(&c, json!({"path": path}))
+            .await
+            .unwrap_err();
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+
+        drop(guard);
+        let letter = win_fs::unused_drive_letter().expect("an unused drive letter");
+        let subst_root = w.path().join("subst-root");
+        fs::create_dir_all(&subst_root).unwrap();
+        fs::write(subst_root.join("f.txt"), "subst-ok").unwrap();
+        let status = std::process::Command::new("subst")
+            .arg(format!("{letter}:"))
+            .arg(&subst_root)
+            .status()
+            .unwrap();
+        assert!(status.success(), "subst {letter}:");
+        let _subst = RemoveSubst(letter);
+        let ok = text(
+            &get(&t, "fs_read")
+                .call(&c, json!({"path": format!(r"{letter}:\f.txt")}))
+                .await
+                .unwrap(),
+        );
+        assert!(ok.contains("subst-ok"), "{ok}");
     }
 }
