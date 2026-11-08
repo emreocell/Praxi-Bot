@@ -193,7 +193,14 @@ fn pid_for_socket_inode(inode: &str) -> Option<u32> {
     let needle = format!("socket:[{inode}]");
     let proc = std::fs::read_dir("/proc").ok()?;
     for entry in proc.filter_map(Result::ok) {
-        let pid: u32 = entry.file_name().to_str()?.parse().ok()?;
+        // `/proc` also contains `self`, `sys`, and other non-pid names.
+        // A non-pid entry is not a failed lookup; skip it and keep scanning.
+        let Some(name) = entry.file_name().into_string().ok() else {
+            continue;
+        };
+        let Ok(pid) = name.parse::<u32>() else {
+            continue;
+        };
         let fd_dir = entry.path().join("fd");
         let Ok(fds) = std::fs::read_dir(fd_dir) else {
             continue;
