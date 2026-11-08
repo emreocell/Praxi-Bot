@@ -78,9 +78,27 @@ impl EventLogWriter {
     /// # Errors
     /// Fails on serialisation or I/O errors.
     pub fn append(&mut self, envelope: &Envelope) -> Result<()> {
+        self.append_buffered(envelope)?;
+        self.sync()
+    }
+
+    /// Append one envelope without forcing it to disk; call [`Self::sync`]
+    /// to make a batch durable with a single `fsync`.
+    ///
+    /// # Errors
+    /// Fails on serialisation or I/O errors.
+    pub fn append_buffered(&mut self, envelope: &Envelope) -> Result<()> {
         let mut line = serde_json::to_vec(envelope)?;
         line.push(b'\n');
         self.file.write_all(&line)?;
+        Ok(())
+    }
+
+    /// Flush everything appended so far to stable storage.
+    ///
+    /// # Errors
+    /// Fails on I/O errors.
+    pub fn sync(&mut self) -> Result<()> {
         self.file.sync_data()?;
         Ok(())
     }

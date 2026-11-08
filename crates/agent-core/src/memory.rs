@@ -15,7 +15,7 @@ use serde_json::Value;
 use storage::Run;
 use uuid::Uuid;
 
-use crate::shared::{STEP_TOOLS, STEP_WORKFLOW, Shared, initiator_of};
+use crate::shared::{STEP_MODEL, STEP_TOOLS, STEP_WORKFLOW, Shared, initiator_of};
 
 /// [`MemoryModel`] over the bot's classifier model (falling back to its
 /// executor), using the prompt templates shipped with `memory-store`.
@@ -119,6 +119,12 @@ pub(crate) struct Exchange {
 /// for, so both count as outside content.
 fn steps_touch_outside_content(steps: &[storage::RunStep], is_meta: impl Fn(&str) -> bool) -> bool {
     steps.iter().any(|s| match s.name.as_str() {
+        // CLI tool execution is inside the session's model step. Treat its
+        // exchange conservatively as outside content, even without tool rows.
+        STEP_MODEL => s
+            .output
+            .as_ref()
+            .is_some_and(|o| o["model"].as_str().is_some_and(|m| m.starts_with("cli:"))),
         STEP_TOOLS => s.input["calls"].as_array().is_some_and(|calls| {
             calls.iter().any(|c| {
                 let name = c["name"].as_str().unwrap_or_default();
@@ -161,7 +167,10 @@ impl Exchange {
             user_id: run.user_id,
             bot_id: run.bot_id,
             chat_id,
-            excerpt: format!("User: {}\nAssistant: {final_text}", users.join("\nUser: ")),
+            excerpt: sh.redact(format!(
+                "User: {}\nAssistant: {final_text}",
+                users.join("\nUser: ")
+            )),
             untrusted,
         })
     }
@@ -251,5 +260,8 @@ mod tests {
             &[step(STEP_WORKFLOW, json!({}))],
             is_meta
         ));
+        let mut cli = step(STEP_MODEL, json!({}));
+        cli.output = Some(json!({"model":"cli:claude"}));
+        assert!(steps_touch_outside_content(&[cli], is_meta));
     }
 }

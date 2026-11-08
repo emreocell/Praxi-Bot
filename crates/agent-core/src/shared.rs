@@ -16,14 +16,14 @@ use protocol::{
 use provider_catalog::{ChatProvider, ModelRef};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use storage::{EventLogWriter, Run, Storage, read_event_log};
+use storage::{EventJournal, JournalRecord, Run, Storage, read_event_log};
 use task_runtime::{ExecError, Runtime};
 use tokio::sync::{broadcast, oneshot};
 use tokio::task::JoinHandle;
 use tool_registry::{Platform, ToolRegistry, ToolSpec};
 use uuid::Uuid;
 
-use crate::config::{LoopConfig, ModelPrice};
+use crate::config::{LoopConfig, ModelPrice, SharedRedactor};
 use crate::profile::BotProfile;
 use crate::subagent::SubSpec;
 
@@ -165,6 +165,8 @@ pub struct Providers {
     prices: HashMap<String, ModelPrice>,
     /// Embedding backend of the K2 router (`None` = BM25 only).
     embedder: Option<Arc<dyn agent_router::ladder::Embedder>>,
+    /// Masks secrets in every request sent through [`Self::pick`]ed providers.
+    redactor: Option<SharedRedactor>,
 }
 
 impl Providers {
@@ -176,6 +178,7 @@ impl Providers {
             by_id: HashMap::new(),
             prices: HashMap::new(),
             embedder: None,
+            redactor: None,
         }
     }
 
@@ -195,7 +198,16 @@ impl Providers {
             by_id,
             prices: HashMap::new(),
             embedder: None,
+            redactor: None,
         }
+    }
+
+    /// Mask secrets in every request (system prompt, history, memory recall,
+    /// tool results) before it reaches a provider.
+    #[must_use]
+    pub(crate) fn with_redactor(mut self, redactor: Option<SharedRedactor>) -> Self {
+        self.redactor = redactor;
+        self
     }
 
     /// Set the embedding backend of the K2 router (for example a
@@ -278,7 +290,7 @@ impl Providers {
         &self,
         model: &ModelRef,
     ) -> Result<Arc<dyn ChatProvider>, provider_catalog::ProviderError> {
-        model
+        let p = model
             .provider()
             .and_then(|p| self.by_id.get(p))
             .or(self.default.as_ref())
@@ -287,7 +299,58 @@ impl Providers {
                 provider_catalog::ProviderError::NoProvider(
                     "setup required; run `bot setup` or `bot providers add`".into(),
                 )
-            })
+            })?;
+        Ok(match &self.redactor {
+            Some(r) => Arc::new(RedactingProvider {
+                inner: p,
+                redactor: r.clone(),
+            }),
+            None => p,
+        })
+    }
+}
+
+/// Provider wrapper that masks secrets in the whole request (every message
+/// part and tool-call argument) just before it leaves the process.
+struct RedactingProvider {
+    inner: Arc<dyn ChatProvider>,
+    redactor: SharedRedactor,
+}
+
+#[async_trait::async_trait]
+impl ChatProvider for RedactingProvider {
+    fn id(&self) -> &str {
+        self.inner.id()
+    }
+
+    async fn stream(
+        &self,
+        mut req: provider_catalog::ChatRequest,
+    ) -> Result<
+        futures::stream::BoxStream<
+            'static,
+            Result<provider_catalog::ChatChunk, provider_catalog::ProviderError>,
+        >,
+        provider_catalog::ProviderError,
+    > {
+        redact_request(&self.redactor, &mut req);
+        self.inner.stream(req).await
+    }
+
+    async fn list_models(&self) -> Result<Vec<String>, provider_catalog::ProviderError> {
+        self.inner.list_models().await
+    }
+}
+
+/// Mask secrets in every message and tool-call argument of `req`.
+pub(crate) fn redact_request(r: &SharedRedactor, req: &mut provider_catalog::ChatRequest) {
+    for m in &mut req.messages {
+        redact_value(r, &mut m.content);
+        for c in &mut m.tool_calls {
+            if r.contains_secret(&c.arguments) {
+                c.arguments = r.redact(&c.arguments);
+            }
+        }
     }
 }
 
@@ -324,7 +387,6 @@ pub(crate) struct CtxState {
     pub steer: VecDeque<String>,
     pub closed: bool,
     pub seq: u64,
-    pub writer: Option<EventLogWriter>,
     pub todos: Vec<TodoItem>,
 }
 
@@ -371,6 +433,9 @@ pub(crate) struct Shared {
     pub providers: RwLock<Providers>,
     /// Workspace-wide policy; replaceable at runtime (`PUT /v1/policy`).
     pub global_policy: RwLock<Policy>,
+    /// Locked deny-all mode (unusable persisted policy): every decision except
+    /// `Meta` is `Deny`, whatever a bot's own policy says.
+    pub policy_locked: std::sync::atomic::AtomicBool,
     /// Desktop control bridge (see `control.rs`); `None` = no gate.
     pub control: RwLock<Option<Arc<dyn crate::control::ControlGate>>>,
     pub resolver: PermissionResolver,
@@ -390,6 +455,8 @@ pub(crate) struct Shared {
     pub gseq: AtomicU64,
     /// Serialises `emit`, so `gseq` order equals broadcast order.
     pub emit_gate: Mutex<()>,
+    /// Ticket that keeps broadcast order equal to `gseq` order (see `emit`).
+    pub send_gate: Mutex<()>,
     /// Set by `AgentLoop::shutdown`: no new turns / resumes.
     pub shutting_down: AtomicBool,
     /// The durable runtime (set once by `AgentLoop::new`; weak because the
@@ -560,7 +627,6 @@ impl Shared {
                 steer: VecDeque::new(),
                 closed: false,
                 seq,
-                writer: None,
                 todos: Vec::new(),
             }),
         });
@@ -579,34 +645,72 @@ impl Shared {
             .is_some_and(|c| c.profile.tool_visible(&spec.name) && platform_ok(&spec.platforms))
     }
 
-    /// Append to the run's NDJSON log, index it under the next `gseq` and
-    /// broadcast.
+    /// The loop's event journal (created over `storage` on first use).
+    fn journal(&self) -> &Arc<EventJournal> {
+        self.cfg
+            .journal
+            .get_or_init(|| EventJournal::fs(Arc::clone(&self.storage)))
+    }
+
+    /// Hand the event to the journal writer (NDJSON log + event index), take
+    /// the next `gseq` and broadcast.  Nothing here waits for the disk, except
+    /// that approval / run-state events are durable before `emit` returns (the
+    /// wait happens after `emit_gate` is released).
     pub fn emit(&self, ctx: &RunCtx, event: Event) {
-        let event = self.redact_event(event);
-        // Lock order: gate, then the run's state.
-        let _gate = self.emit_gate.lock();
+        if matches!(event, Event::RunStarted(_)) {
+            self.refresh_redactor();
+        }
+        let event = self.redact_event(ctx.run_id, event);
+        let barrier = needs_barrier(&event);
+        let journal = self.journal();
+        // Lock order: emit_gate, then the run's state, then (while still holding
+        // emit_gate) the send ticket.  `emit_gate` fixes `gseq` order = journal
+        // queue order; the send ticket keeps broadcast order equal to it while
+        // letting the fsync wait of a barrier event happen *outside* emit_gate.
+        let gate = self.emit_gate.lock();
         let (envelope, gseq) = {
             let mut st = ctx.state.lock();
             let env = Envelope::new(st.seq, event).with_parent(ctx.parent_run_id);
             st.seq += 1;
             let gseq = self.gseq.fetch_add(1, Ordering::SeqCst) + 1;
-            // Index before the log line: a crash in between loses nothing a
-            // replay could expect (a missing log line is skipped).
-            let _ = self.storage.index_event(gseq, ctx.run_id, env.seq);
-            if st.writer.is_none() {
-                st.writer = EventLogWriter::open(self.storage.data_dir(), ctx.run_id).ok();
-            }
-            if let Some(w) = st.writer.as_mut() {
-                // A failing log must not kill the turn; the DB stays the source of truth.
-                let _ = w.append(&env);
-            }
+            journal.append(JournalRecord {
+                gseq,
+                run_id: ctx.run_id,
+                envelope: env.clone(),
+            });
             (env, gseq)
         };
+        let ticket = self.send_gate.lock();
+        drop(gate);
+        if barrier {
+            // Approval / run-state events are durable before anyone can see
+            // them (so a UI answer or follower never outruns the log).
+            journal.flush();
+        }
         let _ = self.events.send(StreamItem {
             gseq,
             run_id: ctx.run_id,
             envelope,
         });
+        drop(ticket);
+    }
+
+    /// Re-read the secret sources into the redactor (new secrets are masked
+    /// from the next run / message on, not only after the poll interval).
+    pub fn refresh_redactor(&self) {
+        if let Some(r) = &self.cfg.redactor {
+            r.refresh_now();
+        }
+    }
+
+    /// Journal write/sync failures so far.
+    pub fn journal_error_count(&self) -> u64 {
+        self.journal().error_count()
+    }
+
+    /// Make everything queued for the journal durable.
+    pub fn flush_journal(&self) {
+        self.journal().flush();
     }
 
     /// Mask secrets in a string when a redactor is configured.
@@ -619,17 +723,12 @@ impl Shared {
 
     /// Mask secrets in every string of an event (no-op without a redactor or
     /// when nothing matches).
-    fn redact_event(&self, event: Event) -> Event {
+    fn redact_event(&self, run_id: RunId, event: Event) -> Event {
         let Some(r) = &self.cfg.redactor else {
             return event;
         };
-        let Ok(mut v) = serde_json::to_value(&event) else {
-            return event;
-        };
-        if !redact_value(r, &mut v) {
-            return event;
-        }
-        serde_json::from_value(v).unwrap_or(event)
+        let value = serde_json::to_value(&event);
+        redact_event_checked(r, run_id, event, value)
     }
 
     /// Tool specs shown to the model: the discovery meta-tools above the
@@ -733,8 +832,33 @@ impl Shared {
     }
 }
 
+/// Redact `event` through its JSON `value`; fails CLOSED: when the event cannot
+/// be transformed or rebuilt, a placeholder error event replaces it (the
+/// original, possibly secret-bearing event is never returned).
+pub(crate) fn redact_event_checked(
+    r: &SharedRedactor,
+    run_id: RunId,
+    event: Event,
+    value: serde_json::Result<serde_json::Value>,
+) -> Event {
+    let withheld = || {
+        Event::Error(protocol::event::RunError {
+            run_id,
+            message: "[event withheld: redaction failed]".into(),
+            recoverable: true,
+        })
+    };
+    let Ok(mut v) = value else {
+        return withheld();
+    };
+    if !redact_value(r, &mut v) {
+        return event;
+    }
+    serde_json::from_value(v).unwrap_or_else(|_| withheld())
+}
+
 /// Redact all strings of `v` in place; `true` if anything changed.
-fn redact_value(r: &secret_store::Redactor, v: &mut serde_json::Value) -> bool {
+fn redact_value(r: &SharedRedactor, v: &mut serde_json::Value) -> bool {
     match v {
         serde_json::Value::String(s) => {
             if r.contains_secret(s) {
@@ -748,6 +872,24 @@ fn redact_value(r: &secret_store::Redactor, v: &mut serde_json::Value) -> bool {
         serde_json::Value::Object(o) => o.values_mut().fold(false, |c, x| redact_value(r, x) | c),
         _ => false,
     }
+}
+
+/// Events that must be on disk before `emit` returns: approvals, questions,
+/// control hand-over and run state.  Everything else is journaled in batches.
+fn needs_barrier(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::RunStarted(_)
+            | Event::RunFinished(_)
+            | Event::ApprovalNeeded(_)
+            | Event::ToolCallApproved(_)
+            | Event::ToolCallDenied(_)
+            | Event::QuestionAsked(_)
+            | Event::ControlRequested(_)
+            | Event::SubagentStarted(_)
+            | Event::SubagentFinished(_)
+            | Event::Error(_)
+    )
 }
 
 /// Result of [`Shared::resolve_call`].

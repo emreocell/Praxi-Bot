@@ -274,7 +274,11 @@ pub(crate) async fn receive(
         return Err(invalid("unsupported format version"));
     }
     if manifest.schema_version > storage::migrate::latest_version() {
-        return Err(invalid("unsupported schema version"));
+        return Err(ImportError::IncompatibleSchema {
+            db: "bot.db".into(),
+            found: manifest.schema_version,
+            supported: storage::migrate::latest_version(),
+        });
     }
     if manifest.files != records {
         return Err(invalid("manifest size/path/sha256 mismatch"));
