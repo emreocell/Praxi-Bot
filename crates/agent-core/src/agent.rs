@@ -221,10 +221,14 @@ impl AgentLoop {
         self.sh.global_policy.read().clone()
     }
 
-    /// Replace the workspace-wide default policy; takes effect for the next
-    /// tool call of every run.
+    /// Replace the workspace-wide default policy.
+    ///
+    /// Bumps the policy revision, then denies pending approvals that the new
+    /// policy hard-denies (the tool is not run and no grant is created). The
+    /// next tool call of every run sees the new policy.
     pub fn set_global_policy(&self, policy: Policy) {
         *self.sh.global_policy.write() = policy;
+        crate::approval::on_global_policy_replaced(&self.sh);
     }
 
     /// USD price of `model` (full `provider/model` reference): the loop config's
@@ -824,6 +828,9 @@ impl AgentLoop {
     /// Wait until the background task of `run_id` (started by this handle) has
     /// finished and return the run state.
     ///
+    /// A finished task drops its own map entry, so a missing handle still
+    /// returns the persisted state.
+    ///
     /// # Errors
     /// Fails if the run is unknown or storage fails.
     pub async fn wait(&self, run_id: RunId) -> Result<RunState> {
@@ -856,8 +863,22 @@ impl AgentLoop {
     }
 
     pub(crate) fn spawn(&self, run_id: RunId, start: Start) {
-        let handle = tokio::spawn(self.clone().drive(run_id, start));
+        // The task waits until its handle is in the map, then removes that
+        // entry when it finishes. `wait` tolerates the entry already being gone.
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let this = self.clone();
+        let sh = Arc::clone(&this.sh);
+        let handle = tokio::spawn(async move {
+            let _ = rx.await;
+            this.drive(run_id, start).await;
+            let finished = {
+                let mut tasks = sh.tasks.lock();
+                tasks.remove(&run_id)
+            };
+            drop(finished);
+        });
         self.sh.tasks.lock().insert(run_id, handle);
+        let _ = tx.send(());
     }
 
     // Boxed so the spawn / `conclude` / next-turn recursion has a nameable type.

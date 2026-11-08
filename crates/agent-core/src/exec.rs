@@ -7,6 +7,7 @@
 
 use std::fmt::Write as _;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use builtin_tools::{QUESTION_CARD_KIND, TODO_LIST_KIND};
@@ -21,7 +22,7 @@ use protocol::{Event, ToolCallId};
 use provider_catalog::{ChatChunk, ChatRequest, ModelRef, ProviderError};
 use serde_json::{Value, json};
 use storage::{Run, RunStep};
-use task_runtime::{ExecError, StepExecutor, StepSpec, StepStatus};
+use task_runtime::{ExecError, RetryPolicy, StepExecutor, StepSpec, StepStatus};
 use tokio_util::sync::CancellationToken;
 use tool_registry::{ContentPart, Tool, ToolContext, ToolOutput, ToolSpec};
 
@@ -511,8 +512,15 @@ impl TurnExecutor {
         (!block.is_empty()).then_some(block)
     }
 
-    /// One model, up to `model_retry.max_attempts` attempts; non-retryable
-    /// errors (bad credentials, bad request, 4xx) fail immediately.
+    /// One model, up to `model_retry.max_attempts` attempts inside one shared
+    /// sleep budget; non-retryable errors (bad credentials, bad request, 4xx)
+    /// fail immediately.
+    ///
+    /// The budget is the sum of the outer backoffs. A `Retry-After` that fits
+    /// is waited out and counts against that budget; one that does not is
+    /// returned as-is. Each `stream` call starts the provider catalog's
+    /// `send_with_retry` with a fresh counter, so refusing the extra attempt
+    /// is what keeps that inner budget from being reset.
     async fn call_with_retries(
         &self,
         ctx: &RunCtx,
@@ -522,6 +530,8 @@ impl TurnExecutor {
     ) -> Result<ModelOut, ProviderError> {
         let policy = self.sh.cfg.model_retry;
         let attempts = policy.max_attempts.max(1);
+        let budget = retry_time_budget(policy);
+        let mut slept = Duration::ZERO;
         let mut attempt = 1;
         let mut malformed_retried = false;
         loop {
@@ -531,13 +541,29 @@ impl TurnExecutor {
                 Err(e @ ProviderError::MalformedToolCall(_)) if malformed_retried => {
                     return Err(e);
                 }
-                Err(ProviderError::MalformedToolCall(_)) if attempt < attempts => {
+                Err(e @ ProviderError::MalformedToolCall(_)) if attempt < attempts => {
+                    let delay = policy.backoff(attempt);
+                    if !sleep_if_affordable(&mut slept, budget, delay).await {
+                        return Err(e);
+                    }
                     malformed_retried = true;
-                    tokio::time::sleep(policy.backoff(attempt)).await;
+                    attempt += 1;
+                }
+                // Honour Retry-After. Sleeping a shorter outer backoff and
+                // calling `stream` again would ignore the server and hand the
+                // inner retry loop a new full budget.
+                Err(ProviderError::RateLimited { retry_after }) if attempt < attempts => {
+                    let delay = retry_after.unwrap_or_else(|| policy.backoff(attempt));
+                    if !sleep_if_affordable(&mut slept, budget, delay).await {
+                        return Err(ProviderError::RateLimited { retry_after });
+                    }
                     attempt += 1;
                 }
                 Err(e) if attempt < attempts && is_retryable(&e) => {
-                    tokio::time::sleep(policy.backoff(attempt)).await;
+                    let delay = policy.backoff(attempt);
+                    if !sleep_if_affordable(&mut slept, budget, delay).await {
+                        return Err(e);
+                    }
                     attempt += 1;
                 }
                 Err(e) => return Err(e),
@@ -677,17 +703,22 @@ impl TurnExecutor {
                         is_error: true,
                     }
                 }
-                Decision::Ask => {
+                Decision::Ask { .. } => {
                     let category = resolved
                         .spec
                         .as_ref()
                         .map_or(PermissionCategory::Script, |s| s.category);
+                    let effect = resolved
+                        .spec
+                        .as_ref()
+                        .map_or(tool_registry::Effect::Write, |s| s.effect);
                     match self
                         .sh
                         .request_approval(
                             &ctx,
                             call_uuid,
                             &resolved.name,
+                            effect,
                             category,
                             &resolved.input,
                         )
@@ -952,6 +983,34 @@ fn unsupported_chain_message(misses: &[(String, String)]) -> String {
          Set model_caps in providers.toml (the user's values override the catalog); \
          for example, under [provider.model_caps.\"<model-id>\"] set tools = true or vision = true"
     )
+}
+
+/// Total time `call_with_retries` may spend *sleeping*, shared across every
+/// outer attempt. Each `stream` call starts the provider catalog's
+/// `send_with_retry` with a fresh counter, so a wait that does not fit is
+/// not started and that inner budget is not reset.
+fn retry_time_budget(policy: RetryPolicy) -> Duration {
+    let mut total = Duration::ZERO;
+    let mut attempt = 1u32;
+    let max = policy.max_attempts.max(1);
+    while attempt < max {
+        total = total.saturating_add(policy.backoff(attempt));
+        attempt += 1;
+    }
+    total
+}
+
+/// Sleep `delay` when it still fits in the remaining sleep budget.
+///
+/// The time spent inside the provider call itself is not charged: the budget
+/// is the sum of the backoffs the outer policy already allowed.
+async fn sleep_if_affordable(slept: &mut Duration, budget: Duration, delay: Duration) -> bool {
+    if slept.saturating_add(delay) > budget {
+        return false;
+    }
+    tokio::time::sleep(delay).await;
+    *slept = slept.saturating_add(delay);
+    true
 }
 
 /// Whether a provider failure is worth retrying (transient) as opposed to a
