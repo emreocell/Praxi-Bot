@@ -21,43 +21,148 @@ reachable only from the machine itself.
 - Architecture `x86_64` or `aarch64` (the installer detects it).
 - An API key for a model provider (see [Providers and models](providers-and-models.md)).
 
-## 1. Get the release package
+## 1. Get and verify the release package
 
-Binaries are built by the **Linux Server Packages** GitHub Actions workflow
-(manual run or a `v*` tag). Each run produces
-`praxi-linux-x86_64.tar.gz` and `praxi-linux-aarch64.tar.gz`, each with a
-`.sha256` file. Tagged runs attach those archives and `install-linux.sh` from
-the same tag to the GitHub release. There are no published releases yet, so
-run the workflow yourself and download the artifact for your architecture.
+Use an independently installed **GitHub CLI 2.80.0 or newer**. The installer
+checks this supported minimum before verification or installation. Its required
+`--source-ref`, `--source-digest`, `--custom-trusted-root`, and signer-policy
+flags are available at that floor. Obtain `gh` from [cli.github.com](https://cli.github.com),
+not from a Praxi release asset.
 
-## 2. Install
+The **Linux Server Packages** workflow builds `praxi-linux-x86_64.tar.gz` and
+`praxi-linux-aarch64.tar.gz` with companion `.sha256` files. Only a protected
+`v*` tag can produce release attestations. A release contains the archives,
+`install-linux.sh` from the same tag, and **`praxi-linux.sigstore.json`**.
+Unsigned branch/manual build artifacts cannot be installed by this installer.
+A checksum checks integrity; it never replaces signed provenance.
 
-Copy the tarball to the server, or, once a release exists, fetch the installer
-from **that same release tag**. The release job uploads `install-linux.sh`
-next to the tarballs. Use that asset; the copy on the default branch can
-drift from the binaries you are installing.
+Verify the installer before executing it, including before invoking `--help`
+on an installer obtained from an untrusted location. Copy the following from a
+reviewed checkout and substitute the release tag you intend to install:
 
-```sh
-# script and binaries from the same tag
-curl -fsSL https://github.com/emreocell/Praxi-Bot/releases/download/v0.1.0/install-linux.sh | sudo bash -s -- --version v0.1.0
-
-# from a local tarball (a sibling .sha256, or --sha256, is required)
-sudo ./scripts/install-linux.sh --file ./praxi-linux-aarch64.tar.gz
-
-# local tarball with neither checksum: refused unless you opt out
-sudo ./scripts/install-linux.sh --file ./praxi-linux-aarch64.tar.gz --insecure-skip-verify
-
-# with a virtual display and Chromium for browser/desktop automation
-sudo ./scripts/install-linux.sh --version v0.1.0 --with-desktop
+```bash
+(
+  set -euo pipefail
+  version=v0.1.0
+  work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+  base="https://github.com/emreocell/Praxi-Bot/releases/download/$version"
+  for asset in install-linux.sh praxi-linux.sigstore.json; do
+    curl -fSL --proto '=https' --proto-redir '=https' --tlsv1.2 "$base/$asset" -o "$work/$asset"
+  done
+  gh attestation verify "$work/install-linux.sh" --bundle "$work/praxi-linux.sigstore.json" \
+    --repo emreocell/Praxi-Bot --hostname github.com \
+    --signer-workflow github.com/emreocell/Praxi-Bot/.github/workflows/linux-release.yml \
+    --source-ref "refs/tags/$version" --deny-self-hosted-runners \
+    --cert-oidc-issuer https://token.actions.githubusercontent.com \
+    --predicate-type https://slsa.dev/provenance/v1 --digest-alg sha256
+  sudo bash "$work/install-linux.sh" --version "$version"
+)
 ```
 
-Other options: `--port`, `--display`, `--screen`, `--sha256`,
-`--insecure-skip-verify`, `--skip-packages`, `--no-start`, `--without-desktop`.
-Run it with `--help` for the full list. Re-running upgrades the binaries and
-keeps `/var/lib/praxi`, `/etc/praxi/praxi.env`, and `/etc/praxi/praxi-node.env`.
-A custom `BOT_PORT` stays unless you pass `--port`. An existing
-`praxi-xvfb.service` and its `DISPLAY` value stay unless you pass
-`--without-desktop`. `--with-desktop` installs or refreshes Xvfb and Chromium.
+The verified installer applies the same fixed repository, workflow, tag, OIDC
+issuer, predicate, and hosted-runner constraints to the archive **before**
+extracting files, installing packages, or modifying services. There is no
+verification bypass. `latest` resolves to a concrete tag; pin `--version` for
+repeatable deployment.
+
+## 2. Install, including offline hosts
+
+For a local archive, always specify the exact release tag. A sibling
+`praxi-linux.sigstore.json` is required unless `--bundle` supplies its path.
+A sibling `.sha256` or `--sha256` adds an optional integrity check:
+
+```sh
+sudo bash ./install-linux.sh --version v0.1.0 --file ./praxi-linux-aarch64.tar.gz
+# Check the signed archive without root, extraction, or installation:
+bash ./install-linux.sh --verify-only --version v0.1.0 --file ./praxi-linux-aarch64.tar.gz
+```
+
+### Offline trust preparation
+
+On a trusted online machine, independently obtain the current Sigstore trusted
+root snapshot with the trusted `gh` installation:
+
+```sh
+gh attestation trusted-root > trusted_root.jsonl
+```
+
+Transfer the trusted GitHub CLI, verified installer, architecture-specific
+archive, provenance bundle, and this snapshot to the offline machine. Transfer
+the root through your trusted administrative channel. **Do not automatically
+trust a root supplied beside a downloaded archive.** The installer accepts a
+custom root only when you explicitly supply it. Recreate the snapshot when
+importing new releases; an offline machine cannot discover later key revocation.
+Offline bundle verification authenticates the repository/owner names at signing
+time, not their current ownership after any rename or name reuse. Preserve the
+reviewed repository identity in your release administration. See GitHub's [offline verification guide](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/verify-attestations-offline).
+
+Before executing the transferred installer, verify it offline too:
+
+```sh
+gh attestation verify ./install-linux.sh --bundle ./praxi-linux.sigstore.json \
+  --custom-trusted-root /trusted/trusted_root.jsonl \
+  --repo emreocell/Praxi-Bot --hostname github.com \
+  --signer-workflow github.com/emreocell/Praxi-Bot/.github/workflows/linux-release.yml \
+  --source-ref refs/tags/v0.1.0 --deny-self-hosted-runners \
+  --cert-oidc-issuer https://token.actions.githubusercontent.com \
+  --predicate-type https://slsa.dev/provenance/v1 --digest-alg sha256
+
+bash ./install-linux.sh --verify-only --offline --version v0.1.0 \
+  --file ./praxi-linux-aarch64.tar.gz --custom-trusted-root /trusted/trusted_root.jsonl
+
+# Runtime dependencies must already be installed on an offline host.
+sudo bash ./install-linux.sh --offline --skip-packages --version v0.1.0 \
+  --file ./praxi-linux-aarch64.tar.gz --custom-trusted-root /trusted/trusted_root.jsonl
+```
+
+`--offline` refuses `latest`, a missing local archive/root, package installation,
+and `--with-desktop` downloads. `--verify-only` needs neither root privileges nor
+runtime packages. A local `--file` with `--custom-trusted-root` can also verify
+without network; the explicit offline mode additionally checks the installation
+options. Missing, corrupt, or mismatched provenance/root material stops the
+operation before installation.
+
+Other options: `--port`, `--display`, `--screen`, `--bundle`, `--sha256`,
+`--skip-packages`, `--no-start`, `--with-desktop`, `--without-desktop`.
+Re-running upgrades the binaries and preserves `/var/lib/praxi`,
+`/etc/praxi/praxi.env`, and `/etc/praxi/praxi-node.env`. A custom `BOT_PORT` stays
+unless `--port` is supplied. An existing Xvfb unit and `DISPLAY` stay unless
+`--without-desktop` is supplied. On an online host, `--with-desktop` installs
+or refreshes Xvfb and Chromium.
+
+### Release administrator setup and dry run
+
+Repository settings are not created by merging a workflow. Before a tagged
+release, an administrator must configure:
+
+1. An **active tag ruleset** matching `refs/tags/v*`, restricting tag creation
+   to release maintainers and prohibiting updates and deletion. Keep bypass
+   permissions limited to the intended release administrators.
+2. An environment named **`release`**, with required reviewers, **Prevent
+   self-review** enabled, and deployment tags restricted to `v*`. Disable
+   administrator bypass where supported.
+
+The attestation job references this environment and fails closed unless GitHub
+reports the current tag as protected and the environment API reports required
+reviewers with self-review prevention. If the token cannot read that policy,
+the job fails; it never assumes approval. The publishing job is gated by the
+same environment and the independent real-verification job.
+
+To exercise real Sigstore/`gh` behavior without publishing, create a reviewed,
+protected prerelease tag and dispatch **Linux Server Packages** on that tag
+with **`dry_run: true`** (the default). The workflow builds both architectures,
+attests the tagged inputs, and verifies all signed assets using real `gh`.
+It then verifies the archive with an independently fetched root inside a Linux
+network namespace with no network and fresh `gh` configuration/cache, and
+rejects a tampered artifact, wrong tag and wrong repository. Tag pushes and this dry-run mode never create a GitHub release.
+Publishing requires a separate dispatch on that protected tag with
+`dry_run: false` and the environment approval. Branch and PR validation remain hermetic and use a
+controlled verifier fixture; those checks do not claim a real attestation run.
+
+Publishing uses `gh release create --verify-tag` exactly once. An existing
+release fails rather than overwriting or adding assets. Publish a new version
+for changed artifacts. The same-run signed bundle is always shipped beside
+both tarballs and the tagged installer.
 
 The script:
 
@@ -237,9 +342,9 @@ is a short launch smoke test, not a representative chat workload measurement.
 ## Update, logs, uninstall
 
 ```sh
-sudo ./scripts/install-linux.sh --file ./praxi-linux-aarch64.tar.gz   # update
+sudo ./scripts/install-linux.sh --version v0.1.0 --file ./praxi-linux-aarch64.tar.gz   # update
 # an existing praxi-xvfb unit and DISPLAY are kept
-sudo ./scripts/install-linux.sh --file ./praxi-linux-aarch64.tar.gz --without-desktop
+sudo ./scripts/install-linux.sh --version v0.1.0 --file ./praxi-linux-aarch64.tar.gz --without-desktop
 journalctl -u praxi -n 100
 sudo ./scripts/install-linux.sh --uninstall           # keeps data and user
 sudo ./scripts/install-linux.sh --uninstall --purge   # deletes data too

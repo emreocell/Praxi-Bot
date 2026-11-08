@@ -6,6 +6,11 @@ on:
   pull_request:
     paths: [".github/workflows/linux-release.yml", "scripts/install-linux.sh"]
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Attest and verify a protected v* tag without publishing a release
+        type: boolean
+        default: true
   push:
     branches: [main]
     tags: ["v*"]
@@ -47,6 +52,16 @@ jobs:
           for action in uses:
               assert re.fullmatch(r"[^@\s]+@[0-9a-f]{40}(?:\s+#.*)?", action), action
           print(f"Verified {len(uses)} immutable action references")
+          release = workflow.split("\n  release:\n", 1)[1]
+          assert "    if: github.event_name == 'workflow_dispatch' && !inputs.dry_run" in release
+          assert "    needs: verify-tagged-release" in release
+          assert "    environment: release" in release
+          attest = workflow.split("\n  attest:\n", 1)[1].split("\n  verify-tagged-release:\n", 1)[0]
+          assert "    environment: release" in attest
+          assert 'GITHUB_REF_PROTECTED' in attest and 'required_reviewers' in attest
+          assert '--clobber' not in release
+          assert 'gh release upload' not in release and 'gh release edit' not in release
+          print("Verified protected-tag/reviewer, explicit-publish, real-verifier, and no-overwrite gates")
           PYTHON
 
       - name: Audit release workflow
@@ -108,6 +123,10 @@ jobs:
           cat > "$fixture_root/bin/gh" <<'GH'
           #!/usr/bin/env bash
           set -euo pipefail
+          if [[ "${1:-}" == --version ]]; then
+            printf 'gh version %s (fixture)\n' "${FIXTURE_GH_VERSION:-2.80.0}"
+            exit 0
+          fi
           printf 'called\n' >> "$FIXTURE_CALLS"
           [[ $# -ge 3 && "$1" == attestation && "$2" == verify ]] || exit 2
           artifact="$3"; shift 3
@@ -115,13 +134,21 @@ jobs:
           while [[ $# -gt 0 ]]; do
             case "$1" in
               --deny-self-hosted-runners) flags["$1"]=true; shift ;;
-              --bundle|--repo|--hostname|--signer-workflow|--source-ref|--cert-oidc-issuer|--predicate-type|--digest-alg)
+              --bundle|--repo|--hostname|--signer-workflow|--source-ref|--cert-oidc-issuer|--predicate-type|--digest-alg|--custom-trusted-root)
                 [[ $# -ge 2 && ! -v "flags[$1]" ]] || exit 2
                 flags["$1"]="$2"; shift 2 ;;
               *) exit 2 ;;
             esac
           done
-          [[ ${#flags[@]} -eq 9 && "${flags[--repo]}" == emreocell/Praxi-Bot ]]
+          expected_flags=9
+          if [[ -v 'flags[--custom-trusted-root]' ]]; then
+            expected_flags=10
+            cmp -- "${flags[--custom-trusted-root]}" "$FIXTURE_ROOT/trusted_root.jsonl"
+          fi
+          if [[ "${FIXTURE_NO_NETWORK:-0}" == 1 ]]; then
+            [[ -v 'flags[--custom-trusted-root]' ]] || exit 2
+          fi
+          [[ ${#flags[@]} -eq "$expected_flags" && "${flags[--repo]}" == emreocell/Praxi-Bot ]]
           [[ "${flags[--hostname]}" == github.com && "${flags[--digest-alg]}" == sha256 ]]
           [[ "${flags[--signer-workflow]}" == github.com/emreocell/Praxi-Bot/.github/workflows/linux-release.yml ]]
           [[ "${flags[--cert-oidc-issuer]}" == https://token.actions.githubusercontent.com ]]
@@ -139,6 +166,7 @@ jobs:
           cat > "$fixture_root/bin/curl" <<'CURL'
           #!/usr/bin/env bash
           set -euo pipefail
+          [[ "${FIXTURE_NO_NETWORK:-0}" != 1 ]] || { echo 'unexpected network' >&2; exit 95; }
           output=""; url=""
           while [[ $# -gt 0 ]]; do
             case "$1" in
@@ -173,7 +201,7 @@ jobs:
               echo "FAIL: $name was accepted" >&2
               exit 1
             fi
-            grep -Fq "$message" "$fixture_root/$name.log" || { cat "$fixture_root/$name.log"; exit 1; }
+            grep -Fq -- "$message" "$fixture_root/$name.log" || { cat "$fixture_root/$name.log"; exit 1; }
             echo "PASS: $name rejected before installation"
           }
 
@@ -224,6 +252,49 @@ jobs:
             bash "$fixture_root/bootstrap.sh"
           [[ ! -e "$fixture_root/bootstrap-executed" && ! -e "$FIXTURE_MUTATIONS" ]]
           [[ "$(wc -l < "$FIXTURE_CALLS")" -eq 8 ]]
+          make_bundle "$FIXTURE_RELEASE/praxi-linux.sigstore.json" emreocell/Praxi-Bot refs/tags/v0.0.0-audit github-hosted
+          # Offline verification must pass an explicitly trusted root and cannot
+          # reach curl, package managers, services, or extraction.
+          printf '{"fixture":"independently acquired root"}\n' > "$fixture_root/trusted_root.jsonl"
+          env FIXTURE_NO_NETWORK=1 bash "$script" --verify-only --offline \
+            --version v0.0.0-audit --file "$FIXTURE_RELEASE/$asset" \
+            --custom-trusted-root "$fixture_root/trusted_root.jsonl"
+          expect_rejected offline-without-explicit-root '--offline requires' \
+            env FIXTURE_NO_NETWORK=1 bash "$script" --verify-only --offline \
+              --version v0.0.0-audit --file "$FIXTURE_RELEASE/$asset"
+          expect_rejected offline-latest '--offline requires' \
+            env FIXTURE_NO_NETWORK=1 bash "$script" --verify-only --offline \
+              --file "$FIXTURE_RELEASE/$asset" --custom-trusted-root "$fixture_root/trusted_root.jsonl"
+          expect_rejected offline-missing-archive '--offline requires' \
+            env FIXTURE_NO_NETWORK=1 bash "$script" --verify-only --offline \
+              --version v0.0.0-audit --custom-trusted-root "$fixture_root/trusted_root.jsonl"
+          expect_rejected missing-root 'trusted root file is missing or empty' \
+            env FIXTURE_NO_NETWORK=1 bash "$script" --verify-only --offline \
+              --version v0.0.0-audit --file "$FIXTURE_RELEASE/$asset" \
+              --custom-trusted-root "$fixture_root/missing-root"
+          printf 'untrusted-root' > "$fixture_root/untrusted-root"
+          expect_rejected untrusted-root 'provenance verification failed' \
+            env FIXTURE_NO_NETWORK=1 bash "$script" --verify-only --offline \
+              --version v0.0.0-audit --file "$FIXTURE_RELEASE/$asset" \
+              --custom-trusted-root "$fixture_root/untrusted-root"
+          expect_rejected offline-wrong-ref 'provenance verification failed' \
+            env FIXTURE_NO_NETWORK=1 bash "$script" --verify-only --offline \
+              --version v0.0.0-audit --file "$FIXTURE_RELEASE/$asset" \
+              --bundle "$fixture_root/wrong-ref.bundle" \
+              --custom-trusted-root "$fixture_root/trusted_root.jsonl"
+          expect_rejected old-verifier 'GitHub CLI >= 2.80.0 is required' \
+            env FIXTURE_GH_VERSION=2.79.0 bash "$script" --verify-only --version v0.0.0-audit \
+              --file "$FIXTURE_RELEASE/$asset"
+          expect_rejected malformed-verifier 'unrecognized version' \
+            env FIXTURE_GH_VERSION=unknown bash "$script" --verify-only --version v0.0.0-audit \
+              --file "$FIXTURE_RELEASE/$asset"
+          expect_rejected offline-desktop '--offline cannot download' \
+            env FIXTURE_NO_NETWORK=1 bash "$script" --verify-only --offline --with-desktop \
+              --version v0.0.0-audit --file "$FIXTURE_RELEASE/$asset" \
+              --custom-trusted-root "$fixture_root/trusted_root.jsonl"
+          [[ ! -e "$FIXTURE_MUTATIONS" ]]
+          echo 'PASS: explicit-root offline verification and verifier version floor'
+
           echo 'PASS: verified bootstrap reached sudo only after installer verification'
           echo 'PASS: all identity checks exercised; no network or privileged commands executed'
 
@@ -306,14 +377,16 @@ jobs:
             dist/praxi-linux-${{ matrix.arch }}.tar.gz.sha256
           if-no-files-found: error
 
-  release:
-    name: Attest and attach to GitHub release
+  attest:
+    name: Attest protected release tag
     if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'emreocell/Praxi-Bot'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment: release
     permissions:
-      contents: write
+      contents: read
+      actions: read
       id-token: write
       attestations: write
     steps:
@@ -321,6 +394,16 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Require tag protection and reviewer approval policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_PROTECTED" == true ]] || { echo 'A protected v* tag is required' >&2; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/environments/release" \
+            --jq '[.protection_rules[]? | select(.type == "required_reviewers" and .prevent_self_review == true) | .reviewers | length] | any(. > 0)' \
+            | grep -qx true || { echo 'release environment requires reviewers and prevention of self-review' >&2; exit 1; }
 
       - name: Download this run's artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -364,6 +447,84 @@ jobs:
               --predicate-type https://slsa.dev/provenance/v1 --digest-alg sha256
           done
 
+      - name: Upload signed inputs for independent verification
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: praxi-linux-signed-inputs
+          path: dist/*
+          if-no-files-found: error
+
+  verify-tagged-release:
+    name: Real gh verification (online and offline)
+    needs: attest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout tagged verifier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download this run's signed inputs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: praxi-linux-signed-inputs
+          path: dist
+          digest-mismatch: error
+      - name: Verify real signatures and reject altered provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Obtain trust independently of the signed inputs. The snapshot is
+          # carried into a new network namespace with no network or gh cache.
+          gh --version
+          gh attestation trusted-root > "$RUNNER_TEMP/trusted_root.jsonl"
+          test -s "$RUNNER_TEMP/trusted_root.jsonl"
+          verify() {
+            gh attestation verify "$1" --bundle dist/praxi-linux.sigstore.json \
+              --repo emreocell/Praxi-Bot --hostname github.com \
+              --signer-workflow github.com/emreocell/Praxi-Bot/.github/workflows/linux-release.yml \
+              --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA" --deny-self-hosted-runners \
+              --cert-oidc-issuer https://token.actions.githubusercontent.com \
+              --predicate-type https://slsa.dev/provenance/v1 --digest-alg sha256
+          }
+          for asset in dist/*.tar.gz dist/install-linux.sh; do verify "$asset"; done
+          bash scripts/install-linux.sh --verify-only --version "$GITHUB_REF_NAME" \
+            --file dist/praxi-linux-x86_64.tar.gz
+          mkdir -p "$RUNNER_TEMP/offline-gh" "$RUNNER_TEMP/offline-cache"
+          sudo unshare --net -- env PATH="$PATH" \
+            GH_CONFIG_DIR="$RUNNER_TEMP/offline-gh" XDG_CACHE_HOME="$RUNNER_TEMP/offline-cache" \
+            bash scripts/install-linux.sh --verify-only --offline --version "$GITHUB_REF_NAME" \
+              --file dist/praxi-linux-x86_64.tar.gz --custom-trusted-root "$RUNNER_TEMP/trusted_root.jsonl"
+          cp dist/praxi-linux-x86_64.tar.gz "$RUNNER_TEMP/tampered.tar.gz"
+          printf 'tampered' >> "$RUNNER_TEMP/tampered.tar.gz"
+          if verify "$RUNNER_TEMP/tampered.tar.gz"; then echo 'accepted tampered artifact' >&2; exit 1; fi
+          if gh attestation verify dist/install-linux.sh --bundle dist/praxi-linux.sigstore.json \
+            --custom-trusted-root "$RUNNER_TEMP/trusted_root.jsonl" --repo emreocell/Praxi-Bot \
+            --source-ref refs/tags/v0.0.0-wrong-ref; then echo 'accepted wrong ref' >&2; exit 1; fi
+          if gh attestation verify dist/install-linux.sh --bundle dist/praxi-linux.sigstore.json \
+            --custom-trusted-root "$RUNNER_TEMP/trusted_root.jsonl" --repo attacker/Praxi-Bot; then
+            echo 'accepted wrong repository' >&2; exit 1
+          fi
+
+  release:
+    name: Publish verified immutable release
+    needs: verify-tagged-release
+    if: github.event_name == 'workflow_dispatch' && !inputs.dry_run
+    environment: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download this run's verified signed inputs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: praxi-linux-signed-inputs
+          path: dist
+          digest-mismatch: error
       - name: Publish verified assets and bootstrap instructions
         env:
           GH_TOKEN: ${{ github.token }}
@@ -373,7 +534,7 @@ jobs:
           cat > "$notes" <<'NOTES'
           ### Verified Linux installation
 
-          Install a trusted GitHub CLI independently from https://cli.github.com.
+          Install trusted GitHub CLI >= 2.80.0 independently from https://cli.github.com.
           Copy the bootstrap from a reviewed copy of `scripts/install-linux.sh`
           or this workflow. Verify the installer before executing it:
 
@@ -401,14 +562,15 @@ jobs:
           checks without installing. Local archives require `--version <tag>`
           and the companion `praxi-linux.sigstore.json` bundle (or `--bundle <file>`).
           A matching `.sha256` is an integrity check, never proof of origin.
+          For offline use, independently acquire `gh attestation trusted-root > trusted_root.jsonl`
+          on an online trusted machine, then transfer it with the artifact and bundle.
+          Pass `--offline --custom-trusted-root /trusted/trusted_root.jsonl` along with
+          `--file` and `--version`; installation also requires `--skip-packages`.
           Releases without signed provenance are rejected; there is no bypass.
           NOTES
           sed -i "s/__PRAXI_TAG__/${GITHUB_REF_NAME}/g" "$notes"
           assets=(dist/*.tar.gz dist/*.sha256 dist/install-linux.sh dist/praxi-linux.sigstore.json)
-          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
-            gh release edit "$GITHUB_REF_NAME" --notes-file "$notes" --draft=false --repo "$GITHUB_REPOSITORY"
-          else
-            gh release create "$GITHUB_REF_NAME" "${assets[@]}" --verify-tag \
-              --title "$GITHUB_REF_NAME" --notes-file "$notes" --repo "$GITHUB_REPOSITORY"
-          fi
+          # Creation fails for an existing release. Never mutate, overwrite, or
+          # append assets to an already published tag; use a new version instead.
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" --verify-tag \
+            --title "$GITHUB_REF_NAME" --notes-file "$notes" --repo "$GITHUB_REPOSITORY"
