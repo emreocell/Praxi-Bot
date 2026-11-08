@@ -20,8 +20,9 @@
 //! refuse every action until an explicit [`ControlHub::release`]
 //! (`POST /v1/control/release`).  The heartbeat TTL only decides whether a
 //! controller counts as live; losing the app (crash, restart, closed stream)
-//! never silently resumes the bot.  A later `idle` / `bot_driving` heartbeat
-//! does not release the latch either.
+//! never silently resumes the bot.  An explicit `PUT` of `idle` /
+//! `bot_driving` (the pre-108 UI's way to resume) does release it, and
+//! `paused` / `human_driving` heartbeats keep it latched.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -127,14 +128,13 @@ impl ControlHub {
 
     /// Register the app as controller / refresh the heartbeat.
     ///
-    /// `Paused` / `HumanDriving` latch (see the module docs); other modes never
-    /// clear a latch, only [`ControlHub::release`] does.
+    /// `Paused` / `HumanDriving` latch (see the module docs); an explicit
+    /// `Idle` / `BotDriving` clears the latch (as does [`ControlHub::release`]);
+    /// TTL expiry never does.
     pub fn put_state(&self, mode: ControlMode) {
         let mut st = self.state.lock();
         st.registration = Some((mode, Instant::now()));
-        if refused_while(mode).is_some() {
-            st.latched = Some(mode);
-        }
+        st.latched = refused_while(mode).map(|_| mode);
     }
 
     /// The latched `Paused` / `HumanDriving` mode, if any (never expires).
@@ -455,13 +455,12 @@ mod tests {
         assert!(hub.registration().is_none(), "heartbeat expired");
         let msg = gate(&hub, None).await.0.unwrap_err();
         assert!(msg.contains("paused"), "{msg}");
-        // A bot_driving / idle heartbeat is not a release.
-        hub.put_state(ControlMode::BotDriving);
-        hub.put_state(ControlMode::Idle);
+        // Another paused heartbeat keeps it latched.
+        hub.put_state(ControlMode::Paused);
         assert!(gate(&hub, None).await.0.is_err());
         assert_eq!(hub.release(), Some(ControlMode::Paused));
         assert_eq!(hub.latched(), None);
-        tokio::time::sleep(Duration::from_millis(200)).await; // idle heartbeat expires
+        tokio::time::sleep(Duration::from_millis(200)).await; // heartbeat expires
         assert!(gate(&hub, None).await.0.is_ok());
         assert_eq!(hub.release(), None, "second release is a no-op");
     }
@@ -477,5 +476,18 @@ mod tests {
         let (out, published, _) = gate(&hub, None).await;
         assert!(out.unwrap_err().contains("taken control"));
         assert_eq!(published, 0);
+    }
+
+    #[tokio::test]
+    async fn explicit_put_bot_driving_releases_but_a_heartbeat_timeout_does_not() {
+        let hub = Arc::new(ControlHub::new(fast()));
+        hub.put_state(ControlMode::Paused);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(gate(&hub, None).await.0.is_err(), "timeout keeps the latch");
+        hub.put_state(ControlMode::BotDriving);
+        assert_eq!(hub.latched(), None);
+        hub.put_state(ControlMode::HumanDriving);
+        hub.put_state(ControlMode::Idle);
+        assert_eq!(hub.latched(), None, "explicit idle releases too");
     }
 }

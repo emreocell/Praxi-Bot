@@ -1636,14 +1636,8 @@ async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
         Some(json!({"mode": "idle"})),
     )
     .await;
-    // SEC-07: an idle heartbeat is not a release; only the explicit one is.
-    assert!(t.state.hub().latched().is_some());
-    assert_eq!(
-        call(&t, Method::POST, "/v1/control/release", None)
-            .await
-            .status,
-        StatusCode::OK
-    );
+    // SEC-07: an explicit PUT idle releases (pre-108 UI resume path).
+    assert!(t.state.hub().latched().is_none());
     // Registered but silent: refused after the long timeout (600 ms here).
     let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
     assert!(state.contains("Button"), "{state}");
@@ -2286,12 +2280,12 @@ async fn pause_is_latched_until_an_explicit_release() {
     )
     .await;
     assert_eq!(r.json()["latched"], "paused");
-    // An idle heartbeat does not release it.
+    // A paused heartbeat keeps it.
     let r = call(
         &t,
         Method::PUT,
         "/v1/control/state",
-        Some(json!({"mode": "idle"})),
+        Some(json!({"mode": "paused"})),
     )
     .await;
     assert_eq!(r.json()["latched"], "paused");
@@ -2388,4 +2382,26 @@ fn load_policy_distinguishes_missing_from_broken() {
     let ok = serde_json::to_string(&permission_engine::Policy::full()).unwrap();
     assert!(crate::validate_policy(&ok).is_ok());
     assert!(crate::validate_policy("nope").is_err());
+}
+
+#[tokio::test]
+async fn explicit_put_bot_driving_releases_a_latched_pause() {
+    let t = setup();
+    call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "human_driving"})),
+    )
+    .await;
+    assert!(t.state.hub().latched().is_some());
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "bot_driving"})),
+    )
+    .await;
+    assert!(r.json()["latched"].is_null());
+    assert!(t.state.hub().latched().is_none());
 }
