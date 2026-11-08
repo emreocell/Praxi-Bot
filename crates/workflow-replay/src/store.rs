@@ -433,6 +433,9 @@ fn owned_temp(name: &str) -> bool {
         && (base == INDEX_FILE || base.strip_suffix(".toml").is_some_and(valid_name))
 }
 
+// Keep the fallible API on every platform so callers propagate Unix fsync
+// errors; non-Unix targets have no portable directory fsync operation here.
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
 fn sync_directory(dir: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     fs::File::open(dir)?.sync_all()?;
