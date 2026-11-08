@@ -3421,6 +3421,50 @@ async fn a_refusing_control_gate_fails_the_tool_call_with_its_message() {
     assert!(tool_messages(&fake.request(1))[0].contains("taken control"));
 }
 
+fn desk_req(run_id: String) -> builtin_tools::ControlRequest {
+    builtin_tools::ControlRequest {
+        run_id,
+        rect: None,
+        label: "Save".into(),
+        action: "click".into(),
+    }
+}
+
+#[tokio::test]
+async fn control_bridge_fails_closed_for_unknown_runs_and_a_dropped_loop() {
+    use builtin_tools::DesktopControlGate as _;
+    let env = setup();
+    let fake = Fake::new(vec![]);
+    let lp = gate_loop(&env, &fake);
+    lp.set_control_gate(Arc::new(TestGate {
+        refuse: false,
+        seen: Mutex::new(Vec::new()),
+    }));
+    let bridge = crate::control::LoopControl {
+        sh: Arc::downgrade(&lp.sh),
+    };
+    // Unknown (never live) run id and an unparsable id both refuse.
+    let err = bridge
+        .before_action(&desk_req(uuid::Uuid::now_v7().to_string()))
+        .await
+        .unwrap_err();
+    assert!(err.contains("not active"), "{err}");
+    assert!(
+        bridge
+            .before_action(&desk_req("nope".into()))
+            .await
+            .is_err()
+    );
+    // Dropped loop refuses too.
+    drop(lp);
+    assert!(
+        bridge
+            .before_action(&desk_req(uuid::Uuid::now_v7().to_string()))
+            .await
+            .is_err()
+    );
+}
+
 #[tokio::test]
 async fn without_a_control_gate_the_action_just_runs() {
     let env = setup();

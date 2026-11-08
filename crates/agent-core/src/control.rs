@@ -52,6 +52,8 @@ pub trait ControlGate: Send + Sync {
     ) -> Result<(), String>;
 }
 
+const NOT_CONSULTABLE: &str = "This desktop action was refused because the run it belongs to is not active, so the control state (pause / human driving) cannot be checked. Do not retry it; ask the user how to continue.";
+
 /// The [`DesktopControlGate`] the builtin tools get: resolves the run and
 /// forwards to the registered [`ControlGate`].
 pub(crate) struct LoopControl {
@@ -61,8 +63,9 @@ pub(crate) struct LoopControl {
 #[async_trait]
 impl DesktopControlGate for LoopControl {
     async fn before_action(&self, req: &ToolRequest) -> Result<(), String> {
+        // Fail closed: if the loop is gone the latch cannot be consulted.
         let Some(sh) = self.sh.upgrade() else {
-            return Ok(());
+            return Err(NOT_CONSULTABLE.to_owned());
         };
         let Some(gate) = sh.control.read().clone() else {
             return Ok(());
@@ -73,8 +76,10 @@ impl DesktopControlGate for LoopControl {
             .ok()
             .and_then(|id| sh.runs.lock().get(&RunId(id)).cloned())
         else {
-            // Not a live run (e.g. a tool used outside a turn): nothing to show.
-            return Ok(());
+            // Not a live run (a tool used outside a turn, or a stale id): the
+            // request cannot be attributed to a run and so cannot be checked
+            // against the control latch.  Fail closed.
+            return Err(NOT_CONSULTABLE.to_owned());
         };
         let request = ControlRequest {
             request_id: Uuid::now_v7(),
