@@ -116,11 +116,15 @@ fn read_verified(data_dir: &Path, path: &Path) -> std::io::Result<(String, bool)
     // No symlink is followed (O_NOFOLLOW, atomic with the open), no FIFO blocks.
     let mut f = std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
+        .custom_flags(
+            (rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::NONBLOCK
+                | rustix::fs::OFlags::CLOEXEC)
+                .bits() as i32,
+        )
         .open(path)?;
     let meta = f.metadata()?;
-    // SAFETY: geteuid has no preconditions and cannot fail.
-    let euid = unsafe { libc::geteuid() };
+    let euid = rustix::process::geteuid().as_raw();
     if !meta.is_file() {
         return Err(deny("api-token is not a regular file"));
     }
