@@ -77,8 +77,9 @@ impl McpHost {
         data_dir: &Path,
         registry: ToolRegistry,
         secrets: Option<Arc<dyn SecretStore>>,
+        redactor: Option<mcp_bridge::ExternalRedactor>,
     ) -> Arc<Self> {
-        Self::start_with_policy(data_dir, registry, secrets, McpPolicy::default())
+        Self::start_with_policy(data_dir, registry, secrets, redactor, McpPolicy::default())
     }
 
     /// [`Self::start`] with a custom bridge policy (tests use short timeouts).
@@ -86,6 +87,7 @@ impl McpHost {
         data_dir: &Path,
         registry: ToolRegistry,
         secrets: Option<Arc<dyn SecretStore>>,
+        redactor: Option<mcp_bridge::ExternalRedactor>,
         policy: McpPolicy,
     ) -> Arc<Self> {
         let path = data_dir.join(MCP_FILE);
@@ -105,6 +107,11 @@ impl McpHost {
         let mut manager = McpManager::with_policy(registry.clone(), policy);
         if let Some(s) = secrets {
             manager = manager.with_secret_store(s);
+        }
+        // The daemon's live redactor masks every MCP diagnostic (stderr,
+        // rmcp warnings, connect and discovery errors).
+        if let Some(r) = redactor {
+            manager = manager.with_redactor(r);
         }
         let catalog = mcp_bridge::builtin_catalog().unwrap_or_else(|e| {
             eprintln!("warning: {e}");
@@ -662,7 +669,8 @@ impl McpControl for McpHost {
         };
         self.connect_registered(&cfg.id, generation, handle, false)
             .await;
-        Ok(self.dto(&self.config_of(&cfg.id)?))
+        // A concurrent removal must not turn a successful add into NotFound.
+        Ok(self.dto(&self.config_of(&cfg.id).unwrap_or(cfg)))
     }
 
     async fn update(
@@ -675,6 +683,9 @@ impl McpControl for McpHost {
             self.check_writable()?;
             let prev = self.config_of(name)?;
             let cfg = merge_update(&prev, &input)?;
+            // Validate before anything is persisted or detached: the old
+            // server keeps running when the new configuration is invalid.
+            cfg.validate().map_err(map_err)?;
             self.persist(|m| {
                 m.insert(name.to_owned(), cfg.clone());
             })?;
@@ -685,7 +696,26 @@ impl McpControl for McpHost {
             };
             self.connecting.lock().remove(name);
             self.announced.lock().remove(name);
-            let handle = self.manager.register_server(cfg.clone()).map_err(map_err)?;
+            let handle = match self.manager.register_server(cfg.clone()) {
+                Ok(handle) => handle,
+                Err(error) => {
+                    // Registration of a validated config should not fail; if
+                    // it does, put the previous server and file back.
+                    let _ = self.persist(|m| {
+                        m.insert(name.to_owned(), prev.clone());
+                    });
+                    let restored = self.manager.register_server(prev.clone()).ok();
+                    if let Some(old) = old {
+                        old.close().await;
+                    }
+                    if let Some(restored) = restored {
+                        let generation = self.begin_connect(name, prev.enabled);
+                        self.connect_registered(name, generation, restored, false)
+                            .await;
+                    }
+                    return Err(map_err(error));
+                }
+            };
             let generation = self.begin_connect(name, cfg.enabled);
             (cfg, old, handle, generation)
         };
@@ -697,7 +727,7 @@ impl McpControl for McpHost {
             },
             self.connect_registered(name, generation, handle, false)
         );
-        Ok(self.dto(&self.config_of(&cfg.id)?))
+        Ok(self.dto(&self.config_of(&cfg.id).unwrap_or(cfg)))
     }
 
     async fn remove(&self, name: &str) -> Result<(), McpControlError> {
@@ -724,12 +754,13 @@ impl McpControl for McpHost {
     }
 
     async fn reconnect(&self, name: &str) -> Result<McpServerDto, McpControlError> {
-        let (handle, generation, reenable) = {
+        let (handle, generation, reenable, fallback) = {
             let _op = self.ops.lock().await;
             let cfg = self.config_of(name)?;
             if !cfg.enabled {
                 return Ok(self.dto(&cfg));
             }
+            let fallback = cfg.clone();
             let (handle, reenable) = match self.manager.server_handle(name) {
                 Ok(handle) => (handle, true),
                 Err(McpError::UnknownServer(_)) => {
@@ -738,11 +769,11 @@ impl McpControl for McpHost {
                 Err(error) => return Err(map_err(error)),
             };
             let generation = self.begin_connect(name, true);
-            (handle, generation, reenable)
+            (handle, generation, reenable, fallback)
         };
         self.connect_registered(name, generation, handle, reenable)
             .await;
-        Ok(self.dto(&self.config_of(name)?))
+        Ok(self.dto(&self.config_of(name).unwrap_or(fallback)))
     }
 
     fn tools(&self, name: &str) -> Result<Vec<McpToolDto>, McpControlError> {
@@ -806,7 +837,7 @@ mod tests {
     }
 
     fn open(dir: &Path) -> Arc<McpHost> {
-        McpHost::start_with_policy(dir, ToolRegistry::new(), None, fast_policy())
+        McpHost::start_with_policy(dir, ToolRegistry::new(), None, None, fast_policy())
     }
 
     fn stdio(name: &str, enabled: bool) -> McpServerInput {
@@ -1062,6 +1093,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn invalid_update_keeps_the_old_server_registered_and_persisted() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = open(dir.path());
+        host.add(stdio("files", false)).await.unwrap();
+        let before = std::fs::read_to_string(dir.path().join(MCP_FILE)).unwrap();
+        let bad = host
+            .update("files", json!({"tool_allow": ["[unclosed"]}))
+            .await
+            .unwrap_err();
+        assert!(matches!(bad, McpControlError::Invalid(_)), "{bad:?}");
+        // Still registered with the manager (not detached) and the file is untouched.
+        assert!(host.manager.server_handle("files").is_ok());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(MCP_FILE)).unwrap(),
+            before
+        );
+        host.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn dangerous_stdio_is_refused_and_mcp_toml_is_not_executed() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(MCP_FILE);
@@ -1195,8 +1246,13 @@ mod tests {
             gate,
             entered: Mutex::new(Some(entered)),
         });
-        let host =
-            McpHost::start_with_policy(&data, ToolRegistry::new(), Some(secrets), fast_policy());
+        let host = McpHost::start_with_policy(
+            &data,
+            ToolRegistry::new(),
+            Some(secrets),
+            None,
+            fast_policy(),
+        );
         let pending_host = Arc::clone(&host);
         let pending = tokio::spawn(async move { pending_host.add(stdio("pending", true)).await });
         started.await.unwrap();

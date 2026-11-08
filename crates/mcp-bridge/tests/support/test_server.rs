@@ -83,6 +83,15 @@ impl ServerHandler for TestServer {
                 );
                 return Ok(ListToolsResult::with_all_items(vec![large]));
             }
+            Ok("huge-page") => {
+                // One page far above the transport frame limit.
+                let mut large = tool("echo", "echo", true);
+                large.input_schema = Arc::new(
+                    serde_json::from_value(json!({"description": "x".repeat(9 * 1024 * 1024)}))
+                        .unwrap(),
+                );
+                return Ok(ListToolsResult::with_all_items(vec![large]));
+            }
             Ok("secret-error") => {
                 return Err(ErrorData::internal_error(
                     std::env::var("API_KEY").unwrap(),
@@ -180,6 +189,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match std::env::var("MCP_TEST_MODE").as_deref() {
         Ok("secret-stderr") => {
             eprintln!("child secret: {}", std::env::var("API_KEY").unwrap());
+        }
+        Ok("secret-stderr-encoded") => {
+            use base64::Engine as _;
+            let secret = std::env::var("API_KEY").unwrap();
+            let std64 = base64::engine::general_purpose::STANDARD.encode(&secret);
+            let url64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&secret);
+            let url: String = secret
+                .bytes()
+                .map(|b| {
+                    if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+                        char::from(b).to_string()
+                    } else {
+                        format!("%{b:02X}")
+                    }
+                })
+                .collect();
+            eprintln!("encoded-url: {url}");
+            eprintln!("encoded-b64: {std64}");
+            eprintln!("encoded-b64url: {url64}");
+            eprintln!("encoded-json: {}", serde_json::to_string(&secret).unwrap());
+            eprintln!(
+                "encoded-bearer-token-only: {}",
+                secret.trim_start_matches("Bearer ")
+            );
+            eprintln!("encoded-done");
         }
         Ok("flood") => {
             use std::io::Write;

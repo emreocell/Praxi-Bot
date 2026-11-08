@@ -623,3 +623,48 @@ async fn discovery_caps_reject_remote_tool_sets_before_registration() {
         mgr.shutdown().await;
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_single_page_above_the_frame_limit_is_rejected_while_reading() {
+    let reg = ToolRegistry::new();
+    let mgr = McpManager::with_policy(reg.clone(), fast_policy(1));
+    let result = tokio::time::timeout(
+        Duration::from_secs(20),
+        mgr.add_server(mode_config("huge", "huge-page")),
+    )
+    .await
+    .expect("oversized frame was not rejected promptly");
+    let error = result.unwrap_err();
+    assert!(
+        !matches!(error, mcp_bridge::McpError::Timeout { .. }),
+        "{error}"
+    );
+    assert!(reg.list().is_empty());
+    mgr.shutdown().await;
+}
+
+const ENCODED_SECRET: &str = "Bearer tok/en+value?with=sym&bols-1234";
+
+#[tokio::test(flavor = "multi_thread")]
+async fn encoded_secret_forms_in_child_stderr_are_masked_and_the_live_redactor_runs() {
+    let host: mcp_bridge::ExternalRedactor =
+        std::sync::Arc::new(|text| text.replace("encoded-done", "host-saw-this"));
+    let store = std::sync::Arc::new(secret_store::MemoryStore::new());
+    secret_store::SecretStore::set(&*store, "test/enc", ENCODED_SECRET).unwrap();
+    let mgr = McpManager::with_policy(ToolRegistry::new(), fast_policy(1))
+        .with_secret_store(store)
+        .with_redactor(host);
+    let mut cfg = mode_config("enc", "secret-stderr-encoded");
+    cfg.secret_env.insert("API_KEY".into(), "test/enc".into());
+    mgr.add_server(cfg).await.unwrap();
+    wait_for_stderr(&mgr, "enc", "host-saw-this").await;
+    let stderr = mgr.stderr_tail("enc").join(
+        "
+",
+    );
+    for leak in ["tok/en", "tok%2Fen", "sym", "bols", "dG9rL2Vu", "dG9r"] {
+        assert!(!stderr.contains(leak), "`{leak}` leaked: {stderr}");
+    }
+    assert!(stderr.matches("[REDACTED]").count() >= 5, "{stderr}");
+    mgr.shutdown().await;
+}

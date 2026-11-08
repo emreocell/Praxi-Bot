@@ -3,6 +3,7 @@
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
+use crate::diagnostics::ExternalRedactor;
 use parking_lot::Mutex;
 use rmcp::{
     model::{CallToolRequestParams, CallToolResult, JsonObject},
@@ -123,6 +124,7 @@ pub(crate) struct Server {
     registry: ToolRegistry,
     policy: McpPolicy,
     secrets: Option<Arc<dyn SecretStore>>,
+    redactor: Option<ExternalRedactor>,
     stderr: Arc<StderrLog>,
     /// The session; the async mutex also serialises (re)connects.
     session: tokio::sync::Mutex<Option<Arc<Session>>>,
@@ -261,6 +263,7 @@ impl Server {
                 &secrets,
                 &self.stderr,
                 self.policy.connect_timeout,
+                self.redactor.clone(),
             )
             .await
             {
@@ -515,6 +518,7 @@ pub struct McpManager {
     registry: ToolRegistry,
     policy: McpPolicy,
     secrets: Option<Arc<dyn SecretStore>>,
+    redactor: Option<ExternalRedactor>,
     servers: Mutex<BTreeMap<String, Arc<Server>>>,
 }
 
@@ -532,6 +536,7 @@ impl McpManager {
             registry,
             policy,
             secrets: None,
+            redactor: None,
             servers: Mutex::new(BTreeMap::new()),
         }
     }
@@ -541,6 +546,15 @@ impl McpManager {
     #[must_use]
     pub fn with_secret_store(mut self, store: Arc<dyn SecretStore>) -> Self {
         self.secrets = Some(store);
+        self
+    }
+
+    /// Live host redactor (the daemon's `SharedRedactor::redact`) applied to
+    /// every MCP diagnostic, after the per-connection masking: server stderr,
+    /// forwarded rmcp warnings and errors, and connect/discovery errors.
+    #[must_use]
+    pub fn with_redactor(mut self, redactor: ExternalRedactor) -> Self {
+        self.redactor = Some(redactor);
         self
     }
 
@@ -575,6 +589,7 @@ impl McpManager {
             registry: self.registry.clone(),
             policy: self.policy,
             secrets: self.secrets.clone(),
+            redactor: self.redactor.clone(),
             stderr: Arc::default(),
             session: tokio::sync::Mutex::new(None),
             state: Mutex::new(State {

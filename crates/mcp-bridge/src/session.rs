@@ -2,9 +2,15 @@
 //!
 //! A tracing dispatcher attached to a future does not propagate through raw
 //! `tokio::spawn` calls in rmcp's service and HTTP worker. Each session therefore
-//! owns a current-thread runtime whose threads use `NoSubscriber`. Only the
-//! bridge's already-scrubbed diagnostics explicitly opt into the caller's
-//! dispatcher. Protocol messages and tool results are not rewritten.
+//! owns a current-thread runtime whose threads use [`Forwarder`]: it drops
+//! everything below `warn` (protocol payloads are logged at lower levels) and
+//! forwards rmcp's `warn`/`error` events (transport closed, parse failures, HTTP
+//! status) to the caller's dispatcher only after the session's redactor and the
+//! host's live redactor masked the message and its fields. Protocol messages and
+//! tool results are not rewritten.
+//!
+//! Cost: one OS thread and one single-threaded runtime per session; both end
+//! when the session closes or is dropped.
 
 use std::{cell::RefCell, fmt, future::Future, time::Duration};
 
@@ -14,7 +20,7 @@ use rmcp::{
     service::{Peer, RunningService},
 };
 use tokio::sync::{oneshot, watch};
-use tracing::subscriber::{DefaultGuard, NoSubscriber};
+use tracing::{Dispatch, Level, Metadata, subscriber::DefaultGuard};
 
 use crate::{McpError, Result, diagnostics::Redactor};
 
@@ -25,6 +31,111 @@ thread_local! {
     // Runtime callbacks also run on Tokio's blocking-pool threads. A guard must
     // live for the whole thread, not just for the on_thread_start callback.
     static QUIET_THREAD: RefCell<Option<DefaultGuard>> = const { RefCell::new(None) };
+}
+
+/// Collects an event's message and fields into one line.
+#[derive(Default)]
+struct LineVisitor(String);
+
+impl tracing::field::Visit for LineVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn fmt::Debug) {
+        use fmt::Write as _;
+        if !self.0.is_empty() {
+            self.0.push(' ');
+        }
+        if field.name() == "message" {
+            let _ = write!(self.0, "{value:?}");
+        } else {
+            let _ = write!(self.0, "{}={value:?}", field.name());
+        }
+    }
+}
+
+struct Forwarded {
+    sink: Dispatch,
+    level: Level,
+    server: String,
+    line: String,
+}
+
+/// Process-wide relay thread (started on first use) that emits [`Forwarded`]
+/// events into the caller's dispatcher.
+fn relay() -> &'static std::sync::mpsc::SyncSender<Forwarded> {
+    static RELAY: std::sync::OnceLock<std::sync::mpsc::SyncSender<Forwarded>> =
+        std::sync::OnceLock::new();
+    RELAY.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Forwarded>(256);
+        let spawned = std::thread::Builder::new()
+            .name("mcp-diagnostics".to_owned())
+            .spawn(move || {
+                for Forwarded {
+                    sink,
+                    level,
+                    server,
+                    line,
+                } in rx
+                {
+                    let server = server.as_str();
+                    tracing::dispatcher::with_default(&sink, || {
+                        if level == Level::ERROR {
+                            tracing::error!(target: "mcp_bridge::rmcp", server, "{line}");
+                        } else {
+                            tracing::warn!(target: "mcp_bridge::rmcp", server, "{line}");
+                        }
+                    });
+                }
+            });
+        drop(spawned);
+        tx
+    })
+}
+
+/// Subscriber installed on every session thread: forwards redacted
+/// `warn`/`error` events and nothing else.
+struct Forwarder {
+    server: String,
+    redactor: Redactor,
+    sink: Dispatch,
+    next_span: std::sync::atomic::AtomicU64,
+}
+
+impl tracing::Subscriber for Forwarder {
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+        *metadata.level() <= Level::WARN
+    }
+
+    fn max_level_hint(&self) -> Option<tracing::metadata::LevelFilter> {
+        Some(tracing::metadata::LevelFilter::WARN)
+    }
+
+    fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        let id = self
+            .next_span
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        tracing::span::Id::from_u64(id.max(1))
+    }
+
+    fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+
+    fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+
+    fn event(&self, event: &tracing::Event<'_>) {
+        let mut line = LineVisitor::default();
+        event.record(&mut line);
+        let line = self.redactor.scrub(&line.0);
+        // Emitting from inside a dispatch would nest dispatcher state, so a
+        // single bounded relay thread does it; a flood is dropped, not queued.
+        let _ = relay().try_send(Forwarded {
+            sink: self.sink.clone(),
+            level: *event.metadata().level(),
+            server: self.server.clone(),
+            line,
+        });
+    }
+
+    fn enter(&self, _: &tracing::span::Id) {}
+
+    fn exit(&self, _: &tracing::span::Id) {}
 }
 
 // Runtime's ordinary Drop waits indefinitely for blocking work. Keep the same
@@ -116,16 +227,22 @@ where
     let (ready, readiness) = oneshot::channel();
     let (completed, completion) = watch::channel(false);
     let worker_server = server.clone();
+    let quiet = Dispatch::new(Forwarder {
+        server: server.clone(),
+        redactor: redactor.clone(),
+        sink: tracing::dispatcher::get_default(Clone::clone),
+        next_span: std::sync::atomic::AtomicU64::new(1),
+    });
     std::thread::Builder::new()
         .name("mcp-session".to_owned())
         .spawn(move || {
-            let _quiet = tracing::subscriber::set_default(NoSubscriber::default());
+            let _quiet = tracing::dispatcher::set_default(&quiet);
+            let thread_quiet = quiet.clone();
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
-                .on_thread_start(|| {
+                .on_thread_start(move || {
                     QUIET_THREAD.with(|guard| {
-                        *guard.borrow_mut() =
-                            Some(tracing::subscriber::set_default(NoSubscriber::default()));
+                        *guard.borrow_mut() = Some(tracing::dispatcher::set_default(&thread_quiet));
                     });
                 })
                 .on_thread_stop(|| {
@@ -364,6 +481,92 @@ mod tests {
             observed.load(Ordering::SeqCst),
             1,
             "private task leaked to global tracing"
+        );
+    }
+
+    /// Collects the message of every event it sees.
+    #[derive(Clone, Default)]
+    struct Collect(Arc<parking_lot::Mutex<Vec<(Level, String)>>>);
+
+    impl tracing::Subscriber for Collect {
+        fn enabled(&self, _: &Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+        fn event(&self, event: &tracing::Event<'_>) {
+            let mut line = LineVisitor::default();
+            event.record(&mut line);
+            self.0.lock().push((*event.metadata().level(), line.0));
+        }
+        fn enter(&self, _: &tracing::span::Id) {}
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    #[tokio::test]
+    async fn rmcp_warnings_and_errors_are_forwarded_redacted_and_lower_levels_dropped() {
+        let sink = Collect::default();
+        let _guard = tracing::subscriber::set_default(sink.clone());
+        let secret = "rmcp-warn-sentinel-5d1e";
+        let redactor = Redactor::new(
+            [secret, "rmcp-warn-sentinel/url+value"],
+            Some(Arc::new(|text: &str| {
+                text.replace("host-live-secret", "<H>")
+            })),
+        );
+        let session = open(
+            "fwd".to_owned(),
+            redactor,
+            Duration::from_secs(5),
+            || async {
+                tracing::debug!("payload {}", "rmcp-warn-sentinel-5d1e");
+                tracing::info!("payload {}", "rmcp-warn-sentinel-5d1e");
+                tracing::warn!(
+                    "transport closed: {} host-live-secret",
+                    "rmcp-warn-sentinel-5d1e"
+                );
+                tokio::spawn(async {
+                    tracing::error!(status = "rmcp-warn-sentinel/url+value", "http status 500");
+                })
+                .await
+                .unwrap();
+                Ok(serve_directly(
+                    (),
+                    TestTransport {
+                        probe: false,
+                        close_started: None,
+                        release_close: None,
+                        dropped: None,
+                    },
+                    None,
+                ))
+            },
+        )
+        .await
+        .unwrap();
+        session.close().await;
+        let mut seen = sink.0.lock().clone();
+        for _ in 0..200 {
+            if seen.len() >= 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            seen = sink.0.lock().clone();
+        }
+        assert_eq!(seen.len(), 2, "{seen:?}");
+        assert_eq!(seen[0].0, Level::WARN);
+        assert!(
+            seen[0].1.contains("transport closed: [REDACTED] <H>"),
+            "{seen:?}"
+        );
+        assert_eq!(seen[1].0, Level::ERROR);
+        assert!(seen[1].1.contains("http status 500"));
+        assert!(
+            !seen.iter().any(|(_, l)| l.contains("sentinel")),
+            "{seen:?}"
         );
     }
 

@@ -586,7 +586,17 @@ pub fn serve(
             crate::peer::start_server(data_dir, *host_mode, *peer_enabled, state.clone()).await?;
         // Connect in the background (a slow `npx` must not delay the listener)
         // and expose `/v1/mcp/*` plus the write-only secrets route.
-        let mcp = crate::mcp_host::McpHost::start(data_dir, mcp_tools, telegram_store.clone());
+        // The same live redactor as the agent loop masks MCP diagnostics.
+        let mcp_redactor: mcp_bridge::ExternalRedactor = {
+            let handle = redactor.clone();
+            Arc::new(move |text: &str| handle.redact(text))
+        };
+        let mcp = crate::mcp_host::McpHost::start(
+            data_dir,
+            mcp_tools,
+            telegram_store.clone(),
+            Some(mcp_redactor),
+        );
         state.set_mcp(Arc::clone(&mcp) as Arc<dyn McpControl>);
         if let Some(store) = telegram_store.clone() {
             state.set_secret_store(store);

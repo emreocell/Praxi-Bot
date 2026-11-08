@@ -14,7 +14,7 @@ use rmcp::{
     RoleClient, ServiceExt,
     service::{RxJsonRpcMessage, TxJsonRpcMessage},
     transport::{
-        StreamableHttpClientTransport, TokioChildProcess, Transport,
+        StreamableHttpClientTransport, Transport, async_rw::AsyncRwTransport,
         streamable_http_client::StreamableHttpClientTransportConfig, which_command,
     },
 };
@@ -23,7 +23,7 @@ use tracing::instrument::WithSubscriber;
 
 use crate::{
     config::{McpServerConfig, McpTransport, refused_stdio_command},
-    diagnostics::{Redactor, StderrLog, capture_stderr},
+    diagnostics::{ExternalRedactor, Redactor, StderrLog, capture_stderr},
     error::{McpError, Result},
     session::{self, Session},
 };
@@ -36,6 +36,56 @@ pub const OS_ESSENTIAL_ENV: &[&str] = &["SystemRoot", "windir"];
 /// See the Windows variant.
 #[cfg(not(windows))]
 pub const OS_ESSENTIAL_ENV: &[&str] = &[];
+
+/// Largest single JSON-RPC frame accepted from a server: one stdout line, or
+/// one SSE event.  Enforced while reading, before rmcp buffers or parses the
+/// frame, so it is also the per-page limit of `tools/list` (the aggregate
+/// 4 MiB schema budget is applied on top, across pages).  An oversized stdio
+/// frame closes the transport; an oversized SSE event is rejected by rmcp.
+/// (A JSON HTTP body has rmcp's own fixed bound.)
+pub(crate) const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
+
+/// Fails the read as soon as one line exceeds `cap` bytes, so a newline-free
+/// or huge frame never grows rmcp's line buffer past `cap` plus one read.
+struct FrameLimit<R> {
+    inner: R,
+    line: usize,
+    cap: usize,
+}
+
+impl<R: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for FrameLimit<R> {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let before = buf.filled().len();
+        let this = &mut *self;
+        let ready = std::pin::Pin::new(&mut this.inner).poll_read(cx, buf);
+        if matches!(ready, std::task::Poll::Ready(Ok(()))) {
+            for byte in &buf.filled()[before..] {
+                if *byte == b'\n' {
+                    this.line = 0;
+                } else {
+                    this.line += 1;
+                }
+            }
+            if this.line > this.cap {
+                return std::task::Poll::Ready(Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("MCP frame exceeds the {} byte limit", this.cap),
+                )));
+            }
+        }
+        ready
+    }
+}
+
+type ChildIo = AsyncRwTransport<
+    RoleClient,
+    FrameLimit<tokio::process::ChildStdout>,
+    tokio::process::ChildStdin,
+>;
 
 /// Secret values resolved for one connect attempt.  Lives only for the
 /// duration of [`open`]; its redactor stays with the session. `Debug` never
@@ -173,7 +223,11 @@ fn forward_stderr(
 /// close releases its wrapper as soon as the direct child exits, which can
 /// leave grandchildren running. Cancellation must also kill synchronously:
 /// runtime teardown may discard a newly spawned asynchronous cleanup task.
-struct ChildTree(Option<TokioChildProcess>);
+/// Stdout is read through [`FrameLimit`].
+struct ChildTree {
+    child: Option<Box<dyn ChildWrapper>>,
+    io: ChildIo,
+}
 
 struct ReapChild(Option<Box<dyn ChildWrapper>>);
 
@@ -191,8 +245,36 @@ impl Drop for ReapChild {
 }
 
 impl ChildTree {
+    fn spawn(mut cmd: CommandWrap) -> std::io::Result<(Self, Option<tokio::process::ChildStderr>)> {
+        cmd.command_mut()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = cmd.spawn()?;
+        let (Some(stdin), Some(stdout)) = (
+            child.inner_mut().stdin().take(),
+            child.inner_mut().stdout().take(),
+        ) else {
+            let _ = ReapChild(Some(child));
+            return Err(std::io::Error::other("child stdio was not piped"));
+        };
+        let stderr = child.inner_mut().stderr().take();
+        let stdout = FrameLimit {
+            inner: stdout,
+            line: 0,
+            cap: MAX_FRAME_BYTES,
+        };
+        Ok((
+            Self {
+                child: Some(child),
+                io: AsyncRwTransport::new(stdout, stdin),
+            },
+            stderr,
+        ))
+    }
+
     fn take_child(&mut self) -> ReapChild {
-        ReapChild(self.0.take().and_then(TokioChildProcess::into_inner))
+        ReapChild(self.child.take())
     }
 }
 
@@ -209,7 +291,7 @@ impl Transport<RoleClient> for ChildTree {
         &mut self,
         item: TxJsonRpcMessage<RoleClient>,
     ) -> impl Future<Output = std::io::Result<()>> + Send + 'static {
-        let send = self.0.as_mut().map(|transport| transport.send(item));
+        let send = self.child.as_ref().map(|_| self.io.send(item));
         async move {
             match send {
                 Some(send) => send.await,
@@ -222,7 +304,8 @@ impl Transport<RoleClient> for ChildTree {
     }
 
     async fn receive(&mut self) -> Option<RxJsonRpcMessage<RoleClient>> {
-        self.0.as_mut()?.receive().await
+        self.child.as_ref()?;
+        self.io.receive().await
     }
 
     async fn close(&mut self) -> std::io::Result<()> {
@@ -251,7 +334,8 @@ fn http_config(
         value.set_sensitive(true);
         map.insert(name, value);
     }
-    let mut cfg = StreamableHttpClientTransportConfig::with_uri(url.to_owned());
+    let mut cfg = StreamableHttpClientTransportConfig::with_uri(url.to_owned())
+        .max_sse_event_size(MAX_FRAME_BYTES);
     cfg.custom_headers = map;
     Ok(cfg)
 }
@@ -262,6 +346,7 @@ pub(crate) async fn open(
     secrets: &ResolvedSecrets,
     stderr: &Arc<StderrLog>,
     timeout: Duration,
+    external: Option<ExternalRedactor>,
 ) -> Result<Session> {
     let redactor = Redactor::new(
         secrets
@@ -269,6 +354,7 @@ pub(crate) async fn open(
             .values()
             .chain(secrets.env.values())
             .map(String::as_str),
+        external,
     );
     let config = config.clone();
     let secrets = secrets.clone();
@@ -280,19 +366,15 @@ pub(crate) async fn open(
         match &config.transport {
             McpTransport::Stdio { .. } => {
                 let cmd = build_command(id, &config.transport, &secrets)?;
-                let (transport, child_stderr) = TokioChildProcess::builder(cmd)
-                    .stderr(Stdio::piped())
-                    .spawn()
-                    .map_err(|e| McpError::Spawn {
+                let (transport, child_stderr) =
+                    ChildTree::spawn(cmd).map_err(|e| McpError::Spawn {
                         server: id.to_owned(),
                         message: e.to_string(),
                     })?;
                 if let Some(pipe) = child_stderr {
                     forward_stderr(id.to_owned(), pipe, stderr, stderr_redactor, diagnostics);
                 }
-                ().serve(ChildTree(Some(transport)))
-                    .await
-                    .map_err(|e| transport_err(id, e))
+                ().serve(transport).await.map_err(|e| transport_err(id, e))
             }
             McpTransport::Http { url, headers } => {
                 let transport = StreamableHttpClientTransport::from_config(http_config(
@@ -433,6 +515,7 @@ mod tests {
             &ResolvedSecrets::default(),
             &Arc::default(),
             Duration::from_secs(2),
+            None,
         )
         .await
         .unwrap_err();
@@ -453,9 +536,15 @@ mod tests {
             "missing-binary-environment-sentinel-header-sentinel",
             [""; 0],
         );
-        let error = open(&cfg, &secrets, &Arc::default(), Duration::from_secs(2))
-            .await
-            .unwrap_err();
+        let error = open(
+            &cfg,
+            &secrets,
+            &Arc::default(),
+            Duration::from_secs(2),
+            None,
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(error, McpError::Spawn { .. }));
         let message = error.to_string();
         assert!(!message.contains("environment-sentinel"));
@@ -471,6 +560,7 @@ mod tests {
             &ResolvedSecrets::default(),
             &Arc::default(),
             Duration::from_secs(2),
+            None,
         )
         .await
         .unwrap_err();
