@@ -241,14 +241,9 @@ impl Inbox {
             }
             let mut file = open_log(path)?;
             let before = file.metadata().map_err(storage_error)?.len();
-            let written = file
-                .write_all(&encoded)
-                .and_then(|()| file.sync_all())
-                .and_then(|()| {
-                    #[cfg(unix)]
-                    File::open(parent(path))?.sync_all()?;
-                    Ok(())
-                });
+            let written = file.write_all(&encoded).and_then(|()| file.sync_all());
+            #[cfg(unix)]
+            let written = written.and_then(|()| File::open(parent(path))?.sync_all());
             if let Err(error) = written {
                 // A partial append must not be followed by another record. If rollback
                 // itself fails, reject all subsequent writes/offset advances.
