@@ -49,7 +49,9 @@ pub use source::{
 
 use crate::index::SKILL_FILE;
 use crate::skill::{self, validate_name};
-use util::{copy_files, hash_files, io_err, now_rfc3339, walk};
+use util::{
+    copy_files, ensure_deletable, hash_files, io_err, now_rfc3339, remove_dir_inside, walk,
+};
 
 /// Everything that can go wrong in the hub.
 #[derive(Debug, thiserror::Error)]
@@ -272,6 +274,7 @@ impl SkillHub {
     /// # Errors
     /// [`HubError::NotInstalled`], plus everything [`SkillHub::preview`] can return.
     pub fn preview_update(&self, name: &str) -> Result<Option<Preview>, HubError> {
+        validate_name(name).map_err(HubError::InvalidSkill)?;
         let entry = self.entry(name)?;
         let preview = self.preview(&install_source(&entry.source))?;
         if preview.name != entry.name {
@@ -293,6 +296,7 @@ impl SkillHub {
     /// [`HubError::HashMismatch`] when the source no longer yields the locked
     /// content, plus fetch/IO failures.
     pub fn restore(&self, name: &str) -> Result<LockEntry, HubError> {
+        validate_name(name).map_err(HubError::InvalidSkill)?;
         let entry = self.entry(name)?;
         let source = match (&entry.pin, &entry.source) {
             (Some(pin), _) => InstallSource::Git {
@@ -324,7 +328,7 @@ impl SkillHub {
         Ok(lock
             .skills
             .keys()
-            .filter(|n| !self.paths.skills_dir.join(n).exists())
+            .filter(|n| validate_name(n).is_ok() && !self.paths.skills_dir.join(n).exists())
             .map(|n| (n.clone(), self.restore(n)))
             .collect())
     }
@@ -334,15 +338,15 @@ impl SkillHub {
     /// # Errors
     /// [`HubError::NotInstalled`] for skills the hub did not install.
     pub fn uninstall(&self, name: &str) -> Result<(), HubError> {
+        validate_name(name).map_err(HubError::InvalidSkill)?;
         let _g = self.guard.lock();
+        let dir = self.paths.skills_dir.join(name);
+        ensure_deletable(&self.paths.skills_dir, &dir)?;
         let mut lock = LockFile::load(&self.paths.lock_file)?;
         if lock.skills.remove(name).is_none() {
             return Err(HubError::NotInstalled(name.to_string()));
         }
-        let dir = self.paths.skills_dir.join(name);
-        if dir.exists() {
-            fs::remove_dir_all(&dir).map_err(|e| io_err("remove", &dir, &e))?;
-        }
+        remove_dir_inside(&self.paths.skills_dir, &dir)?;
         lock.save(&self.paths.lock_file)?;
         let mut usage = lock::load_usage(&self.paths.usage_file);
         if usage.remove(name).is_some() {
@@ -362,12 +366,16 @@ impl SkillHub {
             .skills
             .into_values()
             .map(|entry| {
-                let dir = self.paths.skills_dir.join(&entry.name);
-                let present = dir.is_dir();
-                let modified = present
-                    && walk(&dir)
+                let dir = validate_name(&entry.name)
+                    .ok()
+                    .map(|()| self.paths.skills_dir.join(&entry.name));
+                let present = dir.as_ref().is_some_and(|path| path.is_dir());
+                let modified = match &dir {
+                    Some(path) if present => walk(path)
                         .and_then(|f| hash_files(&f))
-                        .map_or(true, |h| h != entry.hash);
+                        .map_or(true, |h| h != entry.hash),
+                    _ => false,
+                };
                 InstalledSkill {
                     source_tag: entry.source.tag(),
                     usage: usage.get(&entry.name).cloned().unwrap_or_default(),
@@ -456,15 +464,17 @@ impl SkillHub {
                     .ok_or_else(|| {
                         HubError::Source(format!("index has no skill named `{name}`"))
                     })?;
+                let want = entry.commit.clone().ok_or_else(|| {
+                    HubError::Source(format!("index entry `{name}` is missing a commit pin"))
+                })?;
+                source::validate_commit_pin(&want)?;
                 let (root, pin) = self.clone_repo(
                     &entry.git,
-                    entry.commit.as_deref(),
+                    Some(want.as_str()),
                     entry.subdir.as_deref(),
                     staging,
                 )?;
-                if let Some(want) = &entry.commit
-                    && !pin.commit.to_lowercase().starts_with(&want.to_lowercase())
-                {
+                if !pin.commit.eq_ignore_ascii_case(&want) {
                     return Err(HubError::Source(format!(
                         "index commit `{want}` resolved to `{}`",
                         pin.commit
@@ -515,6 +525,7 @@ impl SkillHub {
 
     /// Copy the staged tree into the skills directory and write the lock.
     fn commit(&self, p: &Preview, replace: bool) -> Result<LockEntry, HubError> {
+        validate_name(&p.name).map_err(HubError::InvalidSkill)?;
         let _g = self.guard.lock();
         // The staging dir is private, but verify nothing changed since the scan.
         let files = walk(&p.root)?;
@@ -528,35 +539,46 @@ impl SkillHub {
 
         let mut lock = LockFile::load(&self.paths.lock_file)?;
         let existing = lock.skills.get(&p.name).cloned();
-        let dest = self.paths.skills_dir.join(&p.name);
-        if dest.exists() && (existing.is_none() || !replace) {
-            return Err(HubError::AlreadyInstalled(p.name.clone()));
+        let skills_dir = &self.paths.skills_dir;
+        let dest = skills_dir.join(&p.name);
+        fs::create_dir_all(skills_dir).map_err(|e| io_err("create dir", skills_dir, &e))?;
+        if fs::symlink_metadata(&dest).is_ok() {
+            ensure_deletable(skills_dir, &dest)?;
+            if existing.is_none() || !replace {
+                return Err(HubError::AlreadyInstalled(p.name.clone()));
+            }
         }
 
-        let skills_dir = &self.paths.skills_dir;
-        fs::create_dir_all(skills_dir).map_err(|e| io_err("create dir", skills_dir, &e))?;
         let tmp = skills_dir.join(format!(".hub-new-{}", p.name));
         let old = skills_dir.join(format!(".hub-old-{}", p.name));
         for leftover in [&tmp, &old] {
-            if leftover.exists() {
-                fs::remove_dir_all(leftover).map_err(|e| io_err("remove", leftover, &e))?;
-            }
+            remove_dir_inside(skills_dir, leftover)?;
         }
         fs::create_dir_all(&tmp).map_err(|e| io_err("create dir", &tmp, &e))?;
         if let Err(e) = copy_files(&files, &tmp) {
-            let _ = fs::remove_dir_all(&tmp);
+            let _ = remove_dir_inside(skills_dir, &tmp);
             return Err(e);
         }
+        let copied = walk(&tmp)?;
+        let copied_hash = hash_files(&copied)?;
+        if copied_hash != p.report.fingerprint {
+            let _ = remove_dir_inside(skills_dir, &tmp);
+            return Err(HubError::HashMismatch {
+                expected: p.report.fingerprint.clone(),
+                actual: copied_hash,
+            });
+        }
 
-        let had_old = dest.exists();
+        let had_old = fs::symlink_metadata(&dest).is_ok();
         if had_old {
+            ensure_deletable(skills_dir, &dest)?;
             fs::rename(&dest, &old).map_err(|e| io_err("rename", &dest, &e))?;
         }
         if let Err(e) = fs::rename(&tmp, &dest) {
             if had_old {
                 let _ = fs::rename(&old, &dest);
             }
-            let _ = fs::remove_dir_all(&tmp);
+            let _ = remove_dir_inside(skills_dir, &tmp);
             return Err(io_err("rename", &dest, &e));
         }
 
@@ -576,14 +598,14 @@ impl SkillHub {
         };
         lock.skills.insert(p.name.clone(), entry.clone());
         if let Err(e) = lock.save(&self.paths.lock_file) {
-            let _ = fs::remove_dir_all(&dest);
+            let _ = remove_dir_inside(skills_dir, &dest);
             if had_old {
                 let _ = fs::rename(&old, &dest);
             }
             return Err(e);
         }
         if had_old {
-            let _ = fs::remove_dir_all(&old);
+            let _ = remove_dir_inside(skills_dir, &old);
         }
         Ok(entry)
     }
