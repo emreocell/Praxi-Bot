@@ -24,8 +24,9 @@ use windows::{
     Win32::{
         Foundation::{ERROR_FILE_NOT_FOUND, GetLastError, HANDLE},
         Storage::FileSystem::{
-            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED,
-            GetDriveTypeW, GetFinalPathNameByHandleW, QueryDosDeviceW,
+            FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+            FILE_NAME_NORMALIZED, FindClose, FindFirstFileW, GetDriveTypeW,
+            GetFinalPathNameByHandleW, QueryDosDeviceW, WIN32_FIND_DATAW,
         },
     },
     core::PCWSTR,
@@ -113,6 +114,37 @@ pub(super) fn final_path_nofollow(path: &Path) -> io::Result<PathBuf> {
             return Ok(PathBuf::from(OsString::from_wide(&buf[..n])));
         }
         buf.resize(n.saturating_add(1), 0);
+    }
+}
+
+fn wide_find_path(path: &Path) -> Vec<u16> {
+    let text = path.to_string_lossy().replace('/', "\\");
+    let prefixed = if text.starts_with(r"\\?\") {
+        text
+    } else if let Some(rest) = text.strip_prefix(r"\\") {
+        format!(r"\\?\UNC\{rest}")
+    } else {
+        format!(r"\\?\{text}")
+    };
+    wide(&prefixed)
+}
+
+/// Reparse tag from `FindFirstFileW`, or `None` when the path is not a reparse point.
+///
+/// The call does not open the file for data, so a cloud placeholder is not hydrated.
+pub(super) fn reparse_tag(path: &Path) -> io::Result<Option<u32>> {
+    let wide_name = wide_find_path(path);
+    let mut data = WIN32_FIND_DATAW::default();
+    // SAFETY: `wide_name` is NUL-terminated and lives for the call. `data` is a
+    // writable `WIN32_FIND_DATAW`. `FindFirstFileW` returns metadata only.
+    let handle = unsafe { FindFirstFileW(PCWSTR(wide_name.as_ptr()), &raw mut data) }
+        .map_err(|_| io::Error::last_os_error())?;
+    // SAFETY: `handle` is the successful find handle from the call above.
+    unsafe { FindClose(handle) }.map_err(|_| io::Error::last_os_error())?;
+    if data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+        Ok(Some(data.dwReserved0))
+    } else {
+        Ok(None)
     }
 }
 
@@ -229,6 +261,45 @@ fn mount_point_buffer(substitute: &str, print_name: &str) -> Vec<u8> {
     buf.extend_from_slice(&0u16.to_le_bytes());
     buf.extend_from_slice(&mount);
     buf
+}
+
+/// Mark `path` with `IO_REPARSE_TAG_CLOUD` so `read_link` fails the way an
+/// online-only `OneDrive` placeholder does. The buffer is not a symlink.
+#[cfg(test)]
+pub(super) fn mark_cloud_placeholder(path: &Path) -> io::Result<()> {
+    // Generic reparse buffer: tag, data length, reserved, then 4 data bytes.
+    const IO_REPARSE_TAG_CLOUD: u32 = 0x9000_001A;
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0 | FILE_FLAG_OPEN_REPARSE_POINT.0)
+        .open(path)?;
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&IO_REPARSE_TAG_CLOUD.to_le_bytes());
+    buf.extend_from_slice(&4u16.to_le_bytes());
+    buf.extend_from_slice(&0u16.to_le_bytes());
+    buf.extend_from_slice(&0u32.to_le_bytes());
+    let mut returned = 0u32;
+    // SAFETY: `file` is a file this process created, opened for write with
+    // backup and reparse flags. `buf` is an `IO_REPARSE_TAG_CLOUD` buffer.
+    // The control code writes that buffer onto the file; it does not open a
+    // network path.
+    let ok = unsafe {
+        DeviceIoControl(
+            file.as_raw_handle(),
+            FSCTL_SET_REPARSE_POINT,
+            buf.as_ptr(),
+            u32::try_from(buf.len()).unwrap_or(u32::MAX),
+            std::ptr::null_mut(),
+            0,
+            &raw mut returned,
+            std::ptr::null_mut(),
+        )
+    };
+    if ok == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 /// A drive letter that is neither a DOS device nor a mounted root.

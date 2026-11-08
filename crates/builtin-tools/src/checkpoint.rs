@@ -255,6 +255,21 @@ fn copy_recursive(
             dir,
         });
         Ok(())
+    } else if !meta.is_dir() && crate::files::cloud_placeholder(from, &meta) {
+        // Online-only placeholder: `read_link` fails and the logical size can
+        // exceed the backup budget. Copy when it fits; otherwise leave it out
+        // of the blob. Either way the parent delete or move still proceeds.
+        let logical = meta.len();
+        let fits = budget.entries < MAX_CHECKPOINT_ENTRIES
+            && budget.bytes.saturating_add(logical) <= MAX_CHECKPOINT_BYTES;
+        if fits {
+            budget.charge(logical)?;
+            if let Some(p) = to.parent() {
+                fs::create_dir_all(p)?;
+            }
+            let _ = fs::copy(from, to);
+        }
+        Ok(())
     } else if meta.is_dir() {
         budget.charge(0)?;
         fs::create_dir_all(to)?;
@@ -562,20 +577,34 @@ impl CheckpointStore {
         id: &str,
     ) -> io::Result<(Vec<String>, String, Vec<String>)> {
         let (dir, cp) = self.find(id)?;
+        let links = read_links(&dir);
+        // Manifest `backup` and links.json `rel` are store files `fs_write`
+        // can replace. Reject anything other than plain relative names before
+        // a join can swap in a UNC path or `..` can escape, and before any
+        // stat, mkdir, or copy.
+        for e in &cp.entries {
+            if let Some(rel) = &e.backup {
+                let _ = crate::files::plain_store_components(rel)?;
+            }
+        }
+        for l in &links {
+            let _ = crate::files::plain_store_components(&l.rel)?;
+        }
         let current: Vec<&Path> = cp.entries.iter().map(|e| Path::new(&e.path)).collect();
         let safety = self.create(&cp.run_id, &format!("pre-restore:{id}"), &current)?;
-        let links = read_links(&dir);
         let mut restored = Vec::new();
         let mut warnings = Vec::new();
         for e in &cp.entries {
             let target = Path::new(&e.path);
             // Walk ancestors and require an identity before delete or copy.
-            // A failed lookup is not an absent path that is safe to write.
+            // A missing parent of a vetted local path may be recreated; a
+            // failed lookup through a junction is not safe to write.
             crate::files::vet_checkpoint_write(target)?;
             crate::files::remove_checkpoint_target(target)?;
             if let Some(rel) = &e.backup {
                 let mut ignored = Vec::new();
-                let src = dir.join(rel);
+                let src = crate::files::join_store_rel(&dir, rel)?;
+                crate::files::vet_checkpoint_path(&src)?;
                 if fs::symlink_metadata(&src).is_ok() {
                     let mut budget = CopyBudget {
                         entries: 0,
@@ -586,17 +615,19 @@ impl CheckpointStore {
                 // Recreate links recorded under this entry (including the
                 // entry itself when it was a link).
                 for l in &links {
-                    let Some(rest) = l.rel.strip_prefix(rel.as_str()) else {
+                    let Some(suffix) = crate::files::store_rel_suffix(rel, &l.rel)? else {
                         continue;
                     };
-                    let at = if rest.is_empty() {
-                        target.to_path_buf()
-                    } else if let Some(r) = rest.strip_prefix('/') {
-                        r.split('/').fold(target.to_path_buf(), |p, c| p.join(c))
-                    } else {
+                    let at = crate::files::join_store_parts(target, &suffix)?;
+                    if let Err(err) = crate::files::vet_checkpoint_write(&at) {
+                        warnings.push(format!(
+                            "link {} -> {} skipped: {err}",
+                            at.display(),
+                            l.target
+                        ));
                         continue;
-                    };
-                    if let Some(parent) = at.parent() {
+                    }
+                    if let Some(parent) = at.parent().filter(|p| !p.as_os_str().is_empty()) {
                         fs::create_dir_all(parent)?;
                     }
                     warnings.extend(restore_link(Path::new(&l.target), &at, l.dir));

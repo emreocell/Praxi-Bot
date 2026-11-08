@@ -360,6 +360,9 @@ struct ResolveCtx<'a> {
     roots: &'a [PathBuf],
     drives: &'a DriveCache,
     depth: usize,
+    /// Checkpoint copies treat a cloud-filter placeholder as a normal file.
+    /// `fs_read` leaves this false, so a placeholder is not hydrated on read.
+    allow_cloud_placeholder: bool,
 }
 
 #[cfg(test)]
@@ -639,6 +642,7 @@ fn validate_path(sh: &Shared, raw: &str, follow: Follow) -> Result<PathBuf, Tool
         roots: &sh.allowed_roots,
         drives: &sh.drives,
         depth: 0,
+        allow_cloud_placeholder: false,
     };
     let resolved = resolve_local(&lexical, &ctx)?;
     // The reparse-safe long path is the name Win32 will open. Check it before
@@ -671,7 +675,13 @@ fn resolve_local(path: &Path, ctx: &ResolveCtx<'_>) -> Result<PathBuf, ToolError
         }
         let next = acc.join(name);
         match fs::symlink_metadata(&next) {
-            Ok(meta) if reparse_unsafe(&meta) => return Err(denied(REPARSE_MSG)),
+            Ok(meta) if reparse_unsafe(&meta) => {
+                if ctx.allow_cloud_placeholder && cloud_placeholder(&next, &meta) {
+                    acc = next;
+                } else {
+                    return Err(denied(REPARSE_MSG));
+                }
+            }
             Ok(meta) if meta.file_type().is_symlink() => {
                 return follow_link(&acc, &next, &names[i + 1..], ctx);
             }
@@ -729,6 +739,31 @@ fn follow_link(
     resolve_local(&combined, &next)
 }
 
+/// Cloud Files placeholder (`OneDrive`). `read_link` fails on this reparse tag.
+/// Checkpoint walks treat the file as ordinary so deleting or moving its
+/// parent folder is not aborted.
+pub(crate) fn cloud_placeholder(path: &Path, meta: &fs::Metadata) -> bool {
+    if !reparse_unsafe(meta) {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        matches!(win_fs::reparse_tag(path), Ok(Some(tag)) if is_cloud_reparse_tag(tag))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+/// `IO_REPARSE_TAG_CLOUD` … `IO_REPARSE_TAG_CLOUD_F`, plus the older placeholder tag.
+#[cfg(windows)]
+fn is_cloud_reparse_tag(tag: u32) -> bool {
+    const FILE_PLACEHOLDER: u32 = 0x8000_0015;
+    tag == FILE_PLACEHOLDER || (tag & 0xFFFF_0FFF) == 0x9000_001A
+}
+
 fn reparse_unsafe(meta: &fs::Metadata) -> bool {
     #[cfg(windows)]
     {
@@ -758,6 +793,7 @@ fn prepare_roots(roots: &[PathBuf], drives: &DriveCache) -> Result<Vec<PathBuf>,
             roots: &[],
             drives,
             depth: 0,
+            allow_cloud_placeholder: false,
         };
         let resolved = resolve_local(&abs, &ctx).map_err(|_| ())?;
         let opened = final_identity(&resolved).map_err(|_| ())?;
@@ -781,6 +817,9 @@ const CREDENTIAL_NAMES: &[&str] = &[
     "identity.key",
 ];
 
+/// Hard link to a credential file under another name (`notes.txt` → `.env`)
+/// is not detected. These tools cannot create a hard link; a second directory
+/// entry for the same file is a known limitation of the name denylist.
 fn name_is_credential(name: &str) -> bool {
     let n = name.trim_end_matches([' ', '.']).to_ascii_lowercase();
     n == ".env" || n.starts_with(".env.") || CREDENTIAL_NAMES.contains(&n.as_str())
@@ -1214,6 +1253,7 @@ fn walk_checkpoint(path: &Path, policy: &CpPolicy) -> Result<(PathBuf, PathBuf),
         roots: root_limit,
         drives: &drives,
         depth: 0,
+        allow_cloud_placeholder: true,
     };
     let resolved = resolve_local(&lexical, &ctx)?;
     if !root_limit.is_empty() && !roots_contain(root_limit, &resolved) {
@@ -1257,6 +1297,22 @@ pub(crate) fn vet_checkpoint_node(path: &Path) -> io::Result<CheckpointNode> {
     let policy = checkpoint_policy();
     let (lexical, resolved) = walk_checkpoint(path, &policy).map_err(tool_to_io)?;
     match fs::symlink_metadata(&resolved) {
+        Ok(meta) if cloud_placeholder(&resolved, &meta) => {
+            // A cloud placeholder is a file. `read_link` fails on its reparse
+            // tag and must not abort the parent checkpoint.
+            match identity_existing(&resolved) {
+                Ok(opened) => {
+                    if !in_checkpoint_store(&lexical, &policy.data_dir)
+                        && !policy.roots.is_empty()
+                        && !roots_contain(&policy.roots, &opened)
+                    {
+                        return Err(deny_io(ROOT_MSG));
+                    }
+                    Ok(finish_node(&policy, &[&lexical, &resolved, &opened]))
+                }
+                Err(_) => Ok(finish_node(&policy, &[&lexical, &resolved])),
+            }
+        }
         Ok(meta) if meta.file_type().is_symlink() || reparse_unsafe(&meta) => {
             let target = fs::read_link(&resolved)?;
             classify_link_target(&resolved, &target, &policy).map_err(tool_to_io)?;
@@ -1304,10 +1360,11 @@ pub(crate) fn vet_checkpoint_path(path: &Path) -> io::Result<()> {
 
 /// Classify a restore destination before `remove`, `fs::copy`, or `make_link`.
 ///
-/// The ancestor walk runs first. The path is then named with
-/// `GetFinalPathNameByHandleW`. If that lookup fails, or the parent directory
-/// cannot be named, the write is denied. A `NotFound` from the open is not
-/// treated as an absent local path that is safe to create.
+/// The ancestor walk runs first. An existing parent must be a plain directory
+/// and is named with `GetFinalPathNameByHandleW`. A missing parent is allowed
+/// only when the nearest existing ancestor is a plain directory inside the
+/// vetted root, so restore can recreate that directory. A junction, a failed
+/// identity lookup, or a path outside the roots is still a deny.
 pub(crate) fn vet_checkpoint_write(path: &Path) -> io::Result<()> {
     let policy = checkpoint_policy();
     let (lexical, resolved) = walk_checkpoint(path, &policy).map_err(tool_to_io)?;
@@ -1315,15 +1372,24 @@ pub(crate) fn vet_checkpoint_write(path: &Path) -> io::Result<()> {
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .ok_or_else(|| deny_io("path could not be verified"))?;
-    match fs::symlink_metadata(parent) {
-        Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() && !reparse_unsafe(&meta) => {}
+    let opened = match fs::symlink_metadata(parent) {
+        Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() && !reparse_unsafe(&meta) => {
+            identity_for_write(&resolved).map_err(tool_to_io)?
+        }
         Ok(_) => return Err(deny_io("path could not be verified")),
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            return Err(deny_io("path could not be verified"));
+            let anchor = plain_existing_ancestor(parent)?;
+            let opened_anchor = identity_existing(&anchor).map_err(tool_to_io)?;
+            let tail = resolved
+                .strip_prefix(&anchor)
+                .map_err(|_| deny_io("path could not be verified"))?;
+            if !tail.components().all(|c| matches!(c, Component::Normal(_))) {
+                return Err(deny_io("path could not be verified"));
+            }
+            opened_anchor.join(tail)
         }
         Err(e) => return Err(e),
-    }
-    let opened = identity_for_write(&resolved).map_err(tool_to_io)?;
+    };
     if !policy.roots.is_empty() && !roots_contain(&policy.roots, &opened) {
         return Err(deny_io(ROOT_MSG));
     }
@@ -1331,6 +1397,107 @@ pub(crate) fn vet_checkpoint_write(path: &Path) -> io::Result<()> {
         return Err(deny_io(GRANT_MSG));
     }
     Ok(())
+}
+
+/// Nearest existing plain directory at or above `start`.
+///
+/// A symlink, junction, or other reparse point stops the walk: missing
+/// directories are not created through a link.
+fn plain_existing_ancestor(start: &Path) -> io::Result<PathBuf> {
+    let mut cur = start.to_path_buf();
+    loop {
+        match fs::symlink_metadata(&cur) {
+            Ok(meta)
+                if meta.is_dir() && !meta.file_type().is_symlink() && !reparse_unsafe(&meta) =>
+            {
+                return Ok(cur);
+            }
+            Ok(_) => return Err(deny_io("path could not be verified")),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                cur = cur
+                    .parent()
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .ok_or_else(|| deny_io("path could not be verified"))?
+                    .to_path_buf();
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// Components of a checkpoint `backup` or links.json `rel`.
+///
+/// Only plain [`Component::Normal`] names are accepted. Absolute paths, UNC
+/// and other prefixes, a root, `.`, and `..` are rejected with no filesystem
+/// call. `Path::join` would otherwise replace the base with a UNC string or
+/// let `..` escape the store.
+pub(crate) fn plain_store_components(rel: &str) -> io::Result<Vec<OsString>> {
+    if rel.is_empty() || rel.contains('\0') {
+        return Err(deny_io("checkpoint relative path is empty"));
+    }
+    reject_syntax(rel).map_err(tool_to_io)?;
+    let path = Path::new(rel);
+    if path.is_absolute() || path.has_root() {
+        return Err(deny_io("checkpoint relative path escapes the store"));
+    }
+    // Split on both separators. On Unix `\` is not a separator, so
+    // `..\outside` would otherwise be one Normal component.
+    let mut parts = Vec::new();
+    for seg in rel.split(['/', '\\']) {
+        if seg.is_empty() || seg == "." || seg == ".." || component_is_device(seg) {
+            return Err(deny_io("checkpoint relative path escapes the store"));
+        }
+        parts.push(OsString::from(seg));
+    }
+    if parts.is_empty() {
+        return Err(deny_io("checkpoint relative path is empty"));
+    }
+    for c in path.components() {
+        if !matches!(c, Component::Normal(_)) {
+            return Err(deny_io("checkpoint relative path escapes the store"));
+        }
+    }
+    Ok(parts)
+}
+
+fn push_store_name(out: &mut PathBuf, part: &OsString) -> io::Result<()> {
+    let piece = Path::new(part);
+    let mut comps = piece.components();
+    match (comps.next(), comps.next()) {
+        (Some(Component::Normal(name)), None) if !component_is_device(&name.to_string_lossy()) => {
+            out.push(name);
+            Ok(())
+        }
+        _ => Err(deny_io("checkpoint relative path escapes the store")),
+    }
+}
+
+/// `base` plus the plain components of `rel`. Never calls `Path::join` on the raw string.
+pub(crate) fn join_store_rel(base: &Path, rel: &str) -> io::Result<PathBuf> {
+    let mut out = base.to_path_buf();
+    for part in plain_store_components(rel)? {
+        push_store_name(&mut out, &part)?;
+    }
+    Ok(out)
+}
+
+/// Path components of `rel` that sit strictly under `backup`, if `rel` is that prefix.
+pub(crate) fn store_rel_suffix(backup: &str, rel: &str) -> io::Result<Option<Vec<OsString>>> {
+    let backup_parts = plain_store_components(backup)?;
+    let rel_parts = plain_store_components(rel)?;
+    if rel_parts.len() < backup_parts.len() || rel_parts[..backup_parts.len()] != backup_parts[..] {
+        return Ok(None);
+    }
+    Ok(Some(rel_parts[backup_parts.len()..].to_vec()))
+}
+
+/// `base` plus already-checked plain names.
+pub(crate) fn join_store_parts(base: &Path, parts: &[OsString]) -> io::Result<PathBuf> {
+    let mut out = base.to_path_buf();
+    for part in parts {
+        push_store_name(&mut out, part)?;
+    }
+    Ok(out)
 }
 
 /// Classify a link target before `make_link`. The target text is rejected
@@ -2816,14 +2983,14 @@ mod tests {
 
         let missing = w.path().join("no-such-parent").join("file.txt");
         let id = plant_blob(d.path(), "run-1", &missing.display().to_string(), secret);
-        let err = get(&t, "checkpoint_restore")
+        get(&t, "checkpoint_restore")
             .call(&c, json!({"id": id}))
             .await
-            .unwrap_err();
-        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
-        assert!(
-            !missing.exists() && !w.path().join("no-such-parent").exists(),
-            "a failed identity lookup was treated as safe to write"
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(&missing).unwrap(),
+            secret,
+            "a deleted parent inside the vetted tree was not recreated"
         );
 
         let root = w.path().join("root");
@@ -2932,6 +3099,175 @@ mod tests {
             !tree_has(&d.path().join("checkpoints"), secret),
             "move copied credential bytes into a checkpoint blob"
         );
+    }
+
+    fn plant_forged(data: &Path, path: &str, backup: &str, link_rel: Option<&str>) -> String {
+        let id = format!("cp-{}", uuid::Uuid::now_v7().simple());
+        let dir = data.join("checkpoints").join("run-1").join(&id);
+        fs::create_dir_all(dir.join("files")).unwrap();
+        fs::write(dir.join("files").join("0"), "blob-bytes").unwrap();
+        let cp = crate::checkpoint::Checkpoint {
+            id: id.clone(),
+            run_id: "run-1".into(),
+            created_ms: 0,
+            op: "forged".into(),
+            entries: vec![crate::checkpoint::CheckpointEntry {
+                path: path.into(),
+                existed: true,
+                is_dir: false,
+                backup: Some(backup.into()),
+            }],
+        };
+        fs::write(dir.join("manifest.json"), serde_json::to_vec(&cp).unwrap()).unwrap();
+        if let Some(rel) = link_rel {
+            let links = json!([{
+                "rel": rel,
+                "target": "kept-target",
+                "dir": false
+            }]);
+            fs::write(dir.join("links.json"), serde_json::to_vec(&links).unwrap()).unwrap();
+        }
+        id
+    }
+
+    #[tokio::test]
+    async fn forged_backup_and_link_rel_are_rejected_before_io() {
+        let (d, w, t) = setup();
+        let c = ctx();
+        let file = w.path().join("keep.txt");
+        fs::write(&file, "stay").unwrap();
+        let outside = w.path().join("outside");
+        let escape = w.path().join("praxi-escape");
+        let hostile = [
+            r"\\192.0.2.1\share\x",
+            r"\\server\share",
+            r"..\outside",
+            r"files/0/../../praxi-escape",
+        ];
+        for backup in hostile {
+            let id = plant_forged(d.path(), &file.display().to_string(), backup, None);
+            let started = std::time::Instant::now();
+            let err = get(&t, "checkpoint_restore")
+                .call(&c, json!({"id": id}))
+                .await
+                .unwrap_err();
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(2),
+                "{backup} took {:?}",
+                started.elapsed()
+            );
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "{backup}: {err}"
+            );
+            assert_eq!(fs::read_to_string(&file).unwrap(), "stay", "{backup}");
+            assert!(!outside.exists(), "{backup}");
+            assert!(!escape.exists(), "{backup}");
+        }
+        for rel in hostile {
+            let id = plant_forged(d.path(), &file.display().to_string(), "files/0", Some(rel));
+            let started = std::time::Instant::now();
+            let err = get(&t, "checkpoint_restore")
+                .call(&c, json!({"id": id}))
+                .await
+                .unwrap_err();
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(2),
+                "link {rel} took {:?}",
+                started.elapsed()
+            );
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "link {rel}: {err}"
+            );
+            assert_eq!(fs::read_to_string(&file).unwrap(), "stay", "link {rel}");
+            assert!(!outside.exists(), "link {rel}");
+            assert!(!escape.exists(), "link {rel}");
+        }
+    }
+
+    #[tokio::test]
+    async fn restore_recreates_deleted_parent_inside_root() {
+        let (d, w, _) = setup();
+        let c = ctx();
+        let root = w.path().join("root");
+        let parent = root.join("sub");
+        let file = parent.join("a.txt");
+        fs::create_dir_all(&parent).unwrap();
+        let body = "restored-body";
+        let id = plant_blob(d.path(), "run-1", &file.display().to_string(), body);
+        fs::remove_dir_all(&parent).unwrap();
+        let t = tools_bounded(d.path(), std::slice::from_ref(&root), &[]);
+        get(&t, "checkpoint_restore")
+            .call(&c, json!({"id": id}))
+            .await
+            .unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), body);
+        assert!(parent.is_dir());
+
+        let outside = w.path().join("outside-parent");
+        let outside_file = outside.join("a.txt");
+        let id = plant_blob(
+            d.path(),
+            "run-1",
+            &outside_file.display().to_string(),
+            "nope",
+        );
+        let err = get(&t, "checkpoint_restore")
+            .call(&c, json!({"id": id}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+        assert!(
+            !outside.exists(),
+            "restore created a parent outside the vetted root"
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn cloud_placeholder_does_not_abort_directory_delete_or_move() {
+        let (_d, w, t) = setup();
+        let c = ctx();
+        let dir = w.path().join("proj");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("keep.txt"), "keep").unwrap();
+        let placeholder = dir.join("online-only.txt");
+        fs::write(&placeholder, b"").unwrap();
+        win_fs::mark_cloud_placeholder(&placeholder).expect("cloud reparse tag on a local file");
+        assert!(
+            fs::read_link(&placeholder).is_err(),
+            "placeholder still answers read_link; this does not reproduce the regression"
+        );
+        let err = get(&t, "fs_read")
+            .call(&c, json!({"path": &placeholder}))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ToolError::PermissionDenied(_)),
+            "read of a cloud placeholder was allowed: {err}"
+        );
+        get(&t, "fs_delete")
+            .call(&c, json!({"path": &dir, "recursive": true}))
+            .await
+            .unwrap();
+        assert!(
+            !dir.join("keep.txt").exists(),
+            "directory delete aborted on the cloud placeholder"
+        );
+
+        let src = w.path().join("proj-move");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("keep.txt"), "keep").unwrap();
+        let moved_placeholder = src.join("online-only.txt");
+        fs::write(&moved_placeholder, b"").unwrap();
+        win_fs::mark_cloud_placeholder(&moved_placeholder).expect("cloud reparse tag");
+        let dest = w.path().join("proj-dest");
+        get(&t, "fs_move")
+            .call(&c, json!({"from": &src, "to": &dest}))
+            .await
+            .unwrap();
+        assert_eq!(fs::read_to_string(dest.join("keep.txt")).unwrap(), "keep");
     }
 
     #[cfg(unix)]
