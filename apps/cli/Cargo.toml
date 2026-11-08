@@ -16,6 +16,8 @@ path = "src/main.rs"
 fake-provider = ["daemon-api/fake-provider"]
 
 [dependencies]
+peer-network = { path = "../../crates/peer-network", version = "0.1.0" }
+remote-api = { path = "../../crates/remote-api", version = "0.1.0", features = ["server"] }
 agent-core = { path = "../../crates/agent-core", version = "0.1.0" }
 async-trait.workspace = true
 agent-router = { path = "../../crates/agent-router", version = "0.1.0" }

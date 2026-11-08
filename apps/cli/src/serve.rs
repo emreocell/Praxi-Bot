@@ -242,6 +242,10 @@ async fn shutdown_signal() {
 
 /// How `bot serve` runs.
 pub struct ServeOptions {
+    /// Use the host pairing role and default peer networking on.
+    pub host_mode: bool,
+    /// Explicitly enable peer networking.
+    pub peer_enabled: bool,
     /// Loopback TCP port.
     pub port: u16,
     /// Machine-readable startup / stop lines.
@@ -278,6 +282,7 @@ pub async fn run_daemon(
 ///
 /// # Errors
 /// Storage, token, bind or server errors.
+#[allow(clippy::too_many_lines)] // daemon assembly and ordered lifecycle in one place
 pub fn serve(
     data_dir: &Path,
     opts: &ServeOptions,
@@ -290,6 +295,8 @@ pub fn serve(
         json,
         grace,
         telegram_store,
+        host_mode,
+        peer_enabled,
     } = opts;
     let (port, json, grace) = (*port, *json, *grace);
     let storage = Arc::new(Storage::open(data_dir)?);
@@ -320,6 +327,8 @@ pub fn serve(
         .enable_all()
         .build()?;
     rt.block_on(async {
+        let peer =
+            crate::peer::start_server(data_dir, *host_mode, *peer_enabled, state.clone()).await?;
         // Connect in the background (a slow `npx` must not delay the listener)
         // and expose `/v1/mcp/*` plus the write-only secrets route.
         let mcp = crate::mcp_host::McpHost::start(data_dir, mcp_tools, telegram_store.clone());
@@ -379,7 +388,17 @@ pub fn serve(
         }
         // MCP children stay up through the agent grace period (a running tool
         // call may still need them) and are stopped once the loop has paused.
-        let outcome = run_daemon(listener, state, telegram, shutdown_signal()).await;
+        let shutdown_peer = peer.clone();
+        let outcome = run_daemon(listener, state, telegram, async move {
+            shutdown_signal().await;
+            if let Some(peer) = shutdown_peer {
+                peer.shutdown().await;
+            }
+        })
+        .await;
+        if let Some(peer) = peer {
+            peer.shutdown().await;
+        }
         mcp.shutdown().await;
         let paused = outcome?;
         if json {
