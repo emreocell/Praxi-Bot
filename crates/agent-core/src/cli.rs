@@ -1,7 +1,7 @@
 //! Whole-turn CLI handoff. Tool execution stays in `exec_tools`, including policy,
 //! approvals, redaction, spills, timeouts and the existing run stream events.
 use crate::{
-    exec::TurnExecutor,
+    exec::{CliApproval, TurnExecutor},
     shared::{ModelOut, STEP_TOOLS, Shared, xe},
 };
 use async_trait::async_trait;
@@ -23,7 +23,7 @@ use tool_registry::ToolSpec;
 struct Host {
     sh: Arc<Shared>,
     run: Run,
-    approved: parking_lot::Mutex<Vec<(String, Value)>>,
+    approved: parking_lot::Mutex<Vec<CliApproval>>,
 }
 #[async_trait]
 impl TurnHost for Host {
@@ -57,21 +57,14 @@ impl TurnHost for Host {
             let mut approvals = self.approved.lock();
             approvals
                 .iter()
-                .position(|(n, v)| {
+                .position(|card| {
                     resolved
                         .as_ref()
-                        .is_some_and(|r| *n == r.name && *v == r.input)
+                        .is_some_and(|r| card.name == r.name && card.input == r.input)
                 })
                 .map(|i| approvals.remove(i))
         };
-        match exec
-            .exec_tools_approved(
-                &self.run,
-                &step,
-                approval.as_ref().map(|(n, v)| (n.as_str(), v)),
-            )
-            .await
-        {
+        match exec.exec_tools_approved(&self.run, &step, approval).await {
             Ok(v) => ToolReply {
                 text: v["results"][0]["text"]
                     .as_str()
@@ -95,27 +88,45 @@ impl TurnHost for Host {
         let Some(spec) = r.spec else {
             return false;
         };
-        let allow = match self
+        let decision = self
             .sh
-            .decide(&ctx, &r.name, spec.effect, spec.category, &r.input)
-        {
+            .decide(&ctx, &r.name, spec.effect, spec.category, &r.input);
+        // An allow is not stored. Recording it would let a later ask, including
+        // one that carries unevaluated limits, skip the interactive path.
+        match &decision {
             Decision::Allow => true,
             Decision::Deny => false,
-            Decision::Ask => self
-                .sh
-                .request_approval(&ctx, ToolCallId::new(), &r.name, spec.category, &r.input)
-                .await
-                .is_ok(),
-        };
-        if allow {
-            let mut approved = self.approved.lock();
-            // Bound stale approvals when a CLI never follows through with a call.
-            if approved.len() == 128 {
-                approved.remove(0);
+            Decision::Ask { .. } => {
+                let honored_limits = decision.unsupported_limits().cloned();
+                let Ok(permit) = self
+                    .sh
+                    .request_approval(
+                        &ctx,
+                        ToolCallId::new(),
+                        &r.name,
+                        spec.effect,
+                        spec.category,
+                        &r.input,
+                    )
+                    .await
+                else {
+                    return false;
+                };
+                let mut approved = self.approved.lock();
+                // Bound stale approvals when a CLI never follows through with a call.
+                // Dropping a permit records no grant.
+                if approved.len() == 128 {
+                    approved.remove(0);
+                }
+                approved.push(CliApproval {
+                    name: r.name,
+                    input: r.input,
+                    permit,
+                    honored_limits,
+                });
+                true
             }
-            approved.push((r.name, r.input));
         }
-        allow
     }
 }
 

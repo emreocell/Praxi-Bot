@@ -18,11 +18,14 @@ use crate::error::{PeerError, Result};
 use crate::identity::{key_to_string, load_or_create_secret_key};
 use crate::invite::{INVITE_TTL, Invite, InviteBook, MAX_INVITE_TTL, PairTicket, RedeemError};
 use crate::proto::{
-    ALPN_EVENTS, ALPN_PAIR, ALPN_RPC, CLOSE_NOT_PAIRED, CLOSE_REVOKED, CLOSE_SHUTDOWN, Event,
-    LeaderInfo, MAX_FRAME, MAX_PAIR_FRAME, PROTOCOL_VERSION, PairRequest, PairResponse,
-    RejectReason, read_frame, write_frame,
+    ALPN_EVENTS, ALPN_PAIR, ALPN_RPC, CLOSE_NOT_PAIRED, CLOSE_REPLACED, CLOSE_REVOKED,
+    CLOSE_SHUTDOWN, Event, LeaderInfo, MAX_FRAME, MAX_PAIR_FRAME, PROTOCOL_VERSION, PairRequest,
+    PairResponse, RejectReason, read_frame, write_frame,
 };
-use crate::rpc::{DEFAULT_RPC_TIMEOUT, RpcClient, RpcHandler, map_conn_err, serve_connection};
+use crate::rpc::{
+    DEFAULT_RPC_TIMEOUT, RpcBudget, RpcClient, RpcHandler, RpcLimits, map_conn_err,
+    narrow_rpc_bidi_grant, serve_connection,
+};
 use crate::store::{Device, DeviceStore, Role, now_secs};
 
 /// Which relay servers to use for NAT traversal and fallback.
@@ -62,6 +65,25 @@ pub trait ProtocolHandler: Send + Sync {
     /// Serve a connection from the authenticated paired device.
     /// Return when finished; revoke closes the connection while this runs.
     async fn handle(&self, conn: Connection, device: Device);
+
+    /// Bidirectional streams this protocol needs granted on every connection.
+    ///
+    /// Read once when the endpoint binds. The handshake advertises the maximum
+    /// of this value and the RPC stream cap. `0` leaves the RPC cap unchanged.
+    #[must_use]
+    fn max_bidi_streams(&self) -> usize {
+        0
+    }
+
+    /// Connection receive window, in bytes, required by this protocol.
+    ///
+    /// Read once when the endpoint binds. The handshake advertises the maximum
+    /// of this value and the RPC byte budget, and the window stays finite.
+    /// `0` leaves the RPC budget unchanged.
+    #[must_use]
+    fn receive_window(&self) -> u64 {
+        0
+    }
 }
 
 impl std::fmt::Debug for dyn ProtocolHandler {
@@ -85,8 +107,10 @@ pub struct PeerConfig {
     pub display_name: String,
     /// Capabilities this side offers (e.g. `desktop`, `browser`).
     pub capabilities: Vec<String>,
-    /// Per-request RPC timeout (client and handler side).
+    /// Whole-request RPC timeout (connection, I/O and handler included).
     pub rpc_timeout: Duration,
+    /// Per-connection and endpoint-wide admission limits for incoming RPCs.
+    pub rpc_limits: RpcLimits,
     /// Additional paired-only ALPN handlers. Built-in ALPNs may not be replaced.
     pub extra_protocols: Vec<(Vec<u8>, Arc<dyn ProtocolHandler>)>,
 }
@@ -103,6 +127,7 @@ impl PeerConfig {
             display_name: "core".into(),
             capabilities: Vec::new(),
             rpc_timeout: DEFAULT_RPC_TIMEOUT,
+            rpc_limits: RpcLimits::default(),
             extra_protocols: Vec::new(),
         }
     }
@@ -155,6 +180,7 @@ pub(crate) struct Inner {
     store: DeviceStore,
     invites: InviteBook,
     handler: Option<Arc<dyn RpcHandler>>,
+    rpc_budget: Arc<RpcBudget>,
     conns: Mutex<Vec<(PublicKey, Connection)>>,
     last_seen: Mutex<Vec<(PublicKey, Instant)>>,
     events: broadcast::Sender<PeerEvent>,
@@ -177,6 +203,11 @@ impl Inner {
             .connect(addr, alpn)
             .await
             .map_err(|e| connect_err(&e))?;
+        // The handshake advertised the endpoint-wide grant. An RPC connection
+        // must stop replenishing bidirectional credit above its own cap.
+        if alpn == ALPN_RPC {
+            narrow_rpc_bidi_grant(&conn, self.config.rpc_limits);
+        }
         self.track(peer, &conn)?;
         Ok(conn)
     }
@@ -188,10 +219,35 @@ impl Inner {
             conn.close(CLOSE_NOT_PAIRED.into(), b"not paired");
             return Err(PeerError::UnknownDevice(key_to_string(peer)));
         };
-        conns.retain(|(_, c)| c.close_reason().is_none());
+        // One live RPC connection per peer. A newer `bot/rpc/1` connection
+        // closes the previous one so a paired key cannot repeat the handshake
+        // stream grant. Event connections are left in place; heartbeats
+        // reconnect on their own ALPN and only need the uni limit of 1.
+        let replacing_rpc = conn.alpn() == ALPN_RPC;
+        conns.retain(|(id, existing)| {
+            if existing.close_reason().is_some() {
+                return false;
+            }
+            if replacing_rpc && id == peer && existing.alpn() == ALPN_RPC {
+                existing.close(CLOSE_REPLACED.into(), b"replaced");
+                return false;
+            }
+            true
+        });
         conns.push((*peer, conn.clone()));
         Ok(device)
     }
+}
+
+/// Largest bidirectional-stream and receive-window demand of the extra ALPNs.
+fn extra_alpn_transport(config: &PeerConfig) -> (usize, u64) {
+    let mut bidi = 0usize;
+    let mut window = 0u64;
+    for (_, handler) in &config.extra_protocols {
+        bidi = bidi.max(handler.max_bidi_streams());
+        window = window.max(handler.receive_window());
+    }
+    (bidi, window)
 }
 
 fn connect_err(e: &impl std::fmt::Display) -> PeerError {
@@ -224,6 +280,11 @@ impl PeerNetwork {
     /// Fails if the identity or device list cannot be read or the endpoint
     /// cannot bind.
     pub async fn start(config: PeerConfig, handler: Option<Arc<dyn RpcHandler>>) -> Result<Self> {
+        config.rpc_limits.validate()?;
+        let rpc_budget = Arc::new(RpcBudget::new(
+            config.rpc_limits.streams_total,
+            config.rpc_limits.bytes_total,
+        ));
         let mut alpns = vec![ALPN_PAIR.to_vec(), ALPN_RPC.to_vec(), ALPN_EVENTS.to_vec()];
         for (alpn, _) in &config.extra_protocols {
             if alpn.is_empty() || alpn.len() > 255 || alpns.contains(alpn) {
@@ -233,6 +294,9 @@ impl PeerNetwork {
             }
             alpns.push(alpn.clone());
         }
+        let (extra_bidi, extra_window) = extra_alpn_transport(&config);
+        let transport =
+            crate::rpc::endpoint_transport_config(config.rpc_limits, extra_bidi, extra_window)?;
         let key = load_or_create_secret_key(&config.data_dir.join("identity.key"))?;
         let store = DeviceStore::open(config.data_dir.join("devices.json"))?;
         let builder = match &config.relay {
@@ -244,7 +308,10 @@ impl PeerNetwork {
                 Endpoint::builder(presets::Minimal).relay_mode(RelayMode::Disabled)
             }
         };
-        let mut builder = builder.secret_key(key).alpns(alpns);
+        let mut builder = builder
+            .transport_config(transport)
+            .secret_key(key)
+            .alpns(alpns);
         if let Some(addr) = config.bind_addr {
             builder = builder
                 .bind_addr(addr)
@@ -261,6 +328,7 @@ impl PeerNetwork {
             store,
             invites: InviteBook::default(),
             handler,
+            rpc_budget,
             conns: Mutex::new(Vec::new()),
             last_seen: Mutex::new(Vec::new()),
             events,
@@ -570,6 +638,10 @@ async fn handle_incoming(inner: Arc<Inner>, incoming: Incoming) -> Result<()> {
     let conn = accepting
         .await
         .map_err(|e| PeerError::Connection(e.to_string()))?;
+    // Same narrowing as the dial path: future RPC grants, not the initial credit.
+    if alpn == ALPN_RPC {
+        narrow_rpc_bidi_grant(&conn, inner.config.rpc_limits);
+    }
     let remote = conn.remote_id();
 
     if alpn == ALPN_PAIR {
@@ -598,7 +670,15 @@ async fn handle_incoming(inner: Arc<Inner>, incoming: Incoming) -> Result<()> {
     };
     if alpn == ALPN_RPC {
         if let Some(h) = &inner.handler {
-            serve_connection(conn.clone(), device, h.clone(), inner.config.rpc_timeout).await;
+            serve_connection(
+                conn.clone(),
+                device,
+                h.clone(),
+                inner.config.rpc_timeout,
+                inner.config.rpc_limits,
+                inner.rpc_budget.clone(),
+            )
+            .await;
         } else {
             conn.close(404u32.into(), b"this install does not serve rpc");
         }
@@ -1240,6 +1320,171 @@ mod tests {
         assert!(api.close_reason().is_none());
         assert!(rpc.close_reason().is_none());
         assert!(events.close_reason().is_none());
+
+        other.shutdown().await;
+        desktop.shutdown().await;
+        core.shutdown().await;
+    }
+
+    fn live(inner: &Inner, peer: &PublicKey, alpn: &[u8]) -> usize {
+        inner
+            .conns
+            .lock()
+            .iter()
+            .filter(|(id, conn)| id == peer && conn.alpn() == alpn && conn.close_reason().is_none())
+            .count()
+    }
+
+    async fn wait_live(inner: &Inner, peer: &PublicKey, alpn: &[u8], count: usize) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while live(inner, peer, alpn) != count {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn handshake_grants_configured_bidi_cap_and_one_uni_stream() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = loopback(dir.path(), "core");
+        cfg.rpc_limits.streams_per_connection = 2;
+        let core = PeerNetwork::start(cfg, Some(Arc::new(NopRpc)))
+            .await
+            .unwrap();
+        let desktop = PeerNetwork::start(loopback(dir.path(), "desktop"), None)
+            .await
+            .unwrap();
+        let invite = core.create_invite(Role::Desktop).await;
+        desktop
+            .pair(&PairTicket::parse(&invite.ticket).unwrap())
+            .await
+            .unwrap();
+
+        // Events connections are not accepted as bidirectional, so opened bidi
+        // streams stay outstanding and the next grant has to come from the
+        // handshake credit rather than from the server resetting them.
+        let events = desktop
+            .inner
+            .endpoint
+            .connect(core.addr(), ALPN_EVENTS)
+            .await
+            .unwrap();
+        let mut bidi = Vec::new();
+        let mut slowest = Duration::from_millis(50);
+        for _ in 0..core.inner.config.rpc_limits.streams_per_connection {
+            let started = Instant::now();
+            bidi.push(
+                tokio::time::timeout(Duration::from_secs(5), events.open_bi())
+                    .await
+                    .expect("configured bidi grant")
+                    .unwrap(),
+            );
+            slowest = slowest.max(started.elapsed());
+        }
+        let patience = slowest.saturating_mul(5).max(Duration::from_millis(300));
+        let extra_bidi = tokio::time::timeout(patience, events.open_bi()).await;
+        assert!(
+            extra_bidi.is_err(),
+            "handshake granted more bidirectional streams than streams_per_connection"
+        );
+        let started = Instant::now();
+        let uni = tokio::time::timeout(Duration::from_secs(5), events.open_uni())
+            .await
+            .expect("one unidirectional stream for heartbeats")
+            .unwrap();
+        slowest = slowest.max(started.elapsed());
+        let patience = slowest.saturating_mul(5).max(Duration::from_millis(300));
+        let extra_uni = tokio::time::timeout(patience, events.open_uni()).await;
+        assert!(
+            extra_uni.is_err(),
+            "handshake granted more than one unidirectional stream"
+        );
+        assert!(events.close_reason().is_none());
+        drop(uni);
+        drop(bidi);
+        desktop.shutdown().await;
+        core.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_new_rpc_connection_closes_only_the_previous_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = PeerNetwork::start(loopback(dir.path(), "core"), Some(Arc::new(NopRpc)))
+            .await
+            .unwrap();
+        let desktop = PeerNetwork::start(loopback(dir.path(), "desktop"), None)
+            .await
+            .unwrap();
+        let other = PeerNetwork::start(loopback(dir.path(), "other"), None)
+            .await
+            .unwrap();
+        let invite = core.create_invite(Role::Desktop).await;
+        desktop
+            .pair(&PairTicket::parse(&invite.ticket).unwrap())
+            .await
+            .unwrap();
+        let invite = core.create_invite(Role::Desktop).await;
+        other
+            .pair(&PairTicket::parse(&invite.ticket).unwrap())
+            .await
+            .unwrap();
+
+        let events = desktop
+            .inner
+            .endpoint
+            .connect(core.addr(), ALPN_EVENTS)
+            .await
+            .unwrap();
+        let first = desktop
+            .inner
+            .endpoint
+            .connect(core.addr(), ALPN_RPC)
+            .await
+            .unwrap();
+        let other_rpc = other
+            .inner
+            .endpoint
+            .connect(core.addr(), ALPN_RPC)
+            .await
+            .unwrap();
+        wait_live(&core.inner, &desktop.id(), ALPN_RPC, 1).await;
+        wait_live(&core.inner, &other.id(), ALPN_RPC, 1).await;
+        wait_live(&core.inner, &desktop.id(), ALPN_EVENTS, 1).await;
+
+        let second = desktop
+            .inner
+            .endpoint
+            .connect(core.addr(), ALPN_RPC)
+            .await
+            .unwrap();
+        let closed = tokio::time::timeout(Duration::from_secs(5), first.closed())
+            .await
+            .unwrap();
+        assert!(
+            matches!(closed, iroh::endpoint::ConnectionError::ApplicationClosed(ref c) if c.error_code.into_inner() == u64::from(CLOSE_REPLACED)),
+            "{closed}"
+        );
+        wait_live(&core.inner, &desktop.id(), ALPN_RPC, 1).await;
+        assert!(second.close_reason().is_none());
+        assert!(events.close_reason().is_none());
+        assert!(other_rpc.close_reason().is_none());
+        assert_eq!(live(&core.inner, &other.id(), ALPN_RPC), 1);
+
+        let events_again = desktop
+            .inner
+            .endpoint
+            .connect(core.addr(), ALPN_EVENTS)
+            .await
+            .unwrap();
+        wait_live(&core.inner, &desktop.id(), ALPN_EVENTS, 2).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(events.close_reason().is_none());
+        assert!(events_again.close_reason().is_none());
+        assert!(second.close_reason().is_none());
+        assert_eq!(live(&core.inner, &desktop.id(), ALPN_RPC), 1);
+        assert_eq!(live(&core.inner, &other.id(), ALPN_RPC), 1);
 
         other.shutdown().await;
         desktop.shutdown().await;

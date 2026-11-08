@@ -39,5 +39,5 @@ pub use net::{
 pub use proto::{
     ALPN_API, ALPN_EVENTS, ALPN_PAIR, ALPN_RPC, LeaderInfo, LeaderState, PROTOCOL_VERSION,
 };
-pub use rpc::{RpcClient, RpcHandler};
+pub use rpc::{RpcClient, RpcHandler, RpcLimits};
 pub use store::{Device, Role};

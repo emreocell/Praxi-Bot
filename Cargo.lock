@@ -4409,6 +4409,7 @@ version = "0.1.0"
 dependencies = [
  "agent-router",
  "async-trait",
+ "base64 0.22.1",
  "futures",
  "globset",
  "http",
@@ -5670,12 +5671,14 @@ dependencies = [
  "iroh",
  "parking_lot",
  "qrcode",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "windows 0.62.2",
 ]
 
 [[package]]
