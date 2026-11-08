@@ -9,6 +9,7 @@ use std::{
     collections::BTreeMap,
     io::Write,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
 };
 
 use argon2::{Algorithm, Argon2, Params, Version};
@@ -18,10 +19,12 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit, OsRng, rand_core::RngCore},
 };
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::{
     error::SecretError,
     secret::{SecretStore, SecretValue, validate_name},
+    transaction::{self, TransactionGuard, parent_directory},
 };
 
 const FORMAT_VERSION: u32 = 1;
@@ -58,10 +61,14 @@ struct FileFormat {
 }
 
 /// [`SecretStore`] backed by a passphrase-encrypted file.
+#[derive(Clone)]
 pub struct EncryptedFileStore {
     path: PathBuf,
     passphrase: String,
     kdf: KdfParams,
+    transaction: Arc<Mutex<()>>,
+    #[cfg(test)]
+    fail_before_rename: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl std::fmt::Debug for EncryptedFileStore {
@@ -80,6 +87,9 @@ impl EncryptedFileStore {
             path: path.into(),
             passphrase: passphrase.into(),
             kdf: KdfParams::default(),
+            transaction: Arc::new(Mutex::new(())),
+            #[cfg(test)]
+            fail_before_rename: Arc::default(),
         }
     }
 
@@ -101,7 +111,14 @@ impl EncryptedFileStore {
     /// # Errors
     /// [`SecretError::WrongPassphrase`] or I/O / format errors.
     pub fn verify(&self) -> Result<(), SecretError> {
+        let _transaction = self.lock()?;
         self.load().map(|_| ())
+    }
+
+    fn lock(&self) -> Result<TransactionGuard<'_>, SecretError> {
+        let mut sidecar = self.path.as_os_str().to_os_string();
+        sidecar.push(".lock");
+        transaction::acquire(&self.transaction, Path::new(&sidecar))
     }
 
     fn derive_key(&self, salt: &[u8], kdf: KdfParams) -> Result<[u8; 32], SecretError> {
@@ -164,40 +181,93 @@ impl EncryptedFileStore {
         };
         let json =
             serde_json::to_vec_pretty(&file).map_err(|e| SecretError::Corrupt(e.to_string()))?;
-        if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let tmp = self.path.with_extension("tmp");
+        let mut pending = PendingWrite::new(&self.path)?;
+        pending.write_and_sync(&json)?;
+        #[cfg(test)]
+        if self
+            .fail_before_rename
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
         {
-            let mut opts = std::fs::OpenOptions::new();
-            opts.write(true).create(true).truncate(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                opts.mode(0o600);
-            }
-            let mut f = opts.open(&tmp)?;
-            f.write_all(&json)?;
-            f.sync_all()?;
+            return Err(std::io::Error::other("injected failure before rename").into());
         }
-        std::fs::rename(&tmp, &self.path)?;
+        pending.commit(&self.path)?;
         Ok(())
+    }
+}
+
+/// Owns only a newly created file; error paths never remove another writer's
+/// file. Close the handle before cleanup so this also works on Windows.
+struct PendingWrite {
+    path: PathBuf,
+    file: Option<std::fs::File>,
+}
+
+impl PendingWrite {
+    fn new(destination: &Path) -> Result<Self, std::io::Error> {
+        let directory = parent_directory(destination);
+        std::fs::create_dir_all(directory)?;
+        let mut name = destination
+            .file_name()
+            .ok_or_else(|| std::io::Error::other("secret store path has no file name"))?
+            .to_os_string();
+        name.push(format!(
+            ".{}.{}.tmp",
+            std::process::id(),
+            Uuid::now_v7().simple()
+        ));
+        let path = directory.join(name);
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(&path)?;
+        Ok(Self {
+            path,
+            file: Some(file),
+        })
+    }
+
+    fn write_and_sync(&mut self, bytes: &[u8]) -> Result<(), std::io::Error> {
+        let file = self.file.as_mut().expect("temporary file is still open");
+        file.write_all(bytes)?;
+        file.sync_all()
+    }
+
+    fn commit(mut self, destination: &Path) -> Result<(), std::io::Error> {
+        drop(self.file.take());
+        std::fs::rename(&self.path, destination)?;
+        #[cfg(unix)]
+        std::fs::File::open(parent_directory(destination))?.sync_all()?;
+        Ok(())
+    }
+}
+
+impl Drop for PendingWrite {
+    fn drop(&mut self) {
+        drop(self.file.take());
+        let _ = std::fs::remove_file(&self.path);
     }
 }
 
 impl SecretStore for EncryptedFileStore {
     fn get(&self, name: &str) -> Result<Option<SecretValue>, SecretError> {
+        let _transaction = self.lock()?;
         Ok(self.load()?.remove(name).map(SecretValue::new))
     }
 
     fn set(&self, name: &str, value: &str) -> Result<(), SecretError> {
         validate_name(name)?;
+        let _transaction = self.lock()?;
         let mut map = self.load()?;
         map.insert(name.to_string(), value.to_string());
         self.save(&map)
     }
 
     fn delete(&self, name: &str) -> Result<bool, SecretError> {
+        let _transaction = self.lock()?;
         let mut map = self.load()?;
         let existed = map.remove(name).is_some();
         if existed {
@@ -207,6 +277,7 @@ impl SecretStore for EncryptedFileStore {
     }
 
     fn list_names(&self) -> Result<Vec<String>, SecretError> {
+        let _transaction = self.lock()?;
         Ok(self.load()?.into_keys().collect())
     }
 }
@@ -268,5 +339,73 @@ mod tests {
         let s = store(d.path(), "pw");
         std::fs::write(s.path(), "not json").unwrap();
         assert!(matches!(s.get("a"), Err(SecretError::Corrupt(_))));
+    }
+
+    #[test]
+    fn failure_before_rename_preserves_old_bytes_and_cleans_unique_temp() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(dir.path(), "pw");
+        store.set("old", "value").unwrap();
+        let old_bytes = std::fs::read(store.path()).unwrap();
+        store
+            .fail_before_rename
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(store.set("new", "must not commit").is_err());
+        assert_eq!(std::fs::read(store.path()).unwrap(), old_bytes);
+        assert_eq!(store.list_names().unwrap(), ["old"]);
+        assert!(std::fs::read_dir(dir.path()).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")
+        }));
+    }
+
+    #[test]
+    fn cloned_handles_share_transaction_mutex_and_support_turkish_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(&dir.path().join("Masaüstü/şifreler"), "pw");
+        let clone = store.clone();
+        assert!(Arc::ptr_eq(&store.transaction, &clone.transaction));
+        store.set("one", "1").unwrap();
+        clone.set("two", "2").unwrap();
+        assert_eq!(store.list_names().unwrap(), ["one", "two"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pending_and_committed_files_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(dir.path(), "pw");
+        let pending = PendingWrite::new(store.path()).unwrap();
+        assert_eq!(
+            std::fs::metadata(&pending.path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        drop(pending);
+        store.set("name", "value").unwrap();
+        assert_eq!(
+            std::fs::metadata(store.path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(
+            std::fs::metadata(dir.path().join("secrets.enc.lock"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
     }
 }

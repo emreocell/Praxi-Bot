@@ -17,6 +17,7 @@ mod memory;
 mod open;
 mod redact;
 mod secret;
+mod transaction;
 
 pub use error::SecretError;
 pub use file::{EncryptedFileStore, KdfParams};

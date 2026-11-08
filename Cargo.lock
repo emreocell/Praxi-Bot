@@ -7107,12 +7107,15 @@ dependencies = [
  "argon2",
  "base64 0.22.1",
  "chacha20poly1305",
+ "directories",
+ "fs4",
  "keyring",
  "regex",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "uuid",
 ]
 
 [[package]]
