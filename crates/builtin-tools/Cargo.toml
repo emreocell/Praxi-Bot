@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 async-trait.workspace = true
 browser-cdp = { path = "../browser-cdp", version = "0.1.0" }
+connector-email = { path = "../connector-email", version = "0.1.0" }
 desktop-api = { path = "../desktop-api", version = "0.1.0" }
 globset.workspace = true
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
@@ -30,6 +31,7 @@ uuid.workspace = true
 vision = { path = "../vision", version = "0.1.0" }
 
 [dev-dependencies]
+secret-store.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "test-util"] }
 

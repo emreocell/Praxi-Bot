@@ -40,6 +40,8 @@ pub use script::{
     GateHost, GateRequest, ResolverGate, SCRIPT_TOOL_NAME, ToolGate, raw_command_for,
 };
 
+pub use connector_email;
+
 /// Everything needed to build the built-in tool set.
 pub struct BuiltinConfig {
     /// Application data directory (checkpoints, spill files, screenshots).
@@ -61,11 +63,13 @@ pub struct BuiltinConfig {
     /// Called before every mutating desktop / visible-browser action (see
     /// [`DesktopControlGate`]); `None` = no gate.
     pub control: Option<Arc<dyn DesktopControlGate>>,
+    /// Email connector (IMAP/SMTP tools). `None` = email tools skipped.
+    pub email: Option<Arc<connector_email::EmailConnector>>,
 }
 
 impl BuiltinConfig {
     /// A config with defaults: isolated headless browser, default script limits,
-    /// no desktop backend and no OCR.
+    /// no desktop backend, no OCR and no email connector.
     #[must_use]
     pub fn new(data_dir: PathBuf, gate: Arc<dyn ToolGate>) -> Self {
         Self {
@@ -78,6 +82,7 @@ impl BuiltinConfig {
             gate,
             script_limits: script_runtime::Limits::default(),
             control: None,
+            email: None,
         }
     }
 
@@ -112,6 +117,9 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
     all.push(shell::tool(&cfg.data_dir));
     all.push(script::tool(registry.clone(), cfg.gate, cfg.script_limits));
     all.extend(meta::tools());
+    if let Some(email) = &cfg.email {
+        all.extend(connector_email::tools(email));
+    }
     all
 }
 
@@ -122,6 +130,15 @@ pub fn register_builtin_tools(registry: &ToolRegistry, cfg: BuiltinConfig) -> us
         .into_iter()
         .filter(|t| registry.register(t.clone()))
         .count()
+}
+
+/// Register the e-mail tools in `registry`; returns how many were added.
+#[must_use]
+pub fn register_email_tools(
+    registry: &ToolRegistry,
+    connector: &Arc<connector_email::EmailConnector>,
+) -> usize {
+    connector_email::register(registry, connector)
 }
 
 #[cfg(test)]
@@ -283,5 +300,66 @@ mod tests {
             panic!()
         };
         assert!(text.contains("from script"), "{text}");
+    }
+
+    #[test]
+    fn email_tools_can_be_configured_and_send_is_destructive() {
+        use secret_store::SecretStore;
+
+        let d = tempfile::tempdir().unwrap();
+        let reg = ToolRegistry::new();
+        let store = Arc::new(secret_store::MemoryStore::new());
+        store.set("email/test", "password").unwrap();
+        let account = connector_email::AccountConfig {
+            name: "test".to_string(),
+            address: "user@example.com".to_string(),
+            username: String::new(),
+            password: secret_store::SecretRef::new("email/test").unwrap(),
+            imap: connector_email::ImapSettings {
+                host: "imap.example.com".to_string(),
+                port: 993,
+            },
+            smtp: connector_email::SmtpSettings {
+                host: "smtp.example.com".to_string(),
+                port: 465,
+                security: connector_email::SmtpSecurity::Implicit,
+            },
+            drafts_folder: "Drafts".to_string(),
+            extra_root_pem: None,
+            timeout_secs: 30,
+        };
+        let connector =
+            Arc::new(connector_email::EmailConnector::new(vec![account], store).unwrap());
+        let mut cfg = BuiltinConfig::new(d.path().to_path_buf(), Arc::new(AllowAll));
+        cfg.desktop = Some(Arc::new(desktop::fake::FakeDesktop::new(false)));
+        cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
+        cfg.email = Some(connector.clone());
+        let added = register_builtin_tools(&reg, cfg);
+        assert_eq!(added, 34 + 6);
+
+        // Verification of email tools and their effects
+        let send_tool = reg
+            .get(connector_email::tools::SEND)
+            .expect("email_send registered");
+        assert_eq!(send_tool.spec().effect, Effect::Destructive);
+        assert_eq!(send_tool.spec().category, PermissionCategory::Messaging);
+
+        let draft_tool = reg
+            .get(connector_email::tools::DRAFT)
+            .expect("email_draft registered");
+        assert_eq!(draft_tool.spec().effect, Effect::Write);
+        assert_eq!(draft_tool.spec().category, PermissionCategory::Messaging);
+
+        let read_tool = reg
+            .get(connector_email::tools::READ)
+            .expect("email_read registered");
+        assert_eq!(read_tool.spec().effect, Effect::Read);
+        assert_eq!(read_tool.spec().category, PermissionCategory::Messaging);
+
+        // Also test direct helper register_email_tools
+        let reg2 = ToolRegistry::new();
+        let registered = register_email_tools(&reg2, &connector);
+        assert_eq!(registered, 6);
+        assert!(reg2.get(connector_email::tools::SEND).is_some());
     }
 }

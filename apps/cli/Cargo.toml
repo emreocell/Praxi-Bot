@@ -22,6 +22,7 @@ agent-core = { path = "../../crates/agent-core", version = "0.1.0" }
 async-trait.workspace = true
 agent-router = { path = "../../crates/agent-router", version = "0.1.0" }
 channel-telegram = { path = "../../crates/channel-telegram", version = "0.1.0" }
+connector-email = { path = "../../crates/connector-email", version = "0.1.0" }
 builtin-tools = { path = "../../crates/builtin-tools", version = "0.1.0" }
 browser-cdp = { path = "../../crates/browser-cdp", version = "0.1.0" }
 mcp-bridge = { path = "../../crates/mcp-bridge", version = "0.1.0" }
@@ -37,6 +38,7 @@ protocol.workspace = true
 provider-catalog = { path = "../../crates/provider-catalog", version = "0.1.0" }
 reqwest.workspace = true
 secret-store.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 skills = { path = "../../crates/skills", version = "0.1.0" }
 storage.workspace = true
