@@ -80,6 +80,56 @@ fn provider(server: &MockServer) -> OpenAiCompatProvider {
         .unwrap()
 }
 
+#[test]
+fn audit_extra_exhausted_call_index_returns_error_instead_of_panicking() {
+    let mut assembler = super::sse::Assembler::default();
+    assembler
+        .feed(
+            &json!({"choices": [{"delta": {"tool_calls": [{
+                "index": u64::MAX, "id": "existing", "function": {"name": "read", "arguments": "{}"}
+            }]}}]})
+            .to_string(),
+        )
+        .unwrap();
+    let next = json!({"choices": [{"delta": {"tool_calls": [{
+        "id": "next", "function": {"name": "read", "arguments": "{}"}
+    }]}}]})
+    .to_string();
+    assert!(matches!(
+        assembler.feed(&next),
+        Err(ProviderError::Stream(_))
+    ));
+}
+
+#[test]
+fn audit_extra_max_index_continuations_do_not_allocate_a_new_slot() {
+    let mut assembler = super::sse::Assembler::default();
+    for call in [
+        json!({"index": u64::MAX, "id": "existing", "function": {"name": "read", "arguments": "{"}}),
+        json!({"id": "existing", "function": {"arguments": "\"x\":1"}}),
+        json!({"function": {"arguments": "}"}}),
+    ] {
+        assembler
+            .feed(&json!({"choices": [{"delta": {"tool_calls": [call]}}]}).to_string())
+            .unwrap();
+    }
+    assembler.feed("[DONE]").unwrap();
+    let chunks = assembler.finish().unwrap();
+    let calls: Vec<_> = chunks
+        .iter()
+        .filter_map(|chunk| {
+            if let ChatChunk::ToolCall(call) = chunk {
+                Some(call)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].id, "existing");
+    assert_eq!(calls[0].arguments, r#"{"x":1}"#);
+}
+
 #[tokio::test]
 async fn plain_text_stream_with_usage() {
     let server = MockServer::start().await;
@@ -367,13 +417,192 @@ async fn list_models_without_endpoint_is_empty() {
 
 #[test]
 fn sse_decoder_handles_split_bytes_crlf_and_comments() {
+    fn push(d: &mut SseDecoder, mut bytes: &[u8]) -> Vec<String> {
+        let mut events = Vec::new();
+        while let Some(event) = d.next_event(&mut bytes).unwrap() {
+            events.push(event);
+        }
+        events
+    }
     let mut d = SseDecoder::default();
-    assert!(d.push(b": keepalive\r\nda").is_empty());
-    assert!(d.push(b"ta: {\"a\":1}\r").is_empty());
-    let ev = d.push(b"\n\r\ndata:[DONE]\n\n");
+    assert!(push(&mut d, b": keepalive\r\nda").is_empty());
+    assert!(push(&mut d, b"ta: {\"a\":1}\r").is_empty());
+    let ev = push(&mut d, b"\n\r\ndata:[DONE]\n\n");
     assert_eq!(ev, vec![r#"{"a":1}"#, "[DONE]"]);
-    d.push(b"data: tail");
-    assert_eq!(d.finish().as_deref(), Some("tail"));
+    push(&mut d, b"data: tail");
+    assert_eq!(d.finish().unwrap().as_deref(), Some("tail"));
+}
+
+// Regression for REL-09: a source offering 100 MiB without a newline must be
+// dropped at the line budget, not drained into the decoder's carry buffer.
+#[tokio::test]
+async fn audit_rel09_newline_free_stream_stops_at_line_budget() {
+    use futures::{StreamExt, stream};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    const CHUNK_BYTES: usize = 128 * 1024;
+    const LINE_LIMIT: usize = 1024 * 1024;
+    let polls = Arc::new(AtomicUsize::new(0));
+    let observed = polls.clone();
+    let bytes = stream::iter(0..(100 * 1024 * 1024 / CHUNK_BYTES))
+        .map(move |_| {
+            let index = observed.fetch_add(1, Ordering::Relaxed);
+            assert!(
+                index <= LINE_LIMIT / CHUNK_BYTES,
+                "read beyond the line budget"
+            );
+            Ok(vec![b'x'; CHUNK_BYTES])
+        })
+        .boxed();
+    let state = super::StreamState {
+        bytes,
+        sse: SseDecoder::default(),
+        asm: super::sse::Assembler::default(),
+        pending: std::collections::VecDeque::new(),
+        eof: false,
+        done: false,
+    };
+    let result = stream::try_unfold(state, super::next_chunk)
+        .try_collect::<Vec<_>>()
+        .await;
+    assert!(matches!(result, Err(ProviderError::Stream(_))));
+    assert!(polls.load(Ordering::Relaxed) <= LINE_LIMIT / CHUNK_BYTES + 1);
+}
+
+// Regression for REL-19: the transport never closes; completion must come from
+// [DONE]. Polling once (without a clock or timeout) proves no further read waits.
+#[test]
+fn audit_rel19_done_flushes_once_without_waiting_for_eof() {
+    use futures::{FutureExt, StreamExt, stream};
+
+    let bytes = stream::iter([
+        Ok(concat!(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",",
+            "\"function\":{\"name\":\"read\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n"
+        ).as_bytes().to_vec()),
+        Ok(b"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3}}\n\n".to_vec()),
+        // A second terminal in the same read must not cause duplicate output.
+        Ok(b"data: [DONE]\n\ndata: [DONE]\n\n".to_vec()),
+    ])
+    .chain(stream::pending())
+    .boxed();
+    let state = super::StreamState {
+        bytes,
+        sse: SseDecoder::default(),
+        asm: super::sse::Assembler::default(),
+        pending: std::collections::VecDeque::new(),
+        eof: false,
+        done: false,
+    };
+    let chunks = stream::try_unfold(state, super::next_chunk)
+        .try_collect::<Vec<_>>()
+        .now_or_never()
+        .expect("[DONE] must complete even when the transport stays open")
+        .unwrap();
+    assert_eq!(
+        chunks
+            .iter()
+            .filter(|c| matches!(c, ChatChunk::ToolCall(_)))
+            .count(),
+        1
+    );
+    assert_eq!(
+        chunks
+            .iter()
+            .filter(|c| matches!(c, ChatChunk::Usage(_)))
+            .count(),
+        1
+    );
+    assert_eq!(
+        chunks
+            .iter()
+            .filter(|c| matches!(c, ChatChunk::Done { .. }))
+            .count(),
+        1
+    );
+    assert!(matches!(
+        chunks.iter().find(|c| matches!(c, ChatChunk::Usage(_))),
+        Some(ChatChunk::Usage(Usage {
+            prompt_tokens: 7,
+            completion_tokens: 3,
+            ..
+        }))
+    ));
+}
+
+#[tokio::test]
+async fn done_ignores_invalid_tail_and_unterminated_done_flushes_once() {
+    for body in ["data: [DONE]\n\ndata: invalid\n\n", "data: [DONE]"] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+        let chunks = collect(&provider(&server), req()).await.unwrap();
+        assert_eq!(chunks.len(), 1);
+        assert!(matches!(chunks[0], ChatChunk::Done { .. }));
+    }
+}
+
+#[tokio::test]
+async fn oversized_non_stream_response_is_rejected() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": "x".repeat(crate::limits::MAX_RESPONSE_BYTES)}, "finish_reason": "stop"}]
+        })))
+        .mount(&server)
+        .await;
+    let mut e = entry(&server.uri());
+    e.capabilities.streaming = false;
+    let p = OpenAiCompatProvider::with_api_key(e, fast(), None).unwrap();
+    let error = collect(&p, req()).await.unwrap_err();
+    assert!(
+        matches!(error, ProviderError::Stream(message) if message.contains("response exceeds"))
+    );
+}
+
+#[tokio::test]
+async fn oversized_model_lists_are_rejected_for_all_adapters() {
+    use crate::{AnthropicProvider, GeminiProvider};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [], "models": [], "ignored": "x".repeat(crate::limits::MAX_RESPONSE_BYTES)
+        })))
+        .mount(&server)
+        .await;
+    let providers: Vec<Box<dyn ChatProvider>> = vec![
+        Box::new(provider(&server)),
+        Box::new(AnthropicProvider::with_api_key(entry(&server.uri()), fast(), None).unwrap()),
+        Box::new(GeminiProvider::with_api_key(entry(&server.uri()), fast(), None).unwrap()),
+    ];
+    for p in providers {
+        let error = p.list_models().await.unwrap_err();
+        assert!(
+            matches!(error, ProviderError::Stream(message) if message.contains("response exceeds"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn oversized_http_error_body_keeps_status_classification() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(403)
+                .set_body_string("x".repeat(crate::limits::MAX_ERROR_BYTES * 2)),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let error = collect(&provider(&server), req()).await.unwrap_err();
+    assert!(matches!(error, ProviderError::Auth(message) if message.len() == 500));
 }
 
 #[test]

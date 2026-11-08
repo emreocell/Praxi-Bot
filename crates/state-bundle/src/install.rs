@@ -68,19 +68,119 @@ pub(crate) fn check_target(data: &Path, replace: bool) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn prepare(staging: &Path, manifest: &Manifest, opts: &ImportOptions) -> Result<()> {
-    let mut conn = Connection::open(staging.join("bot.db"))?;
-    if storage::migrate::current_version(&conn)? != manifest.schema_version {
-        return Err(invalid("database and manifest schema disagree"));
+fn database_error(db: &str, error: impl std::fmt::Display) -> ImportError {
+    ImportError::InvalidDatabase {
+        db: db.into(),
+        reason: error.to_string(),
     }
-    storage::migrate::migrate(&mut conn)?;
-    let integrity: String = conn.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
+}
+
+fn incompatible_schema(db: &str, found: u32, supported: u32) -> ImportError {
+    ImportError::IncompatibleSchema {
+        db: db.into(),
+        found,
+        supported,
+    }
+}
+
+fn prepare_database(path: &Path, db: &str, manifest: &Manifest) -> Result<()> {
+    let open = || {
+        Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .map_err(|error| database_error(db, error))
+    };
+    let mut conn = open()?;
+    let found =
+        storage::migrate::current_version(&conn).map_err(|error| database_error(db, error))?;
+    if db == "bot.db" && found != manifest.schema_version
+        || manifest
+            .db_schemas
+            .as_ref()
+            .is_some_and(|schemas| schemas.get(db) != Some(&found))
+    {
+        return Err(database_error(db, "database and manifest schema disagree"));
+    }
+    match db {
+        "bot.db" => {
+            let integrity: String = conn
+                .query_row("PRAGMA quick_check", [], |row| row.get(0))
+                .map_err(|error| database_error(db, error))?;
+            if integrity != "ok" {
+                return Err(database_error(db, integrity));
+            }
+            storage::migrate::migrate(&mut conn).map_err(|error| match error {
+                storage::StorageError::SchemaTooNew { found, supported } => {
+                    incompatible_schema(db, found, supported)
+                }
+                other => database_error(db, other),
+            })?;
+            drop(conn);
+        }
+        "schedules.db" => {
+            drop(conn);
+            scheduler::ScheduleStore::validate_and_migrate(path).map_err(|error| match error {
+                scheduler::SchedulerError::SchemaTooNew { found, supported } => {
+                    incompatible_schema(db, found, supported)
+                }
+                other => database_error(db, other),
+            })?;
+        }
+        "memory.db" => {
+            drop(conn);
+            memory_store::MemoryStore::validate_and_migrate(path).map_err(|error| match error {
+                memory_store::MemoryError::SchemaTooNew { found, supported } => {
+                    incompatible_schema(db, found, supported)
+                }
+                other => database_error(db, other),
+            })?;
+        }
+        _ => return Err(database_error(db, "unsupported database")),
+    }
+    // Reopen after the owning store has closed all handles and registered any
+    // extensions it needs. Each staged database must be a standalone file.
+    let conn = open()?;
+    let integrity: String = conn
+        .query_row("PRAGMA quick_check", [], |row| row.get(0))
+        .map_err(|error| database_error(db, error))?;
     if integrity != "ok" {
-        return Err(invalid("database integrity check failed"));
+        return Err(database_error(db, integrity));
     }
-    // Leave a self-contained database, never depend on staged WAL files.
-    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode=DELETE;")?;
+    let busy: u32 = conn
+        .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))
+        .map_err(|error| database_error(db, error))?;
+    if busy != 0 {
+        return Err(database_error(db, "WAL checkpoint is busy"));
+    }
+    let mode: String = conn
+        .query_row("PRAGMA journal_mode=DELETE", [], |row| row.get(0))
+        .map_err(|error| database_error(db, error))?;
+    if mode != "delete" {
+        return Err(database_error(db, "cannot make database self-contained"));
+    }
     drop(conn);
+    fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .and_then(|file| file.sync_all())
+        .map_err(|error| database_error(db, error))?;
+    Ok(())
+}
+
+pub(crate) fn prepare(staging: &Path, manifest: &Manifest, opts: &ImportOptions) -> Result<()> {
+    const DATABASES: &[&str] = &["bot.db", "schedules.db", "memory.db"];
+    if let Some(schemas) = &manifest.db_schemas {
+        for db in schemas.keys() {
+            if !DATABASES.contains(&db.as_str()) || !staging.join(db).is_file() {
+                return Err(database_error(db, "manifest schema entry has no database"));
+            }
+        }
+    }
+    for db in DATABASES {
+        let path = staging.join(db);
+        if *db == "bot.db" || exists(&path)? {
+            prepare_database(&path, db, manifest)?;
+        }
+    }
     if !matches!(opts.host_mode.as_str(), "standalone" | "host" | "client")
         || !matches!(opts.host_state.as_str(), "fresh" | "standby" | "active")
     {

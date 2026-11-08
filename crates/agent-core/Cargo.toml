@@ -13,7 +13,9 @@ workspace = true
 [dependencies]
 agent-router = { path = "../agent-router", version = "0.1.0" }
 async-trait.workspace = true
+base64.workspace = true
 builtin-tools = { path = "../builtin-tools", version = "0.1.0" }
+cli-provider.workspace = true
 futures.workspace = true
 globset.workspace = true
 memory-store = { path = "../memory-store", version = "0.1.0" }
@@ -38,3 +40,7 @@ workflow-replay = { path = "../workflow-replay", version = "0.1.0" }
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[[bin]]
+name = "agent-cli-fixture"
+path = "../cli-provider/tests/fixtures/runtime_cli.rs"

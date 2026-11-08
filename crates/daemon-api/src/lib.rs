@@ -22,6 +22,7 @@ pub mod mcp;
 mod mcp_routes;
 pub mod openapi;
 pub mod peer;
+pub mod policy;
 pub use peer::{PeerIdentity, PeerRole, peer_router};
 mod routes;
 mod schedule;
@@ -50,6 +51,7 @@ pub use control::{ControlConfig, ControlHub};
 pub use error::ApiError;
 pub use mcp::{McpControl, McpControlError};
 pub use openapi::openapi_json;
+pub use policy::{PolicyLoadError, load_policy, validate_policy};
 
 /// Default TCP port of `bot serve`.
 pub const DEFAULT_PORT: u16 = 47821;
@@ -137,6 +139,8 @@ struct Inner {
     schedules: parking_lot::Mutex<Option<Arc<ScheduleStore>>>,
     /// Serialises `PUT /v1/policy` (read-modify-write of memory + `policy.json`).
     policy_lock: parking_lot::Mutex<()>,
+    /// Why `policy.json` could not be loaded (locked deny-all mode), if so.
+    policy_load_error: parking_lot::Mutex<Option<String>>,
     /// CLI provider detector (`GET /v1/providers/detected`).
     detector: parking_lot::RwLock<Arc<cli_provider::Detector>>,
     /// The running scheduler (see [`AppState::start_scheduler`]).
@@ -172,11 +176,28 @@ impl AppState {
             storage.insert_user(&u)?;
             u.id
         };
-        let hub = Arc::new(ControlHub::new(cfg.control));
+        let hub = Arc::new(ControlHub::with_latch_file(
+            cfg.control,
+            storage.data_dir().join("control-latch.json"),
+        ));
         agent.set_control_gate(hub.clone());
-        if let Some(p) = routes::load_policy(storage.data_dir()) {
-            agent.set_global_policy(p);
-        }
+        let policy_load_error = match policy::load_policy(storage.data_dir()) {
+            Ok(Some(p)) => {
+                agent.set_global_policy(p);
+                None
+            }
+            Ok(None) => None,
+            Err(e) => {
+                // Fail closed (SEC-13): never fall back to the default policy
+                // because the saved one is unusable.
+                policy::preserve_corrupt(storage.data_dir());
+                agent.set_global_policy(permission_engine::Policy::read_only());
+                agent.set_policy_locked(true);
+                let msg = format!("{e}; all tool actions are denied until a policy is saved");
+                eprintln!("daemon-api: WARNING: {msg}");
+                Some(msg)
+            }
+        };
         Ok(Self(Arc::new(Inner {
             schedule_events: tokio::sync::broadcast::channel(64).0,
             channels: parking_lot::Mutex::new(Vec::new()),
@@ -192,6 +213,7 @@ impl AppState {
             secrets: OnceLock::new(),
             schedules: parking_lot::Mutex::new(None),
             policy_lock: parking_lot::Mutex::new(()),
+            policy_load_error: parking_lot::Mutex::new(policy_load_error),
             detector: parking_lot::RwLock::new(Arc::new(cli_provider::Detector::new())),
             scheduler: OnceLock::new(),
             #[cfg(test)]
@@ -336,6 +358,12 @@ impl AppState {
     pub(crate) fn origin_allowed(&self, origin: &str) -> bool {
         self.0.cfg.allowed_origins.iter().any(|o| o == origin)
     }
+    pub(crate) fn policy_load_error(&self) -> Option<String> {
+        self.0.policy_load_error.lock().clone()
+    }
+    pub(crate) fn set_policy_load_error(&self, e: Option<String>) {
+        *self.0.policy_load_error.lock() = e;
+    }
     pub(crate) fn policy_lock(&self) -> parking_lot::MutexGuard<'_, ()> {
         self.0.policy_lock.lock()
     }
@@ -438,7 +466,9 @@ fn api_routes() -> Router<AppState> {
             "/v1/control/state",
             get(r::get_control_state).put(r::put_control_state),
         )
+        .route("/v1/control/release", post(r::release_control))
         .route("/v1/control/{request_id}", post(r::decide_control))
+        .route("/v1/events/latest", get(r::latest_cursor))
         .route("/v1/policy", get(r::get_policy).put(r::put_policy))
         .route("/v1/providers", get(r::list_providers))
         .route("/v1/providers/detected", get(r::detect_providers))

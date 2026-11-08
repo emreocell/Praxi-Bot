@@ -27,8 +27,8 @@ use crate::dto::{
     CatalogProviderDto, CategoryDecisionDto, ChatDto, ConfiguredProviderDto, ControlDecisionInput,
     ControlDecisionResponse, ControlStateDto, ControlStateInput, CreateChat, DecideApproval,
     Decision, DecisionResponse, DeliveryKind, DetectedProviderDto, EffectivePolicyDto, GrantDto,
-    GrantTargetDto, Health, MessageDto, Mode, ParseSchedule, ParsedSchedule, PolicyDto,
-    PolicyInput, ProvidersDto, ReloadResponse, RememberResponse, RevokeGrant, RunDto,
+    GrantTargetDto, Health, LatestCursor, MessageDto, Mode, ParseSchedule, ParsedSchedule,
+    PolicyDto, PolicyInput, ProvidersDto, ReloadResponse, RememberResponse, RevokeGrant, RunDto,
     ScheduleChangeKind, ScheduleDto, ScheduleInput, Scope, SendMessage, SendResponse, UsageSummary,
     UsageTotals,
 };
@@ -709,7 +709,35 @@ fn control_state_dto(s: &AppState) -> ControlStateDto {
             u64::try_from(left.as_millis()).unwrap_or(u64::MAX)
         }),
         app_connected: s.hub().app_connected(),
+        latched: s.hub().latched(),
     }
+}
+
+/// Explicitly release a latched `paused` / `human_driving`: bots may use the
+/// desktop again.  This is the only way (besides a daemon restart) to end a
+/// pause; heartbeats and a lost app never do.  Idempotent.
+#[utoipa::path(post, path = "/v1/control/release", tag = "control", security(("bearer" = [])),
+    responses((status = 200, body = ControlStateDto)))]
+pub(crate) async fn release_control(State(s): State<AppState>) -> Json<ControlStateDto> {
+    s.hub().release();
+    Json(control_state_dto(&s))
+}
+
+/// The newest daemon-wide event cursor (`gseq`, `0` = no event yet): what a
+/// client stores as its resume point after loading a snapshot, so a later
+/// `GET /v1/events` with `Last-Event-ID: <gseq>` replays exactly what came
+/// after.
+#[utoipa::path(get, path = "/v1/events/latest", tag = "events", security(("bearer" = [])),
+    responses((status = 200, body = LatestCursor)))]
+pub(crate) async fn latest_cursor(
+    State(s): State<AppState>,
+) -> Result<Json<LatestCursor>, ApiError> {
+    let st = s.storage_arc();
+    let gseq = tokio::task::spawn_blocking(move || st.last_gseq())
+        .await
+        .map_err(ApiError::internal)?
+        .map_err(ApiError::internal)?;
+    Ok(Json(LatestCursor { gseq }))
 }
 
 /// The daemon's view of the desktop app's controller registration.
@@ -722,7 +750,9 @@ pub(crate) async fn get_control_state(State(s): State<AppState>) -> Json<Control
 /// Register the desktop app as controller and report its mode (heartbeat: send
 /// it on every state change and at least every 5 s; it expires after 15 s).
 /// While the mode is `human_driving` or `paused`, desktop actions of bots are
-/// refused immediately.
+/// refused immediately.  A latched pause is never released by a heartbeat
+/// (`idle` included): send `release: true` with `idle` / `bot_driving` (the
+/// user's resume), or use `POST /v1/control/release`.
 #[utoipa::path(put, path = "/v1/control/state", tag = "control", security(("bearer" = [])),
     request_body = ControlStateInput,
     responses((status = 200, body = ControlStateDto), (status = 400, body = ErrorBody)))]
@@ -730,7 +760,7 @@ pub(crate) async fn put_control_state(
     State(s): State<AppState>,
     ApiJson(input): ApiJson<ControlStateInput>,
 ) -> Json<ControlStateDto> {
-    s.hub().put_state(input.mode);
+    s.hub().apply_state(input.mode, input.release);
     Json(control_state_dto(&s))
 }
 
@@ -760,14 +790,7 @@ pub(crate) async fn decide_control(
 
 // ---------------------------------------------------------------- policy
 
-/// File the global policy is persisted in (`<data dir>/policy.json`).
-pub(crate) const POLICY_FILE: &str = "policy.json";
-
-/// The persisted global policy, if one was saved and still parses.
-pub(crate) fn load_policy(data_dir: &std::path::Path) -> Option<Policy> {
-    let text = std::fs::read_to_string(data_dir.join(POLICY_FILE)).ok()?;
-    serde_json::from_str(&text).ok()
-}
+use crate::policy::POLICY_FILE;
 
 /// Counter that keeps the temp file names of concurrent saves apart.
 static POLICY_TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -812,6 +835,7 @@ fn policy_dto(p: &Policy) -> PolicyDto {
         .map(str::to_owned);
     PolicyDto {
         preset,
+        load_error: None,
         categories: p
             .categories
             .iter()
@@ -825,7 +849,9 @@ fn policy_dto(p: &Policy) -> PolicyDto {
 #[utoipa::path(get, path = "/v1/policy", tag = "policy", security(("bearer" = [])),
     responses((status = 200, body = PolicyDto)))]
 pub(crate) async fn get_policy(State(s): State<AppState>) -> Json<PolicyDto> {
-    Json(policy_dto(&s.agent().global_policy()))
+    let mut dto = policy_dto(&s.agent().global_policy());
+    dto.load_error = s.policy_load_error();
+    Json(dto)
 }
 
 /// Replace the global default policy (persisted; effective for the next tool
@@ -869,6 +895,9 @@ pub(crate) async fn put_policy(
     }
     save_policy(&s.data_dir(), &policy).map_err(ApiError::internal)?;
     s.agent().set_global_policy(policy.clone());
+    // The user replaced the policy: the locked deny-all mode ends here.
+    s.set_policy_load_error(None);
+    s.agent().set_policy_locked(false);
     Ok(Json(policy_dto(&policy)))
 }
 
@@ -880,6 +909,7 @@ fn kind_name(k: &provider_catalog::ProviderKind) -> String {
         ProviderKind::OpenAiCompatible => "openai_compatible".to_owned(),
         ProviderKind::Anthropic => "anthropic".to_owned(),
         ProviderKind::Gemini => "gemini".to_owned(),
+        ProviderKind::Cli => "cli".to_owned(),
         ProviderKind::Other(o) => format!("other:{o}"),
     }
 }
@@ -911,7 +941,15 @@ pub(crate) async fn list_providers(
     let cfg = provider_catalog::ProviderConfig::load(&provider_catalog::config_path(&s.data_dir()))
         .map_err(|e| ApiError::internal(format!("providers.toml: {e}")))?;
     let live = s.agent().providers();
-    let active = live.ids();
+    let mut active = live.ids();
+    active.extend(
+        cfg.providers
+            .iter()
+            .filter(|p| p.enabled && p.cli.is_some())
+            .map(|p| p.id.clone()),
+    );
+    active.sort();
+    active.dedup();
     let default_id = cfg.effective_default().map(|d| d.id.clone());
     let lookups = cfg.providers.iter().map(|p| models_of(live.get(&p.id)));
     let models = futures::future::join_all(lookups).await;
@@ -956,6 +994,18 @@ pub(crate) async fn list_providers(
                 .collect()
         })
         .unwrap_or_default();
+    for p in cfg.providers.iter().filter(|p| p.cli.is_some()) {
+        catalog.push(CatalogProviderDto {
+            id: p.id.clone(),
+            kind: "cli".into(),
+            base_url: String::new(),
+            auth: "none".into(),
+            key_env: None,
+            tools: true,
+            vision: false,
+            configured: true,
+        });
+    }
     catalog.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(Json(ProvidersDto {
         default_provider: (!live.setup_required()).then(|| live.default_id().to_owned()),
