@@ -567,6 +567,8 @@ fn npm_shim_uses_package_exe_and_js_bins_stay_refused() {
     assert!(outside.is_file());
 }
 
+// Detection finds `claude.cmd` through PATHEXT, which Linux does not apply.
+#[cfg(windows)]
 #[tokio::test]
 async fn npm_claude_package_exe_is_the_probed_binary() {
     let temp = tempfile::tempdir().unwrap();

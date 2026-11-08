@@ -59,8 +59,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-4);
-  border-bottom: var(--size-border) solid var(--color-border);
+  padding: var(--space-6) var(--space-5);
 }
 
 .section {
@@ -77,7 +76,7 @@
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-muted);
-  text-transform: uppercase;
+
   letter-spacing: var(--letter-spacing-wide);
 }
 
@@ -117,8 +116,8 @@
 }
 
 .itemActive {
-  background-color: var(--color-accent-subtle);
-  border-color: var(--item-accent, var(--color-accent));
+  background-color: var(--color-surface-elevated);
+  border-color: var(--color-border);
   font-weight: var(--font-weight-semibold);
 }
 
@@ -131,6 +130,7 @@
 }
 
 .mainPane {
+  min-width: var(--space-0);
   flex: 1;
   height: 100%;
   overflow-y: auto;

@@ -12,6 +12,7 @@ import {
 import { ApiClient } from "../api/client";
 import { type Connection, connectDaemon } from "../api/connection";
 import { subscribeEvents } from "../api/events";
+import { MOCK_BASE_URL, MockApiClient } from "../api/mock";
 import type { Bot, Chat, GlobalEnvelope, Health, Run } from "../api/types";
 import {
   applyEvent,
@@ -93,7 +94,15 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
   const [events, dispatch] = useReducer(reducer, EMPTY_EVENTS);
   const [attempt, setAttempt] = useState(0);
 
-  const client = useMemo(() => (conn ? new ApiClient(conn) : null), [conn]);
+  const client = useMemo(
+    () =>
+      conn
+        ? conn.base_url === MOCK_BASE_URL
+          ? new MockApiClient()
+          : new ApiClient(conn)
+        : null,
+    [conn]
+  );
   const clientRef = useRef<ApiClient | null>(null);
   clientRef.current = client;
   const listeners = useRef(new Set<(env: GlobalEnvelope) => void>());
@@ -157,6 +166,10 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
     void Promise.all([refreshBots(), refreshChats(), refreshRuns()]).catch(
       () => {}
     );
+    if (client instanceof MockApiClient) {
+      setEventsConnected(true);
+      return undefined;
+    }
     return subscribeEvents(client, {
       lastEventId: 0,
       onEvent: (env) => {

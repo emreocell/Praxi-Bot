@@ -1,3 +1,4 @@
+import { ThemePicker } from "../components/ThemePicker";
 import type { ChangeEvent, CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -734,19 +735,7 @@ export function OnboardingView({
               <p className={formStyles.hint}>
                 {t("onboarding.step1.themeHint")}
               </p>
-              <div className={styles.optionRow}>
-                {(["light", "dark", "system"] as const).map((mode) => (
-                  <Button
-                    key={mode}
-                    variant="secondary"
-                    active={settings.themeMode === mode}
-                    onClick={() => onThemeChange(mode)}
-                    data-testid={`onboarding-theme-${mode}`}
-                  >
-                    {t(`settings.theme.${mode}`)}
-                  </Button>
-                ))}
-              </div>
+              <ThemePicker value={settings.themeMode} onChange={onThemeChange} />
             </section>
 
             <div className={styles.privacyBox}>

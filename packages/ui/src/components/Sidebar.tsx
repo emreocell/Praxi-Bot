@@ -109,6 +109,7 @@ export function SidebarItem({
   return (
     <Component
       type={asChild ? undefined : type}
+      aria-current={active ? "page" : undefined}
       className={classes}
       style={mergedStyle}
       {...props}
