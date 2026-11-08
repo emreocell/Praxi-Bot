@@ -2,6 +2,7 @@
 #![allow(unsafe_code)]
 
 use std::ffi::c_void;
+use std::os::windows::io::AsRawHandle;
 
 use desktop_api::{
     DesktopError,
@@ -9,7 +10,9 @@ use desktop_api::{
 };
 use windows::{
     Win32::{
-        Foundation::{CloseHandle, ERROR_SUCCESS, HWND, LPARAM, RECT, SetLastError, WAIT_OBJECT_0},
+        Foundation::{
+            CloseHandle, ERROR_SUCCESS, HANDLE, HWND, LPARAM, RECT, SetLastError, WAIT_OBJECT_0,
+        },
         Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute},
         System::Threading::{
             AttachThreadInput, GetCurrentThreadId, GetProcessId, WaitForInputIdle,
@@ -218,55 +221,60 @@ pub fn activate(hwnd: HWND) -> Result<(), DesktopError> {
     }
 }
 
-/// Quote one argument following the `CommandLineToArgvW` / MSVCRT rules:
-/// backslashes are literal unless they precede a double quote, in which case
-/// they must be doubled (and the quote escaped); trailing backslashes inside
-/// the surrounding quotes are doubled so they do not escape the closing quote.
-fn quote_arg(a: &str) -> String {
-    if !a.is_empty() && !a.contains([' ', '\t', '\n', '\x0b', '"']) {
-        return a.to_string();
-    }
-    let mut out = String::with_capacity(a.len() + 2);
-    out.push('"');
-    let mut backslashes = 0usize;
-    for c in a.chars() {
-        match c {
-            '\\' => backslashes += 1,
-            '"' => {
-                out.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
-                out.push('"');
-                backslashes = 0;
-            }
-            _ => {
-                out.extend(std::iter::repeat_n('\\', backslashes));
-                out.push(c);
-                backslashes = 0;
-            }
-        }
-    }
-    out.extend(std::iter::repeat_n('\\', backslashes * 2));
-    out.push('"');
-    out
-}
-
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 const LAUNCH_IDLE_CAP_MS: u32 = 200;
 
+/// Classify a borrowed process handle for the desktop tool's window poller.
+/// Launchers/stubs that exit or do not own a titled window report PID 0, so
+/// windows created by their actual application process are not filtered out.
+fn launched_window_pid(process: HANDLE) -> Pid {
+    if process.is_invalid() {
+        return 0;
+    }
+    // SAFETY: callers borrow a live process handle owned by Child or returned
+    // by ShellExecuteExW. They retain it across this call; this helper never
+    // closes the handle or assumes ownership of it.
+    unsafe {
+        // An already-exited launcher needs no initialization wait. Both later
+        // waits also return as soon as their process condition is signalled.
+        if WaitForSingleObject(process, 0) == WAIT_OBJECT_0 {
+            return 0;
+        }
+        let idle = WaitForInputIdle(process, LAUNCH_IDLE_CAP_MS);
+        let stub_wait = if idle == 0 { 0 } else { 100 };
+        if WaitForSingleObject(process, stub_wait) == WAIT_OBJECT_0 {
+            return 0;
+        }
+        let pid = GetProcessId(process);
+        let owns_window = list_windows().is_ok_and(|wins| {
+            wins.iter()
+                .any(|window| window.pid == pid && !window.title.is_empty())
+        });
+        if pid == 0 || !owns_window { 0 } else { pid }
+    }
+}
+
 /// Launch an executable (or document / app alias) via `ShellExecuteExW`.
-/// No shell or PowerShell is involved. Returns the new process id, or 0 when the
-/// shell handled the request without a new process (URI handlers, reused instance).
+/// Executables use a direct process launch. Batch arguments are validated before
+/// invoking the file association. Returns the process id, or 0 when the shell
+/// handles the request without a new process (URI handlers, reused instance).
 pub fn launch(app: &AppSpec) -> Result<Pid, DesktopError> {
+    let parameters = crate::pure::launch_parameters(app)?;
+    // Executables are started directly; no file association or cmd.exe adapter
+    // can reinterpret their arguments as shell syntax.
+    if app.executable.to_ascii_lowercase().ends_with(".exe") {
+        let child = std::process::Command::new(&app.executable)
+            .args(&app.args)
+            .spawn()
+            .map_err(|error| DesktopError::Internal(format!("launch executable: {error}")))?;
+        // Child keeps ownership of the process handle and closes it on drop.
+        return Ok(launched_window_pid(HANDLE(child.as_raw_handle())));
+    }
     let file = wide(&app.executable);
-    let params = wide(
-        &app.args
-            .iter()
-            .map(|a| quote_arg(a))
-            .collect::<Vec<_>>()
-            .join(" "),
-    );
+    let params = wide(&parameters);
     let verb = wide("open");
     let mut info = SHELLEXECUTEINFOW {
         #[allow(clippy::cast_possible_truncation)]
@@ -293,45 +301,53 @@ pub fn launch(app: &AppSpec) -> Result<Pid, DesktopError> {
             // That is a success, not an error: pid 0 means "not known".
             return Ok(0);
         }
-        // Let GUI apps initialise their message loop (capped). App-execution
-        // aliases (`notepad.exe`, `calc.exe`) keep a launcher pid that never
-        // owns the window; pid 0 tells the caller to accept any new window.
-        // A process that already has a titled window keeps its pid so the
-        // caller can match that process only.
-        let idle = WaitForInputIdle(info.hProcess, LAUNCH_IDLE_CAP_MS);
-        let stub_wait = if idle == 0 { 0 } else { 100 };
-        let pid = if WaitForSingleObject(info.hProcess, stub_wait) == WAIT_OBJECT_0 {
-            0
-        } else {
-            let pid = GetProcessId(info.hProcess);
-            let owns_window = list_windows()
-                .is_ok_and(|wins| wins.iter().any(|w| w.pid == pid && !w.title.is_empty()));
-            if pid == 0 || !owns_window { 0 } else { pid }
-        };
+        let pid = launched_window_pid(info.hProcess);
         let _ = CloseHandle(info.hProcess);
         Ok(pid)
     }
 }
 
 #[cfg(test)]
-mod quote_tests {
-    use super::quote_arg;
+mod launch_tests {
+    use super::*;
+
+    const CHILD_TEST: &str = "winlist::launch_tests::non_gui_child_fixture";
 
     #[test]
-    fn plain_and_empty() {
-        assert_eq!(quote_arg("abc"), "abc");
-        assert_eq!(quote_arg(""), r#""""#);
-        assert_eq!(quote_arg(r"C:\dir\file"), r"C:\dir\file");
+    fn non_gui_child_fixture() {}
+
+    #[test]
+    fn direct_executable_without_owned_window_reports_unknown_pid() {
+        let app = AppSpec {
+            executable: std::env::current_exe()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            args: vec!["--exact".into(), CHILD_TEST.into(), "--quiet".into()],
+        };
+        assert_eq!(launch(&app).unwrap(), 0);
     }
 
     #[test]
-    fn trailing_backslash_is_doubled() {
-        assert_eq!(quote_arg(r"C:\My Dir\"), r#""C:\My Dir\\""#);
+    fn exited_process_reports_unknown_pid_without_closing_borrowed_handle() {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", CHILD_TEST, "--quiet"])
+            .spawn()
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+        let process = HANDLE(child.as_raw_handle());
+        assert_eq!(launched_window_pid(process), 0);
+        // SAFETY: Child still owns this process handle. A valid process id
+        // proves the normalization helper did not close the borrowed handle.
+        assert_eq!(unsafe { GetProcessId(process) }, child.id());
     }
 
     #[test]
-    fn embedded_quote_and_backslashes() {
-        assert_eq!(quote_arg(r#"x" /s"#), r#""x\" /s""#);
-        assert_eq!(quote_arg(r#"a\"b"#), r#""a\\\"b""#);
+    fn unsafe_batch_is_rejected_before_shell_execute() {
+        let app = AppSpec {
+            executable: r"C:\does-not-exist\Masaüstü\rejected.cmd".into(),
+            args: vec!["plain & second-command".into()],
+        };
+        assert!(matches!(launch(&app), Err(DesktopError::Unsupported(_))));
     }
 }

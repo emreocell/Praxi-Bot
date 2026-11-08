@@ -392,3 +392,157 @@ mod tests {
         assert_eq!(denormalize(5000.0, 0.0, &r), (1099.0, 200.0));
     }
 }
+
+/// Build the argument string used for a Windows application launch.
+///
+/// # Errors
+/// Rejects launch arguments that cannot safely be passed to their interpreter.
+pub fn launch_parameters(
+    app: &desktop_api::snapshot::AppSpec,
+) -> Result<String, desktop_api::DesktopError> {
+    let executable = app.executable.trim_end_matches([' ', '.']);
+    let batch = executable.to_ascii_lowercase().ends_with(".cmd")
+        || executable.to_ascii_lowercase().ends_with(".bat");
+    if app.executable.contains('\0') || app.args.iter().any(|arg| arg.contains('\0')) {
+        return Err(desktop_api::DesktopError::Unsupported(
+            "launch paths and arguments must not contain NUL".into(),
+        ));
+    }
+    if batch
+        && (app
+            .executable
+            .chars()
+            .any(|c| "&|<>^%!()\"\r\n".contains(c))
+            || app
+                .args
+                .iter()
+                .any(|arg| arg.chars().any(|c| "&|<>^%!()\"\r\n".contains(c))))
+    {
+        return Err(desktop_api::DesktopError::Unsupported("batch launches with cmd.exe metacharacters are refused; use an executable or pass plain arguments".into()));
+    }
+    if batch {
+        // cmd.exe does not implement the CRT backslash-before-quote rule.
+        // Quotes and expansion/control metacharacters were rejected above, so
+        // quote each remaining argument without rewriting its backslashes.
+        return Ok(app
+            .args
+            .iter()
+            .map(|arg| format!("\"{arg}\""))
+            .collect::<Vec<_>>()
+            .join(" "));
+    }
+    Ok(app
+        .args
+        .iter()
+        .map(|argument| quote_arg(argument))
+        .collect::<Vec<_>>()
+        .join(" "))
+}
+
+/// Quote one argument following the `CommandLineToArgvW` / MSVCRT rules:
+/// backslashes are literal unless they precede a double quote, in which case
+/// they must be doubled (and the quote escaped); trailing backslashes inside
+/// the surrounding quotes are doubled so they do not escape the closing quote.
+fn quote_arg(a: &str) -> String {
+    if !a.is_empty() && !a.contains([' ', '\t', '\n', '\x0b', '"']) {
+        return a.to_string();
+    }
+    let mut out = String::with_capacity(a.len() + 2);
+    out.push('"');
+    let mut backslashes = 0usize;
+    for c in a.chars() {
+        match c {
+            '\\' => backslashes += 1,
+            '"' => {
+                out.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
+                out.push('"');
+                backslashes = 0;
+            }
+            _ => {
+                out.extend(std::iter::repeat_n('\\', backslashes));
+                out.push(c);
+                backslashes = 0;
+            }
+        }
+    }
+    out.extend(std::iter::repeat_n('\\', backslashes * 2));
+    out.push('"');
+    out
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::*;
+    use desktop_api::{DesktopError, snapshot::AppSpec};
+
+    #[test]
+    fn batch_launch_rejects_cmd_metacharacters() {
+        for extension in ["cmd", "CMD", "bat", "BAT", "cmd. "] {
+            for unsafe_argument in [
+                "a&b", "a|b", "<in", ">out", "^x", "%PATH%", "!VAR!", "(x)", "a\nb", "a\rb", "a\"b",
+            ] {
+                let app = AppSpec {
+                    executable: format!("C:\\Users\\Emre\\Masaüstü\\run.{extension}"),
+                    args: vec![unsafe_argument.into()],
+                };
+                assert!(
+                    matches!(launch_parameters(&app), Err(DesktopError::Unsupported(_))),
+                    "accepted {unsafe_argument:?} for {extension}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unicode_executable_arguments_keep_crt_quoting() {
+        assert_eq!(
+            quote_arg(r"C:\Users\Emre\Masaüstü\dosya.txt"),
+            r"C:\Users\Emre\Masaüstü\dosya.txt"
+        );
+        assert_eq!(
+            quote_arg(r"C:\Masaüstü\Yeni klasör\"),
+            r#""C:\Masaüstü\Yeni klasör\\""#
+        );
+        assert_eq!(quote_arg(""), r#""""#);
+        let app = AppSpec {
+            executable: "editor.exe".into(),
+            args: vec!["a&b".into(), "100%".into()],
+        };
+        assert_eq!(launch_parameters(&app).unwrap(), "a&b 100%");
+    }
+
+    #[test]
+    fn plain_batch_paths_preserve_backslashes_and_empty_arguments() {
+        let app = AppSpec {
+            executable: r"C:\Masaüstü\run.cmd".into(),
+            args: vec![r"C:\Masaüstü\Yeni klasör\".into(), String::new()],
+        };
+        assert_eq!(
+            launch_parameters(&app).unwrap(),
+            "\"C:\\Masaüstü\\Yeni klasör\\\" \"\""
+        );
+    }
+}
+
+#[cfg(test)]
+mod quote_tests {
+    use super::quote_arg;
+
+    #[test]
+    fn plain_and_empty() {
+        assert_eq!(quote_arg("abc"), "abc");
+        assert_eq!(quote_arg(""), r#""""#);
+        assert_eq!(quote_arg(r"C:\dir\file"), r"C:\dir\file");
+    }
+
+    #[test]
+    fn trailing_backslash_is_doubled() {
+        assert_eq!(quote_arg(r"C:\My Dir\"), r#""C:\My Dir\\""#);
+    }
+
+    #[test]
+    fn embedded_quote_and_backslashes() {
+        assert_eq!(quote_arg(r#"x" /s"#), r#""x\" /s""#);
+        assert_eq!(quote_arg(r#"a\"b"#), r#""a\\\"b""#);
+    }
+}

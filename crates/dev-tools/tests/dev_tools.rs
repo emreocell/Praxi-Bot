@@ -474,6 +474,59 @@ async fn hooks_are_not_run() {
 }
 
 #[tokio::test]
+async fn prepopulated_old_no_hooks_directory_cannot_execute() {
+    const CHILD: &str = "PRAXI_GIT_HOOK_REGRESSION";
+    if std::env::var_os(CHILD).is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let status = tokio::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "prepopulated_old_no_hooks_directory_cannot_execute",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env("TMPDIR", dir.path())
+            .env("TMP", dir.path())
+            .env("TEMP", dir.path())
+            .status()
+            .await
+            .unwrap();
+        assert!(status.success());
+        return;
+    }
+    let f = fixture();
+    let marker = f.root.join("unexpected-hook");
+    let hooks = std::env::temp_dir().join("praxi-dev-tools-no-hooks-dir");
+    std::fs::create_dir_all(&hooks).unwrap();
+    let hook = hooks.join("post-commit");
+    std::fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\necho ran > \"{}\"\n",
+            marker.display().to_string().replace('\\', "/")
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    std::fs::write(f.repo.join("a.txt"), "new content\n").unwrap();
+    call(
+        &f,
+        "git_commit",
+        json!({"repo": repo_arg(&f), "paths": ["a.txt"], "message": "safe commit"}),
+    )
+    .await
+    .unwrap();
+    assert!(
+        !marker.exists(),
+        "predictable no-hooks directory executed attacker-controlled code"
+    );
+}
+
+#[tokio::test]
 async fn option_injection_is_rejected() {
     let f = fixture();
     let r = repo_arg(&f);

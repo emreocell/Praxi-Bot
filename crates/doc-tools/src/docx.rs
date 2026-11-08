@@ -173,6 +173,66 @@ fn read_zip_entry(
     Ok(buf)
 }
 
+// Bound the entire JSON response as well as the existing row/cell-text limits.
+const MAX_READ_OUTPUT_BYTES: usize = 1024 * 1024;
+const MAX_TABLE_CELLS: usize = 10_000;
+
+fn json_size(value: &impl serde::Serialize) -> Result<usize, ToolError> {
+    serde_json::to_vec(value)
+        .map(|bytes| bytes.len())
+        .map_err(|e| exec(e.to_string()))
+}
+
+fn bounded_table(
+    rows: &[Vec<String>],
+    cfg: &DocToolsConfig,
+    row_limit: usize,
+    cell_limit: usize,
+    byte_limit: usize,
+) -> Result<(Value, usize, usize, bool), ToolError> {
+    let total_cells = rows.iter().map(Vec::len).sum::<usize>();
+    let mut table = json!({"type": "table", "rows": [], "omitted_rows": rows.len(), "omitted_cells": total_cells});
+    let mut remaining = byte_limit.saturating_sub(json_size(&table)?);
+    let mut kept = Vec::new();
+    let mut cells = 0;
+    let mut clipped = false;
+    for row in rows.iter().take(row_limit) {
+        let mut bounded = Vec::new();
+        let mut size = 2 + usize::from(!kept.is_empty());
+        if size > remaining {
+            break;
+        }
+        for cell in row {
+            if cells >= cell_limit {
+                break;
+            }
+            let text = clip(cell, cfg.max_cell_chars);
+            let extra = json_size(&text)? + usize::from(!bounded.is_empty());
+            if size.saturating_add(extra) > remaining {
+                break;
+            }
+            clipped |= cell.chars().count() > cfg.max_cell_chars;
+            bounded.push(text);
+            cells += 1;
+            size += extra;
+        }
+        if bounded.is_empty() && !row.is_empty() {
+            break;
+        }
+        let partial = bounded.len() < row.len();
+        kept.push(bounded);
+        remaining -= size;
+        if partial {
+            break;
+        }
+    }
+    let count = kept.len();
+    table["rows"] = json!(kept);
+    table["omitted_rows"] = json!(rows.len() - count);
+    table["omitted_cells"] = json!(total_cells - cells);
+    Ok((table, count, cells, clipped))
+}
+
 pub fn run_read(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolError> {
     let i: ReadIn = parse(input)?;
     let bytes = read_limited(cfg, &i.path)?;
@@ -185,42 +245,98 @@ pub fn run_read(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolError> 
     )?;
     let blocks = parse_document_xml(&xml)?;
     let total = blocks.len();
-    let (mut md, mut out) = (String::new(), Vec::new());
     let (mut headings, mut paragraphs, mut tables) = (0, 0, 0);
+    let (mut total_rows, mut total_cells) = (0, 0);
     for b in &blocks {
         match b {
             Block::Heading(..) => headings += 1,
             Block::Paragraph(_) => paragraphs += 1,
-            Block::Table(_) => tables += 1,
-        }
-    }
-    for b in blocks.iter().take(cfg.max_rows) {
-        match b {
-            Block::Heading(l, t) => {
-                let _ = write!(md, "{} {t}\n\n", "#".repeat(usize::from(*l)));
-                out.push(json!({"type":"heading","level":l,"text":clip(t, cfg.max_cell_chars)}));
-            }
-            Block::Paragraph(t) => {
-                let _ = write!(md, "{t}\n\n");
-                out.push(json!({"type":"paragraph","text":clip(t, cfg.max_cell_chars)}));
-            }
             Block::Table(rows) => {
-                md.push_str(&md_table(rows, true, 30));
-                md.push('\n');
-                let rows: Vec<Vec<String>> = rows
-                    .iter()
-                    .map(|r| r.iter().map(|c| clip(c, cfg.max_cell_chars)).collect())
-                    .collect();
-                out.push(json!({"type":"table","rows":rows}));
+                tables += 1;
+                total_rows += rows.len();
+                total_cells += rows.iter().map(Vec::len).sum::<usize>();
             }
         }
     }
-    let truncated = total > cfg.max_rows;
-    if truncated {
-        let _ = writeln!(md, "_…{} more blocks_", total - cfg.max_rows);
+    // Counts start at their maximum digit width. One spare byte covers false
+    // being longer than true when the final truncation flag is filled in.
+    let mut data = json!({"path": i.path, "headings": headings, "paragraphs": paragraphs,
+        "tables": tables, "total_blocks": total, "truncated": true,
+        "omitted_rows": total_rows, "omitted_cells": total_cells, "blocks": []});
+    let cap = cfg.max_output_bytes.min(MAX_READ_OUTPUT_BYTES);
+    let mut remaining = cap
+        .checked_sub(json_size(&data)? + 1)
+        .ok_or_else(|| exec("DOCX output limit is too small for result metadata"))?;
+    let (mut kept_rows, mut kept_cells) = (0usize, 0usize);
+    let mut out = Vec::new();
+    let mut truncated = false;
+    for block in blocks.iter().take(cfg.max_rows) {
+        let available = remaining.saturating_sub(usize::from(!out.is_empty()));
+        let (value, rows, cells, clipped) = match block {
+            Block::Heading(level, text) => (
+                json!({"type":"heading", "level":level, "text":clip(text, cfg.max_cell_chars)}),
+                0,
+                0,
+                text.chars().count() > cfg.max_cell_chars,
+            ),
+            Block::Paragraph(text) => (
+                json!({"type":"paragraph", "text":clip(text, cfg.max_cell_chars)}),
+                0,
+                0,
+                text.chars().count() > cfg.max_cell_chars,
+            ),
+            Block::Table(rows) => bounded_table(
+                rows,
+                cfg,
+                cfg.max_rows.saturating_sub(kept_rows),
+                MAX_TABLE_CELLS.saturating_sub(kept_cells),
+                available,
+            )?,
+        };
+        let size = json_size(&value)?;
+        if size > available {
+            truncated = true;
+            break;
+        }
+        remaining = available - size;
+        kept_rows += rows;
+        kept_cells += cells;
+        truncated |= clipped;
+        out.push(value);
     }
-    let data = json!({"path": i.path, "headings": headings, "paragraphs": paragraphs,
-        "tables": tables, "total_blocks": total, "truncated": truncated, "blocks": out});
+    truncated |= out.len() < total || kept_rows < total_rows || kept_cells < total_cells;
+    let mut md = String::new();
+    for block in &out {
+        match block["type"].as_str() {
+            Some("heading") => {
+                let level = usize::try_from(block["level"].as_u64().unwrap_or(1)).unwrap_or(1);
+                let _ = writeln!(
+                    md,
+                    "{} {}\n",
+                    "#".repeat(level),
+                    block["text"].as_str().unwrap_or_default()
+                );
+            }
+            Some("paragraph") => {
+                let _ = writeln!(md, "{}\n", block["text"].as_str().unwrap_or_default());
+            }
+            Some("table") => {
+                let rows: Vec<Vec<String>> = serde_json::from_value(block["rows"].clone())
+                    .map_err(|e| exec(e.to_string()))?;
+                md.push_str(&md_table(&rows, true, 30));
+                md.push('\n');
+            }
+            _ => {}
+        }
+    }
+    if truncated {
+        md.push_str("_…document output truncated_\n");
+    }
+    data["blocks"] = json!(out);
+    data["truncated"] = json!(truncated);
+    data["omitted_rows"] = json!(total_rows - kept_rows);
+    data["omitted_cells"] = json!(total_cells - kept_cells);
+    debug_assert!(json_size(&data)? <= cap);
     Ok(Reply::new(cfg, &md, data))
 }
 
@@ -436,6 +552,90 @@ pub fn run_write(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolError>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_single_large_table_obeys_the_row_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Masaüstü.docx");
+        let rows: Vec<_> = (0..20)
+            .map(|i| vec![format!("row-{i}"), "second".into()])
+            .collect();
+        run_write(
+            &DocToolsConfig::default(),
+            json!({"path": path, "blocks": [{"type":"table", "rows": rows}]}),
+        )
+        .unwrap();
+        let cfg = DocToolsConfig {
+            max_rows: 3,
+            ..Default::default()
+        };
+        let result = run_read(&cfg, json!({"path": path})).unwrap();
+        assert_eq!(
+            result.data["blocks"][0]["rows"].as_array().unwrap().len(),
+            3
+        );
+        assert_eq!(result.data["blocks"][0]["omitted_rows"], 17);
+        assert_eq!(result.data["omitted_rows"], 17);
+        assert_eq!(result.data["truncated"], true);
+    }
+
+    #[test]
+    fn table_row_budget_is_shared_and_byte_budget_counts_json_escaping() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("limits.docx");
+        let rows = vec![vec!["Masaüstü \\\" & data".repeat(20)]; 20];
+        run_write(
+            &DocToolsConfig::default(),
+            json!({"path": path, "blocks": [
+                {"type":"table", "rows": rows}, {"type":"table", "rows": rows}
+            ]}),
+        )
+        .unwrap();
+        let cfg = DocToolsConfig {
+            max_rows: 3,
+            max_cell_chars: 8,
+            ..Default::default()
+        };
+        let result = run_read(&cfg, json!({"path": path})).unwrap();
+        let kept: usize = result.data["blocks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|block| block["rows"].as_array().unwrap().len())
+            .sum();
+        assert_eq!(kept, 3);
+        assert_eq!(result.data["omitted_rows"], 37);
+        let small = DocToolsConfig {
+            max_output_bytes: 512,
+            ..Default::default()
+        };
+        let result = run_read(&small, json!({"path": path})).unwrap();
+        assert!(serde_json::to_vec(&result.data).unwrap().len() <= 512);
+        assert_eq!(result.data["truncated"], true);
+    }
+
+    #[test]
+    fn wide_table_and_clipped_cell_report_truncation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wide.docx");
+        let rows = vec![vec!["long cell"; MAX_TABLE_CELLS + 1]];
+        run_write(
+            &DocToolsConfig::default(),
+            json!({"path": path, "blocks": [{"type":"table", "rows": rows}]}),
+        )
+        .unwrap();
+        let cfg = DocToolsConfig {
+            max_cell_chars: 2,
+            ..Default::default()
+        };
+        let result = run_read(&cfg, json!({"path": path})).unwrap();
+        let cells = result.data["blocks"][0]["rows"][0].as_array().unwrap();
+        assert_eq!(cells.len(), MAX_TABLE_CELLS);
+        assert_eq!(cells[0], "lo…");
+        assert_eq!(result.data["omitted_cells"], 1);
+        assert_eq!(result.data["truncated"], true);
+        assert!(serde_json::to_vec(&result.data).unwrap().len() <= MAX_READ_OUTPUT_BYTES);
+    }
 
     #[test]
     fn control_characters_are_stripped() {
