@@ -481,7 +481,7 @@ fn component_is_device(name: &str) -> bool {
     #[cfg(not(windows))]
     {
         let _ = name;
-        return false;
+        false
     }
     #[cfg(windows)]
     {
@@ -522,6 +522,7 @@ fn lexical_normalize(path: &Path) -> Result<PathBuf, ToolError> {
     Ok(out)
 }
 
+#[cfg(any(windows, test))]
 fn drive_letter(path: &Path) -> Option<char> {
     for c in path.components() {
         let Component::Prefix(prefix) = c else {
@@ -906,6 +907,7 @@ fn roots_contain(roots: &[PathBuf], path: &Path) -> bool {
 /// expands `RUNNER~1` to `runneradmin`. The caller's path is often still the
 /// 8.3 temp directory, so containment and grants compare one form. The walk
 /// stops at a reparse point; the link target is classified by the caller.
+#[cfg_attr(not(windows), allow(clippy::unnecessary_wraps))]
 fn widen_path(path: &Path) -> Result<PathBuf, ToolError> {
     #[cfg(not(windows))]
     {
@@ -1006,6 +1008,7 @@ fn parse_subst_listing(output: &str) -> HashMap<char, String> {
     map
 }
 
+#[cfg(any(windows, test))]
 fn local_subst_target(target: &str) -> Option<PathBuf> {
     if dos_target_is_remote(target) || classify_path_str(target) != Class::Local {
         return None;
@@ -1086,6 +1089,7 @@ fn rewrite_drive_live(path: &Path, depth: u8) -> Result<PathBuf, ToolError> {
     rewrite_drive_live(&rewritten, depth + 1)
 }
 
+#[cfg_attr(not(windows), allow(clippy::unnecessary_wraps))]
 fn confine_drive(path: &Path) -> Result<PathBuf, ToolError> {
     #[cfg(windows)]
     {
@@ -1113,6 +1117,7 @@ fn path_after_drive(path: &Path) -> PathBuf {
 /// On Windows the name comes from `GetFinalPathNameByHandleW` on a reparse-safe
 /// handle, so `ENV~1` becomes `.env` before the denylist runs. File bytes are
 /// not read. A failure to name an existing path is denied (fail closed).
+#[cfg_attr(not(windows), allow(clippy::unnecessary_wraps))]
 fn final_identity(path: &Path) -> Result<PathBuf, ToolError> {
     #[cfg(windows)]
     {
@@ -1166,6 +1171,7 @@ fn canonical_data_dir(data_dir: &Path) -> PathBuf {
 ///
 /// `NotFound` and every other failure are denied. A failed lookup is not
 /// evidence that the path is an absent local file.
+#[cfg_attr(not(windows), allow(clippy::unnecessary_wraps))]
 fn identity_existing(path: &Path) -> Result<PathBuf, ToolError> {
     #[cfg(windows)]
     {
@@ -1184,6 +1190,7 @@ fn identity_existing(path: &Path) -> Result<PathBuf, ToolError> {
 ///
 /// The parent must already exist. A parent open that fails, including
 /// `NotFound`, is a deny — the lexical path is not treated as safe to write.
+#[cfg_attr(not(windows), allow(clippy::unnecessary_wraps))]
 fn identity_for_write(path: &Path) -> Result<PathBuf, ToolError> {
     #[cfg(windows)]
     {
@@ -2555,7 +2562,7 @@ mod tests {
     async fn unc_device_and_dos_names_are_refused_before_open() {
         let (_d, _w, t) = setup();
         let c = ctx();
-        let mut paths = vec![
+        let common = [
             r"\\192.0.2.1\share\file",
             r"\\?\UNC\192.0.2.1\share\file",
             "//192.0.2.1/share/file",
@@ -2565,11 +2572,10 @@ mod tests {
         // `NUL` and `CON` are ordinary file names on Unix. On Windows they are
         // DOS devices and are still refused before any open.
         #[cfg(windows)]
-        {
-            paths.push("NUL");
-            paths.push("CON");
-        }
-        for path in paths {
+        let dos_names: &[&str] = &["NUL", "CON"];
+        #[cfg(not(windows))]
+        let dos_names: &[&str] = &[];
+        for path in common.into_iter().chain(dos_names.iter().copied()) {
             let started = std::time::Instant::now();
             let err = get(&t, "fs_read")
                 .call(&c, json!({"path": path}))
