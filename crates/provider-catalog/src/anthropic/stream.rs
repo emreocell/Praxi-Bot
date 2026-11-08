@@ -8,6 +8,7 @@ use serde_json::Value;
 use super::{classify, status_for_error_type};
 use crate::{
     error::ProviderError,
+    limits::ToolArgumentBudget,
     provider::{ChatChunk, FinishReason, ToolCall, Usage},
     util::{EventDecoder, finish_error},
 };
@@ -62,21 +63,25 @@ impl UsageAcc {
         }
     }
 
-    fn usage(&self) -> Usage {
-        Usage {
-            prompt_tokens: self.input
-                + self.cache_read.unwrap_or(0)
-                + self.cache_write.unwrap_or(0),
+    fn usage(&self) -> Result<Usage, ProviderError> {
+        let prompt_tokens = self
+            .input
+            .checked_add(self.cache_read.unwrap_or(0))
+            .and_then(|total| total.checked_add(self.cache_write.unwrap_or(0)))
+            .ok_or_else(|| ProviderError::Stream("Anthropic prompt-token total overflow".into()))?;
+        Ok(Usage {
+            prompt_tokens,
             completion_tokens: self.output,
             cached_tokens: self.cache_read,
             cache_write_tokens: self.cache_write,
-        }
+        })
     }
 }
 
 #[derive(Debug, Default)]
 pub(super) struct Decoder {
     blocks: BTreeMap<u64, Block>,
+    arguments: ToolArgumentBudget,
     usage: UsageAcc,
     finish: Option<FinishReason>,
     finished: bool,
@@ -159,9 +164,11 @@ impl Decoder {
         self.blocks.insert(idx, block);
     }
 
-    fn block_delta(&mut self, v: &Value, out: &mut Vec<ChatChunk>) {
+    fn block_delta(&mut self, v: &Value, out: &mut Vec<ChatChunk>) -> Result<(), ProviderError> {
         let idx = v.get("index").and_then(Value::as_u64).unwrap_or(0);
-        let Some(d) = v.get("delta") else { return };
+        let Some(d) = v.get("delta") else {
+            return Ok(());
+        };
         let str_of = |k: &str| d.get(k).and_then(Value::as_str).unwrap_or_default();
         match (
             d.get("type").and_then(Value::as_str),
@@ -175,6 +182,7 @@ impl Decoder {
             }
             (Some("input_json_delta"), Some(Block::Tool { id, args, .. })) => {
                 let part = str_of("partial_json");
+                self.arguments.charge(args.len(), part.len())?;
                 args.push_str(part);
                 out.push(ChatChunk::ToolCallDelta {
                     call_id: id.clone(),
@@ -190,6 +198,7 @@ impl Decoder {
             }
             _ => {}
         }
+        Ok(())
     }
 }
 
@@ -205,7 +214,7 @@ impl EventDecoder for Decoder {
                 }
             }
             Some("content_block_start") => self.block_start(&v, &mut out),
-            Some("content_block_delta") => self.block_delta(&v, &mut out),
+            Some("content_block_delta") => self.block_delta(&v, &mut out)?,
             Some("message_delta") => {
                 if let Some(r) = v.pointer("/delta/stop_reason").and_then(Value::as_str) {
                     self.finish = Some(parse_finish(r));
@@ -244,7 +253,7 @@ impl EventDecoder for Decoder {
             }
         }
         if self.usage.seen {
-            out.push(ChatChunk::Usage(self.usage.usage()));
+            out.push(ChatChunk::Usage(self.usage.usage()?));
         }
         if let Some(e) = self.finish.as_ref().and_then(finish_error) {
             return Err(e);

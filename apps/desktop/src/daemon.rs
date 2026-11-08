@@ -213,6 +213,7 @@ pub fn bot_binary() -> OsString {
 /// A `bot` command with the console window suppressed on Windows.
 #[must_use]
 pub fn bot_command() -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut cmd = Command::new(bot_binary());
     #[cfg(windows)]
     {

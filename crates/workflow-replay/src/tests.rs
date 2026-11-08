@@ -801,3 +801,155 @@ async fn workflow_cannot_recurse_through_script_run() {
         "{text}"
     );
 }
+
+// ── control gate (SEC-06, replay half) ──────────────────────────────────────
+
+/// Refuses every action and counts the asks.
+#[derive(Default)]
+struct RefusingControl {
+    asked: Mutex<Vec<String>>,
+}
+
+#[async_trait::async_trait]
+impl builtin_tools::DesktopControlGate for RefusingControl {
+    async fn before_action(&self, req: &builtin_tools::ControlRequest) -> Result<(), String> {
+        self.asked.lock().push(req.action.clone());
+        Err("the user has taken control".into())
+    }
+}
+
+fn refusing_opts() -> (ReplayOptions, Arc<RefusingControl>) {
+    let c = Arc::new(RefusingControl::default());
+    let mut o = ReplayOptions::instant();
+    o.control = Some(c.clone());
+    (o, c)
+}
+
+#[tokio::test]
+async fn refusing_control_gate_blocks_every_desktop_action_kind() {
+    for kind in [
+        DesktopActionKind::Click,
+        DesktopActionKind::Type,
+        DesktopActionKind::SetValue,
+        DesktopActionKind::Key,
+    ] {
+        let wf = screen_wf(vec![Step::DesktopAction(DesktopAction {
+            app: None,
+            window_title_pattern: Some("*App".into()),
+            target: Some(desk_loc("button", "OK")),
+            action: kind,
+            value: Some("a".into()),
+            method: None,
+        })]);
+        let desktop = FakeDesktop::new(
+            vec![window(1, "A - App")],
+            vec![node(0, "button", "OK", 10.0, 10.0)],
+        );
+        let (opts, control) = refusing_opts();
+        let report = Replayer::new(handles(Some(desktop.clone()), None), opts)
+            .replay(&wf, &params(&json!({})), &RecordingGate::default())
+            .await
+            .unwrap();
+        assert!(!report.is_completed(), "{kind:?}");
+        assert!(
+            desktop.actions.lock().is_empty(),
+            "{kind:?} reached backend"
+        );
+        assert_eq!(control.asked.lock().len(), 1, "{kind:?}");
+    }
+}
+
+#[tokio::test]
+async fn refusing_control_gate_blocks_launch() {
+    let wf = screen_wf(vec![Step::Launch(Launch {
+        executable: "notepad.exe".into(),
+        args: vec![],
+    })]);
+    let desktop = notepad_desktop();
+    let (opts, _c) = refusing_opts();
+    let report = Replayer::new(handles(Some(desktop.clone()), None), opts)
+        .replay(&wf, &params(&json!({})), &RecordingGate::default())
+        .await
+        .unwrap();
+    assert!(!report.is_completed());
+    assert!(desktop.launched.lock().is_empty());
+}
+
+#[tokio::test]
+async fn refusing_control_gate_blocks_every_browser_action_and_navigate() {
+    let page = "# Shop (https://shop.test/cart)\n  [e1] textbox \"Search\"\n  [e2] button \"Go\"\n";
+    let bloc = |role: &str, name: &str, css: Option<&str>| BrowserLocator {
+        role: role.into(),
+        name: name.into(),
+        fingerprint: fingerprint_hex(role, name),
+        aria_label: None,
+        css: css.map(Into::into),
+        nth: None,
+    };
+    let mut cases: Vec<Step> = Vec::new();
+    for (kind, target) in [
+        (BrowserActionKind::Click, Some(bloc("button", "Go", None))),
+        (
+            BrowserActionKind::Fill,
+            Some(bloc("textbox", "Search", None)),
+        ),
+        (BrowserActionKind::Select, Some(bloc("button", "Go", None))),
+        (BrowserActionKind::Press, None),
+        (BrowserActionKind::Back, None),
+        // css fallback path (browser_eval)
+        (BrowserActionKind::Click, Some(bloc("", "", Some("#buy")))),
+    ] {
+        cases.push(Step::BrowserAction(BrowserAction {
+            url_pattern: None,
+            target,
+            action: kind,
+            value: Some("x".into()),
+        }));
+    }
+    cases.push(Step::Navigate(crate::format::Navigate {
+        url: "https://shop.test/".into(),
+        profile: None,
+    }));
+    for step in cases {
+        let browser = FakeBrowser::new(page);
+        let (opts, control) = refusing_opts();
+        let report = Replayer::new(handles(None, Some(browser.clone())), opts)
+            .replay(
+                &screen_wf(vec![step.clone()]),
+                &params(&json!({})),
+                &RecordingGate::default(),
+            )
+            .await
+            .unwrap();
+        assert!(!report.is_completed(), "{step:?}");
+        assert_eq!(control.asked.lock().len(), 1, "{step:?}");
+        // Only the read-only css uniqueness probe may have touched the driver.
+        let calls = browser.calls.lock();
+        assert!(
+            calls
+                .iter()
+                .all(|c| c.starts_with("eval:document.querySelectorAll")),
+            "{step:?} mutated: {calls:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn missing_control_gate_fails_closed_for_acting_steps() {
+    let wf = screen_wf(vec![Step::Launch(Launch {
+        executable: "notepad.exe".into(),
+        args: vec![],
+    })]);
+    let desktop = notepad_desktop();
+    let opts = ReplayOptions {
+        launch_settle: std::time::Duration::ZERO,
+        ..ReplayOptions::default()
+    };
+    assert!(opts.control.is_none());
+    let report = Replayer::new(handles(Some(desktop.clone()), None), opts)
+        .replay(&wf, &params(&json!({})), &RecordingGate::default())
+        .await
+        .unwrap();
+    assert!(!report.is_completed());
+    assert!(desktop.launched.lock().is_empty());
+}

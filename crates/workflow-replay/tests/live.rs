@@ -325,6 +325,7 @@ async fn record_open_notepad_type_text_then_replay() {
     let second = "praxi-live-second";
     let opts = ReplayOptions {
         resolve_timeout: Duration::from_secs(10),
+        control: Some(std::sync::Arc::new(workflow_replay::AllowAllControl)),
         ..ReplayOptions::default()
     };
     let handles = Handles {

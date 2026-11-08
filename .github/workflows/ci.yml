@@ -38,8 +38,46 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # Run even when clippy failed so one gate cannot hide another's evidence.
       - name: Run tests
-        run: cargo test --workspace
+        if: success() || failure()
+        run: cargo test --workspace --no-fail-fast
+
+  browser-integration:
+    name: Browser integration (Chrome for Testing)
+    runs-on: ubuntu-latest
+    continue-on-error: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config libxcb1-dev
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      # Same pin and checksums as scripts/install-linux.sh (install_cft).
+      - name: Install pinned Chrome for Testing
+        run: |
+          set -euo pipefail
+          version="157.0.8103.38"
+          expected="8cdeb344e9b2cefe59f4aea8d1d93d5d93054c03cde217665c16fc1f62e72a66"
+          curl -fsSL "https://storage.googleapis.com/chrome-for-testing-public/${version}/linux64/chrome-linux64.zip" -o "$RUNNER_TEMP/chrome.zip"
+          echo "${expected}  $RUNNER_TEMP/chrome.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/chrome.zip" -d "$RUNNER_TEMP/cft"
+          echo "PRAXI_BROWSER_PATH=$RUNNER_TEMP/cft/chrome-linux64/chrome" >> "$GITHUB_ENV"
+          # ubuntu-24.04 restricts unprivileged user namespaces (Chrome sandbox).
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      - name: Run browser-cdp integration tests
+        run: cargo test -p browser-cdp --test browser --test dialogs -- --ignored --test-threads=1
 
   license-check:
     name: License Check
@@ -87,3 +125,6 @@ jobs:
 
       - name: Lint
         run: pnpm lint
+
+      - name: UI tests
+        run: pnpm --filter ./apps/desktop/ui test

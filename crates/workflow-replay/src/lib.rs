@@ -49,8 +49,8 @@ pub use format::{
 };
 pub use recorder::{DroppedStep, RecordOptions, Recorder, Recording};
 pub use replay::{
-    EventSink, Handles, Handover, HandoverReason, PartialState, ReplayOptions, ReplayOutcome,
-    ReplayReport, Replayer, StepReport,
+    AllowAllControl, EventSink, Handles, Handover, HandoverReason, PartialState, ReplayOptions,
+    ReplayOutcome, ReplayReport, Replayer, StepReport,
 };
 pub use store::{IndexEntry, WorkflowStore};
 pub use tool::{LIST_TOOL_NAME, RUN_TOOL_NAME, summarize, tools};

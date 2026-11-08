@@ -28,6 +28,14 @@ pub enum ImportError {
     TargetNotEmpty,
     #[error("invalid bundle: {0}")]
     Invalid(String),
+    #[error("database {db} has schema version {found}, newer than supported {supported}")]
+    IncompatibleSchema {
+        db: String,
+        found: u32,
+        supported: u32,
+    },
+    #[error("invalid database {db}: {reason}")]
+    InvalidDatabase { db: String, reason: String },
     #[error("bundle exceeds configured size limit")]
     SizeLimit,
     #[error("I/O: {0}")]
@@ -60,6 +68,9 @@ pub struct FileRecord {
 pub struct Manifest {
     pub format_version: u32,
     pub schema_version: u32,
+    /// Per-database source schema versions. Older bundles omit this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub db_schemas: Option<BTreeMap<String, u32>>,
     pub app_version: String,
     pub epoch: u64,
     pub created_at: u64,
@@ -185,6 +196,7 @@ pub async fn export(
     let mut manifest = Manifest {
         format_version: FORMAT_VERSION,
         schema_version: 0,
+        db_schemas: Some(BTreeMap::new()),
         app_version: opts.app_version,
         epoch: opts.epoch,
         created_at: now(),
@@ -203,9 +215,13 @@ pub async fn export(
             let snapshot = snapshots.path().join(&path);
             transfer::backup(&source, &snapshot)?;
             source = snapshot;
+            let version = storage::migrate::current_version(&rusqlite::Connection::open(&source)?)?;
+            manifest
+                .db_schemas
+                .get_or_insert_default()
+                .insert(path.clone(), version);
             if path == "bot.db" {
-                manifest.schema_version =
-                    storage::migrate::current_version(&rusqlite::Connection::open(&source)?)?;
+                manifest.schema_version = version;
                 if manifest.schema_version > storage::migrate::latest_version() {
                     return Err(invalid("database schema is too new"));
                 }

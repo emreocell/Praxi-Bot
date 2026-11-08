@@ -6,7 +6,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use builtin_tools::{BrowserDriver, GateRequest, ToolGate, Wait, raw_command_for};
+use builtin_tools::{
+    BrowserDriver, ControlRequest, DesktopControlGate, GateRequest, ToolGate, Wait, raw_command_for,
+};
 use desktop_api::snapshot::AppSpec;
 use desktop_api::{Action, ClickMethod, DesktopBackend, Snapshot, Target};
 use protocol::event::{WorkflowDrift, WorkflowStepCompleted, WorkflowStepStarted};
@@ -54,6 +56,17 @@ pub struct Handles {
     pub tools: ToolRegistry,
 }
 
+/// A control gate that allows everything (tests, headless runs with no human
+/// at the wheel). Must be chosen explicitly: a missing gate refuses.
+pub struct AllowAllControl;
+
+#[async_trait::async_trait]
+impl DesktopControlGate for AllowAllControl {
+    async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 /// Replay settings.
 #[derive(Clone)]
 pub struct ReplayOptions {
@@ -75,6 +88,10 @@ pub struct ReplayOptions {
     pub action_settle: Duration,
     /// Bot that started the replay, forwarded to tool steps.
     pub bot_id: Option<String>,
+    /// Desktop control gate, asked before every native / browser mutation
+    /// (the user may have taken the wheel). `None` fails closed: acting steps
+    /// are refused. Use [`AllowAllControl`] only where no human is at the wheel.
+    pub control: Option<Arc<dyn DesktopControlGate>>,
 }
 
 impl Default for ReplayOptions {
@@ -89,6 +106,7 @@ impl Default for ReplayOptions {
             launch_settle: Duration::from_millis(1500),
             action_settle: Duration::from_millis(300),
             bot_id: None,
+            control: None,
         }
     }
 }
@@ -102,6 +120,7 @@ impl ReplayOptions {
             poll_interval: Duration::from_millis(1),
             launch_settle: Duration::ZERO,
             action_settle: Duration::ZERO,
+            control: Some(Arc::new(AllowAllControl)),
             ..Self::default()
         }
     }
@@ -511,6 +530,23 @@ impl Replayer {
         gate.authorize(&req).await.map_err(Stop::Denied)
     }
 
+    /// Ask the desktop control gate (if any) before a mutating action.
+    async fn control_gate(&self, action: &str, label: String) -> Result<(), Stop> {
+        let Some(gate) = &self.opts.control else {
+            return Err(Stop::Denied(format!(
+                "no desktop control gate configured: refusing {action}"
+            )));
+        };
+        gate.before_action(&ControlRequest {
+            run_id: self.opts.run_id.clone(),
+            rect: None,
+            label,
+            action: action.to_owned(),
+        })
+        .await
+        .map_err(Stop::Denied)
+    }
+
     async fn run_step(
         &self,
         step: &Step,
@@ -532,6 +568,7 @@ impl Replayer {
                     json!({"url": url, "profile": n.profile}),
                 )
                 .await?;
+                self.control_gate("browser_open", url.clone()).await?;
                 let out = driver
                     .open(&url, n.profile.as_deref())
                     .await
@@ -558,6 +595,7 @@ impl Replayer {
                     json!({"executable": executable, "args": args}),
                 )
                 .await?;
+                self.control_gate("launch", executable.clone()).await?;
                 let pid = backend
                     .launch(AppSpec { executable, args })
                     .await
@@ -786,6 +824,16 @@ impl Replayer {
             input,
         )
         .await?;
+        self.control_gate(
+            match d.action {
+                DesktopActionKind::Click => "click",
+                DesktopActionKind::Type => "type",
+                DesktopActionKind::SetValue => "set_value",
+                DesktopActionKind::Key => "key",
+            },
+            tool.to_owned(),
+        )
+        .await?;
 
         match d.action {
             DesktopActionKind::Click => {
@@ -931,6 +979,7 @@ impl Replayer {
                 json!({"js": js}),
             )
             .await?;
+            self.control_gate("browser_eval", css.clone()).await?;
             driver
                 .eval(&js)
                 .await
@@ -952,6 +1001,7 @@ impl Replayer {
                 input,
             )
             .await?;
+            self.control_gate(tool, tool.to_owned()).await?;
             let need = || Stop::Failed("browser step has no target".into());
             match b.action {
                 BrowserActionKind::Click => driver.click(&r.ok_or_else(need)?).await,

@@ -55,6 +55,28 @@ fn provider(server: &MockServer, retries: u32) -> AnthropicProvider {
     .unwrap()
 }
 
+#[test]
+fn streamed_tool_argument_fragments_have_a_cumulative_limit() {
+    let mut decoder = Decoder::default();
+    decoder
+        .feed(
+            &json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "tool_use", "id": "call", "name": "read"}
+            })
+            .to_string(),
+        )
+        .unwrap();
+    let delta = json!({
+        "type": "content_block_delta", "index": 0,
+        "delta": {"type": "input_json_delta", "partial_json": "x".repeat(crate::limits::MAX_TOOL_ARGUMENT_BYTES / 2)}
+    }).to_string();
+    decoder.feed(&delta).unwrap();
+    decoder.feed(&delta).unwrap();
+    let error = decoder.feed(&delta).unwrap_err();
+    assert!(matches!(error, ProviderError::Stream(message) if message.contains("tool arguments")));
+}
+
 fn req() -> ChatRequest {
     ChatRequest::new(
         ModelRef("anthropic/claude-test".into()),
@@ -118,6 +140,45 @@ async fn collect(p: &AnthropicProvider, r: ChatRequest) -> Result<Vec<ChatChunk>
 
 fn err_body(kind: &str, msg: &str) -> Value {
     json!({"type":"error","error":{"type":kind,"message":msg}})
+}
+
+#[test]
+fn audit_extra_usage_overflow_returns_error_instead_of_panicking() {
+    let mut decoder = Decoder::default();
+    decoder
+        .feed(&start(&json!({"input_tokens": u64::MAX, "cache_read_input_tokens": 1})).to_string())
+        .unwrap();
+    decoder.feed(r#"{"type":"message_stop"}"#).unwrap();
+    assert!(matches!(decoder.finish(), Err(ProviderError::Stream(_))));
+}
+
+#[test]
+fn audit_extra_cache_write_overflow_is_rejected() {
+    let mut decoder = Decoder::default();
+    decoder.feed(&start(&json!({"input_tokens": u64::MAX - 1, "cache_read_input_tokens": 1, "cache_creation_input_tokens": 1})).to_string()).unwrap();
+    decoder.feed(r#"{"type":"message_stop"}"#).unwrap();
+    assert!(matches!(decoder.finish(), Err(ProviderError::Stream(_))));
+}
+
+#[test]
+fn audit_extra_maximum_valid_usage_total_is_preserved() {
+    let mut decoder = Decoder::default();
+    decoder.feed(&start(&json!({"input_tokens": u64::MAX - 5, "cache_read_input_tokens": 2, "cache_creation_input_tokens": 3})).to_string()).unwrap();
+    decoder.feed(r#"{"type":"message_stop"}"#).unwrap();
+    let chunks = decoder.finish().unwrap();
+    let usage = chunks
+        .iter()
+        .find_map(|chunk| {
+            if let ChatChunk::Usage(usage) = chunk {
+                Some(usage)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(usage.prompt_tokens, u64::MAX);
+    assert_eq!(usage.cached_tokens, Some(2));
+    assert_eq!(usage.cache_write_tokens, Some(3));
 }
 
 #[tokio::test]

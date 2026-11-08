@@ -31,7 +31,7 @@ pub use actions::{
     ActionResult, KeySpec, ScreenshotOptions, ScreenshotTarget, WaitCondition, parse_key,
 };
 pub use browser::{Browser, TargetInfo};
-pub use client::{CdpClient, CdpEvent};
+pub use client::{CdpClient, CdpClientConfig, CdpEvent};
 pub use diff::{SnapshotDiff, diff, diff_text};
 pub use error::{Error, Result};
 pub use launch::{LaunchOptions, find_browser};
