@@ -34,6 +34,7 @@ members = [
     "crates/secret-store",
     "crates/scheduler",
     "crates/daemon-api",
+    "crates/connector-email",
     "crates/web-tools",
     "crates/openapi-tools",
     "apps/cli",

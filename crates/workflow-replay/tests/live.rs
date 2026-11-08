@@ -7,6 +7,7 @@
 
 #![cfg(windows)]
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -92,18 +93,145 @@ async fn notepad_windows(backend: &Arc<dyn DesktopBackend>) -> Vec<u64> {
         .collect()
 }
 
+/// Index of the first button whose rendered line contains one of `needles`.
+fn button_index(state: &str, needles: &[&str]) -> Option<u32> {
+    state.lines().find_map(|line| {
+        let lower = line.to_lowercase();
+        if !lower.contains("] button ") || !needles.iter().any(|n| lower.contains(n)) {
+            return None;
+        }
+        let end = line.find(']')?;
+        line[1..end].parse().ok()
+    })
+}
+
 async fn close_notepad(reg: &ToolRegistry, backend: &Arc<dyn DesktopBackend>) {
-    for id in notepad_windows(backend).await {
-        let _ = call(reg, "desktop_get_state", &json!({"window_id": id})).await;
-        for keys in [
-            json!(["ctrl", "a"]),
-            json!(["Delete"]),
-            json!(["alt", "F4"]),
-        ] {
-            let _ = call(reg, "desktop_key", &json!({"keys": keys})).await;
+    let click = reg.get("desktop_click").expect("desktop_click missing");
+    // Alt+F4 from this process does not reach Store Notepad (foreground lock),
+    // so close through the UIA button. A dirty buffer then shows Kaydetme /
+    // Don't save; click that too. The click's refresh may fail once the
+    // window is gone, which is expected.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        let ids = notepad_windows(backend).await;
+        if ids.is_empty() {
+            return;
+        }
+        for id in ids {
+            let state = call(reg, "desktop_get_state", &json!({"window_id": id})).await;
+            let Ok(generation) = state
+                .lines()
+                .find_map(|l| {
+                    l.strip_prefix("# window ")?
+                        .split_whitespace()
+                        .find_map(|tok| tok.strip_prefix("gen=")?.parse::<u64>().ok())
+                })
+                .ok_or(())
+            else {
+                continue;
+            };
+            let target = button_index(&state, &["kaydetme", "don't save", "do not save"])
+                .or_else(|| button_index(&state, &["button \"kapat\"", "button \"close\""]));
+            if let Some(index) = target {
+                let _ = click
+                    .call(
+                        &ToolContext::default(),
+                        json!({"index": index, "gen": generation}),
+                    )
+                    .await;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(400)).await;
+    }
+}
+
+/// Backs up and clears Store Notepad's `TabState` / `WindowState` so the test
+/// starts with a clean untitled window and restores the user's open tabs on drop.
+struct NotepadSessionGuard {
+    dirs: Vec<PathBuf>,
+    backup: PathBuf,
+}
+
+impl NotepadSessionGuard {
+    fn new(backup: PathBuf) -> Self {
+        let dirs = notepad_state_dirs();
+        for (i, dir) in dirs.iter().enumerate() {
+            let dst = backup.join(i.to_string());
+            let _ = std::fs::create_dir_all(&dst);
+            if let Ok(rd) = std::fs::read_dir(dir) {
+                for entry in rd.flatten() {
+                    let path = entry.path();
+                    if path.is_file()
+                        && let Some(name) = path.file_name()
+                    {
+                        let _ = std::fs::copy(&path, dst.join(name));
+                        let _ = std::fs::remove_file(&path);
+                    }
+                }
+            }
+        }
+        Self { dirs, backup }
+    }
+
+    fn clear_current(&self) {
+        for dir in &self.dirs {
+            if let Ok(rd) = std::fs::read_dir(dir) {
+                for entry in rd.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                }
+            }
         }
     }
-    tokio::time::sleep(Duration::from_millis(800)).await;
+}
+
+impl Drop for NotepadSessionGuard {
+    fn drop(&mut self) {
+        self.clear_current();
+        for (i, dir) in self.dirs.iter().enumerate() {
+            let src = self.backup.join(i.to_string());
+            if let Ok(rd) = std::fs::read_dir(&src) {
+                for entry in rd.flatten() {
+                    let path = entry.path();
+                    if path.is_file()
+                        && let Some(name) = path.file_name()
+                    {
+                        let _ = std::fs::copy(&path, dir.join(name));
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn notepad_state_dirs() -> Vec<PathBuf> {
+    let Some(local) = std::env::var_os("LOCALAPPDATA") else {
+        return Vec::new();
+    };
+    let Ok(rd) = std::fs::read_dir(Path::new(&local).join("Packages")) else {
+        return Vec::new();
+    };
+    rd.flatten()
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("Microsoft.WindowsNotepad_")
+        })
+        .flat_map(|e| ["TabState", "WindowState"].map(|d| e.path().join("LocalState").join(d)))
+        .collect()
+}
+
+fn parse_gen(state: &str) -> u64 {
+    state
+        .lines()
+        .find_map(|l| {
+            l.strip_prefix("# window ")?
+                .split_whitespace()
+                .find_map(|tok| tok.strip_prefix("gen=")?.parse().ok())
+        })
+        .expect("missing gen= in state header")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -121,6 +249,7 @@ async fn record_open_notepad_type_text_then_replay() {
         notepad_windows(&backend).await.is_empty(),
         "close your Notepad windows before running this test"
     );
+    let session_guard = NotepadSessionGuard::new(data.path().join("np-session-backup"));
 
     // ── Phase 1: the "agent run" (real tools, real screen) ─────────────────
     let first = "praxi-live-first";
@@ -153,12 +282,14 @@ async fn record_open_notepad_type_text_then_replay() {
         .find(|l| l.starts_with('[') && (l.contains("] edit ") || l.contains("] document ")))
         .unwrap_or_else(|| panic!("no editor in state:\n{state}"));
     let index: u32 = editor[1..editor.find(']').unwrap()].parse().unwrap();
-    let type_args = json!({"index": index, "text": first});
+    let generation = parse_gen(&state);
+    let type_args = json!({"index": index, "gen": generation, "text": first});
     let after = call(&reg, "desktop_type", &type_args).await;
     steps.push(persisted(3, "desktop_type", &type_args, &after));
     assert!(after.contains(first), "typing failed:\n{after}");
 
     close_notepad(&reg, &backend).await;
+    session_guard.clear_current();
     assert!(
         notepad_windows(&backend).await.is_empty(),
         "Notepad is still open"
