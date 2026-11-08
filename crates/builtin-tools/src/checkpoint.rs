@@ -8,7 +8,7 @@
 use std::fmt::Write as _;
 use std::fs;
 use std::io::{self, Read as _};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -418,6 +418,14 @@ fn collect_link_topology(
     let mut prefix = PathBuf::new();
     for (index, component) in components.iter().enumerate() {
         prefix.push(component);
+        // A Windows prefix is not a filesystem entry: `\\?\C:` is
+        // incomplete until its root separator is appended. Canonical paths
+        // stored in manifests use that verbatim spelling, including when a
+        // restore captures its safety checkpoint. The caller's path gate
+        // has already classified the drive/root before this topology walk.
+        if matches!(component, Component::Prefix(_) | Component::RootDir) {
+            continue;
+        }
         match fs::symlink_metadata(&prefix) {
             Ok(meta) if is_link(&meta) => {
                 crate::files::vet_checkpoint_path(&prefix)?;
@@ -500,6 +508,13 @@ fn canonical_dir(path: &Path) -> io::Result<PathBuf> {
             continue;
         }
         let next = base.join(c);
+        // Preserve the complete root before probing for the first real
+        // entry. In particular, a bare verbatim drive prefix cannot be
+        // passed to `symlink_metadata` on Windows.
+        if matches!(c, Component::Prefix(_) | Component::RootDir) {
+            base = next;
+            continue;
+        }
         if next.symlink_metadata().is_ok() {
             base = next;
         } else {
@@ -1544,6 +1559,55 @@ impl CheckpointStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn canonical_windows_paths_are_readable_and_restore_with_a_safety_checkpoint() {
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let store = CheckpointStore::new(data.path());
+        let existing = work.path().join("existing.txt");
+        fs::write(&existing, "original bytes").unwrap();
+        let verbatim = fs::canonicalize(&existing).unwrap();
+        assert!(matches!(
+            verbatim.components().next(),
+            Some(Component::Prefix(prefix))
+                if matches!(prefix.kind(), std::path::Prefix::VerbatimDisk(_))
+        ));
+        // This is an actual data read of the normalized path, separate from
+        // the attributes-only handle used by the permission identity query.
+        assert_eq!(fs::read_to_string(&verbatim).unwrap(), "original bytes");
+        let missing = verbatim.parent().unwrap().join("not-created.txt");
+        assert_eq!(canonical_dir(&missing).unwrap(), missing);
+
+        for input in [&existing, &verbatim] {
+            let id = store
+                .create("windows-paths", "fs_write", &[input, &missing])
+                .unwrap();
+            fs::write(&existing, "current bytes").unwrap();
+            fs::write(&missing, "created after checkpoint").unwrap();
+            let (_, safety) = store.restore(&id).unwrap();
+            assert_eq!(fs::read_to_string(&existing).unwrap(), "original bytes");
+            assert!(!missing.exists());
+            assert!(
+                store
+                    .list("windows-paths")
+                    .unwrap()
+                    .iter()
+                    .any(|cp| { cp.id == safety && cp.op == format!("pre-restore:{id}") })
+            );
+            // Safety checkpoint manifests contain canonical verbatim paths
+            // too, so restoring the safety checkpoint repeats the same walk.
+            store.restore(&safety).unwrap();
+            assert_eq!(fs::read_to_string(&existing).unwrap(), "current bytes");
+            assert_eq!(
+                fs::read_to_string(&missing).unwrap(),
+                "created after checkpoint"
+            );
+            fs::write(&existing, "original bytes").unwrap();
+            fs::remove_file(&missing).unwrap();
+        }
+    }
 
     #[test]
     fn payload_sha256_matches_standard_vectors_and_chunk_boundaries() {
