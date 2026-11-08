@@ -520,7 +520,11 @@ mod tests {
         let d = work.path().join("d");
         fs::create_dir_all(&d).unwrap();
         fs::write(d.join("f"), "x").unwrap();
-        // A link whose target can never be recreated or copied.
+        // `d/bad` is a real non-empty directory in the backup, so it is restored
+        // first and the link can then never be created at that path (no
+        // symlink privilege or platform quirk involved), nor copied over it.
+        fs::create_dir_all(d.join("bad")).unwrap();
+        fs::write(d.join("bad").join("keep"), "k").unwrap();
         let id = store.create("r", "fs_delete", &[&d]).unwrap();
         let (cp_dir, _) = store.find(&id).unwrap();
         let backup = store.list("r").unwrap()[0].entries[0]
@@ -536,6 +540,7 @@ mod tests {
         fs::remove_dir_all(&d).unwrap();
         let (_, _, warnings) = store.restore_with_warnings(&id).unwrap();
         assert_eq!(fs::read_to_string(d.join("f")).unwrap(), "x");
+        assert_eq!(fs::read_to_string(d.join("bad").join("keep")).unwrap(), "k");
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(warnings[0].contains("skipped"), "{warnings:?}");
     }
