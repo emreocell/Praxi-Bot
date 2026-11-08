@@ -1,7 +1,7 @@
 //! Opening a raw MCP client session over stdio or streamable HTTP.
 
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
+    collections::{BTreeMap, HashMap},
     fmt,
     process::Stdio,
     sync::Arc,
@@ -9,26 +9,24 @@ use std::{
 };
 
 use http::{HeaderName, HeaderValue};
-use parking_lot::Mutex;
-use process_wrap::tokio::{CommandWrap, KillOnDrop};
+use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
 use rmcp::{
     RoleClient, ServiceExt,
-    service::RunningService,
+    service::{RxJsonRpcMessage, TxJsonRpcMessage},
     transport::{
-        StreamableHttpClientTransport, TokioChildProcess,
+        StreamableHttpClientTransport, TokioChildProcess, Transport,
         streamable_http_client::StreamableHttpClientTransportConfig, which_command,
     },
 };
 use secret_store::{SecretRef, SecretStore, resolve};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tracing::instrument::WithSubscriber;
 
 use crate::{
     config::{McpServerConfig, McpTransport, refused_stdio_command},
+    diagnostics::{Redactor, StderrLog, capture_stderr},
     error::{McpError, Result},
+    session::{self, Session},
 };
-
-/// A live MCP client session.
-pub(crate) type Session = RunningService<RoleClient, ()>;
 
 /// Environment variables that are passed to stdio children even though the
 /// config does not declare them, because the OS runtime itself breaks without
@@ -39,32 +37,10 @@ pub const OS_ESSENTIAL_ENV: &[&str] = &["SystemRoot", "windir"];
 #[cfg(not(windows))]
 pub const OS_ESSENTIAL_ENV: &[&str] = &[];
 
-/// How many stderr lines are kept per server.
-const STDERR_TAIL_LINES: usize = 200;
-
-/// Ring buffer of a server's most recent stderr lines (also forwarded to `tracing`).
-#[derive(Debug, Default)]
-pub(crate) struct StderrLog {
-    lines: Mutex<VecDeque<String>>,
-}
-
-impl StderrLog {
-    fn push(&self, line: String) {
-        let mut lines = self.lines.lock();
-        if lines.len() == STDERR_TAIL_LINES {
-            lines.pop_front();
-        }
-        lines.push_back(line);
-    }
-
-    pub(crate) fn snapshot(&self) -> Vec<String> {
-        self.lines.lock().iter().cloned().collect()
-    }
-}
-
 /// Secret values resolved for one connect attempt.  Lives only for the
-/// duration of [`open`]; `Debug` never prints the values.
-#[derive(Default)]
+/// duration of [`open`]; its redactor stays with the session. `Debug` never
+/// prints the values.
+#[derive(Clone, Default)]
 pub(crate) struct ResolvedSecrets {
     headers: BTreeMap<String, String>,
     env: BTreeMap<String, String>,
@@ -101,9 +77,11 @@ pub(crate) fn resolve_secrets(
             .map_err(|e| McpError::Config(format!("server `{id}`: `{kind}.{key}`: {e}")))?;
         resolve(store, &r)
             .map(|v| v.expose().to_owned())
-            .map_err(|e| {
+            .map_err(|_| {
+                // A backend error may contain credential material that never
+                // reached ResolvedSecrets, so do not expose its arbitrary text.
                 McpError::Config(format!(
-                    "server `{id}`: cannot resolve secret `{name}` for `{kind}.{key}`: {e}"
+                    "server `{id}`: cannot resolve secret `{name}` for `{kind}.{key}`"
                 ))
             })
     };
@@ -178,14 +156,84 @@ fn build_command(
     Ok(isolate_child(cmd))
 }
 
-fn forward_stderr(server: String, stderr: tokio::process::ChildStderr, log: Arc<StderrLog>) {
-    tokio::spawn(async move {
-        let mut lines = BufReader::new(stderr).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            tracing::warn!(target: "mcp_bridge::stderr", server = %server, "{line}");
-            log.push(line);
+fn forward_stderr(
+    server: String,
+    stderr: tokio::process::ChildStderr,
+    log: Arc<StderrLog>,
+    redactor: Redactor,
+    diagnostics: tracing::Dispatch,
+) {
+    tokio::spawn(
+        async move { capture_stderr(&server, stderr, &log, &redactor).await }
+            .with_subscriber(diagnostics),
+    );
+}
+
+/// Own the process tree until it has been killed and reaped. rmcp's graceful
+/// close releases its wrapper as soon as the direct child exits, which can
+/// leave grandchildren running. Cancellation must also kill synchronously:
+/// runtime teardown may discard a newly spawned asynchronous cleanup task.
+struct ChildTree(Option<TokioChildProcess>);
+
+struct ReapChild(Option<Box<dyn ChildWrapper>>);
+
+impl Drop for ReapChild {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.0.take() {
+            let _ = child.start_kill();
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                runtime.spawn(async move {
+                    let _ = child.wait().await;
+                });
+            }
         }
-    });
+    }
+}
+
+impl ChildTree {
+    fn take_child(&mut self) -> ReapChild {
+        ReapChild(self.0.take().and_then(TokioChildProcess::into_inner))
+    }
+}
+
+impl Drop for ChildTree {
+    fn drop(&mut self) {
+        drop(self.take_child());
+    }
+}
+
+impl Transport<RoleClient> for ChildTree {
+    type Error = std::io::Error;
+
+    fn send(
+        &mut self,
+        item: TxJsonRpcMessage<RoleClient>,
+    ) -> impl Future<Output = std::io::Result<()>> + Send + 'static {
+        let send = self.0.as_mut().map(|transport| transport.send(item));
+        async move {
+            match send {
+                Some(send) => send.await,
+                None => Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "MCP child transport closed",
+                )),
+            }
+        }
+    }
+
+    async fn receive(&mut self) -> Option<RxJsonRpcMessage<RoleClient>> {
+        self.0.as_mut()?.receive().await
+    }
+
+    async fn close(&mut self) -> std::io::Result<()> {
+        let mut guard = self.take_child();
+        if let Some(child) = guard.0.as_mut() {
+            child.start_kill()?;
+            child.wait().await?;
+        }
+        guard.0 = None;
+        Ok(())
+    }
 }
 
 fn http_config(
@@ -215,11 +263,23 @@ pub(crate) async fn open(
     stderr: &Arc<StderrLog>,
     timeout: Duration,
 ) -> Result<Session> {
-    let id = config.id.as_str();
-    let handshake = async {
+    let redactor = Redactor::new(
+        secrets
+            .headers
+            .values()
+            .chain(secrets.env.values())
+            .map(String::as_str),
+    );
+    let config = config.clone();
+    let secrets = secrets.clone();
+    let stderr = Arc::clone(stderr);
+    let diagnostics = tracing::dispatcher::get_default(Clone::clone);
+    let stderr_redactor = redactor.clone();
+    session::open(config.id.clone(), redactor, timeout, move || async move {
+        let id = config.id.as_str();
         match &config.transport {
             McpTransport::Stdio { .. } => {
-                let cmd = build_command(id, &config.transport, secrets)?;
+                let cmd = build_command(id, &config.transport, &secrets)?;
                 let (transport, child_stderr) = TokioChildProcess::builder(cmd)
                     .stderr(Stdio::piped())
                     .spawn()
@@ -228,9 +288,11 @@ pub(crate) async fn open(
                         message: e.to_string(),
                     })?;
                 if let Some(pipe) = child_stderr {
-                    forward_stderr(id.to_owned(), pipe, Arc::clone(stderr));
+                    forward_stderr(id.to_owned(), pipe, stderr, stderr_redactor, diagnostics);
                 }
-                ().serve(transport).await.map_err(|e| transport_err(id, e))
+                ().serve(ChildTree(Some(transport)))
+                    .await
+                    .map_err(|e| transport_err(id, e))
             }
             McpTransport::Http { url, headers } => {
                 let transport = StreamableHttpClientTransport::from_config(http_config(
@@ -242,13 +304,8 @@ pub(crate) async fn open(
                 ().serve(transport).await.map_err(|e| transport_err(id, e))
             }
         }
-    };
-    tokio::time::timeout(timeout, handshake)
-        .await
-        .map_err(|_| McpError::Timeout {
-            server: id.to_owned(),
-            seconds: timeout.as_secs().max(1),
-        })?
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -332,15 +389,40 @@ mod tests {
         assert!(resolve_secrets(&plain, None).is_ok());
     }
 
-    #[test]
-    fn stderr_log_is_a_bounded_ring() {
-        let log = StderrLog::default();
-        for i in 0..(STDERR_TAIL_LINES + 10) {
-            log.push(format!("l{i}"));
+    struct LeakyBackend;
+
+    impl SecretStore for LeakyBackend {
+        fn get(
+            &self,
+            _: &str,
+        ) -> std::result::Result<Option<secret_store::SecretValue>, secret_store::SecretError>
+        {
+            Err(secret_store::SecretError::Keyring(
+                "backend printed unresolved-secret-sentinel".into(),
+            ))
         }
-        let snap = log.snapshot();
-        assert_eq!(snap.len(), STDERR_TAIL_LINES);
-        assert_eq!(snap[0], "l10");
+        fn set(&self, _: &str, _: &str) -> std::result::Result<(), secret_store::SecretError> {
+            unimplemented!()
+        }
+        fn delete(&self, _: &str) -> std::result::Result<bool, secret_store::SecretError> {
+            unimplemented!()
+        }
+        fn list_names(&self) -> std::result::Result<Vec<String>, secret_store::SecretError> {
+            unimplemented!()
+        }
+    }
+
+    #[test]
+    fn secret_backend_error_text_is_not_exposed_before_a_redactor_exists() {
+        let mut cfg = McpServerConfig::http("backend", "https://unused.invalid/mcp");
+        cfg.secret_headers
+            .insert("Authorization".into(), "key/ref".into());
+        let error = resolve_secrets(&cfg, Some(&LeakyBackend))
+            .unwrap_err()
+            .to_string();
+        assert!(!error.contains("unresolved-secret-sentinel"));
+        assert!(error.contains("key/ref"));
+        assert!(error.contains("secret_headers.Authorization"));
     }
 
     #[tokio::test]
@@ -358,6 +440,27 @@ mod tests {
             matches!(err, McpError::Config(ref m) if m.contains("never-list")),
             "{err}"
         );
+    }
+
+    #[tokio::test]
+    async fn transport_errors_scrub_both_environment_and_header_secret_values() {
+        let secrets = ResolvedSecrets {
+            env: BTreeMap::from([("KEY".into(), "environment-sentinel".into())]),
+            headers: BTreeMap::from([("Authorization".into(), "header-sentinel".into())]),
+        };
+        let cfg = McpServerConfig::stdio(
+            "secret-errors",
+            "missing-binary-environment-sentinel-header-sentinel",
+            [""; 0],
+        );
+        let error = open(&cfg, &secrets, &Arc::default(), Duration::from_secs(2))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, McpError::Spawn { .. }));
+        let message = error.to_string();
+        assert!(!message.contains("environment-sentinel"));
+        assert!(!message.contains("header-sentinel"));
+        assert!(message.contains("[REDACTED]"));
     }
 
     #[tokio::test]

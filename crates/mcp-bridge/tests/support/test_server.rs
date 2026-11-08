@@ -11,9 +11,9 @@ use std::sync::Arc;
 use rmcp::{
     ErrorData, RoleServer, ServerHandler, ServiceExt,
     model::{
-        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, JsonObject,
-        ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
-        ToolAnnotations,
+        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
+        JsonObject, ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig,
+        Tool, ToolAnnotations,
     },
     service::RequestContext,
     transport::stdio,
@@ -37,22 +37,80 @@ fn tool(name: &'static str, description: &'static str, read_only: bool) -> Tool 
 
 impl ServerHandler for TestServer {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+        let config = ServerConfig::new(ServerCapabilities::builder().enable_tools().build());
+        if std::env::var("MCP_TEST_MODE").as_deref() == Ok("secret-diagnostics") {
+            config.with_server_info(Implementation::new(
+                std::env::var("API_KEY").unwrap(),
+                "test",
+            ))
+        } else {
+            config
+        }
     }
 
     async fn list_tools(
         &self,
-        _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(vec![
+        match std::env::var("MCP_TEST_MODE").as_deref() {
+            Ok("stalled") => {
+                eprintln!("tools/list entered");
+                std::future::pending::<()>().await;
+            }
+            Ok("pages") => {
+                let page: usize = request
+                    .and_then(|r| r.cursor)
+                    .and_then(|c| c.parse().ok())
+                    .unwrap_or(0);
+                let mut result = ListToolsResult::with_all_items(vec![]);
+                result.next_cursor = Some((page + 1).to_string());
+                return Ok(result);
+            }
+            Ok("tools") => {
+                return Ok(ListToolsResult::with_all_items(vec![
+                    tool(
+                        "echo", "echo", true
+                    );
+                    1025
+                ]));
+            }
+            Ok("schema") => {
+                let mut large = tool("echo", "echo", true);
+                large.input_schema = Arc::new(
+                    serde_json::from_value(json!({"description": "x".repeat(4 * 1024 * 1024)}))
+                        .unwrap(),
+                );
+                return Ok(ListToolsResult::with_all_items(vec![large]));
+            }
+            Ok("secret-error") => {
+                return Err(ErrorData::internal_error(
+                    std::env::var("API_KEY").unwrap(),
+                    None,
+                ));
+            }
+            _ => {}
+        }
+        let mut tools = vec![
             tool("echo", "Echo the given text back", true),
             tool("delete_all", "Delete everything", false),
             tool("read_secret", "Read a secret value", true),
             tool("fail", "Always returns a tool-level error", false),
             tool("crash", "Terminates the server process", false),
             tool("env_keys", "List the environment variable names", true),
-        ]))
+        ];
+        if std::env::var("MCP_TEST_MODE").as_deref() == Ok("secret-diagnostics") {
+            let secret = std::env::var("API_KEY").unwrap();
+            let notification = serde_json::from_value(json!({
+                "method": "notifications/message",
+                "params": {"level": "info", "data": secret}
+            }))
+            .unwrap();
+            context.peer.send_notification(notification).await.unwrap();
+            let duplicate = Tool::new(secret, "duplicate diagnostic test", Arc::default());
+            tools.extend([duplicate.clone(), duplicate]);
+        }
+        Ok(ListToolsResult::with_all_items(tools))
     }
 
     async fn call_tool(
@@ -119,6 +177,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     spawn_orphan();
+    match std::env::var("MCP_TEST_MODE").as_deref() {
+        Ok("secret-stderr") => {
+            eprintln!("child secret: {}", std::env::var("API_KEY").unwrap());
+        }
+        Ok("flood") => {
+            use std::io::Write;
+            let mut stderr = std::io::stderr().lock();
+            for _ in 0..(10 * 1024) {
+                stderr.write_all(&[b'x'; 1024])?;
+            }
+            writeln!(stderr, "\nflood-finished")?;
+        }
+        _ => {}
+    }
     let service = TestServer.serve(stdio()).await?;
     service.waiting().await?;
     Ok(())

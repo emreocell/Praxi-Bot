@@ -44,14 +44,17 @@
 
 mod catalog;
 mod config;
+mod diagnostics;
+mod discovery;
 mod error;
 mod manager;
+mod session;
 mod tool;
 mod transport;
 
 pub use catalog::{CatalogEntry, CatalogInstall, RequiredSecret, builtin_catalog};
 pub use config::{McpConfigStore, McpServerConfig, McpTransport, TomlFileStore};
 pub use error::{McpError, Result};
-pub use manager::{Backoff, McpManager, McpPolicy, ServerSnapshot, ServerStatus};
+pub use manager::{Backoff, McpManager, McpPolicy, McpServerHandle, ServerSnapshot, ServerStatus};
 pub use tool::qualified_name;
 pub use transport::OS_ESSENTIAL_ENV;

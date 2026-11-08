@@ -4,9 +4,12 @@
 //! ([`daemon_api::McpControl`]).  Every change made through the API is saved
 //! back to `mcp.toml` (write temp file, fsync, rename) *before* it is applied.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
-use std::sync::{Arc, Weak};
+use std::sync::{
+    Arc, Weak,
+    atomic::{AtomicU64, Ordering},
+};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -16,8 +19,8 @@ use daemon_api::mcp::{
 };
 use daemon_api::{McpControl, McpControlError};
 use mcp_bridge::{
-    CatalogEntry, McpConfigStore, McpError, McpManager, McpPolicy, McpServerConfig, McpTransport,
-    ServerSnapshot, ServerStatus, TomlFileStore,
+    CatalogEntry, McpConfigStore, McpError, McpManager, McpPolicy, McpServerConfig,
+    McpServerHandle, McpTransport, ServerSnapshot, ServerStatus, TomlFileStore,
 };
 use parking_lot::Mutex;
 use secret_store::SecretStore;
@@ -53,10 +56,11 @@ pub struct McpHost {
     /// The configured servers (what `mcp.toml` holds), by name.
     configs: Mutex<BTreeMap<String, McpServerConfig>>,
     /// Servers whose connect is in flight.
-    connecting: Mutex<HashSet<String>>,
+    connecting: Mutex<HashMap<String, u64>>,
+    next_connect: AtomicU64,
     /// Last status announced per server (deduplicates events).
     announced: Mutex<HashMap<String, McpStatus>>,
-    /// Serialises add / update / remove / reconnect (they save the file).
+    /// Serialises local configuration/registry changes, never remote I/O.
     ops: tokio::sync::Mutex<()>,
     /// Set when `mcp.toml` could not be loaded: it is never overwritten then.
     broken: Option<String>,
@@ -106,19 +110,26 @@ impl McpHost {
             eprintln!("warning: {e}");
             Vec::new()
         });
+        // Register synchronously before returning the host. Background futures
+        // hold the exact registration, so removal/replacement cannot resurrect it.
+        let registrations: Vec<_> = loaded
+            .iter()
+            .filter_map(|cfg| match manager.register_server(cfg.clone()) {
+                Ok(handle) => Some((cfg.id.clone(), cfg.enabled, handle)),
+                Err(error) => {
+                    eprintln!("warning: MCP server {} not registered: {error}", cfg.id);
+                    None
+                }
+            })
+            .collect();
         let host = Arc::new(Self {
             manager,
             registry,
             store,
             catalog,
             configs: Mutex::new(loaded.iter().map(|c| (c.id.clone(), c.clone())).collect()),
-            connecting: Mutex::new(
-                loaded
-                    .iter()
-                    .filter(|c| c.enabled)
-                    .map(|c| c.id.clone())
-                    .collect(),
-            ),
+            connecting: Mutex::new(HashMap::new()),
+            next_connect: AtomicU64::new(1),
             announced: Mutex::new(HashMap::new()),
             ops: tokio::sync::Mutex::new(()),
             broken,
@@ -130,24 +141,12 @@ impl McpHost {
                 .lock()
                 .insert(c.id.clone(), host.status_of(&c.id));
         }
-        // Connect in the background so a slow `npx` never delays the daemon.
-        // The ops lock keeps this from racing a management call that removes
-        // or replaces the server before the connect runs.
-        for c in loaded {
+        // Each server discovers independently; configuration changes remain live.
+        for (id, enabled, handle) in registrations {
+            let generation = host.begin_connect(&id, enabled);
             let h = Arc::clone(&host);
             tokio::spawn(async move {
-                let id = c.id.clone();
-                let _op = h.ops.lock().await;
-                let current = h.configs.lock().get(&id).cloned();
-                if current.as_ref() != Some(&c) || h.snapshot(&id).is_some() {
-                    h.connecting.lock().remove(&id);
-                    return;
-                }
-                if let Err(e) = h.manager.add_server(c).await {
-                    eprintln!("warning: MCP server {id} not started: {e}");
-                }
-                h.connecting.lock().remove(&id);
-                h.announce(&id);
+                h.connect_registered(&id, generation, handle, false).await;
             });
         }
         let weak = Arc::downgrade(&host);
@@ -169,7 +168,7 @@ impl McpHost {
     }
 
     fn status_of(&self, name: &str) -> McpStatus {
-        if self.connecting.lock().contains(name) {
+        if self.connecting.lock().contains_key(name) {
             return McpStatus::Connecting;
         }
         match self.snapshot(name) {
@@ -284,18 +283,44 @@ impl McpHost {
         Ok(())
     }
 
-    /// Connect `cfg` through the manager, tracking the `connecting` state.
-    async fn connect_new(&self, cfg: McpServerConfig) {
-        let id = cfg.id.clone();
-        if cfg.enabled {
-            self.connecting.lock().insert(id.clone());
-            self.announce(&id);
+    fn begin_connect(&self, id: &str, enabled: bool) -> Option<u64> {
+        if !enabled {
+            return None;
         }
-        if let Err(e) = self.manager.add_server(cfg).await {
-            eprintln!("warning: MCP server {id} not started: {e}");
+        let generation = self.next_connect.fetch_add(1, Ordering::Relaxed);
+        self.connecting.lock().insert(id.to_owned(), generation);
+        self.announce(id);
+        Some(generation)
+    }
+
+    /// Finishing an obsolete operation must not clear a newer Connecting state.
+    fn finish_connect(&self, id: &str, generation: Option<u64>) {
+        if let Some(generation) = generation {
+            let mut connecting = self.connecting.lock();
+            if connecting.get(id) != Some(&generation) {
+                return;
+            }
+            connecting.remove(id);
         }
-        self.connecting.lock().remove(&id);
-        self.announce(&id);
+        self.announce(id);
+    }
+
+    async fn connect_registered(
+        &self,
+        id: &str,
+        generation: Option<u64>,
+        handle: McpServerHandle,
+        reenable: bool,
+    ) {
+        let result = if reenable {
+            handle.reenable().await
+        } else {
+            handle.connect().await
+        };
+        if let Err(error) = result {
+            eprintln!("warning: MCP server {id} not started: {error}");
+        }
+        self.finish_connect(id, generation);
     }
 }
 
@@ -615,23 +640,29 @@ impl McpControl for McpHost {
     }
 
     async fn add(&self, input: McpServerInput) -> Result<McpServerDto, McpControlError> {
-        let _op = self.ops.lock().await;
-        self.check_writable()?;
-        let name = input
-            .name
-            .clone()
-            .ok_or_else(|| McpControlError::Invalid("`name` is required".into()))?;
-        let cfg = to_config(&name, input)?;
-        if self.configs.lock().contains_key(&name) {
-            return Err(McpControlError::Conflict(format!(
-                "mcp server {name} already exists"
-            )));
-        }
-        self.persist(|m| {
-            m.insert(name.clone(), cfg.clone());
-        })?;
-        self.connect_new(cfg.clone()).await;
-        Ok(self.dto(&cfg))
+        let (cfg, handle, generation) = {
+            let _op = self.ops.lock().await;
+            self.check_writable()?;
+            let name = input
+                .name
+                .clone()
+                .ok_or_else(|| invalid("`name` is required"))?;
+            let cfg = to_config(&name, input)?;
+            if self.configs.lock().contains_key(&name) {
+                return Err(McpControlError::Conflict(format!(
+                    "mcp server {name} already exists"
+                )));
+            }
+            self.persist(|m| {
+                m.insert(name.clone(), cfg.clone());
+            })?;
+            let handle = self.manager.register_server(cfg.clone()).map_err(map_err)?;
+            let generation = self.begin_connect(&name, cfg.enabled);
+            (cfg, handle, generation)
+        };
+        self.connect_registered(&cfg.id, generation, handle, false)
+            .await;
+        Ok(self.dto(&self.config_of(&cfg.id)?))
     }
 
     async fn update(
@@ -639,60 +670,79 @@ impl McpControl for McpHost {
         name: &str,
         input: serde_json::Value,
     ) -> Result<McpServerDto, McpControlError> {
-        let _op = self.ops.lock().await;
-        self.check_writable()?;
-        self.config_of(name)?;
-        let prev = self.config_of(name)?;
-        let cfg = merge_update(&prev, &input)?;
-        self.persist(|m| {
-            m.insert(name.to_owned(), cfg.clone());
-        })?;
-        match self.manager.remove_server(name).await {
-            Ok(()) | Err(McpError::UnknownServer(_)) => {}
-            Err(e) => return Err(map_err(e)),
-        }
-        // A config change is a refetch hint even when the status stays put
-        // (a disabled server updated in place, for example).
-        self.announced.lock().remove(name);
-        self.connect_new(cfg.clone()).await;
-        Ok(self.dto(&cfg))
+        let (cfg, old, handle, generation) = {
+            let _op = self.ops.lock().await;
+            self.check_writable()?;
+            let prev = self.config_of(name)?;
+            let cfg = merge_update(&prev, &input)?;
+            self.persist(|m| {
+                m.insert(name.to_owned(), cfg.clone());
+            })?;
+            let old = match self.manager.detach_server(name) {
+                Ok(handle) => Some(handle),
+                Err(McpError::UnknownServer(_)) => None,
+                Err(error) => return Err(map_err(error)),
+            };
+            self.connecting.lock().remove(name);
+            self.announced.lock().remove(name);
+            let handle = self.manager.register_server(cfg.clone()).map_err(map_err)?;
+            let generation = self.begin_connect(name, cfg.enabled);
+            (cfg, old, handle, generation)
+        };
+        tokio::join!(
+            async {
+                if let Some(old) = old {
+                    old.close().await;
+                }
+            },
+            self.connect_registered(name, generation, handle, false)
+        );
+        Ok(self.dto(&self.config_of(&cfg.id)?))
     }
 
     async fn remove(&self, name: &str) -> Result<(), McpControlError> {
-        let _op = self.ops.lock().await;
-        self.check_writable()?;
-        self.config_of(name)?;
-        self.persist(|m| {
-            m.remove(name);
-        })?;
-        match self.manager.remove_server(name).await {
-            Ok(()) | Err(McpError::UnknownServer(_)) => {}
-            Err(e) => return Err(map_err(e)),
+        let old = {
+            let _op = self.ops.lock().await;
+            self.check_writable()?;
+            self.config_of(name)?;
+            self.persist(|m| {
+                m.remove(name);
+            })?;
+            let old = match self.manager.detach_server(name) {
+                Ok(handle) => Some(handle),
+                Err(McpError::UnknownServer(_)) => None,
+                Err(error) => return Err(map_err(error)),
+            };
+            self.connecting.lock().remove(name);
+            self.forget(name);
+            old
+        };
+        if let Some(old) = old {
+            old.close().await;
         }
-        self.connecting.lock().remove(name);
-        self.forget(name);
         Ok(())
     }
 
     async fn reconnect(&self, name: &str) -> Result<McpServerDto, McpControlError> {
-        let _op = self.ops.lock().await;
-        let cfg = self.config_of(name)?;
-        if cfg.enabled {
-            if self.snapshot(name).is_some() {
-                self.connecting.lock().insert(name.to_owned());
-                self.announce(name);
-                // A failed connect shows as `status: error`, not as an HTTP error.
-                if let Err(e) = self.manager.reenable(name).await {
-                    eprintln!("warning: MCP server {name} reconnect failed: {e}");
-                }
-                self.connecting.lock().remove(name);
-                self.announce(name);
-            } else {
-                // Never registered (it was invalid at startup): try as new.
-                self.connect_new(cfg.clone()).await;
+        let (handle, generation, reenable) = {
+            let _op = self.ops.lock().await;
+            let cfg = self.config_of(name)?;
+            if !cfg.enabled {
+                return Ok(self.dto(&cfg));
             }
-        }
-        Ok(self.dto(&cfg))
+            let (handle, reenable) = match self.manager.server_handle(name) {
+                Ok(handle) => (handle, true),
+                Err(McpError::UnknownServer(_)) => {
+                    (self.manager.register_server(cfg).map_err(map_err)?, false)
+                }
+                Err(error) => return Err(map_err(error)),
+            };
+            let generation = self.begin_connect(name, true);
+            (handle, generation, reenable)
+        };
+        self.connect_registered(name, generation, handle, reenable)
+            .await;
+        Ok(self.dto(&self.config_of(name)?))
     }
 
     fn tools(&self, name: &str) -> Result<Vec<McpToolDto>, McpControlError> {
@@ -1093,5 +1143,76 @@ mod tests {
             assert!(cat.iter().any(|e| e.id == id), "{id}");
         }
         host.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn connection_work_releases_global_ops_for_other_management() {
+        // A deterministic gate at the transport boundary keeps the connection
+        // pending without sockets, subprocesses, or timing-dependent sleeps.
+        type Gate = Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>;
+        struct ReleaseOnDrop(Gate);
+        impl Drop for ReleaseOnDrop {
+            fn drop(&mut self) {
+                *self.0.0.lock().unwrap() = true;
+                self.0.1.notify_all();
+            }
+        }
+        struct GatedSecrets {
+            gate: Gate,
+            entered: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+        }
+        impl SecretStore for GatedSecrets {
+            fn get(
+                &self,
+                _: &str,
+            ) -> Result<Option<secret_store::SecretValue>, secret_store::SecretError> {
+                if let Some(entered) = self.entered.lock().take() {
+                    let _ = entered.send(());
+                }
+                let mut released = self.gate.0.lock().unwrap();
+                while !*released {
+                    released = self.gate.1.wait(released).unwrap();
+                }
+                Ok(None) // Stops before attempting to spawn the fixture command.
+            }
+            fn set(&self, _: &str, _: &str) -> Result<(), secret_store::SecretError> {
+                unreachable!()
+            }
+            fn delete(&self, _: &str) -> Result<bool, secret_store::SecretError> {
+                unreachable!()
+            }
+            fn list_names(&self) -> Result<Vec<String>, secret_store::SecretError> {
+                unreachable!()
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("Masaüstü-秘密");
+        std::fs::create_dir(&data).unwrap();
+        let gate = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        let release = ReleaseOnDrop(Arc::clone(&gate));
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let secrets = Arc::new(GatedSecrets {
+            gate,
+            entered: Mutex::new(Some(entered)),
+        });
+        let host =
+            McpHost::start_with_policy(&data, ToolRegistry::new(), Some(secrets), fast_policy());
+        let pending_host = Arc::clone(&host);
+        let pending = tokio::spawn(async move { pending_host.add(stdio("pending", true)).await });
+        started.await.unwrap();
+        assert!(
+            host.ops.try_lock().is_ok(),
+            "connection work must not hold global ops"
+        );
+        assert_eq!(host.add(stdio("other", false)).await.unwrap().name, "other");
+        host.remove("other").await.unwrap();
+        assert!(matches!(
+            host.config_of("other"),
+            Err(McpControlError::NotFound(_))
+        ));
+        drop(release);
+        assert_eq!(pending.await.unwrap().unwrap().status, McpStatus::Error);
+        host.shutdown().await;
+        drop(host); // Close the store/host before Windows removes the directory.
     }
 }
