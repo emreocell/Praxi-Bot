@@ -160,6 +160,9 @@ fn parent(path: &Path) -> &Path {
 fn open_log(path: &Path) -> Result<File> {
     std::fs::create_dir_all(parent(path)).map_err(storage_error)?;
     let mut options = OpenOptions::new();
+    // Append, not write. On Windows that is `FILE_APPEND_DATA` without
+    // `FILE_WRITE_DATA`, so `File::set_len` on this handle returns Access Denied
+    // (os error 5). Truncation goes through `truncate_durable`.
     options.read(true).append(true).create(true);
     #[cfg(unix)]
     {
@@ -169,40 +172,67 @@ fn open_log(path: &Path) -> Result<File> {
     options.open(path).map_err(storage_error)
 }
 
+/// Shrink `path` to `len` and fsync the new size.
+///
+/// Every append-mode handle must already be closed. Windows denies `set_len` on
+/// those handles, and a replace over a file that still has an open handle fails
+/// the same way. The valid prefix is left in place; only the torn tail is dropped.
+fn truncate_durable(path: &Path, len: u64) -> Result<()> {
+    let mut options = OpenOptions::new();
+    options.read(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(path).map_err(storage_error)?;
+    file.set_len(len).map_err(storage_error)?;
+    file.sync_all().map_err(storage_error)?;
+    Ok(())
+}
+
+/// Apply complete records. `Some(len)` is a torn final record: the caller
+/// truncates to `len` only after this function drops its append handle.
+fn replay(path: &Path, bot_key: &str, inner: &mut InboxInner) -> Result<Option<u64>> {
+    let mut reader = BufReader::new(open_log(path)?);
+    let mut valid_bytes = 0u64;
+    loop {
+        let mut line = Vec::new();
+        let count = (&mut reader)
+            .take(MAX_RECORD_BYTES as u64 + 1)
+            .read_until(b'\n', &mut line)
+            .map_err(storage_error)?;
+        if count == 0 {
+            break;
+        }
+        if count > MAX_RECORD_BYTES {
+            return Err(storage_error("record too large"));
+        }
+        if line.last() != Some(&b'\n') {
+            // No offset could have been acknowledged for a record without its
+            // newline and fsync. Discard only the unfinished final append.
+            return Ok(Some(valid_bytes));
+        }
+        let entry: InboxEntry = serde_json::from_slice(&line).map_err(storage_error)?;
+        if entry.update_id != entry.payload.update_id {
+            return Err(storage_error("record update ID differs from payload"));
+        }
+        if entry.bot_key == bot_key {
+            inner.apply(entry);
+        }
+        valid_bytes += count as u64;
+    }
+    Ok(None)
+}
+
 impl Inbox {
     pub(crate) fn open(path: Option<PathBuf>, bot_key: &str) -> Result<Self> {
         let mut inner = InboxInner::default();
         if let Some(path) = &path {
-            let file = open_log(path)?;
-            let mut reader = BufReader::new(file.try_clone().map_err(storage_error)?);
-            let mut valid_bytes = 0u64;
-            loop {
-                let mut line = Vec::new();
-                let count = (&mut reader)
-                    .take(MAX_RECORD_BYTES as u64 + 1)
-                    .read_until(b'\n', &mut line)
-                    .map_err(storage_error)?;
-                if count == 0 {
-                    break;
-                }
-                if count > MAX_RECORD_BYTES {
-                    return Err(storage_error("record too large"));
-                }
-                if line.last() != Some(&b'\n') {
-                    // No offset could have been acknowledged for a record without its
-                    // newline and fsync. Discard only the unfinished final append.
-                    file.set_len(valid_bytes).map_err(storage_error)?;
-                    file.sync_all().map_err(storage_error)?;
-                    break;
-                }
-                let entry: InboxEntry = serde_json::from_slice(&line).map_err(storage_error)?;
-                if entry.update_id != entry.payload.update_id {
-                    return Err(storage_error("record update ID differs from payload"));
-                }
-                if entry.bot_key == bot_key {
-                    inner.apply(entry);
-                }
-                valid_bytes += count as u64;
+            // `replay` closes the append handle before we truncate. Holding it
+            // across `set_len` is Access Denied on Windows.
+            if let Some(valid_bytes) = replay(path, bot_key, &mut inner)? {
+                truncate_durable(path, valid_bytes)?;
             }
         }
         Ok(Self {
@@ -247,7 +277,10 @@ impl Inbox {
             if let Err(error) = written {
                 // A partial append must not be followed by another record. If rollback
                 // itself fails, reject all subsequent writes/offset advances.
-                inner.poisoned = file.set_len(before).and_then(|()| file.sync_all()).is_err();
+                // Close the append handle first: `set_len` on it is Access Denied on
+                // Windows, which would poison a log we could still have repaired.
+                drop(file);
+                inner.poisoned = truncate_durable(path, before).is_err();
                 return Err(storage_error(error));
             }
         }
