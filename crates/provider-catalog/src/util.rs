@@ -14,6 +14,7 @@ use serde_json::{Map, Value};
 
 use crate::{
     error::ProviderError,
+    limits::error_body,
     openai_compat::{OpenAiCompatConfig, sse::SseDecoder},
     provider::{ChatChunk, ChatRequest, FinishReason},
 };
@@ -108,7 +109,7 @@ pub(crate) async fn send_with_retry(
             return Ok(resp);
         }
         let headers = resp.headers().clone();
-        let body = resp.text().await.unwrap_or_default();
+        let body = error_body(resp).await.unwrap_or_default();
         let err = classify(status.as_u16(), &headers, &body);
         let retry = match &err {
             ProviderError::RateLimited { retry_after } => Some(*retry_after),
@@ -372,8 +373,8 @@ pub(crate) trait EventDecoder: Send + 'static {
     fn finish(&mut self) -> Result<Vec<ChatChunk>, ProviderError>;
 }
 
-struct StreamState<D> {
-    bytes: BoxStream<'static, Result<Vec<u8>, ProviderError>>,
+struct StreamState<D, B> {
+    bytes: BoxStream<'static, Result<B, ProviderError>>,
     sse: SseDecoder,
     dec: D,
     pending: VecDeque<ChatChunk>,
@@ -381,9 +382,9 @@ struct StreamState<D> {
     done: bool,
 }
 
-async fn next_chunk<D: EventDecoder>(
-    mut st: StreamState<D>,
-) -> Result<Option<(ChatChunk, StreamState<D>)>, ProviderError> {
+async fn next_chunk<D: EventDecoder, B: AsRef<[u8]> + Send + 'static>(
+    mut st: StreamState<D, B>,
+) -> Result<Option<(ChatChunk, StreamState<D, B>)>, ProviderError> {
     loop {
         if let Some(c) = st.pending.pop_front() {
             return Ok(Some((c, st)));
@@ -392,7 +393,7 @@ async fn next_chunk<D: EventDecoder>(
             return Ok(None);
         }
         if st.eof {
-            if let Some(tail) = st.sse.finish() {
+            if let Some(tail) = st.sse.finish()? {
                 let chunks = st.dec.feed(&tail)?;
                 st.pending.extend(chunks);
             }
@@ -403,7 +404,8 @@ async fn next_chunk<D: EventDecoder>(
         }
         match st.bytes.next().await {
             Some(Ok(b)) => {
-                for payload in st.sse.push(&b) {
+                let mut input = b.as_ref();
+                while let Some(payload) = st.sse.next_event(&mut input)? {
                     let chunks = st.dec.feed(&payload)?;
                     st.pending.extend(chunks);
                 }
@@ -421,7 +423,7 @@ pub(crate) fn event_stream<D: EventDecoder>(
 ) -> BoxStream<'static, Result<ChatChunk, ProviderError>> {
     let bytes = resp
         .bytes_stream()
-        .map(|r| r.map(|b| b.to_vec()).map_err(map_reqwest_error))
+        .map(|r| r.map_err(map_reqwest_error))
         .boxed();
     let state = StreamState {
         bytes,

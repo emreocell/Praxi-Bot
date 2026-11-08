@@ -450,6 +450,9 @@ pub enum SuccessCheck {
 pub struct Workflow {
     /// Format version.
     pub version: u32,
+    /// Monotonic store revision, distinct from the workflow format version.
+    #[serde(default = "initial_revision")]
+    pub revision: u64,
     /// Identifier (`a-z0-9_-`).
     pub name: String,
     /// What it does.
@@ -464,6 +467,10 @@ pub struct Workflow {
     /// Checked after the last step.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub success_check: Option<SuccessCheck>,
+}
+
+const fn initial_revision() -> u64 {
+    1
 }
 
 /// Whether `name` is a legal workflow name.
@@ -482,6 +489,7 @@ impl Workflow {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             version: FORMAT_VERSION,
+            revision: initial_revision(),
             name: name.into(),
             description: String::new(),
             params: Vec::new(),
