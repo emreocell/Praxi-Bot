@@ -10,7 +10,11 @@ use wiremock::{
 
 use super::{OpenAiCompatConfig, OpenAiCompatProvider, request::build_body, sse::SseDecoder};
 use crate::{
-    entry::{Auth, CompatFlags, ModelCapabilities, ProviderEntry, ProviderKind},
+    config::ProviderSettings,
+    entry::{
+        Auth, CapabilityOverrides, CompatFlags, ModelCapabilities, ModelInfo, ProviderEntry,
+        ProviderKind,
+    },
     error::ProviderError,
     provider::{
         ChatChunk, ChatProvider, ChatRequest, FinishReason, Message, MessageRole, ModelRef,
@@ -493,7 +497,7 @@ fn images_require_vision_and_tools_require_tools() {
     let mut e = entry("http://x");
     assert!(matches!(
         build_body(&e, "m", &r, true),
-        Err(ProviderError::InvalidRequest(_))
+        Err(ProviderError::Unsupported { capability }) if capability == "vision"
     ));
     e.capabilities.vision = true;
     let b = build_body(&e, "m", &r, true).unwrap();
@@ -504,7 +508,7 @@ fn images_require_vision_and_tools_require_tools() {
     r2.tools = vec![tool()];
     assert!(matches!(
         build_body(&e, "m", &r2, true),
-        Err(ProviderError::InvalidRequest(_))
+        Err(ProviderError::Unsupported { capability }) if capability == "tools"
     ));
 }
 
@@ -515,6 +519,114 @@ fn json_mode_ignored_when_unsupported() {
     let mut r = req();
     r.json_mode = true;
     assert!(body(&e, &r).get("response_format").is_none());
+}
+
+#[test]
+fn catalog_model_override_rejects_only_that_model() {
+    let src = r#"
+id = "agg"
+kind = "open_ai_compatible"
+base_url = "http://localhost:1/v1"
+auth = "None"
+
+[capabilities]
+tools = true
+vision = true
+streaming = true
+json_mode = true
+
+[[models]]
+id = "weak"
+capabilities = { tools = false, vision = false }
+
+[[models]]
+id = "strong"
+"#;
+    let e: ProviderEntry = toml::from_str(src).unwrap();
+    let mut r = req();
+    r.tools = vec![tool()];
+    assert!(matches!(
+        build_body(&e, "weak", &r, true),
+        Err(ProviderError::Unsupported { ref capability }) if capability == "tools"
+    ));
+    assert!(build_body(&e, "strong", &r, true).is_ok());
+    assert!(build_body(&e, "unlisted", &r, true).is_ok());
+
+    let mut user = ProviderSettings::new("agg", 1);
+    user.model_caps.insert(
+        "weak".into(),
+        CapabilityOverrides {
+            tools: Some(true),
+            ..CapabilityOverrides::default()
+        },
+    );
+    let merged = user.apply_model_caps(&e);
+    assert!(build_body(&merged, "weak", &r, true).is_ok());
+    // The catalog vision override survives a user value that does not mention it.
+    assert!(!merged.caps_for("weak").vision);
+    assert!(merged.caps_for("strong").tools);
+}
+
+#[tokio::test]
+async fn per_model_streaming_override_disables_sse() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(body_partial_json(json!({"model": "weak", "stream": false})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{
+                "message": {"role": "assistant", "content": "hi"},
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut e = entry(&server.uri());
+    e.models.push(ModelInfo {
+        id: "weak".into(),
+        capabilities: Some(CapabilityOverrides {
+            streaming: Some(false),
+            ..CapabilityOverrides::default()
+        }),
+        ..ModelInfo::default()
+    });
+    assert!(e.caps_for("some-model").streaming);
+    assert!(!e.caps_for("weak").streaming);
+    let p = OpenAiCompatProvider::with_api_key(e, fast(), None).unwrap();
+    let mut r = req();
+    r.model = ModelRef("mock/weak".into());
+    let chunks = collect(&p, r).await.unwrap();
+    assert!(matches!(&chunks[0], ChatChunk::TextDelta(t) if t == "hi"));
+}
+
+#[tokio::test]
+async fn tool_support_400s_from_ollama_and_lmstudio_are_unsupported() {
+    // Ollama's OpenAI-compatible endpoint (registry form, HTTP 400).
+    let ollama = r#"{"error":{"message":"registry.ollama.ai/library/llama3.2:latest does not support tools","type":"api_error","param":null,"code":null}}"#;
+    // LM Studio's OpenAI-compatible server (`model_not_support_tools`).
+    let lmstudio = r#"{"error":{"message":"The model does not support tools.","type":"invalid_request_error","code":"model_not_support_tools"}}"#;
+    let unrelated = r#"{"error":{"message":"invalid temperature","type":"invalid_request_error"}}"#;
+    for (body, unsupported) in [(ollama, true), (lmstudio, true), (unrelated, false)] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(400).set_body_string(body))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let err = provider(&server).stream(req()).await.err().unwrap();
+        if unsupported {
+            assert!(
+                matches!(err, ProviderError::Unsupported { ref capability } if capability == "tools"),
+                "{body} -> {err:?}"
+            );
+        } else {
+            assert!(
+                matches!(err, ProviderError::Api { status: 400, .. }),
+                "{body} -> {err:?}"
+            );
+        }
+    }
 }
 
 #[test]

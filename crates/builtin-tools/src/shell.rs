@@ -315,6 +315,7 @@ mod tests {
         let ctx = ToolContext {
             run_id: "r".into(),
             max_inline_bytes: 1000,
+            bot_id: None,
         };
         let out = t
             .call(

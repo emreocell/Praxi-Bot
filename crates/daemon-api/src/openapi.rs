@@ -8,7 +8,7 @@ use axum::Json;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
-use crate::{dto, error, routes};
+use crate::{dto, error, mcp, mcp_routes, routes};
 
 struct Security;
 
@@ -67,6 +67,7 @@ impl Modify for Security {
         routes::get_policy,
         routes::put_policy,
         routes::list_providers,
+        routes::detect_providers,
         routes::reload_providers,
         routes::list_schedules,
         routes::create_schedule,
@@ -78,6 +79,14 @@ impl Modify for Security {
         routes::webhook,
         routes::list_channels,
         routes::telegram_pair_code,
+        mcp_routes::list_mcp_servers,
+        mcp_routes::create_mcp_server,
+        mcp_routes::update_mcp_server,
+        mcp_routes::delete_mcp_server,
+        mcp_routes::reconnect_mcp_server,
+        mcp_routes::list_mcp_tools,
+        mcp_routes::mcp_catalog,
+        mcp_routes::set_secret,
         events_doc,
     ),
     components(schemas(
@@ -90,14 +99,19 @@ impl Modify for Security {
         dto::CategoryDecisionDto, dto::ControlMode, dto::ControlStateInput,
         dto::ControlStateDto, dto::ControlVerdict, dto::ControlDecisionInput,
         dto::ControlDecisionResponse, dto::PolicyDto, dto::PolicyInput, dto::ProvidersDto,
-        dto::ConfiguredProviderDto, dto::CatalogProviderDto, dto::ReloadResponse, dto::RememberResponse, dto::ScheduleDto, dto::ScheduleInput,
-        dto::ParseSchedule, dto::ParsedSchedule, dto::AcceptedResponse, dto::ChannelDto, dto::PairCodeDto, dto::ScheduleChanged, dto::ScheduleChangeKind, error::ErrorBody, error::ErrorDetail,
+        dto::ConfiguredProviderDto, dto::CatalogProviderDto, dto::DetectedProviderDto, dto::CliAuthState, dto::ReloadResponse, dto::RememberResponse, dto::ScheduleDto, dto::ScheduleInput,
+        dto::ParseSchedule, dto::ParsedSchedule, dto::AcceptedResponse, dto::ChannelDto, dto::PairCodeDto, dto::ScheduleChanged, dto::ScheduleChangeKind,
+        mcp::McpTransportKind, mcp::McpStatus, mcp::McpServerDto, mcp::McpTransportObject,
+        mcp::McpTransportInput, mcp::McpServerInput, mcp::McpToolDto, mcp::McpRequiredSecretDto,
+        mcp::McpCatalogInstallDto, mcp::McpCatalogEntryDto, mcp::SetSecret, mcp::McpServerChanged,
+        error::ErrorBody, error::ErrorDetail,
     )),
     modifiers(&Security),
     tags(
         (name = "meta"), (name = "bots"), (name = "chats"), (name = "approvals"),
         (name = "runs"), (name = "usage"), (name = "events"), (name = "control"),
-        (name = "policy"), (name = "providers"), (name = "schedules"), (name = "channels")
+        (name = "policy"), (name = "providers"), (name = "schedules"), (name = "channels"),
+        (name = "mcp"), (name = "secrets")
     )
 )]
 pub struct ApiDoc;
@@ -119,6 +133,11 @@ pub struct ApiDoc;
 /// kind `created` / `updated` / `toggled` / `deleted`) when a schedule is changed
 /// through the API.  They have no SSE `id`, are not replayed and are not
 /// envelopes: treat them as a hint to refetch `/v1/schedules`.
+///
+/// It likewise carries `mcp_server_changed` events (`mcp::McpServerChanged`:
+/// `{"type":"mcp_server_changed","name","status"}`) when an MCP server is
+/// added, updated, removed or changes status (connecting / connected / error /
+/// quarantined ...); same rules: a hint to refetch `/v1/mcp/servers`.
 #[utoipa::path(get, path = "/v1/events", tag = "events", security(("bearer" = [])),
     params(
         ("run_id" = Option<uuid::Uuid>, Query, description = "Follow only this run; the stream ends after run_finished"),

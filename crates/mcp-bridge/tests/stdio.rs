@@ -6,7 +6,7 @@ use mcp_bridge::{
     Backoff, McpManager, McpPolicy, McpServerConfig, McpTransport, OS_ESSENTIAL_ENV, ServerStatus,
 };
 use serde_json::json;
-use tool_registry::{ContentPart, Effect, ToolContext, ToolRegistry};
+use tool_registry::{ContentPart, Effect, ToolContext, ToolError, ToolRegistry};
 
 fn server_exe() -> PathBuf {
     // target/debug/deps/<test>.exe -> target/debug/examples/test_server[.exe]
@@ -237,15 +237,12 @@ async fn discovery_surface_fronts_a_large_mcp_server() {
     let mgr = McpManager::with_policy(reg.clone(), fast_policy(3));
     mgr.add_server(config("d")).await.unwrap();
 
-    // 6 MCP tools: above a threshold of 3 the model only sees the meta-tools.
+    // MCP tools are namespaced: they never count against the threshold and
+    // are never passed directly, so the model only sees the meta-tools.
     let surface = ToolSurface::new(reg.clone(), 3);
-    assert_eq!(surface.mode(), SurfaceMode::Discovery);
+    assert_eq!(surface.mode(), SurfaceMode::Direct);
     assert_eq!(surface.specs().len(), 3);
-    // Below the threshold they would be passed directly.
-    assert_eq!(
-        ToolSurface::new(reg.clone(), 10).mode(),
-        SurfaceMode::Direct
-    );
+    assert!(surface.resolve("mcp:d/echo").is_none());
 
     let ctx = ToolContext::default();
     let find = surface.resolve(FIND_TOOL).unwrap();
@@ -256,7 +253,7 @@ async fn discovery_surface_fronts_a_large_mcp_server() {
     let ContentPart::Json { data } = &hits.content[0] else {
         panic!("expected json")
     };
-    assert_eq!(data[0]["name"], "mcp:d/echo");
+    assert_eq!(data["results"][0]["name"], "mcp:d/echo");
 
     let out = surface
         .resolve(USE_TOOL)
@@ -268,6 +265,101 @@ async fn discovery_surface_fronts_a_large_mcp_server() {
         .await
         .unwrap();
     assert_eq!(text_of(&out.content), "via meta");
+}
+
+fn process_alive(pid: u32) -> bool {
+    #[cfg(windows)]
+    {
+        let out = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
+            .output();
+        match out {
+            Ok(o) => String::from_utf8_lossy(&o.stdout).contains(&format!("\"{pid}\"")),
+            Err(_) => false,
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bots_allowlist_is_enforced_on_call() {
+    let reg = ToolRegistry::new();
+    let mgr = McpManager::with_policy(reg.clone(), fast_policy(3));
+    let mut cfg = config("b");
+    cfg.bots = Some(vec!["bot-a".into()]);
+    mgr.add_server(cfg).await.unwrap();
+    let tool = reg.get("mcp:b/echo").unwrap();
+    let input = json!({"text": "hi"});
+    let allowed = ToolContext {
+        bot_id: Some("bot-a".into()),
+        ..ToolContext::default()
+    };
+    assert_eq!(
+        text_of(&tool.call(&allowed, input.clone()).await.unwrap().content),
+        "hi"
+    );
+    let other = ToolContext {
+        bot_id: Some("bot-b".into()),
+        ..ToolContext::default()
+    };
+    let err = tool.call(&other, input.clone()).await.unwrap_err();
+    assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+    let err = tool.call(&ToolContext::default(), input).await.unwrap_err();
+    assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+
+    let mut open = config("open");
+    open.bots = None;
+    mgr.add_server(open).await.unwrap();
+    let any = reg.get("mcp:open/echo").unwrap();
+    assert!(
+        any.call(&ToolContext::default(), json!({"text": "x"}))
+            .await
+            .is_ok()
+    );
+    mgr.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn shutdown_reaps_stdio_child_tree() {
+    let dir = tempfile::tempdir().unwrap();
+    let pidfile = dir.path().join("orphan.pid");
+    let reg = ToolRegistry::new();
+    let mgr = McpManager::with_policy(reg, fast_policy(3));
+    let mut cfg = config("tree");
+    if let McpTransport::Stdio { env, .. } = &mut cfg.transport {
+        env.insert("MCP_ORPHAN_PIDFILE".into(), pidfile.display().to_string());
+    }
+    mgr.add_server(cfg).await.unwrap();
+    let mut pid = None;
+    for _ in 0..50 {
+        if let Ok(text) = std::fs::read_to_string(&pidfile)
+            && let Ok(n) = text.trim().parse::<u32>()
+        {
+            pid = Some(n);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let pid = pid.expect("orphan pidfile");
+    assert!(process_alive(pid), "orphan {pid} was not alive");
+    mgr.shutdown().await;
+    let mut dead = false;
+    for _ in 0..40 {
+        if !process_alive(pid) {
+            dead = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(dead, "orphan {pid} survived MCP shutdown");
 }
 
 // ── fail-closed hardening (task 042) ────────────────────────────────────────

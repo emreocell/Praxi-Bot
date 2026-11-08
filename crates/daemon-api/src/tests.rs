@@ -22,6 +22,7 @@ use tower::ServiceExt;
 use crate::fake::FakeProvider;
 use crate::{AppState, DaemonConfig, router};
 
+mod mcp;
 mod schedules;
 
 const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -223,6 +224,39 @@ async fn events(t: &T, query: &str, last_id: Option<&str>) -> Vec<(String, Strin
 }
 
 // ------------------------------------------------------------ guards
+
+#[tokio::test]
+async fn unconfigured_daemon_stays_live_and_rejects_chat_until_reload() {
+    let t = setup();
+    t.agent.set_providers(Providers::unconfigured());
+    let (_, chat) = make_chat(&t).await;
+    for _ in 0..2 {
+        let health = send(&t.app, Method::GET, "/v1/health", None, &[]).await;
+        assert_eq!(health.status, StatusCode::OK);
+        assert_eq!(health.json()["status"], "setup_required");
+        let resp = call(
+            &t,
+            Method::POST,
+            &format!("/v1/chats/{chat}/messages"),
+            Some(json!({"text":"hello"})),
+        )
+        .await;
+        assert_eq!(resp.status, StatusCode::CONFLICT);
+        assert_eq!(resp.json()["error"]["code"], "setup_required");
+    }
+    t.agent
+        .set_providers(Providers::single(Arc::new(FakeProvider)));
+    let health = send(&t.app, Method::GET, "/v1/health", None, &[]).await;
+    assert_eq!(health.json()["status"], "ok");
+    let resp = call(
+        &t,
+        Method::POST,
+        &format!("/v1/chats/{chat}/messages"),
+        Some(json!({"text":"hello"})),
+    )
+    .await;
+    assert_eq!(resp.status, StatusCode::ACCEPTED);
+}
 
 #[tokio::test]
 async fn auth_required_and_health_is_public() {
@@ -1380,7 +1414,14 @@ fn openapi_snapshot() {
         "/v1/control/{request_id}",
         "/v1/policy",
         "/v1/providers",
+        "/v1/providers/detected",
         "/v1/providers/reload",
+        "/v1/mcp/servers",
+        "/v1/mcp/servers/{name}",
+        "/v1/mcp/servers/{name}/reconnect",
+        "/v1/mcp/servers/{name}/tools",
+        "/v1/mcp/catalog",
+        "/v1/secrets/{name}",
     ] {
         assert!(v["paths"].get(p).is_some(), "{p}");
     }
@@ -1537,15 +1578,21 @@ async fn control_routes_validate_and_report_the_registration() {
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
 }
 
+/// One run: observe, then click `index` with that observation's generation.
+/// Desktop state is per run, so the click cannot reuse an earlier message.
+fn click_after_state(index: u32) -> String {
+    format!("call:desktop_get_state {{}}\ncall:desktop_click {{\"index\": {index}, \"gen\": $gen}}")
+}
+
 #[tokio::test]
 async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
     let (t, desktop) = setup_desktop();
     let (_, chat) = make_chat(&t).await;
-    let r = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
-    assert!(r.contains("Button 2"), "{r}");
+    let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
+    assert!(state.contains("Button 2"), "{state}");
 
     // Nobody registered: the click just runs.
-    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 2}"#).await;
+    let r = run_and_reply(&t, &chat, &click_after_state(2)).await;
     assert!(r.contains("dispatched"), "{r}");
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
 
@@ -1557,9 +1604,9 @@ async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
         Some(json!({"mode": "human_driving"})),
     )
     .await;
-    let r = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
-    assert!(r.contains("Button 2"), "reads are not gated: {r}");
-    let (r, events) = run_and_reply_seen(&t, &chat, r#"call:desktop_click {"index": 3}"#).await;
+    let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
+    assert!(state.contains("Button 2"), "reads are not gated: {state}");
+    let (r, events) = run_and_reply_seen(&t, &chat, &click_after_state(3)).await;
     assert!(r.contains("taken control of the desktop"), "{r}");
     // "At once" means no round trip to the app (which would have emitted a
     // `control_requested` and waited for its answer), not a wall-clock bound.
@@ -1582,9 +1629,9 @@ async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
     )
     .await;
     // Registered but silent: refused after the long timeout (600 ms here).
-    let r = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
-    assert!(r.contains("Button"), "{r}");
-    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 3}"#).await;
+    let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
+    assert!(state.contains("Button"), "{state}");
+    let r = run_and_reply(&t, &chat, &click_after_state(3)).await;
     assert!(r.contains("did not confirm"), "{r}");
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
@@ -1632,8 +1679,7 @@ async fn a_registered_app_confirms_each_click_before_it_runs() {
     )
     .await;
     let seen = auto_answer(&t, "proceed", None);
-    run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
-    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 2}"#).await;
+    let r = run_and_reply(&t, &chat, &click_after_state(2)).await;
     assert!(r.contains("dispatched"), "{r}");
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
 
@@ -1657,8 +1703,7 @@ async fn an_app_refusal_reaches_the_model_and_nothing_is_dispatched() {
     )
     .await;
     let _seen = auto_answer(&t, "refuse", Some("the user pressed Stop"));
-    run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
-    let r = run_and_reply(&t, &chat, r#"call:desktop_click {"index": 1}"#).await;
+    let r = run_and_reply(&t, &chat, &click_after_state(1)).await;
     assert!(r.contains("the user pressed Stop"), "{r}");
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 0);
 }
@@ -2017,6 +2062,80 @@ async fn providers_are_listed_with_models_and_reload_swaps_them() {
     assert_eq!(conf[0]["models"], json!(["m1", "m2"]));
     assert_eq!(conf[1]["active"], false);
     assert_eq!(p["default_provider"], "second");
+}
+
+#[tokio::test]
+async fn providers_detected_requires_auth() {
+    let t = setup();
+    let r = send(&t.app, Method::GET, "/v1/providers/detected", None, &[]).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn providers_detected_reports_six_rows() {
+    let t = setup();
+    let r = call(&t, Method::GET, "/v1/providers/detected", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let list = r.json();
+    let items = list.as_array().unwrap();
+    assert_eq!(items.len(), 6);
+    let ids: Vec<&str> = items
+        .iter()
+        .map(|item| item["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![
+            "claude",
+            "codex",
+            "cursor",
+            "opencode",
+            "gemini",
+            "chatgpt-plan"
+        ]
+    );
+    for row in items {
+        assert_eq!(row["runnable"], false);
+    }
+}
+
+#[tokio::test]
+async fn providers_detected_sentinel_token_is_never_leaked_or_read() {
+    let t = setup();
+    let temp = tempfile::tempdir().unwrap();
+
+    let opencode_dir = temp.path().join("local_app").join("opencode");
+    std::fs::create_dir_all(&opencode_dir).unwrap();
+    let sentinel = "SENTINEL_TOKEN_SECRET_NEVER_LEAK";
+    std::fs::write(opencode_dir.join("auth.json"), sentinel).unwrap();
+
+    let gemini_dir = temp.path().join("home").join(".gemini");
+    std::fs::create_dir_all(&gemini_dir).unwrap();
+    std::fs::write(gemini_dir.join("oauth_creds.json"), sentinel).unwrap();
+
+    let env = cli_provider::PathEnv::for_test(temp.path().to_path_buf())
+        .with_local_app_data(temp.path().join("local_app"))
+        .with_home(temp.path().join("home"));
+
+    t.state
+        .set_detector(Arc::new(cli_provider::Detector::with_env(env)));
+
+    let r = call(&t, Method::GET, "/v1/providers/detected?refresh=1", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+
+    let body_str = String::from_utf8(r.body.clone()).unwrap();
+    assert!(
+        !body_str.contains(sentinel),
+        "response body must never contain sentinel token from auth files"
+    );
+
+    let list = r.json();
+    let items = list.as_array().unwrap();
+    let opencode = items.iter().find(|x| x["id"] == "opencode").unwrap();
+    let gemini = items.iter().find(|x| x["id"] == "gemini").unwrap();
+
+    assert_eq!(opencode["auth"], "unknown");
+    assert_eq!(gemini["auth"], "unknown");
 }
 
 // ----------------------------------------------------------- usage cost

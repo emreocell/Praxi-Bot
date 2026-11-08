@@ -58,6 +58,11 @@ pub struct ToolContext {
     pub run_id: String,
     /// Maximum number of bytes of output to retain in memory before spilling.
     pub max_inline_bytes: usize,
+    /// Bot that invoked the tool. `None` when the caller is not a bot.
+    ///
+    /// MCP servers with a `bots` allowlist refuse a call whose id is missing
+    /// or not listed. `None` here is not "every bot".
+    pub bot_id: Option<String>,
 }
 
 impl Default for ToolContext {
@@ -65,6 +70,7 @@ impl Default for ToolContext {
         Self {
             run_id: String::new(),
             max_inline_bytes: 1024 * 1024, // 1 MiB
+            bot_id: None,
         }
     }
 }

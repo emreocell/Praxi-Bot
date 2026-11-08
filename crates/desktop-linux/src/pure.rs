@@ -257,16 +257,37 @@ pub fn keep(node: &RawNode, is_root: bool) -> bool {
     context && !node.name.trim().is_empty()
 }
 
-/// Select the source indices to keep (first `max` kept nodes, in order).
+/// Select the source indices to keep, in document order. When more than `max`
+/// nodes qualify, the root and the focused node come first, then enabled
+/// interactive nodes, then the rest; the result is still sorted by position.
 /// Element 0 is treated as the root.
 #[must_use]
 pub fn select(raw: &[RawNode], max: usize) -> Vec<usize> {
-    raw.iter()
+    let kept: Vec<usize> = raw
+        .iter()
         .enumerate()
         .filter(|(i, n)| keep(n, *i == 0))
         .map(|(i, _)| i)
-        .take(max)
-        .collect()
+        .collect();
+    if kept.len() <= max {
+        return kept;
+    }
+    let tier = |i: usize| -> u8 {
+        let n = &raw[i];
+        if i == 0 || n.focused {
+            0
+        } else if n.enabled && n.is_interactive() {
+            1
+        } else {
+            2
+        }
+    };
+    let mut ranked = kept;
+    // Stable sort keeps document order inside each tier.
+    ranked.sort_by_key(|&i| tier(i));
+    ranked.truncate(max);
+    ranked.sort_unstable();
+    ranked
 }
 
 /// Convert a raw node into the public [`UiNode`]. Password fields lose their
@@ -600,6 +621,25 @@ mod tests {
         v.extend((0..10).map(|i| raw("button", &format!("b{i}"))));
         let sel = select(&v, 4);
         assert_eq!(sel, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn select_prefers_focus_and_interactive_nodes_over_text_when_capped() {
+        let mut v = vec![raw("pane", "")];
+        v.extend((0..3000).map(|i| raw("text", &format!("t{i}"))));
+        v.extend((0..1998).map(|i| raw("button", &format!("b{i}"))));
+        let mut focused = raw("edit", "Search");
+        focused.focused = true;
+        v.push(focused);
+        assert_eq!(v.len(), 5000);
+        let sel = select(&v, MAX_NODES);
+        assert_eq!(sel.len(), MAX_NODES);
+        assert!(sel.contains(&0));
+        assert!(sel.contains(&4999), "focused node kept");
+        for i in 3001..4999 {
+            assert!(sel.contains(&i), "interactive node {i} kept");
+        }
+        assert!(sel.windows(2).all(|w| w[0] < w[1]), "document order");
     }
 
     #[test]

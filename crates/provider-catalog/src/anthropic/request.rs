@@ -104,9 +104,9 @@ fn convert_messages(req: &ChatRequest, vision: bool) -> Result<(Vec<Value>, Turn
     let mut out: Turns = Vec::new();
     for m in &req.messages {
         if !vision && has_image(&m.content) {
-            return Err(ProviderError::InvalidRequest(
-                "image content sent to a model without vision capability".into(),
-            ));
+            return Err(ProviderError::Unsupported {
+                capability: "vision".into(),
+            });
         }
         match m.role {
             MessageRole::System => {
@@ -168,20 +168,21 @@ fn tool_choice(entry: &ProviderEntry, choice: Option<&ToolChoice>) -> Option<Val
 /// Build the JSON request body for `model`.
 ///
 /// # Errors
-/// [`ProviderError::InvalidRequest`] when the request needs a capability the
-/// entry does not declare (images without `vision`, tools without `tools`).
+/// [`ProviderError::Unsupported`] when the request needs a capability `model`
+/// does not have (images without `vision`, tools without `tools`).
 pub(super) fn build_body(
     entry: &ProviderEntry,
     model: &str,
     req: &ChatRequest,
     caching: bool,
 ) -> Result<Value, ProviderError> {
-    if !req.tools.is_empty() && !entry.capabilities.tools {
-        return Err(ProviderError::InvalidRequest(
-            "tools sent to a model without tool-calling capability".into(),
-        ));
+    let caps = entry.caps_for(model);
+    if !req.tools.is_empty() && !caps.tools {
+        return Err(ProviderError::Unsupported {
+            capability: "tools".into(),
+        });
     }
-    let (mut system, messages) = convert_messages(req, entry.capabilities.vision)?;
+    let (mut system, messages) = convert_messages(req, caps.vision)?;
     let mut tools = convert_tools(&req.tools);
 
     let mut messages: Vec<Value> = messages

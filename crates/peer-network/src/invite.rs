@@ -15,6 +15,8 @@ use crate::store::Role;
 pub const TICKET_PREFIX: &str = "bot-pair:";
 /// How long an invite stays valid.
 pub const INVITE_TTL: Duration = Duration::from_secs(120);
+/// Maximum validity window for a custom invite.
+pub const MAX_INVITE_TTL: Duration = Duration::from_secs(30 * 60);
 /// Wrong attempts tolerated before an invite is destroyed.
 const MAX_FAILED: u32 = 5;
 

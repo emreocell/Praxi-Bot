@@ -1,55 +1,77 @@
 # MCP servers
 
-> **Status: Planned for the daemon.** Praxi contains an MCP client library
-> (`crates/mcp-bridge`) with tests, but the daemon (`bot serve`) does not load
-> or start MCP servers yet, and there is no CLI command or desktop screen to add
-> one. This page describes what the library does so you know what is coming.
-> Do not expect a `mcp.toml` placed in your data directory to take effect today.
+The daemon (`bot serve`) loads `<data dir>/mcp.toml` at startup and **runs** every
+enabled server in that file. A `stdio` server is a program the daemon starts
+as the same user the daemon runs as: it can read and write whatever that user
+can. An `http` server is a URL the daemon calls.
 
-The Model Context Protocol (MCP) is a standard way for tools to be offered to AI
-agents. With MCP support, any MCP server (a program you run, or a web endpoint)
-becomes a set of tools a bot can use.
+You can also add, change and remove servers while the daemon is running, with
+`POST`, `PUT` and `DELETE` on `/v1/mcp/servers` (see
+[`docs/api/openapi.json`](../api/openapi.json)). Every change is written back
+to `mcp.toml` before it is applied. `GET /v1/mcp/servers` returns the stored
+config: tool filters, the working directory, plain environment variables,
+header names, and secret **names**. It never returns a secret value. Store
+values with `POST /v1/secrets/{name}` (write-only).
 
-## What the library supports
+`PUT /v1/mcp/servers/{name}` merges into the stored server. A field you leave
+out keeps its previous value. `bots: null` means every bot.
+
+## What a server becomes
 
 - **Two transports:** a local program spoken to over stdin/stdout (`stdio`), or a
-  streamable HTTP endpoint (`http`, with optional extra headers such as
-  `Authorization`).
+  streamable HTTP endpoint (`http`).
 - **Naming:** a tool `search` from a server with id `web` is exposed as
   `mcp:web/search`.
 - **Filtering:** per server, `tool_allow` and `tool_exclude` glob lists over the
   server-side tool name; the exclude list is applied after the allow list.
-- **Safe by default:** tools count as *destructive* (so they ask for approval)
-  unless the server marks them with the `readOnlyHint` annotation.
-- **Isolation:** a stdio server only receives the environment variables you list
-  for it (plus a tiny OS-essential set); nothing is inherited implicitly.
+- **`readOnlyHint` is ignored unless you opt in.** Tools are *destructive*
+  (they ask for approval) even when the server marks them read-only. Set
+  `trust_hints = true` on that server only if you trust it to lower its own
+  tools to read-only.
+- **Who may call it:** `bots` is a list of bot ids, or omitted / `null` for
+  every bot. A listed server refuses calls from any other bot.
+- **Isolation of the environment:** a stdio server only receives the variables
+  you list (plus a tiny OS-essential set). Nothing else is inherited. The
+  program itself still runs as the daemon user.
+- **Commands that the shell tool would always flag are refused.** The same
+  never-list that forces approval for `shell_run` (for example `rm -rf /`)
+  rejects the stdio `command` and `args` before the process is started, both
+  for `mcp.toml` at startup and for add/update through the API.
 - **Resilience:** reconnects with backoff, and quarantines a server that keeps
-  failing.
-- **Persistence:** the planned configuration is a TOML file listing servers.
+  failing. On shutdown the daemon closes each session and waits for the child
+  to exit. Stdio servers are started in their own process group (Unix) or a
+  Windows job that dies when the job closes, so an `npx` or `uvx` wrapper and
+  the process it launched are both stopped.
 
-Illustrative shape of one server entry (the schema of the library, not a file
-that Praxi reads yet):
+## `mcp.toml`
+
+The file lives in the data directory (`BOT_DATA_DIR`, or the OS application
+data directory for Praxi). The daemon creates it if it is missing. If the file
+cannot be parsed, no server from it is started and the daemon will not
+overwrite it until you fix it and restart.
 
 ```toml
 [[server]]
 id = "files"
 enabled = true
+category = "fs"          # accounts (default) | fs | shell | browser | ...
+trust_hints = false      # true: believe this server's readOnlyHint
+# bots = ["bot-a"]       # omit or null: every bot
 tool_allow = ["read_*"]
 
 [server.transport]
 type = "stdio"
 command = "npx"
-args = ["-y", "some-mcp-server"]
-[server.transport.env]
-API_TOKEN = "..."
+args = ["-y", "@modelcontextprotocol/server-filesystem@2.2.0", "."]
+
+[server.secret_env]
+API_KEY = "mcp/files-key"   # name of a secret, never its value
 ```
 
-Server ids may use only letters, digits, `.`, `_` and `-`.
+Server ids may use only letters, digits, `.`, `_` and `-`. `category = "meta"`
+is rejected. Catalog packages are pinned to an exact version (`name@1.2.3` or
+`name==1.2.3`); `@latest` and a bare `npx -y` / `uvx` package are not accepted
+in the curated catalog.
 
-## Until then
-
-You can extend what a bot does today with [skills](skills.md),
-[workflows](workflows.md) (including a `tool` step), and the built-in tools
-listed in [Bots and profiles](bots-and-profiles.md). The `script_run` tool lets a
-bot run small scripts that can call other tools, and every inner call is
-permission-checked like a direct one.
+A stdio `command` is executed. Do not point it at a shell one-liner or at a
+program you would not run yourself in a terminal as the daemon user.

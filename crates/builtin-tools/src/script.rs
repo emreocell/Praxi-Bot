@@ -162,22 +162,28 @@ pub struct GateHost {
     gate: Arc<dyn ToolGate>,
     run_id: String,
     max_inline_bytes: usize,
+    bot_id: Option<String>,
 }
 
 impl GateHost {
     /// Create a host for one script run.
+    ///
+    /// `bot_id` is copied onto every inner tool call so an MCP server's bot
+    /// allowlist still applies inside a script.
     #[must_use]
     pub fn new(
         registry: ToolRegistry,
         gate: Arc<dyn ToolGate>,
         run_id: String,
         max_inline_bytes: usize,
+        bot_id: Option<String>,
     ) -> Self {
         Self {
             registry,
             gate,
             run_id,
             max_inline_bytes,
+            bot_id,
         }
     }
 }
@@ -210,6 +216,7 @@ impl ScriptHost for GateHost {
         let ctx = ToolContext {
             run_id: self.run_id.clone(),
             max_inline_bytes: self.max_inline_bytes,
+            bot_id: self.bot_id.clone(),
         };
         tool.call(&ctx, input)
             .await
@@ -270,6 +277,7 @@ impl Tool for ScriptTool {
             self.gate.clone(),
             ctx.run_id.clone(),
             ctx.max_inline_bytes,
+            ctx.bot_id.clone(),
         ));
         // QuickJS is synchronous CPU work: a busy loop would block the async
         // worker (and `tokio::time::timeout` cannot preempt it). Run it on the

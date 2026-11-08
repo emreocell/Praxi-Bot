@@ -194,6 +194,13 @@ impl AgentLoop {
         names
     }
 
+    /// The loop's tool registry (cheap clone). MCP servers register their
+    /// tools here, so a turn can call them.
+    #[must_use]
+    pub fn tool_registry(&self) -> ToolRegistry {
+        self.sh.tools.clone()
+    }
+
     /// The loop's providers (cheap clone).
     #[must_use]
     pub fn providers(&self) -> Providers {
@@ -381,6 +388,9 @@ impl AgentLoop {
         directive: Option<ScheduleWork>,
         handoff: Option<RunId>,
     ) -> Result<RunId> {
+        if self.sh.providers.read().setup_required() {
+            return Err(LoopError::SetupRequired);
+        }
         if self.sh.shutting_down.load(Ordering::SeqCst) {
             return Err(LoopError::ShuttingDown);
         }
@@ -640,6 +650,9 @@ impl AgentLoop {
     /// # Errors
     /// Fails if the run does not exist, is not `Paused`, or its chat is busy.
     pub fn resume(&self, run_id: RunId) -> Result<()> {
+        if self.sh.providers.read().setup_required() {
+            return Err(LoopError::SetupRequired);
+        }
         if self.sh.shutting_down.load(Ordering::SeqCst) {
             return Err(LoopError::ShuttingDown);
         }

@@ -10,6 +10,7 @@ use std::{
 
 use http::{HeaderName, HeaderValue};
 use parking_lot::Mutex;
+use process_wrap::tokio::{CommandWrap, KillOnDrop};
 use rmcp::{
     RoleClient, ServiceExt,
     service::RunningService,
@@ -22,7 +23,7 @@ use secret_store::{SecretRef, SecretStore, resolve};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::{
-    config::{McpServerConfig, McpTransport},
+    config::{McpServerConfig, McpTransport, refused_stdio_command},
     error::{McpError, Result},
 };
 
@@ -123,12 +124,29 @@ fn transport_err(server: &str, e: impl std::fmt::Display) -> McpError {
     }
 }
 
+/// Put the child in its own process group (Unix) or a kill-on-close job
+/// (Windows) so wrapper trees (`npx`, `uvx`) die with the server.
+fn isolate_child(cmd: tokio::process::Command) -> CommandWrap {
+    let mut wrap = CommandWrap::from(cmd);
+    // `KillOnDrop` is what makes the Windows job use `KILL_ON_JOB_CLOSE`.
+    wrap.wrap(KillOnDrop);
+    #[cfg(unix)]
+    wrap.wrap(process_wrap::tokio::ProcessGroup::leader());
+    #[cfg(windows)]
+    {
+        use windows::Win32::System::Threading::CREATE_NO_WINDOW;
+        wrap.wrap(process_wrap::tokio::CreationFlags(CREATE_NO_WINDOW));
+        wrap.wrap(process_wrap::tokio::JobObject);
+    }
+    wrap
+}
+
 /// Build the command for a stdio server with a minimal, explicit environment.
 fn build_command(
     server: &str,
     config: &McpTransport,
     secrets: &ResolvedSecrets,
-) -> Result<tokio::process::Command> {
+) -> Result<CommandWrap> {
     let McpTransport::Stdio {
         command,
         args,
@@ -138,6 +156,9 @@ fn build_command(
     else {
         unreachable!("build_command is only called for stdio transports");
     };
+    if let Some(why) = refused_stdio_command(command, args) {
+        return Err(McpError::Config(format!("server `{server}`: {why}")));
+    }
     let spawn_err = |e: std::io::Error| McpError::Spawn {
         server: server.to_owned(),
         message: format!("`{command}`: {e}"),
@@ -150,16 +171,11 @@ fn build_command(
             cmd.env(key, v);
         }
     }
-    cmd.args(args)
-        .envs(env)
-        .envs(&secrets.env)
-        .kill_on_drop(true);
+    cmd.args(args).envs(env).envs(&secrets.env);
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
     }
-    #[cfg(windows)]
-    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    Ok(cmd)
+    Ok(isolate_child(cmd))
 }
 
 fn forward_stderr(server: String, stderr: tokio::process::ChildStderr, log: Arc<StderrLog>) {
@@ -325,6 +341,23 @@ mod tests {
         let snap = log.snapshot();
         assert_eq!(snap.len(), STDERR_TAIL_LINES);
         assert_eq!(snap[0], "l10");
+    }
+
+    #[tokio::test]
+    async fn never_list_command_is_refused_before_spawn() {
+        let cfg = McpServerConfig::stdio("s", "rm", ["-rf", "/"]);
+        let err = open(
+            &cfg,
+            &ResolvedSecrets::default(),
+            &Arc::default(),
+            Duration::from_secs(2),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(err, McpError::Config(ref m) if m.contains("never-list")),
+            "{err}"
+        );
     }
 
     #[tokio::test]

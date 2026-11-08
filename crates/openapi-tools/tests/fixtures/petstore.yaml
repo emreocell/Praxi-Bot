@@ -1,0 +1,144 @@
+openapi: 3.0.3
+info:
+  title: Petstore
+  version: 1.0.0
+servers:
+  - url: http://placeholder.invalid/v1
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      description: How many items to return
+      schema:
+        type: integer
+        maximum: 100
+  schemas:
+    Category:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string, nullable: true }
+        parent:
+          $ref: '#/components/schemas/Category'
+    Pet:
+      type: object
+      required: [name]
+      properties:
+        id: { type: integer, example: 7 }
+        name: { type: string }
+        tag: { type: string }
+        example: { type: string }
+        category:
+          $ref: '#/components/schemas/Category'
+    NewPet:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        tag: { type: string }
+  requestBodies:
+    PetBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/NewPet'
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      summary: List all pets
+      tags: [pets]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - name: status
+          in: query
+          explode: true
+          schema:
+            type: array
+            items: { type: string }
+        - name: X-Api-Key
+          in: header
+          schema: { type: string }
+        - name: X-Trace
+          in: header
+          schema: { type: string }
+      responses:
+        '200': { description: ok }
+    post:
+      operationId: createPet
+      summary: Create a pet
+      tags: [pets]
+      requestBody:
+        $ref: '#/components/requestBodies/PetBody'
+      responses:
+        '201': { description: created }
+  /pets/{petId}:
+    parameters:
+      - name: petId
+        in: path
+        required: true
+        description: The pet id
+        schema: { type: string }
+    get:
+      operationId: showPetById
+      summary: Info for a specific pet
+      tags: [pets]
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+    put:
+      summary: Replace a pet
+      tags: [pets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Pet'
+      responses:
+        '200': { description: ok }
+    delete:
+      operationId: deletePet
+      summary: Delete a pet
+      tags: [pets, admin]
+      responses:
+        '204': { description: gone }
+  /stores/{id}/orders:
+    get:
+      tags: [store]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: id
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: ok }
+  /upload:
+    post:
+      operationId: uploadFile
+      requestBody:
+        content:
+          multipart/form-data:
+            schema: { type: object }
+      responses:
+        '200': { description: ok }
+  /old:
+    get:
+      operationId: oldThing
+      deprecated: true
+      responses:
+        '200': { description: ok }

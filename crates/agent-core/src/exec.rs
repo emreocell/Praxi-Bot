@@ -382,6 +382,9 @@ impl TurnExecutor {
             .collect();
         let mut last_err: Option<ProviderError> = None;
         let mut result: Option<ModelOut> = None;
+        // Capability misses across the chain, and whether any other error occurred.
+        let mut misses: Vec<(String, String)> = Vec::new();
+        let mut other_failure = false;
         for (i, name) in models.iter().enumerate() {
             if let Some(prev) = &last_err {
                 self.sh.emit(
@@ -406,10 +409,19 @@ impl TurnExecutor {
                     break;
                 }
                 Err(e) => {
-                    // Only a retryable failure of the primary model justifies
-                    // switching; a broken request / credential would fail
-                    // everywhere.
-                    let hard = i == 0 && !is_retryable(&e);
+                    // A retryable failure of the primary justifies switching, and
+                    // so does `Unsupported`: the next model may have the capability.
+                    // `is_retryable` stays false for it, so the same model is not
+                    // tried again. A generic `InvalidRequest` or an unmatched
+                    // `Api` 400 still stops the chain on the primary.
+                    if let ProviderError::Unsupported { capability } = &e {
+                        misses.push(((*name).clone(), capability.clone()));
+                    } else {
+                        other_failure = true;
+                    }
+                    let hard = i == 0
+                        && !is_retryable(&e)
+                        && !matches!(e, ProviderError::Unsupported { .. });
                     last_err = Some(e);
                     if hard {
                         break;
@@ -418,10 +430,12 @@ impl TurnExecutor {
             }
         }
         let Some(mut out) = result else {
-            return Err(xe(last_err.map_or_else(
-                || "no model available".to_owned(),
-                |e| e.to_string(),
-            )));
+            let message = if !other_failure && !misses.is_empty() {
+                unsupported_chain_message(&misses)
+            } else {
+                last_err.map_or_else(|| "no model available".to_owned(), |e| e.to_string())
+            };
+            return Err(xe(message));
         };
         if let Some(reason) = guard_reason {
             // Tools were disabled: ignore anything the model still tried to call.
@@ -539,7 +553,7 @@ impl TurnExecutor {
         specs: &[ToolSpec],
     ) -> Result<ModelOut, ProviderError> {
         let model = req.model.clone();
-        let provider = self.sh.providers.read().pick(&model);
+        let provider = self.sh.providers.read().pick(&model)?;
         let mut stream = provider.stream(req).await?;
         let mut out = ModelOut {
             model: model.0,
@@ -787,6 +801,7 @@ impl TurnExecutor {
         let tctx = ToolContext {
             run_id: run.id.to_string(),
             max_inline_bytes: g.spill_threshold_bytes,
+            bot_id: Some(run.bot_id.to_string()),
         };
         // Approval (if any) happened before this point, so the clock only
         // covers the tool itself.
@@ -925,8 +940,25 @@ fn preview(text: &str) -> String {
     )
 }
 
+/// Every model in the chain returned [`ProviderError::Unsupported`].
+fn unsupported_chain_message(misses: &[(String, String)]) -> String {
+    let listed = misses
+        .iter()
+        .map(|(model, capability)| format!("{model} lacks {capability}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "no model supports the request: {listed}. \
+         Set model_caps in providers.toml (the user's values override the catalog); \
+         for example, under [provider.model_caps.\"<model-id>\"] set tools = true or vision = true"
+    )
+}
+
 /// Whether a provider failure is worth retrying (transient) as opposed to a
 /// credential / request problem that would fail again.
+///
+/// [`ProviderError::Unsupported`] is not retryable: the same model fails the
+/// same way. The fallback chain, not this function, tries the next model.
 pub(crate) fn is_retryable(e: &ProviderError) -> bool {
     match e {
         ProviderError::RateLimited { .. }
