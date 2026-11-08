@@ -264,6 +264,8 @@ async fn test_timeout_and_overflow() {
     assert_eq!(claude.detail.as_deref(), Some("timeout"));
 }
 
+// `.cmd` shims only exist on Windows.
+#[cfg(windows)]
 #[tokio::test]
 async fn test_windows_cmd_shim_refused_and_multiline() {
     let temp = tempfile::tempdir().unwrap();
@@ -332,6 +334,8 @@ async fn test_secret_env_is_not_passed_to_the_probe() {
     assert!(!rendered.contains("LEAKED"), "{rendered}");
 }
 
+// `.cmd` shims only exist on Windows.
+#[cfg(windows)]
 #[tokio::test]
 async fn test_batch_node_shim_is_not_executed() {
     let temp = tempfile::tempdir().unwrap();

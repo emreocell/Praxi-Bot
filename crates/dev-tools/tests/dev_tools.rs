@@ -623,7 +623,14 @@ async fn process_list_finds_this_process() {
     assert!(all["total_matching"].as_u64().unwrap() >= procs.len() as u64);
     // 500 may not include us on very busy hosts, so look us up by name too.
     let exe = std::env::current_exe().unwrap();
-    let stem = exe.file_stem().unwrap().to_string_lossy().to_string();
+    // Linux truncates process names (comm) to 15 characters.
+    let stem: String = exe
+        .file_stem()
+        .unwrap()
+        .to_string_lossy()
+        .chars()
+        .take(15)
+        .collect();
     let by_name = call(
         &f,
         PROCESS_LIST_TOOL_NAME,
