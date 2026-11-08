@@ -4,6 +4,7 @@
 //! assembled from separate user values. `raw_command` (the input's `command`)
 //! is what the permission layer matches against the never-list.
 
+use std::ffi::{OsStr, OsString};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -11,10 +12,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use process_wrap::tokio::ChildWrapper;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
+use tokio::task::JoinHandle;
 use tool_registry::{
     Effect, PermissionCategory, Tool, ToolContext, ToolError, ToolOutput, ToolSpec,
 };
@@ -122,6 +125,137 @@ fn build_command(kind: ShellKind, command: &str) -> Command {
     }
 }
 
+/// Names copied into a shell child. Vault, bearer and provider credentials are
+/// not in this list, so they are never inherited. Nothing here is written back
+/// to the daemon process. There is no tool input that grants extra names; a
+/// secret would have to be added here on purpose.
+const CHILD_ENV_ALLOWLIST: &[&str] = &[
+    "PATH",
+    "PATHEXT",
+    "SYSTEMROOT",
+    "WINDIR",
+    "SYSTEMDRIVE",
+    "COMSPEC",
+    "HOME",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "LOCALAPPDATA",
+    "APPDATA",
+    "PROGRAMDATA",
+    "ALLUSERSPROFILE",
+    "USERNAME",
+    "USER",
+    "LOGNAME",
+    "USERDOMAIN",
+    "OS",
+    "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE",
+    "LANG",
+    "LANGUAGE",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_COLLATE",
+    "LC_MESSAGES",
+    "LC_MONETARY",
+    "LC_NUMERIC",
+    "LC_TIME",
+    "TZ",
+    "TERM",
+];
+
+fn child_env_allowed(name: &OsStr) -> bool {
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    let upper = name.to_ascii_uppercase();
+    CHILD_ENV_ALLOWLIST.iter().any(|allowed| *allowed == upper)
+}
+
+/// Replace the child's environment with the allowlist, read from the daemon
+/// without modifying it.
+fn apply_child_env(cmd: &mut Command) {
+    let kept: Vec<(OsString, OsString)> = std::env::vars_os()
+        .filter(|(key, _)| child_env_allowed(key))
+        .collect();
+    cmd.env_clear();
+    for (key, value) in kept {
+        cmd.env(key, value);
+    }
+}
+
+/// Unix process group so `killpg` reaches the tree, Windows job object so
+/// `TerminateJobObject` does. `KillOnDrop` is not registered: that flag is
+/// what sets `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, and closing the job on a
+/// successful return would kill background children the shell had already
+/// detached. Tree kill is `start_kill` while [`TreeGuard`] is armed.
+fn isolate_child(cmd: Command) -> process_wrap::tokio::CommandWrap {
+    let mut wrap = process_wrap::tokio::CommandWrap::from(cmd);
+    #[cfg(unix)]
+    {
+        wrap.wrap(process_wrap::tokio::ProcessGroup::leader());
+    }
+    #[cfg(windows)]
+    {
+        use windows::Win32::System::Threading::CREATE_NO_WINDOW;
+        wrap.wrap(process_wrap::tokio::CreationFlags(CREATE_NO_WINDOW));
+        wrap.wrap(process_wrap::tokio::JobObject);
+    }
+    wrap
+}
+
+/// Owns the child and its stdout/stderr readers. Drop terminates the tree and
+/// reaps it when the call is cancelled, times out, or fails.
+struct TreeGuard {
+    child: Option<Box<dyn ChildWrapper>>,
+    readers: Vec<JoinHandle<()>>,
+    /// When set, drop sends killpg / terminates the job before reaping.
+    armed: bool,
+}
+
+impl TreeGuard {
+    fn abort_readers(&mut self) {
+        for task in self.readers.drain(..) {
+            task.abort();
+        }
+    }
+
+    async fn terminate(&mut self) {
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+        }
+        self.armed = false;
+        self.abort_readers();
+    }
+}
+
+impl Drop for TreeGuard {
+    fn drop(&mut self) {
+        for task in &self.readers {
+            task.abort();
+        }
+        let Some(mut child) = self.child.take() else {
+            return;
+        };
+        // Success already waited the direct child and disarmed. Dropping the
+        // wrapper must not `killpg` / close a kill-on-close job, and must not
+        // block in the process-group wait until background children exit.
+        if !self.armed {
+            return;
+        }
+        let _ = child.start_kill();
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::spawn(async move {
+                let _ = child.wait().await;
+            });
+        }
+    }
+}
+
 /// Read `r` to EOF into a shared buffer (capped at `HARD_CAPTURE_BYTES`).
 ///
 /// The buffer is shared so partial output survives when the task is aborted
@@ -184,28 +318,45 @@ impl Tool for ShellTool {
         }
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        let mut child = cmd
+            .stderr(Stdio::piped());
+        apply_child_env(&mut cmd);
+        let mut child = isolate_child(cmd)
             .spawn()
             .map_err(|e| exec_err(format!("could not start {kind:?}: {e}")))?;
         let out_buf = Arc::new(parking_lot::Mutex::new(Vec::new()));
         let err_buf = Arc::new(parking_lot::Mutex::new(Vec::new()));
-        let mut out_task = tokio::spawn(drain(
-            child.stdout.take().expect("piped stdout"),
-            out_buf.clone(),
-        ));
-        let mut err_task = tokio::spawn(drain(
-            child.stderr.take().expect("piped stderr"),
-            err_buf.clone(),
-        ));
+        let stdout = child.stdout().take().expect("piped stdout");
+        let stderr = child.stderr().take().expect("piped stderr");
+        let out_task = tokio::spawn(drain(stdout, Arc::clone(&out_buf)));
+        let err_task = tokio::spawn(drain(stderr, Arc::clone(&err_buf)));
+        let mut guard = TreeGuard {
+            child: Some(child),
+            readers: vec![out_task, err_task],
+            armed: true,
+        };
 
-        let waited = tokio::time::timeout(timeout, child.wait()).await;
+        // The outermost `wait` reaps the whole process group (Unix) or blocks
+        // on the job. A shell that backgrounded a child would then sit until
+        // that child exits or the tool timeout `killpg`s it. Wait the direct
+        // child only; `terminate` / armed `Drop` still kill and reap the tree.
+        let waited = tokio::time::timeout(timeout, async {
+            guard
+                .child
+                .as_mut()
+                .expect("child present")
+                .inner_mut()
+                .wait()
+                .await
+        })
+        .await;
         let (code, note) = match waited {
             Ok(Ok(status)) => (status.code(), None),
-            Ok(Err(e)) => return Err(exec_err(format!("wait failed: {e}"))),
+            Ok(Err(e)) => {
+                guard.terminate().await;
+                return Err(exec_err(format!("wait failed: {e}")));
+            }
             Err(_) => {
-                let _ = child.kill().await;
+                guard.terminate().await;
                 (
                     None,
                     Some(format!(
@@ -215,17 +366,25 @@ impl Tool for ShellTool {
                 )
             }
         };
-        // Grandchildren may keep the pipes open after the shell exits or is
-        // killed: wait a grace period, then keep whatever was read and stop the
-        // reader tasks so they do not accumulate output in the background.
-        let grace = Duration::from_secs(2);
-        let _ = tokio::time::timeout(grace, async {
-            let _ = (&mut out_task).await;
-            let _ = (&mut err_task).await;
-        })
-        .await;
-        out_task.abort();
-        err_task.abort();
+        // Grandchildren may keep the pipes open after the shell exits: wait a
+        // grace period, then keep whatever was read. The guard owns the reader
+        // tasks, so cancellation aborts them instead of detaching them.
+        if note.is_none() {
+            let grace = Duration::from_secs(2);
+            let _ = tokio::time::timeout(grace, async {
+                for task in &mut guard.readers {
+                    let _ = (&mut *task).await;
+                }
+            })
+            .await;
+        }
+        guard.abort_readers();
+        // The direct child has exited. Disarm before drop so background
+        // descendants are left running. Timeout, wait errors and a dropped
+        // future leave `armed` set (`terminate` clears it after the tree kill).
+        if note.is_none() {
+            guard.armed = false;
+        }
         let stdout = std::mem::take(&mut *out_buf.lock());
         let stderr = std::mem::take(&mut *err_buf.lock());
         let text = format_output(code, &stdout, &stderr, note.as_deref());
@@ -383,5 +542,285 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, ToolError::InvalidInput(_)));
+    }
+
+    fn ps_single(path: &Path) -> String {
+        format!("'{}'", path.display().to_string().replace('\'', "''"))
+    }
+
+    /// Path inside a single-quoted PowerShell string that itself sits inside
+    /// another single-quoted string (`''path''` becomes `'path'`).
+    fn ps_nested(path: &Path) -> String {
+        format!("''{}''", path.display().to_string().replace('\'', "''"))
+    }
+
+    /// Parent stays in the foreground; a descendant writes `marker` after a delay.
+    /// `spawned` is written once that descendant exists. `pidfile` is for cleanup.
+    fn descendant_command(marker: &Path, spawned: &Path, pidfile: &Path) -> String {
+        if cfg!(windows) {
+            format!(
+                "$psi = New-Object System.Diagnostics.ProcessStartInfo; \
+                 $psi.FileName = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'; \
+                 $psi.Arguments = '-NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 5; Set-Content -LiteralPath {marker} -Value leaked\"'; \
+                 $psi.UseShellExecute = $false; \
+                 $psi.CreateNoWindow = $true; \
+                 $p = [System.Diagnostics.Process]::Start($psi); \
+                 Set-Content -LiteralPath {pid} -Value $p.Id -Encoding Ascii; \
+                 Set-Content -LiteralPath {spawned} -Value ok -Encoding Ascii; \
+                 Start-Sleep -Seconds 60",
+                marker = ps_nested(marker),
+                pid = ps_single(pidfile),
+                spawned = ps_single(spawned),
+            )
+        } else {
+            format!(
+                "(sleep 5; echo leaked > '{}') & echo $! > '{}' && echo ok > '{}' && wait",
+                marker.display(),
+                pidfile.display(),
+                spawned.display(),
+            )
+        }
+    }
+
+    fn kill_pid(pid: u32) {
+        let mut cmd = std::process::Command::new(if cfg!(windows) { "taskkill" } else { "kill" });
+        if cfg!(windows) {
+            cmd.args(["/F", "/T", "/PID", &pid.to_string()]);
+        } else {
+            cmd.args(["-9", &pid.to_string()]);
+        }
+        let _ = cmd
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+
+    struct KillLater {
+        pidfile: PathBuf,
+    }
+
+    impl Drop for KillLater {
+        fn drop(&mut self) {
+            if let Ok(text) = std::fs::read_to_string(&self.pidfile)
+                && let Ok(pid) = text.trim().parse::<u32>()
+            {
+                kill_pid(pid);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn timeout_and_cancel_kill_descendant_before_marker() {
+        let work = tempfile::tempdir().unwrap();
+        let spill = tempfile::tempdir().unwrap();
+        let t = tool(spill.path());
+        let marker = work.path().join("marker.txt");
+        let spawned = work.path().join("spawned.txt");
+        let pidfile = work.path().join("pid.txt");
+        let _cleanup = KillLater {
+            pidfile: pidfile.clone(),
+        };
+        let cmd = descendant_command(&marker, &spawned, &pidfile);
+
+        let err = t
+            .call(
+                &ToolContext::default(),
+                json!({"command": cmd, "shell": shell_for_tests(), "timeout": 1}),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("timed out"), "{err}");
+        assert!(
+            spawned.exists(),
+            "descendant was not started before the timeout, so the test is inconclusive: {err}"
+        );
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        assert!(
+            !marker.exists(),
+            "descendant wrote the marker after timeout"
+        );
+
+        let _ = std::fs::remove_file(&spawned);
+        let _ = std::fs::remove_file(&pidfile);
+        let marker = work.path().join("marker-cancel.txt");
+        let spawned = work.path().join("spawned-cancel.txt");
+        let pidfile = work.path().join("pid-cancel.txt");
+        let _cleanup_cancel = KillLater {
+            pidfile: pidfile.clone(),
+        };
+        let cmd = descendant_command(&marker, &spawned, &pidfile);
+        let ctx = ToolContext::default();
+        {
+            let call = t.call(
+                &ctx,
+                json!({"command": cmd, "shell": shell_for_tests(), "timeout": 30}),
+            );
+            tokio::pin!(call);
+            let started = std::time::Instant::now();
+            loop {
+                tokio::select! {
+                    result = &mut call => panic!("shell returned before cancellation: {result:?}"),
+                    () = tokio::time::sleep(Duration::from_millis(50)) => {
+                        if spawned.exists() {
+                            break;
+                        }
+                        assert!(
+                            started.elapsed() < Duration::from_secs(10),
+                            "descendant was not started"
+                        );
+                    }
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        assert!(
+            !marker.exists(),
+            "descendant wrote the marker after the shell future was dropped"
+        );
+    }
+
+    fn process_alive(pid: u32) -> bool {
+        if cfg!(windows) {
+            let output = std::process::Command::new("tasklist")
+                .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .output();
+            let Ok(output) = output else {
+                return false;
+            };
+            let text = String::from_utf8_lossy(&output.stdout);
+            let want = pid.to_string();
+            text.lines().any(|line| {
+                line.split(',')
+                    .nth(1)
+                    .is_some_and(|col| col.trim().trim_matches('"') == want)
+            })
+        } else {
+            std::process::Command::new("kill")
+                .args(["-0", &pid.to_string()])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+        }
+    }
+
+    /// A background child must still be running after a successful `shell_run`.
+    ///
+    /// Unix `ProcessGroupChild::wait` blocks until the group is empty, so a
+    /// group wait turns this into a timeout that `killpg`s the child. Windows
+    /// `KILL_ON_JOB_CLOSE` kills it when the job handle drops on return.
+    #[tokio::test]
+    async fn successful_shell_run_leaves_background_child_alive() {
+        let work = tempfile::tempdir().unwrap();
+        let spill = tempfile::tempdir().unwrap();
+        let t = tool(spill.path());
+        let pidfile = work.path().join("pid.txt");
+        let _cleanup = KillLater {
+            pidfile: pidfile.clone(),
+        };
+        let cmd = if cfg!(windows) {
+            format!(
+                "$psi = New-Object System.Diagnostics.ProcessStartInfo; \
+                 $psi.FileName = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'; \
+                 $psi.Arguments = '-NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 30\"'; \
+                 $psi.UseShellExecute = $false; \
+                 $psi.CreateNoWindow = $true; \
+                 $p = [System.Diagnostics.Process]::Start($psi); \
+                 Set-Content -LiteralPath {pid} -Value $p.Id -Encoding Ascii; \
+                 Write-Output started-bg",
+                pid = ps_single(&pidfile),
+            )
+        } else {
+            format!(
+                "sleep 30 & echo $! > '{}' ; echo started-bg",
+                pidfile.display()
+            )
+        };
+        let started = std::time::Instant::now();
+        let out = t
+            .call(
+                &ToolContext::default(),
+                json!({"command": cmd, "shell": shell_for_tests(), "timeout": 15}),
+            )
+            .await
+            .unwrap();
+        let s = text(&out);
+        assert!(s.contains("exit_code: 0"), "{s}");
+        assert!(s.contains("started-bg"), "{s}");
+        assert!(
+            started.elapsed() < Duration::from_secs(12),
+            "shell_run waited out the background child ({:?})",
+            started.elapsed()
+        );
+        let pid_text = std::fs::read_to_string(&pidfile).expect("background pid file");
+        let pid = pid_text
+            .chars()
+            .filter(char::is_ascii_digit)
+            .collect::<String>()
+            .parse::<u32>()
+            .unwrap_or_else(|_| panic!("pid file {pid_text:?}"));
+        // A job-close kill lands before `call` returns. The pause covers a
+        // kill that is only queued by the time the tool result is observed.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            process_alive(pid),
+            "background child {pid} was killed after a successful shell_run"
+        );
+    }
+
+    #[tokio::test]
+    #[allow(unsafe_code)]
+    async fn child_env_omits_secrets_but_keeps_path() {
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                #[allow(unsafe_code)]
+                unsafe {
+                    std::env::remove_var("BOT_SECRETS_PASSPHRASE");
+                    std::env::remove_var("OPENAI_API_KEY");
+                    std::env::remove_var("ANTHROPIC_API_KEY");
+                    std::env::remove_var("BOT_API_BEARER");
+                }
+            }
+        }
+        let _restore = Restore;
+        unsafe {
+            std::env::set_var("BOT_SECRETS_PASSPHRASE", "sentinel-secret-value");
+            std::env::set_var("OPENAI_API_KEY", "sk-provider-sentinel");
+            std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-sentinel");
+            std::env::set_var("BOT_API_BEARER", "Bearer-sentinel-token");
+        }
+        let parent_path = std::env::var("PATH").expect("PATH");
+        let d = tempfile::tempdir().unwrap();
+        let cmd = if cfg!(windows) {
+            "Write-Output $env:PATH; Write-Output $env:BOT_SECRETS_PASSPHRASE; Write-Output $env:OPENAI_API_KEY; Write-Output $env:ANTHROPIC_API_KEY; Write-Output $env:BOT_API_BEARER"
+        } else {
+            "printf '%s\\n' \"$PATH\" \"$BOT_SECRETS_PASSPHRASE\" \"$OPENAI_API_KEY\" \"$ANTHROPIC_API_KEY\" \"$BOT_API_BEARER\""
+        };
+        let out = tool(d.path())
+            .call(
+                &ToolContext::default(),
+                json!({"command": cmd, "shell": shell_for_tests()}),
+            )
+            .await
+            .unwrap();
+        let s = text(&out);
+        assert!(
+            s.contains(&parent_path),
+            "PATH was not visible to the child:\n{s}"
+        );
+        assert!(!s.contains("sentinel-secret-value"), "{s}");
+        assert!(!s.contains("sk-provider-sentinel"), "{s}");
+        assert!(!s.contains("sk-ant-sentinel"), "{s}");
+        assert!(!s.contains("Bearer-sentinel-token"), "{s}");
+        assert_eq!(
+            std::env::var("BOT_SECRETS_PASSPHRASE").unwrap(),
+            "sentinel-secret-value",
+            "daemon environment was mutated"
+        );
     }
 }
