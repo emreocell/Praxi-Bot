@@ -74,3 +74,5 @@
   flex: 1;
   min-width: calc(var(--size-control-lg) * 3);
 }
+
+.emptyIcon { display: block; width: var(--space-8); height: var(--space-8); margin-bottom: var(--space-4); color: var(--color-accent-text); }

@@ -22,8 +22,7 @@ use tokio_util::sync::CancellationToken;
 use tool_registry::ToolSpec;
 
 use crate::detect::{
-    self, PathEnv, apply_sanitized_env, binary_pin, find_candidate, isolate, kill_tree,
-    resolve_spawn,
+    ChildTree, PathEnv, apply_sanitized_env, binary_pin, find_candidate, isolate, resolve_spawn,
 };
 
 /// Supported session dialect.
@@ -158,7 +157,7 @@ struct Bridge {
     child_pid: Arc<AtomicU32>,
     /// Kill-on-close job created by `isolate` for this turn. Empty until spawn.
     #[cfg(windows)]
-    job: detect::SharedJob,
+    job: crate::detect::SharedJob,
     listen: Arc<OnceLock<SocketAddr>>,
 }
 
@@ -347,7 +346,10 @@ async fn restrict_sidecar(path: &std::path::Path) -> Result<(), CliError> {
     }
     Ok(())
 }
+// NamedTempFile is already mode 0600 here, so there is no ACL step to await.
+// `async` stays so the call site can `.await` on every host.
 #[cfg(not(windows))]
+#[allow(clippy::unused_async)] // Match the Windows implementation's async interface.
 async fn restrict_sidecar(_: &std::path::Path) -> Result<(), CliError> {
     Ok(())
 }
@@ -666,7 +668,7 @@ async fn session(
     let candidate = find_candidate(command, env).ok_or(CliError::NotInstalled)?;
     let resolved = resolve_spawn(&candidate, env).map_err(|_| CliError::ShimRefused)?;
     #[cfg(windows)]
-    let job = detect::SharedJob::new();
+    let job = crate::detect::SharedJob::new();
     let bridge = Bridge {
         capability: format!("Bearer {}{}", uuid::Uuid::now_v7(), uuid::Uuid::now_v7()),
         tools: Arc::new(turn.tools.clone()),
@@ -752,13 +754,14 @@ async fn session(
     let mut isolated = isolate(cmd, job);
     #[cfg(not(windows))]
     let mut isolated = isolate(cmd);
-    let mut child = isolated.spawn().map_err(|e| {
+    let child = isolated.spawn().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             CliError::NotInstalled
         } else {
             CliError::Io
         }
     })?;
+    let mut child = ChildTree::new(child);
     #[cfg(not(windows))]
     {
         let child_pid = child
@@ -796,7 +799,7 @@ async fn session(
         r = protocol(engine, &turn, &bridge, &server, host.as_ref(), &mut stdin, stdout) => r,
     };
     stop.cancel();
-    kill_tree(child.as_mut()).await;
+    child.terminate().await;
     stderr_task.abort();
     result
 }
@@ -1264,7 +1267,7 @@ mod tests {
             #[cfg(not(windows))]
             child_pid: Arc::new(AtomicU32::new(std::process::id())),
             #[cfg(windows)]
-            job: detect::SharedJob::new(),
+            job: crate::detect::SharedJob::new(),
             listen: Arc::new(OnceLock::new()),
         }
     }
@@ -1370,7 +1373,7 @@ mod tests {
         url: &str,
         auth: Option<&str>,
         body: &str,
-        #[cfg(windows)] job: &detect::SharedJob,
+        #[cfg(windows)] job: &crate::detect::SharedJob,
     ) -> String {
         #[cfg(not(windows))]
         {
@@ -1383,7 +1386,7 @@ mod tests {
     }
     #[cfg(windows)]
     async fn post_inside_job(
-        job: &detect::SharedJob,
+        job: &crate::detect::SharedJob,
         url: &str,
         auth: Option<&str>,
         body: &str,

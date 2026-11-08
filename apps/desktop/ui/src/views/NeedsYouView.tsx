@@ -1,3 +1,4 @@
+import { ArrowUpRight, CheckCheck } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Avatar, Button, Card } from "ui";
 import formStyles from "../components/Form.module.css";
@@ -21,7 +22,7 @@ export function NeedsYouView({
           <p className={formStyles.hint}>{t("needs.subtitle")}</p>
         </header>
         {needs.length === 0 ? (
-          <p className={formStyles.hint}>{t("needs.empty")}</p>
+          <p className={formStyles.hint}><CheckCheck className={formStyles.emptyIcon} />{t("needs.empty")}</p>
         ) : (
           <ul className={styles.list}>
             {needs.map((n) => {
@@ -52,7 +53,7 @@ export function NeedsYouView({
                       disabled={!n.chatId}
                       onClick={() => onOpenChat(n.chatId)}
                     >
-                      {t("needs.open")}
+                      <ArrowUpRight />{t("needs.open")}
                     </Button>
                   </Card>
                 </li>

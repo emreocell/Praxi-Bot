@@ -1,5 +1,83 @@
-use std::io::Write;
+use std::io::{Read, Write};
 use std::time::Duration;
+
+fn probe_descendant() {
+    let mut stream = std::net::TcpStream::connect(std::env::var("PROBE_TREE_ADDRESS").unwrap())
+        .expect("connect tree observer");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    std::fs::write(
+        std::env::var("PROBE_TREE_READY").unwrap(),
+        std::process::id().to_string(),
+    )
+    .unwrap();
+    stream.write_all(b"ready").unwrap();
+    let mut command = [0];
+    while stream.read_exact(&mut command).is_ok() {
+        match command[0] {
+            b'p' => stream.write_all(b"p").unwrap(),
+            b'q' => std::process::exit(0),
+            _ => panic!("unknown tree observer command"),
+        }
+    }
+}
+
+#[allow(clippy::zombie_processes)] // Exiting before the descendant is the regression fixture.
+fn probe_tree(args: &[String]) -> bool {
+    if std::env::var("PROBE_TREE_DESCENDANT").is_ok() {
+        probe_descendant();
+        return true;
+    }
+    let Ok(mode) = std::env::var("PROBE_TREE_MODE") else {
+        return false;
+    };
+    if args != ["--version"] {
+        return false;
+    }
+    let ready = std::env::var("PROBE_TREE_READY").unwrap();
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    command
+        .env_clear()
+        .env("PROBE_TREE_DESCENDANT", "1")
+        .env(
+            "PROBE_TREE_ADDRESS",
+            std::env::var("PROBE_TREE_ADDRESS").unwrap(),
+        )
+        .env("PROBE_TREE_READY", &ready)
+        .stdin(std::process::Stdio::null());
+    for key in ["SYSTEMROOT", "WINDIR"] {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    if mode == "closed" {
+        command
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+    } else {
+        command
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit());
+    }
+    let mut child = command.spawn().expect("spawn probe descendant");
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    while !std::path::Path::new(&ready).exists() {
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("probe descendant did not become ready");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    if mode == "hang" {
+        let _ = child.wait();
+        return true;
+    }
+    // Deliberately exit without waiting. The descendant retains the inherited
+    // output handles, just like a shell wrapper that backgrounds a helper.
+    false
+}
 
 fn leaked_sentinel() -> bool {
     std::env::vars().any(|(key, value)| {
@@ -12,6 +90,7 @@ fn leaked_sentinel() -> bool {
     })
 }
 
+#[allow(clippy::too_many_lines)] // Explicit fake CLI command transcript.
 fn main() {
     if leaked_sentinel() {
         println!("LEAKED");
@@ -19,6 +98,9 @@ fn main() {
     }
 
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if probe_tree(&args) {
+        return;
+    }
 
     if std::env::var("FAKE_TREE_GRANDCHILD").is_ok() {
         let marker = std::env::var("FAKE_TREE_MARKER").unwrap_or_default();
@@ -101,7 +183,9 @@ fn main() {
             }
         }
         "status --format json" => {
-            if std::env::var("FAKE_CURSOR_PLAIN").is_ok() {
+            if let Ok(json) = std::env::var("FAKE_CURSOR_JSON") {
+                println!("{json}");
+            } else if std::env::var("FAKE_CURSOR_PLAIN").is_ok() {
                 eprintln!("flag --format not recognized");
                 std::process::exit(1);
             } else if std::env::var("FAKE_AUTH_SIGNED_OUT").is_ok() {
@@ -111,10 +195,18 @@ fn main() {
             }
         }
         "status" => {
-            if std::env::var("FAKE_AUTH_SIGNED_OUT").is_ok() {
+            if let Ok(text) = std::env::var("FAKE_CURSOR_TEXT") {
+                println!("{text}");
+            } else if std::env::var("FAKE_AUTH_SIGNED_OUT").is_ok() {
                 println!("not logged in");
             } else {
                 println!("authenticated");
+            }
+            if let Ok(text) = std::env::var("FAKE_CURSOR_STDERR") {
+                eprintln!("{text}");
+            }
+            if std::env::var("FAKE_CURSOR_FAIL").is_ok() {
+                std::process::exit(1);
             }
         }
         _ => {

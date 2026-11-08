@@ -18,7 +18,8 @@ function totalTokens(u: UsageTotals): number {
   return u.prompt_tokens + u.completion_tokens;
 }
 
-export function UsageView() {
+/** `embedded`: inside the settings modal (no page padding / title). */
+export function UsageView({ embedded = false }: { embedded?: boolean }) {
   const { t, i18n } = useTranslation();
   const { client, bots, events } = useDaemon();
   const [range, setRange] = useState<Range>("all");
@@ -60,12 +61,14 @@ export function UsageView() {
   });
 
   return (
-    <div className={styles.pane}>
-      <div className={styles.container}>
-        <header className={styles.header}>
-          <h1 className={styles.title}>{t("usage.title")}</h1>
-          <p className={styles.subtitle}>{t("usage.subtitle")}</p>
-        </header>
+    <div className={embedded ? styles.embeddedPane : styles.pane}>
+      <div className={embedded ? styles.embeddedContainer : styles.container}>
+        {embedded ? null : (
+          <header className={styles.header}>
+            <h1 className={styles.title}>{t("usage.title")}</h1>
+            <p className={styles.subtitle}>{t("usage.subtitle")}</p>
+          </header>
+        )}
 
         <div className={styles.rangeRow} role="group" aria-label={t("usage.range")}>
           {(["all", "day", "week", "month"] as const).map((r) => (

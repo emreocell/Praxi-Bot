@@ -24,7 +24,7 @@ use crate::proto::{
 };
 use crate::rpc::{
     DEFAULT_RPC_TIMEOUT, RpcBudget, RpcClient, RpcHandler, RpcLimits, map_conn_err,
-    serve_connection,
+    narrow_rpc_bidi_grant, serve_connection,
 };
 use crate::store::{Device, DeviceStore, Role, now_secs};
 
@@ -65,6 +65,25 @@ pub trait ProtocolHandler: Send + Sync {
     /// Serve a connection from the authenticated paired device.
     /// Return when finished; revoke closes the connection while this runs.
     async fn handle(&self, conn: Connection, device: Device);
+
+    /// Bidirectional streams this protocol needs granted on every connection.
+    ///
+    /// Read once when the endpoint binds. The handshake advertises the maximum
+    /// of this value and the RPC stream cap. `0` leaves the RPC cap unchanged.
+    #[must_use]
+    fn max_bidi_streams(&self) -> usize {
+        0
+    }
+
+    /// Connection receive window, in bytes, required by this protocol.
+    ///
+    /// Read once when the endpoint binds. The handshake advertises the maximum
+    /// of this value and the RPC byte budget, and the window stays finite.
+    /// `0` leaves the RPC budget unchanged.
+    #[must_use]
+    fn receive_window(&self) -> u64 {
+        0
+    }
 }
 
 impl std::fmt::Debug for dyn ProtocolHandler {
@@ -184,6 +203,11 @@ impl Inner {
             .connect(addr, alpn)
             .await
             .map_err(|e| connect_err(&e))?;
+        // The handshake advertised the endpoint-wide grant. An RPC connection
+        // must stop replenishing bidirectional credit above its own cap.
+        if alpn == ALPN_RPC {
+            narrow_rpc_bidi_grant(&conn, self.config.rpc_limits);
+        }
         self.track(peer, &conn)?;
         Ok(conn)
     }
@@ -213,6 +237,17 @@ impl Inner {
         conns.push((*peer, conn.clone()));
         Ok(device)
     }
+}
+
+/// Largest bidirectional-stream and receive-window demand of the extra ALPNs.
+fn extra_alpn_transport(config: &PeerConfig) -> (usize, u64) {
+    let mut bidi = 0usize;
+    let mut window = 0u64;
+    for (_, handler) in &config.extra_protocols {
+        bidi = bidi.max(handler.max_bidi_streams());
+        window = window.max(handler.receive_window());
+    }
+    (bidi, window)
 }
 
 fn connect_err(e: &impl std::fmt::Display) -> PeerError {
@@ -259,6 +294,9 @@ impl PeerNetwork {
             }
             alpns.push(alpn.clone());
         }
+        let (extra_bidi, extra_window) = extra_alpn_transport(&config);
+        let transport =
+            crate::rpc::endpoint_transport_config(config.rpc_limits, extra_bidi, extra_window)?;
         let key = load_or_create_secret_key(&config.data_dir.join("identity.key"))?;
         let store = DeviceStore::open(config.data_dir.join("devices.json"))?;
         let builder = match &config.relay {
@@ -271,7 +309,7 @@ impl PeerNetwork {
             }
         };
         let mut builder = builder
-            .transport_config(crate::rpc::endpoint_transport_config(config.rpc_limits))
+            .transport_config(transport)
             .secret_key(key)
             .alpns(alpns);
         if let Some(addr) = config.bind_addr {
@@ -600,6 +638,10 @@ async fn handle_incoming(inner: Arc<Inner>, incoming: Incoming) -> Result<()> {
     let conn = accepting
         .await
         .map_err(|e| PeerError::Connection(e.to_string()))?;
+    // Same narrowing as the dial path: future RPC grants, not the initial credit.
+    if alpn == ALPN_RPC {
+        narrow_rpc_bidi_grant(&conn, inner.config.rpc_limits);
+    }
     let remote = conn.remote_id();
 
     if alpn == ALPN_PAIR {

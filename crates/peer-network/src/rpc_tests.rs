@@ -634,18 +634,20 @@ fn transport_debug_field(text: &str, field: &str) -> u64 {
     panic!("missing {field} in {text}");
 }
 
-#[test]
-fn endpoint_transport_config_reads_back_stream_caps_and_receive_window() {
-    let limits = RpcLimits {
-        streams_per_connection: 3,
-        bytes_per_connection: 3 * STREAM_BYTES,
-        ..RpcLimits::default()
-    };
-    assert!(limits.validate().is_ok());
-    let text = format!("{:?}", endpoint_transport_config(limits));
+fn assert_endpoint_transport(
+    limits: RpcLimits,
+    extra_bidi: usize,
+    extra_window: u64,
+    bidi: u64,
+    window: u64,
+) {
+    let text = format!(
+        "{:?}",
+        endpoint_transport_config(limits, extra_bidi, extra_window).unwrap()
+    );
     assert_eq!(
         transport_debug_field(&text, "max_concurrent_bidi_streams"),
-        3,
+        bidi,
         "{text}"
     );
     assert_eq!(
@@ -655,7 +657,7 @@ fn endpoint_transport_config_reads_back_stream_caps_and_receive_window() {
     );
     assert_eq!(
         transport_debug_field(&text, "receive_window"),
-        u64::try_from(limits.bytes_per_connection).unwrap(),
+        window,
         "{text}"
     );
     // The connection window, not the per-stream window, is the byte budget.
@@ -664,36 +666,47 @@ fn endpoint_transport_config_reads_back_stream_caps_and_receive_window() {
         transport_debug_field(&text, "stream_receive_window"),
         "{text}"
     );
+    assert_ne!(bidi, 100, "{text}");
+    assert!(window < (1_u64 << 62) - 1, "{text}");
+}
+
+#[test]
+fn endpoint_transport_config_reads_back_stream_caps_and_receive_window() {
+    let limits = RpcLimits {
+        streams_per_connection: 3,
+        bytes_per_connection: 3 * STREAM_BYTES,
+        ..RpcLimits::default()
+    };
+    assert!(limits.validate().is_ok());
+    let rpc_window = u64::try_from(limits.bytes_per_connection).unwrap();
+    // No extra ALPN: the handshake grant stays the RPC admission cap.
+    assert_endpoint_transport(limits, 0, 0, 3, rpc_window);
+    // A smaller extra ALPN must not shrink the RPC grant or window.
+    assert_endpoint_transport(limits, 1, 1, 3, rpc_window);
+
+    // A larger ALPN, such as the remote API: 32 streams and a 16 MiB body each.
+    let api_streams = 32u64;
+    let api_body = api_streams * 16 * 1024 * 1024;
+    let api_streams_usize = usize::try_from(api_streams).unwrap();
+    assert_endpoint_transport(limits, api_streams_usize, api_body, api_streams, api_body);
 
     let defaults = RpcLimits::default();
-    let text = format!("{:?}", endpoint_transport_config(defaults));
-    assert_eq!(
-        transport_debug_field(&text, "max_concurrent_bidi_streams"),
+    assert_endpoint_transport(
+        defaults,
+        0,
+        0,
         u64::try_from(defaults.streams_per_connection).unwrap(),
-        "{text}"
-    );
-    assert_eq!(
-        transport_debug_field(&text, "max_concurrent_uni_streams"),
-        1,
-        "{text}"
-    );
-    assert_eq!(
-        transport_debug_field(&text, "receive_window"),
         u64::try_from(defaults.bytes_per_connection).unwrap(),
-        "{text}"
     );
-    assert_ne!(
-        transport_debug_field(&text, "max_concurrent_bidi_streams"),
-        100,
-        "{text}"
-    );
-    assert_ne!(
-        transport_debug_field(&text, "max_concurrent_uni_streams"),
-        100,
-        "{text}"
-    );
+    assert_endpoint_transport(defaults, api_streams_usize, api_body, api_streams, api_body);
+    if let Ok(too_many_streams) = usize::try_from(u64::from(u32::MAX) + 1) {
+        assert!(
+            endpoint_transport_config(limits, too_many_streams, 0).is_err(),
+            "a stream cap that does not fit u32 must be rejected"
+        );
+    }
     assert!(
-        transport_debug_field(&text, "receive_window") < (1_u64 << 62) - 1,
-        "{text}"
+        endpoint_transport_config(limits, 0, u64::MAX).is_err(),
+        "an unbounded receive window must be rejected"
     );
 }

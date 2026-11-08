@@ -17,7 +17,12 @@ pub const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Maximum time to produce response headers; SSE bodies remain unbounded.
 pub const RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
-pub(crate) const STREAMS: usize = 32;
+/// Concurrent bidirectional streams one `bot/api/1` connection may carry.
+pub const STREAMS: usize = 32;
+/// Request-body bytes one API connection may have in flight.
+///
+/// [`STREAMS`] requests, each up to [`MAX_REQUEST_BYTES`].
+pub const CONNECTION_BODY_BUDGET: u64 = (STREAMS as u64) * (MAX_REQUEST_BYTES as u64);
 
 // Enforce the cap even with chunked encoding; preserve frames and backpressure.
 pub(crate) fn request_body(body: Body) -> Body {

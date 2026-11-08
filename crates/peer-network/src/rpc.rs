@@ -84,27 +84,57 @@ const ENDPOINT_UNI_STREAMS: u32 = 1;
 
 /// QUIC transport limits installed on the endpoint before `bind`.
 ///
-/// The handshake advertises these values, and `set_max_concurrent_*` after
-/// accept cannot take that credit back. `max_concurrent_bidi_streams` is
-/// `limits.streams_per_connection` (pairing opens one bidirectional stream).
+/// The handshake advertises these values, and that initial stream credit cannot
+/// be revoked. `max_concurrent_bidi_streams` is the maximum of
+/// `limits.streams_per_connection` and `extra_bidi_streams`, so every ALPN on
+/// the endpoint gets the grant it needs. Pairing opens one bidirectional
+/// stream; another ALPN, such as the remote API, may need more. RPC connections
+/// then call [`narrow_rpc_bidi_grant`] to reduce future grants to the RPC cap.
 /// `max_concurrent_uni_streams` is [`ENDPOINT_UNI_STREAMS`]. `receive_window`
-/// is `limits.bytes_per_connection`, so per-stream windows cannot stack up to
-/// the QUIC maximum.
+/// is the maximum of `limits.bytes_per_connection` and `extra_receive_window`,
+/// so per-stream windows cannot stack up to the QUIC maximum.
 ///
 /// `limits` must already have passed [`RpcLimits::validate`].
-#[must_use]
-pub(crate) fn endpoint_transport_config(limits: RpcLimits) -> QuicTransportConfig {
+///
+/// # Errors
+///
+/// Returns an error if `extra_bidi_streams` does not fit in a `u32`, or the
+/// chosen receive window does not fit in a QUIC varint.
+pub(crate) fn endpoint_transport_config(
+    limits: RpcLimits,
+    extra_bidi_streams: usize,
+    extra_receive_window: u64,
+) -> Result<QuicTransportConfig> {
+    let rpc_bidi =
+        u32::try_from(limits.streams_per_connection).expect("RPC limits were validated at startup");
+    let Ok(extra_bidi) = u32::try_from(extra_bidi_streams) else {
+        return Err(PeerError::Protocol(
+            "extra ALPN bidirectional stream cap does not fit a QUIC limit".into(),
+        ));
+    };
+    let rpc_window =
+        u64::try_from(limits.bytes_per_connection).expect("RPC limits were validated at startup");
+    let Ok(window) = VarInt::from_u64(rpc_window.max(extra_receive_window)) else {
+        return Err(PeerError::Protocol(
+            "connection receive window does not fit a QUIC varint".into(),
+        ));
+    };
+    Ok(QuicTransportConfig::builder()
+        .max_concurrent_bidi_streams(VarInt::from_u32(rpc_bidi.max(extra_bidi)))
+        .max_concurrent_uni_streams(VarInt::from_u32(ENDPOINT_UNI_STREAMS))
+        .receive_window(window)
+        .build())
+}
+
+/// Stop replenishing bidirectional credit above the RPC stream cap.
+///
+/// Call this immediately after the handshake on `bot/rpc/1`. The endpoint grant
+/// is the max any served ALPN needs, and that initial credit cannot be revoked.
+/// Lowering the concurrent limit here reduces grants issued as streams close.
+pub(crate) fn narrow_rpc_bidi_grant(conn: &Connection, limits: RpcLimits) {
     let bidi =
         u32::try_from(limits.streams_per_connection).expect("RPC limits were validated at startup");
-    let window =
-        u64::try_from(limits.bytes_per_connection).expect("RPC limits were validated at startup");
-    QuicTransportConfig::builder()
-        .max_concurrent_bidi_streams(VarInt::from_u32(bidi))
-        .max_concurrent_uni_streams(VarInt::from_u32(ENDPOINT_UNI_STREAMS))
-        .receive_window(
-            VarInt::from_u64(window).expect("per-connection byte budget fits a QUIC varint"),
-        )
-        .build()
+    conn.set_max_concurrent_bi_streams(VarInt::from_u32(bidi));
 }
 
 pub(crate) struct RpcBudget {
@@ -325,9 +355,9 @@ pub(crate) async fn serve_connection(
     global: Arc<RpcBudget>,
 ) {
     let local = RpcBudget::new(limits.streams_per_connection, limits.bytes_per_connection);
-    // Stream credit was fixed in the handshake by `endpoint_transport_config`.
-    // Admission still rejects bidi work that exceeds the byte budget. This
-    // loop does not accept unidirectional streams.
+    // `narrow_rpc_bidi_grant` already lowered future bidi grants to
+    // `streams_per_connection`. Admission still rejects work past the byte
+    // budget. This loop does not accept unidirectional streams.
     let peer = Arc::new(peer);
     while let Ok((send, recv)) = conn.accept_bi().await {
         let Ok(deadline) = deadline(timeout) else {

@@ -211,7 +211,10 @@ async fn claude_deny() {
 }
 #[tokio::test]
 async fn codex_unconfinable_is_not_spawned() {
-    for shim in [false, true] {
+    // `.cmd` shims are a Windows PATHEXT feature. The direct fixture still
+    // has to be refused on every host.
+    let shims = [false, true];
+    for shim in shims.into_iter().filter(|shim| !shim || cfg!(windows)) {
         for version in ["0.167.0", "2.1.300"] {
             let (dir, cli) = fixture_env(Engine::Codex, "", shim, &[("FAKE_VERSION", version)]);
             let err = cli
@@ -243,6 +246,9 @@ async fn codex_reprobe_refuses_when_the_spawn_path_changes() {
     );
     assert!(!dir.path().join("argv").exists());
 }
+// `shim.cmd` is resolved through PATHEXT. Linux covers the same prompt check
+// in `claude_allow`, which spawns the fixture directly.
+#[cfg(windows)]
 #[tokio::test]
 async fn claude_cmd_prompt_absent() {
     run(Engine::Claude, true, true).await;
@@ -440,11 +446,15 @@ async fn missing_and_refused_shims_are_typed() {
             .unwrap_err(),
         CliError::NotInstalled
     );
-    std::fs::write(dir.path().join("missing.cmd"), "@echo off").unwrap();
-    assert_eq!(
-        cli.run_turn(turn(), Host::new(true), CancellationToken::new())
-            .await
-            .unwrap_err(),
-        CliError::ShimRefused
-    );
+    // A `.cmd` shim is only a candidate where PATHEXT includes it.
+    #[cfg(windows)]
+    {
+        std::fs::write(dir.path().join("missing.cmd"), "@echo off").unwrap();
+        assert_eq!(
+            cli.run_turn(turn(), Host::new(true), CancellationToken::new())
+                .await
+                .unwrap_err(),
+            CliError::ShimRefused
+        );
+    }
 }

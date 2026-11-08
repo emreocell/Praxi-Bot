@@ -454,23 +454,64 @@ mod tests {
         #[cfg(windows)]
         let _serial = WINDOWS_SHELL_TESTS.lock().await;
         let work = tempfile::tempdir().unwrap();
-        let fixture = spawn_delayed_marker(work.path(), Duration::from_secs(2));
+        let delay = Duration::from_secs(TIMEOUT_DESCENDANT_DELAY_SECS);
+        // The parent stays in the foreground for the whole tool timeout. The
+        // descendant delay is longer than that timeout, so the kill lands first.
+        let fixture = spawn_delayed_marker(
+            work.path(),
+            delay,
+            Duration::from_secs(BACKGROUND_LIFE_SECS),
+        );
         let t = tool(work.path());
         let started = std::time::Instant::now();
-        let err = t
-            .call(
-                &ToolContext::default(),
-                json!({"command": fixture.command, "shell": fixture.shell, "cwd": fixture.dir, "timeout": 1}),
-            )
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("timed out"), "{err}");
-        assert!(started.elapsed() < Duration::from_secs(15), "{err}");
-        assert!(
-            recorded_pid(&fixture.child_pid).is_some() && fixture.ready.exists(),
-            "descendant was not ready before timeout; fixture is inconclusive: {err}"
+        let ctx = ToolContext::default();
+        let call = t.call(
+            &ctx,
+            json!({"command": fixture.command, "shell": fixture.shell, "cwd": fixture.dir, "timeout": TIMEOUT_KILL_SECS}),
         );
-        assert_marker_stays_absent(&fixture).await;
+        tokio::pin!(call);
+        // Readiness is the marker the child writes before sleeping, not a 1s budget.
+        let mut ready_at = None;
+        let result = loop {
+            tokio::select! {
+                biased;
+                result = &mut call => break result,
+                () = tokio::time::sleep(Duration::from_millis(50)) => {
+                    if ready_at.is_none()
+                        && fixture.ready.exists()
+                        && let Some(pid) = recorded_pid(&fixture.child_pid)
+                    {
+                        ready_at = Some(started.elapsed());
+                        // Task list can lag the pid file on a busy runner.
+                        assert!(
+                            became_alive(pid, Duration::from_secs(10)).await,
+                            "descendant {pid} was not alive when the ready marker appeared"
+                        );
+                    }
+                }
+            }
+        };
+        if ready_at.is_none() && fixture.ready.exists() {
+            ready_at = Some(started.elapsed());
+        }
+        let err = result.expect_err("shell succeeded instead of timing out");
+        let message = err.to_string();
+        assert!(message.contains("timed out"), "{message}");
+        assert!(
+            started.elapsed() < Duration::from_secs(TIMEOUT_KILL_SECS + 60),
+            "timeout kill took {:?}: {message}",
+            started.elapsed()
+        );
+        let ready_at = ready_at.unwrap_or_else(|| {
+            panic!("descendant was not ready before timeout; fixture is inconclusive: {message}")
+        });
+        assert!(
+            recorded_pid(&fixture.child_pid).is_some(),
+            "descendant pid was not recorded; fixture is inconclusive: {message}"
+        );
+        // `delay` exceeds the tool timeout, so this deadline is after the write
+        // the descendant would have made had the tree survived.
+        assert_marker_absent_until(&fixture, started, ready_at + delay + MARKER_GRACE).await;
     }
 
     #[tokio::test]
@@ -530,28 +571,47 @@ mod tests {
         let _serial = WINDOWS_SHELL_TESTS.lock().await;
         let d = tempfile::tempdir().unwrap();
         let t = tool(d.path());
-        // The child explicitly inherits both pipes on Windows and Unix.
+        // The child explicitly inherits both pipes on Windows and Unix, and
+        // writes its marker only after `BACKGROUND_LIFE_SECS`. Returning before
+        // that file exists, under `SHELL_RETURN_BOUND`, proves the tool did not
+        // wait out the grandchild. Startup on a slow runner may itself exceed a
+        // few seconds, so the bound is generous and the signal is the marker.
         let fixture = spawn_fixture(
             d.path(),
-            Duration::from_secs(8),
+            Duration::from_secs(BACKGROUND_LIFE_SECS),
             Duration::ZERO,
-            false,
+            true,
             true,
         );
         let started = std::time::Instant::now();
         let out = t
             .call(
                 &ToolContext::default(),
-                json!({"command": fixture.command, "shell": fixture.shell, "cwd": fixture.dir}),
+                json!({"command": fixture.command, "shell": fixture.shell, "cwd": fixture.dir, "timeout": SHELL_CALL_TIMEOUT_SECS}),
             )
             .await
-            .unwrap();
+            .unwrap_or_else(|err| {
+                panic!(
+                    "shell_run did not finish while the grandchild was still running: {err}"
+                )
+            });
         let s = text(&out);
         assert!(s.contains("started-bg"), "{s}");
-        assert!(started.elapsed() < Duration::from_secs(7));
+        assert!(
+            started.elapsed() < SHELL_RETURN_BOUND,
+            "shell_run waited out the background grandchild ({:?})",
+            started.elapsed()
+        );
+        assert!(
+            !fixture.marker.exists(),
+            "background grandchild finished before shell_run returned"
+        );
         assert!(fixture.ready.exists(), "background child never started");
-        let pid = recorded_pid(&fixture.child_pid).expect("background child pid");
-        assert!(process_alive(pid), "pipe-holding child exited prematurely");
+        let pid = await_recorded_pid(&fixture.child_pid).await;
+        assert!(
+            became_alive(pid, READY_BOUND).await,
+            "pipe-holding child {pid} was not running after shell_run returned"
+        );
     }
 
     #[tokio::test]
@@ -563,6 +623,33 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, ToolError::InvalidInput(_)));
     }
+
+    /// Cold process start on a busy runner can take well over a minute.
+    /// Tests wait for marker files until this cap instead of a fixed 1s budget.
+    const READY_BOUND: Duration = Duration::from_secs(120);
+    /// A background child stays up this long, so a slow-but-successful return
+    /// still happens before it exits or writes its marker.
+    const BACKGROUND_LIFE_SECS: u64 = 300;
+    /// Upper bound for a `shell_run` that must return while that child is alive.
+    const SHELL_RETURN_BOUND: Duration = Duration::from_secs(180);
+    /// Tool timeout above `SHELL_RETURN_BOUND` and below `BACKGROUND_LIFE_SECS`,
+    /// so waiting out the child fails and a slow start is not killed.
+    const SHELL_CALL_TIMEOUT_SECS: u64 = 240;
+    /// Tool timeout for the kill-on-timeout path. Longer than runner startup,
+    /// shorter than the descendant's marker delay below.
+    const TIMEOUT_KILL_SECS: u64 = 90;
+    /// Descendant writes the leaked marker only after this delay, which is
+    /// longer than `TIMEOUT_KILL_SECS`, so a timeout always lands first.
+    const TIMEOUT_DESCENDANT_DELAY_SECS: u64 = 130;
+    /// Cancel path: the future is dropped once the child is ready. The
+    /// post-drop wait is this delay plus `MARKER_GRACE`.
+    const CANCEL_DESCENDANT_DELAY_SECS: u64 = 10;
+    /// Slack after the scheduled marker write so a late timer still fails the test.
+    const MARKER_GRACE: Duration = Duration::from_secs(20);
+    /// Positive control has to outlive a slow start plus the descendant delay.
+    /// Parent sleep starts only after the child is ready, so this is longer
+    /// than `READY_BOUND` + `TIMEOUT_DESCENDANT_DELAY_SECS`.
+    const POSITIVE_CONTROL_TIMEOUT_SECS: u64 = 360;
 
     const FIXTURE_MODE: &str = "PRAXI_SHELL_TEST_FIXTURE";
     const FIXTURE_TEST: &str = "shell::tests::process_fixture";
@@ -577,8 +664,9 @@ mod tests {
 
     /// A subprocess entry point, selected with --exact by the real shell tool.
     /// The ordinary suite has no fixture mode and simply returns. Both OSes
-    /// execute this same native parent/child protocol, without PowerShell
-    /// startup consuming the one-second timeout or six-second readiness cap.
+    /// execute this same native parent/child protocol, so the descendant stays
+    /// in the tool's process group / Windows job. Readiness is `ready.txt`,
+    /// waited out to `READY_BOUND`, not a fixed one-second budget.
     #[test]
     fn process_fixture() {
         let Ok(mode) = std::env::var(FIXTURE_MODE) else {
@@ -622,9 +710,9 @@ mod tests {
         // Reap while this parent is alive, but intentionally do not join the
         // thread: the background controls require the parent to exit first.
         let _reaper = std::thread::spawn(move || child.wait().unwrap());
-        // A successful parent return must witness an already-running child;
-        // the later 500ms alive check must not double as a startup deadline.
-        let ready_deadline = std::time::Instant::now() + Duration::from_secs(6);
+        // A successful parent return must witness an already-running child.
+        // The deadline is the shared readiness cap, not a one-second budget.
+        let ready_deadline = std::time::Instant::now() + READY_BOUND;
         while !Path::new("ready.txt").exists() {
             assert!(
                 std::time::Instant::now() < ready_deadline,
@@ -647,10 +735,12 @@ mod tests {
     }
 
     /// The same fixture serves the timeout, cancellation and positive control.
-    /// The descendant acknowledges startup before its two-second delayed write.
+    /// The descendant acknowledges startup before its delayed write.
     /// Parent and descendant remain in the tool's process group / Windows job.
-    fn spawn_delayed_marker(dir: &Path, delay: Duration) -> ProcessFixture {
-        spawn_fixture(dir, delay, Duration::from_secs(30), true, true)
+    /// `parent_delay` keeps the foreground parent alive past the tool timeout
+    /// and, on the positive-control path, past the marker write.
+    fn spawn_delayed_marker(dir: &Path, delay: Duration, parent_delay: Duration) -> ProcessFixture {
+        spawn_fixture(dir, delay, parent_delay, true, true)
     }
 
     fn spawn_fixture(
@@ -763,23 +853,25 @@ mod tests {
         }
     }
 
-    async fn assert_marker_stays_absent(fixture: &ProcessFixture) {
-        tokio::time::timeout(Duration::from_secs(6), async {
-            let started = tokio::time::Instant::now();
-            loop {
-                assert!(
-                    !fixture.marker.exists(),
-                    "descendant survived and wrote {}",
-                    fixture.marker.display()
-                );
-                if started.elapsed() >= Duration::from_secs(4) {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(25)).await;
+    /// Poll until `due` (measured from `started`) and fail if the marker appears.
+    /// The deadline is the descendant's scheduled write plus `MARKER_GRACE`, so
+    /// a survivor cannot hide behind a short fixed sleep.
+    async fn assert_marker_absent_until(
+        fixture: &ProcessFixture,
+        started: std::time::Instant,
+        due: Duration,
+    ) {
+        loop {
+            assert!(
+                !fixture.marker.exists(),
+                "descendant survived and wrote {}",
+                fixture.marker.display()
+            );
+            if started.elapsed() >= due {
+                break;
             }
-        })
-        .await
-        .expect("marker observation exceeded its six-second cap");
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
     }
 
     #[tokio::test]
@@ -787,18 +879,25 @@ mod tests {
         #[cfg(windows)]
         let _serial = WINDOWS_SHELL_TESTS.lock().await;
         let work = tempfile::tempdir().unwrap();
-        let fixture = spawn_delayed_marker(work.path(), Duration::from_secs(2));
+        let delay = Duration::from_secs(TIMEOUT_DESCENDANT_DELAY_SECS);
+        let fixture = spawn_delayed_marker(
+            work.path(),
+            delay,
+            Duration::from_secs(BACKGROUND_LIFE_SECS),
+        );
         let t = tool(work.path());
         let ctx = ToolContext::default();
-        // The identical command, without a tool timeout, must write its marker.
-        // Drop its still-running 30s parent once that has been observed.
+        // The identical command, without a kill timeout, must write its marker.
+        // The tool timeout only covers a slow start; it is longer than the delay.
+        // Drop the still-running parent once the marker has been observed.
         {
             let call = t.call(
                 &ctx,
-                json!({"command": fixture.command, "shell": fixture.shell, "cwd": fixture.dir}),
+                json!({"command": fixture.command, "shell": fixture.shell, "cwd": fixture.dir, "timeout": POSITIVE_CONTROL_TIMEOUT_SECS}),
             );
             tokio::pin!(call);
-            let written = tokio::time::timeout(Duration::from_secs(6), async {
+            let cap = READY_BOUND + delay + MARKER_GRACE;
+            let written = tokio::time::timeout(cap, async {
                 loop {
                     if std::fs::read_to_string(&fixture.marker).is_ok_and(|value| {
                         value.trim_start_matches('\u{feff}').trim() == "survived"
@@ -824,34 +923,47 @@ mod tests {
         #[cfg(windows)]
         let _serial = WINDOWS_SHELL_TESTS.lock().await;
         let work = tempfile::tempdir().unwrap();
-        let fixture = spawn_delayed_marker(work.path(), Duration::from_secs(2));
+        let delay = Duration::from_secs(CANCEL_DESCENDANT_DELAY_SECS);
+        let fixture = spawn_delayed_marker(
+            work.path(),
+            delay,
+            Duration::from_secs(BACKGROUND_LIFE_SECS),
+        );
         let t = tool(work.path());
         let ctx = ToolContext::default();
-        {
+        let started = std::time::Instant::now();
+        let ready_at = {
             let call = t.call(
                 &ctx,
-                json!({"command": fixture.command, "shell": fixture.shell, "cwd": fixture.dir}),
+                json!({"command": fixture.command, "shell": fixture.shell, "cwd": fixture.dir, "timeout": SHELL_CALL_TIMEOUT_SECS}),
             );
             tokio::pin!(call);
-            // Start the cancellation clock only once the child is running:
-            // a slow PowerShell startup must not yield a vacuous green test.
-            let ready = tokio::time::timeout(Duration::from_secs(6), async {
-                while !fixture.ready.exists() {
-                    tokio::time::sleep(Duration::from_millis(25)).await;
+            // Cancel only once the child is running. A slow start must not
+            // yield a vacuous green test, and the wait is the readiness cap.
+            let ready_at = loop {
+                tokio::select! {
+                    biased;
+                    result = &mut call => panic!("shell returned before cancellation: {result:?}"),
+                    () = tokio::time::sleep(Duration::from_millis(25)) => {
+                        if fixture.ready.exists() {
+                            break started.elapsed();
+                        }
+                        assert!(
+                            started.elapsed() < READY_BOUND,
+                            "descendant never acknowledged startup"
+                        );
+                    }
                 }
-            });
-            tokio::select! {
-                result = &mut call => panic!("shell returned before cancellation: {result:?}"),
-                result = ready => result.expect("descendant never acknowledged startup"),
-            }
+            };
             assert!(
                 tokio::time::timeout(Duration::from_millis(500), &mut call)
                     .await
                     .is_err(),
                 "shell returned before its future could be cancelled"
             );
-        } // Drop the actual call future, not just a borrowed timeout wrapper.
-        assert_marker_stays_absent(&fixture).await;
+            ready_at
+        }; // Drop the actual call future, not just a borrowed timeout wrapper.
+        assert_marker_absent_until(&fixture, started, ready_at + delay + MARKER_GRACE).await;
     }
 
     fn process_alive(pid: u32) -> bool {
@@ -883,6 +995,49 @@ mod tests {
         }
     }
 
+    async fn await_recorded_pid(path: &Path) -> u32 {
+        let started = std::time::Instant::now();
+        loop {
+            if let Some(pid) = recorded_pid(path) {
+                return pid;
+            }
+            assert!(
+                started.elapsed() < READY_BOUND,
+                "pid file {} was not written",
+                path.display()
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    async fn became_alive(pid: u32, bound: Duration) -> bool {
+        let started = std::time::Instant::now();
+        loop {
+            if process_alive(pid) {
+                return true;
+            }
+            if started.elapsed() >= bound {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    /// `true` when `pid` is still alive at the end of `window`.
+    /// A death at any poll is `false` (the child was killed).
+    async fn stays_alive(pid: u32, window: Duration) -> bool {
+        let started = std::time::Instant::now();
+        loop {
+            if !process_alive(pid) {
+                return false;
+            }
+            if started.elapsed() >= window {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }
+
     /// A background child must still be running after a successful `shell_run`.
     ///
     /// Unix `ProcessGroupChild::wait` blocks until the group is empty, so a
@@ -896,37 +1051,52 @@ mod tests {
         let spill = tempfile::tempdir().unwrap();
         let t = tool(spill.path());
         // Null child streams isolate successful-return job lifetime from the
-        // separate inherited-pipe/grace test above.
+        // separate inherited-pipe/grace test above. The marker is written only
+        // after `BACKGROUND_LIFE_SECS`, so the signal that we did not wait the
+        // child out is the missing file under a generous return bound.
         let fixture = spawn_fixture(
             work.path(),
-            Duration::from_secs(30),
+            Duration::from_secs(BACKGROUND_LIFE_SECS),
             Duration::ZERO,
-            false,
+            true,
             false,
         );
         let started = std::time::Instant::now();
         let out = t
             .call(
                 &ToolContext::default(),
-                json!({"command": fixture.command, "shell": fixture.shell, "cwd": fixture.dir, "timeout": 15}),
+                json!({"command": fixture.command, "shell": fixture.shell, "cwd": fixture.dir, "timeout": SHELL_CALL_TIMEOUT_SECS}),
             )
             .await
-            .unwrap();
+            .unwrap_or_else(|err| {
+                panic!(
+                    "shell_run did not finish while the background child was still running: {err}"
+                )
+            });
         let s = text(&out);
         assert!(s.contains("exit_code: 0"), "{s}");
         assert!(s.contains("started-bg"), "{s}");
         assert!(
-            started.elapsed() < Duration::from_secs(12),
+            started.elapsed() < SHELL_RETURN_BOUND,
             "shell_run waited out the background child ({:?})",
             started.elapsed()
         );
-        let pid = recorded_pid(&fixture.child_pid).expect("background child pid");
-        // A job-close kill lands before `call` returns. The pause covers a
-        // kill that is only queued by the time the tool result is observed.
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        assert!(fixture.ready.exists(), "background child never started");
         assert!(
-            process_alive(pid),
+            !fixture.marker.exists(),
+            "background child finished before shell_run returned"
+        );
+        assert!(fixture.ready.exists(), "background child never started");
+        let pid = await_recorded_pid(&fixture.child_pid).await;
+        // A job-close kill lands before `call` returns. The first wait absorbs a
+        // task list that has not observed the new pid yet. The second covers a
+        // kill that is only queued when the result is observed, including on a
+        // slow runner where 500ms is not enough to see it.
+        assert!(
+            became_alive(pid, Duration::from_secs(10)).await,
+            "background child {pid} was not running after a successful shell_run"
+        );
+        assert!(
+            stays_alive(pid, Duration::from_secs(5)).await,
             "background child {pid} was killed after a successful shell_run"
         );
     }

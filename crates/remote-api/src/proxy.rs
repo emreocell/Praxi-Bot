@@ -160,9 +160,24 @@ async fn probe(conn: &Connection) -> io::Result<()> {
     let (mut sender, connection) = http1::handshake(TokioIo::new(tokio::io::join(recv, send)))
         .await
         .map_err(io::Error::other)?;
-    let _driver = AbortTask(tokio::spawn(async move {
+    // Finish the exchange. Aborting the driver leaves the bidi stream open and
+    // holds one unit of the connection's stream credit.
+    let driver = tokio::spawn(async move {
         let _ = connection.await;
-    }));
+    });
+    let result = probe_health(&mut sender).await;
+    if result.is_err() {
+        driver.abort();
+        return result;
+    }
+    drop(sender);
+    let _ = tokio::time::timeout(CONNECT_TIMEOUT, driver).await;
+    Ok(())
+}
+
+async fn probe_health(
+    sender: &mut hyper::client::conn::http1::SendRequest<Body>,
+) -> io::Result<()> {
     let req = Request::builder()
         .uri("/v1/health")
         .header(header::HOST, "iroh.local")
@@ -172,6 +187,11 @@ async fn probe(conn: &Connection) -> io::Result<()> {
     if response.status() != StatusCode::OK {
         return Err(io::Error::other("remote API health probe rejected"));
     }
+    response
+        .into_body()
+        .collect()
+        .await
+        .map_err(io::Error::other)?;
     Ok(())
 }
 
