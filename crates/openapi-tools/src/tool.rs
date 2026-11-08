@@ -153,6 +153,9 @@ pub fn tools(spec: &ApiSpec, cfg: &OpenApiConfig) -> Result<Vec<Arc<dyn Tool>>, 
         _ => {}
     }
     let mut builder = Client::builder()
+        // Ambient proxies can resolve the destination themselves, bypassing
+        // GuardResolver and receiving credentials intended only for that API.
+        .no_proxy()
         .timeout(cfg.timeout)
         .connect_timeout(cfg.timeout.min(Duration::from_secs(10)))
         .redirect(Policy::none())
