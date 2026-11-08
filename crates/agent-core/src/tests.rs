@@ -3449,6 +3449,26 @@ async fn global_policy_can_be_replaced_at_runtime() {
     assert_eq!(w.count.load(Ordering::SeqCst), 1);
 }
 
+#[tokio::test]
+async fn locked_policy_denies_everything_even_under_a_permissive_policy() {
+    // SEC-13: the locked deny-all mode ignores global / bot allowances.
+    let env = setup();
+    let w = Arc::new(tool("t.write", Effect::Write, "written"));
+    let fake = Fake::new(vec![calls(&[("c1", "t.write", json!({}))]), text("done")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&w)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    lp.set_policy_locked(true);
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let _ = lp.wait(run).await;
+    assert_eq!(w.count.load(Ordering::SeqCst), 0, "denied while locked");
+}
+
 // ---------- F05 regressions ----------
 
 #[tokio::test]

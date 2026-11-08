@@ -105,6 +105,9 @@ impl Shared {
             initiator: ctx.initiator,
         };
         let r = &self.resolver;
+        if self.locked_deny(category) {
+            return Decision::Deny;
+        }
         let d = r.resolve(
             &self.global_policy.read(),
             ctx.bot_policy.as_ref(),
@@ -132,6 +135,12 @@ impl Shared {
         }
     }
 
+    /// Locked deny-all mode applies to `category`.
+    fn locked_deny(&self, category: PermissionCategory) -> bool {
+        category != PermissionCategory::Meta
+            && self.policy_locked.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     /// Decision for a human-initiated call of `category` under a bot's policy
     /// plus its category grants; the flag says a grant made the difference.
     pub(crate) fn effective_category(
@@ -146,6 +155,9 @@ impl Shared {
             initiator: InitiatorKind::Human,
         };
         let r = &self.resolver;
+        if self.locked_deny(category) {
+            return (Decision::Deny, false);
+        }
         let d = r.resolve(&self.global_policy.read(), bot_policy, None, &req);
         // Same rule as `decide`: only a policy-level `Ask` can be waived.
         let floor = r.resolve(&Policy::full(), None, None, &req) != Decision::Allow;

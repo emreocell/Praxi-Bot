@@ -2,8 +2,23 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
+
+use crate::runtime::CliError;
+
+#[cfg(windows)]
+#[path = "winjob.rs"]
+mod winjob;
+#[cfg(windows)]
+pub(crate) use winjob::SharedJob;
+
+/// Stable detection code when the installed Codex still has `unified_exec`.
+pub const CODEX_UNCONFINABLE_DETAIL: &str = "codex_unconfinable";
+/// Shown with [`CODEX_UNCONFINABLE_DETAIL`]. Praxi does not spawn that CLI.
+pub const CODEX_UNCONFINABLE_MESSAGE: &str =
+    "The installed Codex cannot disable unified_exec, so Praxi will not run it.";
 
 /// Authentication status reported by a CLI provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,10 +44,13 @@ pub struct DetectedCli {
     pub auth: AuthState,
     /// Account label (email or org name, max 160 chars, or null).
     pub account_label: Option<String>,
-    /// Whether this engine can currently run turns (always false in this task).
+    /// Whether this installed engine supports turn execution.
     pub runnable: bool,
     /// Stable detail code (`not_on_path`, `timeout`, `auth_unparsed`, etc., or null).
     pub detail: Option<String>,
+    /// User-readable refusal. `detail` stays the stable code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 /// Hermetic PATH and filesystem environment for detection.
@@ -201,8 +219,13 @@ pub fn resolve_spawn(candidate: &Path, env: &PathEnv) -> Result<ResolvedCommand,
         });
     }
 
-    // Check if the shim can be unwrapped to node + js script
+    // Check if the shim can be unwrapped to node + js script. An npm package
+    // reference is decided first: a native `.exe` named by package.json is
+    // used, and a `.js` bin stays refused. The `.cmd` is never passed to cmd.exe.
     if let Ok(text) = std::fs::read_to_string(candidate) {
+        if let Some(decision) = npm_native_exe(candidate, &text) {
+            return decision;
+        }
         let dir = candidate.parent().unwrap_or_else(|| Path::new("."));
         if let Some(target) = parse_npm_shim_target(&text) {
             let script_path = dir.join(&target);
@@ -212,6 +235,26 @@ pub fn resolve_spawn(candidate: &Path, env: &PathEnv) -> Result<ResolvedCommand,
                     return Ok(ResolvedCommand {
                         program: node,
                         args: vec![script_path.to_string_lossy().into_owned()],
+                    });
+                }
+            }
+            return Err(ShimError::Refused);
+        }
+        // Native installers also ship a batch wrapper around a sibling .exe.
+        // Trust only a literal target spelled in the shim, never shell expansion.
+        for line in text.lines() {
+            for prefix in ["\"%~dp0\\", "\"%dp0%\\", "\"%~dp0"] {
+                if let Some((_, rest)) = line.split_once(prefix)
+                    && let Some((target, _)) = rest.split_once('"')
+                    && !target.contains(['/', '\\', '%', ':'])
+                    && Path::new(target)
+                        .extension()
+                        .is_some_and(|e| e.eq_ignore_ascii_case("exe"))
+                    && dir.join(target).is_file()
+                {
+                    return Ok(ResolvedCommand {
+                        program: dir.join(target),
+                        args: Vec::new(),
                     });
                 }
             }
@@ -232,26 +275,192 @@ fn is_js_extension(target: &str) -> bool {
 }
 
 fn parse_npm_shim_target(text: &str) -> Option<String> {
-    for line in text.lines() {
-        if let Some(idx) = line.find("\"%~dp0\\") {
-            let rest = &line[idx + 7..];
-            if let Some(end) = rest.find('\"') {
-                let target = &rest[..end];
-                if is_js_extension(target) {
-                    return Some(target.to_owned());
-                }
-            }
-        } else if let Some(idx) = line.find("\"%dp0%\\") {
-            let rest = &line[idx + 7..];
-            if let Some(end) = rest.find('\"') {
-                let target = &rest[..end];
-                if is_js_extension(target) {
-                    return Some(target.to_owned());
-                }
+    for prefix in ["\"%~dp0\\", "\"%dp0%\\", "\"%~dp0"] {
+        for (idx, _) in text.match_indices(prefix) {
+            if let Some((target, _)) = text[idx + prefix.len()..].split_once('"')
+                && !target.contains(['%', '\n', '\r', ':', '\\', '/'])
+                && is_js_extension(target)
+            {
+                return Some(target.to_owned());
             }
         }
     }
     None
+}
+
+struct NpmPackageRef {
+    name: String,
+    relative: PathBuf,
+}
+
+/// npm `.cmd` shims name a package under `node_modules`. The executable is
+/// taken from that package's `package.json` `bin` entry, not from the path
+/// written in the shim. A `.js` bin is refused. The returned exe is canonical
+/// and stays inside the package directory.
+fn npm_native_exe(candidate: &Path, text: &str) -> Option<Result<ResolvedCommand, ShimError>> {
+    let dir = candidate.parent()?;
+    let stem = candidate.file_stem()?.to_str()?;
+    let mut saw_ref = false;
+    let mut search = text;
+    while let Some(at) = search.find("node_modules") {
+        let after = &search[at + "node_modules".len()..];
+        search = &search[at + "node_modules".len()..];
+        let Some(rest) = after.strip_prefix('\\').or_else(|| after.strip_prefix('/')) else {
+            continue;
+        };
+        let Some(package) = parse_npm_package(rest) else {
+            continue;
+        };
+        saw_ref = true;
+        if let Some(decision) = package_bin(dir, stem, &package) {
+            return Some(decision);
+        }
+    }
+    saw_ref.then_some(Err(ShimError::Refused))
+}
+
+fn parse_npm_package(rest: &str) -> Option<NpmPackageRef> {
+    let (first, after_first) = take_component(rest)?;
+    if let Some(scope) = first.strip_prefix('@') {
+        if !name_ok(scope) {
+            return None;
+        }
+        let after_sep = strip_one_sep(after_first?)?;
+        let (second, _) = take_component(after_sep)?;
+        if !name_ok(&second) {
+            return None;
+        }
+        let mut relative = PathBuf::from("node_modules");
+        relative.push(&first);
+        relative.push(&second);
+        Some(NpmPackageRef {
+            name: format!("{first}/{second}"),
+            relative,
+        })
+    } else {
+        if !name_ok(&first) {
+            return None;
+        }
+        let mut relative = PathBuf::from("node_modules");
+        relative.push(&first);
+        Some(NpmPackageRef {
+            name: first,
+            relative,
+        })
+    }
+}
+
+fn take_component(text: &str) -> Option<(String, Option<&str>)> {
+    if text.is_empty() {
+        return None;
+    }
+    let end = text
+        .find([
+            '\\', '/', '"', '\'', ' ', '\r', '\n', '\t', '%', ':', '*', '?',
+        ])
+        .unwrap_or(text.len());
+    if end == 0 {
+        return None;
+    }
+    let comp = text[..end].to_owned();
+    let rest = (end < text.len()).then(|| &text[end..]);
+    Some((comp, rest))
+}
+
+fn strip_one_sep(text: &str) -> Option<&str> {
+    text.strip_prefix('\\').or_else(|| text.strip_prefix('/'))
+}
+
+fn name_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+fn package_bin(
+    shim_dir: &Path,
+    stem: &str,
+    package: &NpmPackageRef,
+) -> Option<Result<ResolvedCommand, ShimError>> {
+    let pkg_dir = shim_dir.join(&package.relative);
+    let json_path = pkg_dir.join("package.json");
+    if !json_path.is_file() {
+        return None;
+    }
+    let text = std::fs::read_to_string(json_path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&text).ok()?;
+    if parsed.get("name").and_then(serde_json::Value::as_str) != Some(package.name.as_str()) {
+        return Some(Err(ShimError::Refused));
+    }
+    let unscoped = package
+        .name
+        .rsplit('/')
+        .next()
+        .unwrap_or(package.name.as_str());
+    let Some(bin_rel) = select_bin(&parsed, stem, unscoped) else {
+        return Some(Err(ShimError::Refused));
+    };
+    match native_exe_inside(&pkg_dir, bin_rel) {
+        Some(path) => Some(Ok(ResolvedCommand {
+            program: path,
+            args: Vec::new(),
+        })),
+        None => Some(Err(ShimError::Refused)),
+    }
+}
+
+fn select_bin<'a>(pkg: &'a serde_json::Value, stem: &str, unscoped: &str) -> Option<&'a str> {
+    match pkg.get("bin")? {
+        serde_json::Value::String(path) if stem.eq_ignore_ascii_case(unscoped) => Some(path),
+        serde_json::Value::Object(map) => map
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(stem))?
+            .1
+            .as_str(),
+        _ => None,
+    }
+}
+
+/// `Some(path)` only for a real `.exe` that canonicalizes inside `package_dir`.
+/// Scripts, missing files, and any `..` or absolute bin are `None` (refused).
+fn native_exe_inside(package_dir: &Path, bin_rel: &str) -> Option<PathBuf> {
+    if bin_rel.is_empty() || bin_rel.contains(['\0', '%', '\n', '\r']) {
+        return None;
+    }
+    let rel = Path::new(bin_rel);
+    if rel.is_absolute() {
+        return None;
+    }
+    let mut joined = package_dir.to_path_buf();
+    for component in rel.components() {
+        match component {
+            std::path::Component::Normal(part) => {
+                let text = part.to_str()?;
+                if text.contains([':', '%']) {
+                    return None;
+                }
+                joined.push(part);
+            }
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => return None,
+        }
+    }
+    let ext = joined
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("");
+    if !ext.eq_ignore_ascii_case("exe") {
+        return None;
+    }
+    if !joined.is_file() {
+        return None;
+    }
+    let root = std::fs::canonicalize(package_dir).ok()?;
+    let file = std::fs::canonicalize(&joined).ok()?;
+    (file.starts_with(&root) && file != root).then_some(file)
 }
 
 fn find_node_executable(near: &Path, env: &PathEnv) -> Option<PathBuf> {
@@ -336,7 +545,7 @@ fn tree_kill_program() -> PathBuf {
     }
 }
 
-async fn kill_tree(child: &mut tokio::process::Child) {
+pub(crate) async fn kill_tree(child: &mut dyn ChildWrapper) {
     if let Some(pid) = child.id() {
         let mut cmd = tokio::process::Command::new(tree_kill_program());
         #[cfg(windows)]
@@ -346,11 +555,72 @@ async fn kill_tree(child: &mut tokio::process::Child) {
         scrub_process_env(&mut cmd);
         let _ = cmd.output().await;
     }
-    let _ = child.kill().await;
+    let _ = child.start_kill();
     let _ = child.wait().await;
 }
 
-fn apply_sanitized_env(cmd: &mut tokio::process::Command, env: &PathEnv) {
+/// The same isolation for probes and sessions: groups on Unix, kill-on-close
+/// jobs on Windows (including when the parent runtime is torn down).
+///
+/// On Windows, `job` is the handle the bridge later passes to `IsProcessInJob`.
+/// The child is assigned to that job before it is resumed.
+pub(crate) fn isolate(cmd: tokio::process::Command, #[cfg(windows)] job: SharedJob) -> CommandWrap {
+    let mut wrap = CommandWrap::from(cmd);
+    wrap.wrap(KillOnDrop);
+    #[cfg(unix)]
+    wrap.wrap(process_wrap::tokio::ProcessGroup::leader());
+    #[cfg(windows)]
+    {
+        wrap.wrap(process_wrap::tokio::CreationFlags(
+            windows::Win32::System::Threading::CREATE_NO_WINDOW,
+        ));
+        wrap.wrap(winjob::KillOnCloseJob { job });
+    }
+    wrap
+}
+
+/// Identity of the exact file that will be spawned. A rewrite or replace
+/// changes the pin, so a later probe of the same path can fail closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BinaryPin {
+    len: u64,
+    modified: u128,
+    volume: u64,
+    index: u64,
+}
+
+pub(crate) fn binary_pin(path: &Path) -> Option<BinaryPin> {
+    let meta = std::fs::metadata(path).ok()?;
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|stamp| stamp.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |elapsed| {
+            (u128::from(elapsed.as_secs()) << 32) | u128::from(elapsed.subsec_nanos())
+        });
+    #[cfg(windows)]
+    {
+        let (volume, index) = winjob::file_id(path)?;
+        Some(BinaryPin {
+            len: meta.len(),
+            modified,
+            volume,
+            index,
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some(BinaryPin {
+            len: meta.len(),
+            modified,
+            volume: meta.dev(),
+            index: meta.ino(),
+        })
+    }
+}
+
+pub(crate) fn apply_sanitized_env(cmd: &mut tokio::process::Command, env: &PathEnv) {
     cmd.env_clear();
 
     let path_val = std::env::join_paths(&env.path_dirs).unwrap_or_default();
@@ -378,19 +648,18 @@ fn apply_sanitized_env(cmd: &mut tokio::process::Command, env: &PathEnv) {
         }
     }
 
-    // Allow test fixture control flags (e.g. FAKE_*) but NEVER any secret
+    // Preserve the user's non-secret environment, including CLI home overrides.
     for (k, v) in &env.env_vars {
         let upper = k.to_ascii_uppercase();
-        if upper.contains("KEY")
+        if upper == "PATH"
+            || upper.contains("KEY")
             || upper.contains("TOKEN")
             || upper.contains("SECRET")
             || upper.contains("CREDENTIAL")
         {
             continue;
         }
-        if upper.starts_with("FAKE_") {
-            cmd.env(k, v);
-        }
+        cmd.env(k, v);
     }
 }
 
@@ -408,7 +677,7 @@ async fn run_process_probe(
     let mut cmd = tokio::process::Command::new(&resolved.program);
     cmd.args(&resolved.args);
     cmd.args(args);
-    cmd.stdin(std::process::Stdio::null());
+    cmd.stdin(std::process::Stdio::null()).kill_on_drop(true);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
 
@@ -419,9 +688,18 @@ async fn run_process_probe(
         cmd.process_group(0);
     }
 
-    let mut child = cmd.spawn().map_err(|_| ProbeError::SpawnFailed)?;
-    let mut stdout = child.stdout.take().expect("piped");
-    let mut stderr = child.stderr.take().expect("piped");
+    #[cfg(windows)]
+    let job = SharedJob::new();
+    #[cfg(windows)]
+    let mut child = isolate(cmd, job.clone())
+        .spawn()
+        .map_err(|_| ProbeError::SpawnFailed)?;
+    #[cfg(not(windows))]
+    let mut child = isolate(cmd).spawn().map_err(|_| ProbeError::SpawnFailed)?;
+    #[cfg(windows)]
+    let _job = job;
+    let mut stdout = child.stdout().take().expect("piped");
+    let mut stderr = child.stderr().take().expect("piped");
 
     let read_fut = async {
         let mut stdout_buf = Vec::new();
@@ -474,18 +752,67 @@ async fn run_process_probe(
     match tokio::time::timeout(PROBE_TIMEOUT, read_fut).await {
         Ok(Ok(res)) => Ok(res),
         Ok(Err(ProbeError::OutputTooLarge)) => {
-            kill_tree(&mut child).await;
+            kill_tree(child.as_mut()).await;
             Err(ProbeError::OutputTooLarge)
         }
         Ok(Err(e)) => {
-            kill_tree(&mut child).await;
+            kill_tree(child.as_mut()).await;
             Err(e)
         }
         Err(_) => {
-            kill_tree(&mut child).await;
+            kill_tree(child.as_mut()).await;
             Err(ProbeError::Timeout)
         }
     }
+}
+
+/// Probe a version without opening login files or exposing raw diagnostics.
+pub(crate) async fn claude_version(
+    resolved: &ResolvedCommand,
+    env: &PathEnv,
+) -> Option<(u32, u32, u32)> {
+    let Ok((status, stdout, _)) = run_process_probe(resolved, &["--version"], env).await else {
+        return None;
+    };
+    if !status.success() {
+        return None;
+    }
+    stdout.split_whitespace().find_map(|part| {
+        let parts: Vec<u32> = part
+            .split('.')
+            .map(str::parse)
+            .collect::<Result<_, _>>()
+            .ok()?;
+        (parts.len() == 3).then(|| (parts[0], parts[1], parts[2]))
+    })
+}
+
+/// `claude --help` text, so a turn can refuse before spawn when the installed
+/// CLI does not advertise the permission mode and tool flags this crate sends.
+pub(crate) async fn claude_help(resolved: &ResolvedCommand, env: &PathEnv) -> Option<String> {
+    let (status, stdout, _) = run_process_probe(resolved, &["--help"], env).await.ok()?;
+    status.success().then_some(stdout)
+}
+
+/// Probe Codex version without opening login files or exposing raw diagnostics.
+pub(crate) async fn codex_version(
+    resolved: &ResolvedCommand,
+    env: &PathEnv,
+) -> Result<Option<(u32, u32, u32)>, CliError> {
+    let Ok((status, stdout, _)) = run_process_probe(resolved, &["--version"], env).await else {
+        return Err(CliError::NotInstalled);
+    };
+    if !status.success() {
+        return Err(CliError::NotInstalled);
+    }
+    Ok(stdout.split_whitespace().find_map(|part| {
+        let parts: Vec<u32> = part
+            .split('.')
+            .map(str::parse)
+            .collect::<Result<_, _>>()
+            .ok()?;
+        (parts.len() == 3).then(|| (parts[0], parts[1], parts[2]))
+    }))
 }
 
 fn parse_version_string(stdout: &str) -> Option<String> {
@@ -573,6 +900,7 @@ impl Detector {
             account_label: None,
             runnable: false,
             detail: codex.detail.clone(),
+            message: codex.message.clone(),
         };
 
         vec![claude, codex, cursor, opencode, gemini, chatgpt_plan]
@@ -594,6 +922,7 @@ impl Detector {
             account_label: None,
             runnable: false,
             detail: Some("not_on_path".to_owned()),
+            message: None,
         };
 
         let Some(candidate) = find_candidate(argv0, &self.env) else {
@@ -613,6 +942,7 @@ impl Detector {
                         account_label: None,
                         runnable: false,
                         detail: Some("shim_refused".to_owned()),
+                        message: None,
                     },
                     None,
                 );
@@ -631,8 +961,9 @@ impl Detector {
                             version,
                             auth: AuthState::Unknown,
                             account_label: None,
-                            runnable: false,
+                            runnable: id == "claude",
                             detail: None,
+                            message: None,
                         },
                         Some(resolved),
                     )
@@ -648,6 +979,7 @@ impl Detector {
                             account_label: None,
                             runnable: false,
                             detail: Some("broken_shim".to_owned()),
+                            message: None,
                         },
                         None,
                     )
@@ -663,6 +995,7 @@ impl Detector {
                     account_label: None,
                     runnable: false,
                     detail: Some("timeout".to_owned()),
+                    message: None,
                 },
                 None,
             ),
@@ -676,6 +1009,7 @@ impl Detector {
                     account_label: None,
                     runnable: false,
                     detail: Some("output_too_large".to_owned()),
+                    message: None,
                 },
                 None,
             ),
@@ -689,6 +1023,7 @@ impl Detector {
                     account_label: None,
                     runnable: false,
                     detail: Some("spawn_failed".to_owned()),
+                    message: None,
                 },
                 None,
             ),
@@ -801,6 +1136,12 @@ impl Detector {
                 cli.auth = AuthState::Unknown;
                 cli.detail = Some("auth_unparsed".to_owned());
             }
+        }
+
+        if cli.installed && cli.detail.is_none() {
+            cli.runnable = false;
+            cli.detail = Some(CODEX_UNCONFINABLE_DETAIL.to_owned());
+            cli.message = Some(CODEX_UNCONFINABLE_MESSAGE.to_owned());
         }
 
         cli
@@ -1105,6 +1446,18 @@ mod tests {
             Some("node.exe")
         );
         assert!(resolved.args.iter().any(|arg| arg.ends_with("cli.js")));
+    }
+
+    #[test]
+    fn binary_pin_changes_when_the_file_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tool.exe");
+        std::fs::write(&path, b"one").unwrap();
+        let first = binary_pin(&path).unwrap();
+        std::fs::write(&path, b"two-bytes").unwrap();
+        let second = binary_pin(&path).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(binary_pin(&path), Some(second));
     }
 
     #[tokio::test]

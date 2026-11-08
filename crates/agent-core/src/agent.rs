@@ -81,6 +81,7 @@ impl AgentLoop {
                 tools,
                 providers: RwLock::new(providers),
                 global_policy: RwLock::new(cfg.global_policy.clone()),
+                policy_locked: std::sync::atomic::AtomicBool::new(false),
                 control: RwLock::new(None),
                 resolver: PermissionResolver::new(),
                 cfg,
@@ -227,6 +228,14 @@ impl AgentLoop {
     /// tool call of every run.
     pub fn set_global_policy(&self, policy: Policy) {
         *self.sh.global_policy.write() = policy;
+    }
+
+    /// Lock (or unlock) deny-all mode: while locked every tool decision except
+    /// agent-internal `Meta` tools is `Deny`, bot-specific policies included.
+    pub fn set_policy_locked(&self, locked: bool) {
+        self.sh
+            .policy_locked
+            .store(locked, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// USD price of `model` (full `provider/model` reference): the loop config's

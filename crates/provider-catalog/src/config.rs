@@ -37,6 +37,9 @@ pub fn api_key_secret_name(provider_id: &str) -> String {
 /// One configured provider.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderSettings {
+    /// Session configuration; absent for catalog-backed HTTP providers.
+    #[serde(default, flatten, skip_serializing_if = "Option::is_none")]
+    pub cli: Option<CliSettings>,
     /// Catalog id (or the id chosen for a custom provider).
     pub id: String,
     /// Whether the provider may be used.
@@ -61,6 +64,32 @@ pub struct ProviderSettings {
     pub model_caps: BTreeMap<String, CapabilityOverrides>,
 }
 
+/// Secret-free CLI provider shape in `providers.toml`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CliSettings {
+    /// An installed CLI, resolved on PATH at turn time.
+    Cli { engine: CliEngine, command: String },
+}
+
+/// Engines supported by the fixture-locked session runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CliEngine {
+    Claude,
+    Codex,
+}
+
+impl CliSettings {
+    /// Engine and argv0; never a path or shell command.
+    #[must_use]
+    pub fn parts(&self) -> (CliEngine, &str) {
+        match self {
+            Self::Cli { engine, command } => (*engine, command),
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
 }
@@ -70,6 +99,7 @@ impl ProviderSettings {
     #[must_use]
     pub fn new(id: impl Into<String>, added_at_ms: i64) -> Self {
         Self {
+            cli: None,
             id: id.into(),
             enabled: true,
             key: None,
@@ -110,6 +140,9 @@ impl ProviderSettings {
     /// `provider/model` reference when a default model is set.
     #[must_use]
     pub fn model_ref(&self) -> Option<ModelRef> {
+        if self.cli.is_some() && self.default_model.is_none() {
+            return Some(ModelRef(self.id.clone()));
+        }
         self.default_model
             .as_ref()
             .map(|m| ModelRef(format!("{}/{m}", self.id)))
@@ -129,6 +162,9 @@ impl ProviderSettings {
         store: &dyn SecretStore,
         config: OpenAiCompatConfig,
     ) -> Result<Box<dyn ChatProvider>, ProviderError> {
+        if self.cli.is_some() || entry.kind == crate::ProviderKind::Cli {
+            return Err(ProviderError::CliSession);
+        }
         let key = match (&self.key, &entry.auth) {
             (Some(r), _) => Some(
                 resolve(store, r)
@@ -158,6 +194,9 @@ pub struct ProviderConfig {
 /// Errors from reading / writing the provider config.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
+    /// A CLI record must contain only an argv0 and no HTTP credentials.
+    #[error("invalid CLI provider: {0}")]
+    InvalidCli(String),
     /// Filesystem error.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
@@ -179,7 +218,11 @@ impl ProviderConfig {
     /// I/O or parse errors.
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         match std::fs::read_to_string(path) {
-            Ok(s) => Ok(toml::from_str(&s)?),
+            Ok(s) => {
+                let cfg: Self = toml::from_str(&s)?;
+                cfg.validate_cli()?;
+                Ok(cfg)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(e) => Err(e.into()),
         }
@@ -190,12 +233,39 @@ impl ProviderConfig {
     /// # Errors
     /// I/O or serialisation errors.
     pub fn save(&self, path: &Path) -> Result<(), ConfigError> {
+        self.validate_cli()?;
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
         let tmp = path.with_extension("tmp");
         std::fs::write(&tmp, toml::to_string_pretty(self)?)?;
         std::fs::rename(&tmp, path)?;
+        Ok(())
+    }
+
+    fn validate_cli(&self) -> Result<(), ConfigError> {
+        for p in &self.providers {
+            if let Some(cli) = &p.cli {
+                let (engine, command) = cli.parts();
+                let id = match engine {
+                    CliEngine::Claude => "cli:claude",
+                    CliEngine::Codex => "cli:codex",
+                };
+                if p.id != id
+                    || p.key.is_some()
+                    || p.custom.is_some()
+                    || command.is_empty()
+                    || command.starts_with('-')
+                    || !command
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+                {
+                    return Err(ConfigError::InvalidCli(p.id.clone()));
+                }
+            } else if p.id.starts_with("cli:") {
+                return Err(ConfigError::InvalidCli(p.id.clone()));
+            }
+        }
         Ok(())
     }
 
@@ -630,6 +700,67 @@ mod connection_tests {
         assert!(matches!(
             test_connection(&p, None).await,
             Err(ProviderError::Auth(_))
+        ));
+    }
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+    #[test]
+    fn cli_enablement_roundtrips_without_secrets_or_spawning() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[[provider]]\nid='cli:claude'\nadded_at_ms=0\nkind='cli'\nengine='claude'\ncommand='missing-fake'\n").unwrap();
+        let cfg = ProviderConfig::load(&path).unwrap();
+        let p = cfg.get("cli:claude").unwrap();
+        assert_eq!(
+            p.cli.as_ref().unwrap().parts(),
+            (CliEngine::Claude, "missing-fake")
+        );
+        assert!(p.key.is_none());
+        cfg.save(&path).unwrap();
+        assert_eq!(ProviderConfig::load(&path).unwrap(), cfg);
+        let text = std::fs::read_to_string(path).unwrap();
+        assert!(!text.contains("base_url"));
+        assert!(!text.contains("key"));
+    }
+    #[test]
+    fn cli_configuration_rejects_paths_unsupported_engines_and_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        for fields in [
+            "engine='claude'\ncommand='C:/claude.exe'",
+            "engine='cursor'\ncommand='cursor'",
+            "engine='codex'\ncommand='codex'",
+            "engine='claude'\ncommand='claude'\nkey='env:SECRET'",
+        ] {
+            std::fs::write(
+                &path,
+                format!("[[provider]]\nid='cli:claude'\nadded_at_ms=0\nkind='cli'\n{fields}\n"),
+            )
+            .unwrap();
+            assert!(ProviderConfig::load(&path).is_err(), "{fields}");
+        }
+    }
+    #[test]
+    fn cli_factory_fails_before_resolving_a_secret() {
+        let mut entry: ProviderEntry =
+            toml::from_str(include_str!("../../../providers/catalog/anthropic.toml")).unwrap();
+        entry.kind = crate::ProviderKind::Cli;
+        assert!(matches!(
+            build_chat_provider(&entry, OpenAiCompatConfig::default(), None),
+            Err(ProviderError::CliSession)
+        ));
+        let mut s = ProviderSettings::new("cli:claude", 0);
+        s.key = Some(secret_store::SecretRef::new("missing").unwrap());
+        assert!(matches!(
+            s.build_provider(
+                &entry,
+                &secret_store::MemoryStore::new(),
+                OpenAiCompatConfig::default()
+            ),
+            Err(ProviderError::CliSession)
         ));
     }
 }

@@ -712,6 +712,8 @@ export interface components {
              * @description Milliseconds until the registration expires; `0` when not registered.
              */
             expires_in_ms: number;
+            /** @description `paused` / `human_driving` while latched: refuses bot actions until `POST /v1/control/release` (or a `PUT` with `release: true`), regardless of the heartbeat.  `null` when nothing is latched. */
+            latched?: null | components["schemas"]["ControlMode"];
             mode?: null | components["schemas"]["ControlMode"];
         };
         /**
@@ -722,6 +724,8 @@ export interface components {
         ControlStateInput: {
             /** @description The app's current mode. */
             mode: components["schemas"]["ControlMode"];
+            /** @description With `idle` / `bot_driving`: the user's explicit resume, clears a latched pause.  Plain heartbeats (without it) never release. */
+            release?: boolean;
         };
         /**
          * @description The app's answer to a `control_requested` event.
@@ -893,6 +897,8 @@ export interface components {
              *     `approve-destructive`, `read-and-draft`, `full`); `null` = custom.
              */
             preset?: string | null;
+            /** @description Set when the persisted `policy.json` could not be loaded: the daemon is locked to deny-all until a new policy is saved with `PUT /v1/policy`. */
+            load_error?: string | null;
         };
         /**
          * @description `PUT /v1/policy`.  Start from `preset` (or, without it, from the current
