@@ -1,8 +1,16 @@
 //! File tools (permission category `Fs`) with checkpoints before every change.
+//!
+//! `validate_path` runs before any stat or open. It rejects UNC and device
+//! paths (including verbatim `\\?\UNC` and `\\.\` forms), refuses mapped
+//! drives and reparse points that leave the local machine, and blocks
+//! credential files unless the host granted that exact path. Configured read
+//! roots are enforced on the lexical path and again after symlink resolution.
 
+use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -39,6 +47,15 @@ enum Op {
 struct Shared {
     checkpoints: CheckpointStore,
     spill_dir: PathBuf,
+    /// Application data directory, lexically absolute. Credential files under
+    /// it (and well-known credential names anywhere) are refused.
+    data_dir: PathBuf,
+    /// When non-empty, every fs path must stay inside one of these directories.
+    allowed_roots: Vec<PathBuf>,
+    /// Credential paths the host explicitly granted. Does not permit UNC,
+    /// device, or out-of-root access.
+    grants: Vec<PathBuf>,
+    drives: DriveCache,
 }
 
 /// One file tool.
@@ -49,11 +66,34 @@ pub struct FsTool {
 }
 
 /// Build all file tools; `data_dir` hosts checkpoints and spill files.
+///
+/// UNC paths, device paths, and credential files are refused. No root limit
+/// is applied; use [`tools_bounded`] when the host has configured roots or grants.
 #[must_use]
 pub fn tools(data_dir: &Path) -> Vec<Arc<dyn Tool>> {
+    tools_bounded(data_dir, &[], &[])
+}
+
+/// Like [`tools`], confined to `allowed_roots` when that slice is non-empty.
+/// `grants` are absolute credential paths the host has explicitly allowed.
+#[must_use]
+pub(crate) fn tools_bounded(
+    data_dir: &Path,
+    allowed_roots: &[PathBuf],
+    grants: &[PathBuf],
+) -> Vec<Arc<dyn Tool>> {
+    let drives = DriveCache::new();
+    let allowed_roots = prepare_roots(allowed_roots, &drives);
+    let grants = prepare_grants(grants);
+    let data_dir =
+        lexical_absolute(&data_dir.to_string_lossy()).unwrap_or_else(|_| data_dir.to_path_buf());
     let shared = Arc::new(Shared {
-        checkpoints: CheckpointStore::new(data_dir),
+        checkpoints: CheckpointStore::new(&data_dir),
         spill_dir: data_dir.join("spill"),
+        data_dir,
+        allowed_roots,
+        grants,
+        drives,
     });
     let fs = PermissionCategory::Fs;
     let defs: Vec<(Op, ToolSpec)> = vec![
@@ -255,6 +295,680 @@ struct CpRestoreIn {
     id: String,
 }
 
+const MAX_LINK_DEPTH: usize = 8;
+const UNC_MSG: &str = "UNC paths are not allowed";
+const DEVICE_MSG: &str = "device paths are not allowed";
+const ROOT_MSG: &str = "path is outside the allowed roots";
+const GRANT_MSG: &str = "credential or control file requires an explicit grant";
+const REPARSE_MSG: &str = "reparse points are not allowed";
+const LINK_MSG: &str = "symlink chain is too deep";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Class {
+    Local,
+    Unc,
+    Device,
+}
+
+/// How far [`validate_path`] follows links before the filesystem is changed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Follow {
+    /// Read the file or directory. The final symlink is resolved.
+    Content,
+    /// Write bytes. The final symlink is resolved; a missing tail is allowed.
+    Write,
+    /// Rename or delete this directory entry. The final symlink is kept.
+    Entry,
+    /// Create or replace this directory entry. The final symlink is kept.
+    Place,
+}
+
+fn denied(msg: &str) -> ToolError {
+    ToolError::PermissionDenied(msg.to_string())
+}
+
+fn follows_final(follow: Follow) -> bool {
+    matches!(follow, Follow::Content | Follow::Write)
+}
+
+fn allows_missing(follow: Follow) -> bool {
+    matches!(follow, Follow::Write | Follow::Place)
+}
+
+#[derive(Clone, Copy)]
+struct ResolveCtx<'a> {
+    follow: Follow,
+    roots: &'a [PathBuf],
+    drives: &'a DriveCache,
+    depth: usize,
+}
+
+#[derive(Clone, Debug)]
+struct DriveSnapshot {
+    mapped: HashSet<char>,
+    subst: HashMap<char, PathBuf>,
+}
+
+struct DriveCache {
+    #[cfg(windows)]
+    snapshot: parking_lot::Mutex<Option<DriveSnapshot>>,
+}
+
+impl DriveCache {
+    fn new() -> Self {
+        Self {
+            #[cfg(windows)]
+            snapshot: parking_lot::Mutex::new(None),
+        }
+    }
+
+    fn apply(&self, path: &Path) -> Result<PathBuf, ToolError> {
+        #[cfg(windows)]
+        {
+            let snap = self.loaded()?;
+            rewrite_drive(path, &snap, 0)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = self;
+            Ok(path.to_path_buf())
+        }
+    }
+
+    #[cfg(windows)]
+    fn loaded(&self) -> Result<DriveSnapshot, ToolError> {
+        let mut guard = self.snapshot.lock();
+        if let Some(snap) = guard.as_ref() {
+            return Ok(snap.clone());
+        }
+        let snap = load_drive_snapshot()?;
+        *guard = Some(snap.clone());
+        Ok(snap)
+    }
+}
+
+/// String classification only. No filesystem access, so it cannot touch the network.
+fn classify_path_str(raw: &str) -> Class {
+    if raw.contains('\0') {
+        return Class::Device;
+    }
+    let lower = raw.replace('/', "\\").to_ascii_lowercase();
+    if let Some(rest) = lower.strip_prefix(r"\\") {
+        return classify_double_slash(rest);
+    }
+    if let Some(rest) = lower.strip_prefix(r"\??\") {
+        return classify_nt_prefix(rest);
+    }
+    if lower.starts_with(r"\device\") || lower == r"\device" {
+        return if lower.contains("mup") || lower.contains("lanman") || lower.contains(r"\unc\") {
+            Class::Unc
+        } else {
+            Class::Device
+        };
+    }
+    Class::Local
+}
+
+fn classify_double_slash(rest: &str) -> Class {
+    if let Some(after) = rest.strip_prefix(r"?\") {
+        return classify_verbatim(after);
+    }
+    if rest.is_empty() || rest.starts_with(['?', '.']) {
+        return Class::Device;
+    }
+    Class::Unc
+}
+
+fn classify_verbatim(after: &str) -> Class {
+    if after == "unc" || after.starts_with(r"unc\") {
+        return Class::Unc;
+    }
+    if is_drive_prefix(after) {
+        return Class::Local;
+    }
+    Class::Device
+}
+
+fn classify_nt_prefix(rest: &str) -> Class {
+    if rest == "unc" || rest.starts_with(r"unc\") {
+        return Class::Unc;
+    }
+    if is_drive_prefix(rest) {
+        return Class::Local;
+    }
+    if rest.contains(r"\unc\") || rest.contains("lanman") || rest.contains("mup") {
+        return Class::Unc;
+    }
+    Class::Device
+}
+
+fn is_drive_prefix(rest: &str) -> bool {
+    let b = rest.as_bytes();
+    b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
+}
+
+fn reject_syntax(raw: &str) -> Result<(), ToolError> {
+    if raw.is_empty() || raw.contains('\0') {
+        return Err(ToolError::InvalidInput(
+            "path is empty or contains NUL".into(),
+        ));
+    }
+    match classify_path_str(raw) {
+        Class::Local => Ok(()),
+        Class::Unc => Err(denied(UNC_MSG)),
+        Class::Device => Err(denied(DEVICE_MSG)),
+    }
+}
+
+/// `\\?\C:\...` and `\??\C:\...` become `C:\...`. Other strings are unchanged.
+fn strip_local_prefix(raw: &str) -> String {
+    let lower = raw.replace('/', "\\").to_ascii_lowercase();
+    for prefix in [r"\\?\", r"\??\"] {
+        if let Some(rest) = lower.strip_prefix(prefix)
+            && is_drive_prefix(rest)
+        {
+            return raw.replace('/', "\\")[prefix.len()..].to_string();
+        }
+    }
+    raw.to_string()
+}
+
+fn component_is_device(name: &str) -> bool {
+    if name.contains([':', '\0']) {
+        return true;
+    }
+    let n = name.trim_end_matches([' ', '.']).to_ascii_uppercase();
+    matches!(
+        n.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || (n.len() == 4
+        && (n.starts_with("COM") || n.starts_with("LPT"))
+        && n.as_bytes()
+            .get(3)
+            .is_some_and(|b| (b'1'..=b'9').contains(b)))
+}
+
+fn lexical_normalize(path: &Path) -> Result<PathBuf, ToolError> {
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::Prefix(_) | Component::RootDir => out.push(c.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if matches!(out.components().next_back(), Some(Component::Normal(_))) {
+                    out.pop();
+                }
+            }
+            Component::Normal(name) => {
+                if component_is_device(&name.to_string_lossy()) {
+                    return Err(denied(DEVICE_MSG));
+                }
+                out.push(name);
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn drive_letter(path: &Path) -> Option<char> {
+    for c in path.components() {
+        let Component::Prefix(prefix) = c else {
+            continue;
+        };
+        let s = prefix.as_os_str().to_string_lossy();
+        let bytes = s.as_bytes();
+        for i in 0..bytes.len().saturating_sub(1) {
+            if bytes[i].is_ascii_alphabetic() && bytes[i + 1] == b':' {
+                return Some(char::from(bytes[i]).to_ascii_uppercase());
+            }
+        }
+    }
+    None
+}
+
+fn is_drive_relative(path: &Path) -> bool {
+    path.components().any(|c| matches!(c, Component::Prefix(_))) && !path.is_absolute()
+}
+
+fn is_root_relative(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        path.is_absolute() && drive_letter(path).is_none()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+fn prefix_current_drive(path: &Path) -> Result<PathBuf, ToolError> {
+    #[cfg(windows)]
+    {
+        let cwd =
+            std::env::current_dir().map_err(|e| exec_err(format!("current directory: {e}")))?;
+        let letter = drive_letter(&cwd).ok_or_else(|| denied(UNC_MSG))?;
+        let mut out = PathBuf::from(format!("{letter}:\\"));
+        for c in path.components() {
+            if !matches!(c, Component::Prefix(_) | Component::RootDir) {
+                out.push(c);
+            }
+        }
+        Ok(out)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Err(denied(UNC_MSG))
+    }
+}
+
+fn lexical_absolute(raw: &str) -> Result<PathBuf, ToolError> {
+    reject_syntax(raw)?;
+    let stripped = strip_local_prefix(raw);
+    reject_syntax(&stripped)?;
+    let path = Path::new(&stripped);
+    if is_drive_relative(path) {
+        return Err(denied("drive-relative paths are not allowed"));
+    }
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else if is_root_relative(path) {
+        prefix_current_drive(path)?
+    } else {
+        let cwd =
+            std::env::current_dir().map_err(|e| exec_err(format!("current directory: {e}")))?;
+        reject_syntax(&cwd.to_string_lossy())?;
+        cwd.join(path)
+    };
+    let norm = lexical_normalize(&abs)?;
+    reject_syntax(&norm.to_string_lossy())?;
+    Ok(norm)
+}
+
+fn split_anchor(path: &Path) -> Result<(PathBuf, Vec<OsString>), ToolError> {
+    let mut anchor = PathBuf::new();
+    let mut names = Vec::new();
+    for c in path.components() {
+        match c {
+            Component::Prefix(_) | Component::RootDir => anchor.push(c.as_os_str()),
+            Component::Normal(name) => names.push(name.to_os_string()),
+            Component::CurDir => {}
+            Component::ParentDir => return Err(denied(ROOT_MSG)),
+        }
+    }
+    Ok((anchor, names))
+}
+
+fn join_link(parent: &Path, target: &Path, rest: &[OsString]) -> Result<PathBuf, ToolError> {
+    let mut combined = if target.is_absolute() {
+        target.to_path_buf()
+    } else {
+        parent.join(target)
+    };
+    for name in rest {
+        if component_is_device(&name.to_string_lossy()) {
+            return Err(denied(DEVICE_MSG));
+        }
+        combined.push(name);
+    }
+    lexical_normalize(&combined)
+}
+
+/// Resolve `raw` to a local path that is safe to stat and open.
+///
+/// Classification of UNC, device, and verbatim prefixes happens before any
+/// filesystem call. Roots are checked on the lexical path before the walk, and
+/// again on every symlink target before that target is stated.
+fn validate_path(sh: &Shared, raw: &str, follow: Follow) -> Result<PathBuf, ToolError> {
+    let lexical = lexical_absolute(raw)?;
+    let ctx = ResolveCtx {
+        follow,
+        roots: &sh.allowed_roots,
+        drives: &sh.drives,
+        depth: 0,
+    };
+    let resolved = resolve_local(&lexical, &ctx)?;
+    if credential_blocked(sh, &lexical, &resolved) {
+        return Err(denied(GRANT_MSG));
+    }
+    Ok(resolved)
+}
+
+fn resolve_local(path: &Path, ctx: &ResolveCtx<'_>) -> Result<PathBuf, ToolError> {
+    if ctx.depth > MAX_LINK_DEPTH {
+        return Err(denied(LINK_MSG));
+    }
+    let path = lexical_normalize(path)?;
+    reject_syntax(&path.to_string_lossy())?;
+    let path = ctx.drives.apply(&path)?;
+    reject_syntax(&path.to_string_lossy())?;
+    if !ctx.roots.is_empty() && !roots_contain(ctx.roots, &path) {
+        return Err(denied(ROOT_MSG));
+    }
+    let (mut acc, names) = split_anchor(&path)?;
+    for (i, name) in names.iter().enumerate() {
+        if component_is_device(&name.to_string_lossy()) {
+            return Err(denied(DEVICE_MSG));
+        }
+        let next = acc.join(name);
+        match fs::symlink_metadata(&next) {
+            Ok(meta) if reparse_unsafe(&meta) => return Err(denied(REPARSE_MSG)),
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return follow_link(&acc, &next, &names[i + 1..], ctx);
+            }
+            Ok(_) => acc = next,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && allows_missing(ctx.follow) => {
+                return append_missing(&next, &names[i + 1..]);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(exec_err(format!("{} does not exist", path.display())));
+            }
+            Err(e) => return Err(exec_err(format!("{}: {e}", next.display()))),
+        }
+    }
+    Ok(acc)
+}
+
+fn append_missing(start: &Path, rest: &[OsString]) -> Result<PathBuf, ToolError> {
+    let mut acc = start.to_path_buf();
+    for name in rest {
+        if component_is_device(&name.to_string_lossy()) {
+            return Err(denied(DEVICE_MSG));
+        }
+        acc.push(name);
+    }
+    Ok(acc)
+}
+
+fn follow_link(
+    parent: &Path,
+    link: &Path,
+    rest: &[OsString],
+    ctx: &ResolveCtx<'_>,
+) -> Result<PathBuf, ToolError> {
+    let target = fs::read_link(link).map_err(|e| exec_err(format!("{}: {e}", link.display())))?;
+    let raw = target.to_string_lossy();
+    if dos_target_is_remote(&raw) {
+        return Err(denied(UNC_MSG));
+    }
+    let stripped = strip_local_prefix(&raw);
+    reject_syntax(&stripped)?;
+    let combined = join_link(parent, Path::new(&stripped), rest)?;
+    if rest.is_empty() && !follows_final(ctx.follow) {
+        let verify = ResolveCtx {
+            follow: Follow::Content,
+            depth: ctx.depth + 1,
+            ..*ctx
+        };
+        let _verified = resolve_local(&combined, &verify)?;
+        return Ok(link.to_path_buf());
+    }
+    let next = ResolveCtx {
+        depth: ctx.depth + 1,
+        ..*ctx
+    };
+    resolve_local(&combined, &next)
+}
+
+fn reparse_unsafe(meta: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 && !meta.file_type().is_symlink()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = meta;
+        false
+    }
+}
+
+fn prepare_roots(roots: &[PathBuf], drives: &DriveCache) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for root in roots {
+        let Ok(abs) = lexical_absolute(&root.to_string_lossy()) else {
+            continue;
+        };
+        let ctx = ResolveCtx {
+            follow: Follow::Content,
+            roots: &[],
+            drives,
+            depth: 0,
+        };
+        if let Ok(resolved) = resolve_local(&abs, &ctx) {
+            out.push(resolved);
+        }
+    }
+    out
+}
+
+fn prepare_grants(grants: &[PathBuf]) -> Vec<PathBuf> {
+    grants
+        .iter()
+        .filter_map(|g| lexical_absolute(&g.to_string_lossy()).ok())
+        .collect()
+}
+
+const CREDENTIAL_NAMES: &[&str] = &[
+    "api-token",
+    "praxi.env",
+    "praxi-node.env",
+    "secrets.enc",
+    "identity.key",
+];
+
+fn name_is_credential(name: &str) -> bool {
+    let n = name.trim_end_matches([' ', '.']).to_ascii_lowercase();
+    n == ".env" || n.starts_with(".env.") || CREDENTIAL_NAMES.contains(&n.as_str())
+}
+
+fn is_protected(path: &Path, data_dir: &Path) -> bool {
+    let named = path.components().any(|c| match c {
+        Component::Normal(name) => name_is_credential(&name.to_string_lossy()),
+        Component::Prefix(_) | Component::RootDir | Component::CurDir | Component::ParentDir => {
+            false
+        }
+    });
+    named || under_data_sensitive(path, data_dir)
+}
+
+fn under_data_sensitive(path: &Path, data_dir: &Path) -> bool {
+    let p = norm_parts(path);
+    let d = norm_parts(data_dir);
+    if p.len() <= d.len() || p[..d.len()] != d[..] {
+        return false;
+    }
+    let rel = &p[d.len()..];
+    let Some(base) = rel.last().map(String::as_str) else {
+        return false;
+    };
+    base == "devices.json"
+        || base == "peer-node"
+        || rel.iter().any(|s| s == "vault" || s == "secrets")
+}
+
+fn credential_blocked(sh: &Shared, lexical: &Path, resolved: &Path) -> bool {
+    let protected = is_protected(lexical, &sh.data_dir) || is_protected(resolved, &sh.data_dir);
+    protected && !has_grant(&sh.grants, lexical, resolved)
+}
+
+fn has_grant(grants: &[PathBuf], lexical: &Path, resolved: &Path) -> bool {
+    grants
+        .iter()
+        .any(|g| same_path(g, lexical) || same_path(g, resolved))
+}
+
+fn same_path(a: &Path, b: &Path) -> bool {
+    norm_parts(a) == norm_parts(b)
+}
+
+fn roots_contain(roots: &[PathBuf], path: &Path) -> bool {
+    let p = norm_parts(path);
+    roots.iter().any(|root| {
+        let r = norm_parts(root);
+        !r.is_empty() && p.len() >= r.len() && p[..r.len()] == r[..]
+    })
+}
+
+fn fold_part(s: &str) -> String {
+    #[cfg(windows)]
+    {
+        s.to_ascii_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        s.to_string()
+    }
+}
+
+fn norm_parts(path: &Path) -> Vec<String> {
+    path.components()
+        .map(|c| fold_part(&c.as_os_str().to_string_lossy()))
+        .collect()
+}
+
+fn dos_target_is_remote(target: &str) -> bool {
+    let t = target.replace('/', "\\").to_ascii_lowercase();
+    t.contains("lanmanredirector")
+        || t.contains(r"\unc\")
+        || t.contains(r"\mup")
+        || t.starts_with(r"\\")
+}
+
+fn parse_mapped_drives(output: &str) -> HashSet<char> {
+    let mut set = HashSet::new();
+    for line in output.lines() {
+        let line = line.trim();
+        let lower = line.to_ascii_lowercase();
+        let Some(idx) = lower.rfind(r"\network\") else {
+            continue;
+        };
+        let after = &line[idx + r"\network\".len()..];
+        let token = after.split(['\\', '/']).next().unwrap_or("");
+        let mut chars = token.chars();
+        let Some(c) = chars.next() else {
+            continue;
+        };
+        if chars.next().is_none() && c.is_ascii_alphabetic() {
+            set.insert(c.to_ascii_uppercase());
+        }
+    }
+    set
+}
+
+fn parse_subst_listing(output: &str) -> HashMap<char, String> {
+    let mut map = HashMap::new();
+    for line in output.lines() {
+        let Some((left, right)) = line.split_once("=>") else {
+            continue;
+        };
+        let Some(c) = left.trim().chars().next() else {
+            continue;
+        };
+        if !c.is_ascii_alphabetic() {
+            continue;
+        }
+        let target = right.trim();
+        if target.is_empty() {
+            continue;
+        }
+        map.insert(c.to_ascii_uppercase(), target.to_string());
+    }
+    map
+}
+
+fn local_subst_target(target: &str) -> Option<PathBuf> {
+    if dos_target_is_remote(target) || classify_path_str(target) != Class::Local {
+        return None;
+    }
+    let stripped = strip_local_prefix(target);
+    if dos_target_is_remote(&stripped) || classify_path_str(&stripped) != Class::Local {
+        return None;
+    }
+    let path = PathBuf::from(&stripped);
+    if drive_letter(&path).is_none() && stripped.starts_with(['\\', '/']) {
+        return None;
+    }
+    Some(path)
+}
+
+fn snapshot_from(reg_out: &str, subst_out: &str) -> DriveSnapshot {
+    let mut mapped = parse_mapped_drives(reg_out);
+    let mut subst = HashMap::new();
+    for (letter, target) in parse_subst_listing(subst_out) {
+        if let Some(path) = local_subst_target(&target) {
+            subst.insert(letter, path);
+        } else {
+            mapped.insert(letter);
+        }
+    }
+    DriveSnapshot { mapped, subst }
+}
+
+#[cfg(windows)]
+fn rewrite_drive(path: &Path, snap: &DriveSnapshot, depth: u8) -> Result<PathBuf, ToolError> {
+    if depth > 4 {
+        return Err(denied("drive substitution is too deep"));
+    }
+    let Some(letter) = drive_letter(path) else {
+        return Ok(path.to_path_buf());
+    };
+    if snap.mapped.contains(&letter) {
+        return Err(denied("mapped network drives are not allowed"));
+    }
+    let Some(target) = snap.subst.get(&letter) else {
+        return Ok(path.to_path_buf());
+    };
+    let rewritten = lexical_normalize(&target.join(path_after_drive(path)))?;
+    reject_syntax(&rewritten.to_string_lossy())?;
+    rewrite_drive(&rewritten, snap, depth + 1)
+}
+
+#[cfg(windows)]
+fn path_after_drive(path: &Path) -> PathBuf {
+    let mut rest = PathBuf::new();
+    for c in path.components() {
+        if !matches!(c, Component::Prefix(_) | Component::RootDir) {
+            rest.push(c);
+        }
+    }
+    rest
+}
+
+#[cfg(windows)]
+fn load_drive_snapshot() -> Result<DriveSnapshot, ToolError> {
+    let reg = run_hidden("reg", &["query", r"HKCU\Network"])?;
+    let reg_text = if reg.status.success() {
+        String::from_utf8_lossy(&reg.stdout).into_owned()
+    } else if reg.status.code() == Some(1) {
+        String::new()
+    } else {
+        return Err(denied("drive mapping could not be verified"));
+    };
+    let subst = run_hidden("subst", &[])?;
+    if !subst.status.success() {
+        return Err(denied("drive mapping could not be verified"));
+    }
+    let subst_text = String::from_utf8_lossy(&subst.stdout);
+    Ok(snapshot_from(&reg_text, &subst_text))
+}
+
+#[cfg(windows)]
+fn run_hidden(program: &str, args: &[&str]) -> Result<std::process::Output, ToolError> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    std::process::Command::new(program)
+        .args(args)
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map_err(|_| denied("drive mapping could not be verified"))
+}
+
 fn read_text(path: &Path) -> Result<String, ToolError> {
     use std::io::Read as _;
     let too_big = || {
@@ -351,13 +1065,14 @@ fn read_line_range(
     Ok((kept, total))
 }
 
-fn do_read(i: &ReadIn) -> Result<String, ToolError> {
+fn do_read(sh: &Shared, i: &ReadIn) -> Result<String, ToolError> {
+    let path = validate_path(sh, &i.path, Follow::Content)?;
     let Some(r) = &i.range else {
-        return read_text(Path::new(&i.path));
+        return read_text(&path);
     };
     let start = r.start.unwrap_or(1).max(1);
     let end = r.end.unwrap_or(usize::MAX);
-    let (kept, total) = read_line_range(Path::new(&i.path), start, end)?;
+    let (kept, total) = read_line_range(&path, start, end)?;
     let end = end.min(total);
     if start > end {
         return Err(exec_err(format!(
@@ -389,7 +1104,13 @@ fn walk(root: &Path, depth: usize, f: &mut dyn FnMut(&Path, bool) -> bool) -> bo
     entries.sort_by_key(fs::DirEntry::file_name);
     for e in entries {
         let p = e.path();
-        let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
+        let ft = e.file_type().ok();
+        let is_link = ft.as_ref().is_some_and(fs::FileType::is_symlink);
+        // Symlinks and other reparse points are not descended into: opening
+        // them can follow a junction onto a UNC target.
+        let is_dir = ft.as_ref().is_some_and(fs::FileType::is_dir)
+            && !is_link
+            && !fs::symlink_metadata(&p).is_ok_and(|m| reparse_unsafe(&m));
         if is_dir && SKIP_DIRS.iter().any(|s| e.file_name() == *s) {
             continue;
         }
@@ -413,9 +1134,19 @@ fn glob_hit(m: &(globset::GlobMatcher, bool), root: &Path, p: &Path) -> bool {
     }
 }
 
-fn do_list(i: &ListIn) -> Result<String, ToolError> {
-    let root = Path::new(&i.path);
-    if !root.is_dir() {
+fn is_dir_nofollow(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink() && !reparse_unsafe(&m))
+}
+
+fn is_file_nofollow(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .is_ok_and(|m| m.is_file() && !m.file_type().is_symlink() && !reparse_unsafe(&m))
+}
+
+fn do_list(sh: &Shared, i: &ListIn) -> Result<String, ToolError> {
+    let root = validate_path(sh, &i.path, Follow::Content)?;
+    if !is_dir_nofollow(&root) {
         return Err(exec_err(format!("{} is not a directory", i.path)));
     }
     let m = matcher(i.glob.as_deref())?;
@@ -426,22 +1157,28 @@ fn do_list(i: &ListIn) -> Result<String, ToolError> {
             truncated = true;
             return false;
         }
-        let rel = p.strip_prefix(root).unwrap_or(p).display().to_string();
-        if is_dir {
+        let rel = p.strip_prefix(&root).unwrap_or(p).display().to_string();
+        let meta = fs::symlink_metadata(p).ok();
+        let link = meta
+            .as_ref()
+            .is_some_and(|m| m.file_type().is_symlink() || reparse_unsafe(m));
+        if link {
+            lines.push(format!("l {rel}"));
+        } else if is_dir {
             lines.push(format!("d {rel}/"));
         } else {
-            let size = fs::metadata(p).map_or(0, |m| m.len());
+            let size = meta.map_or(0, |m| m.len());
             lines.push(format!("f {rel} ({size} bytes)"));
         }
         true
     };
     match &m {
         None => {
-            walk(root, 0, &mut |p, d| push(p, d));
+            walk(&root, 0, &mut |p, d| push(p, d));
         }
         Some(m) => {
-            walk(root, 10, &mut |p, d| {
-                if glob_hit(m, root, p) {
+            walk(&root, 10, &mut |p, d| {
+                if glob_hit(m, &root, p) {
                     push(p, d)
                 } else {
                     true
@@ -459,8 +1196,16 @@ fn do_list(i: &ListIn) -> Result<String, ToolError> {
     Ok(out)
 }
 
-fn search_file(path: &Path, q: &str, root: &Path, out: &mut Vec<String>) {
-    let Ok(meta) = fs::metadata(path) else { return };
+fn search_file(sh: &Shared, path: &Path, q: &str, root: &Path, out: &mut Vec<String>) {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return;
+    };
+    if meta.file_type().is_symlink() || reparse_unsafe(&meta) {
+        return;
+    }
+    if is_protected(path, &sh.data_dir) && !has_grant(&sh.grants, path, path) {
+        return;
+    }
     if meta.len() > MAX_SEARCH_FILE_BYTES {
         return;
     }
@@ -487,21 +1232,21 @@ fn search_file(path: &Path, q: &str, root: &Path, out: &mut Vec<String>) {
     }
 }
 
-fn do_search(i: &SearchIn) -> Result<String, ToolError> {
+fn do_search(sh: &Shared, i: &SearchIn) -> Result<String, ToolError> {
     if i.query.is_empty() {
         return Err(ToolError::InvalidInput("query is empty".into()));
     }
     let q = i.query.to_lowercase();
-    let root = Path::new(&i.path);
+    let root = validate_path(sh, &i.path, Follow::Content)?;
     let m = matcher(i.glob.as_deref())?;
     let mut out = Vec::new();
-    if root.is_file() {
-        let parent = root.parent().unwrap_or(root);
-        search_file(root, &q, parent, &mut out);
-    } else if root.is_dir() {
-        walk(root, 12, &mut |p, is_dir| {
-            if !is_dir && m.as_ref().is_none_or(|m| glob_hit(m, root, p)) {
-                search_file(p, &q, root, &mut out);
+    if is_file_nofollow(&root) {
+        let parent = root.parent().unwrap_or(&root);
+        search_file(sh, &root, &q, parent, &mut out);
+    } else if is_dir_nofollow(&root) {
+        walk(&root, 12, &mut |p, is_dir| {
+            if !is_dir && m.as_ref().is_none_or(|m| glob_hit(m, &root, p)) {
+                search_file(sh, p, &q, &root, &mut out);
             }
             out.len() < MAX_MATCHES
         });
@@ -527,12 +1272,12 @@ impl Shared {
 }
 
 fn do_write(sh: &Shared, run: &str, i: &WriteIn) -> Result<String, ToolError> {
-    let p = Path::new(&i.path);
-    let cp = sh.checkpoint(run, "fs_write", &[p])?;
+    let p = validate_path(sh, &i.path, Follow::Write)?;
+    let cp = sh.checkpoint(run, "fs_write", &[&p])?;
     if let Some(parent) = p.parent().filter(|d| !d.as_os_str().is_empty()) {
         fs::create_dir_all(parent).map_err(|e| exec_err(format!("create dirs: {e}")))?;
     }
-    fs::write(p, i.content.as_bytes()).map_err(|e| exec_err(format!("write {}: {e}", i.path)))?;
+    fs::write(&p, i.content.as_bytes()).map_err(|e| exec_err(format!("write {}: {e}", i.path)))?;
     Ok(format!(
         "wrote {} bytes to {} (checkpoint {cp})",
         i.content.len(),
@@ -544,8 +1289,8 @@ fn do_edit(sh: &Shared, run: &str, i: &EditIn) -> Result<String, ToolError> {
     if i.old.is_empty() {
         return Err(ToolError::InvalidInput("old must not be empty".into()));
     }
-    let p = Path::new(&i.path);
-    let text = read_text(p)?;
+    let p = validate_path(sh, &i.path, Follow::Content)?;
+    let text = read_text(&p)?;
     let n = text.matches(&i.old).count();
     if n == 0 {
         return Err(exec_err("old text not found; read the file again"));
@@ -555,58 +1300,62 @@ fn do_edit(sh: &Shared, run: &str, i: &EditIn) -> Result<String, ToolError> {
             "old text matches {n} times; add more context or set replace_all"
         )));
     }
-    let cp = sh.checkpoint(run, "fs_edit", &[p])?;
+    let cp = sh.checkpoint(run, "fs_edit", &[&p])?;
     let updated = text.replace(&i.old, &i.new);
-    fs::write(p, updated).map_err(|e| exec_err(format!("write {}: {e}", i.path)))?;
+    fs::write(&p, updated).map_err(|e| exec_err(format!("write {}: {e}", i.path)))?;
     Ok(format!(
         "replaced {n} occurrence(s) in {} (checkpoint {cp})",
         i.path
     ))
 }
 
+fn remove_entry(path: &Path, meta: &fs::Metadata) -> Result<(), ToolError> {
+    let r = if meta.file_type().is_symlink() {
+        // Remove the link itself. `remove_dir_all` would follow a junction.
+        fs::remove_file(path).or_else(|_| fs::remove_dir(path))
+    } else if meta.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    };
+    r.map_err(|e| exec_err(format!("delete {}: {e}", path.display())))
+}
+
 fn do_move(sh: &Shared, run: &str, i: &MoveIn) -> Result<String, ToolError> {
-    let (from, to) = (Path::new(&i.from), Path::new(&i.to));
-    if fs::symlink_metadata(from).is_err() {
+    let from = validate_path(sh, &i.from, Follow::Entry)?;
+    let to = validate_path(sh, &i.to, Follow::Place)?;
+    if fs::symlink_metadata(&from).is_err() {
         return Err(exec_err(format!("{} does not exist", i.from)));
     }
-    if to.exists() && !i.overwrite {
+    let dest_meta = fs::symlink_metadata(&to).ok();
+    if dest_meta.is_some() && !i.overwrite {
         return Err(exec_err(format!(
             "{} already exists; set overwrite to replace it",
             i.to
         )));
     }
-    let cp = sh.checkpoint(run, "fs_move", &[from, to])?;
+    let cp = sh.checkpoint(run, "fs_move", &[&from, &to])?;
     if let Some(parent) = to.parent().filter(|d| !d.as_os_str().is_empty()) {
         fs::create_dir_all(parent).map_err(|e| exec_err(format!("create dirs: {e}")))?;
     }
-    if to.exists() {
-        let r = if to.is_dir() {
-            fs::remove_dir_all(to)
-        } else {
-            fs::remove_file(to)
-        };
-        r.map_err(|e| exec_err(format!("remove target: {e}")))?;
+    if let Some(meta) = dest_meta {
+        remove_entry(&to, &meta)?;
     }
-    fs::rename(from, to).map_err(|e| exec_err(format!("move failed: {e}")))?;
+    fs::rename(&from, &to).map_err(|e| exec_err(format!("move failed: {e}")))?;
     Ok(format!("moved {} to {} (checkpoint {cp})", i.from, i.to))
 }
 
 fn do_delete(sh: &Shared, run: &str, i: &DeleteIn) -> Result<String, ToolError> {
-    let p = Path::new(&i.path);
-    let meta = fs::symlink_metadata(p).map_err(|e| exec_err(format!("{}: {e}", i.path)))?;
-    if meta.is_dir() && !i.recursive {
+    let p = validate_path(sh, &i.path, Follow::Entry)?;
+    let meta = fs::symlink_metadata(&p).map_err(|e| exec_err(format!("{}: {e}", i.path)))?;
+    if meta.is_dir() && !meta.file_type().is_symlink() && !i.recursive {
         return Err(exec_err(format!(
             "{} is a directory; set recursive to delete it",
             i.path
         )));
     }
-    let cp = sh.checkpoint(run, "fs_delete", &[p])?;
-    let r = if meta.is_dir() {
-        fs::remove_dir_all(p)
-    } else {
-        fs::remove_file(p)
-    };
-    r.map_err(|e| exec_err(format!("delete {}: {e}", i.path)))?;
+    let cp = sh.checkpoint(run, "fs_delete", &[&p])?;
+    remove_entry(&p, &meta)?;
     Ok(format!("deleted {} (checkpoint {cp})", i.path))
 }
 
@@ -662,15 +1411,15 @@ impl Tool for FsTool {
         let text = match self.op {
             Op::Read => {
                 let i: ReadIn = parse(input)?;
-                blocking(move || do_read(&i)).await?
+                blocking(move || do_read(&sh, &i)).await?
             }
             Op::List => {
                 let i: ListIn = parse(input)?;
-                blocking(move || do_list(&i)).await?
+                blocking(move || do_list(&sh, &i)).await?
             }
             Op::Search => {
                 let i: SearchIn = parse(input)?;
-                blocking(move || do_search(&i)).await?
+                blocking(move || do_search(&sh, &i)).await?
             }
             Op::Write => {
                 let i: WriteIn = parse(input)?;
@@ -933,5 +1682,382 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, ToolError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn unc_and_device_prefixes_are_classified_without_io() {
+        let remote = [
+            r"\\server\share",
+            r"\\server\share\file",
+            "//server/share",
+            "//server/share/file",
+            r"\\?\UNC\server\share\file",
+            r"\\?\unc\server\share",
+            "//?/UNC/server/share",
+            r"\\server",
+            r"\??\UNC\server\share",
+            r"\Device\Mup\server\share",
+            r"\Device\LanmanRedirector\server\share",
+        ];
+        for p in remote {
+            assert_eq!(classify_path_str(p), Class::Unc, "{p}");
+        }
+        let device = [
+            r"\\.\PhysicalDrive0",
+            r"\\.\C:",
+            "//./COM1",
+            r"\\?\GLOBALROOT\Device\Harddisk0\Partition0",
+            r"\\?\Volume{12345678-1234-1234-1234-123456789abc}\",
+            r"\\?\",
+            r"\Device\HarddiskVolume1\",
+            r"\??\PhysicalDrive0",
+        ];
+        for p in device {
+            assert_eq!(classify_path_str(p), Class::Device, "{p}");
+        }
+        let local = [
+            r"C:\Windows\notepad.exe",
+            "C:/Windows/notepad.exe",
+            r"\\?\C:\Windows\notepad.exe",
+            "//?/C:/Windows/notepad.exe",
+            r"\??\C:\Windows\notepad.exe",
+            "foo/bar",
+            "./foo",
+            "/etc/hosts",
+        ];
+        for p in local {
+            assert_eq!(classify_path_str(p), Class::Local, "{p}");
+        }
+    }
+
+    #[test]
+    fn dos_device_names_and_mapped_drive_targets_are_classified_without_io() {
+        for n in [
+            "NUL", "nul", "CON", "PRN", "AUX", "COM1", "LPT9", "NUL.", "NUL ", "NUL:", "CONIN$",
+            "CONOUT$",
+        ] {
+            assert!(component_is_device(n), "{n}");
+        }
+        for n in ["NULL", "COM", "COM0", "LPT0", "COM10", "file.txt", ".env"] {
+            assert!(!component_is_device(n), "{n}");
+        }
+        assert!(dos_target_is_remote(r"\??\UNC\evil\share"));
+        assert!(dos_target_is_remote(
+            r"\Device\LanmanRedirector\;Z:0000000000000000\evil\share"
+        ));
+        assert!(dos_target_is_remote(r"\Device\Mup\evil\share"));
+        assert!(dos_target_is_remote(r"\\evil\share"));
+        assert!(!dos_target_is_remote(r"\??\C:\Users\me"));
+        assert!(!dos_target_is_remote(r"\Device\HarddiskVolume3"));
+        let snap = snapshot_from(
+            "HKEY_CURRENT_USER\\Network\\Z\r\nHKEY_CURRENT_USER\\Network\\Y\r\n",
+            "S:\\: => C:\\work\r\nT:\\: => \\\\evil\\share\r\n",
+        );
+        assert!(snap.mapped.contains(&'Z') && snap.mapped.contains(&'Y'));
+        assert!(snap.mapped.contains(&'T'), "UNC subst is a mapped drive");
+        assert!(!snap.mapped.contains(&'S'));
+        assert_eq!(
+            snap.subst.get(&'S').map(PathBuf::as_path),
+            Some(Path::new(r"C:\work"))
+        );
+    }
+
+    /// Directory symlink, or a junction on Windows (no extra privilege).
+    fn link_dir(target: &Path, link: &Path) -> std::io::Result<()> {
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(target, link)
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            let out = std::process::Command::new("cmd")
+                .args(["/c", "mklink", "/J"])
+                .arg(link)
+                .arg(target)
+                .creation_flags(CREATE_NO_WINDOW)
+                .stdin(std::process::Stdio::null())
+                .output()?;
+            if out.status.success() {
+                Ok(())
+            } else {
+                Err(std::io::Error::other(
+                    String::from_utf8_lossy(&out.stderr).to_string(),
+                ))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn unc_device_and_dos_names_are_refused_before_open() {
+        let (_d, _w, t) = setup();
+        let c = ctx();
+        let paths = [
+            r"\\192.0.2.1\share\file",
+            r"\\?\UNC\192.0.2.1\share\file",
+            "//192.0.2.1/share/file",
+            r"\\.\PhysicalDrive0",
+            r"\\.\NUL",
+            "NUL",
+            "CON",
+        ];
+        for path in paths {
+            let started = std::time::Instant::now();
+            let err = get(&t, "fs_read")
+                .call(&c, json!({"path": path}))
+                .await
+                .unwrap_err();
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(2),
+                "{path} took {:?}; a stat would have waited on the network",
+                started.elapsed()
+            );
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "{path}: {err}"
+            );
+            assert!(!err.to_string().contains("PRAXI"), "{path}");
+        }
+        for (name, input) in [
+            ("fs_list", json!({"path": r"\\192.0.2.1\share"})),
+            (
+                "fs_search",
+                json!({"query": "x", "path": r"\\192.0.2.1\share"}),
+            ),
+            (
+                "fs_write",
+                json!({"path": r"\\192.0.2.1\share\file", "content": "x"}),
+            ),
+        ] {
+            let err = get(&t, name).call(&c, input).await.unwrap_err();
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "{name}: {err}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn credential_paths_require_an_explicit_grant() {
+        let (d, w, t) = setup();
+        let c = ctx();
+        let secret = "PRAXI_SENTINEL_c102";
+        for name in [
+            ".env",
+            ".env.local",
+            "api-token",
+            "praxi.env",
+            "praxi-node.env",
+            "secrets.enc",
+            "identity.key",
+        ] {
+            let file = w.path().join(name);
+            fs::write(&file, secret).unwrap();
+            let err = get(&t, "fs_read")
+                .call(&c, json!({"path": &file}))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "{name}: {err}"
+            );
+            assert!(!err.to_string().contains(secret), "{name}: {err}");
+            assert_eq!(fs::read_to_string(&file).unwrap(), secret);
+        }
+        let fresh = w.path().join(".env");
+        fs::remove_file(&fresh).unwrap();
+        let err = get(&t, "fs_write")
+            .call(&c, json!({"path": &fresh, "content": secret}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+        assert!(!fresh.exists(), "refused write must not create .env");
+
+        let vault = d.path().join("vault");
+        fs::create_dir_all(&vault).unwrap();
+        let note = vault.join("note.txt");
+        fs::write(&note, secret).unwrap();
+        let err = get(&t, "fs_read")
+            .call(&c, json!({"path": &note}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+
+        let inside = d.path().join("devices.json");
+        fs::write(&inside, secret).unwrap();
+        let err = get(&t, "fs_read")
+            .call(&c, json!({"path": &inside}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+
+        // A project file with the same name is not a daemon credential.
+        let outside = w.path().join("devices.json");
+        fs::write(&outside, "project-devices").unwrap();
+        let ok = text(
+            &get(&t, "fs_read")
+                .call(&c, json!({"path": &outside}))
+                .await
+                .unwrap(),
+        );
+        assert!(ok.contains("project-devices"), "{ok}");
+
+        fs::write(w.path().join("readme.txt"), "ordinary notes").unwrap();
+        fs::write(w.path().join(".env"), secret).unwrap();
+        let searched = text(
+            &get(&t, "fs_search")
+                .call(&c, json!({"query": secret, "path": w.path()}))
+                .await
+                .unwrap(),
+        );
+        assert!(
+            !searched.contains(secret),
+            "search must not return credential contents: {searched}"
+        );
+
+        let envf = w.path().join(".env");
+        let granted = tools_bounded(d.path(), &[], std::slice::from_ref(&envf));
+        let ok = text(
+            &get(&granted, "fs_read")
+                .call(&c, json!({"path": &envf}))
+                .await
+                .unwrap(),
+        );
+        assert!(ok.contains(secret), "{ok}");
+        let token = w.path().join("api-token");
+        let err = get(&granted, "fs_read")
+            .call(&c, json!({"path": &token}))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ToolError::PermissionDenied(_)),
+            "a grant is exact: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn allowed_roots_block_dotdot_and_symlink_escape() {
+        let (d, w, _t) = setup();
+        let root = w.path().join("root");
+        let sub = root.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(root.join("ok.txt"), "safe").unwrap();
+        let outside = w.path().join("outside.txt");
+        let secret = "PRAXI_OUTSIDE_c102";
+        fs::write(&outside, secret).unwrap();
+        let t = tools_bounded(d.path(), std::slice::from_ref(&root), &[]);
+        let c = ctx();
+        let ok = text(
+            &get(&t, "fs_read")
+                .call(&c, json!({"path": root.join("ok.txt")}))
+                .await
+                .unwrap(),
+        );
+        assert!(ok.contains("safe"), "{ok}");
+        let via_dot = text(
+            &get(&t, "fs_read")
+                .call(&c, json!({"path": sub.join("..").join("ok.txt")}))
+                .await
+                .unwrap(),
+        );
+        assert!(via_dot.contains("safe"), "{via_dot}");
+
+        for escaped in [outside.clone(), root.join("..").join("outside.txt")] {
+            let err = get(&t, "fs_read")
+                .call(&c, json!({"path": &escaped}))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "{}: {err}",
+                escaped.display()
+            );
+            assert!(!err.to_string().contains(secret), "{err}");
+        }
+        let err = get(&t, "fs_write")
+            .call(
+                &c,
+                json!({"path": root.join("..").join("planted.txt"), "content": "x"}),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+        assert!(!w.path().join("planted.txt").exists());
+
+        let outside_dir = w.path().join("outside_dir");
+        fs::create_dir_all(&outside_dir).unwrap();
+        fs::write(outside_dir.join("secret.txt"), secret).unwrap();
+        let leak = root.join("leak");
+        link_dir(&outside_dir, &leak).expect("directory link");
+        let err = get(&t, "fs_read")
+            .call(&c, json!({"path": leak.join("secret.txt")}))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ToolError::PermissionDenied(_)),
+            "reparse escape: {err}"
+        );
+        assert!(!err.to_string().contains(secret), "{err}");
+        let searched = text(
+            &get(&t, "fs_search")
+                .call(&c, json!({"query": secret, "path": &root}))
+                .await
+                .unwrap(),
+        );
+        assert!(
+            !searched.contains(secret),
+            "search followed a reparse point: {searched}"
+        );
+        let nested = root.join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("ok.txt"), "safe").unwrap();
+        let alias = root.join("alias");
+        link_dir(&nested, &alias).expect("in-root directory link");
+        let ok = text(
+            &get(&t, "fs_read")
+                .call(&c, json!({"path": alias.join("ok.txt")}))
+                .await
+                .unwrap(),
+        );
+        assert!(ok.contains("safe"), "in-root reparse: {ok}");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_local_files_work_and_unc_is_not_opened() {
+        let (d, w, t) = setup();
+        let file = w.path().join("local.txt");
+        fs::write(&file, "local-ok").unwrap();
+        let c = ctx();
+        let ok = text(
+            &get(&t, "fs_read")
+                .call(&c, json!({"path": &file}))
+                .await
+                .unwrap(),
+        );
+        assert!(ok.contains("local-ok"), "{ok}");
+        for path in [
+            r"\\192.0.2.1\share\file",
+            r"\\?\UNC\192.0.2.1\share\a",
+            r"\\.\PhysicalDrive0",
+            "//192.0.2.1/share/a",
+        ] {
+            let started = std::time::Instant::now();
+            let err = get(&t, "fs_read")
+                .call(&c, json!({"path": path}))
+                .await
+                .unwrap_err();
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(2),
+                "{path} took {:?}",
+                started.elapsed()
+            );
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "{path}: {err}"
+            );
+        }
+        let _ = d;
     }
 }
