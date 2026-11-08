@@ -7,8 +7,8 @@
 //!   reading the UI tree text the model saw just before the call.
 //! * Literal values that appear verbatim in the user's message become
 //!   parameters (default = the recorded literal).
-//! * The result is a *proposal*: it is returned for review and never saved
-//!   here.
+//! * The recorder returns an unsaved *proposal* for review. The caller can
+//!   explicitly persist it afterward with [`Recording::save_new`].
 //!
 //! TODO(model-assisted parametrisation): only whole-value substring matches are
 //! lifted; partial matches (`...?q=cats`), reworded values and dates need a
@@ -16,6 +16,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use chrono::{DateTime, Datelike, Utc};
 use protocol::RunId;
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -29,6 +30,7 @@ use crate::format::{
     Workflow,
 };
 use crate::locator::{fingerprint_hex, parse_browser_line, parse_browser_snapshot, read_quoted};
+use crate::store::{SaveError, SaveMode, WorkflowStore};
 use crate::template::escape_literal;
 
 /// Step names the agent loop persists (agent-core `STEP_USER` / `STEP_TOOLS`).
@@ -86,6 +88,36 @@ pub struct Recording {
     pub warnings: Vec<String>,
 }
 
+impl Recording {
+    /// Save a reviewed proposal without replacing any existing workflow.
+    /// Returns its initial store revision.
+    ///
+    /// # Errors
+    /// Name collision, invalid workflow, or a store error.
+    pub fn save_new(&self, store: &WorkflowStore) -> Result<u64, SaveError> {
+        store.save_with_mode(&self.workflow, SaveMode::CreateNew)
+    }
+}
+
+fn default_recording_name(run_id: RunId) -> String {
+    let id = run_id.into_inner();
+    let timestamp = id
+        .get_timestamp()
+        .and_then(|timestamp| {
+            let (seconds, nanos) = timestamp.to_unix();
+            DateTime::<Utc>::from_timestamp(i64::try_from(seconds).ok()?, nanos)
+        })
+        .filter(|time| (0..=9999).contains(&time.year()))
+        .map_or_else(
+            || "unknown".into(),
+            |time| time.format("%Y%m%d-%H%M").to_string(),
+        );
+    // Keep the complete identifier. A short random suffix can still collide,
+    // even for two distinct UUIDv7 values created in the same millisecond.
+    // The normal UTC form is only 50 characters (valid_name permits 64).
+    format!("run-{timestamp}-{}", id.simple())
+}
+
 /// Records workflows from persisted runs.
 #[derive(Default)]
 pub struct Recorder {
@@ -131,8 +163,7 @@ impl Recorder {
             .map_err(|e| RecordError::Storage(e.to_string()))?;
         let mut opts = opts.clone();
         if opts.name.is_none() {
-            let short: String = run_id.to_string().chars().take(8).collect();
-            opts.name = Some(format!("run-{short}"));
+            opts.name = Some(default_recording_name(run_id));
         }
         self.from_steps(&steps, &opts)
     }
@@ -167,7 +198,12 @@ impl Recorder {
             return Err(RecordError::Empty);
         }
 
-        let mut wf = Workflow::new(opts.name.clone().unwrap_or_else(|| "recorded".into()));
+        let first = ordered.first().ok_or(RecordError::Empty)?;
+        let mut wf = Workflow::new(
+            opts.name
+                .clone()
+                .unwrap_or_else(|| default_recording_name(first.run_id)),
+        );
         wf.description = opts.description.clone().unwrap_or_else(|| {
             message
                 .lines()
@@ -969,5 +1005,109 @@ mod tests {
             panic!()
         };
         assert_eq!(d.value.as_deref(), Some("{{\"a\":1}}"));
+    }
+
+    #[test]
+    fn task_145_regression_distinct_run_ids_in_one_millisecond_have_distinct_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::open_in_memory(dir.path()).unwrap();
+        let user_id = protocol::UserId::new();
+        let bot_id = protocol::BotId::new();
+        storage
+            .insert_user(&storage::User {
+                id: user_id,
+                name: "test".into(),
+                created_at_ms: 0,
+            })
+            .unwrap();
+        storage
+            .insert_bot(&storage::Bot {
+                id: bot_id,
+                user_id,
+                name: "test".into(),
+                config: json!({}),
+                created_at_ms: 0,
+            })
+            .unwrap();
+        let mut names = Vec::new();
+        // Same v7 millisecond and last 12 hex digits; truncating either end
+        // would lose the difference between these two valid run identifiers.
+        for id in [
+            "00000000-0000-7000-8000-000000000001",
+            "00000000-0000-7001-8000-000000000001",
+        ] {
+            let run_id = RunId(Uuid::parse_str(id).unwrap());
+            storage
+                .insert_run(&storage::Run {
+                    id: run_id,
+                    user_id,
+                    bot_id,
+                    chat_id: None,
+                    kind: "turn".into(),
+                    state: "succeeded".into(),
+                    error: None,
+                    created_at_ms: 0,
+                    updated_at_ms: 0,
+                    parent_run_id: None,
+                    spec: None,
+                })
+                .unwrap();
+            let mut step = tool_step(
+                1,
+                json!([call("a", "shell_run", &json!({"command": "echo ok"}))]),
+                json!([res("a", "shell_run", "ok", false)]),
+            );
+            step.run_id = run_id;
+            step.user_id = user_id;
+            storage.insert_step(&step).unwrap();
+            names.push(
+                Recorder::new()
+                    .from_run(&storage, run_id, &RecordOptions::default())
+                    .unwrap()
+                    .workflow
+                    .name,
+            );
+        }
+        assert_ne!(names[0], names[1]);
+        assert!(names.iter().all(|name| crate::format::valid_name(name)));
+    }
+
+    #[test]
+    fn default_name_has_utc_timestamp_and_supports_unusual_ids() {
+        let id = Uuid::parse_str("00000000-0000-7000-8000-000000000001").unwrap();
+        assert_eq!(
+            default_recording_name(RunId(id)),
+            "run-19700101-0000-00000000000070008000000000000001"
+        );
+        for id in [Uuid::nil(), Uuid::max(), id] {
+            assert!(crate::format::valid_name(&default_recording_name(RunId(
+                id
+            ))));
+        }
+    }
+
+    #[test]
+    fn explicit_name_wins_and_reviewed_proposal_saves_create_only() {
+        let steps = [tool_step(
+            1,
+            json!([call("a", "shell_run", &json!({"command": "echo ok"}))]),
+            json!([res("a", "shell_run", "ok", false)]),
+        )];
+        let recording = Recorder::new()
+            .from_steps(
+                &steps,
+                &RecordOptions {
+                    name: Some("chosen".into()),
+                    description: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(recording.workflow.name, "chosen");
+        let dir = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::new(dir.path());
+        assert_eq!(recording.save_new(&store).unwrap(), 1);
+        assert!(
+            matches!(recording.save_new(&store), Err(SaveError::AlreadyExists(name)) if name == "chosen")
+        );
     }
 }

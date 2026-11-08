@@ -433,6 +433,9 @@ pub(crate) struct Shared {
     pub providers: RwLock<Providers>,
     /// Workspace-wide policy; replaceable at runtime (`PUT /v1/policy`).
     pub global_policy: RwLock<Policy>,
+    /// Locked deny-all mode (unusable persisted policy): every decision except
+    /// `Meta` is `Deny`, whatever a bot's own policy says.
+    pub policy_locked: std::sync::atomic::AtomicBool,
     /// Desktop control bridge (see `control.rs`); `None` = no gate.
     pub control: RwLock<Option<Arc<dyn crate::control::ControlGate>>>,
     pub resolver: PermissionResolver,

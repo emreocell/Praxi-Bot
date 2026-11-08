@@ -9,6 +9,16 @@ pub enum Error {
     Io(String),
     /// WebSocket transport failure.
     WebSocket(String),
+    /// A decoded reply/event or outgoing command exceeded its configured bound.
+    /// Unlike a transport error, rejecting one decoded reply keeps the connection usable.
+    MessageTooLarge {
+        /// Message category (reply, event or request).
+        kind: &'static str,
+        /// Observed serialized byte count.
+        size: usize,
+        /// Configured byte limit.
+        limit: usize,
+    },
     /// The browser answered a command with a protocol error.
     Protocol {
         /// CDP error code.
@@ -44,6 +54,12 @@ impl fmt::Display for Error {
         match self {
             Self::Io(m) => write!(f, "io error: {m}"),
             Self::WebSocket(m) => write!(f, "websocket error: {m}"),
+            Self::MessageTooLarge { kind, size, limit } => {
+                write!(
+                    f,
+                    "CDP {kind} too large: {size} bytes exceeds {limit}-byte limit"
+                )
+            }
             Self::Protocol { code, message } => write!(f, "CDP error {code}: {message}"),
             Self::Timeout(m) => write!(f, "timeout: {m}"),
             Self::Closed => write!(f, "CDP connection closed"),

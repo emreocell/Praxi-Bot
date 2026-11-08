@@ -22,6 +22,7 @@ pub fn build_chat_provider(
 ) -> Result<Box<dyn ChatProvider>, ProviderError> {
     let entry = entry.clone();
     Ok(match &entry.kind {
+        ProviderKind::Cli => return Err(ProviderError::CliSession),
         ProviderKind::OpenAiCompatible => {
             Box::new(OpenAiCompatProvider::with_api_key(entry, config, key)?)
         }
