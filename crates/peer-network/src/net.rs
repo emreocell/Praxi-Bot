@@ -22,7 +22,10 @@ use crate::proto::{
     LeaderInfo, MAX_FRAME, MAX_PAIR_FRAME, PROTOCOL_VERSION, PairRequest, PairResponse,
     RejectReason, read_frame, write_frame,
 };
-use crate::rpc::{DEFAULT_RPC_TIMEOUT, RpcClient, RpcHandler, map_conn_err, serve_connection};
+use crate::rpc::{
+    DEFAULT_RPC_TIMEOUT, RpcBudget, RpcClient, RpcHandler, RpcLimits, map_conn_err,
+    serve_connection,
+};
 use crate::store::{Device, DeviceStore, Role, now_secs};
 
 /// Which relay servers to use for NAT traversal and fallback.
@@ -85,8 +88,10 @@ pub struct PeerConfig {
     pub display_name: String,
     /// Capabilities this side offers (e.g. `desktop`, `browser`).
     pub capabilities: Vec<String>,
-    /// Per-request RPC timeout (client and handler side).
+    /// Whole-request RPC timeout (connection, I/O and handler included).
     pub rpc_timeout: Duration,
+    /// Per-connection and endpoint-wide admission limits for incoming RPCs.
+    pub rpc_limits: RpcLimits,
     /// Additional paired-only ALPN handlers. Built-in ALPNs may not be replaced.
     pub extra_protocols: Vec<(Vec<u8>, Arc<dyn ProtocolHandler>)>,
 }
@@ -103,6 +108,7 @@ impl PeerConfig {
             display_name: "core".into(),
             capabilities: Vec::new(),
             rpc_timeout: DEFAULT_RPC_TIMEOUT,
+            rpc_limits: RpcLimits::default(),
             extra_protocols: Vec::new(),
         }
     }
@@ -155,6 +161,7 @@ pub(crate) struct Inner {
     store: DeviceStore,
     invites: InviteBook,
     handler: Option<Arc<dyn RpcHandler>>,
+    rpc_budget: Arc<RpcBudget>,
     conns: Mutex<Vec<(PublicKey, Connection)>>,
     last_seen: Mutex<Vec<(PublicKey, Instant)>>,
     events: broadcast::Sender<PeerEvent>,
@@ -224,6 +231,11 @@ impl PeerNetwork {
     /// Fails if the identity or device list cannot be read or the endpoint
     /// cannot bind.
     pub async fn start(config: PeerConfig, handler: Option<Arc<dyn RpcHandler>>) -> Result<Self> {
+        config.rpc_limits.validate()?;
+        let rpc_budget = Arc::new(RpcBudget::new(
+            config.rpc_limits.streams_total,
+            config.rpc_limits.bytes_total,
+        ));
         let mut alpns = vec![ALPN_PAIR.to_vec(), ALPN_RPC.to_vec(), ALPN_EVENTS.to_vec()];
         for (alpn, _) in &config.extra_protocols {
             if alpn.is_empty() || alpn.len() > 255 || alpns.contains(alpn) {
@@ -261,6 +273,7 @@ impl PeerNetwork {
             store,
             invites: InviteBook::default(),
             handler,
+            rpc_budget,
             conns: Mutex::new(Vec::new()),
             last_seen: Mutex::new(Vec::new()),
             events,
@@ -598,7 +611,15 @@ async fn handle_incoming(inner: Arc<Inner>, incoming: Incoming) -> Result<()> {
     };
     if alpn == ALPN_RPC {
         if let Some(h) = &inner.handler {
-            serve_connection(conn.clone(), device, h.clone(), inner.config.rpc_timeout).await;
+            serve_connection(
+                conn.clone(),
+                device,
+                h.clone(),
+                inner.config.rpc_timeout,
+                inner.config.rpc_limits,
+                inner.rpc_budget.clone(),
+            )
+            .await;
         } else {
             conn.close(404u32.into(), b"this install does not serve rpc");
         }
