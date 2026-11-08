@@ -75,7 +75,13 @@ pub struct DaemonConfig {
     pub shutdown_grace: Duration,
     /// Timing of the desktop control bridge (see [`control`]).
     pub control: ControlConfig,
+    /// Most concurrent `GET /v1/events` streams (each holds replay buffers);
+    /// further requests get `503` until one closes.
+    pub max_sse_subscribers: usize,
 }
+
+/// Default [`DaemonConfig::max_sse_subscribers`].
+pub const DEFAULT_MAX_SSE_SUBSCRIBERS: usize = 16;
 
 /// Default [`DaemonConfig::shutdown_grace`].
 pub const DEFAULT_SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
@@ -92,6 +98,7 @@ impl DaemonConfig {
                 .collect(),
             shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
             control: ControlConfig::default(),
+            max_sse_subscribers: DEFAULT_MAX_SSE_SUBSCRIBERS,
         }
     }
 }
@@ -129,6 +136,10 @@ struct Inner {
     cfg: DaemonConfig,
     started: Instant,
     sse_gaps_total: Arc<std::sync::atomic::AtomicU64>,
+    /// Open `GET /v1/events` streams.
+    sse_subscribers: Arc<std::sync::atomic::AtomicUsize>,
+    /// `(run, from_gseq)` of gaps already audited (bounded; see `sse`).
+    sse_audited_gaps: Arc<parking_lot::Mutex<std::collections::HashSet<(uuid::Uuid, u64)>>>,
     shutdown: CancellationToken,
     hub: Arc<ControlHub>,
     provider_host: OnceLock<ProviderHost>,
@@ -208,6 +219,8 @@ impl AppState {
             cfg,
             started: Instant::now(),
             sse_gaps_total: Arc::default(),
+            sse_subscribers: Arc::default(),
+            sse_audited_gaps: Arc::default(),
             shutdown: CancellationToken::new(),
             hub,
             provider_host: OnceLock::new(),
@@ -439,7 +452,7 @@ fn api_routes() -> Router<AppState> {
     use mcp_routes as m;
     use routes as r;
     Router::new()
-        .route("/v1/health", get(sse::health))
+        .route("/v1/health", get(r::health))
         .route("/v1/openapi.json", get(openapi::serve_openapi))
         .route("/v1/bots", get(r::list_bots).post(r::create_bot))
         .route(
@@ -471,6 +484,7 @@ fn api_routes() -> Router<AppState> {
         .route("/v1/control/release", post(r::release_control))
         .route("/v1/control/{request_id}", post(r::decide_control))
         .route("/v1/events/latest", get(r::latest_cursor))
+        .route("/v1/events/status", get(sse::status))
         .route("/v1/policy", get(r::get_policy).put(r::put_policy))
         .route("/v1/providers", get(r::list_providers))
         .route("/v1/providers/detected", get(r::detect_providers))

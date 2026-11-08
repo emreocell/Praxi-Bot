@@ -910,7 +910,7 @@
           "events"
         ],
         "summary": "Documentation stub for the SSE route (the handler lives in `sse.rs`).",
-        "description": "Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the\nSSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local\n`seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without\nit the stream covers all runs: the SSE `id` is a daemon-wide, strictly\nincreasing `gseq` (persisted) and `Last-Event-ID: <gseq>` replays every\nmissed event of every run, in order, before going live.  Browsers cannot set\nheaders on `EventSource`, so this route (and only this one) also accepts the\nAPI token as the `token` query parameter (Host / Origin checks still apply;\nthe token is compared in constant time; beware that URLs may be logged).\n\nThe daemon-wide stream (no `run_id`) also carries `schedule_changed` events\n(`dto::ScheduleChanged`: `{\"type\":\"schedule_changed\",\"schedule_id\",\"kind\"}`,\nkind `created` / `updated` / `toggled` / `deleted`) when a schedule is changed\nthrough the API.  They have no SSE `id`, are not replayed and are not\nenvelopes: treat them as a hint to refetch `/v1/schedules`.\n\nA replay gap is explicit: `event: gap` has an `id` equal to `to_gseq` and\ndata `{from_gseq, to_gseq, run_id, reason}`; reason is `log_line_missing` or\n`log_unreadable`. It is audited before the cursor passes the missing row.\n`/v1/health.sse_gaps_total` counts these notifications since daemon startup.\nAfter three consecutive replay failures (or live-buffer overflow),\n`event: error` carries `{code: \"replay_unavailable\", last_event_id}` and the\nstream closes. This error has no `id`; reconnect with the last received ID.\nRetry delays start at 250 ms and double up to 5 s. Live buffering is limited\nto 1000 events and 8 MiB per subscriber. The desktop currently ignores unknown\nevent names; card 144 can surface gap/error notifications without changing\nthe ordering or cursor contract.\n\nIt likewise carries `mcp_server_changed` events (`mcp::McpServerChanged`:\n`{\"type\":\"mcp_server_changed\",\"name\",\"status\"}`) when an MCP server is\nadded, updated, removed or changes status (connecting / connected / error /\nquarantined ...); same rules: a hint to refetch `/v1/mcp/servers`.",
+        "description": "Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the\nSSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local\n`seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without\nit the stream covers all runs: the SSE `id` is a daemon-wide, strictly\nincreasing `gseq` (persisted) and `Last-Event-ID: <gseq>` replays every\nmissed event of every run, in order, before going live.  Browsers cannot set\nheaders on `EventSource`, so this route (and only this one) also accepts the\nAPI token as the `token` query parameter (Host / Origin checks still apply;\nthe token is compared in constant time; beware that URLs may be logged).\n\nThe daemon-wide stream (no `run_id`) also carries `schedule_changed` events\n(`dto::ScheduleChanged`: `{\"type\":\"schedule_changed\",\"schedule_id\",\"kind\"}`,\nkind `created` / `updated` / `toggled` / `deleted`) when a schedule is changed\nthrough the API.  They have no SSE `id`, are not replayed and are not\nenvelopes: treat them as a hint to refetch `/v1/schedules`.\n\nA replay gap is explicit: `event: gap` has an `id` equal to `to_gseq` and\ndata `{from_gseq, to_gseq, run_id, reason}`; reason is `log_line_missing` or\n`log_unreadable`. It is audited before the cursor passes the missing row.\n`/v1/events/status.sse_gaps_total` (authenticated) counts these notifications since daemon startup.\nAfter three consecutive replay failures (or live-buffer overflow),\n`event: error` carries `{code: \"replay_unavailable\", last_event_id}` and the\nstream closes. This error has no `id`; reconnect with the last received ID.\nRetry delays start at 250 ms and double up to 5 s. Live buffering is limited\nto 1000 events and 4 MiB per subscriber; replay chunks hold at most 2 MiB of serialized events (a single larger event closes the stream with `replay_unavailable`), and at most `max_sse_subscribers` streams (default 16) may be open: further requests get `503`. The desktop currently ignores unknown\nevent names; card 144 can surface gap/error notifications without changing\nthe ordering or cursor contract.\n\nIt likewise carries `mcp_server_changed` events (`mcp::McpServerChanged`:\n`{\"type\":\"mcp_server_changed\",\"name\",\"status\"}`) when an MCP server is\nadded, updated, removed or changes status (connecting / connected / error /\nquarantined ...); same rules: a hint to refetch `/v1/mcp/servers`.",
         "operationId": "events_doc",
         "parameters": [
           {
@@ -1000,11 +1000,37 @@
         ]
       }
     },
+    "/v1/events/status": {
+      "get": {
+        "tags": [
+          "events"
+        ],
+        "operationId": "status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SseStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/health": {
       "get": {
         "tags": [
           "meta"
         ],
+        "summary": "Liveness probe (no auth; still Host / Origin checked).",
         "operationId": "health",
         "responses": {
           "200": {
@@ -1012,7 +1038,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReplayHealth"
+                  "$ref": "#/components/schemas/Health"
                 }
               }
             }
@@ -4269,28 +4295,6 @@
           }
         }
       },
-      "ReplayHealth": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/Health"
-          },
-          {
-            "type": "object",
-            "required": [
-              "sse_gaps_total"
-            ],
-            "properties": {
-              "sse_gaps_total": {
-                "type": "integer",
-                "format": "int64",
-                "description": "Gap notifications audited by this daemon (per subscriber, since startup).",
-                "minimum": 0
-              }
-            }
-          }
-        ],
-        "description": "Liveness plus the count of explicit SSE gap notifications in this daemon."
-      },
       "RevokeGrant": {
         "type": "object",
         "description": "`DELETE /v1/bots/{id}/grants`.",
@@ -4607,6 +4611,35 @@
           "value": {
             "type": "string",
             "description": "The secret value.  Write-only: no route returns it."
+          }
+        }
+      },
+      "SseStatus": {
+        "type": "object",
+        "description": "Counters of the SSE machinery (authenticated, unlike `/v1/health`).",
+        "required": [
+          "sse_gaps_total",
+          "sse_subscribers",
+          "max_sse_subscribers"
+        ],
+        "properties": {
+          "max_sse_subscribers": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Configured cap on open event streams.",
+            "minimum": 0
+          },
+          "sse_gaps_total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Gap notifications emitted by this daemon (per subscriber, since startup).",
+            "minimum": 0
+          },
+          "sse_subscribers": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Event streams open right now.",
+            "minimum": 0
           }
         }
       },

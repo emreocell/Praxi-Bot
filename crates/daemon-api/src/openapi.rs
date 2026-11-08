@@ -40,7 +40,7 @@ impl Modify for Security {
             except GET /v1/health need `Authorization: Bearer <token>`."
     ),
     paths(
-        sse::health,
+        routes::health,
         routes::list_bots,
         routes::create_bot,
         routes::get_bot,
@@ -65,6 +65,7 @@ impl Modify for Security {
         routes::put_control_state,
         routes::release_control,
         routes::latest_cursor,
+        sse::status,
         routes::decide_control,
         routes::get_policy,
         routes::put_policy,
@@ -92,7 +93,7 @@ impl Modify for Security {
         events_doc,
     ),
     components(schemas(
-        sse::ReplayHealth, sse::Gap, dto::Health, dto::BotDto, dto::BotInput, dto::ChatDto, dto::CreateChat,
+        sse::SseStatus, sse::Gap, dto::Health, dto::BotDto, dto::BotInput, dto::ChatDto, dto::CreateChat,
         dto::MessageDto, dto::Mode, dto::SendMessage, dto::DeliveryKind, dto::SendResponse,
         dto::ApprovalDto, dto::Decision, dto::Scope, dto::DecideApproval,
         dto::DecisionResponse, dto::RunDto, dto::UsageTotals, dto::BotUsage,
@@ -139,12 +140,12 @@ pub struct ApiDoc;
 /// A replay gap is explicit: `event: gap` has an `id` equal to `to_gseq` and
 /// data `{from_gseq, to_gseq, run_id, reason}`; reason is `log_line_missing` or
 /// `log_unreadable`. It is audited before the cursor passes the missing row.
-/// `/v1/health.sse_gaps_total` counts these notifications since daemon startup.
+/// `/v1/events/status.sse_gaps_total` (authenticated) counts these notifications since daemon startup.
 /// After three consecutive replay failures (or live-buffer overflow),
 /// `event: error` carries `{code: "replay_unavailable", last_event_id}` and the
 /// stream closes. This error has no `id`; reconnect with the last received ID.
 /// Retry delays start at 250 ms and double up to 5 s. Live buffering is limited
-/// to 1000 events and 8 MiB per subscriber. The desktop currently ignores unknown
+/// to 1000 events and 4 MiB per subscriber; replay chunks hold at most 2 MiB of serialized events (a single larger event closes the stream with `replay_unavailable`), and at most `max_sse_subscribers` streams (default 16) may be open: further requests get `503`. The desktop currently ignores unknown
 /// event names; card 144 can surface gap/error notifications without changing
 /// the ordering or cursor contract.
 ///

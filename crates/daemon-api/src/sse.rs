@@ -22,7 +22,7 @@ use std::convert::Infallible;
 use std::io::{BufRead, Read};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use agent_core::StreamItem;
@@ -121,6 +121,9 @@ struct Feed {
     delivered: u64,
     user_id: protocol::UserId,
     gaps_total: Arc<AtomicU64>,
+    audited_gaps: Arc<parking_lot::Mutex<HashSet<(Uuid, u64)>>>,
+    /// Releases this stream's subscriber slot on drop.
+    _slot: Option<SseSlot>,
     // ---- global form ----
     /// `schedule_changed` notifications (global stream only).
     sched_rx: Option<broadcast::Receiver<ScheduleChanged>>,
@@ -134,6 +137,27 @@ struct Feed {
     cancel: CancellationToken,
     /// Marks a global stream (the desktop app's) as open for the control bridge.
     _app: Option<crate::control::SubscriberGuard>,
+}
+
+/// One open stream's claim on the subscriber cap.
+struct SseSlot(Arc<AtomicUsize>);
+
+impl SseSlot {
+    #[allow(deprecated)] // `try_update` is newer than the MSRV
+    fn acquire(counter: &Arc<AtomicUsize>, max: usize) -> Option<Self> {
+        counter
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                (n < max).then_some(n + 1)
+            })
+            .ok()?;
+        Some(Self(Arc::clone(counter)))
+    }
+}
+
+impl Drop for SseSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl Feed {
@@ -193,7 +217,7 @@ impl Feed {
             return true;
         }
         let bytes = serde_json::to_vec(&item.envelope).map_or(MAX_EVENT_BYTES + 1, |v| v.len());
-        if self.live.len() >= LIVE_BUFFER_EVENTS || self.live_bytes + bytes > REPLAY_BYTES {
+        if self.live.len() >= LIVE_BUFFER_EVENTS || self.live_bytes + bytes > LIVE_BUFFER_BYTES {
             self.unavailable();
             return false;
         }
@@ -237,6 +261,7 @@ impl Feed {
         let (st, dir, after) = (Arc::clone(&self.storage), self.data_dir.clone(), self.scan);
         let logs = Arc::clone(&self.logs);
         let user = self.user_id;
+        let audited = Arc::clone(&self.audited_gaps);
         let force = self.stalled_row.filter(|_| {
             self.stalled_since
                 .is_some_and(|t| t.elapsed() >= PENDING_LINE_GRACE)
@@ -252,6 +277,10 @@ impl Feed {
                 }
             }
             for gap in &chunk.gaps {
+                let key = (gap.run_id, gap.from_gseq);
+                if audited.lock().contains(&key) {
+                    continue;
+                }
                 st.append_audit(
                     user,
                     None,
@@ -260,6 +289,11 @@ impl Feed {
                     &serde_json::to_value(gap).ok()?,
                 )
                 .ok()?;
+                let mut seen = audited.lock();
+                if seen.len() >= AUDITED_GAPS_MAX {
+                    seen.clear();
+                }
+                seen.insert(key);
             }
             // Speculative reads must not erase evidence until every gap audit
             // write succeeded. A failed commit retries from the same cursor.
@@ -398,6 +432,9 @@ impl Feed {
                 match &out {
                     Out::Run(item) => self.delivered = item.gseq,
                     Out::Gap(gap) => self.delivered = gap.to_gseq,
+                    // Everything queued ahead has been yielded by now, so the
+                    // reported cursor is exactly what the client holds.
+                    Out::Unavailable(_) => return Some(Out::Unavailable(self.delivered)),
                     _ => {}
                 }
                 return Some(out);
@@ -501,8 +538,14 @@ struct Chunk {
 const LOG_CACHE_RUNS: usize = 8;
 const LOG_CACHE_BYTES: usize = 4 * 1024 * 1024;
 const LOG_CACHE_EVENTS: usize = 8_192;
-const REPLAY_BYTES: usize = 8 * 1024 * 1024;
+/// Serialized bytes per replay chunk.  Decoded `Envelope`s are a few times
+/// larger than their JSON, so this also bounds the decoded footprint (~4x).
+const REPLAY_BYTES: usize = 2 * 1024 * 1024;
+const LIVE_BUFFER_BYTES: usize = 4 * 1024 * 1024;
+/// A single event must fit one replay chunk.
 const MAX_EVENT_BYTES: usize = REPLAY_BYTES;
+/// Audited-gap keys remembered (cleared when full; a duplicate row is harmless).
+const AUDITED_GAPS_MAX: usize = 4_096;
 const LIVE_BUFFER_EVENTS: usize = 1_000;
 const REPLAY_FAILURES: u32 = 3;
 const REPLAY_BACKOFF: Duration = Duration::from_millis(250);
@@ -853,6 +896,13 @@ pub(crate) async fn events(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, ApiError> {
     let scoped_run = q.run_id.map(RunId);
+    let slot = SseSlot::acquire(&state.0.sse_subscribers, state.0.cfg.max_sse_subscribers)
+        .ok_or_else(|| {
+            ApiError::unavailable(format!(
+                "too many open event streams (limit {}); close one and retry",
+                state.0.cfg.max_sse_subscribers
+            ))
+        })?;
     if let Some(run) = scoped_run {
         state.run_of_user(run)?;
     }
@@ -884,6 +934,8 @@ pub(crate) async fn events(
         delivered: 0,
         user_id: state.user_id(),
         gaps_total: Arc::clone(&state.0.sse_gaps_total),
+        audited_gaps: Arc::clone(&state.0.sse_audited_gaps),
+        _slot: Some(slot),
         sched_rx: scoped_run
             .is_none()
             .then(|| state.subscribe_schedule_events()),
@@ -928,24 +980,24 @@ pub(crate) async fn events(
     Ok(Sse::new(event_stream(feed)).keep_alive(KeepAlive::default()))
 }
 
-/// Liveness plus the count of explicit SSE gap notifications in this daemon.
+/// Counters of the SSE machinery (authenticated, unlike `/v1/health`).
 #[derive(Serialize, utoipa::ToSchema)]
-pub(crate) struct ReplayHealth {
-    #[serde(flatten)]
-    health: crate::dto::Health,
-    /// Gap notifications audited by this daemon (per subscriber, since startup).
+pub(crate) struct SseStatus {
+    /// Gap notifications emitted by this daemon (per subscriber, since startup).
     sse_gaps_total: u64,
+    /// Event streams open right now.
+    sse_subscribers: u64,
+    /// Configured cap on open event streams.
+    max_sse_subscribers: u64,
 }
 
-#[utoipa::path(get, path = "/v1/health", tag = "meta",
-    responses((status = 200, body = ReplayHealth)))]
-pub(crate) async fn health(State(state): State<AppState>) -> axum::Json<ReplayHealth> {
-    let total = state.0.sse_gaps_total.load(Ordering::Relaxed);
-    let base_health = crate::routes::health;
-    let axum::Json(health) = base_health(State(state)).await;
-    axum::Json(ReplayHealth {
-        health,
-        sse_gaps_total: total,
+#[utoipa::path(get, path = "/v1/events/status", tag = "events", security(("bearer" = [])),
+    responses((status = 200, body = SseStatus)))]
+pub(crate) async fn status(State(state): State<AppState>) -> axum::Json<SseStatus> {
+    axum::Json(SseStatus {
+        sse_gaps_total: state.0.sse_gaps_total.load(Ordering::Relaxed),
+        sse_subscribers: state.0.sse_subscribers.load(Ordering::Relaxed) as u64,
+        max_sse_subscribers: state.0.cfg.max_sse_subscribers as u64,
     })
 }
 
@@ -1199,6 +1251,8 @@ mod tests {
             delivered: 0,
             user_id,
             gaps_total: Arc::default(),
+            audited_gaps: Arc::default(),
+            _slot: None,
             sched_rx: None,
             mcp_rx: None,
             storage: Arc::clone(&storage),
@@ -1329,6 +1383,53 @@ mod tests {
         assert_eq!(feed.delivered, 2);
     }
 
+    #[tokio::test]
+    async fn unavailable_reports_the_cursor_after_the_events_queued_ahead_of_it() {
+        let (_dir, st, mut feed, _tx) = replay_fixture();
+        let run = RunId::new();
+        feed.replaying = false;
+        for g in 1..=2 {
+            let item = append_indexed(&st, run, g, g - 1);
+            feed.pending.push_back(Out::Run(item));
+        }
+        feed.unavailable();
+        assert!(matches!(feed.next_global_item().await, Some(Out::Run(_))));
+        assert!(matches!(feed.next_global_item().await, Some(Out::Run(_))));
+        assert!(matches!(
+            feed.next_global_item().await,
+            Some(Out::Unavailable(2))
+        ));
+        assert!(feed.next_global_item().await.is_none());
+    }
+
+    #[test]
+    fn subscriber_slots_are_capped_and_released_on_drop() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let a = SseSlot::acquire(&counter, 2).unwrap();
+        let _b = SseSlot::acquire(&counter, 2).unwrap();
+        assert!(SseSlot::acquire(&counter, 2).is_none());
+        drop(a);
+        assert!(SseSlot::acquire(&counter, 2).is_some());
+    }
+
+    #[tokio::test]
+    async fn a_gap_is_audited_once_even_when_replayed_again() {
+        let (_dir, st, mut feed, _tx) = replay_fixture();
+        let lost = RunId::new();
+        st.index_event(1, lost, 0).unwrap();
+        append_indexed(&st, RunId::new(), 2, 0);
+        for _ in 0..2 {
+            feed.scan = 0;
+            feed.pending.clear();
+            feed.replaying = true;
+            feed.stalled_row = Some(1);
+            feed.stalled_since = Some(Instant::now().checked_sub(PENDING_LINE_GRACE).unwrap());
+            feed.replay_chunk().await;
+            assert!(matches!(feed.pending.front(), Some(Out::Gap(_))));
+        }
+        assert_eq!(st.list_audit(feed.user_id).unwrap().len(), 1);
+    }
+
     #[test]
     fn unreadable_log_needs_two_attempts_even_when_grace_is_expired() {
         let dir = tempfile::tempdir().unwrap();
@@ -1439,7 +1540,7 @@ mod tests {
                     seq,
                     Event::MessageDelta(protocol::event::MessageDelta {
                         run_id: run,
-                        text: "x".repeat(3 * 1024 * 1024),
+                        text: "x".repeat(700 * 1024),
                     }),
                 ))
                 .unwrap();

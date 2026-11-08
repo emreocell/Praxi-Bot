@@ -2580,20 +2580,43 @@ async fn peer_heartbeats_only_audit_mode_changes_and_explicit_release() {
 }
 
 #[tokio::test]
-async fn health_exposes_per_daemon_sse_gap_count() {
+async fn event_streams_beyond_the_cap_get_503() {
     let t = setup();
-    let initial = call(&t, Method::GET, "/v1/health", None).await.json();
-    assert_eq!(initial["sse_gaps_total"], 0);
+    t.state.0.sse_subscribers.store(
+        t.state.0.cfg.max_sse_subscribers,
+        std::sync::atomic::Ordering::SeqCst,
+    );
+    let r = call(&t, Method::GET, "/v1/events", None).await;
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        r.json()["error"]["message"]
+            .to_string()
+            .contains("too many open event streams"),
+        "{:?}",
+        r.json()
+    );
+}
+
+#[tokio::test]
+async fn sse_gap_count_is_on_the_authenticated_status_not_on_health() {
+    let t = setup();
+    assert!(
+        call(&t, Method::GET, "/v1/health", None)
+            .await
+            .json()
+            .get("sse_gaps_total")
+            .is_none()
+    );
     t.state
         .0
         .sse_gaps_total
         .store(3, std::sync::atomic::Ordering::Relaxed);
-    let current = call(&t, Method::GET, "/v1/health", None).await.json();
-    assert_eq!(current["sse_gaps_total"], 3);
-    assert_eq!(current["status"], initial["status"]);
-    assert_eq!(current["version"], initial["version"]);
+    let status = call(&t, Method::GET, "/v1/events/status", None)
+        .await
+        .json();
+    assert_eq!(status["sse_gaps_total"], 3);
     assert_eq!(
-        call(&setup(), Method::GET, "/v1/health", None).await.json()["sse_gaps_total"],
-        0
+        status["max_sse_subscribers"],
+        crate::DEFAULT_MAX_SSE_SUBSCRIBERS
     );
 }
