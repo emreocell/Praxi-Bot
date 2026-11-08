@@ -267,6 +267,11 @@ impl AgentLoop {
                     sh.emit(&ctx, ev);
                 }
             })),
+            // Same control gate as the desktop/browser tools: a replay is refused
+            // while the human has the wheel.
+            control: Some(Arc::new(LoopControl {
+                sh: Arc::downgrade(&self.sh),
+            })),
             ..workflow_replay::ReplayOptions::default()
         };
         let (s2, h2, o2) = (store.clone(), handles.clone(), opts.clone());
