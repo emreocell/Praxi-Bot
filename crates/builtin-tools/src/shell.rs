@@ -405,6 +405,12 @@ mod tests {
     use super::*;
     use tool_registry::ContentPart;
 
+    // PowerShell startup on Windows runners exhausted the old timing budgets
+    // even for echo commands. Keep these semantic checks from competing with
+    // native lifetime fixtures; their timing assertions stay unchanged.
+    #[cfg(windows)]
+    static WINDOWS_SHELL_TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     fn shell_for_tests() -> &'static str {
         if cfg!(windows) { "powershell" } else { "sh" }
     }
@@ -418,6 +424,8 @@ mod tests {
 
     #[tokio::test]
     async fn runs_command_and_reports_exit_code() {
+        #[cfg(windows)]
+        let _serial = WINDOWS_SHELL_TESTS.lock().await;
         let d = tempfile::tempdir().unwrap();
         let t = tool(d.path());
         let out = t
@@ -443,27 +451,73 @@ mod tests {
 
     #[tokio::test]
     async fn timeout_kills_the_command() {
-        let d = tempfile::tempdir().unwrap();
-        let t = tool(d.path());
-        let sleeper = if cfg!(windows) {
-            "Start-Sleep -Seconds 30"
-        } else {
-            "sleep 30"
-        };
+        #[cfg(windows)]
+        let _serial = WINDOWS_SHELL_TESTS.lock().await;
+        let work = tempfile::tempdir().unwrap();
+        let delay = Duration::from_secs(TIMEOUT_DESCENDANT_DELAY_SECS);
+        // The parent stays in the foreground for the whole tool timeout. The
+        // descendant delay is longer than that timeout, so the kill lands first.
+        let fixture = spawn_delayed_marker(
+            work.path(),
+            delay,
+            Duration::from_secs(BACKGROUND_LIFE_SECS),
+        );
+        let t = tool(work.path());
         let started = std::time::Instant::now();
-        let err = t
-            .call(
-                &ToolContext::default(),
-                json!({"command": sleeper, "shell": shell_for_tests(), "timeout": 1}),
-            )
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("timed out"), "{err}");
-        assert!(started.elapsed() < Duration::from_secs(15));
+        let ctx = ToolContext::default();
+        let call = t.call(
+            &ctx,
+            json!({"command": fixture.command, "shell": fixture.shell, "cwd": fixture.dir, "timeout": TIMEOUT_KILL_SECS}),
+        );
+        tokio::pin!(call);
+        // Readiness is the marker the child writes before sleeping, not a 1s budget.
+        let mut ready_at = None;
+        let result = loop {
+            tokio::select! {
+                biased;
+                result = &mut call => break result,
+                () = tokio::time::sleep(Duration::from_millis(50)) => {
+                    if ready_at.is_none()
+                        && fixture.ready.exists()
+                        && let Some(pid) = recorded_pid(&fixture.child_pid)
+                    {
+                        ready_at = Some(started.elapsed());
+                        // Task list can lag the pid file on a busy runner.
+                        assert!(
+                            became_alive(pid, Duration::from_secs(10)).await,
+                            "descendant {pid} was not alive when the ready marker appeared"
+                        );
+                    }
+                }
+            }
+        };
+        if ready_at.is_none() && fixture.ready.exists() {
+            ready_at = Some(started.elapsed());
+        }
+        let err = result.expect_err("shell succeeded instead of timing out");
+        let message = err.to_string();
+        assert!(message.contains("timed out"), "{message}");
+        assert!(
+            started.elapsed() < Duration::from_secs(TIMEOUT_KILL_SECS + 60),
+            "timeout kill took {:?}: {message}",
+            started.elapsed()
+        );
+        let ready_at = ready_at.unwrap_or_else(|| {
+            panic!("descendant was not ready before timeout; fixture is inconclusive: {message}")
+        });
+        assert!(
+            recorded_pid(&fixture.child_pid).is_some(),
+            "descendant pid was not recorded; fixture is inconclusive: {message}"
+        );
+        // `delay` exceeds the tool timeout, so this deadline is after the write
+        // the descendant would have made had the tree survived.
+        assert_marker_absent_until(&fixture, started, ready_at + delay + MARKER_GRACE).await;
     }
 
     #[tokio::test]
     async fn large_output_is_capped_and_spilled() {
+        #[cfg(windows)]
+        let _serial = WINDOWS_SHELL_TESTS.lock().await;
         let d = tempfile::tempdir().unwrap();
         let t = tool(d.path());
         let gen_cmd = if cfg!(windows) {
@@ -491,6 +545,8 @@ mod tests {
 
     #[tokio::test]
     async fn command_is_a_single_argument_no_injection_of_extra_args() {
+        #[cfg(windows)]
+        let _serial = WINDOWS_SHELL_TESTS.lock().await;
         // Quotes and metacharacters inside the command stay inside it.
         let d = tempfile::tempdir().unwrap();
         let t = tool(d.path());
@@ -511,43 +567,27 @@ mod tests {
 
     #[tokio::test]
     async fn background_grandchild_holding_pipe_keeps_partial_output() {
-        // NOTE: only a true regression test on Unix (`sleep … &` inherits the pipe).
-        // On Windows `Start-Process -NoNewWindow` may not inherit the handles, so
-        // this can pass even without the drain/grace fix.
-        //
-        // The grandchild writes `done` only after `BACKGROUND_LIFE_SECS`. Returning
-        // before that file exists, under `SHELL_RETURN_BOUND`, is what proves the
-        // tool did not wait out the child. Startup on a slow runner may itself
-        // exceed a few seconds, so the bound is generous and the signal is the marker.
+        #[cfg(windows)]
+        let _serial = WINDOWS_SHELL_TESTS.lock().await;
         let d = tempfile::tempdir().unwrap();
         let t = tool(d.path());
-        let done = d.path().join("grandchild-done.txt");
-        let pidfile = d.path().join("grandchild-pid.txt");
-        let _cleanup = KillLater {
-            pidfile: pidfile.clone(),
-        };
-        let cmd = if cfg!(windows) {
-            format!(
-                "$p = Start-Process -NoNewWindow -PassThru -FilePath (Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe') -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds {life}; Set-Content -LiteralPath {done} -Value done'; \
-                 Set-Content -LiteralPath {pid} -Value $p.Id -Encoding Ascii; \
-                 Write-Output started-bg",
-                life = BACKGROUND_LIFE_SECS,
-                done = ps_nested(&done),
-                pid = ps_single(&pidfile),
-            )
-        } else {
-            format!(
-                "(sleep {life}; echo done > '{done}') & echo $! > '{pid}'; echo started-bg",
-                life = BACKGROUND_LIFE_SECS,
-                done = done.display(),
-                pid = pidfile.display(),
-            )
-        };
+        // The child explicitly inherits both pipes on Windows and Unix, and
+        // writes its marker only after `BACKGROUND_LIFE_SECS`. Returning before
+        // that file exists, under `SHELL_RETURN_BOUND`, proves the tool did not
+        // wait out the grandchild. Startup on a slow runner may itself exceed a
+        // few seconds, so the bound is generous and the signal is the marker.
+        let fixture = spawn_fixture(
+            d.path(),
+            Duration::from_secs(BACKGROUND_LIFE_SECS),
+            Duration::ZERO,
+            true,
+            true,
+        );
         let started = std::time::Instant::now();
         let out = t
             .call(
                 &ToolContext::default(),
-                json!({"command": cmd, "shell": shell_for_tests(), "timeout": SHELL_CALL_TIMEOUT_SECS}),
+                json!({"command": fixture.command, "shell": fixture.shell, "cwd": fixture.dir, "timeout": SHELL_CALL_TIMEOUT_SECS}),
             )
             .await
             .unwrap_or_else(|err| {
@@ -563,13 +603,14 @@ mod tests {
             started.elapsed()
         );
         assert!(
-            !done.exists(),
+            !fixture.marker.exists(),
             "background grandchild finished before shell_run returned"
         );
-        let pid = read_pid(&pidfile).await;
+        assert!(fixture.ready.exists(), "background child never started");
+        let pid = await_recorded_pid(&fixture.child_pid).await;
         assert!(
             became_alive(pid, READY_BOUND).await,
-            "background grandchild {pid} was not running after shell_run returned"
+            "pipe-holding child {pid} was not running after shell_run returned"
         );
     }
 
@@ -583,21 +624,11 @@ mod tests {
         assert!(matches!(err, ToolError::InvalidInput(_)));
     }
 
-    fn ps_single(path: &Path) -> String {
-        format!("'{}'", path.display().to_string().replace('\'', "''"))
-    }
-
-    /// Path inside a single-quoted PowerShell string that itself sits inside
-    /// another single-quoted string (`''path''` becomes `'path'`).
-    fn ps_nested(path: &Path) -> String {
-        format!("''{}''", path.display().to_string().replace('\'', "''"))
-    }
-
     /// Cold process start on a busy runner can take well over a minute.
     /// Tests wait for marker files until this cap instead of a fixed 1s budget.
     const READY_BOUND: Duration = Duration::from_secs(120);
     /// A background child stays up this long, so a slow-but-successful return
-    /// still happens before it exits or writes its done marker.
+    /// still happens before it exits or writes its marker.
     const BACKGROUND_LIFE_SECS: u64 = 300;
     /// Upper bound for a `shell_run` that must return while that child is alive.
     const SHELL_RETURN_BOUND: Duration = Duration::from_secs(180);
@@ -610,45 +641,165 @@ mod tests {
     /// Descendant writes the leaked marker only after this delay, which is
     /// longer than `TIMEOUT_KILL_SECS`, so a timeout always lands first.
     const TIMEOUT_DESCENDANT_DELAY_SECS: u64 = 130;
-    /// Cancel path: short delay, because the future is dropped as soon as the
-    /// spawned marker exists. The post-drop wait is this plus `MARKER_GRACE`.
+    /// Cancel path: the future is dropped once the child is ready. The
+    /// post-drop wait is this delay plus `MARKER_GRACE`.
     const CANCEL_DESCENDANT_DELAY_SECS: u64 = 10;
     /// Slack after the scheduled marker write so a late timer still fails the test.
     const MARKER_GRACE: Duration = Duration::from_secs(20);
+    /// Positive control has to outlive a slow start plus the descendant delay.
+    /// Parent sleep starts only after the child is ready, so this is longer
+    /// than `READY_BOUND` + `TIMEOUT_DESCENDANT_DELAY_SECS`.
+    const POSITIVE_CONTROL_TIMEOUT_SECS: u64 = 360;
 
-    /// Parent stays in the foreground; a descendant writes `marker` after
-    /// `delay_secs`. `spawned` is written once that descendant exists.
-    /// `pidfile` is for cleanup.
-    fn descendant_command(
-        marker: &Path,
-        spawned: &Path,
-        pidfile: &Path,
-        delay_secs: u64,
-    ) -> String {
-        if cfg!(windows) {
+    const FIXTURE_MODE: &str = "PRAXI_SHELL_TEST_FIXTURE";
+    const FIXTURE_TEST: &str = "shell::tests::process_fixture";
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct FixtureConfig {
+        child_delay_ms: u64,
+        parent_delay_ms: u64,
+        write_marker: bool,
+        inherit_pipes: bool,
+    }
+
+    /// A subprocess entry point, selected with --exact by the real shell tool.
+    /// The ordinary suite has no fixture mode and simply returns. Both OSes
+    /// execute this same native parent/child protocol, so the descendant stays
+    /// in the tool's process group / Windows job. Readiness is `ready.txt`,
+    /// waited out to `READY_BOUND`, not a fixed one-second budget.
+    #[test]
+    fn process_fixture() {
+        let Ok(mode) = std::env::var(FIXTURE_MODE) else {
+            return;
+        };
+        let config: FixtureConfig =
+            serde_json::from_slice(&std::fs::read("fixture.json").unwrap()).unwrap();
+        if mode == "child" {
+            std::fs::write("ready.txt", b"ready").unwrap();
+            std::thread::sleep(Duration::from_millis(config.child_delay_ms));
+            if config.write_marker {
+                std::fs::write("marker.txt", b"survived").unwrap();
+            }
+            return;
+        }
+        assert_eq!(mode, "parent", "unknown fixture mode");
+        std::fs::write("parent.pid", std::process::id().to_string()).unwrap();
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args(["--exact", FIXTURE_TEST, "--nocapture", "--test-threads=1"])
+            .env(FIXTURE_MODE, "child")
+            .stdin(Stdio::null())
+            .stdout(if config.inherit_pipes {
+                Stdio::inherit()
+            } else {
+                Stdio::null()
+            })
+            .stderr(if config.inherit_pipes {
+                Stdio::inherit()
+            } else {
+                Stdio::null()
+            });
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            // No breakaway flag: the child must inherit the tool's Windows job.
+            command.creation_flags(windows::Win32::System::Threading::CREATE_NO_WINDOW.0);
+        }
+        let mut child = command.spawn().unwrap();
+        std::fs::write("child.pid", child.id().to_string()).unwrap();
+        // Reap while this parent is alive, but intentionally do not join the
+        // thread: the background controls require the parent to exit first.
+        let _reaper = std::thread::spawn(move || child.wait().unwrap());
+        // A successful parent return must witness an already-running child.
+        // The deadline is the shared readiness cap, not a one-second budget.
+        let ready_deadline = std::time::Instant::now() + READY_BOUND;
+        while !Path::new("ready.txt").exists() {
+            assert!(
+                std::time::Instant::now() < ready_deadline,
+                "fixture child did not acknowledge startup"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        println!("started-bg");
+        std::thread::sleep(Duration::from_millis(config.parent_delay_ms));
+    }
+
+    struct ProcessFixture {
+        command: String,
+        shell: &'static str,
+        dir: PathBuf,
+        marker: PathBuf,
+        ready: PathBuf,
+        child_pid: PathBuf,
+        _cleanup: KillLater,
+    }
+
+    /// The same fixture serves the timeout, cancellation and positive control.
+    /// The descendant acknowledges startup before its delayed write.
+    /// Parent and descendant remain in the tool's process group / Windows job.
+    /// `parent_delay` keeps the foreground parent alive past the tool timeout
+    /// and, on the positive-control path, past the marker write.
+    fn spawn_delayed_marker(dir: &Path, delay: Duration, parent_delay: Duration) -> ProcessFixture {
+        spawn_fixture(dir, delay, parent_delay, true, true)
+    }
+
+    fn spawn_fixture(
+        dir: &Path,
+        delay: Duration,
+        parent_delay: Duration,
+        write_marker: bool,
+        inherit_pipes: bool,
+    ) -> ProcessFixture {
+        let dir = dir.join("Öcel 引用's process tree");
+        std::fs::create_dir(&dir).unwrap();
+        // A fixed relative executable name keeps arbitrary paths out of cmd's
+        // expansion rules. The actual executable and cwd still contain Unicode
+        // and an apostrophe. Copy only when a cross-volume hard link cannot work.
+        let executable = std::env::current_exe().unwrap();
+        let fixture_executable = dir.join("shell-test-fixture.exe");
+        if std::fs::hard_link(&executable, &fixture_executable).is_err() {
+            std::fs::copy(&executable, &fixture_executable).unwrap();
+        }
+        let config = FixtureConfig {
+            child_delay_ms: u64::try_from(delay.as_millis()).unwrap(),
+            parent_delay_ms: u64::try_from(parent_delay.as_millis()).unwrap(),
+            write_marker,
+            inherit_pipes,
+        };
+        std::fs::write(
+            dir.join("fixture.json"),
+            serde_json::to_vec(&config).unwrap(),
+        )
+        .unwrap();
+        let marker = dir.join("marker.txt");
+        let ready = dir.join("ready.txt");
+        let parent_pid = dir.join("parent.pid");
+        let child_pid = dir.join("child.pid");
+        let cleanup = KillLater {
+            pidfiles: vec![child_pid.clone(), parent_pid.clone()],
+            groupfile: Some(parent_pid.clone()),
+        };
+        // Set the mode inside the shell: production deliberately strips custom
+        // variables from its inherited environment. Only the exact helper runs.
+        let command = if cfg!(windows) {
             format!(
-                "$psi = New-Object System.Diagnostics.ProcessStartInfo; \
-                 $psi.FileName = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'; \
-                 $psi.Arguments = '-NoProfile -NonInteractive -Command \"Start-Sleep -Seconds {delay}; Set-Content -LiteralPath {marker} -Value leaked\"'; \
-                 $psi.UseShellExecute = $false; \
-                 $psi.CreateNoWindow = $true; \
-                 $p = [System.Diagnostics.Process]::Start($psi); \
-                 Set-Content -LiteralPath {pid} -Value $p.Id -Encoding Ascii; \
-                 Set-Content -LiteralPath {spawned} -Value ok -Encoding Ascii; \
-                 Start-Sleep -Seconds 300",
-                delay = delay_secs,
-                marker = ps_nested(marker),
-                pid = ps_single(pidfile),
-                spawned = ps_single(spawned),
+                "set \"{FIXTURE_MODE}=parent\" && .\\shell-test-fixture.exe \
+                 --exact {FIXTURE_TEST} --nocapture --test-threads=1"
             )
         } else {
             format!(
-                "(sleep {delay}; echo leaked > '{marker}') & echo $! > '{pid}' && echo ok > '{spawned}' && wait",
-                delay = delay_secs,
-                marker = marker.display(),
-                pid = pidfile.display(),
-                spawned = spawned.display(),
+                "{FIXTURE_MODE}=parent exec ./shell-test-fixture.exe \
+                 --exact {FIXTURE_TEST} --nocapture --test-threads=1"
             )
+        };
+        ProcessFixture {
+            command,
+            shell: if cfg!(windows) { "cmd" } else { "sh" },
+            dir,
+            marker,
+            ready,
+            child_pid,
+            _cleanup: cleanup,
         }
     }
 
@@ -660,124 +811,159 @@ mod tests {
             cmd.args(["-9", &pid.to_string()]);
         }
         let _ = cmd
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .status();
     }
 
+    fn recorded_pid(path: &Path) -> Option<u32> {
+        std::fs::read_to_string(path)
+            .ok()?
+            .trim()
+            .parse::<u32>()
+            .ok()
+            .filter(|pid| *pid > 1)
+    }
+
     struct KillLater {
-        pidfile: PathBuf,
+        pidfiles: Vec<PathBuf>,
+        groupfile: Option<PathBuf>,
     }
 
     impl Drop for KillLater {
         fn drop(&mut self) {
-            if let Ok(text) = std::fs::read_to_string(&self.pidfile)
-                && let Ok(pid) = text.trim().parse::<u32>()
+            // The group can outlive its parent. Kill it even when a regression
+            // killed only that parent, then cover individually recorded PIDs.
+            if cfg!(unix)
+                && let Some(pid) = self.groupfile.as_deref().and_then(recorded_pid)
             {
-                kill_pid(pid);
+                let _ = std::process::Command::new("sh")
+                    .args(["-c", "kill -KILL \"-$1\"", "cleanup", &pid.to_string()])
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
+            }
+            for pidfile in &self.pidfiles {
+                if let Some(pid) = recorded_pid(pidfile) {
+                    kill_pid(pid);
+                }
             }
         }
     }
 
-    #[tokio::test]
-    async fn timeout_and_cancel_kill_descendant_before_marker() {
-        let work = tempfile::tempdir().unwrap();
-        let spill = tempfile::tempdir().unwrap();
-        let t = tool(spill.path());
-        let marker = work.path().join("marker.txt");
-        let spawned = work.path().join("spawned.txt");
-        let pidfile = work.path().join("pid.txt");
-        let _cleanup = KillLater {
-            pidfile: pidfile.clone(),
-        };
-        let delay = Duration::from_secs(TIMEOUT_DESCENDANT_DELAY_SECS);
-        let cmd = descendant_command(&marker, &spawned, &pidfile, TIMEOUT_DESCENDANT_DELAY_SECS);
-
-        // The tool timeout is the kill under test and the upper bound on startup.
-        // Readiness is the spawned marker, not a 1s budget. The descendant's own
-        // delay is longer than the timeout, so the kill lands before the marker.
-        let started = std::time::Instant::now();
-        let ctx = ToolContext::default();
-        let call = t.call(
-            &ctx,
-            json!({"command": cmd, "shell": shell_for_tests(), "timeout": TIMEOUT_KILL_SECS}),
-        );
-        tokio::pin!(call);
-        let mut spawned_at = None;
-        let result = loop {
-            tokio::select! {
-                biased;
-                result = &mut call => break result,
-                () = tokio::time::sleep(Duration::from_millis(50)) => {
-                    if spawned_at.is_none() && spawned.exists() {
-                        spawned_at = Some(started.elapsed());
-                        let pid = read_pid(&pidfile).await;
-                        assert!(
-                            process_alive(pid),
-                            "descendant {pid} was not alive when the spawned marker appeared"
-                        );
-                    }
-                }
+    /// Poll until `due` (measured from `started`) and fail if the marker appears.
+    /// The deadline is the descendant's scheduled write plus `MARKER_GRACE`, so
+    /// a survivor cannot hide behind a short fixed sleep.
+    async fn assert_marker_absent_until(
+        fixture: &ProcessFixture,
+        started: std::time::Instant,
+        due: Duration,
+    ) {
+        loop {
+            assert!(
+                !fixture.marker.exists(),
+                "descendant survived and wrote {}",
+                fixture.marker.display()
+            );
+            if started.elapsed() >= due {
+                break;
             }
-        };
-        if spawned_at.is_none() && spawned.exists() {
-            spawned_at = Some(started.elapsed());
+            tokio::time::sleep(Duration::from_millis(25)).await;
         }
-        let err = result.expect_err("shell succeeded instead of timing out");
-        assert!(err.to_string().contains("timed out"), "{err}");
-        let spawned_at = spawned_at.unwrap_or_else(|| {
-            panic!(
-                "descendant was not started before the timeout, so the test is inconclusive: {err}"
-            )
-        });
-        // `delay` exceeds the tool timeout, so the deadline is before this write
-        // even when the descendant was created on the first instant.
-        let marker_due = spawned_at + delay + MARKER_GRACE;
-        if let Some(remaining) = marker_due.checked_sub(started.elapsed()) {
-            tokio::time::sleep(remaining).await;
-        }
-        assert!(
-            !marker.exists(),
-            "descendant wrote the marker after timeout"
-        );
+    }
 
-        let _ = std::fs::remove_file(&spawned);
-        let _ = std::fs::remove_file(&pidfile);
-        let marker = work.path().join("marker-cancel.txt");
-        let spawned = work.path().join("spawned-cancel.txt");
-        let pidfile = work.path().join("pid-cancel.txt");
-        let _cleanup_cancel = KillLater {
-            pidfile: pidfile.clone(),
-        };
-        let cmd = descendant_command(&marker, &spawned, &pidfile, CANCEL_DESCENDANT_DELAY_SECS);
+    #[tokio::test]
+    async fn delayed_marker_positive_control() {
+        #[cfg(windows)]
+        let _serial = WINDOWS_SHELL_TESTS.lock().await;
+        let work = tempfile::tempdir().unwrap();
+        let delay = Duration::from_secs(TIMEOUT_DESCENDANT_DELAY_SECS);
+        let fixture = spawn_delayed_marker(
+            work.path(),
+            delay,
+            Duration::from_secs(BACKGROUND_LIFE_SECS),
+        );
+        let t = tool(work.path());
+        let ctx = ToolContext::default();
+        // The identical command, without a kill timeout, must write its marker.
+        // The tool timeout only covers a slow start; it is longer than the delay.
+        // Drop the still-running parent once the marker has been observed.
         {
             let call = t.call(
                 &ctx,
-                json!({"command": cmd, "shell": shell_for_tests(), "timeout": SHELL_CALL_TIMEOUT_SECS}),
+                json!({"command": fixture.command, "shell": fixture.shell, "cwd": fixture.dir, "timeout": POSITIVE_CONTROL_TIMEOUT_SECS}),
             );
             tokio::pin!(call);
-            let started = std::time::Instant::now();
-            loop {
+            let cap = READY_BOUND + delay + MARKER_GRACE;
+            let written = tokio::time::timeout(cap, async {
+                loop {
+                    if std::fs::read_to_string(&fixture.marker).is_ok_and(|value| {
+                        value.trim_start_matches('\u{feff}').trim() == "survived"
+                    }) {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                }
+            });
+            tokio::select! {
+                result = &mut call => panic!("positive-control parent exited early: {result:?}"),
+                result = written => result.expect("positive-control marker was not written"),
+            }
+            assert!(
+                fixture.ready.exists(),
+                "descendant never acknowledged startup"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_future_kills_the_tree() {
+        #[cfg(windows)]
+        let _serial = WINDOWS_SHELL_TESTS.lock().await;
+        let work = tempfile::tempdir().unwrap();
+        let delay = Duration::from_secs(CANCEL_DESCENDANT_DELAY_SECS);
+        let fixture = spawn_delayed_marker(
+            work.path(),
+            delay,
+            Duration::from_secs(BACKGROUND_LIFE_SECS),
+        );
+        let t = tool(work.path());
+        let ctx = ToolContext::default();
+        let started = std::time::Instant::now();
+        let ready_at = {
+            let call = t.call(
+                &ctx,
+                json!({"command": fixture.command, "shell": fixture.shell, "cwd": fixture.dir, "timeout": SHELL_CALL_TIMEOUT_SECS}),
+            );
+            tokio::pin!(call);
+            // Cancel only once the child is running. A slow start must not
+            // yield a vacuous green test, and the wait is the readiness cap.
+            let ready_at = loop {
                 tokio::select! {
                     biased;
                     result = &mut call => panic!("shell returned before cancellation: {result:?}"),
-                    () = tokio::time::sleep(Duration::from_millis(50)) => {
-                        if spawned.exists() {
-                            break;
+                    () = tokio::time::sleep(Duration::from_millis(25)) => {
+                        if fixture.ready.exists() {
+                            break started.elapsed();
                         }
                         assert!(
                             started.elapsed() < READY_BOUND,
-                            "descendant was not started"
+                            "descendant never acknowledged startup"
                         );
                     }
                 }
-            }
-        }
-        tokio::time::sleep(Duration::from_secs(CANCEL_DESCENDANT_DELAY_SECS) + MARKER_GRACE).await;
-        assert!(
-            !marker.exists(),
-            "descendant wrote the marker after the shell future was dropped"
-        );
+            };
+            assert!(
+                tokio::time::timeout(Duration::from_millis(500), &mut call)
+                    .await
+                    .is_err(),
+                "shell returned before its future could be cancelled"
+            );
+            ready_at
+        }; // Drop the actual call future, not just a borrowed timeout wrapper.
+        assert_marker_absent_until(&fixture, started, ready_at + delay + MARKER_GRACE).await;
     }
 
     fn process_alive(pid: u32) -> bool {
@@ -809,94 +995,15 @@ mod tests {
         }
     }
 
-    /// A background child must still be running after a successful `shell_run`.
-    ///
-    /// Unix `ProcessGroupChild::wait` blocks until the group is empty, so a
-    /// group wait turns this into a timeout that `killpg`s the child. Windows
-    /// `KILL_ON_JOB_CLOSE` kills it when the job handle drops on return.
-    #[tokio::test]
-    async fn successful_shell_run_leaves_background_child_alive() {
-        let work = tempfile::tempdir().unwrap();
-        let spill = tempfile::tempdir().unwrap();
-        let t = tool(spill.path());
-        let pidfile = work.path().join("pid.txt");
-        let _cleanup = KillLater {
-            pidfile: pidfile.clone(),
-        };
-        let done = work.path().join("child-done.txt");
-        let cmd = if cfg!(windows) {
-            format!(
-                "$psi = New-Object System.Diagnostics.ProcessStartInfo; \
-                 $psi.FileName = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'; \
-                 $psi.Arguments = '-NoProfile -NonInteractive -Command \"Start-Sleep -Seconds {life}; Set-Content -LiteralPath {done} -Value done\"'; \
-                 $psi.UseShellExecute = $false; \
-                 $psi.CreateNoWindow = $true; \
-                 $p = [System.Diagnostics.Process]::Start($psi); \
-                 Set-Content -LiteralPath {pid} -Value $p.Id -Encoding Ascii; \
-                 Write-Output started-bg",
-                life = BACKGROUND_LIFE_SECS,
-                done = ps_nested(&done),
-                pid = ps_single(&pidfile),
-            )
-        } else {
-            format!(
-                "(sleep {life}; echo done > '{done}') & echo $! > '{pid}'; echo started-bg",
-                life = BACKGROUND_LIFE_SECS,
-                done = done.display(),
-                pid = pidfile.display(),
-            )
-        };
-        let started = std::time::Instant::now();
-        let out = t
-            .call(
-                &ToolContext::default(),
-                json!({"command": cmd, "shell": shell_for_tests(), "timeout": SHELL_CALL_TIMEOUT_SECS}),
-            )
-            .await
-            .unwrap_or_else(|err| {
-                panic!("shell_run did not finish while the background child was still running: {err}")
-            });
-        let s = text(&out);
-        assert!(s.contains("exit_code: 0"), "{s}");
-        assert!(s.contains("started-bg"), "{s}");
-        assert!(
-            started.elapsed() < SHELL_RETURN_BOUND,
-            "shell_run waited out the background child ({:?})",
-            started.elapsed()
-        );
-        assert!(
-            !done.exists(),
-            "background child finished before shell_run returned"
-        );
-        let pid = read_pid(&pidfile).await;
-        // A job-close kill lands before `call` returns. The first wait absorbs a
-        // task list that has not observed the new pid yet. The second covers a
-        // kill that is only queued when the result is observed, including on a
-        // slow runner where 500ms is not enough to see it.
-        assert!(
-            became_alive(pid, Duration::from_secs(10)).await,
-            "background child {pid} was not running after a successful shell_run"
-        );
-        assert!(
-            stays_alive(pid, Duration::from_secs(5)).await,
-            "background child {pid} was killed after a successful shell_run"
-        );
-    }
-
-    async fn read_pid(path: &Path) -> u32 {
+    async fn await_recorded_pid(path: &Path) -> u32 {
         let started = std::time::Instant::now();
         loop {
-            if let Ok(text) = std::fs::read_to_string(path) {
-                let digits: String = text.chars().filter(char::is_ascii_digit).collect();
-                if let Ok(pid) = digits.parse::<u32>()
-                    && pid > 0
-                {
-                    return pid;
-                }
+            if let Some(pid) = recorded_pid(path) {
+                return pid;
             }
             assert!(
                 started.elapsed() < READY_BOUND,
-                "background pid file {} was not written",
+                "pid file {} was not written",
                 path.display()
             );
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -931,6 +1038,69 @@ mod tests {
         }
     }
 
+    /// A background child must still be running after a successful `shell_run`.
+    ///
+    /// Unix `ProcessGroupChild::wait` blocks until the group is empty, so a
+    /// group wait turns this into a timeout that `killpg`s the child. Windows
+    /// `KILL_ON_JOB_CLOSE` kills it when the job handle drops on return.
+    #[tokio::test]
+    async fn successful_shell_run_leaves_background_child_alive() {
+        #[cfg(windows)]
+        let _serial = WINDOWS_SHELL_TESTS.lock().await;
+        let work = tempfile::tempdir().unwrap();
+        let spill = tempfile::tempdir().unwrap();
+        let t = tool(spill.path());
+        // Null child streams isolate successful-return job lifetime from the
+        // separate inherited-pipe/grace test above. The marker is written only
+        // after `BACKGROUND_LIFE_SECS`, so the signal that we did not wait the
+        // child out is the missing file under a generous return bound.
+        let fixture = spawn_fixture(
+            work.path(),
+            Duration::from_secs(BACKGROUND_LIFE_SECS),
+            Duration::ZERO,
+            true,
+            false,
+        );
+        let started = std::time::Instant::now();
+        let out = t
+            .call(
+                &ToolContext::default(),
+                json!({"command": fixture.command, "shell": fixture.shell, "cwd": fixture.dir, "timeout": SHELL_CALL_TIMEOUT_SECS}),
+            )
+            .await
+            .unwrap_or_else(|err| {
+                panic!(
+                    "shell_run did not finish while the background child was still running: {err}"
+                )
+            });
+        let s = text(&out);
+        assert!(s.contains("exit_code: 0"), "{s}");
+        assert!(s.contains("started-bg"), "{s}");
+        assert!(
+            started.elapsed() < SHELL_RETURN_BOUND,
+            "shell_run waited out the background child ({:?})",
+            started.elapsed()
+        );
+        assert!(
+            !fixture.marker.exists(),
+            "background child finished before shell_run returned"
+        );
+        assert!(fixture.ready.exists(), "background child never started");
+        let pid = await_recorded_pid(&fixture.child_pid).await;
+        // A job-close kill lands before `call` returns. The first wait absorbs a
+        // task list that has not observed the new pid yet. The second covers a
+        // kill that is only queued when the result is observed, including on a
+        // slow runner where 500ms is not enough to see it.
+        assert!(
+            became_alive(pid, Duration::from_secs(10)).await,
+            "background child {pid} was not running after a successful shell_run"
+        );
+        assert!(
+            stays_alive(pid, Duration::from_secs(5)).await,
+            "background child {pid} was killed after a successful shell_run"
+        );
+    }
+
     #[tokio::test]
     #[allow(unsafe_code)]
     async fn child_env_omits_secrets_but_keeps_path() {
@@ -946,6 +1116,8 @@ mod tests {
                 }
             }
         }
+        #[cfg(windows)]
+        let _serial = WINDOWS_SHELL_TESTS.lock().await;
         let _restore = Restore;
         unsafe {
             std::env::set_var("BOT_SECRETS_PASSPHRASE", "sentinel-secret-value");
