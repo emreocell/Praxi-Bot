@@ -116,18 +116,24 @@ impl Assembler {
     /// Slot for a streamed tool-call delta. Servers that omit `index` (some
     /// compat layers) are resolved by `id`: a new id opens a new call, a
     /// delta without id continues the most recent one.
-    fn call_index(&self, c: &Value, pos: usize) -> u64 {
+    fn call_index(&self, c: &Value, pos: usize) -> Result<u64, ProviderError> {
         if let Some(i) = c.get("index").and_then(Value::as_u64) {
-            return i;
+            return Ok(i);
         }
-        let next = self.calls.keys().next_back().map_or(0, |k| k + 1);
         match c.get("id").and_then(Value::as_str) {
-            Some(id) if !id.is_empty() => self
-                .calls
-                .iter()
-                .find(|(_, p)| p.id == id)
-                .map_or(next, |(k, _)| *k),
-            _ => self.calls.keys().next_back().copied().unwrap_or(pos as u64),
+            Some(id) if !id.is_empty() => {
+                if let Some((index, _)) = self.calls.iter().find(|(_, call)| call.id == id) {
+                    return Ok(*index);
+                }
+                // Only allocate a new slot for a new ID. A continuation of the last
+                // valid slot (including u64::MAX) does not need to increment it.
+                self.calls.keys().next_back().map_or(Ok(0), |index| {
+                    index
+                        .checked_add(1)
+                        .ok_or_else(|| ProviderError::Stream("tool-call index exhausted".into()))
+                })
+            }
+            _ => Ok(self.calls.keys().next_back().copied().unwrap_or(pos as u64)),
         }
     }
 
@@ -169,7 +175,7 @@ impl Assembler {
             }
             if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
                 for (pos, c) in calls.iter().enumerate() {
-                    let idx = self.call_index(c, pos);
+                    let idx = self.call_index(c, pos)?;
                     let p = self.calls.entry(idx).or_default();
                     if let Some(id) = c.get("id").and_then(Value::as_str)
                         && p.id.is_empty()

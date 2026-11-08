@@ -98,6 +98,38 @@ fn tool_calls(chunks: &[ChatChunk]) -> Vec<ToolCall> {
         .collect()
 }
 
+#[test]
+fn audit_extra_usage_overflow_returns_error_instead_of_panicking() {
+    use crate::util::EventDecoder;
+    let mut decoder = super::stream::Decoder::default();
+    let payload =
+        json!({"usageMetadata": {"candidatesTokenCount": u64::MAX, "thoughtsTokenCount": 1}})
+            .to_string();
+    assert!(matches!(
+        decoder.feed(&payload),
+        Err(ProviderError::Stream(_))
+    ));
+}
+
+#[test]
+fn audit_extra_maximum_valid_usage_total_is_preserved() {
+    use crate::util::EventDecoder;
+    let mut decoder = super::stream::Decoder::default();
+    decoder.feed(&json!({"usageMetadata": {"candidatesTokenCount": u64::MAX - 1, "thoughtsTokenCount": 1}, "candidates": [{"finishReason": "STOP"}]}).to_string()).unwrap();
+    let chunks = decoder.finish().unwrap();
+    let usage = chunks
+        .iter()
+        .find_map(|chunk| {
+            if let ChatChunk::Usage(usage) = chunk {
+                Some(usage)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(usage.completion_tokens, u64::MAX);
+}
+
 #[tokio::test]
 async fn text_stream_uses_sse_endpoint_and_key_header() {
     let server = MockServer::start().await;

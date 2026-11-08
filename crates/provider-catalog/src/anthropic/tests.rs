@@ -120,6 +120,45 @@ fn err_body(kind: &str, msg: &str) -> Value {
     json!({"type":"error","error":{"type":kind,"message":msg}})
 }
 
+#[test]
+fn audit_extra_usage_overflow_returns_error_instead_of_panicking() {
+    let mut decoder = Decoder::default();
+    decoder
+        .feed(&start(&json!({"input_tokens": u64::MAX, "cache_read_input_tokens": 1})).to_string())
+        .unwrap();
+    decoder.feed(r#"{"type":"message_stop"}"#).unwrap();
+    assert!(matches!(decoder.finish(), Err(ProviderError::Stream(_))));
+}
+
+#[test]
+fn audit_extra_cache_write_overflow_is_rejected() {
+    let mut decoder = Decoder::default();
+    decoder.feed(&start(&json!({"input_tokens": u64::MAX - 1, "cache_read_input_tokens": 1, "cache_creation_input_tokens": 1})).to_string()).unwrap();
+    decoder.feed(r#"{"type":"message_stop"}"#).unwrap();
+    assert!(matches!(decoder.finish(), Err(ProviderError::Stream(_))));
+}
+
+#[test]
+fn audit_extra_maximum_valid_usage_total_is_preserved() {
+    let mut decoder = Decoder::default();
+    decoder.feed(&start(&json!({"input_tokens": u64::MAX - 5, "cache_read_input_tokens": 2, "cache_creation_input_tokens": 3})).to_string()).unwrap();
+    decoder.feed(r#"{"type":"message_stop"}"#).unwrap();
+    let chunks = decoder.finish().unwrap();
+    let usage = chunks
+        .iter()
+        .find_map(|chunk| {
+            if let ChatChunk::Usage(usage) = chunk {
+                Some(usage)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(usage.prompt_tokens, u64::MAX);
+    assert_eq!(usage.cached_tokens, Some(2));
+    assert_eq!(usage.cache_write_tokens, Some(3));
+}
+
 #[tokio::test]
 async fn text_stream_with_headers_and_usage() {
     let server = MockServer::start().await;

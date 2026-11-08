@@ -80,6 +80,56 @@ fn provider(server: &MockServer) -> OpenAiCompatProvider {
         .unwrap()
 }
 
+#[test]
+fn audit_extra_exhausted_call_index_returns_error_instead_of_panicking() {
+    let mut assembler = super::sse::Assembler::default();
+    assembler
+        .feed(
+            &json!({"choices": [{"delta": {"tool_calls": [{
+                "index": u64::MAX, "id": "existing", "function": {"name": "read", "arguments": "{}"}
+            }]}}]})
+            .to_string(),
+        )
+        .unwrap();
+    let next = json!({"choices": [{"delta": {"tool_calls": [{
+        "id": "next", "function": {"name": "read", "arguments": "{}"}
+    }]}}]})
+    .to_string();
+    assert!(matches!(
+        assembler.feed(&next),
+        Err(ProviderError::Stream(_))
+    ));
+}
+
+#[test]
+fn audit_extra_max_index_continuations_do_not_allocate_a_new_slot() {
+    let mut assembler = super::sse::Assembler::default();
+    for call in [
+        json!({"index": u64::MAX, "id": "existing", "function": {"name": "read", "arguments": "{"}}),
+        json!({"id": "existing", "function": {"arguments": "\"x\":1"}}),
+        json!({"function": {"arguments": "}"}}),
+    ] {
+        assembler
+            .feed(&json!({"choices": [{"delta": {"tool_calls": [call]}}]}).to_string())
+            .unwrap();
+    }
+    assembler.feed("[DONE]").unwrap();
+    let chunks = assembler.finish().unwrap();
+    let calls: Vec<_> = chunks
+        .iter()
+        .filter_map(|chunk| {
+            if let ChatChunk::ToolCall(call) = chunk {
+                Some(call)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].id, "existing");
+    assert_eq!(calls[0].arguments, r#"{"x":1}"#);
+}
+
 #[tokio::test]
 async fn plain_text_stream_with_usage() {
     let server = MockServer::start().await;

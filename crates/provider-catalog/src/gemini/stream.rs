@@ -32,16 +32,19 @@ fn parse_finish(s: &str) -> FinishReason {
     }
 }
 
-fn parse_usage(u: &Value) -> Usage {
+fn parse_usage(u: &Value) -> Result<Usage, ProviderError> {
     let get = |k: &str| u.get(k).and_then(Value::as_u64);
-    Usage {
+    // Thinking tokens are billed as output; reject totals that cannot be represented.
+    let completion_tokens = get("candidatesTokenCount")
+        .unwrap_or(0)
+        .checked_add(get("thoughtsTokenCount").unwrap_or(0))
+        .ok_or_else(|| ProviderError::Stream("Gemini completion-token total overflow".into()))?;
+    Ok(Usage {
         prompt_tokens: get("promptTokenCount").unwrap_or(0),
-        // Thinking tokens are billed as output.
-        completion_tokens: get("candidatesTokenCount").unwrap_or(0)
-            + get("thoughtsTokenCount").unwrap_or(0),
+        completion_tokens,
         cached_tokens: get("cachedContentTokenCount"),
         cache_write_tokens: None,
-    }
+    })
 }
 
 fn unique_id(index: usize) -> u64 {
@@ -78,7 +81,7 @@ impl EventDecoder for Decoder {
             return Err(classify(status, &HeaderMap::new(), payload));
         }
         if let Some(u) = v.get("usageMetadata") {
-            self.usage = Some(parse_usage(u));
+            self.usage = Some(parse_usage(u)?);
         }
         let mut out = Vec::new();
         // A blocked prompt has no candidates, only a block reason.
