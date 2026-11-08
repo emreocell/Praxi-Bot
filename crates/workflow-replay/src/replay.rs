@@ -56,6 +56,17 @@ pub struct Handles {
     pub tools: ToolRegistry,
 }
 
+/// A control gate that allows everything (tests, headless runs with no human
+/// at the wheel). Must be chosen explicitly: a missing gate refuses.
+pub struct AllowAllControl;
+
+#[async_trait::async_trait]
+impl DesktopControlGate for AllowAllControl {
+    async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 /// Replay settings.
 #[derive(Clone)]
 pub struct ReplayOptions {
@@ -78,7 +89,8 @@ pub struct ReplayOptions {
     /// Bot that started the replay, forwarded to tool steps.
     pub bot_id: Option<String>,
     /// Desktop control gate, asked before every native / browser mutation
-    /// (the user may have taken the wheel). `None` = no gate (CLI only).
+    /// (the user may have taken the wheel). `None` fails closed: acting steps
+    /// are refused. Use [`AllowAllControl`] only where no human is at the wheel.
     pub control: Option<Arc<dyn DesktopControlGate>>,
 }
 
@@ -108,6 +120,7 @@ impl ReplayOptions {
             poll_interval: Duration::from_millis(1),
             launch_settle: Duration::ZERO,
             action_settle: Duration::ZERO,
+            control: Some(Arc::new(AllowAllControl)),
             ..Self::default()
         }
     }
@@ -520,7 +533,9 @@ impl Replayer {
     /// Ask the desktop control gate (if any) before a mutating action.
     async fn control_gate(&self, action: &str, label: String) -> Result<(), Stop> {
         let Some(gate) = &self.opts.control else {
-            return Ok(());
+            return Err(Stop::Denied(format!(
+                "no desktop control gate configured: refusing {action}"
+            )));
         };
         gate.before_action(&ControlRequest {
             run_id: self.opts.run_id.clone(),

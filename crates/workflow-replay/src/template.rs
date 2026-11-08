@@ -236,7 +236,7 @@ fn reject_quoted_placeholders(t: &str, dialect: ShellDialect) -> Result<(), Work
             Piece::Var(v) => {
                 if pending_escape {
                     return Err(WorkflowError::Template(format!(
-                        "placeholder `{{{v}}}` follows a dangling escape character in a shell                          template: {t:?}"
+                        "placeholder `{{{v}}}` directly follows an escape or expansion character                          in a shell template: {t:?}"
                     )));
                 }
                 if q != Q::None {
@@ -276,6 +276,17 @@ fn reject_quoted_placeholders(t: &str, dialect: ShellDialect) -> Result<(), Work
                             }
                         }
                     }
+                }
+                // A trailing character that changes how the next byte is read:
+                // cmd `^` (`^"` stays a literal quote, so `&` goes live), POSIX
+                // `$` (`$'..'` is ANSI-C quoting), PowerShell `$` / `@`.
+                let last = l.chars().next_back();
+                if match dialect {
+                    ShellDialect::Cmd => last == Some('^'),
+                    ShellDialect::Posix => last == Some('$'),
+                    ShellDialect::PowerShell => matches!(last, Some('$' | '@')),
+                } {
+                    pending_escape = true;
                 }
             }
         }
@@ -489,24 +500,56 @@ mod tests {
     }
 
     #[test]
-    fn newline_value_stays_one_word_on_real_sh() {
-        let Ok(probe) = std::process::Command::new("sh")
+    fn caret_and_dollar_before_placeholder_are_rejected() {
+        let v = vars(&[("x", "a&calc")]);
+        assert!(render_shell("echo ^{x}", &v, ShellDialect::Cmd).is_err());
+        assert!(render_shell("echo ${x}", &v, ShellDialect::Posix).is_err());
+        assert!(render_shell("echo ${x}", &v, ShellDialect::PowerShell).is_err());
+        assert!(render_shell("echo @{x}", &v, ShellDialect::PowerShell).is_err());
+        assert!(render_shell("echo a {x}", &v, ShellDialect::Posix).is_ok());
+    }
+
+    fn have_sh() -> bool {
+        std::process::Command::new("sh")
             .arg("-c")
             .arg("true")
             .status()
-        else {
-            return; // no sh here
-        };
-        if !probe.success() {
+            .is_ok_and(|s| s.success())
+    }
+
+    fn sh_out(cmd: &str) -> String {
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(cmd)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    #[test]
+    fn newline_value_stays_one_word_on_real_sh() {
+        if !have_sh() {
             return;
         }
         let v = vars(&[("x", "a\nb;echo pwned")]);
         let cmd = render_shell("printf %s {x}", &v, ShellDialect::Posix).unwrap();
-        let out = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(&cmd)
-            .output()
-            .unwrap();
-        assert_eq!(String::from_utf8_lossy(&out.stdout), "a\nb;echo pwned");
+        assert_eq!(sh_out(&cmd), "a\nb;echo pwned");
+    }
+
+    /// The exploit: `\{x}` renders `\'a\n..'` where sh sees an escaped quote and
+    /// the newline then ends the command. The renderer must refuse it; if it ever
+    /// accepts, the output on real sh has to be exactly the value.
+    #[test]
+    fn backslash_placeholder_never_executes_a_newline_value_on_real_sh() {
+        if !have_sh() {
+            return;
+        }
+        let v = vars(&[("x", "a\necho pwned")]);
+        match render_shell(r"printf %s \{x}", &v, ShellDialect::Posix) {
+            Err(_) => {}
+            Ok(cmd) => assert_eq!(sh_out(&cmd), "a\necho pwned", "injection: {cmd:?}"),
+        }
+        // And the guard itself does not depend on sh being present.
+        assert!(render_shell(r"printf %s \{x}", &v, ShellDialect::Posix).is_err());
     }
 }

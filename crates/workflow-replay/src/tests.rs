@@ -933,3 +933,23 @@ async fn refusing_control_gate_blocks_every_browser_action_and_navigate() {
         );
     }
 }
+
+#[tokio::test]
+async fn missing_control_gate_fails_closed_for_acting_steps() {
+    let wf = screen_wf(vec![Step::Launch(Launch {
+        executable: "notepad.exe".into(),
+        args: vec![],
+    })]);
+    let desktop = notepad_desktop();
+    let opts = ReplayOptions {
+        launch_settle: std::time::Duration::ZERO,
+        ..ReplayOptions::default()
+    };
+    assert!(opts.control.is_none());
+    let report = Replayer::new(handles(Some(desktop.clone()), None), opts)
+        .replay(&wf, &params(&json!({})), &RecordingGate::default())
+        .await
+        .unwrap();
+    assert!(!report.is_completed());
+    assert!(desktop.launched.lock().is_empty());
+}
