@@ -480,7 +480,13 @@ fn check_web(env: &DoctorEnv<'_>) -> Check {
             _ => brave_missing = true,
         }
     }
-    let cfg = crate::serve::web_tools_config(env.data_dir, &file, Some(&mem), &mut notes);
+    let cfg = crate::serve::web_tools_config(
+        env.data_dir,
+        &file,
+        Some(&mem),
+        &crate::serve::daemon_protected_sockets(env.port),
+        &mut notes,
+    );
     let backends = crate::serve::web_backend_summary(&cfg);
     if brave_missing {
         notes.push("brave key secret not found".into());

@@ -419,10 +419,15 @@ mod tests {
         let (_d, reg) = web_registry(Some(web_tools::WebToolsConfig::default()));
         for name in web_tools::TOOL_NAMES {
             let spec = reg.get(name).expect("web tool registered").spec().clone();
-            // Read-only egress behind the SSRF policy: the default policy lets it
-            // run without a per-call prompt (see `read_tools_skip_ask`), and the
-            // Browser category keeps a Browser deny / limit effective.
-            assert_eq!(spec.effect, Effect::Read, "{name}");
+            // Search only reaches the configured providers (Read, no per-call
+            // prompt); tools fetching a model-chosen URL are Write and ask like
+            // `browser_open`. All stay in Browser so a Browser deny applies.
+            let want = if *name == "web_search" {
+                Effect::Read
+            } else {
+                Effect::Write
+            };
+            assert_eq!(spec.effect, want, "{name}");
             assert_eq!(spec.category, PermissionCategory::Browser, "{name}");
         }
         let (_d, reg) = web_registry(Some(web_tools::WebToolsConfig::default()));

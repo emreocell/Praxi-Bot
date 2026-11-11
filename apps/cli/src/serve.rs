@@ -470,6 +470,21 @@ pub const WEB_FILE: &str = "web.toml";
 
 /// Largest `max_bytes` a `web.toml` may set (64 MiB).
 const WEB_MAX_BYTES_CAP: usize = 64 << 20;
+/// Upper bounds for `web.toml` timeouts, in seconds.
+const WEB_TIMEOUT_CAP_SECS: u64 = 120;
+const WEB_CONNECT_TIMEOUT_CAP_SECS: u64 = 30;
+
+/// The interface the daemon API listens on (loopback only, never another).
+const DAEMON_BIND_IP: Ipv4Addr = Ipv4Addr::LOCALHOST;
+
+/// The daemon's own listener, to be refused by the web tools. The exact port
+/// is protected (not the whole IP) so a local `SearXNG` on another loopback
+/// port keeps working. Port `0` (ephemeral, real port unknown yet) protects
+/// every port of the bind IP.
+#[must_use]
+pub fn daemon_protected_sockets(daemon_port: u16) -> Vec<SocketAddr> {
+    vec![SocketAddr::from((DAEMON_BIND_IP, daemon_port))]
+}
 
 /// `<data_dir>/web.toml`. Every key is optional; the web tools work without
 /// the file (`DuckDuckGo` needs no key).
@@ -544,9 +559,14 @@ pub fn web_tools_config(
     data_dir: &Path,
     file: &WebConfigFile,
     store: Option<&Arc<dyn SecretStore>>,
+    protected: &[SocketAddr],
     warnings: &mut Vec<String>,
 ) -> web_tools::WebToolsConfig {
     let mut cfg = web_tools::WebToolsConfig {
+        policy: Arc::new(web_tools::DefaultUrlPolicy {
+            blocked_sockets: protected.to_vec(),
+            ..web_tools::DefaultUrlPolicy::default()
+        }),
         secrets: store.cloned(),
         spill_dir: Some(data_dir.join("spill")),
         ..web_tools::WebToolsConfig::default()
@@ -576,10 +596,20 @@ pub fn web_tools_config(
         })
     };
     if let Some(n) = positive("timeout_secs", h.timeout_secs, warnings) {
-        cfg.http.timeout = Duration::from_secs(n);
+        if n > WEB_TIMEOUT_CAP_SECS {
+            warnings.push(format!(
+                "web.toml: timeout_secs capped at {WEB_TIMEOUT_CAP_SECS}"
+            ));
+        }
+        cfg.http.timeout = Duration::from_secs(n.min(WEB_TIMEOUT_CAP_SECS));
     }
     if let Some(n) = positive("connect_timeout_secs", h.connect_timeout_secs, warnings) {
-        cfg.http.connect_timeout = Duration::from_secs(n);
+        if n > WEB_CONNECT_TIMEOUT_CAP_SECS {
+            warnings.push(format!(
+                "web.toml: connect_timeout_secs capped at {WEB_CONNECT_TIMEOUT_CAP_SECS}"
+            ));
+        }
+        cfg.http.connect_timeout = Duration::from_secs(n.min(WEB_CONNECT_TIMEOUT_CAP_SECS));
     }
     if let Some(n) = h.max_bytes {
         if n == 0 {
@@ -604,7 +634,16 @@ pub fn web_tools_config(
 pub fn web_backend_summary(cfg: &web_tools::WebToolsConfig) -> String {
     let mut v = Vec::new();
     if let Some(u) = &cfg.search.searxng_url {
-        v.push(format!("searxng ({u})"));
+        // Only scheme://host[:port]: never a path, query or credentials.
+        let origin = url::Url::parse(u)
+            .ok()
+            .and_then(|p| {
+                let host = p.host_str()?;
+                let port = p.port().map_or_else(String::new, |n| format!(":{n}"));
+                Some(format!("{}://{host}{port}", p.scheme()))
+            })
+            .unwrap_or_else(|| "invalid url".to_owned());
+        v.push(format!("searxng ({origin})"));
     }
     if cfg.search.brave_key.is_some() {
         v.push("brave".to_owned());
@@ -626,18 +665,26 @@ pub fn web_backend_summary(cfg: &web_tools::WebToolsConfig) -> String {
 /// to the defaults. Returns how many tools were added.
 pub fn register_web(
     data_dir: &Path,
+    daemon_port: u16,
     registry: &ToolRegistry,
     store: Option<&Arc<dyn SecretStore>>,
 ) -> usize {
     let (file, mut warnings) = load_web_file(data_dir);
-    let cfg = web_tools_config(data_dir, &file, store, &mut warnings);
+    let protected = daemon_protected_sockets(daemon_port);
+    let cfg = web_tools_config(data_dir, &file, store, &protected, &mut warnings);
     let mut summary = web_backend_summary(&cfg);
     let mut result = builtin_tools::register_web_tools(registry, cfg);
     if let Err(e) = &result {
         warnings.push(format!(
             "web.toml: {e}; using the default web tools settings"
         ));
-        let cfg = web_tools_config(data_dir, &WebConfigFile::default(), store, &mut warnings);
+        let cfg = web_tools_config(
+            data_dir,
+            &WebConfigFile::default(),
+            store,
+            &protected,
+            &mut warnings,
+        );
         summary = web_backend_summary(&cfg);
         result = builtin_tools::register_web_tools(registry, cfg);
     }
@@ -746,7 +793,7 @@ pub fn serve(
     // Same registry the loop calls tools from: MCP servers, email and web tools register into it.
     let mcp_tools = agent.tool_registry();
     register_email(data_dir, &mcp_tools, telegram_store.as_ref());
-    register_web(data_dir, &mcp_tools, telegram_store.as_ref());
+    register_web(data_dir, port, &mcp_tools, telegram_store.as_ref());
     let recovered = agent.recover()?;
     let mut cfg = DaemonConfig::new(api_token.clone());
     cfg.shutdown_grace = grace;
@@ -802,7 +849,7 @@ pub fn serve(
         }
         // Loopback only: never bind another interface.
         let listener =
-            tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).await?;
+            tokio::net::TcpListener::bind(SocketAddr::from((DAEMON_BIND_IP, port))).await?;
         let addr = listener.local_addr()?;
         // The Telegram channel (when a token is stored and it is enabled) talks
         // to this daemon through its own loopback address.
@@ -1173,19 +1220,23 @@ host = "smtp.example.com"
 
         let dir = tempfile::tempdir().unwrap();
         let reg = ToolRegistry::new();
-        assert_eq!(register_web(dir.path(), &reg, None), 5);
+        assert_eq!(register_web(dir.path(), 0, &reg, None), 5);
         assert_eq!(web_names(&reg), web_tools::TOOL_NAMES);
         for name in web_tools::TOOL_NAMES {
             let t = reg.get(name).unwrap();
-            // Read-only egress: no per-call approval under the default policy,
-            // still the Browser category so a Browser deny applies.
-            assert_eq!(t.spec().effect, Effect::Read, "{name}");
+            // Search is Read; fetching a model-chosen URL is Write (asks).
+            let want = if *name == "web_search" {
+                Effect::Read
+            } else {
+                Effect::Write
+            };
+            assert_eq!(t.spec().effect, want, "{name}");
             assert_eq!(t.spec().category, PermissionCategory::Browser, "{name}");
         }
         let mut w = Vec::new();
         let (file, warnings) = load_web_file(dir.path());
         assert_eq!(warnings.len(), 0);
-        let cfg = web_tools_config(dir.path(), &file, None, &mut w);
+        let cfg = web_tools_config(dir.path(), &file, None, &[], &mut w);
         assert_eq!(w.len(), 0);
         assert!(cfg.search.duckduckgo);
         assert_eq!(web_backend_summary(&cfg), "duckduckgo");
@@ -1216,7 +1267,7 @@ max_redirects = 2
         let (file, warnings) = load_web_file(dir.path());
         assert!(warnings.is_empty(), "{warnings:?}");
         let mut w = Vec::new();
-        let cfg = web_tools_config(dir.path(), &file, Some(&store), &mut w);
+        let cfg = web_tools_config(dir.path(), &file, Some(&store), &[], &mut w);
         assert!(w.is_empty(), "{w:?}");
         assert_eq!(
             cfg.search.searxng_url.as_deref(),
@@ -1233,7 +1284,7 @@ max_redirects = 2
             "searxng (http://127.0.0.1:8080) > brave"
         );
         let reg = ToolRegistry::new();
-        assert_eq!(register_web(dir.path(), &reg, Some(&store)), 5);
+        assert_eq!(register_web(dir.path(), 0, &reg, Some(&store)), 5);
     }
 
     #[test]
@@ -1251,7 +1302,7 @@ unknown_key = 1
             assert_eq!(warnings.len(), 1, "{bad}");
             assert!(warnings[0].contains("web.toml"), "{warnings:?}");
             let reg = ToolRegistry::new();
-            assert_eq!(register_web(dir.path(), &reg, None), 5, "{bad}");
+            assert_eq!(register_web(dir.path(), 0, &reg, None), 5, "{bad}");
         }
     }
 
@@ -1267,7 +1318,7 @@ searxng_url = \"not a url\"
         )
         .unwrap();
         let reg = ToolRegistry::new();
-        assert_eq!(register_web(dir.path(), &reg, None), 5);
+        assert_eq!(register_web(dir.path(), 0, &reg, None), 5);
 
         // A Brave key without a secret store is dropped with a warning.
         std::fs::write(
@@ -1283,12 +1334,90 @@ max_bytes = 99999999999
         let (file, warnings) = load_web_file(dir.path());
         assert_eq!(warnings.len(), 0);
         let mut w = Vec::new();
-        let cfg = web_tools_config(dir.path(), &file, None, &mut w);
+        let cfg = web_tools_config(dir.path(), &file, None, &[], &mut w);
         assert_eq!(w.len(), 3, "{w:?}");
         assert!(cfg.search.brave_key.is_none());
         assert_eq!(cfg.http.timeout, web_tools::HttpConfig::default().timeout);
         assert_eq!(cfg.http.max_bytes, WEB_MAX_BYTES_CAP);
         let reg = ToolRegistry::new();
-        assert_eq!(register_web(dir.path(), &reg, None), 5);
+        assert_eq!(register_web(dir.path(), 0, &reg, None), 5);
+    }
+
+    #[test]
+    fn web_timeouts_are_clamped_with_a_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(WEB_FILE),
+            "[http]
+timeout_secs = 100000
+connect_timeout_secs = 999
+",
+        )
+        .unwrap();
+        let (file, _) = load_web_file(dir.path());
+        let mut w = Vec::new();
+        let cfg = web_tools_config(dir.path(), &file, None, &[], &mut w);
+        assert_eq!(w.len(), 2, "{w:?}");
+        assert_eq!(cfg.http.timeout, Duration::from_secs(WEB_TIMEOUT_CAP_SECS));
+        assert_eq!(
+            cfg.http.connect_timeout,
+            Duration::from_secs(WEB_CONNECT_TIMEOUT_CAP_SECS)
+        );
+    }
+
+    #[test]
+    fn backend_summary_shows_only_the_searxng_origin() {
+        let mut cfg = web_tools::WebToolsConfig::default();
+        cfg.search.searxng_url =
+            Some("https://user:pw@searx.example.org:8443/private/path?token=abc".into());
+        let s = web_backend_summary(&cfg);
+        assert_eq!(s, "searxng (https://searx.example.org:8443) > duckduckgo");
+        assert!(!s.contains("pw") && !s.contains("token") && !s.contains("private"));
+        cfg.search.searxng_url = Some("not a url".into());
+        assert!(web_backend_summary(&cfg).contains("invalid url"));
+    }
+
+    #[test]
+    fn daemon_listener_is_refused_but_other_loopback_ports_stay_possible() {
+        let protected = daemon_protected_sockets(47000);
+        assert_eq!(protected, vec![SocketAddr::from((DAEMON_BIND_IP, 47000))]);
+        // Port 0 protects every port of the bind IP.
+        assert_eq!(daemon_protected_sockets(0)[0].port(), 0);
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut w = Vec::new();
+        // A non-loopback address stands in to show the entry itself refuses it.
+        let cfg = web_tools_config(
+            dir.path(),
+            &WebConfigFile::default(),
+            None,
+            &[
+                "203.0.113.7:0".parse().unwrap(),
+                "203.0.113.9:4000".parse().unwrap(),
+            ],
+            &mut w,
+        );
+        let check = |u: &str| cfg.policy.check_url(&url::Url::parse(u).unwrap());
+        for port in [80, 8080, 47000] {
+            let e = check(&format!("http://203.0.113.7:{port}/")).unwrap_err();
+            assert!(e.to_string().contains("protected"), "{e}");
+        }
+        assert!(check("http://203.0.113.9:4000/").is_err());
+        assert!(check("http://203.0.113.9:4001/").is_ok());
+        assert!(check("http://203.0.113.8/").is_ok());
+
+        // The real daemon address is refused either way (loopback is blocked).
+        let cfg = web_tools_config(
+            dir.path(),
+            &WebConfigFile::default(),
+            None,
+            &protected,
+            &mut w,
+        );
+        assert!(
+            cfg.policy
+                .check_url(&url::Url::parse("http://127.0.0.1:47000/").unwrap())
+                .is_err()
+        );
     }
 }

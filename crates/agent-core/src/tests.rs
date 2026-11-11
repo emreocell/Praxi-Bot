@@ -540,15 +540,14 @@ async fn policy_deny_never_asks() {
     assert_eq!(env.storage.list_approvals(run).unwrap().len(), 0);
 }
 
-/// A loop whose registry holds the real web tools (no network is touched: the
-/// default SSRF policy refuses every target used below before connecting).
+/// A loop whose registry holds the real web tools. No network is touched: no
+/// search backend is configured and the default SSRF policy refuses every URL
+/// used below before connecting.
 fn web_loop(env: &Env, fake: &Arc<Fake>, profile: BotProfile, config: LoopConfig) -> AgentLoop {
     let registry = ToolRegistry::new();
-    builtin_tools::register_web_tools(
-        &registry,
-        builtin_tools::web_tools::WebToolsConfig::default(),
-    )
-    .unwrap();
+    let mut web = builtin_tools::web_tools::WebToolsConfig::default();
+    web.search.duckduckgo = false;
+    builtin_tools::register_web_tools(&registry, web).unwrap();
     let lp = AgentLoop::new(
         Arc::clone(&env.storage),
         registry,
@@ -560,37 +559,67 @@ fn web_loop(env: &Env, fake: &Arc<Fake>, profile: BotProfile, config: LoopConfig
 }
 
 #[tokio::test]
-async fn web_tools_run_without_approval_under_the_default_policy_but_stay_ssrf_guarded() {
+async fn web_search_runs_without_approval_under_the_default_policy() {
     let env = setup();
     let fake = Fake::new(vec![
-        calls(&[
-            ("c1", "web_extract", json!({"url": "http://127.0.0.1:9/"})),
-            (
-                "c2",
-                "web_metadata",
-                json!({"url": "http://169.254.169.254/latest/meta-data"}),
-            ),
-        ]),
+        calls(&[("c1", "web_search", json!({"query": "x"}))]),
         text("done"),
     ]);
-    // `Policy::approve_destructive()` is the shipped default and `cfg` keeps
-    // the default `read_tools_skip_ask = true`.
     let lp = web_loop(&env, &fake, profile(""), cfg(Policy::approve_destructive()));
-    let run = lp.run_turn(env.chat, "read it").unwrap();
+    let run = lp.run_turn(env.chat, "search").unwrap();
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
-    assert_eq!(
-        env.storage.list_approvals(run).unwrap().len(),
-        0,
-        "no per-call approval for read-only web access"
-    );
-    let msgs = tool_messages(&fake.request(1));
-    assert_eq!(msgs.len(), 2);
-    for m in &msgs {
-        assert!(
-            m.contains("blocked"),
-            "private / loopback / metadata targets stay refused by the URL policy: {m}"
-        );
+    assert_eq!(env.storage.list_approvals(run).unwrap().len(), 0);
+    // It ran (and failed offline: no backend), it was not parked.
+    assert!(tool_messages(&fake.request(1))[0].contains("no search backend"));
+}
+
+#[tokio::test]
+async fn web_fetch_asks_by_default_and_a_tool_grant_removes_the_prompt() {
+    let env = setup();
+    let url = json!({"url": "http://127.0.0.1:9/"});
+    for name in ["web_extract", "web_feed", "web_sitemap", "web_metadata"] {
+        let fake = Fake::new(vec![calls(&[("c1", name, url.clone())]), text("done")]);
+        let lp = web_loop(&env, &fake, profile(""), cfg(Policy::approve_destructive()));
+        let mut rx = lp.subscribe();
+        let run = lp.run_turn(env.chat, "read it").unwrap();
+        let Event::ApprovalNeeded(a) =
+            until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+        else {
+            unreachable!()
+        };
+        assert_eq!(a.tool_name, name);
+        lp.approve(a.call_id, ApprovalScope::Once, env.user)
+            .unwrap();
+        assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+        // Approved, so it ran; the SSRF policy still refuses the target.
+        assert!(tool_messages(&fake.request(1))[0].contains("blocked"));
     }
+
+    // "Always allow this tool" for web_extract: the next call does not ask.
+    let fake = Fake::new(vec![
+        calls(&[("c1", "web_extract", url.clone())]),
+        text("one"),
+        calls(&[("c2", "web_extract", url.clone())]),
+        text("two"),
+    ]);
+    let lp = web_loop(&env, &fake, profile(""), cfg(Policy::approve_destructive()));
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "first").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    lp.approve(a.call_id, ApprovalScope::Always, env.user)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let run2 = lp.run_turn(env.chat, "second").unwrap();
+    assert_eq!(lp.wait(run2).await.unwrap(), RunState::Succeeded);
+    assert_eq!(
+        env.storage.list_approvals(run2).unwrap().len(),
+        0,
+        "a tool-level grant removes the prompt"
+    );
+    assert!(tool_messages(&fake.request(3))[0].contains("blocked"));
 }
 
 #[tokio::test]

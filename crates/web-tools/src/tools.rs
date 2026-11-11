@@ -1,10 +1,15 @@
 //! `Tool` implementations and the registration entry points.
 //!
-//! Conventions follow `builtin-tools`: effect `Read` (read-only network
-//! egress, every URL and redirect hop checked by the SSRF [`UrlPolicy`]),
-//! permission category `Browser` (so a `Browser` deny / limits policy still
-//! applies), every output prefixed with an "untrusted external content"
-//! notice, large text spilled to a file.
+//! Conventions follow `builtin-tools`: permission category `Browser`, every
+//! output prefixed with an "untrusted external content" notice, large text
+//! spilled to a file. Effects are split by destination:
+//!
+//! - `web_search` is `Read`: queries only go to the configured search
+//!   providers, so it runs without a per-call prompt under the default policy.
+//! - `web_extract`, `web_feed`, `web_sitemap` and `web_metadata` are `Write`:
+//!   they contact an arbitrary host chosen by the model, so (like
+//!   `browser_open`) they ask unless the user grants the tool to a bot. Every
+//!   URL and redirect hop is checked by the SSRF [`UrlPolicy`] either way.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -119,7 +124,11 @@ pub fn tools(cfg: WebToolsConfig) -> Result<Vec<Arc<dyn Tool>>, WebError> {
                 name: name.to_string(),
                 description: desc.to_string(),
                 input_schema: schema,
-                effect: Effect::Read,
+                effect: if matches!(kind, Kind::Search) {
+                    Effect::Read
+                } else {
+                    Effect::Write
+                },
                 category: PermissionCategory::Browser,
                 platforms: vec![Platform::All],
             },
