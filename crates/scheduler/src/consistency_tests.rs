@@ -178,8 +178,13 @@ async fn unresolved_intents_survive_restart_without_unsafe_replay() {
         );
         scheduler.settle().await;
         assert_eq!(exec.count(), 0, "task 136 must supply safe replay first");
-        assert_eq!(store.unresolved_occurrence_count().unwrap(), 1);
-        assert_eq!(store.get(row.id).unwrap().unwrap().next_run_at, Some(2_000));
+        // The row is retained, but reclassified from live work to visible
+        // history: nothing may stay `pending` / `dispatched` forever.
+        assert_eq!(store.unresolved_occurrence_count().unwrap(), 0);
+        let after = store.get(row.id).unwrap().unwrap();
+        assert_eq!(after.missed_occurrences, 1);
+        assert_eq!(after.next_run_at, Some(2_000));
+        assert!(after.enabled);
         scheduler.shutdown().await;
     }
 }
@@ -200,5 +205,48 @@ async fn consumed_identity_does_not_block_later_catch_up_slots() {
     clock.jump_wall_ms(2_001);
     scheduler.settle().await;
     assert_eq!(exec.count(), 3, "only the two new identities may run");
+    scheduler.shutdown().await;
+}
+
+#[tokio::test]
+async fn interrupted_one_shot_is_parked_visibly_on_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut once = Schedule::new(
+        BotId::new(),
+        None,
+        "once",
+        ScheduleSpec::At { unix_ms: 1_000 },
+        Payload::AgentPrompt {
+            text: "once".into(),
+        },
+        MisfirePolicy::RunOnce,
+        0,
+    )
+    .unwrap();
+    {
+        let store = ScheduleStore::open(dir.path()).unwrap();
+        store.insert(&once).unwrap();
+        // Reserved (timer consumed) and dispatched, then the process died.
+        assert!(store.reserve_occurrences(&once, &[1_000], None).unwrap());
+        assert!(
+            store
+                .claim_occurrence(once.id, 0, 1_000, 1_000)
+                .unwrap()
+                .is_some()
+        );
+    }
+    let store = Arc::new(ScheduleStore::open(dir.path()).unwrap());
+    let exec = RecordingExecutor::new();
+    let scheduler = Scheduler::start_with_clock(
+        Arc::clone(&store),
+        exec.clone(),
+        Arc::new(FakeClock::new(5_000)),
+    );
+    scheduler.settle().await;
+    assert_eq!(exec.count(), 0, "no unsafe replay");
+    once = store.list().unwrap().into_iter().next().unwrap();
+    assert!(!once.enabled, "not silently enabled-and-dead");
+    assert_eq!(once.next_run_at, None);
+    assert_eq!(once.missed_occurrences, 1);
     scheduler.shutdown().await;
 }

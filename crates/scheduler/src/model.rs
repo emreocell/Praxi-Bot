@@ -453,6 +453,11 @@ pub struct Schedule {
     /// This is a persistence/concurrency detail, not part of the schedule DTO.
     #[serde(skip)]
     pub revision: i64,
+    /// Occurrences that were reserved or dispatched but never confirmed
+    /// because the process stopped (`missed` / `interrupted`). They are not
+    /// replayed automatically (task 136); UIs can show them as "missed".
+    #[serde(default)]
+    pub missed_occurrences: u32,
 }
 
 impl Schedule {
@@ -488,6 +493,7 @@ impl Schedule {
             next_run_at,
             misfire_policy,
             revision: 0,
+            missed_occurrences: 0,
         })
     }
 }

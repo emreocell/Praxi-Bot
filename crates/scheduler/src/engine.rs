@@ -132,13 +132,15 @@ impl Scheduler {
         let init_wall = inner.clock.wall_ms();
         let init_mono = inner.clock.mono_ms();
 
-        match inner.store.unresolved_occurrence_count() {
+        // Nothing is dispatching yet, so every unresolved row is a leftover of
+        // an earlier process. Reclassify it as visible history; no replay.
+        match inner.store.recover_unresolved_occurrences() {
             Ok(0) => {}
             Ok(count) => tracing::warn!(
                 count,
-                "unresolved schedule intents retained; automatic replay awaits durable idempotent starts (task 136)"
+                "marked unresolved schedule occurrences missed/interrupted; automatic replay awaits durable idempotent starts (task 136)"
             ),
-            Err(error) => tracing::error!(%error, "failed to inspect unresolved schedule intents"),
+            Err(error) => tracing::error!(%error, "failed to recover unresolved schedule intents"),
         }
 
         // Run the startup recovery/misfire pass synchronously so any schedule

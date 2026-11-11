@@ -367,8 +367,14 @@ async fn secondary_future_schemas_name_the_database() {
             .unwrap();
         drop(conn);
         let error = rejected(&bundle(source.path()).await, ImportOptions::default()).await;
+        // Each database reports its own newest supported schema version.
+        let expected = if db == "schedules.db" {
+            scheduler::SCHEMA_VERSION
+        } else {
+            1
+        };
         assert!(
-            matches!(error, ImportError::IncompatibleSchema { db: name, found: 999, supported: 1 } if name == db)
+            matches!(error, ImportError::IncompatibleSchema { db: name, found: 999, supported } if name == db && supported == expected)
         );
     }
 }

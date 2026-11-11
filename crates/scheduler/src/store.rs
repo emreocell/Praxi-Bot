@@ -25,10 +25,23 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0002_schedule_consistency",
         include_str!("../migrations/0002_schedule_consistency.sql"),
     ),
+    (
+        "0003_occurrence_recovery",
+        include_str!("../migrations/0003_occurrence_recovery.sql"),
+    ),
 ];
 
+/// Schema version produced by the newest embedded migration.
+pub const SCHEMA_VERSION: u32 = 3;
+
+/// Terminal occurrence rows kept per schedule; older ones are pruned in the
+/// transaction that finishes an occurrence. Unresolved rows are never pruned.
+const OCCURRENCE_HISTORY_LIMIT: i64 = 100;
+
+const TERMINAL_STATES: &str = "'succeeded', 'failed', 'started', 'missed', 'interrupted'";
+
 const SCHEDULE_SELECT: &str = "SELECT id, bot_id, chat_id, name, spec_json, payload_json, \
-    enabled, created_at_ms, last_run_at_ms, next_run_at_ms, misfire_policy, revision FROM schedules";
+    enabled, created_at_ms, last_run_at_ms, next_run_at_ms, misfire_policy, revision,     (SELECT COUNT(*) FROM occurrences o WHERE o.schedule_id = schedules.id      AND o.state IN ('missed', 'interrupted')) FROM schedules";
 
 /// Type alias for [`ScheduleStore`].
 pub type Store = ScheduleStore;
@@ -162,41 +175,47 @@ impl ScheduleStore {
     }
 
     /// Insert a new schedule, or replace only an existing row's definition.
-    /// Runtime cursors and the original bot/creation identity are preserved on
-    /// conflict. Definition changes invalidate unstarted catch-up occurrences.
+    /// The original bot/creation identity and the run cursors are preserved on
+    /// conflict. As with [`Self::update`], the timer is re-armed from the
+    /// current row when the spec changed or the schedule was re-enabled, and
+    /// unstarted catch-up occurrences are invalidated.
     ///
     /// # Errors
     /// Fails if `schedule.spec` is invalid or on SQLite/JSON errors.
     pub fn upsert(&self, schedule: &Schedule) -> Result<()> {
         schedule.spec.validate()?;
-        let spec_json = serde_json::to_string(&schedule.spec)?;
-        let payload_json = serde_json::to_string(&schedule.payload)?;
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute(
-            "INSERT INTO schedules (id, bot_id, chat_id, name, spec_json, payload_json, \
-             enabled, created_at_ms, last_run_at_ms, next_run_at_ms, misfire_policy) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
-             ON CONFLICT(id) DO UPDATE SET \
-             chat_id = excluded.chat_id, name = excluded.name, \
-             spec_json = excluded.spec_json, payload_json = excluded.payload_json, \
-             enabled = excluded.enabled, misfire_policy = excluded.misfire_policy, \
-             revision = schedules.revision + 1",
-            params![
-                schedule.id.to_string(),
-                schedule.bot_id.to_string(),
-                schedule.chat_id.map(|c| c.to_string()),
-                schedule.name,
-                spec_json,
-                payload_json,
-                i64::from(schedule.enabled),
-                schedule.created_at,
-                schedule.last_run_at,
-                schedule.next_run_at,
-                schedule.misfire_policy.as_str(),
-            ],
-        )?;
-        cancel_pending(&tx, schedule.id)?;
+        if let Some(current) = get_schedule(&tx, schedule.id)? {
+            let mut definition = schedule.clone();
+            definition.bot_id = current.bot_id;
+            edit_in(
+                &tx,
+                &definition,
+                Some(schedule.enabled),
+                storage::now_ms(),
+                None,
+            )?;
+        } else {
+            tx.execute(
+                "INSERT INTO schedules (id, bot_id, chat_id, name, spec_json, payload_json, \
+                 enabled, created_at_ms, last_run_at_ms, next_run_at_ms, misfire_policy) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    schedule.id.to_string(),
+                    schedule.bot_id.to_string(),
+                    schedule.chat_id.map(|c| c.to_string()),
+                    schedule.name,
+                    serde_json::to_string(&schedule.spec)?,
+                    serde_json::to_string(&schedule.payload)?,
+                    i64::from(schedule.enabled),
+                    schedule.created_at,
+                    schedule.last_run_at,
+                    schedule.next_run_at,
+                    schedule.misfire_policy.as_str(),
+                ],
+            )?;
+        }
         tx.commit()?;
         drop(conn);
         self.notify();
@@ -271,9 +290,13 @@ impl ScheduleStore {
         Ok(min_ts)
     }
 
-    /// Replace a definition only; never write `last_run_at` or `next_run_at`.
-    /// Returns `false` when the row was deleted or its definition revision
-    /// changed since the caller read it. Unstarted occurrences are cancelled.
+    /// Replace a definition, guarded by the caller's `revision`. Run progress
+    /// (`last_run_at`) is never taken from the caller. The timer is re-armed
+    /// from the CURRENT row in the same transaction when the spec changed or
+    /// the schedule is being re-enabled, so a re-enabled schedule can fire; an
+    /// unchanged spec keeps the current `next_run_at`. Returns `false` when the
+    /// row was deleted or its definition revision changed since the caller
+    /// read it. Unstarted occurrences are cancelled.
     ///
     /// # Errors
     /// Fails if the specification is invalid or on SQLite/JSON errors.
@@ -281,18 +304,23 @@ impl ScheduleStore {
         schedule.spec.validate()?;
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let changed = update_definition_in(&tx, schedule)?;
+        let edited = edit_in(
+            &tx,
+            schedule,
+            Some(schedule.enabled),
+            storage::now_ms(),
+            Some(schedule.revision),
+        )?;
         tx.commit()?;
         drop(conn);
-        if changed {
+        if edited.is_some() {
             self.notify();
         }
-        Ok(changed)
+        Ok(edited.is_some())
     }
 
-    /// Compatibility entry point for definition-only updates.
-    /// See [`Self::update_definition`]; runtime state is never accepted from a
-    /// potentially stale caller snapshot.
+    /// Alias of [`Self::update_definition`]; re-enabling through it re-arms the
+    /// timer.
     ///
     /// # Errors
     /// As [`Self::update_definition`].
@@ -338,41 +366,31 @@ impl ScheduleStore {
         definition.spec.validate()?;
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let Some(current) = get_schedule(&tx, definition.id)? else {
-            return Ok(None);
-        };
-        if current.bot_id != definition.bot_id {
-            return Err(SchedulerError::InvalidSpec(
-                "the bot of a schedule cannot be changed".into(),
-            ));
-        }
-        let next_revision = current.revision.checked_add(1).ok_or_else(|| {
-            SchedulerError::InvalidSpec("schedule definition revision is exhausted".into())
-        })?;
-        let was_enabled = current.enabled;
-        let enabled = enabled.unwrap_or(was_enabled);
-        let next = rearm_if_spec_changed(&current, &definition.spec, enabled, now_ms)?;
-        let mut edited = definition.clone();
-        edited.enabled = enabled;
-        edited.revision = current.revision;
-        update_definition_in(&tx, &edited)?;
-        set_next_run_after_edit_in(&tx, current.id, next_revision, next)?;
-        let fresh = get_schedule(&tx, current.id)?;
+        let edited = edit_in(&tx, definition, enabled, now_ms, None)?;
         tx.commit()?;
         drop(conn);
         self.notify();
-        Ok(fresh.map(|schedule| (schedule, was_enabled)))
+        Ok(edited)
     }
 
     /// Enable or disable a schedule and update its timer. This is a definition
     /// change: bump its revision and cancel unstarted catch-up occurrences.
-    /// Already-dispatched work is allowed to finish.
+    /// Already-dispatched work is allowed to finish. Enabling with
+    /// `next_run_at = None` computes the next occurrence from the stored spec
+    /// (an enabled schedule is never left without a timer here).
     ///
     /// # Errors
     /// Fails on SQLite errors.
     pub fn set_enabled(&self, id: TaskId, enabled: bool, next_run_at: Option<i64>) -> Result<bool> {
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let next_run_at = match (enabled, next_run_at) {
+            (true, None) => match get_schedule(&tx, id)? {
+                Some(current) => arm_from(&current.spec, storage::now_ms())?,
+                None => None,
+            },
+            (_, next) => next,
+        };
         let changed = tx.execute(
             "UPDATE schedules SET enabled = ?2, next_run_at_ms = ?3, \
              revision = revision + 1 WHERE id = ?1",
@@ -546,8 +564,11 @@ impl ScheduleStore {
     /// Record only the legacy executor's outcome; no fabricated run id or
     /// `started` acknowledgment. An interrupted dispatch stays uncertain and
     /// is NOT retried until task 136 supplies durable start idempotency.
+    /// Terminal history of the schedule is pruned in the same transaction.
     pub(crate) fn finish_occurrence(&self, id: TaskId, due_ms: i64, succeeded: bool) -> Result<()> {
-        self.conn().execute(
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
             "UPDATE occurrences SET state = ?3 WHERE schedule_id = ?1 \
              AND due_ms = ?2 AND state = 'dispatched'",
             params![
@@ -556,9 +577,75 @@ impl ScheduleStore {
                 if succeeded { "succeeded" } else { "failed" },
             ],
         )?;
+        prune_history(&tx, id)?;
+        tx.commit()?;
         Ok(())
     }
 
+    /// Startup crash recovery, without replaying anything (replay needs the
+    /// durable start API of task 136): `pending` rows become `missed`,
+    /// `dispatched` rows become `interrupted`, so they stop looking like live
+    /// work and show up in [`Schedule::missed_occurrences`]. An enabled
+    /// one-shot whose only timer was consumed by such an occurrence is
+    /// disabled, so it is not left enabled-and-dead. Returns the number of
+    /// occurrences reclassified; calling it again is a no-op.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn recover_unresolved_occurrences(&self) -> Result<u64> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let affected: Vec<String> = {
+            let mut st = tx.prepare(
+                "SELECT DISTINCT schedule_id FROM occurrences \
+                 WHERE state IN ('pending', 'dispatched')",
+            )?;
+            st.query_map([], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>()?
+        };
+        for raw in &affected {
+            let Ok(uuid) = Uuid::parse_str(raw) else {
+                continue;
+            };
+            let id = TaskId(uuid);
+            if let Some(schedule) = get_schedule(&tx, id)?
+                && schedule.enabled
+                && schedule.next_run_at.is_none()
+                && matches!(schedule.spec, ScheduleSpec::At { .. })
+            {
+                tx.execute(
+                    "UPDATE schedules SET enabled = 0, revision = revision + 1 WHERE id = ?1",
+                    [raw],
+                )?;
+                tracing::warn!(
+                    schedule_id = %id,
+                    name = %schedule.name,
+                    "one-shot schedule was interrupted before completion; disabled and marked missed"
+                );
+            }
+        }
+        let mut changed = tx.execute(
+            "UPDATE occurrences SET state = 'missed' WHERE state = 'pending'",
+            [],
+        )?;
+        changed += tx.execute(
+            "UPDATE occurrences SET state = 'interrupted' WHERE state = 'dispatched'",
+            [],
+        )?;
+        for raw in &affected {
+            if let Ok(uuid) = Uuid::parse_str(raw) {
+                prune_history(&tx, TaskId(uuid))?;
+            }
+        }
+        tx.commit()?;
+        drop(conn);
+        if changed > 0 {
+            self.notify();
+        }
+        Ok(u64::try_from(changed).unwrap_or(u64::MAX))
+    }
+
+    #[cfg(test)]
     pub(crate) fn unresolved_occurrence_count(&self) -> Result<u64> {
         Ok(self.conn().query_row(
             "SELECT COUNT(*) FROM occurrences WHERE state IN ('pending', 'dispatched')",
@@ -643,11 +730,83 @@ fn get_schedule(conn: &Connection, id: TaskId) -> Result<Option<Schedule>> {
 }
 
 fn cancel_pending(conn: &Connection, id: TaskId) -> Result<()> {
+    let dropped: Vec<i64> = {
+        let mut st = conn.prepare(
+            "SELECT due_ms FROM occurrences WHERE schedule_id = ?1 \
+             AND state = 'pending' ORDER BY due_ms",
+        )?;
+        st.query_map([id.to_string()], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?
+    };
+    if dropped.is_empty() {
+        return Ok(());
+    }
     conn.execute(
         "DELETE FROM occurrences WHERE schedule_id = ?1 AND state = 'pending'",
         [id.to_string()],
     )?;
+    tracing::warn!(
+        schedule_id = %id,
+        count = dropped.len(),
+        first_due_ms = dropped[0],
+        last_due_ms = dropped[dropped.len() - 1],
+        "dropped pending catch-up occurrences because the schedule was edited, disabled or parked"
+    );
     Ok(())
+}
+
+fn prune_history(conn: &Connection, id: TaskId) -> Result<()> {
+    conn.execute(
+        &format!(
+            "DELETE FROM occurrences WHERE schedule_id = ?1 AND state IN ({TERMINAL_STATES}) \
+             AND due_ms NOT IN (SELECT due_ms FROM occurrences WHERE schedule_id = ?1 \
+             AND state IN ({TERMINAL_STATES}) ORDER BY due_ms DESC LIMIT ?2)"
+        ),
+        params![id.to_string(), OCCURRENCE_HISTORY_LIMIT],
+    )?;
+    Ok(())
+}
+
+/// Apply a definition to the CURRENT row and re-arm its timer in the caller's
+/// transaction. `expected_revision` rejects a stale caller (`None` result).
+/// Returns the fresh row and its previous enabled state.
+fn edit_in(
+    conn: &Connection,
+    definition: &Schedule,
+    enabled: Option<bool>,
+    now_ms: i64,
+    expected_revision: Option<i64>,
+) -> Result<Option<(Schedule, bool)>> {
+    let Some(current) = get_schedule(conn, definition.id)? else {
+        return Ok(None);
+    };
+    if current.bot_id != definition.bot_id {
+        return Err(SchedulerError::InvalidSpec(
+            "the bot of a schedule cannot be changed".into(),
+        ));
+    }
+    if expected_revision.is_some_and(|revision| revision != current.revision) {
+        return Ok(None);
+    }
+    let next_revision = current.revision.checked_add(1).ok_or_else(|| {
+        SchedulerError::InvalidSpec("schedule definition revision is exhausted".into())
+    })?;
+    let was_enabled = current.enabled;
+    let enabled = enabled.unwrap_or(was_enabled);
+    let next = rearm_if_spec_changed(&current, &definition.spec, enabled, now_ms)?;
+    let mut edited = definition.clone();
+    edited.enabled = enabled;
+    edited.revision = current.revision;
+    update_definition_in(conn, &edited)?;
+    set_next_run_after_edit_in(conn, current.id, next_revision, next)?;
+    Ok(get_schedule(conn, current.id)?.map(|schedule| (schedule, was_enabled)))
+}
+
+fn arm_from(spec: &ScheduleSpec, now_ms: i64) -> Result<Option<i64>> {
+    match spec {
+        ScheduleSpec::At { unix_ms } => Ok(Some(*unix_ms)),
+        other => other.next_after(now_ms),
+    }
 }
 
 fn update_definition_in(conn: &Connection, schedule: &Schedule) -> Result<bool> {
@@ -693,10 +852,7 @@ fn rearm_if_spec_changed(
     if !enabled {
         Ok(None)
     } else if new_spec != &current.spec || !current.enabled {
-        match new_spec {
-            ScheduleSpec::At { unix_ms } => Ok(Some(*unix_ms)),
-            other => other.next_after(now_ms),
-        }
+        arm_from(new_spec, now_ms)
     } else {
         Ok(current.next_run_at)
     }
@@ -747,6 +903,7 @@ fn schedule_row(row: &Row<'_>) -> rusqlite::Result<Schedule> {
         next_run_at: row.get(9)?,
         misfire_policy,
         revision: row.get(11)?,
+        missed_occurrences: row.get(12)?,
     })
 }
 

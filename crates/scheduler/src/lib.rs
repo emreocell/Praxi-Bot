@@ -23,8 +23,10 @@
 //! # Durable dispatch boundary (task 136)
 //! An occurrence is identified by `schedule_id:due_ms`. Pending/dispatched
 //! intents survive restart, but the current [`ScheduleExecutor`] cannot
-//! durably deduplicate a start or return its `run_id`. The engine therefore
-//! logs unresolved intents without replaying them. Full no-loss/no-duplicate
+//! durably deduplicate a start or return its `run_id`. At startup the engine
+//! therefore reclassifies unresolved intents as `missed` / `interrupted`
+//! (visible as [`Schedule::missed_occurrences`], an interrupted one-shot is
+//! disabled) without replaying them. Full no-loss/no-duplicate
 //! recovery, `started(run_id)`, and disabling one-shots after a durable start
 //! require the task-136 `AgentLoop::start_scheduled` contract. A reserved
 //! one-shot currently has an exhausted timer, not a fabricated start record.
@@ -49,7 +51,7 @@ pub use model::{
 };
 pub use nl::{parse_natural_language, parse_natural_language_with_tz, parse_nl};
 pub use protocol::{BotId, ChatId, Initiator, InitiatorKind, TaskId};
-pub use store::{ScheduleStore, Store};
+pub use store::{SCHEMA_VERSION, ScheduleStore, Store};
 pub use webhook::{
     REPLAY_WINDOW_MS, ReplayGuard, WebhookMeta, handle_webhook, sign_webhook_body,
     sign_webhook_hex, verify_webhook_signature,
