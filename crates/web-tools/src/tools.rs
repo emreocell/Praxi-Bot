@@ -36,6 +36,22 @@ pub const TOOL_NAMES: &[&str] = &[
     "web_metadata",
 ];
 
+/// Longest URL a web tool accepts, in characters. Damps bulk data exfiltration
+/// through URLs.
+pub const MAX_URL_CHARS: usize = 2048;
+/// Longest `web_search` query, in characters.
+pub const MAX_QUERY_CHARS: usize = 400;
+
+fn check_len(what: &str, v: &str, max: usize) -> Result<(), ToolError> {
+    let n = v.chars().count();
+    if n > max {
+        return Err(ToolError::InvalidInput(format!(
+            "{what} is too long ({n} characters, limit {max})"
+        )));
+    }
+    Ok(())
+}
+
 /// Everything needed to build the web tools.
 #[derive(Clone)]
 pub struct WebToolsConfig {
@@ -339,6 +355,7 @@ struct UrlLimitIn {
 impl WebTool {
     async fn search(&self, input: Value) -> Result<ToolOutput, ToolError> {
         let i: SearchIn = parse(input)?;
+        check_len("query", &i.query, MAX_QUERY_CHARS)?;
         let q = SearchQuery {
             limit: i.limit.unwrap_or(10),
             language: i.language,
@@ -379,6 +396,7 @@ impl WebTool {
 
     async fn extract(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
         let i: ExtractIn = parse(input)?;
+        check_len("url", &i.url, MAX_URL_CHARS)?;
         let page = self
             .shared
             .fetcher
@@ -428,6 +446,7 @@ impl WebTool {
 
     async fn feed(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
         let i: UrlLimitIn = parse(input)?;
+        check_len("url", &i.url, MAX_URL_CHARS)?;
         let page = self
             .shared
             .fetcher
@@ -451,6 +470,7 @@ impl WebTool {
 
     async fn sitemap(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
         let i: UrlLimitIn = parse(input)?;
+        check_len("url", &i.url, MAX_URL_CHARS)?;
         let page = self
             .shared
             .fetcher
@@ -474,6 +494,7 @@ impl WebTool {
 
     async fn metadata(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
         let i: UrlLimitIn = parse(input)?;
+        check_len("url", &i.url, MAX_URL_CHARS)?;
         let page = self
             .shared
             .fetcher

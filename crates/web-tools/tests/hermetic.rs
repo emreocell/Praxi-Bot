@@ -672,3 +672,25 @@ async fn large_sitemap_and_feed_json_respect_inline_budget_and_spill() {
         );
     }
 }
+
+#[tokio::test]
+async fn overlong_urls_and_queries_are_refused_before_any_request() {
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, cfg(DefaultUrlPolicy::default())).unwrap();
+    let long_url = format!("https://example.org/?q={}", "a".repeat(2100));
+    for name in ["web_extract", "web_metadata", "web_feed", "web_sitemap"] {
+        let err = call(&reg, name, json!({"url": long_url}))
+            .await
+            .unwrap_err();
+        assert!(err.contains("too long"), "{name}: {err}");
+    }
+    let err = call(&reg, "web_search", json!({"query": "q".repeat(401)}))
+        .await
+        .unwrap_err();
+    assert!(err.contains("too long"), "{err}");
+    // At the limit the call gets past the length check (and fails later, offline).
+    let err = call(&reg, "web_search", json!({"query": "q".repeat(400)}))
+        .await
+        .unwrap_err();
+    assert!(!err.contains("too long"), "{err}");
+}

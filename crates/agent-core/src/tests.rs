@@ -600,13 +600,23 @@ async fn browser_deny_still_denies_web_tools_and_write_browser_tools_still_ask()
     deny.categories
         .insert(PermissionCategory::Browser, Rule::new(Level::Deny));
     let fake = Fake::new(vec![
-        calls(&[("c1", "web_extract", json!({"url": "http://127.0.0.1:9/"}))]),
+        calls(&[
+            ("c1", "web_extract", json!({"url": "http://127.0.0.1:9/"})),
+            ("c2", "web_search", json!({"query": "x"})),
+            ("c3", "web_feed", json!({"url": "http://127.0.0.1:9/"})),
+            ("c4", "web_sitemap", json!({"url": "http://127.0.0.1:9/"})),
+            ("c5", "web_metadata", json!({"url": "http://127.0.0.1:9/"})),
+        ]),
         text("stopped"),
     ]);
     let lp = web_loop(&env, &fake, profile(""), cfg(deny));
     let run = lp.run_turn(env.chat, "go").unwrap();
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
-    assert!(tool_messages(&fake.request(1))[0].contains("Permission denied"));
+    let msgs = tool_messages(&fake.request(1));
+    assert_eq!(msgs.len(), 5);
+    for m in &msgs {
+        assert!(m.contains("Permission denied"), "{m}");
+    }
 
     // A mutating browser tool is unchanged: it still parks for approval.
     let click = {
@@ -635,6 +645,24 @@ async fn browser_deny_still_denies_web_tools_and_write_browser_tools_still_ask()
     assert_eq!(a.tool_name, "browser_click");
     assert_eq!(click.count.load(Ordering::SeqCst), 0);
     lp.cancel(run).unwrap();
+}
+
+#[test]
+fn a_tool_allow_list_without_web_hides_the_web_tools() {
+    let hidden = profile(
+        "[tools]
+allow = [\"fs_*\"]
+",
+    );
+    let shown = profile(
+        "[tools]
+allow = [\"fs_*\", \"web_*\"]
+",
+    );
+    for name in builtin_tools::web_tools::TOOL_NAMES {
+        assert!(!hidden.tool_visible(name), "{name}");
+        assert!(shown.tool_visible(name), "{name}");
+    }
 }
 
 #[tokio::test]

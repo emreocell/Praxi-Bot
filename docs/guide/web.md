@@ -83,6 +83,18 @@ tools from a bot's `allow` list.
   are denied too. Tools that act on a page (`browser_click`, `browser_fill`,
   ...) still ask as before.
 
+## Known risk
+
+Because the web tools run without asking, a malicious page could try to
+persuade the bot (prompt injection) to put something it has seen into a search
+query or a URL, which would then be sent to a third party without a prompt. The
+permission engine has no taint or egress tracking for content read from
+untrusted sources, so this is only bounded, not prevented: queries are capped at
+400 characters and URLs at 2,048, local and private addresses are refused,
+results are labelled untrusted, and you can remove `web_*` from a bot's `allow`
+list or set the `browser` category to `ask` or `deny`. Treat a bot that handles
+secrets and also browses the web with care.
+
 ## Check that it works
 
 ```sh
