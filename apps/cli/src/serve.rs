@@ -21,7 +21,7 @@ use provider_catalog::{
 };
 use secret_store::{PASSPHRASE_ENV, SecretStore};
 use serde::Deserialize;
-use skills::{SkillIndex, SkillPaths};
+use skills::{SkillIndex, SkillRoots};
 use storage::Storage;
 use tool_registry::ToolRegistry;
 use workflow_replay::{Handles, WorkflowStore};
@@ -306,15 +306,11 @@ pub fn build_agent_with_redactor(
     )
 }
 
-/// The skills index of a data dir: the bundled skills plus `<data_dir>/skills/`,
-/// which is also where `skill_write` saves what the bot learns.
+/// Shared/bundled index and per-bot roots. Tool calls resolve their caller's
+/// bot directory; a bot-less caller cannot write a learned skill.
 #[must_use]
 pub fn load_skills(data_dir: &Path) -> SkillIndex {
-    let dir = data_dir.join("skills");
-    SkillIndex::load(SkillPaths {
-        user: Some(dir.clone()),
-        bot: Some(dir),
-    })
+    SkillIndex::load_roots(SkillRoots::from_data_dir(data_dir))
 }
 
 /// The desktop backend of the real daemon: Windows UI Automation on Windows,
@@ -863,7 +859,8 @@ id = "unpriced"
         );
         assert!(names.iter().any(|n| n == "workflow_run"), "{names:?}");
         let idx = load_skills(dir.path());
-        assert!(idx.write_dir().is_some());
+        assert!(idx.write_dir().is_none());
+        assert!(idx.for_bot(Some("b1")).unwrap().write_dir().is_some());
         assert!(idx.get("custom-dropdowns").is_some(), "bundled skills load");
     }
 

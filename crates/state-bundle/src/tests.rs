@@ -299,6 +299,37 @@ async fn exclusions_are_central_and_apply_at_every_depth() {
 }
 
 #[tokio::test]
+async fn skill_lock_and_publication_staging_files_are_not_bundled() {
+    let dir = tempfile::tempdir().unwrap();
+    database(dir.path(), false);
+    for (path, value) in [
+        ("skills/demo/SKILL.md", "skill"),
+        ("skills/.praxi-skills.lock", ""),
+        ("skills/.praxi-publish-abc123/SKILL.md", "half published"),
+        ("skills/.praxi-publish-old-abc123/skill/SKILL.md", "backup"),
+        ("skills/demo/.praxi-write-abc123", "half written"),
+        ("bots/a/skills/.praxi-skills.lock", ""),
+        ("bots/a/skills/x/.praxi-write-abc123", "half written"),
+    ] {
+        let path = dir.path().join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, value).unwrap();
+    }
+    let paths: Vec<String> = unpack(&bundle(dir.path()).await)
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect();
+    assert!(
+        paths.contains(&"skills/demo/SKILL.md".to_owned()),
+        "{paths:?}"
+    );
+    assert!(
+        paths.iter().all(|path| !path.contains(".praxi-")),
+        "{paths:?}"
+    );
+}
+
+#[tokio::test]
 async fn tampered_payload_fails_sha256() {
     let dir = tempfile::tempdir().unwrap();
     database(dir.path(), false);

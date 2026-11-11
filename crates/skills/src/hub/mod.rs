@@ -36,7 +36,7 @@
 pub mod lock;
 pub mod scan;
 pub mod source;
-mod util;
+pub(crate) mod util;
 
 use std::fs;
 use std::path::{Path, PathBuf};
