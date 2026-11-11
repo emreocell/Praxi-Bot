@@ -13,6 +13,18 @@ reachable only from the machine itself.
 > planned desktop and browser automation, not because every tool already uses
 > them.
 
+> **Releasing (maintainers).** Pushing a `v*` tag does **not** publish
+> anything. Publishing needs a manual dispatch of **Linux Server Packages** on
+> the protected tag with `dry_run=false`, plus approval of the `release`
+> environment. The repository administrator must create both of these before
+> the first release (details in
+> [Release administrator setup](#release-administrator-setup-and-dry-run)):
+>
+> - an active tag ruleset for `refs/tags/v*` (restrict creation to release
+>   maintainers, block updates and deletion, minimal bypass);
+> - an environment named `release` with required reviewers, Prevent
+>   self-review on, deployment tags limited to `v*`, administrator bypass off.
+
 ## What you need
 
 - A VM with 6 GB RAM (1 core) or 12 GB (2 cores) for an always-on host with

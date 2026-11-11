@@ -446,13 +446,15 @@ fi
 # A custom root is an explicit administrator trust decision. Never auto-select
 # one from release assets or from the archive directory: fetch it independently
 # with `gh attestation trusted-root` on a trusted online machine.
+# Expand optional arrays as ${a[@]+"${a[@]}"}: bash < 4.4 (including macOS
+# /bin/bash 3.2) aborts on "${a[@]}" of an empty array under set -u.
 trust_args=()
 if [[ -n "${TRUSTED_ROOT}" ]]; then
   cp -- "${TRUSTED_ROOT}" "${WORK}/trusted_root.jsonl"
   trust_args=(--custom-trusted-root "${WORK}/trusted_root.jsonl")
 fi
 # Identity constraints remain fixed in both online and offline verification.
-gh attestation verify "${WORK}/${ASSET}" --bundle "${WORK}/${BUNDLE_ASSET}" "${trust_args[@]}" \
+gh attestation verify "${WORK}/${ASSET}" --bundle "${WORK}/${BUNDLE_ASSET}" ${trust_args[@]+"${trust_args[@]}"} \
   --repo "${REPO}" --hostname github.com \
   --signer-workflow "${SIGNER_WORKFLOW}" \
   --source-ref "refs/tags/${VERSION}" --deny-self-hosted-runners \

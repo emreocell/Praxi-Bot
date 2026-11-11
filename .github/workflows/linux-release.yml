@@ -482,13 +482,26 @@ jobs:
           gh --version
           gh attestation trusted-root > "$RUNNER_TEMP/trusted_root.jsonl"
           test -s "$RUNNER_TEMP/trusted_root.jsonl"
-          verify() {
+          # Same policy flags as the positive checks; a negative case changes
+          # exactly one property (artifact, repo or ref) and must fail with the
+          # error that property produces, not for an unrelated reason.
+          verify_with() {
             gh attestation verify "$1" --bundle dist/praxi-linux.sigstore.json \
-              --repo emreocell/Praxi-Bot --hostname github.com \
+              --repo "$2" --hostname github.com \
               --signer-workflow github.com/emreocell/Praxi-Bot/.github/workflows/linux-release.yml \
-              --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA" --deny-self-hosted-runners \
+              --source-ref "$3" --source-digest "$GITHUB_SHA" --deny-self-hosted-runners \
               --cert-oidc-issuer https://token.actions.githubusercontent.com \
               --predicate-type https://slsa.dev/provenance/v1 --digest-alg sha256
+          }
+          verify() { verify_with "$1" emreocell/Praxi-Bot "$GITHUB_REF"; }
+          expect_verify_failure() {
+            local name="$1" message="$2" output; shift 2
+            if output="$(verify_with "$@" 2>&1)"; then
+              echo "accepted $name" >&2; exit 1
+            fi
+            printf '%s\n' "$output"
+            grep -Fq -- "$message" <<<"$output" || { echo "$name failed for an unexpected reason" >&2; exit 1; }
+            echo "PASS: $name rejected for the expected reason"
           }
           for asset in dist/*.tar.gz dist/install-linux.sh; do verify "$asset"; done
           bash scripts/install-linux.sh --verify-only --version "$GITHUB_REF_NAME" \
@@ -500,14 +513,15 @@ jobs:
               --file dist/praxi-linux-x86_64.tar.gz --custom-trusted-root "$RUNNER_TEMP/trusted_root.jsonl"
           cp dist/praxi-linux-x86_64.tar.gz "$RUNNER_TEMP/tampered.tar.gz"
           printf 'tampered' >> "$RUNNER_TEMP/tampered.tar.gz"
-          if verify "$RUNNER_TEMP/tampered.tar.gz"; then echo 'accepted tampered artifact' >&2; exit 1; fi
-          if gh attestation verify dist/install-linux.sh --bundle dist/praxi-linux.sigstore.json \
-            --custom-trusted-root "$RUNNER_TEMP/trusted_root.jsonl" --repo emreocell/Praxi-Bot \
-            --source-ref refs/tags/v0.0.0-wrong-ref; then echo 'accepted wrong ref' >&2; exit 1; fi
-          if gh attestation verify dist/install-linux.sh --bundle dist/praxi-linux.sigstore.json \
-            --custom-trusted-root "$RUNNER_TEMP/trusted_root.jsonl" --repo attacker/Praxi-Bot; then
-            echo 'accepted wrong repository' >&2; exit 1
-          fi
+          # gh 2.80.0 error texts: cli/cli pkg/cmd/attestation/verify/attestation.go
+          # and verification/extensions.go. The digest is checked in the Sigstore
+          # stage; ref and repository are checked in the later policy stage.
+          expect_verify_failure 'tampered artifact' '✗ Sigstore verification failed' \
+            "$RUNNER_TEMP/tampered.tar.gz" emreocell/Praxi-Bot "$GITHUB_REF"
+          expect_verify_failure 'wrong ref' 'expected SourceRepositoryRef to be refs/tags/v0.0.0-wrong-ref' \
+            dist/install-linux.sh emreocell/Praxi-Bot refs/tags/v0.0.0-wrong-ref
+          expect_verify_failure 'wrong repository' 'expected SourceRepositoryOwnerURI to be https://github.com/attacker' \
+            dist/install-linux.sh attacker/Praxi-Bot "$GITHUB_REF"
 
   release:
     name: Publish verified immutable release
