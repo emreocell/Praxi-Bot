@@ -5,7 +5,6 @@
 //! to its state at checkpoint time (paths that did not exist are removed) and
 //! first takes a checkpoint of the current state so a restore can be undone.
 
-use std::fmt::Write as _;
 use std::fs;
 use std::io::{self, Read as _};
 use std::path::{Component, Path, PathBuf};
@@ -122,6 +121,17 @@ fn budget_err(msg: &str) -> io::Error {
 }
 
 impl CopyBudget {
+    /// Charge bytes that appeared after the entry itself was charged.
+    fn charge_extra(&mut self, bytes: u64) -> io::Result<()> {
+        self.bytes = self.bytes.saturating_add(bytes);
+        if self.bytes > MAX_CHECKPOINT_BYTES {
+            return Err(budget_err(&format!(
+                "checkpoint byte budget exceeded ({MAX_CHECKPOINT_BYTES} bytes)"
+            )));
+        }
+        Ok(())
+    }
+
     fn charge(&mut self, bytes: u64) -> io::Result<()> {
         self.entries = self.entries.saturating_add(1);
         self.bytes = self.bytes.saturating_add(bytes);
@@ -139,166 +149,25 @@ impl CopyBudget {
     }
 }
 
-/// A dependency-free SHA-256 used only to detect damaged checkpoint payloads.
-/// The manifest is writable local data, so this is not an authenticity boundary.
-struct PayloadSha256 {
-    state: [u32; 8],
-    block: [u8; 64],
-    filled: usize,
-    bytes: u64,
-}
+/// SHA-256 used only to detect damaged checkpoint payloads. The manifest is
+/// writable local data, so this is an integrity check, not an authenticity
+/// boundary.
+struct PayloadSha256(sha2::Sha256);
 
 impl PayloadSha256 {
     fn new() -> Self {
-        Self {
-            state: [
-                0x6a09_e667,
-                0xbb67_ae85,
-                0x3c6e_f372,
-                0xa54f_f53a,
-                0x510e_527f,
-                0x9b05_688c,
-                0x1f83_d9ab,
-                0x5be0_cd19,
-            ],
-            block: [0; 64],
-            filled: 0,
-            bytes: 0,
-        }
+        use sha2::Digest as _;
+        Self(sha2::Sha256::new())
     }
 
-    fn update(&mut self, mut data: &[u8]) {
-        self.bytes += data.len() as u64;
-        while !data.is_empty() {
-            let n = (64 - self.filled).min(data.len());
-            self.block[self.filled..self.filled + n].copy_from_slice(&data[..n]);
-            self.filled += n;
-            data = &data[n..];
-            if self.filled == 64 {
-                self.compress();
-                self.filled = 0;
-            }
-        }
+    fn update(&mut self, data: &[u8]) {
+        use sha2::Digest as _;
+        self.0.update(data);
     }
 
-    #[allow(clippy::many_single_char_names)]
-    fn compress(&mut self) {
-        const K: [u32; 64] = [
-            0x428a_2f98,
-            0x7137_4491,
-            0xb5c0_fbcf,
-            0xe9b5_dba5,
-            0x3956_c25b,
-            0x59f1_11f1,
-            0x923f_82a4,
-            0xab1c_5ed5,
-            0xd807_aa98,
-            0x1283_5b01,
-            0x2431_85be,
-            0x550c_7dc3,
-            0x72be_5d74,
-            0x80de_b1fe,
-            0x9bdc_06a7,
-            0xc19b_f174,
-            0xe49b_69c1,
-            0xefbe_4786,
-            0x0fc1_9dc6,
-            0x240c_a1cc,
-            0x2de9_2c6f,
-            0x4a74_84aa,
-            0x5cb0_a9dc,
-            0x76f9_88da,
-            0x983e_5152,
-            0xa831_c66d,
-            0xb003_27c8,
-            0xbf59_7fc7,
-            0xc6e0_0bf3,
-            0xd5a7_9147,
-            0x06ca_6351,
-            0x1429_2967,
-            0x27b7_0a85,
-            0x2e1b_2138,
-            0x4d2c_6dfc,
-            0x5338_0d13,
-            0x650a_7354,
-            0x766a_0abb,
-            0x81c2_c92e,
-            0x9272_2c85,
-            0xa2bf_e8a1,
-            0xa81a_664b,
-            0xc24b_8b70,
-            0xc76c_51a3,
-            0xd192_e819,
-            0xd699_0624,
-            0xf40e_3585,
-            0x106a_a070,
-            0x19a4_c116,
-            0x1e37_6c08,
-            0x2748_774c,
-            0x34b0_bcb5,
-            0x391c_0cb3,
-            0x4ed8_aa4a,
-            0x5b9c_ca4f,
-            0x682e_6ff3,
-            0x748f_82ee,
-            0x78a5_636f,
-            0x84c8_7814,
-            0x8cc7_0208,
-            0x90be_fffa,
-            0xa450_6ceb,
-            0xbef9_a3f7,
-            0xc671_78f2,
-        ];
-        let mut words = [0u32; 64];
-        for (out, bytes) in words.iter_mut().zip(self.block.as_chunks::<4>().0) {
-            *out = u32::from_be_bytes(*bytes);
-        }
-        for i in 16..64 {
-            let a = words[i - 15];
-            let b = words[i - 2];
-            let s0 = a.rotate_right(7) ^ a.rotate_right(18) ^ (a >> 3);
-            let s1 = b.rotate_right(17) ^ b.rotate_right(19) ^ (b >> 10);
-            words[i] = words[i - 16]
-                .wrapping_add(s0)
-                .wrapping_add(words[i - 7])
-                .wrapping_add(s1);
-        }
-        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = self.state;
-        for i in 0..64 {
-            let t1 = h
-                .wrapping_add(e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25))
-                .wrapping_add((e & f) ^ (!e & g))
-                .wrapping_add(K[i])
-                .wrapping_add(words[i]);
-            let t2 = (a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22))
-                .wrapping_add((a & b) ^ (a & c) ^ (b & c));
-            h = g;
-            g = f;
-            f = e;
-            e = d.wrapping_add(t1);
-            d = c;
-            c = b;
-            b = a;
-            a = t1.wrapping_add(t2);
-        }
-        for (state, word) in self.state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
-            *state = state.wrapping_add(word);
-        }
-    }
-
-    fn finish(mut self) -> String {
-        let bits = self.bytes * 8;
-        self.update(&[0x80]);
-        while self.filled != 56 {
-            self.update(&[0]);
-        }
-        self.update(&bits.to_be_bytes());
-        self.state
-            .iter()
-            .fold(String::with_capacity(64), |mut out, word| {
-                let _ = write!(out, "{word:08x}");
-                out
-            })
+    fn finish(self) -> String {
+        use sha2::Digest as _;
+        format!("{:x}", self.0.finalize())
     }
 }
 
@@ -583,6 +452,48 @@ fn is_reparse(meta: &fs::Metadata) -> bool {
     }
 }
 
+#[cfg(test)]
+pub(crate) mod test_hooks {
+    use std::cell::RefCell;
+    use std::path::Path;
+
+    type Hook = Box<dyn FnMut(&Path)>;
+
+    thread_local! {
+        /// Regular files whose name contains this text are reported as skipped.
+        pub(crate) static FORCE_SKIP: RefCell<Option<String>> = const { RefCell::new(None) };
+        /// Called with the source path before every regular-file copy attempt.
+        pub(crate) static BEFORE_FILE_COPY: RefCell<Option<Hook>> = const { RefCell::new(None) };
+    }
+
+    pub(crate) fn skip_requested(path: &Path) -> bool {
+        FORCE_SKIP.with(|slot| {
+            slot.borrow().as_ref().is_some_and(|needle| {
+                path.file_name()
+                    .is_some_and(|name| name.to_string_lossy().contains(needle.as_str()))
+            })
+        })
+    }
+
+    pub(crate) fn before_file_copy(path: &Path) {
+        BEFORE_FILE_COPY.with(|slot| {
+            if let Some(hook) = slot.borrow_mut().as_mut() {
+                hook(path);
+            }
+        });
+    }
+
+    /// Clears both hooks when a test ends, even by panic.
+    pub(crate) struct Reset;
+
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            FORCE_SKIP.with(|slot| *slot.borrow_mut() = None);
+            BEFORE_FILE_COPY.with(|slot| *slot.borrow_mut() = None);
+        }
+    }
+}
+
 fn copy_recursive(
     from: &Path,
     to: &Path,
@@ -639,16 +550,47 @@ fn copy_recursive(
         }
         Ok(())
     } else {
+        #[cfg(test)]
+        if test_hooks::skip_requested(from) {
+            budget
+                .skipped
+                .push(format!("{}: forced test skip", from.display()));
+            return Ok(());
+        }
         budget.charge(meta.len())?;
         if let Some(p) = to.parent() {
             fs::create_dir_all(p)?;
         }
-        let copied = fs::copy(from, to)?;
-        if copied != meta.len() {
-            return Err(budget_err("source size changed while checkpointing"));
-        }
-        Ok(())
+        copy_file_stable(from, to, meta.len(), budget)
     }
+}
+
+/// Copies attempted for a file whose size changes while it is being copied.
+const MAX_COPY_ATTEMPTS: usize = 4;
+
+/// Copy one regular file. A file that is being appended to is copied again a
+/// small, bounded number of times before the checkpoint is refused.
+fn copy_file_stable(
+    from: &Path,
+    to: &Path,
+    first_len: u64,
+    budget: &mut CopyBudget,
+) -> io::Result<()> {
+    let mut expected = first_len;
+    for attempt in 1..=MAX_COPY_ATTEMPTS {
+        #[cfg(test)]
+        test_hooks::before_file_copy(from);
+        let copied = fs::copy(from, to)?;
+        if copied == expected {
+            return Ok(());
+        }
+        if attempt < MAX_COPY_ATTEMPTS {
+            let now = fs::symlink_metadata(from)?.len();
+            budget.charge_extra(now.saturating_sub(expected))?;
+            expected = now;
+        }
+    }
+    Err(budget_err("source size changed while checkpointing"))
 }
 
 fn copy_placeholder(
@@ -912,7 +854,9 @@ pub(crate) fn copy_move_payload(from: &Path, staged: &Path) -> io::Result<()> {
 }
 
 fn validate_payloads(dir: &Path, cp: &Checkpoint, links: &[LinkRecord]) -> io::Result<()> {
-    let mut problems = cp.skipped.clone();
+    // `cp.skipped` is reported by `restore`, not treated as damage: entries
+    // that were never captured cannot be restored, the rest still can.
+    let mut problems = Vec::new();
     if let Some(expected) = &cp.links_sha256 {
         match fs::read(dir.join(LINKS_FILE)) {
             Ok(bytes) => {
@@ -974,9 +918,83 @@ pub(crate) fn adjacent_temp(path: &Path, label: &str) -> io::Result<PathBuf> {
     let name = path
         .file_name()
         .ok_or_else(|| budget_err("target has no filename"))?;
-    let mut temp = name.to_os_string();
-    temp.push(format!(".praxi-{label}-{}", uuid::Uuid::now_v7().simple()));
-    Ok(parent.join(temp))
+    Ok(parent.join(temp_name("", name, label)))
+}
+
+/// Longest generated temporary file name, in bytes. File systems allow 255
+/// (bytes on Linux, UTF-16 units on Windows); keep a margin.
+const MAX_TEMP_NAME_BYTES: usize = 240;
+
+/// `<prefix><name>.praxi-<label>-<uuid>`. A name that would not fit is cut
+/// (on a character boundary) so a legal 255 byte file name can still be
+/// restored or overwritten. Short names are kept whole so leftovers stay
+/// recognisable.
+pub(crate) fn temp_name(prefix: &str, name: &std::ffi::OsStr, label: &str) -> std::ffi::OsString {
+    let suffix = format!(".praxi-{label}-{}", uuid::Uuid::now_v7().simple());
+    let mut out = std::ffi::OsString::from(prefix);
+    if prefix.len() + name.as_encoded_bytes().len() + suffix.len() <= MAX_TEMP_NAME_BYTES {
+        out.push(name);
+    } else {
+        let room = MAX_TEMP_NAME_BYTES.saturating_sub(prefix.len() + suffix.len());
+        let lossy = name.to_string_lossy();
+        let mut kept = String::new();
+        for c in lossy.chars() {
+            if kept.len() + c.len_utf8() > room {
+                break;
+            }
+            kept.push(c);
+        }
+        out.push(kept);
+    }
+    out.push(suffix);
+    out
+}
+
+/// Markers of generated names that can hold the only copy of a file when an
+/// operation was interrupted between its two renames.
+const LEFTOVER_MARKERS: [&str; 3] = [
+    ".praxi-restore-old-",
+    ".praxi-move-old-",
+    ".praxi-restore-aborted-",
+];
+
+/// Entries scanned and notes produced per directory, so a huge directory
+/// cannot make a checkpoint slow or noisy.
+const MAX_LEFTOVER_SCAN: usize = 5_000;
+const MAX_LEFTOVER_NOTES: usize = 8;
+
+/// Report leftovers of an interrupted restore or overwrite-move directly
+/// inside `dir`. Such an operation renames the current bytes aside, then
+/// renames the replacement into place; a crash between the two leaves the
+/// target missing and its data in a `*.praxi-*-old-*` sibling. There is no
+/// on-disk journal: this detection is the recovery aid.
+pub(crate) fn leftover_notes(dir: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut notes = Vec::new();
+    for entry in entries.take(MAX_LEFTOVER_SCAN).flatten() {
+        let name = entry.file_name();
+        let text = name.to_string_lossy();
+        let Some((marker, at)) = LEFTOVER_MARKERS
+            .iter()
+            .find_map(|marker| text.find(marker).map(|at| (*marker, at)))
+        else {
+            continue;
+        };
+        let original = text[..at].strip_prefix('.').unwrap_or(&text[..at]);
+        let aborted = marker == ".praxi-restore-aborted-";
+        notes.push(format!(
+            "leftover of an interrupted operation: {} holds {} bytes of `{original}`; if `{original}` is missing or wrong, rename it back (rename {} {original}) after checking its content",
+            entry.path().display(),
+            if aborted { "replacement" } else { "previous" },
+            entry.path().display(),
+        ));
+        if notes.len() >= MAX_LEFTOVER_NOTES {
+            break;
+        }
+    }
+    notes
 }
 
 /// Cleanup is always no-follow. Never remove a symlink's referent.
@@ -1503,6 +1521,15 @@ impl CheckpointStore {
         // Keep an undo checkpoint even when payload validation subsequently
         // fails. No user path has been changed at this point.
         let safety = self.create(&cp.run_id, &format!("pre-restore:{id}"), &current)?;
+        let unsaved = self.skipped(&safety)?;
+        if !unsaved.is_empty() {
+            // Restoring would delete current bytes that the safety checkpoint
+            // could not keep. Nothing has been changed yet; refuse.
+            return Err(io::Error::other(format!(
+                "restore of checkpoint {id} aborted before any change: the safety checkpoint {safety} of the current state is incomplete, so a restore could not be undone. Not saved: {}",
+                unsaved.join("; ")
+            )));
+        }
         validate_payloads(&dir, &cp, &links).map_err(|err| io::Error::new(err.kind(), format!(
             "{err}; current state saved as {safety}; restore with checkpoint_restore {safety}"
         )))?;
@@ -1552,6 +1579,11 @@ impl CheckpointStore {
             ));
         }
         tx.finish(&mut warnings);
+        for skipped in &cp.skipped {
+            warnings.push(format!(
+                "not restored (it could not be captured when checkpoint {id} was taken): {skipped}"
+            ));
+        }
         Ok((restored, safety, warnings))
     }
 }
@@ -1839,7 +1871,9 @@ mod tests {
     }
 
     #[test]
-    fn checkpoint_marked_partial_is_not_restored() {
+    fn checkpoint_marked_partial_restores_captured_entries_and_reports_skipped() {
+        // Card 181 item 1: a skipped entry no longer makes the whole
+        // checkpoint unrestorable. Captured payloads still restore.
         let data = tempfile::tempdir().unwrap();
         let work = tempfile::tempdir().unwrap();
         let store = CheckpointStore::new(data.path());
@@ -1850,10 +1884,163 @@ mod tests {
         cp.skipped.push("offline.dat: provider unavailable".into());
         fs::write(dir.join("manifest.json"), serde_json::to_vec(&cp).unwrap()).unwrap();
         fs::write(&file, "current").unwrap();
-        let err = store.restore(&id).unwrap_err();
-        assert!(err.to_string().contains("offline.dat"), "{err}");
-        assert_eq!(fs::read_to_string(&file).unwrap(), "current");
+        let (restored, _safety, warnings) = store.restore_with_warnings(&id).unwrap();
+        assert_eq!(restored.len(), 1);
+        assert_eq!(fs::read_to_string(&file).unwrap(), "original");
+        assert!(
+            warnings.iter().any(|w| w.contains("offline.dat")),
+            "{warnings:?}"
+        );
         assert_eq!(store.list("r").unwrap()[0].skipped.len(), 1);
+    }
+
+    #[test]
+    fn partial_checkpoint_still_refuses_damaged_captured_payloads() {
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let store = CheckpointStore::new(data.path());
+        let file = work.path().join("file");
+        fs::write(&file, "original").unwrap();
+        let id = store.create("r", "delete", &[&file]).unwrap();
+        let (dir, mut cp) = store.find(&id).unwrap();
+        cp.skipped.push("offline.dat: provider unavailable".into());
+        fs::write(dir.join("manifest.json"), serde_json::to_vec(&cp).unwrap()).unwrap();
+        fs::write(dir.join("files").join("0"), "tampered").unwrap();
+        fs::write(&file, "current").unwrap();
+        let err = store.restore(&id).unwrap_err();
+        assert!(err.to_string().contains("mismatch"), "{err}");
+        assert_eq!(fs::read_to_string(&file).unwrap(), "current");
+    }
+
+    #[test]
+    fn restore_aborts_before_any_change_when_safety_checkpoint_is_partial() {
+        // Card 181 item 2: the pre-restore safety checkpoint must be complete
+        // or the restore would delete bytes that were never saved.
+        let _reset = test_hooks::Reset;
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let store = CheckpointStore::new(data.path());
+        let proj = work.path().join("proj");
+        fs::create_dir(&proj).unwrap();
+        fs::write(proj.join("a.txt"), "original").unwrap();
+        let id = store.create("r", "delete", &[&proj]).unwrap();
+        fs::write(proj.join("a.txt"), "current").unwrap();
+        fs::write(proj.join("blocked.dat"), "unsaved").unwrap();
+        test_hooks::FORCE_SKIP.with(|slot| *slot.borrow_mut() = Some("blocked".into()));
+        let err = store.restore(&id).unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("blocked.dat"), "{text}");
+        assert!(text.contains("safety"), "{text}");
+        assert_eq!(fs::read_to_string(proj.join("a.txt")).unwrap(), "current");
+        assert_eq!(
+            fs::read_to_string(proj.join("blocked.dat")).unwrap(),
+            "unsaved"
+        );
+        let leftovers: Vec<_> = fs::read_dir(&proj)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(leftovers.len(), 2, "{leftovers:?}");
+    }
+
+    #[test]
+    fn file_appended_during_copy_is_retried_not_refused() {
+        // Card 181 item 4.
+        let _reset = test_hooks::Reset;
+        let work = tempfile::tempdir().unwrap();
+        let source = work.path().join("log.txt");
+        fs::write(&source, "start\n").unwrap();
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let seen = calls.clone();
+        test_hooks::BEFORE_FILE_COPY.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move |path: &Path| {
+                seen.set(seen.get() + 1);
+                if seen.get() == 1 {
+                    use std::io::Write as _;
+                    let mut file = fs::OpenOptions::new().append(true).open(path).unwrap();
+                    file.write_all(b"appended\n").unwrap();
+                }
+            }));
+        });
+        let payload = work.path().join("payload");
+        let mut budget = CopyBudget {
+            entries: 0,
+            bytes: 0,
+            skipped: Vec::new(),
+        };
+        copy_recursive(
+            &source,
+            &payload,
+            "payload",
+            &mut Vec::new(),
+            0,
+            &mut budget,
+        )
+        .unwrap();
+        assert_eq!(calls.get(), 2);
+        assert_eq!(
+            fs::read_to_string(&payload).unwrap(),
+            fs::read_to_string(&source).unwrap()
+        );
+    }
+
+    #[test]
+    fn file_that_never_settles_fails_after_bounded_retries() {
+        let _reset = test_hooks::Reset;
+        let work = tempfile::tempdir().unwrap();
+        let source = work.path().join("busy.log");
+        fs::write(&source, "x").unwrap();
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let seen = calls.clone();
+        test_hooks::BEFORE_FILE_COPY.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move |path: &Path| {
+                use std::io::Write as _;
+                seen.set(seen.get() + 1);
+                let mut file = fs::OpenOptions::new().append(true).open(path).unwrap();
+                file.write_all(b"more").unwrap();
+            }));
+        });
+        let mut budget = CopyBudget {
+            entries: 0,
+            bytes: 0,
+            skipped: Vec::new(),
+        };
+        let err = copy_recursive(
+            &source,
+            &work.path().join("payload"),
+            "payload",
+            &mut Vec::new(),
+            0,
+            &mut budget,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("size changed"), "{err}");
+        assert!(calls.get() >= 2 && calls.get() <= 8, "{}", calls.get());
+    }
+
+    #[test]
+    fn long_file_names_still_get_usable_temporary_names() {
+        // Card 181 item 8: 40+ characters of suffix must not push a legal
+        // 255 byte name over the filesystem limit.
+        let work = tempfile::tempdir().unwrap();
+        let name = format!("{}.txt", "n".repeat(240));
+        let target = work.path().join(&name);
+        fs::write(&target, "x").unwrap();
+        for label in ["restore", "restore-old", "restore-aborted", "link-copy"] {
+            let temp = adjacent_temp(&target, label).unwrap();
+            assert!(
+                temp.file_name().unwrap().len() <= 255,
+                "{label}: {} bytes",
+                temp.file_name().unwrap().len()
+            );
+            fs::write(&temp, "y").unwrap();
+            fs::remove_file(&temp).unwrap();
+        }
+        let store = CheckpointStore::new(&work.path().join("data"));
+        let id = store.create("r", "write", &[&target]).unwrap();
+        fs::write(&target, "changed").unwrap();
+        store.restore(&id).unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), "x");
     }
 
     #[test]

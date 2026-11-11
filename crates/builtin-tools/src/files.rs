@@ -1168,7 +1168,11 @@ fn canonical_data_dir(data_dir: &Path) -> PathBuf {
         lexical_absolute(&data_dir.to_string_lossy()).unwrap_or_else(|_| data_dir.to_path_buf());
     // Widen the existing ancestor as well as an existing final directory.
     // The data directory can be created only after tools are constructed.
-    widen_path(&lexical).unwrap_or(lexical)
+    let widened = widen_path(&lexical).unwrap_or(lexical);
+    // `widen_path` stops at a reparse point, so a data directory that is
+    // itself a junction keeps its (possibly 8.3) final name. Name that
+    // junction object, not its target.
+    final_identity(&widened).unwrap_or(widened)
 }
 
 /// Identity of a path already observed with `symlink_metadata`.
@@ -1750,10 +1754,7 @@ fn hidden_move_path(path: &Path, label: &str) -> io::Result<PathBuf> {
     let name = path
         .file_name()
         .ok_or_else(|| io::Error::other("move target has no name"))?;
-    let mut hidden = OsString::from(".");
-    hidden.push(name);
-    hidden.push(format!(".praxi-{label}-{}", uuid::Uuid::now_v7().simple()));
-    Ok(parent.join(hidden))
+    Ok(parent.join(crate::checkpoint::temp_name(".", name, label)))
 }
 
 fn cross_device(err: &io::Error) -> bool {
@@ -2304,14 +2305,35 @@ impl Shared {
                 .checkpoints
                 .skipped(&id)
                 .map_err(|err| io_to_tool(&err, "read checkpoint result, nothing changed"))?;
-            let note = if skipped.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    "\nwarning: checkpoint {id} is partial: {}",
+            if !skipped.is_empty() {
+                // The undo checkpoint would be incomplete, so the operation
+                // would destroy bytes that cannot be brought back.
+                return Err(exec_err(format!(
+                    "{op} was not run and nothing changed: {} item(s) cannot be restored if it proceeds because they could not be saved in checkpoint {id}: {}",
+                    skipped.len(),
                     skipped.join("; ")
-                )
-            };
+                )));
+            }
+            let mut note = String::new();
+            let mut seen = Vec::new();
+            for (_, effective) in paths {
+                let mut dirs = Vec::new();
+                if let Some(parent) = effective.parent() {
+                    dirs.push(parent.to_path_buf());
+                }
+                if is_dir_nofollow(effective) {
+                    dirs.push(effective.to_path_buf());
+                }
+                for dir in dirs {
+                    if seen.contains(&dir) {
+                        continue;
+                    }
+                    for line in crate::checkpoint::leftover_notes(&dir) {
+                        let _ = write!(note, "\nwarning: {line}");
+                    }
+                    seen.push(dir);
+                }
+            }
             Ok((id, note))
         })
     }
@@ -2378,20 +2400,23 @@ fn do_move_with(
     let result = (|| {
         let from = validate_path(sh, &i.from, Follow::Entry)?;
         let to = validate_path(sh, &i.to, Follow::Place)?;
-        // Snapshot before ordinary preflight failures too: their diagnostics
-        // identify a real, discoverable checkpoint and never delete a target.
-        let (cp, note) = sh.checkpoint(
-            run,
-            "fs_move",
-            &[(Path::new(&i.from), &from), (Path::new(&i.to), &to)],
-        )?;
-        saved = Some(cp.clone());
+        // Cheap preflight first: a rejected move must not copy the
+        // destination into a checkpoint or leave an empty receipt behind.
+        if fs::symlink_metadata(&from).is_err() {
+            return Err(exec_err(format!("{} does not exist", i.from)));
+        }
         if fs::symlink_metadata(&to).is_ok() && !i.overwrite {
             return Err(exec_err(format!(
                 "{} already exists; set overwrite to replace it",
                 i.to
             )));
         }
+        let (cp, note) = sh.checkpoint(
+            run,
+            "fs_move",
+            &[(Path::new(&i.from), &from), (Path::new(&i.to), &to)],
+        )?;
+        saved = Some(cp.clone());
         let source = norm_parts(&from);
         let target = norm_parts(&to);
         if source == target
@@ -2411,12 +2436,11 @@ fn do_move_with(
         Ok(result)
     })();
     result.map_err(|err| {
-        let cp = saved.unwrap_or_else(|| {
-            // A rejected path must never be read just to make an error's
-            // checkpoint. Record an empty rejected-operation receipt instead.
-            sh.checkpoint(run, "fs_move:rejected", &[])
-                .map_or_else(|_| "unavailable".to_owned(), |(id, _)| id)
-        });
+        // No checkpoint means the move was rejected before anything was read
+        // or changed; the error stands on its own.
+        let Some(cp) = saved else {
+            return err;
+        };
         let recovery = if err.to_string().contains("rollback incomplete") {
             "restore with checkpoint_restore; retained backup paths are listed above"
         } else {
@@ -2966,6 +2990,241 @@ mod tests {
         );
         assert_eq!(fs::read_dir(&to).unwrap().count(), 3);
         assert_eq!(fs::read_dir(to.join("nested")).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn partial_checkpoint_stops_delete_move_and_write_and_names_skipped_paths() {
+        // Card 181 item 1: never run a destructive operation whose undo
+        // checkpoint is known to be incomplete.
+        let _reset = crate::checkpoint::test_hooks::Reset;
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let proj = work.path().join("proj");
+        fs::create_dir(&proj).unwrap();
+        for index in 0..20 {
+            fs::write(proj.join(format!("file-{index}.txt")), "keep").unwrap();
+        }
+        fs::write(proj.join("offline.dat"), "cloud only").unwrap();
+        crate::checkpoint::test_hooks::FORCE_SKIP
+            .with(|slot| *slot.borrow_mut() = Some("offline".into()));
+
+        let err = do_delete(
+            &sh,
+            "partial",
+            &DeleteIn {
+                path: proj.display().to_string(),
+                recursive: true,
+            },
+        )
+        .unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("offline.dat"), "{text}");
+        assert!(text.contains("cannot be restored"), "{text}");
+        assert_eq!(fs::read_dir(&proj).unwrap().count(), 21);
+
+        let dest = work.path().join("dest");
+        let err = do_move(&sh, "partial", &move_input(&proj, &dest)).unwrap_err();
+        assert!(err.to_string().contains("offline.dat"), "{err}");
+        assert!(!dest.exists());
+        assert_eq!(fs::read_dir(&proj).unwrap().count(), 21);
+
+        let err = do_write(
+            &sh,
+            "partial",
+            &WriteIn {
+                path: proj.join("offline.dat").display().to_string(),
+                content: "new".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("offline.dat"), "{err}");
+        assert_eq!(
+            fs::read_to_string(proj.join("offline.dat")).unwrap(),
+            "cloud only"
+        );
+
+        // Without the unreadable entry the same operations proceed.
+        crate::checkpoint::test_hooks::FORCE_SKIP.with(|slot| *slot.borrow_mut() = None);
+        do_delete(
+            &sh,
+            "partial",
+            &DeleteIn {
+                path: proj.display().to_string(),
+                recursive: true,
+            },
+        )
+        .unwrap();
+        assert!(!proj.exists());
+    }
+
+    #[test]
+    fn rejected_moves_create_no_checkpoint_and_keep_the_missing_source_message() {
+        // Card 181 item 5.
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let from = work.path().join("source.txt");
+        let to = work.path().join("destination.txt");
+        fs::write(&from, "source").unwrap();
+        fs::write(&to, "destination").unwrap();
+
+        let err = do_move(
+            &sh,
+            "reject",
+            &MoveIn {
+                from: from.display().to_string(),
+                to: to.display().to_string(),
+                overwrite: false,
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("already exists"), "{err}");
+        assert_eq!(fs::read_to_string(&to).unwrap(), "destination");
+
+        let missing = work.path().join("missing.txt");
+        let err = do_move(
+            &sh,
+            "reject",
+            &move_input(&missing, &work.path().join("elsewhere.txt")),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("does not exist"), "{err}");
+
+        let secret = work.path().join(".env");
+        let err = do_move(&sh, "reject", &move_input(&from, &secret)).unwrap_err();
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+        assert_eq!(fs::read_to_string(&from).unwrap(), "source");
+
+        assert!(
+            sh.checkpoints.list("reject").unwrap().is_empty(),
+            "a rejected move left a checkpoint: {:?}",
+            sh.checkpoints.list("reject").unwrap()
+        );
+        assert!(!tree_has(&data.path().join("checkpoints"), "destination"));
+    }
+
+    #[test]
+    fn interrupted_swap_leftovers_are_reported_by_the_next_destructive_tool() {
+        // Card 181 item 3: a crash between the two renames leaves the data
+        // beside a missing target. The next checkpoint must point at it.
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let restore_old = work
+            .path()
+            .join("report.txt.praxi-restore-old-0190aaaabbbbccccddddeeeeffff0011");
+        let move_old = work
+            .path()
+            .join(".notes.txt.praxi-move-old-0190aaaabbbbccccddddeeeeffff0022");
+        fs::write(&restore_old, "precious report").unwrap();
+        fs::write(&move_old, "precious notes").unwrap();
+        let other = work.path().join("other.txt");
+        fs::write(&other, "x").unwrap();
+        let out = do_write(
+            &sh,
+            "leftover",
+            &WriteIn {
+                path: other.display().to_string(),
+                content: "y".into(),
+            },
+        )
+        .unwrap();
+        assert!(out.contains("praxi-restore-old-0190aaaa"), "{out}");
+        assert!(out.contains("praxi-move-old-0190aaaa"), "{out}");
+        assert!(out.contains("report.txt"), "{out}");
+        assert!(out.contains("notes.txt"), "{out}");
+        assert!(out.contains("rename"), "{out}");
+        assert_eq!(fs::read_to_string(&restore_old).unwrap(), "precious report");
+        assert_eq!(fs::read_to_string(&move_old).unwrap(), "precious notes");
+    }
+
+    #[test]
+    fn cross_volume_move_keeps_a_nested_protected_link_object() {
+        // Card 181 item 7: confirm the source tree is not removed together
+        // with a link the checkpoint walk treats as protected.
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let from = work.path().join("source");
+        let to = work.path().join("destination");
+        fs::create_dir(&from).unwrap();
+        fs::write(from.join("plain.txt"), "plain").unwrap();
+        let referent = work.path().join("referent");
+        fs::create_dir(&referent).unwrap();
+        fs::write(referent.join("inside.txt"), "linked").unwrap();
+        let link = from.join(".env");
+        // A junction needs no privilege on Windows; a symlink does.
+        #[cfg(windows)]
+        let made = std::process::Command::new("cmd")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&link)
+            .arg(&referent)
+            .output()
+            .is_ok_and(|out| out.status.success());
+        #[cfg(not(windows))]
+        let made = link_for_checkpoint_test(&referent, &link, true);
+        if !made {
+            eprintln!("skipping link move regression: could not create a link");
+            return;
+        }
+        let result = do_move_with(
+            &sh,
+            "link-move",
+            &move_input(&from, &to),
+            |source, destination| {
+                if grant_matches(source, &from) && grant_matches(destination, &to) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::CrossesDevices,
+                        "test cross-volume",
+                    ));
+                }
+                fs::rename(source, destination)
+            },
+        );
+        let survives =
+            fs::symlink_metadata(&link).is_ok() || fs::symlink_metadata(to.join(".env")).is_ok();
+        assert!(
+            survives,
+            "protected link object vanished (move result: {result:?})"
+        );
+        assert_eq!(
+            fs::read_to_string(referent.join("inside.txt")).unwrap(),
+            "linked"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn junction_data_dir_keeps_its_long_final_name() {
+        // Card 181 item 9: the data directory itself can be a junction whose
+        // own name has an 8.3 alias.
+        let base = tempfile::tempdir().unwrap();
+        let real = base.path().join("real-data-target-directory");
+        fs::create_dir(&real).unwrap();
+        let junction = base.path().join("praxi-data-junction-directory");
+        let made = std::process::Command::new("cmd")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&real)
+            .output()
+            .is_ok_and(|out| out.status.success());
+        if !made {
+            eprintln!("skipping junction regression: mklink /J failed");
+            return;
+        }
+        let long = normalize_final(&win_fs::final_path_nofollow(&junction).unwrap()).unwrap();
+        let short = win_fs::short_path(&junction).unwrap();
+        if !short.to_string_lossy().contains('~') {
+            eprintln!("skipping 8.3 regression: volume does not generate short names");
+            return;
+        }
+        assert!(
+            same_path(&canonical_data_dir(&short), &long),
+            "{} vs {}",
+            canonical_data_dir(&short).display(),
+            long.display()
+        );
     }
 
     #[test]
@@ -4088,7 +4347,7 @@ mod tests {
 
     #[cfg(windows)]
     #[tokio::test]
-    async fn cloud_placeholder_does_not_abort_directory_delete_or_move() {
+    async fn unsavable_cloud_placeholder_stops_directory_delete_and_move_before_any_change() {
         let (_d, w, t) = setup();
         let c = ctx();
         let dir = w.path().join("proj");
@@ -4109,14 +4368,16 @@ mod tests {
             matches!(err, ToolError::PermissionDenied(_)),
             "read of a cloud placeholder was allowed: {err}"
         );
-        get(&t, "fs_delete")
+        // Card 181 item 1: a placeholder that cannot be saved in the undo
+        // checkpoint stops the delete instead of leaving 1 file restorable
+        // only by hand. Nothing is changed.
+        let err = get(&t, "fs_delete")
             .call(&c, json!({"path": &dir, "recursive": true}))
             .await
-            .unwrap();
-        assert!(
-            !dir.join("keep.txt").exists(),
-            "directory delete aborted on the cloud placeholder"
-        );
+            .unwrap_err();
+        assert!(err.to_string().contains("online-only.txt"), "{err}");
+        assert!(err.to_string().contains("cannot be restored"), "{err}");
+        assert_eq!(fs::read_to_string(dir.join("keep.txt")).unwrap(), "keep");
 
         let src = w.path().join("proj-move");
         fs::create_dir_all(&src).unwrap();
@@ -4125,11 +4386,13 @@ mod tests {
         fs::write(&moved_placeholder, b"").unwrap();
         win_fs::mark_cloud_placeholder(&moved_placeholder).expect("cloud reparse tag");
         let dest = w.path().join("proj-dest");
-        get(&t, "fs_move")
+        let err = get(&t, "fs_move")
             .call(&c, json!({"from": &src, "to": &dest}))
             .await
-            .unwrap();
-        assert_eq!(fs::read_to_string(dest.join("keep.txt")).unwrap(), "keep");
+            .unwrap_err();
+        assert!(err.to_string().contains("online-only.txt"), "{err}");
+        assert!(!dest.exists());
+        assert_eq!(fs::read_to_string(src.join("keep.txt")).unwrap(), "keep");
     }
 
     #[cfg(unix)]
