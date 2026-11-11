@@ -468,6 +468,18 @@ fn set_transport_kind(cfg: &mut McpServerConfig, kind: &str) -> Result<(), McpCo
     }
 }
 
+/// Whether a PUT body touches nothing but the bot list (no restart needed).
+fn bots_only(patch: &serde_json::Value) -> bool {
+    patch.as_object().is_some_and(|o| {
+        o.keys().all(|k| {
+            matches!(
+                k.as_str(),
+                "name" | "id" | "bots" | "bots_add" | "bots_remove"
+            )
+        })
+    })
+}
+
 /// Merge a PUT body onto `prev`. Keys that are absent keep the stored value.
 /// `bots: null` clears the allowlist (every bot).
 fn merge_update(
@@ -543,6 +555,24 @@ fn merge_update(
         } else {
             Some(json_strings(v, "bots")?)
         };
+    }
+    // Atomic add / remove of single ids on the stored list (the caller holds
+    // the host lock).  An open server (`None`) stays open under both.
+    if let Some(v) = obj.get("bots_add").filter(|v| !v.is_null()) {
+        let add = json_strings(v, "bots_add")?;
+        if let Some(list) = cfg.bots.as_mut() {
+            for id in add {
+                if !list.contains(&id) {
+                    list.push(id);
+                }
+            }
+        }
+    }
+    if let Some(v) = obj.get("bots_remove").filter(|v| !v.is_null()) {
+        let remove = json_strings(v, "bots_remove")?;
+        if let Some(list) = cfg.bots.as_mut() {
+            list.retain(|id| !remove.contains(id));
+        }
     }
     cfg.validate().map_err(map_err)?;
     Ok(cfg)
@@ -689,6 +719,15 @@ impl McpControl for McpHost {
             self.persist(|m| {
                 m.insert(name.to_owned(), cfg.clone());
             })?;
+            if bots_only(&input) {
+                // Only who may use the server changed: keep the connection
+                // (in-flight calls finish) and switch the live list now.
+                match self.manager.set_server_bots(name, cfg.bots.clone()) {
+                    Ok(()) | Err(McpError::UnknownServer(_)) => {}
+                    Err(error) => return Err(map_err(error)),
+                }
+                return Ok(self.dto(&cfg));
+            }
             let old = match self.manager.detach_server(name) {
                 Ok(handle) => Some(handle),
                 Err(McpError::UnknownServer(_)) => None,
@@ -728,6 +767,39 @@ impl McpControl for McpHost {
             self.connect_registered(name, generation, handle, false)
         );
         Ok(self.dto(&self.config_of(&cfg.id).unwrap_or(cfg)))
+    }
+
+    async fn forget_bot(&self, bot_id: &str) -> Result<usize, McpControlError> {
+        // One critical section for every server: concurrent updates cannot be
+        // lost, and the removal is a remove-id on the stored lists.
+        let _op = self.ops.lock().await;
+        self.check_writable()?;
+        let affected: Vec<String> = self
+            .configs
+            .lock()
+            .values()
+            .filter(|c| {
+                c.bots
+                    .as_ref()
+                    .is_some_and(|l| l.iter().any(|b| b == bot_id))
+            })
+            .map(|c| c.id.clone())
+            .collect();
+        if affected.is_empty() {
+            return Ok(0);
+        }
+        self.persist(|m| {
+            for name in &affected {
+                if let Some(list) = m.get_mut(name).and_then(|c| c.bots.as_mut()) {
+                    list.retain(|b| b != bot_id);
+                }
+            }
+        })?;
+        for name in &affected {
+            let live = self.config_of(name).ok().and_then(|c| c.bots);
+            let _ = self.manager.set_server_bots(name, live);
+        }
+        Ok(affected.len())
     }
 
     async fn remove(&self, name: &str) -> Result<(), McpControlError> {
@@ -1117,6 +1189,91 @@ mod tests {
         assert_eq!(saved_of("only-gone"), Some(Vec::new()));
         assert_eq!(saved_of("open"), None);
         host.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn bots_only_update_does_not_restart_the_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = open(dir.path());
+        let mut input = stdio("files", true);
+        input.bots = Some(vec!["a".into(), "b".into()]);
+        host.add(input).await.unwrap();
+        let before = host.manager.server_handle("files").unwrap();
+        let mut rx = host.subscribe();
+
+        let dto = host
+            .update("files", json!({"bots_remove": ["b"]}))
+            .await
+            .unwrap();
+        assert_eq!(dto.bots, Some(vec!["a".to_owned()]));
+        let dto = host.update("files", json!({"bots": []})).await.unwrap();
+        assert_eq!(dto.bots, Some(Vec::new()));
+        // Same registration (not detached / re-registered) and no status churn.
+        let after = host.manager.server_handle("files").unwrap();
+        assert!(before.same_server(&after));
+        assert_eq!(events_of(&mut rx).await, Vec::<McpStatus>::new());
+
+        // Any other field still restarts it.
+        host.update("files", json!({"enabled": true, "bots": ["a"]}))
+            .await
+            .unwrap();
+        let restarted = host.manager.server_handle("files").unwrap();
+        assert!(!before.same_server(&restarted));
+        host.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn add_remove_ids_are_atomic_and_keep_open_servers_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = open(dir.path());
+        let mut listed = stdio("listed", false);
+        listed.bots = Some(vec!["a".into()]);
+        host.add(listed).await.unwrap();
+        host.add(stdio("open", false)).await.unwrap();
+        let dto = host
+            .update(
+                "listed",
+                json!({"bots_add": ["b", "a"], "bots_remove": ["x"]}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(dto.bots, Some(vec!["a".to_owned(), "b".to_owned()]));
+        // An open server stays open under add and remove.
+        let dto = host
+            .update("open", json!({"bots_add": ["a"], "bots_remove": ["b"]}))
+            .await
+            .unwrap();
+        assert_eq!(dto.bots, None);
+        host.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn concurrent_forget_and_update_lose_nothing() {
+        for round in 0..20 {
+            let dir = tempfile::tempdir().unwrap();
+            let host = open(dir.path());
+            let mut input = stdio("s", false);
+            input.bots = Some(vec!["gone".into(), "stay".into()]);
+            host.add(input).await.unwrap();
+            let (forgot, updated) = tokio::join!(
+                host.forget_bot("gone"),
+                host.update("s", json!({"bots_add": ["new"]}))
+            );
+            forgot.unwrap();
+            updated.unwrap();
+            let bots = host.list().remove(0).bots.unwrap();
+            assert!(bots.contains(&"new".to_owned()), "round {round}: {bots:?}");
+            assert!(bots.contains(&"stay".to_owned()), "round {round}: {bots:?}");
+            assert!(
+                !bots.contains(&"gone".to_owned()),
+                "round {round}: {bots:?}"
+            );
+            let saved = TomlFileStore::new(dir.path().join(MCP_FILE))
+                .load()
+                .unwrap();
+            assert_eq!(saved[0].bots.as_ref().unwrap(), &bots);
+            host.shutdown().await;
+        }
     }
 
     #[tokio::test]

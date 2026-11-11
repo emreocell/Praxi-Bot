@@ -3784,6 +3784,26 @@
             },
             "description": "Bots that may use the server.  Omit to keep the list; `null` = all bots."
           },
+          "bots_add": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Bot ids to add to `bots`, applied atomically on the stored list (no\nread-modify-write by the client).  No effect while the server is open to\nevery bot (`bots: null`).  Applied after `bots`."
+          },
+          "bots_remove": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Bot ids to remove from `bots`, applied atomically; an emptied list stays\n`[]` (no bot), it never becomes `null`.  Applied after `bots_add`."
+          },
           "category": {
             "type": [
               "string",

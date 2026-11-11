@@ -678,13 +678,14 @@ impl Shared {
     /// Profile allow / exclude lists, platform and the tool's own per-bot
     /// visibility (an MCP server's `bots` list).  Call-time enforcement stays
     /// in the tool itself; this keeps hidden tools out of what the model sees.
-    fn spec_visible(&self, profile: &BotProfile, bot: BotId, spec: &ToolSpec) -> bool {
+    pub(crate) fn spec_visible(&self, profile: &BotProfile, bot: BotId, spec: &ToolSpec) -> bool {
         profile.tool_visible(&spec.name)
             && platform_ok(&spec.platforms)
+            // Fail closed: a name the registry no longer knows is not visible.
             && self
                 .tools
                 .get(&spec.name)
-                .is_none_or(|t| t.visible_to(Some(&bot.to_string())))
+                .is_some_and(|t| t.visible_to(Some(&bot.to_string())))
     }
 
     /// The loop's event journal (created over `storage` on first use).
@@ -858,12 +859,12 @@ impl Shared {
     }
 
     /// Tool specs the bot may see, sorted by name (stable prompts cache better).
-    pub fn visible_specs(&self, profile: &BotProfile) -> Vec<ToolSpec> {
+    pub fn visible_specs(&self, profile: &BotProfile, bot: BotId) -> Vec<ToolSpec> {
         let mut specs: Vec<ToolSpec> = self
             .tools
             .list()
             .into_iter()
-            .filter(|s| profile.tool_visible(&s.name) && platform_ok(&s.platforms))
+            .filter(|s| self.spec_visible(profile, bot, s))
             .collect();
         specs.sort_by(|a, b| a.name.cmp(&b.name));
         specs

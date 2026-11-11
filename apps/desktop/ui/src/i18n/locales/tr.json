@@ -349,7 +349,8 @@
     "apps": {
       "title": "Uygulamalar",
       "hint": "Bu botun kullanabileceği bağlı uygulamalar. Tüm botlara açık bir uygulamanın seçimini kaldırırsan diğer botlarınla sınırlanır. Uygulamaları Uygulamalar ekranından yönetebilirsin.",
-      "none": "Henüz bağlı uygulama yok."
+      "none": "Henüz bağlı uygulama yok.",
+      "partialFail": "Bot kaydedildi ama şu uygulamalar için erişim güncellenemedi: {{names}}. Tekrar Kaydet’i dene."
     },
     "createTitle": "Yeni bot",
     "editTitle": "Botu düzenle",
@@ -747,6 +748,7 @@
       "some": "Yalnızca seçilen botlar",
       "noBotsYet": "Henüz bot yok. Önce bir bot oluştur.",
       "nobody": "En az bir bot seçmedikçe hiçbir bot bu uygulamayı kullanamaz.",
+      "deletedBot": "silinmiş bot",
       "edit": "Botlar",
       "save": "Kaydet",
       "savedToast": "{{name}}: bot erişimi kaydedildi"

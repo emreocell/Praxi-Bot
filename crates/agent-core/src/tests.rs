@@ -2468,7 +2468,7 @@ async fn k2_tool_candidates_carry_schema_parameters() {
         profile(""),
         cfg(Policy::full()),
     );
-    let cands = lp.sh.router_candidates(&profile(""));
+    let cands = lp.sh.router_candidates(&profile(""), env.bot);
     let c = cands.iter().find(|c| c.name == "n.send").unwrap();
     let json = serde_json::to_value(c).unwrap();
     let params = json["params"].as_array().unwrap();
@@ -3053,6 +3053,21 @@ async fn bot_scoped_tools_are_hidden_from_other_bots_in_every_model_surface() {
     let used = &tool_messages(&fake.request(3))[2];
     assert!(used.contains("unknown tool"), "{used}");
     assert_eq!(scoped.count.load(Ordering::SeqCst), 0);
+
+    // The router classifier never sees names / descriptions of tools this bot
+    // may not use; a spec the registry does not know is not visible at all.
+    let cands: Vec<String> = lp
+        .sh
+        .router_candidates(&profile(""), env.bot)
+        .into_iter()
+        .map(|c| c.name)
+        .collect();
+    assert!(cands.contains(&"mcp:mine/ok".to_owned()), "{cands:?}");
+    assert!(cands.contains(&"mcp:open/ok".to_owned()), "{cands:?}");
+    assert!(!cands.contains(&"mcp:srv/secret".to_owned()), "{cands:?}");
+    assert!(!cands.contains(&"mcp:nobody/ok".to_owned()), "{cands:?}");
+    let ghost = tool("mcp:ghost/x", Effect::Read, "g").spec;
+    assert!(!lp.sh.spec_visible(&profile(""), env.bot, &ghost));
 }
 
 #[tokio::test]

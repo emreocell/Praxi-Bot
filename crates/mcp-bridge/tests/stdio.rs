@@ -668,3 +668,60 @@ async fn encoded_secret_forms_in_child_stderr_are_masked_and_the_live_redactor_r
     assert!(stderr.matches("[REDACTED]").count() >= 5, "{stderr}");
     mgr.shutdown().await;
 }
+
+fn as_bot(id: &str) -> ToolContext {
+    ToolContext {
+        bot_id: Some(id.into()),
+        ..ToolContext::default()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bots_change_applies_live_without_dropping_in_flight_calls() {
+    let reg = ToolRegistry::new();
+    let mgr = McpManager::with_policy(reg.clone(), fast_policy(3));
+    let mut cfg = config("t");
+    cfg.bots = Some(vec!["a".into(), "b".into()]);
+    mgr.add_server(cfg).await.unwrap();
+    let echo = reg.get("mcp:t/echo").unwrap();
+
+    // A call from bot `b` is running when `b` is removed from the list.
+    let slow = {
+        let echo = echo.clone();
+        tokio::spawn(async move {
+            echo.call(&as_bot("b"), json!({"text": "late", "sleep_ms": 800}))
+                .await
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    mgr.set_server_bots("t", Some(vec!["a".into()])).unwrap();
+
+    // The in-flight call survives (same connection, no restart) ...
+    let out = slow.await.unwrap().expect("in-flight call must finish");
+    assert_eq!(text_of(&out.content), "late");
+    // ... the removed bot is denied on its next call and no longer sees the
+    // tool, while the remaining bot is unaffected.
+    let denied = echo
+        .call(&as_bot("b"), json!({"text": "x"}))
+        .await
+        .unwrap_err();
+    assert!(matches!(denied, ToolError::PermissionDenied(_)), "{denied}");
+    assert!(!echo.visible_to(Some("b")));
+    assert!(echo.visible_to(Some("a")));
+    let ok = echo
+        .call(&as_bot("a"), json!({"text": "hi"}))
+        .await
+        .unwrap();
+    assert_eq!(text_of(&ok.content), "hi");
+
+    // Empty list = nobody; null = everybody.
+    mgr.set_server_bots("t", Some(vec![])).unwrap();
+    assert!(echo.call(&as_bot("a"), json!({"text": "x"})).await.is_err());
+    mgr.set_server_bots("t", None).unwrap();
+    assert!(
+        echo.call(&as_bot("zzz"), json!({"text": "x"}))
+            .await
+            .is_ok()
+    );
+    assert!(mgr.set_server_bots("missing", None).is_err());
+}

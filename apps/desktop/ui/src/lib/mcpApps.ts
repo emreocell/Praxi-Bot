@@ -4,6 +4,7 @@ import type {
   McpCatalogEntry,
   McpServer,
   McpServerConfig,
+  McpServerPatch,
   McpStatus
 } from "../api/types.ts";
 import { matchesQuery } from "./searchText.ts";
@@ -306,23 +307,98 @@ export function botHasAccess(
 }
 
 /**
- * The server's `bots` after ticking / unticking `botId` on the bot's form.
- * Unticking on an open server lists every other bot explicitly; ticking on an
- * open server leaves it open (`null`).
+ * The patch that applies one tick of the bot form's Apps checklist, or `null`
+ * when nothing needs to change.  On a list it is an atomic add / remove of this
+ * one id (the daemon applies it under its lock).  Unticking on an open server
+ * narrows it to every other bot, an explicit list.
  */
-export function botListAfterToggle(
+export function appsPatch(
   server: Pick<McpServer, "bots">,
   botId: string,
   on: boolean,
   allBotIds: string[]
-): string[] | null {
+): McpServerPatch | null {
   if (server.bots === null || server.bots === undefined) {
-    return on ? null : allBotIds.filter((id) => id !== botId);
+    return on ? null : { bots: allBotIds.filter((id) => id !== botId) };
   }
-  if (on) {
-    return server.bots.includes(botId) ? [...server.bots] : [...server.bots, botId];
+  return on ? { bots_add: [botId] } : { bots_remove: [botId] };
+}
+
+/**
+ * The patch that turns the scope the editor opened with into the one the user
+ * chose.  List to list is an add / remove diff (applied atomically by the
+ * daemon, so another edit made meanwhile is not overwritten); switching from
+ * or to "all bots" has to be absolute.
+ */
+export function scopePatch(from: BotScope, to: BotScope): McpServerPatch {
+  if (to.mode === "all") {
+    return { bots: null };
   }
-  return server.bots.filter((id) => id !== botId);
+  if (from.mode === "all") {
+    return { bots: [...to.ids] };
+  }
+  return {
+    bots_add: to.ids.filter((id) => !from.ids.includes(id)),
+    bots_remove: from.ids.filter((id) => !to.ids.includes(id))
+  };
+}
+
+/** Servers whose tick differs from the snapshot taken when the form opened. */
+export function changedApps(
+  initial: Record<string, boolean>,
+  allowed: Record<string, boolean>
+): string[] {
+  return Object.keys(allowed).filter((name) => allowed[name] !== initial[name]);
+}
+
+/**
+ * Apply only the ticks the user changed in this form session, each against the
+ * server's current state.  Returns the names of the servers that failed.
+ */
+export async function applyAppsSelection(
+  api: Pick<McpApi, "listMcpServers" | "updateMcpServer">,
+  botId: string,
+  initial: Record<string, boolean>,
+  allowed: Record<string, boolean>,
+  allBotIds: string[]
+): Promise<string[]> {
+  const changed = changedApps(initial, allowed);
+  if (changed.length === 0) {
+    return [];
+  }
+  const fresh = await api.listMcpServers();
+  const failed: string[] = [];
+  for (const name of changed) {
+    const server = fresh.find((s) => s.name === name);
+    if (!server) {
+      continue;
+    }
+    const patch = appsPatch(server, botId, allowed[name], allBotIds);
+    if (patch === null) {
+      continue;
+    }
+    try {
+      await api.updateMcpServer(name, patch);
+    } catch {
+      failed.push(name);
+    }
+  }
+  return failed;
+}
+
+/** Like `botAccess`, but ids of bots that no longer exist read `deleted`. */
+export function botAccessLabels(
+  server: Pick<McpServer, "bots">,
+  bots: Pick<Bot, "id" | "name">[],
+  deleted: string
+): { all: true } | { all: false; names: string[] } {
+  if (server.bots === null || server.bots === undefined) {
+    return { all: true };
+  }
+  return {
+    all: false,
+    names: server.bots.map((id) => bots.find((b) => b.id === id)?.name ?? deleted)
+  };
 }
 
 /** Which bots may use a server: everyone, or the named bots. */

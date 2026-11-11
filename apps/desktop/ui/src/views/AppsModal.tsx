@@ -1,10 +1,10 @@
-import { Blocks, Cable, Check, FolderOpen, Plus, Search, Server, Users, X } from "lucide-react";
-import { siGithub, siGitlab, siNotion, siGoogledrive, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siLinear, siTodoist, siObsidian, siHomeassistant } from "simple-icons";
+import { Blocks, Cable, Check, Plus, Search, Server, Users, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
-import type { McpCatalogEntry, McpServer } from "../api/types";
+import type { McpCatalogEntry, McpServer, McpServerPatch } from "../api/types";
 import formStyles from "../components/Form.module.css";
+import { AppTile } from "../components/AppTile";
 import { BotAccessPicker } from "../components/BotAccessPicker";
 import { Modal } from "../components/Modal";
 import { Segmented } from "../components/SettingsUi";
@@ -13,10 +13,10 @@ import { openExternal } from "../lib/externalLink";
 import {
   ALL_CATEGORIES,
   type BotScope,
-  botAccess,
+  botAccessLabels,
   botScope,
   botSelection,
-  botsFromScope,
+  scopePatch,
   catalogCategories,
   connectCatalogEntry,
   customServerConfig,
@@ -29,13 +29,6 @@ import {
 import { useDaemon } from "../state/DaemonContext";
 import { useMcp } from "../state/useMcp";
 import styles from "./AppsModal.module.css";
-
-const BRAND_ICONS = [siGithub, siGitlab, siNotion, siGoogledrive, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siLinear, siTodoist, siObsidian, siHomeassistant];
-function Tile({ name }: { name: string }) {
-  const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, "");
-  const brand = BRAND_ICONS.find((icon) => normalized === icon.slug || normalized === icon.title.toLowerCase().replace(/[^a-z0-9]/g, ""));
-  return <span className={styles.tile} aria-hidden="true">{brand ? <svg viewBox="0 0 24 24"><path d={brand.path} fill="currentColor" /></svg> : normalized === "filesystem" ? <FolderOpen /> : <Blocks />}</span>;
-}
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -52,14 +45,14 @@ function ConnectedRow({
   busy: boolean;
   onReconnect: () => void;
   onDisconnect: () => void;
-  onSaveBots: (bots: string[] | null) => void;
+  onSaveBots: (patch: McpServerPatch) => void;
 }) {
   const { t } = useTranslation();
   const { bots } = useDaemon();
   const [confirm, setConfirm] = useState(false);
   const [editing, setEditing] = useState(false);
   const [scope, setScope] = useState<BotScope>(() => botScope(server));
-  const access = botAccess(server, bots);
+  const access = botAccessLabels(server, bots, t("apps.access.deletedBot"));
   const tone = statusTone(server.status);
   const needsReconnect =
     server.status === "error" ||
@@ -67,7 +60,7 @@ function ConnectedRow({
     server.status === "quarantined";
   return (
     <li className={styles.serverRow} data-testid={`mcp-server-${server.name}`}>
-      <Tile name={server.name} />
+      <AppTile name={server.name} />
       <div className={styles.serverMain}>
         <div className={styles.serverTitle}>
           <span className={styles.serverName}>{server.name}</span>
@@ -151,7 +144,7 @@ function ConnectedRow({
               data-testid={`mcp-access-save-${server.name}`}
               onClick={() => {
                 setEditing(false);
-                onSaveBots(botsFromScope(scope));
+                onSaveBots(scopePatch(botScope(server), scope));
               }}
             >
               {t("apps.access.save")}
@@ -197,7 +190,7 @@ function CatalogCard({
   return (
     <li className={styles.card} data-testid={`mcp-catalog-${entry.id}`}>
       <div className={styles.cardHead}>
-        <Tile name={entry.name} />
+        <AppTile name={entry.name} />
         <div className={styles.cardTitle}>
           <span className={styles.serverName}>{entry.name}</span>
           <span className={styles.category}>
@@ -575,9 +568,9 @@ export function AppsModal({
                             await reload();
                           })
                         }
-                        onSaveBots={(list) =>
+                        onSaveBots={(patch) =>
                           void run(s.name, async () => {
-                            await client?.updateMcpServer(s.name, { bots: list });
+                            await client?.updateMcpServer(s.name, patch);
                             toast.show(t("apps.access.savedToast", { name: s.name }), "success");
                             await reload();
                           })

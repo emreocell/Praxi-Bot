@@ -82,11 +82,11 @@ impl Tool for McpToolAdapter {
     }
 
     fn visible_to(&self, bot_id: Option<&str>) -> bool {
-        bot_listed(self.server.config(), bot_id)
+        bot_listed(self.server.bots().as_deref(), bot_id)
     }
 
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
-        ensure_bot_allowed(self.server.config(), ctx)?;
+        ensure_bot_allowed(self.server.bots().as_deref(), self.server.id(), ctx)?;
         let arguments = match input {
             Value::Object(map) => Some(map),
             Value::Null => None,
@@ -108,28 +108,27 @@ impl Tool for McpToolAdapter {
 /// `bots = None` allows every caller. A list allows only those bot ids;
 /// a call with no bot id is refused (it is not on the list).
 pub(crate) fn ensure_bot_allowed(
-    config: &McpServerConfig,
+    bots: Option<&[String]>,
+    server_id: &str,
     ctx: &ToolContext,
 ) -> Result<(), ToolError> {
-    if bot_listed(config, ctx.bot_id.as_deref()) {
+    if bot_listed(bots, ctx.bot_id.as_deref()) {
         return Ok(());
     }
     match ctx.bot_id.as_deref() {
         Some(id) => Err(ToolError::PermissionDenied(format!(
-            "bot `{id}` is not allowed to use MCP server `{}`",
-            config.id
+            "bot `{id}` is not allowed to use MCP server `{server_id}`"
         ))),
         None => Err(ToolError::PermissionDenied(format!(
-            "MCP server `{}` is limited to specific bots and this call has no bot id",
-            config.id
+            "MCP server `{server_id}` is limited to specific bots and this call has no bot id"
         ))),
     }
 }
 
 /// Whether `bot_id` may use the server: `bots = None` allows everyone, a list
 /// only its members (an empty list therefore allows no bot at all).
-pub(crate) fn bot_listed(config: &McpServerConfig, bot_id: Option<&str>) -> bool {
-    match &config.bots {
+pub(crate) fn bot_listed(bots: Option<&[String]>, bot_id: Option<&str>) -> bool {
+    match bots {
         None => true,
         Some(allowed) => bot_id.is_some_and(|id| allowed.iter().any(|b| b == id)),
     }
@@ -209,16 +208,16 @@ mod tests {
             bot_id: Some("bot-b".into()),
             ..ToolContext::default()
         };
-        assert!(ensure_bot_allowed(&cfg, &anon).is_ok());
-        assert!(ensure_bot_allowed(&cfg, &other).is_ok());
+        assert!(ensure_bot_allowed(cfg.bots.as_deref(), "srv", &anon).is_ok());
+        assert!(ensure_bot_allowed(cfg.bots.as_deref(), "srv", &other).is_ok());
         cfg.bots = Some(vec!["bot-a".into()]);
-        assert!(ensure_bot_allowed(&cfg, &listed).is_ok());
-        let denied = ensure_bot_allowed(&cfg, &other).unwrap_err();
+        assert!(ensure_bot_allowed(cfg.bots.as_deref(), "srv", &listed).is_ok());
+        let denied = ensure_bot_allowed(cfg.bots.as_deref(), "srv", &other).unwrap_err();
         assert!(
             matches!(denied, ToolError::PermissionDenied(ref m) if m.contains("bot-b")),
             "{denied}"
         );
-        let anon_denied = ensure_bot_allowed(&cfg, &anon).unwrap_err();
+        let anon_denied = ensure_bot_allowed(cfg.bots.as_deref(), "srv", &anon).unwrap_err();
         assert!(
             matches!(anon_denied, ToolError::PermissionDenied(_)),
             "{anon_denied}"
@@ -229,23 +228,23 @@ mod tests {
     fn bot_listing_distinguishes_null_empty_and_listed() {
         let mut cfg = McpServerConfig::stdio("srv", "x", [""; 0]);
         // null = every bot (and callers without a bot id).
-        assert!(bot_listed(&cfg, Some("a")));
-        assert!(bot_listed(&cfg, None));
+        assert!(bot_listed(cfg.bots.as_deref(), Some("a")));
+        assert!(bot_listed(cfg.bots.as_deref(), None));
         // An empty list is "no bot", never "all bots".
         cfg.bots = Some(Vec::new());
-        assert!(!bot_listed(&cfg, Some("a")));
-        assert!(!bot_listed(&cfg, None));
+        assert!(!bot_listed(cfg.bots.as_deref(), Some("a")));
+        assert!(!bot_listed(cfg.bots.as_deref(), None));
         let anon = ToolContext::default();
-        assert!(ensure_bot_allowed(&cfg, &anon).is_err());
+        assert!(ensure_bot_allowed(cfg.bots.as_deref(), "srv", &anon).is_err());
         let a = ToolContext {
             bot_id: Some("a".into()),
             ..ToolContext::default()
         };
-        assert!(ensure_bot_allowed(&cfg, &a).is_err());
+        assert!(ensure_bot_allowed(cfg.bots.as_deref(), "srv", &a).is_err());
         cfg.bots = Some(vec!["a".into()]);
-        assert!(bot_listed(&cfg, Some("a")));
-        assert!(!bot_listed(&cfg, Some("b")));
-        assert!(!bot_listed(&cfg, None));
+        assert!(bot_listed(cfg.bots.as_deref(), Some("a")));
+        assert!(!bot_listed(cfg.bots.as_deref(), Some("b")));
+        assert!(!bot_listed(cfg.bots.as_deref(), None));
     }
 
     #[test]

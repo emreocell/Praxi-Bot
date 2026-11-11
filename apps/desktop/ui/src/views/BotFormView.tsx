@@ -8,7 +8,6 @@ import {
   type PermissionLevel
 } from "../api/types";
 import formStyles from "../components/Form.module.css";
-import { useToast } from "../components/Toast";
 import { avatarFromFile, AvatarFileError } from "../lib/avatar";
 import {
   BOT_COLORS,
@@ -19,7 +18,8 @@ import {
   PRESET_CHOICES,
   type PresetChoice
 } from "../lib/botProfile";
-import { botHasAccess, botListAfterToggle } from "../lib/mcpApps";
+import { AppTile } from "../components/AppTile";
+import { applyAppsSelection, botHasAccess, changedApps } from "../lib/mcpApps";
 import { FAKE_PROVIDER_ID } from "../lib/providers";
 import { type ProvidersView, providersView } from "../lib/providerView";
 import { useDaemon } from "../state/DaemonContext";
@@ -86,13 +86,17 @@ export function BotFormView({
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
-  const toast = useToast();
   const { client, bots, conn, refreshBots } = useDaemon();
   const existing = bots.find((b) => b.id === botId);
   // Apps: one source of truth, the server's `bots` list (bot UUIDs).  `null`
   // until loaded; `allowed` is this bot's ticked servers by name.
   const [servers, setServers] = useState<McpServer[] | null>(null);
   const [allowed, setAllowed] = useState<Record<string, boolean>>({});
+  // Snapshot of the ticks when the form loaded: only ticks the user changed
+  // since are written back, never a difference caused by someone else.
+  const [initialApps, setInitialApps] = useState<Record<string, boolean>>({});
+  // Id of a bot this form created (a retry after a partial failure updates it).
+  const [createdId, setCreatedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<BotDraft>(() => draftFromBot(existing));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -129,12 +133,12 @@ export function BotFormView({
       .listMcpServers()
       .then((list) => {
         if (!cancelled) {
-          setServers(list);
-          setAllowed(
-            Object.fromEntries(
-              list.map((s) => [s.name, botHasAccess(s, existing?.id)])
-            )
+          const snapshot = Object.fromEntries(
+            list.map((s) => [s.name, botHasAccess(s, existing?.id)])
           );
+          setServers(list);
+          setAllowed(snapshot);
+          setInitialApps(snapshot);
         }
       })
       .catch(() => {
@@ -179,31 +183,6 @@ export function BotFormView({
   const nameMissing = draft.name.trim() === "";
   const executorMissing = draft.executor.model.trim() === "";
 
-  /** Write this bot's Apps ticks back to the servers' `bots` lists. */
-  const saveApps = async (savedId: string) => {
-    if (!client || !servers) {
-      return;
-    }
-    try {
-      // Work from the servers as they are now, not as they were when the form opened.
-      const fresh = await client.listMcpServers();
-      const allIds = bots.map((b) => b.id);
-      for (const s of fresh) {
-        const want = allowed[s.name];
-        if (want === undefined || want === botHasAccess(s, savedId)) {
-          continue;
-        }
-        const list = botListAfterToggle(s, savedId, want, allIds);
-        if (list === null && s.bots === null) {
-          continue;
-        }
-        await client.updateMcpServer(s.name, { bots: list });
-      }
-    } catch (e) {
-      toast.show(e instanceof Error ? e.message : String(e), "danger");
-    }
-  };
-
   const save = async () => {
     if (!client || nameMissing || executorMissing) {
       return;
@@ -211,13 +190,37 @@ export function BotFormView({
     setSaving(true);
     setError(null);
     try {
-      const config = configFromDraft(draft, existing);
+      const target = existing ?? bots.find((b) => b.id === createdId);
+      const config = configFromDraft(draft, target);
       const input = { name: draft.name.trim(), config };
-      const saved = existing
-        ? await client.updateBot(existing.id, input)
+      const saved = target
+        ? await client.updateBot(target.id, input)
         : await client.createBot(input);
-      await saveApps(saved.id);
+      if (!target) {
+        setCreatedId(saved.id);
+      }
+      const failed = await applyAppsSelection(
+        client,
+        saved.id,
+        initialApps,
+        allowed,
+        bots.map((b) => b.id)
+      );
       await refreshBots();
+      if (failed.length > 0) {
+        // The bot itself is saved, its app access is not: say so and stay.
+        setInitialApps((prev) => {
+          const next = { ...prev };
+          for (const name of changedApps(prev, allowed)) {
+            if (!failed.includes(name)) {
+              next[name] = allowed[name];
+            }
+          }
+          return next;
+        });
+        setError(t("botForm.apps.partialFail", { names: failed.join(", ") }));
+        return;
+      }
       onDone(saved.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -469,6 +472,7 @@ export function BotFormView({
                           setAllowed((a) => ({ ...a, [s.name]: e.target.checked }))
                         }
                       />
+                      <AppTile name={s.name} small />
                       <span className={styles.appName}>{s.name}</span>
                     </label>
                   </li>

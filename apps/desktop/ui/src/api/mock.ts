@@ -353,6 +353,18 @@ export class MockApiClient extends ApiClient {
       ...(typeof patch.url === "string" ? { url: patch.url } : {}),
       ...("bots" in patch ? { bots: (patch.bots as string[] | null) ?? null } : {})
     };
+    // Atomic id operations; an open server (null) stays open.
+    if (merged.bots != null) {
+      let list = [...merged.bots];
+      for (const id of (patch.bots_add as string[] | undefined) ?? []) {
+        if (!list.includes(id)) {
+          list.push(id);
+        }
+      }
+      const rm = (patch.bots_remove as string[] | undefined) ?? [];
+      list = list.filter((id) => !rm.includes(id));
+      merged.bots = list;
+    }
     this.servers[idx] = merged;
     return merged;
   }

@@ -134,6 +134,15 @@ impl ServerHandler for TestServer {
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_owned();
+        let sleep_ms = request
+            .arguments
+            .as_ref()
+            .and_then(|a| a.get("sleep_ms"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        if sleep_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(sleep_ms)).await;
+        }
         let result = match request.name.as_ref() {
             "echo" => CallToolResult::success(vec![ContentBlock::text(text)]),
             "delete_all" => CallToolResult::success(vec![ContentBlock::text("deleted")]),

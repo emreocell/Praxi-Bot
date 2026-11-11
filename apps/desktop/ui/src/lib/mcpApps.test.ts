@@ -8,7 +8,11 @@ import {
   applyServerEvent,
   botAccess,
   botHasAccess,
-  botListAfterToggle,
+  appsPatch,
+  scopePatch,
+  applyAppsSelection,
+  botAccessLabels,
+  changedApps,
   botScope,
   botSelection,
   botsFromScope,
@@ -220,19 +224,20 @@ test("bot side: access of a bot to each server, and the list to write back", () 
   assert.equal(botHasAccess(open, undefined), true);
   assert.equal(botHasAccess(mine, undefined), false);
 
-  // Unticking on an open server makes an explicit list of every OTHER bot.
-  assert.deepEqual(
-    botListAfterToggle(open, BOTS[0].id, false, BOTS.map((b) => b.id)),
-    [BOTS[1].id, BOTS[2].id]
-  );
+  const all = BOTS.map((b) => b.id);
+  // Unticking on an open server narrows it to every OTHER bot (explicit list).
+  assert.deepEqual(appsPatch(open, BOTS[0].id, false, all), {
+    bots: [BOTS[1].id, BOTS[2].id]
+  });
   // Ticking on an open server changes nothing (it stays open).
-  assert.equal(botListAfterToggle(open, BOTS[0].id, true, []), null);
-  assert.deepEqual(botListAfterToggle(theirs, BOTS[0].id, true, []), [
-    BOTS[1].id,
-    BOTS[0].id
-  ]);
-  // The last bot removed leaves [] (no bot), never null.
-  assert.deepEqual(botListAfterToggle(mine, BOTS[0].id, false, []), []);
+  assert.equal(appsPatch(open, BOTS[0].id, true, all), null);
+  // On a list, ticking / unticking are atomic add / remove of ONE id.
+  assert.deepEqual(appsPatch(theirs, BOTS[0].id, true, all), {
+    bots_add: [BOTS[0].id]
+  });
+  assert.deepEqual(appsPatch(mine, BOTS[0].id, false, all), {
+    bots_remove: [BOTS[0].id]
+  });
 });
 
 test("saving a server's bots goes through PUT with UUIDs and keeps other fields", async () => {
@@ -280,4 +285,76 @@ test("a custom server can be created for chosen bots", () => {
   );
   assert.ok(dflt.ok);
   assert.equal("bots" in dflt.config, false);
+});
+
+test("bot form only applies the ticks the user changed in this session", async () => {
+  const api = new MockApiClient();
+  const Y = BOTS[0].id;
+  const all = BOTS.map((b) => b.id);
+  await api.updateMcpServer("github", { bots: [Y, BOTS[1].id] });
+  // The form opened with Y ticked for github and (open) linear.
+  const initial = { github: true, linear: true, filesystem: false };
+  // Meanwhile the user removes Y from github in the Apps modal.
+  await api.updateMcpServer("github", { bots_remove: [Y] });
+  // Saving an unrelated edit of the bot form: no tick was changed.
+  assert.deepEqual(changedApps(initial, { ...initial }), []);
+  const failed = await applyAppsSelection(api, Y, initial, { ...initial }, all);
+  assert.deepEqual(failed, []);
+  const github = api.servers.find((s) => s.name === "github");
+  assert.deepEqual(github?.bots, [BOTS[1].id], "Y must not be re-added");
+
+  // A tick the user did change is applied, on the fresh server state.
+  const failed2 = await applyAppsSelection(
+    api,
+    Y,
+    initial,
+    { ...initial, filesystem: true, linear: false },
+    all
+  );
+  assert.deepEqual(failed2, []);
+  assert.ok(api.servers.find((s) => s.name === "filesystem")?.bots?.includes(Y));
+  assert.deepEqual(api.servers.find((s) => s.name === "linear")?.bots, [
+    BOTS[1].id,
+    BOTS[2].id
+  ]);
+});
+
+test("a failing server is reported, the others are still applied", async () => {
+  const api = new MockApiClient();
+  const Y = BOTS[0].id;
+  const real = api.updateMcpServer.bind(api);
+  api.updateMcpServer = (name, patch) =>
+    name === "github" ? Promise.reject(new Error("boom")) : real(name, patch);
+  await real("github", { bots: [BOTS[1].id] });
+  const failed = await applyAppsSelection(
+    api,
+    Y,
+    { github: false, filesystem: false },
+    { github: true, filesystem: true },
+    BOTS.map((b) => b.id)
+  );
+  assert.deepEqual(failed, ["github"]);
+  assert.ok(api.servers.find((s) => s.name === "filesystem")?.bots?.includes(Y));
+});
+
+test("stale bot ids are labelled as deleted, never shown as raw ids", () => {
+  const a = botAccessLabels({ bots: [BOTS[0].id, "gone-uuid"] }, BOTS, "(deleted bot)");
+  assert.deepEqual(a, { all: false, names: ["Atlas", "(deleted bot)"] });
+  assert.deepEqual(botAccessLabels({ bots: null }, BOTS, "x"), { all: true });
+  assert.deepEqual(botAccessLabels({ bots: [] }, BOTS, "x"), { all: false, names: [] });
+});
+
+test("the server editor sends a diff for list edits, absolute only across all-bots", () => {
+  const some = (...ids: string[]) => ({ mode: "some" as const, ids });
+  assert.deepEqual(scopePatch(some("a", "b"), some("b", "c")), {
+    bots_add: ["c"],
+    bots_remove: ["a"]
+  });
+  assert.deepEqual(scopePatch({ mode: "all" }, some("a")), { bots: ["a"] });
+  assert.deepEqual(scopePatch({ mode: "all" }, some()), { bots: [] });
+  assert.deepEqual(scopePatch(some("a"), { mode: "all" }), { bots: null });
+  assert.deepEqual(scopePatch(some("a"), some()), {
+    bots_add: [],
+    bots_remove: ["a"]
+  });
 });

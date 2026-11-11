@@ -132,9 +132,17 @@ pub(crate) struct Server {
     /// Discovery and explicit reconnects serialize only for this server.
     operation: tokio::sync::Mutex<()>,
     retired: tokio::sync::watch::Sender<bool>,
+    /// Live copy of `config.bots`: adapters read this, so a `bots` change
+    /// takes effect on the next call without restarting the server.
+    bots: Mutex<Option<Vec<String>>>,
 }
 
 impl Server {
+    /// The bots allowed right now (`None` = all, `Some([])` = none).
+    pub(crate) fn bots(&self) -> Option<Vec<String>> {
+        self.bots.lock().clone()
+    }
+
     pub(crate) fn id(&self) -> &str {
         &self.config.id
     }
@@ -487,6 +495,12 @@ async fn close_session(session: Arc<Session>) {
 pub struct McpServerHandle(Arc<Server>);
 
 impl McpServerHandle {
+    /// Whether both handles are the same registration (not a re-registered copy).
+    #[must_use]
+    pub fn same_server(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
     /// Discover and register this server's tools, with the manager's limits.
     ///
     /// # Errors
@@ -606,6 +620,7 @@ impl McpManager {
             }),
             operation: tokio::sync::Mutex::new(()),
             retired: tokio::sync::watch::channel(false).0,
+            bots: Mutex::new(config.bots.clone()),
             config,
         });
         {
@@ -619,6 +634,16 @@ impl McpManager {
             servers.insert(server.id().to_owned(), Arc::clone(&server));
         }
         Ok(McpServerHandle(server))
+    }
+
+    /// Change who may use server `id` without touching its connection: calls
+    /// already running finish, and the next call (and discovery) sees `bots`.
+    ///
+    /// # Errors
+    /// No server with this id is registered.
+    pub fn set_server_bots(&self, id: &str, bots: Option<Vec<String>>) -> Result<()> {
+        *self.get(id)?.bots.lock() = bots;
+        Ok(())
     }
 
     /// Capture a particular registration before releasing a host's lock.

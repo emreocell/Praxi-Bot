@@ -112,6 +112,17 @@ impl FakeMcp {
         if present("bots") {
             slot.bots = serde_json::from_value(obj["bots"].clone()).unwrap_or(None);
         }
+        if let (Some(list), Some(add)) = (slot.bots.as_mut(), obj.get("bots_add")) {
+            for id in serde_json::from_value::<Vec<String>>(add.clone()).unwrap_or_default() {
+                if !list.contains(&id) {
+                    list.push(id);
+                }
+            }
+        }
+        if let (Some(list), Some(rm)) = (slot.bots.as_mut(), obj.get("bots_remove")) {
+            let rm = serde_json::from_value::<Vec<String>>(rm.clone()).unwrap_or_default();
+            list.retain(|id| !rm.contains(id));
+        }
         Ok(())
     }
 
