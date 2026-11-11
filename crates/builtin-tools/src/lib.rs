@@ -41,6 +41,7 @@ pub use script::{
 };
 
 pub use connector_email;
+pub use web_tools;
 
 /// Everything needed to build the built-in tool set.
 pub struct BuiltinConfig {
@@ -65,6 +66,8 @@ pub struct BuiltinConfig {
     pub control: Option<Arc<dyn DesktopControlGate>>,
     /// Email connector (IMAP/SMTP tools). `None` = email tools skipped.
     pub email: Option<Arc<connector_email::EmailConnector>>,
+    /// Web tools (search, fetch, feeds, sitemaps, metadata). `None` = web tools skipped.
+    pub web: Option<web_tools::WebToolsConfig>,
     /// Directories `fs_*` may read and write. Empty does not add a root limit.
     /// A non-empty list that cannot be resolved denies every `fs_*` call.
     /// UNC paths, device paths, and credential files are still refused.
@@ -76,7 +79,7 @@ pub struct BuiltinConfig {
 
 impl BuiltinConfig {
     /// A config with defaults: isolated headless browser, default script limits,
-    /// no desktop backend, no OCR and no email connector.
+    /// no desktop backend, no OCR, no email connector and no web tools.
     #[must_use]
     pub fn new(data_dir: PathBuf, gate: Arc<dyn ToolGate>) -> Self {
         Self {
@@ -90,6 +93,7 @@ impl BuiltinConfig {
             script_limits: script_runtime::Limits::default(),
             control: None,
             email: None,
+            web: None,
             fs_allowed_roots: Vec::new(),
             fs_granted_paths: Vec::new(),
         }
@@ -133,6 +137,12 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
     if let Some(email) = &cfg.email {
         all.extend(connector_email::tools(email));
     }
+    if let Some(web) = cfg.web.clone() {
+        match web_tools::tools(web) {
+            Ok(tools) => all.extend(tools),
+            Err(e) => tracing::warn!("web tools not available: {e}"),
+        }
+    }
     all
 }
 
@@ -152,6 +162,17 @@ pub fn register_email_tools(
     connector: &Arc<connector_email::EmailConnector>,
 ) -> usize {
     connector_email::register(registry, connector)
+}
+
+/// Register the web tools in `registry`; returns the names that were added.
+///
+/// # Errors
+/// [`web_tools::WebError`] when the HTTP client or a search backend cannot be built.
+pub fn register_web_tools(
+    registry: &ToolRegistry,
+    cfg: web_tools::WebToolsConfig,
+) -> Result<Vec<String>, web_tools::WebError> {
+    web_tools::register(registry, cfg)
 }
 
 #[cfg(test)]
@@ -374,5 +395,170 @@ mod tests {
         let registered = register_email_tools(&reg2, &connector);
         assert_eq!(registered, 6);
         assert!(reg2.get(connector_email::tools::SEND).is_some());
+    }
+
+    fn web_registry(
+        cfg_web: Option<web_tools::WebToolsConfig>,
+    ) -> (tempfile::TempDir, ToolRegistry) {
+        let d = tempfile::tempdir().unwrap();
+        let reg = ToolRegistry::new();
+        let mut cfg = BuiltinConfig::new(d.path().to_path_buf(), Arc::new(AllowAll));
+        cfg.desktop = Some(Arc::new(desktop::fake::FakeDesktop::new(false)));
+        cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
+        cfg.web = cfg_web;
+        let _ = register_builtin_tools(&reg, cfg);
+        (d, reg)
+    }
+
+    #[test]
+    fn web_tools_are_absent_unless_configured() {
+        let (_d, reg) = web_registry(None);
+        for name in web_tools::TOOL_NAMES {
+            assert!(reg.get(name).is_none(), "{name} must be off by default");
+        }
+        let (_d, reg) = web_registry(Some(web_tools::WebToolsConfig::default()));
+        for name in web_tools::TOOL_NAMES {
+            let spec = reg.get(name).expect("web tool registered").spec().clone();
+            // Read-only egress behind the SSRF policy: the default policy lets it
+            // run without a per-call prompt (see `read_tools_skip_ask`), and the
+            // Browser category keeps a Browser deny / limit effective.
+            assert_eq!(spec.effect, Effect::Read, "{name}");
+            assert_eq!(spec.category, PermissionCategory::Browser, "{name}");
+        }
+        let (_d, reg) = web_registry(Some(web_tools::WebToolsConfig::default()));
+        let again = register_web_tools(&reg, web_tools::WebToolsConfig::default()).unwrap();
+        assert!(again.is_empty(), "already registered: {again:?}");
+    }
+
+    #[test]
+    fn adding_web_tools_changes_no_other_tool_effect() {
+        let (_d, without) = web_registry(None);
+        let (_d, with) = web_registry(Some(web_tools::WebToolsConfig::default()));
+        for spec in without.list() {
+            let other = with
+                .get(&spec.name)
+                .expect("still registered")
+                .spec()
+                .clone();
+            assert_eq!(other.effect, spec.effect, "{}", spec.name);
+            assert_eq!(other.category, spec.category, "{}", spec.name);
+        }
+        // Mutating browser tools keep asking.
+        assert_eq!(
+            with.get("browser_open").unwrap().spec().effect,
+            Effect::Write
+        );
+    }
+
+    async fn web_call(
+        reg: &ToolRegistry,
+        name: &str,
+        input: serde_json::Value,
+    ) -> Result<tool_registry::ToolOutput, String> {
+        reg.get(name)
+            .unwrap()
+            .call(&tool_registry::ToolContext::default(), input)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    #[tokio::test]
+    async fn default_web_policy_blocks_private_loopback_and_metadata_targets() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("secret"))
+            .mount(&server)
+            .await;
+        let (_d, reg) = web_registry(Some(web_tools::WebToolsConfig::default()));
+        for url in [
+            server.uri(),
+            "http://127.0.0.1:1/".to_owned(),
+            "http://[::1]:1/".to_owned(),
+            "http://169.254.169.254/latest/meta-data".to_owned(),
+            "http://192.168.1.1/".to_owned(),
+            "http://localhost:1/".to_owned(),
+            "file:///etc/passwd".to_owned(),
+        ] {
+            let err = web_call(&reg, "web_extract", serde_json::json!({ "url": url }))
+                .await
+                .unwrap_err();
+            assert!(
+                err.contains("blocked") || err.contains("scheme"),
+                "{url}: {err}"
+            );
+        }
+        assert!(
+            server.received_requests().await.unwrap().is_empty(),
+            "a blocked target must never be contacted"
+        );
+    }
+
+    #[tokio::test]
+    async fn web_fetch_allows_a_permitted_host_but_not_a_redirect_to_a_private_address() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/ok"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/html")
+                    .set_body_string(
+                        "<html><body><article><p>public page text</p></article></body></html>",
+                    ),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/to-metadata"))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .insert_header("location", "http://169.254.169.254/latest/meta-data/"),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/to-lan"))
+            .respond_with(
+                ResponseTemplate::new(302).insert_header("location", "http://10.0.0.5/admin"),
+            )
+            .mount(&server)
+            .await;
+        // The mock server listens on loopback and stands in for a public host:
+        // only that host is exempted from the address block.
+        let policy = web_tools::DefaultUrlPolicy {
+            private_ok_hosts: vec!["127.0.0.1".into()],
+            ..web_tools::DefaultUrlPolicy::default()
+        };
+        let (_d, reg) = web_registry(Some(web_tools::WebToolsConfig {
+            policy: Arc::new(policy),
+            ..web_tools::WebToolsConfig::default()
+        }));
+        let out = web_call(
+            &reg,
+            "web_extract",
+            serde_json::json!({"url": format!("{}/ok", server.uri())}),
+        )
+        .await
+        .unwrap();
+        let tool_registry::ContentPart::Text { text } = &out.content[0] else {
+            panic!("text output")
+        };
+        assert!(text.contains("untrusted external content"), "{text}");
+        assert!(text.contains("public page text"), "{text}");
+        for p in ["/to-metadata", "/to-lan"] {
+            let err = web_call(
+                &reg,
+                "web_extract",
+                serde_json::json!({"url": format!("{}{p}", server.uri())}),
+            )
+            .await
+            .unwrap_err();
+            assert!(err.contains("blocked"), "{p}: {err}");
+        }
     }
 }

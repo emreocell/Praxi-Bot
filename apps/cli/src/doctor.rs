@@ -130,6 +130,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
             |e| Check::fail("browser", e, "install a non-snap browser or set BOT_BROWSER_PATH; use `sudo praxi doctor` for service-context validation"),
         ),
         check_mcp(env.data_dir),
+        check_web(env),
         check_disk(env.data_dir),
         check_telegram(env),
     ]
@@ -455,6 +456,103 @@ fn check_mcp(dir: &Path) -> Check {
         Ok(s) => Check::ok(N, format!("{} server(s)", s.len())),
         Err(e) => Check::fail(N, e.to_string(), format!("fix {}", path.display())),
     }
+}
+
+/// Time the `--online` web search probe may take.
+const WEB_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// `web tools`: which search backends are configured, and with `--online`
+/// whether a live search answers. A failing probe is a warning, never a fail:
+/// the bot still works without web search.
+fn check_web(env: &DoctorEnv<'_>) -> Check {
+    const N: &str = "web search";
+    let (file, mut notes) = crate::serve::load_web_file(env.data_dir);
+    // The doctor holds the store by reference only: copy the one Brave key into
+    // a throwaway in-memory store for the probe.
+    let mem: std::sync::Arc<dyn SecretStore> =
+        std::sync::Arc::new(secret_store::MemoryStore::new());
+    let mut brave_missing = false;
+    if let (Some(name), Ok((s, _))) = (file.search.brave_key.as_deref(), &env.store) {
+        match s.get(name) {
+            Ok(Some(v)) => {
+                let _ = mem.set(name, v.expose());
+            }
+            _ => brave_missing = true,
+        }
+    }
+    let cfg = crate::serve::web_tools_config(env.data_dir, &file, Some(&mem), &mut notes);
+    let backends = crate::serve::web_backend_summary(&cfg);
+    if brave_missing {
+        notes.push("brave key secret not found".into());
+    }
+    let detail = |extra: String| {
+        let mut d = format!("backends: {backends}");
+        if !extra.is_empty() {
+            d.push_str("; ");
+            d.push_str(&extra);
+        }
+        if !notes.is_empty() {
+            d.push_str("; ");
+            d.push_str(&notes.join("; "));
+        }
+        d
+    };
+    let hint = "see docs/guide/web.md; edit <data_dir>/web.toml";
+    if !env.online {
+        let c = Check::ok(N, detail("not probed".into()));
+        return if notes.is_empty() {
+            c.hint("add --online to test that a search answers")
+        } else {
+            Check {
+                status: Status::Warn,
+                ..c
+            }
+            .hint(hint)
+        };
+    }
+    match probe_web_search(cfg) {
+        Ok(backend) => {
+            let c = Check::ok(N, detail(format!("{backend} answered")));
+            if notes.is_empty() {
+                c
+            } else {
+                Check {
+                    status: Status::Warn,
+                    ..c
+                }
+                .hint(hint)
+            }
+        }
+        Err(e) => Check::warn(N, detail(format!("no answer: {e}")), hint),
+    }
+}
+
+/// Run one live search through the configured backends; the answering backend's name.
+fn probe_web_search(cfg: web_tools::WebToolsConfig) -> std::result::Result<String, String> {
+    let reg = tool_registry::ToolRegistry::new();
+    web_tools::register(&reg, cfg).map_err(|e| e.to_string())?;
+    let tool = reg.get("web_search").ok_or("web_search not registered")?;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    rt.block_on(async {
+        let ctx = tool_registry::ToolContext::default();
+        let call = tool.call(&ctx, json!({"query": "praxi", "limit": 1}));
+        let out = tokio::time::timeout(WEB_PROBE_TIMEOUT, call)
+            .await
+            .map_err(|_| "timed out".to_string())?
+            .map_err(|e| e.to_string())?;
+        out.content
+            .iter()
+            .find_map(|p| match p {
+                tool_registry::ContentPart::Json { data } => {
+                    data["backend"].as_str().map(str::to_owned)
+                }
+                _ => None,
+            })
+            .ok_or_else(|| "unexpected search output".to_string())
+    })
 }
 
 fn check_disk(dir: &Path) -> Check {
@@ -915,5 +1013,77 @@ id = "m1"
         let j = to_json(&checks);
         assert_eq!(j["checks"].as_array().unwrap().len(), checks.len());
         assert_eq!(j["ok"], false);
+    }
+
+    #[test]
+    fn web_check_reports_backends_without_touching_the_network() {
+        let d = tempfile::tempdir().unwrap();
+        let (cat, store) = (catalog(), MemStore::default());
+        let checks = run_checks(&env(d.path(), &cat, &store, free_port()));
+        let c = get(&checks, "web search");
+        assert_eq!(c.status, Status::Ok);
+        assert!(c.detail.contains("duckduckgo"), "{}", c.detail);
+        assert!(c.detail.contains("not probed"), "{}", c.detail);
+
+        std::fs::write(d.path().join(crate::serve::WEB_FILE), "= nonsense").unwrap();
+        let checks = run_checks(&env(d.path(), &cat, &store, free_port()));
+        let c = get(&checks, "web search");
+        assert_eq!(c.status, Status::Warn);
+        assert!(c.detail.contains("web.toml"), "{}", c.detail);
+    }
+
+    #[test]
+    fn web_check_online_answers_or_warns_never_fails() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let ok = rt.block_on(async {
+            let s = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/search"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(
+                    json!({"results": [{"title": "T", "url": "https://example.org/", "content": "c"}]}),
+                ))
+                .mount(&s)
+                .await;
+            s
+        });
+        let broken = rt.block_on(async {
+            let s = MockServer::start().await;
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(500))
+                .mount(&s)
+                .await;
+            s
+        });
+        let (cat, store) = (catalog(), MemStore::default());
+        for (server, status, word) in [
+            (&ok, Status::Ok, "searxng answered"),
+            (&broken, Status::Warn, "no answer"),
+        ] {
+            let d = tempfile::tempdir().unwrap();
+            std::fs::write(
+                d.path().join(crate::serve::WEB_FILE),
+                format!(
+                    "[search]
+searxng_url = \"{}\"
+duckduckgo = false
+",
+                    server.uri()
+                ),
+            )
+            .unwrap();
+            let mut e = env(d.path(), &cat, &store, free_port());
+            e.online = true;
+            let checks = run_checks(&e);
+            let c = get(&checks, "web search");
+            assert_eq!(c.status, status, "{}", c.detail);
+            assert!(c.detail.contains(word), "{}", c.detail);
+        }
     }
 }

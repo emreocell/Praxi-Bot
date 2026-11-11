@@ -1,8 +1,10 @@
 //! `Tool` implementations and the registration entry points.
 //!
-//! Conventions follow `builtin-tools` (and task 048's `web_fetch`): effect
-//! `Write`, permission category `Browser`, every output prefixed with an
-//! "untrusted external content" notice, large text spilled to a file.
+//! Conventions follow `builtin-tools`: effect `Read` (read-only network
+//! egress, every URL and redirect hop checked by the SSRF [`UrlPolicy`]),
+//! permission category `Browser` (so a `Browser` deny / limits policy still
+//! applies), every output prefixed with an "untrusted external content"
+//! notice, large text spilled to a file.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -101,7 +103,7 @@ pub fn tools(cfg: WebToolsConfig) -> Result<Vec<Arc<dyn Tool>>, WebError> {
                 name: name.to_string(),
                 description: desc.to_string(),
                 input_schema: schema,
-                effect: Effect::Write,
+                effect: Effect::Read,
                 category: PermissionCategory::Browser,
                 platforms: vec![Platform::All],
             },
@@ -112,7 +114,7 @@ pub fn tools(cfg: WebToolsConfig) -> Result<Vec<Arc<dyn Tool>>, WebError> {
     Ok(vec![
         make(
             "web_search",
-            "Search the web (SearXNG, Brave or DuckDuckGo backends) and return titles, URLs and snippets.",
+            "Search the web (SearXNG, Brave or DuckDuckGo backends) and return titles, URLs and snippets. Prefer this over the browser for finding pages; open results with web_extract.",
             json!({"type":"object","required":["query"],"properties":{
                 "query":{"type":"string","description":"Search query"},
                 "limit":{"type":"integer","minimum":1,"maximum":25,"description":"Max results (default 10)"},
@@ -123,7 +125,7 @@ pub fn tools(cfg: WebToolsConfig) -> Result<Vec<Arc<dyn Tool>>, WebError> {
         ),
         make(
             "web_extract",
-            "Fetch a URL over HTTP (no browser) and return its main content as Markdown: readability extraction, tables, links.",
+            "Fetch a URL over HTTP and return the page as readable Markdown (main content, tables, links). Use this to read a page. It is fast and needs no browser; use the browser tools only when the page needs JavaScript, a login or interaction.",
             json!({"type":"object","required":["url"],"properties":{
                 "url":{"type":"string"},
                 "include_links":{"type":"boolean","description":"Keep [text](url) links in the Markdown (default true)"},

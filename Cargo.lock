@@ -875,7 +875,9 @@ dependencies = [
  "tracing",
  "uuid",
  "vision",
+ "web-tools",
  "windows 0.62.2",
+ "wiremock",
 ]
 
 [[package]]
@@ -1253,6 +1255,7 @@ dependencies = [
  "toml 0.8.2",
  "tool-registry",
  "uuid",
+ "web-tools",
  "wiremock",
  "workflow-replay",
 ]

@@ -540,6 +540,103 @@ async fn policy_deny_never_asks() {
     assert_eq!(env.storage.list_approvals(run).unwrap().len(), 0);
 }
 
+/// A loop whose registry holds the real web tools (no network is touched: the
+/// default SSRF policy refuses every target used below before connecting).
+fn web_loop(env: &Env, fake: &Arc<Fake>, profile: BotProfile, config: LoopConfig) -> AgentLoop {
+    let registry = ToolRegistry::new();
+    builtin_tools::register_web_tools(
+        &registry,
+        builtin_tools::web_tools::WebToolsConfig::default(),
+    )
+    .unwrap();
+    let lp = AgentLoop::new(
+        Arc::clone(&env.storage),
+        registry,
+        Providers::single(Arc::clone(fake) as Arc<dyn ChatProvider>),
+        config,
+    );
+    lp.add_profile(env.bot, profile);
+    lp
+}
+
+#[tokio::test]
+async fn web_tools_run_without_approval_under_the_default_policy_but_stay_ssrf_guarded() {
+    let env = setup();
+    let fake = Fake::new(vec![
+        calls(&[
+            ("c1", "web_extract", json!({"url": "http://127.0.0.1:9/"})),
+            (
+                "c2",
+                "web_metadata",
+                json!({"url": "http://169.254.169.254/latest/meta-data"}),
+            ),
+        ]),
+        text("done"),
+    ]);
+    // `Policy::approve_destructive()` is the shipped default and `cfg` keeps
+    // the default `read_tools_skip_ask = true`.
+    let lp = web_loop(&env, &fake, profile(""), cfg(Policy::approve_destructive()));
+    let run = lp.run_turn(env.chat, "read it").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(
+        env.storage.list_approvals(run).unwrap().len(),
+        0,
+        "no per-call approval for read-only web access"
+    );
+    let msgs = tool_messages(&fake.request(1));
+    assert_eq!(msgs.len(), 2);
+    for m in &msgs {
+        assert!(
+            m.contains("blocked"),
+            "private / loopback / metadata targets stay refused by the URL policy: {m}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn browser_deny_still_denies_web_tools_and_write_browser_tools_still_ask() {
+    let env = setup();
+    let mut deny = Policy::approve_destructive();
+    deny.categories
+        .insert(PermissionCategory::Browser, Rule::new(Level::Deny));
+    let fake = Fake::new(vec![
+        calls(&[("c1", "web_extract", json!({"url": "http://127.0.0.1:9/"}))]),
+        text("stopped"),
+    ]);
+    let lp = web_loop(&env, &fake, profile(""), cfg(deny));
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(tool_messages(&fake.request(1))[0].contains("Permission denied"));
+
+    // A mutating browser tool is unchanged: it still parks for approval.
+    let click = {
+        let mut t = tool("browser_click", Effect::Write, "clicked");
+        t.spec.category = PermissionCategory::Browser;
+        Arc::new(t)
+    };
+    let fake = Fake::new(vec![
+        calls(&[("c1", "browser_click", json!({}))]),
+        text("fine"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&click)],
+        profile(""),
+        cfg(Policy::approve_destructive()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "click").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(a.tool_name, "browser_click");
+    assert_eq!(click.count.load(Ordering::SeqCst), 0);
+    lp.cancel(run).unwrap();
+}
+
 #[tokio::test]
 async fn independent_reads_run_concurrently_in_one_step() {
     let env = setup();

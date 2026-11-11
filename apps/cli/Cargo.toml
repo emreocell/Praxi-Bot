@@ -45,6 +45,7 @@ storage.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 tool-registry = { path = "../../crates/tool-registry", version = "0.1.0" }
 toml.workspace = true
+web-tools = { path = "../../crates/web-tools", version = "0.1.0" }
 workflow-replay = { path = "../../crates/workflow-replay", version = "0.1.0" }
 
 [target.'cfg(windows)'.dependencies]

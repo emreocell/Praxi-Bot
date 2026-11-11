@@ -83,7 +83,7 @@ fn registers_five_tools_with_builtin_conventions() {
         let spec = reg.get(name).unwrap().spec().clone();
         assert!(spec.is_valid());
         assert_eq!(spec.category, tool_registry::PermissionCategory::Browser);
-        assert_eq!(spec.effect, tool_registry::Effect::Write);
+        assert_eq!(spec.effect, tool_registry::Effect::Read);
     }
     // Registering twice adds nothing.
     assert_eq!(

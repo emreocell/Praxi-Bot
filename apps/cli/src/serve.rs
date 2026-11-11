@@ -465,6 +465,200 @@ pub fn register_email(
     }
 }
 
+/// Filename of the optional web tools configuration in `<data_dir>`.
+pub const WEB_FILE: &str = "web.toml";
+
+/// Largest `max_bytes` a `web.toml` may set (64 MiB).
+const WEB_MAX_BYTES_CAP: usize = 64 << 20;
+
+/// `<data_dir>/web.toml`. Every key is optional; the web tools work without
+/// the file (`DuckDuckGo` needs no key).
+///
+/// ```toml
+/// [search]
+/// searxng_url = "http://127.0.0.1:8080"  # trusted local/private instance
+/// brave_key = "web/brave"                # NAME of a secret, never the key
+/// duckduckgo = true                      # keyless fallback (default)
+///
+/// [http]
+/// timeout_secs = 20
+/// connect_timeout_secs = 8
+/// max_bytes = 5242880
+/// max_redirects = 5
+/// ```
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct WebConfigFile {
+    #[serde(default)]
+    pub search: WebSearchSection,
+    #[serde(default)]
+    pub http: WebHttpSection,
+}
+
+/// `[search]` of [`WebConfigFile`].
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct WebSearchSection {
+    pub searxng_url: Option<String>,
+    /// Name of the secret holding the Brave Search API key.
+    pub brave_key: Option<String>,
+    pub duckduckgo: Option<bool>,
+}
+
+/// `[http]` of [`WebConfigFile`].
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct WebHttpSection {
+    pub timeout_secs: Option<u64>,
+    pub connect_timeout_secs: Option<u64>,
+    pub max_bytes: Option<usize>,
+    pub max_redirects: Option<usize>,
+}
+
+/// Read `<data_dir>/web.toml`. A missing file is the default; an unreadable or
+/// malformed one yields the default plus a warning (it never stops the daemon).
+#[must_use]
+pub fn load_web_file(data_dir: &Path) -> (WebConfigFile, Vec<String>) {
+    let path = data_dir.join(WEB_FILE);
+    if !path.exists() {
+        return (WebConfigFile::default(), Vec::new());
+    }
+    let parsed = std::fs::read_to_string(&path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))
+        .and_then(|s| {
+            toml::from_str::<WebConfigFile>(&s).map_err(|e| format!("{}: {e}", path.display()))
+        });
+    match parsed {
+        Ok(f) => (f, Vec::new()),
+        Err(e) => (
+            WebConfigFile::default(),
+            vec![format!("{e}; using the default web tools settings")],
+        ),
+    }
+}
+
+/// Build the [`web_tools::WebToolsConfig`] for `file`. Invalid single values are
+/// dropped with a warning in `warnings`; the SSRF policy is always the default.
+#[must_use]
+pub fn web_tools_config(
+    data_dir: &Path,
+    file: &WebConfigFile,
+    store: Option<&Arc<dyn SecretStore>>,
+    warnings: &mut Vec<String>,
+) -> web_tools::WebToolsConfig {
+    let mut cfg = web_tools::WebToolsConfig {
+        secrets: store.cloned(),
+        spill_dir: Some(data_dir.join("spill")),
+        ..web_tools::WebToolsConfig::default()
+    };
+    let s = &file.search;
+    cfg.search.searxng_url = s.searxng_url.clone().filter(|u| !u.trim().is_empty());
+    if let Some(d) = s.duckduckgo {
+        cfg.search.duckduckgo = d;
+    }
+    if let Some(name) = s.brave_key.as_deref().filter(|n| !n.trim().is_empty()) {
+        match secret_store::SecretRef::new(name) {
+            Ok(r) if store.is_some() => cfg.search.brave_key = Some(r),
+            Ok(_) => warnings.push(format!(
+                "web.toml: brave_key {name:?} ignored, the secret store is not available"
+            )),
+            Err(e) => warnings.push(format!("web.toml: brave_key ignored: {e}")),
+        }
+    }
+    let h = &file.http;
+    let positive = |what: &str, v: Option<u64>, warnings: &mut Vec<String>| {
+        v.filter(|n| {
+            let ok = *n > 0;
+            if !ok {
+                warnings.push(format!("web.toml: {what} must be greater than 0; ignored"));
+            }
+            ok
+        })
+    };
+    if let Some(n) = positive("timeout_secs", h.timeout_secs, warnings) {
+        cfg.http.timeout = Duration::from_secs(n);
+    }
+    if let Some(n) = positive("connect_timeout_secs", h.connect_timeout_secs, warnings) {
+        cfg.http.connect_timeout = Duration::from_secs(n);
+    }
+    if let Some(n) = h.max_bytes {
+        if n == 0 {
+            warnings.push("web.toml: max_bytes must be greater than 0; ignored".into());
+        } else if n > WEB_MAX_BYTES_CAP {
+            warnings.push(format!(
+                "web.toml: max_bytes capped at {WEB_MAX_BYTES_CAP} bytes"
+            ));
+            cfg.http.max_bytes = WEB_MAX_BYTES_CAP;
+        } else {
+            cfg.http.max_bytes = n;
+        }
+    }
+    if let Some(n) = h.max_redirects {
+        cfg.http.max_redirects = n.min(10);
+    }
+    cfg
+}
+
+/// Which search backends `cfg` will try, in order (for logs and `bot doctor`).
+#[must_use]
+pub fn web_backend_summary(cfg: &web_tools::WebToolsConfig) -> String {
+    let mut v = Vec::new();
+    if let Some(u) = &cfg.search.searxng_url {
+        v.push(format!("searxng ({u})"));
+    }
+    if cfg.search.brave_key.is_some() {
+        v.push("brave".to_owned());
+    }
+    if cfg.search.duckduckgo {
+        v.push("duckduckgo".to_owned());
+    }
+    if v.is_empty() {
+        "none".to_owned()
+    } else {
+        v.join(" > ")
+    }
+}
+
+/// Register the web tools (`web_search`, `web_extract`, ...) into `registry`.
+///
+/// On by default: no configuration is needed. A broken `web.toml`, or one that
+/// cannot be turned into a working configuration, logs a warning and falls back
+/// to the defaults. Returns how many tools were added.
+pub fn register_web(
+    data_dir: &Path,
+    registry: &ToolRegistry,
+    store: Option<&Arc<dyn SecretStore>>,
+) -> usize {
+    let (file, mut warnings) = load_web_file(data_dir);
+    let cfg = web_tools_config(data_dir, &file, store, &mut warnings);
+    let mut summary = web_backend_summary(&cfg);
+    let mut result = builtin_tools::register_web_tools(registry, cfg);
+    if let Err(e) = &result {
+        warnings.push(format!(
+            "web.toml: {e}; using the default web tools settings"
+        ));
+        let cfg = web_tools_config(data_dir, &WebConfigFile::default(), store, &mut warnings);
+        summary = web_backend_summary(&cfg);
+        result = builtin_tools::register_web_tools(registry, cfg);
+    }
+    for w in &warnings {
+        eprintln!("warning: {w}");
+    }
+    match result {
+        Ok(added) => {
+            eprintln!(
+                "web: {} tool(s) registered (search: {summary})",
+                added.len()
+            );
+            added.len()
+        }
+        Err(e) => {
+            eprintln!("warning: web tools unavailable: {e}");
+            0
+        }
+    }
+}
+
 /// How `bot serve` runs.
 pub struct ServeOptions {
     /// Use the host pairing role and default peer networking on.
@@ -549,9 +743,10 @@ pub fn serve(
         }) as Arc<dyn SecretStore>
     });
     let agent = build_agent_with_redactor(&storage, providers, data_dir, desktop, redactor.clone());
-    // Same registry the loop calls tools from: MCP servers and email register into it.
+    // Same registry the loop calls tools from: MCP servers, email and web tools register into it.
     let mcp_tools = agent.tool_registry();
     register_email(data_dir, &mcp_tools, telegram_store.as_ref());
+    register_web(data_dir, &mcp_tools, telegram_store.as_ref());
     let recovered = agent.recover()?;
     let mut cfg = DaemonConfig::new(api_token.clone());
     cfg.shutdown_grace = grace;
@@ -963,5 +1158,137 @@ host = "smtp.example.com"
         let read = reg.get("email_read").expect("email_read registered");
         assert_eq!(read.spec().effect, Effect::Read);
         assert_eq!(read.spec().category, PermissionCategory::Messaging);
+    }
+    fn web_names(reg: &ToolRegistry) -> Vec<String> {
+        web_tools::TOOL_NAMES
+            .iter()
+            .filter(|n| reg.get(n).is_some())
+            .map(|n| (*n).to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn web_tools_register_by_default_without_web_toml() {
+        use tool_registry::{Effect, PermissionCategory};
+
+        let dir = tempfile::tempdir().unwrap();
+        let reg = ToolRegistry::new();
+        assert_eq!(register_web(dir.path(), &reg, None), 5);
+        assert_eq!(web_names(&reg), web_tools::TOOL_NAMES);
+        for name in web_tools::TOOL_NAMES {
+            let t = reg.get(name).unwrap();
+            // Read-only egress: no per-call approval under the default policy,
+            // still the Browser category so a Browser deny applies.
+            assert_eq!(t.spec().effect, Effect::Read, "{name}");
+            assert_eq!(t.spec().category, PermissionCategory::Browser, "{name}");
+        }
+        let mut w = Vec::new();
+        let (file, warnings) = load_web_file(dir.path());
+        assert_eq!(warnings.len(), 0);
+        let cfg = web_tools_config(dir.path(), &file, None, &mut w);
+        assert_eq!(w.len(), 0);
+        assert!(cfg.search.duckduckgo);
+        assert_eq!(web_backend_summary(&cfg), "duckduckgo");
+        assert_eq!(cfg.spill_dir, Some(dir.path().join("spill")));
+    }
+
+    #[test]
+    fn valid_web_toml_is_honoured() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(WEB_FILE),
+            r#"
+[search]
+searxng_url = "http://127.0.0.1:8080"
+brave_key = "web/brave"
+duckduckgo = false
+
+[http]
+timeout_secs = 7
+connect_timeout_secs = 3
+max_bytes = 1000000
+max_redirects = 2
+"#,
+        )
+        .unwrap();
+        let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
+        store.set("web/brave", "k").unwrap();
+        let (file, warnings) = load_web_file(dir.path());
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let mut w = Vec::new();
+        let cfg = web_tools_config(dir.path(), &file, Some(&store), &mut w);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(
+            cfg.search.searxng_url.as_deref(),
+            Some("http://127.0.0.1:8080")
+        );
+        assert_eq!(cfg.search.brave_key.as_ref().unwrap().name(), "web/brave");
+        assert!(!cfg.search.duckduckgo);
+        assert_eq!(cfg.http.timeout, Duration::from_secs(7));
+        assert_eq!(cfg.http.connect_timeout, Duration::from_secs(3));
+        assert_eq!(cfg.http.max_bytes, 1_000_000);
+        assert_eq!(cfg.http.max_redirects, 2);
+        assert_eq!(
+            web_backend_summary(&cfg),
+            "searxng (http://127.0.0.1:8080) > brave"
+        );
+        let reg = ToolRegistry::new();
+        assert_eq!(register_web(dir.path(), &reg, Some(&store)), 5);
+    }
+
+    #[test]
+    fn malformed_web_toml_falls_back_with_a_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        for bad in [
+            "this is = = not toml",
+            "[search]
+unknown_key = 1
+",
+        ] {
+            std::fs::write(dir.path().join(WEB_FILE), bad).unwrap();
+            let (file, warnings) = load_web_file(dir.path());
+            assert_eq!(file, WebConfigFile::default());
+            assert_eq!(warnings.len(), 1, "{bad}");
+            assert!(warnings[0].contains("web.toml"), "{warnings:?}");
+            let reg = ToolRegistry::new();
+            assert_eq!(register_web(dir.path(), &reg, None), 5, "{bad}");
+        }
+    }
+
+    #[test]
+    fn unusable_web_toml_values_do_not_stop_registration() {
+        let dir = tempfile::tempdir().unwrap();
+        // A bad SearXNG URL fails the backend build: fall back to the defaults.
+        std::fs::write(
+            dir.path().join(WEB_FILE),
+            "[search]
+searxng_url = \"not a url\"
+",
+        )
+        .unwrap();
+        let reg = ToolRegistry::new();
+        assert_eq!(register_web(dir.path(), &reg, None), 5);
+
+        // A Brave key without a secret store is dropped with a warning.
+        std::fs::write(
+            dir.path().join(WEB_FILE),
+            "[search]
+brave_key = \"web/brave\"
+[http]
+timeout_secs = 0
+max_bytes = 99999999999
+",
+        )
+        .unwrap();
+        let (file, warnings) = load_web_file(dir.path());
+        assert_eq!(warnings.len(), 0);
+        let mut w = Vec::new();
+        let cfg = web_tools_config(dir.path(), &file, None, &mut w);
+        assert_eq!(w.len(), 3, "{w:?}");
+        assert!(cfg.search.brave_key.is_none());
+        assert_eq!(cfg.http.timeout, web_tools::HttpConfig::default().timeout);
+        assert_eq!(cfg.http.max_bytes, WEB_MAX_BYTES_CAP);
+        let reg = ToolRegistry::new();
+        assert_eq!(register_web(dir.path(), &reg, None), 5);
     }
 }
