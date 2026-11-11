@@ -419,6 +419,7 @@ pub(crate) struct PreparedLaunch {
 
 impl PreparedLaunch {
     /// `CreateProcess` the original executable. `ShellExecute` is the other route.
+    #[cfg(windows)]
     #[must_use]
     pub(crate) fn spawns_directly(&self) -> bool {
         self.direct
@@ -501,6 +502,7 @@ pub(crate) fn file_name_of(path: &str) -> &str {
 }
 
 /// `cmd.exe` is the interpreter when the association command starts with it.
+#[cfg(any(windows, test))]
 #[must_use]
 pub(crate) fn command_template_uses_cmd(template: &str) -> bool {
     let Some(token) = first_command_token(template) else {
@@ -512,6 +514,7 @@ pub(crate) fn command_template_uses_cmd(template: &str) -> bool {
 }
 
 /// A document (not an exe, batch file, or shortcut) may still be a `cmd.exe` association.
+#[cfg(windows)]
 #[must_use]
 pub(crate) fn needs_association_check(resolved_path: &str) -> bool {
     classify_file_name(file_name_of(resolved_path)) == LaunchKind::Document
@@ -662,11 +665,13 @@ fn is_shell_interpreter(file_name: &str) -> bool {
 
 /// Final path component is `cmd`, PowerShell, `pwsh`, `wscript`, or `cscript`,
 /// with or without `.exe`.
+#[cfg(windows)]
 #[must_use]
 pub(crate) fn file_name_is_shell_interpreter(path: &str) -> bool {
     is_shell_interpreter(&file_name_of(path).to_ascii_lowercase())
 }
 
+#[cfg(any(windows, test))]
 fn is_cmd_image(file_name: &str) -> bool {
     let lower = file_name.to_ascii_lowercase();
     lower == "cmd.exe" || lower == "cmd"
@@ -694,6 +699,7 @@ fn crt_parameters(args: &[String]) -> String {
         .join(" ")
 }
 
+#[cfg(any(windows, test))]
 fn first_command_token(template: &str) -> Option<String> {
     let trimmed = template.trim_start();
     if trimmed.is_empty() {
@@ -713,6 +719,7 @@ fn first_command_token(template: &str) -> Option<String> {
     }
 }
 
+#[cfg(any(windows, test))]
 fn expand_env_vars(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut rest = input;
