@@ -83,7 +83,7 @@ impl BotPreset {
         match self {
             Self::General => "You are a helpful general-purpose assistant.",
             Self::Browser => {
-                "You research topics on the web with the browser tools and cite your sources."
+                "You research topics on the web and cite your sources. Prefer web_search and web_extract to find and read pages; use the browser tools only when a page needs JavaScript, a login or interaction."
             }
             Self::Desktop => {
                 "You operate the user's computer carefully, step by step, asking before risky actions."
@@ -108,8 +108,8 @@ impl BotPreset {
             "workflow_*",
         ];
         match self {
-            Self::General => v.extend(["fs_read", "fs_list", "fs_search"]),
-            Self::Browser => v.push("browser_*"),
+            Self::General => v.extend(["fs_read", "fs_list", "fs_search", "web_*"]),
+            Self::Browser => v.extend(["web_*", "browser_*"]),
             Self::Desktop => v.extend(["desktop_*", "fs_*", "checkpoint_*"]),
         }
         v

@@ -540,6 +540,160 @@ async fn policy_deny_never_asks() {
     assert_eq!(env.storage.list_approvals(run).unwrap().len(), 0);
 }
 
+/// A loop whose registry holds the real web tools. No network is touched: no
+/// search backend is configured and the default SSRF policy refuses every URL
+/// used below before connecting.
+fn web_loop(env: &Env, fake: &Arc<Fake>, profile: BotProfile, config: LoopConfig) -> AgentLoop {
+    let registry = ToolRegistry::new();
+    let mut web = builtin_tools::web_tools::WebToolsConfig::default();
+    web.search.duckduckgo = false;
+    builtin_tools::register_web_tools(&registry, web).unwrap();
+    let lp = AgentLoop::new(
+        Arc::clone(&env.storage),
+        registry,
+        Providers::single(Arc::clone(fake) as Arc<dyn ChatProvider>),
+        config,
+    );
+    lp.add_profile(env.bot, profile);
+    lp
+}
+
+#[tokio::test]
+async fn web_search_runs_without_approval_under_the_default_policy() {
+    let env = setup();
+    let fake = Fake::new(vec![
+        calls(&[("c1", "web_search", json!({"query": "x"}))]),
+        text("done"),
+    ]);
+    let lp = web_loop(&env, &fake, profile(""), cfg(Policy::approve_destructive()));
+    let run = lp.run_turn(env.chat, "search").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(env.storage.list_approvals(run).unwrap().len(), 0);
+    // It ran (and failed offline: no backend), it was not parked.
+    assert!(tool_messages(&fake.request(1))[0].contains("no search backend"));
+}
+
+#[tokio::test]
+async fn web_fetch_asks_by_default_and_a_tool_grant_removes_the_prompt() {
+    let env = setup();
+    let url = json!({"url": "http://127.0.0.1:9/"});
+    for name in ["web_extract", "web_feed", "web_sitemap", "web_metadata"] {
+        let fake = Fake::new(vec![calls(&[("c1", name, url.clone())]), text("done")]);
+        let lp = web_loop(&env, &fake, profile(""), cfg(Policy::approve_destructive()));
+        let mut rx = lp.subscribe();
+        let run = lp.run_turn(env.chat, "read it").unwrap();
+        let Event::ApprovalNeeded(a) =
+            until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+        else {
+            unreachable!()
+        };
+        assert_eq!(a.tool_name, name);
+        lp.approve(a.call_id, ApprovalScope::Once, env.user)
+            .unwrap();
+        assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+        // Approved, so it ran; the SSRF policy still refuses the target.
+        assert!(tool_messages(&fake.request(1))[0].contains("blocked"));
+    }
+
+    // "Always allow this tool" for web_extract: the next call does not ask.
+    let fake = Fake::new(vec![
+        calls(&[("c1", "web_extract", url.clone())]),
+        text("one"),
+        calls(&[("c2", "web_extract", url.clone())]),
+        text("two"),
+    ]);
+    let lp = web_loop(&env, &fake, profile(""), cfg(Policy::approve_destructive()));
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "first").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    lp.approve(a.call_id, ApprovalScope::Always, env.user)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let run2 = lp.run_turn(env.chat, "second").unwrap();
+    assert_eq!(lp.wait(run2).await.unwrap(), RunState::Succeeded);
+    assert_eq!(
+        env.storage.list_approvals(run2).unwrap().len(),
+        0,
+        "a tool-level grant removes the prompt"
+    );
+    assert!(tool_messages(&fake.request(3))[0].contains("blocked"));
+}
+
+#[tokio::test]
+async fn browser_deny_still_denies_web_tools_and_write_browser_tools_still_ask() {
+    let env = setup();
+    let mut deny = Policy::approve_destructive();
+    deny.categories
+        .insert(PermissionCategory::Browser, Rule::new(Level::Deny));
+    let fake = Fake::new(vec![
+        calls(&[
+            ("c1", "web_extract", json!({"url": "http://127.0.0.1:9/"})),
+            ("c2", "web_search", json!({"query": "x"})),
+            ("c3", "web_feed", json!({"url": "http://127.0.0.1:9/"})),
+            ("c4", "web_sitemap", json!({"url": "http://127.0.0.1:9/"})),
+            ("c5", "web_metadata", json!({"url": "http://127.0.0.1:9/"})),
+        ]),
+        text("stopped"),
+    ]);
+    let lp = web_loop(&env, &fake, profile(""), cfg(deny));
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let msgs = tool_messages(&fake.request(1));
+    assert_eq!(msgs.len(), 5);
+    for m in &msgs {
+        assert!(m.contains("Permission denied"), "{m}");
+    }
+
+    // A mutating browser tool is unchanged: it still parks for approval.
+    let click = {
+        let mut t = tool("browser_click", Effect::Write, "clicked");
+        t.spec.category = PermissionCategory::Browser;
+        Arc::new(t)
+    };
+    let fake = Fake::new(vec![
+        calls(&[("c1", "browser_click", json!({}))]),
+        text("fine"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&click)],
+        profile(""),
+        cfg(Policy::approve_destructive()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "click").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(a.tool_name, "browser_click");
+    assert_eq!(click.count.load(Ordering::SeqCst), 0);
+    lp.cancel(run).unwrap();
+}
+
+#[test]
+fn a_tool_allow_list_without_web_hides_the_web_tools() {
+    let hidden = profile(
+        "[tools]
+allow = [\"fs_*\"]
+",
+    );
+    let shown = profile(
+        "[tools]
+allow = [\"fs_*\", \"web_*\"]
+",
+    );
+    for name in builtin_tools::web_tools::TOOL_NAMES {
+        assert!(!hidden.tool_visible(name), "{name}");
+        assert!(shown.tool_visible(name), "{name}");
+    }
+}
+
 #[tokio::test]
 async fn independent_reads_run_concurrently_in_one_step() {
     let env = setup();
