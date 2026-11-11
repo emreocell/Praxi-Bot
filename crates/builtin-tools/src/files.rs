@@ -1768,6 +1768,7 @@ fn cross_device(err: &io::Error) -> bool {
 struct MoveTransaction<'a, F> {
     sh: &'a Shared,
     rename: F,
+    overwrite: bool,
     renames: Vec<(PathBuf, PathBuf)>,
     discard: Vec<PathBuf>,
     stages: Vec<PathBuf>,
@@ -1776,10 +1777,11 @@ struct MoveTransaction<'a, F> {
 }
 
 impl<'a, F: Fn(&Path, &Path) -> io::Result<()>> MoveTransaction<'a, F> {
-    fn new(sh: &'a Shared, rename: F) -> Self {
+    fn new(sh: &'a Shared, rename: F, overwrite: bool) -> Self {
         Self {
             sh,
             rename,
+            overwrite,
             renames: Vec::new(),
             discard: Vec::new(),
             stages: Vec::new(),
@@ -1822,6 +1824,17 @@ impl<'a, F: Fn(&Path, &Path) -> io::Result<()>> MoveTransaction<'a, F> {
             Ok(_) => {}
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
             Err(err) => return Err(err),
+        }
+        if !self.overwrite {
+            // Enforced where the destination is displaced: it can appear
+            // after the preflight, while the checkpoint is being taken.
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!(
+                    "{} already exists; set overwrite to replace it",
+                    to.display()
+                ),
+            ));
         }
         if entry_is_protected(to, &self.sh.data_dir, &self.sh.grants)? {
             return Err(deny_io("destination contains a protected file"));
@@ -1973,9 +1986,10 @@ fn relocate_safely(
     from: &Path,
     to: &Path,
     rename: impl Fn(&Path, &Path) -> io::Result<()>,
+    overwrite: bool,
 ) -> io::Result<Vec<String>> {
     with_checkpoint_gate(sh, || {
-        let mut tx = MoveTransaction::new(sh, rename);
+        let mut tx = MoveTransaction::new(sh, rename, overwrite);
         if let Err(err) = tx.move_path(from, to) {
             let rollback = tx.rollback();
             if rollback.is_empty() {
@@ -2308,8 +2322,9 @@ impl Shared {
             if !skipped.is_empty() {
                 // The undo checkpoint would be incomplete, so the operation
                 // would destroy bytes that cannot be brought back.
+                self.checkpoints.discard(&id);
                 return Err(exec_err(format!(
-                    "{op} was not run and nothing changed: {} item(s) cannot be restored if it proceeds because they could not be saved in checkpoint {id}: {}",
+                    "{op} was not run and nothing changed: {} item(s) cannot be restored if it proceeds because they could not be saved in an undo checkpoint: {}",
                     skipped.len(),
                     skipped.join("; ")
                 )));
@@ -2427,7 +2442,7 @@ fn do_move_with(
                 "move source and destination are the same path or overlapping directories",
             ));
         }
-        let warnings = relocate_safely(sh, &from, &to, rename)
+        let warnings = relocate_safely(sh, &from, &to, rename, i.overwrite)
             .map_err(|err| io_to_tool(&err, "move failed"))?;
         let mut result = format!("moved {} to {} (checkpoint {cp}){note}", i.from, i.to);
         for warning in warnings {
@@ -3225,6 +3240,105 @@ mod tests {
             canonical_data_dir(&short).display(),
             long.display()
         );
+    }
+
+    #[test]
+    fn destination_created_after_preflight_is_not_displaced_without_overwrite() {
+        // Review of 34e5879: `overwrite` must hold at the point of mutation,
+        // not only in the preflight that runs before a slow checkpoint.
+        let _reset = crate::checkpoint::test_hooks::Reset;
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let from = work.path().join("source.txt");
+        let to = work.path().join("destination.txt");
+        fs::write(&from, "source bytes").unwrap();
+        let late = to.clone();
+        crate::checkpoint::test_hooks::BEFORE_FILE_COPY.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move |_| {
+                if !late.exists() {
+                    fs::write(&late, "late arrival").unwrap();
+                }
+            }));
+        });
+        let err = do_move(
+            &sh,
+            "late",
+            &MoveIn {
+                from: from.display().to_string(),
+                to: to.display().to_string(),
+                overwrite: false,
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("already exists"), "{err}");
+        assert_eq!(fs::read_to_string(&from).unwrap(), "source bytes");
+        assert_eq!(fs::read_to_string(&to).unwrap(), "late arrival");
+        assert_eq!(fs::read_dir(work.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn blocked_operation_leaves_no_checkpoint_behind() {
+        let _reset = crate::checkpoint::test_hooks::Reset;
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let proj = work.path().join("proj");
+        fs::create_dir(&proj).unwrap();
+        fs::write(proj.join("keep.txt"), "keep").unwrap();
+        fs::write(proj.join("offline.dat"), "cloud only").unwrap();
+        crate::checkpoint::test_hooks::FORCE_SKIP
+            .with(|slot| *slot.borrow_mut() = Some("offline".into()));
+        for _ in 0..2 {
+            do_delete(
+                &sh,
+                "blocked",
+                &DeleteIn {
+                    path: proj.display().to_string(),
+                    recursive: true,
+                },
+            )
+            .unwrap_err();
+        }
+        assert_eq!(sh.checkpoints.list("blocked").unwrap().len(), 0);
+        let run_dir = data.path().join("checkpoints").join("blocked");
+        let left = fs::read_dir(&run_dir).map_or(0, Iterator::count);
+        assert_eq!(left, 0, "blocked operations left checkpoint directories");
+        assert_eq!(fs::read_to_string(proj.join("keep.txt")).unwrap(), "keep");
+    }
+
+    #[test]
+    fn protected_files_do_not_count_as_skipped_for_delete_and_move() {
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        for (name, moving) in [("del", false), ("mov", true)] {
+            let proj = work.path().join(name);
+            fs::create_dir(&proj).unwrap();
+            fs::write(proj.join(".env"), "SECRET").unwrap();
+            fs::write(proj.join("a.txt"), "a").unwrap();
+            fs::write(proj.join("b.txt"), "b").unwrap();
+            if moving {
+                let dest = work.path().join("moved");
+                do_move(&sh, name, &move_input(&proj, &dest)).unwrap();
+                assert_eq!(fs::read_to_string(dest.join("a.txt")).unwrap(), "a");
+            } else {
+                do_delete(
+                    &sh,
+                    name,
+                    &DeleteIn {
+                        path: proj.display().to_string(),
+                        recursive: true,
+                    },
+                )
+                .unwrap();
+                assert!(!proj.join("a.txt").exists());
+            }
+            assert_eq!(fs::read_to_string(proj.join(".env")).unwrap(), "SECRET");
+            let cps = sh.checkpoints.list(name).unwrap();
+            assert_eq!(cps.len(), 1);
+            assert!(cps[0].skipped.is_empty(), "{:?}", cps[0].skipped);
+        }
     }
 
     #[test]
