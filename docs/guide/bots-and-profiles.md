@@ -67,12 +67,17 @@ informational in the current version: the loop runs on `executor`. The
 
 ### Permissions in a profile
 
-- Bots created by `bot setup` with the General preset get `mcp:*` and `email_*`
-  in `[tools] allow`, so they can reach MCP servers and email. This only makes
-  the tools visible: MCP tools and `email_send` still ask for approval under the
-  default policy. Profiles saved earlier are not changed; to give such a bot the
-  same reach, add `"mcp:*"` and `"email_*"` to its `[tools] allow` list. Which
-  servers a bot may use is set on the server (`bots`), see the MCP servers guide.
+- Bots created by `bot setup` with the General preset get `mcp:*` in
+  `[tools] allow`, so they can reach MCP servers. This only makes the tools
+  visible: MCP tools still ask for approval under the default policy. Profiles
+  saved earlier are not changed; add `"mcp:*"` to a bot's `[tools] allow` list
+  to give it the same reach. Which servers a bot may use is set on the server
+  (`bots`), see the MCP servers guide.
+- Email is not on by default. The `email_list_folders`, `email_search` and
+  `email_read` tools only read, so they run without a prompt, and together with
+  `web_*` a malicious page could make the bot read your mailbox into a web
+  search. To opt in a bot, add `"email_*"` to its `[tools] allow` list (sending
+  with `email_send` still asks) and keep that bot's web tools off or on ask.
 - `preset` picks a starting policy. The four presets are explained in
   [Chatting and approvals](chatting-and-approvals.md#permission-levels).
 - `[permissions.categories.<name>.level]` then overrides single categories
@@ -103,6 +108,7 @@ wildcards. The built-in tool groups:
 | Files | `fs_read`, `fs_list`, `fs_search`, `fs_write`, `fs_edit`, `fs_move`, `fs_delete`, `checkpoint_list`, `checkpoint_restore` |
 | Shell | `shell_run` |
 | Browser | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_select`, `browser_press`, `browser_scroll`, `browser_wait`, `browser_back`, `browser_tabs`, `browser_screenshot`, `browser_eval` |
+| Web (read-only, no browser) | `web_search`, `web_extract`, `web_feed`, `web_sitemap`, `web_metadata` (see [Web tools](web.md)) |
 | Desktop (Windows) | `desktop_list_apps`, `desktop_launch`, `desktop_get_state`, `desktop_click`, `desktop_type`, `desktop_set_value`, `desktop_key`, `desktop_scroll`, `desktop_drag` |
 | Scripts | `script_run` |
 | Agent-internal | `ask_user`, `todo_write`, `spawn_subagent` |

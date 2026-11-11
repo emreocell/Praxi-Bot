@@ -83,7 +83,7 @@ impl BotPreset {
         match self {
             Self::General => "You are a helpful general-purpose assistant.",
             Self::Browser => {
-                "You research topics on the web with the browser tools and cite your sources."
+                "You research topics on the web and cite your sources. Prefer web_search and web_extract to find and read pages; use the browser tools only when a page needs JavaScript, a login or interaction."
             }
             Self::Desktop => {
                 "You operate the user's computer carefully, step by step, asking before risky actions."
@@ -95,10 +95,13 @@ impl BotPreset {
     ///
     /// Every preset keeps the agent-internal tools (questions, todos,
     /// sub-agents, skills, workflows, tool discovery) so the loop works.
-    /// The General preset also reaches MCP servers (`mcp:*`) and email
-    /// (`email_*`).  Stored profiles are not rewritten: to give an existing bot
-    /// the same reach, add `"mcp:*"` and `"email_*"` to `[tools] allow` of its
-    /// profile (for example in the bot's edit form or the profile TOML).
+    /// The General preset also reaches MCP servers (`mcp:*`); MCP tools still
+    /// ask by default.  Email (`email_*`) is deliberately opt-in per bot: its
+    /// list / search / read tools are `Read` and run without a prompt, and
+    /// together with `web_*` an injected page could read the mailbox into a
+    /// search query.  Stored profiles are not rewritten: to give an existing
+    /// bot MCP reach add `"mcp:*"` to `[tools] allow` of its profile; add
+    /// `"email_*"` only if you accept that.
     #[must_use]
     pub fn tool_allow(self) -> Vec<&'static str> {
         let mut v = vec![
@@ -112,12 +115,13 @@ impl BotPreset {
             "workflow_*",
         ];
         match self {
-            // `mcp:*` and `email_*` only make those tools reachable; every MCP
-            // tool is `Destructive` / `Accounts` unless its server is trusted and
-            // `email_send` is `Destructive`, so the permission policy still asks.
-            // Which bots may use which MCP server is the server's `bots` list.
-            Self::General => v.extend(["fs_read", "fs_list", "fs_search", "mcp:*", "email_*"]),
-            Self::Browser => v.push("browser_*"),
+            // `mcp:*` only makes MCP tools reachable: every MCP tool is
+            // `Destructive` / `Accounts` unless its server is trusted, so the
+            // permission policy still asks.  Which bots may use which server is
+            // the server's `bots` list.  Email is NOT here: the `email_*` read
+            // tools are `Read` and run without a prompt (see `tool_allow` docs).
+            Self::General => v.extend(["fs_read", "fs_list", "fs_search", "web_*", "mcp:*"]),
+            Self::Browser => v.extend(["web_*", "browser_*"]),
             Self::Desktop => v.extend(["desktop_*", "fs_*", "checkpoint_*"]),
         }
         v
@@ -228,4 +232,18 @@ pub fn bot_config(
         "permissions": { "preset": perm.id() },
         "tools": { "allow": preset.tool_allow() },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_general_reaches_mcp_and_no_preset_exposes_email() {
+        for p in BotPreset::ALL {
+            let allow = p.tool_allow();
+            assert_eq!(allow.contains(&"mcp:*"), p == BotPreset::General, "{p:?}");
+            assert!(!allow.iter().any(|g| g.starts_with("email")), "{p:?}");
+        }
+    }
 }

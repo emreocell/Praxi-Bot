@@ -602,14 +602,17 @@ impl TurnExecutor {
             .and_then(|s| s.input["text"].as_str())
             .map(str::to_owned)
             .or_else(|| ctx.sub.as_ref().map(|s| s.task.clone()));
-        let block = index.prompt_block_suggesting(
-            &skills::SkillContext {
-                domain: hints.domain,
-                app: hints.app,
-                text,
-            },
-            suggested,
-        );
+        let skill_ctx = skills::SkillContext {
+            domain: hints.domain,
+            app: hints.app,
+            text,
+        };
+        // Per-bot resolver: learned skills of this bot (and only this bot) are
+        // listed next to the shared and bundled ones. An unusable bot id falls
+        // back to the shared view, the same scope a bot-less caller gets.
+        let block = index
+            .prompt_block_for_bot(Some(&ctx.bot_id.to_string()), &skill_ctx, suggested)
+            .unwrap_or_else(|_| index.prompt_block_suggesting(&skill_ctx, suggested));
         (!block.is_empty()).then_some(block)
     }
 

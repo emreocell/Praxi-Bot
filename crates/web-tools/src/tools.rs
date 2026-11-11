@@ -1,8 +1,15 @@
 //! `Tool` implementations and the registration entry points.
 //!
-//! Conventions follow `builtin-tools` (and task 048's `web_fetch`): effect
-//! `Write`, permission category `Browser`, every output prefixed with an
-//! "untrusted external content" notice, large text spilled to a file.
+//! Conventions follow `builtin-tools`: permission category `Browser`, every
+//! output prefixed with an "untrusted external content" notice, large text
+//! spilled to a file. Effects are split by destination:
+//!
+//! - `web_search` is `Read`: queries only go to the configured search
+//!   providers, so it runs without a per-call prompt under the default policy.
+//! - `web_extract`, `web_feed`, `web_sitemap` and `web_metadata` are `Write`:
+//!   they contact an arbitrary host chosen by the model, so (like
+//!   `browser_open`) they ask unless the user grants the tool to a bot. Every
+//!   URL and redirect hop is checked by the SSRF [`UrlPolicy`] either way.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -33,6 +40,22 @@ pub const TOOL_NAMES: &[&str] = &[
     "web_sitemap",
     "web_metadata",
 ];
+
+/// Longest URL a web tool accepts, in characters. Damps bulk data exfiltration
+/// through URLs.
+pub const MAX_URL_CHARS: usize = 2048;
+/// Longest `web_search` query, in characters.
+pub const MAX_QUERY_CHARS: usize = 400;
+
+fn check_len(what: &str, v: &str, max: usize) -> Result<(), ToolError> {
+    let n = v.chars().count();
+    if n > max {
+        return Err(ToolError::InvalidInput(format!(
+            "{what} is too long ({n} characters, limit {max})"
+        )));
+    }
+    Ok(())
+}
 
 /// Everything needed to build the web tools.
 #[derive(Clone)]
@@ -101,7 +124,11 @@ pub fn tools(cfg: WebToolsConfig) -> Result<Vec<Arc<dyn Tool>>, WebError> {
                 name: name.to_string(),
                 description: desc.to_string(),
                 input_schema: schema,
-                effect: Effect::Write,
+                effect: if matches!(kind, Kind::Search) {
+                    Effect::Read
+                } else {
+                    Effect::Write
+                },
                 category: PermissionCategory::Browser,
                 platforms: vec![Platform::All],
             },
@@ -112,7 +139,7 @@ pub fn tools(cfg: WebToolsConfig) -> Result<Vec<Arc<dyn Tool>>, WebError> {
     Ok(vec![
         make(
             "web_search",
-            "Search the web (SearXNG, Brave or DuckDuckGo backends) and return titles, URLs and snippets.",
+            "Search the web (SearXNG, Brave or DuckDuckGo backends) and return titles, URLs and snippets. Prefer this over the browser for finding pages; open results with web_extract.",
             json!({"type":"object","required":["query"],"properties":{
                 "query":{"type":"string","description":"Search query"},
                 "limit":{"type":"integer","minimum":1,"maximum":25,"description":"Max results (default 10)"},
@@ -123,7 +150,7 @@ pub fn tools(cfg: WebToolsConfig) -> Result<Vec<Arc<dyn Tool>>, WebError> {
         ),
         make(
             "web_extract",
-            "Fetch a URL over HTTP (no browser) and return its main content as Markdown: readability extraction, tables, links.",
+            "Fetch a URL over HTTP and return the page as readable Markdown (main content, tables, links). Use this to read a page. It is fast and needs no browser; use the browser tools only when the page needs JavaScript, a login or interaction.",
             json!({"type":"object","required":["url"],"properties":{
                 "url":{"type":"string"},
                 "include_links":{"type":"boolean","description":"Keep [text](url) links in the Markdown (default true)"},
@@ -337,6 +364,7 @@ struct UrlLimitIn {
 impl WebTool {
     async fn search(&self, input: Value) -> Result<ToolOutput, ToolError> {
         let i: SearchIn = parse(input)?;
+        check_len("query", &i.query, MAX_QUERY_CHARS)?;
         let q = SearchQuery {
             limit: i.limit.unwrap_or(10),
             language: i.language,
@@ -377,6 +405,7 @@ impl WebTool {
 
     async fn extract(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
         let i: ExtractIn = parse(input)?;
+        check_len("url", &i.url, MAX_URL_CHARS)?;
         let page = self
             .shared
             .fetcher
@@ -426,6 +455,7 @@ impl WebTool {
 
     async fn feed(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
         let i: UrlLimitIn = parse(input)?;
+        check_len("url", &i.url, MAX_URL_CHARS)?;
         let page = self
             .shared
             .fetcher
@@ -449,6 +479,7 @@ impl WebTool {
 
     async fn sitemap(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
         let i: UrlLimitIn = parse(input)?;
+        check_len("url", &i.url, MAX_URL_CHARS)?;
         let page = self
             .shared
             .fetcher
@@ -472,6 +503,7 @@ impl WebTool {
 
     async fn metadata(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
         let i: UrlLimitIn = parse(input)?;
+        check_len("url", &i.url, MAX_URL_CHARS)?;
         let page = self
             .shared
             .fetcher

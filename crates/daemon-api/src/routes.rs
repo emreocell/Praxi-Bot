@@ -1266,35 +1266,39 @@ pub(crate) async fn update_schedule(
         return Err(bad_schedule("the bot of a schedule cannot be changed"));
     }
     let p = schedule_parts(&s, &input)?;
-    let was_enabled = sc.enabled;
-    let enabled = input.enabled.unwrap_or(sc.enabled);
-    let rearm = p.spec != sc.spec || (enabled && !sc.enabled);
     input.name.trim().clone_into(&mut sc.name);
     sc.chat_id = p.chat_id;
     sc.payload = p.payload;
     sc.misfire_policy = p.policy;
-    sc.enabled = enabled;
-    if !enabled {
-        sc.next_run_at = None;
-    } else if rearm || sc.next_run_at.is_none() {
-        sc.next_run_at = match &p.spec {
-            ScheduleSpec::At { unix_ms } => Some(*unix_ms),
-            other => other.next_after(now_ms())?,
-        };
-    }
     sc.spec = p.spec;
     let store = s.schedule_store()?;
-    store.update(&sc)?;
+    // Run progress may have changed after schedule_of_user. The store reads
+    // it again and computes any re-arm under the same write transaction.
+    let (sc, was_enabled) = persist_schedule_edit(&store, &sc, input.enabled, now_ms())?;
     apply_webhook(&store, sc.id, input.webhook_secret.as_deref())?;
     s.publish_schedule_changed(
         sc.id.0,
-        if enabled == was_enabled {
+        if sc.enabled == was_enabled {
             ScheduleChangeKind::Updated
         } else {
             ScheduleChangeKind::Toggled
         },
     );
     Ok(Json(dto_of(&s, &sc)?))
+}
+
+/// Persist the PUT definition without trusting the route's runtime snapshot.
+/// Keeping this boundary separate also allows deterministic read/write race
+/// tests without a process-global hook or a real clock/sleep.
+fn persist_schedule_edit(
+    store: &scheduler::ScheduleStore,
+    definition: &Schedule,
+    enabled: Option<bool>,
+    now: i64,
+) -> Result<(Schedule, bool), ApiError> {
+    store
+        .update_definition_and_rearm(definition, enabled, now)?
+        .ok_or_else(|| ApiError::not_found(format!("schedule {}", definition.id)))
 }
 
 /// Delete a schedule (and its webhook trigger).  Runs it already started stay.
@@ -1452,4 +1456,91 @@ pub(crate) async fn telegram_pair_code(
         .create_pair_code()
         .map(Json)
         .map_err(ApiError::conflict)
+}
+
+#[cfg(test)]
+mod schedule_update_tests {
+    use std::sync::{Arc, Barrier};
+
+    use super::*;
+
+    fn schedule(spec: ScheduleSpec) -> Schedule {
+        Schedule::new(
+            BotId::new(),
+            None,
+            "before",
+            spec,
+            Payload::AgentPrompt {
+                text: "before".into(),
+            },
+            MisfirePolicy::RunOnce,
+            0,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn route_edit_preserves_firing_between_read_and_write() {
+        let store = Arc::new(scheduler::ScheduleStore::open_in_memory().unwrap());
+        let original = schedule(ScheduleSpec::Every { seconds: 60 });
+        store.insert(&original).unwrap();
+        // Exactly the snapshot read by update_schedule before validation.
+        let mut stale = store.get(original.id).unwrap().unwrap();
+        stale.name = "after".into();
+        stale.payload = Payload::AgentPrompt {
+            text: "after".into(),
+        };
+        let read = Barrier::new(2);
+        let fired = Barrier::new(2);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                read.wait();
+                store
+                    .record_run_intent(original.id, 60_000, Some(120_000))
+                    .unwrap();
+                fired.wait();
+            });
+            read.wait();
+            fired.wait();
+            let (fresh, _) = persist_schedule_edit(&store, &stale, None, 60_000).unwrap();
+            assert_eq!(fresh.name, "after");
+            assert_eq!(fresh.payload, stale.payload);
+            assert_eq!(fresh.last_run_at, Some(60_000));
+            assert_eq!(fresh.next_run_at, Some(120_000));
+            assert!(
+                store.list_due(60_000).unwrap().is_empty(),
+                "must not re-fire"
+            );
+            let dto = serde_json::to_value(schedule_dto(&fresh, false)).unwrap();
+            assert!(dto.get("revision").is_none());
+        });
+    }
+
+    #[test]
+    fn route_title_edit_does_not_rearm_consumed_one_shot() {
+        let store = scheduler::ScheduleStore::open_in_memory().unwrap();
+        let mut stale = schedule(ScheduleSpec::At { unix_ms: 1_000 });
+        store.insert(&stale).unwrap();
+        store.record_run_intent(stale.id, 1_000, None).unwrap();
+        stale.name = "renamed".into();
+        let (fresh, _) = persist_schedule_edit(&store, &stale, None, 2_000).unwrap();
+        assert_eq!(fresh.last_run_at, Some(1_000));
+        assert_eq!(fresh.next_run_at, None);
+        assert_eq!(store.list_due(2_000).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn route_edit_uses_current_enabled_state_and_does_not_resurrect_delete() {
+        let store = scheduler::ScheduleStore::open_in_memory().unwrap();
+        let stale = schedule(ScheduleSpec::Every { seconds: 60 });
+        store.insert(&stale).unwrap();
+        store.set_enabled(stale.id, false, None).unwrap();
+        let (fresh, was_enabled) = persist_schedule_edit(&store, &stale, None, 10).unwrap();
+        assert!(!was_enabled);
+        assert!(!fresh.enabled);
+        assert_eq!(fresh.next_run_at, None);
+        store.delete(stale.id).unwrap();
+        assert!(persist_schedule_edit(&store, &stale, Some(true), 20).is_err());
+        assert!(store.get(stale.id).unwrap().is_none());
+    }
 }
