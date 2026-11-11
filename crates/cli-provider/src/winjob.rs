@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use process_wrap::tokio::{ChildWrapper, CommandWrap, CommandWrapper};
 use windows::Win32::{
-    Foundation::{CloseHandle, HANDLE},
+    Foundation::{CloseHandle, DUPLICATE_HANDLE_OPTIONS, DuplicateHandle, HANDLE},
     System::{
         Diagnostics::ToolHelp::{
             CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
@@ -20,9 +20,11 @@ use windows::Win32::{
             JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
             SetInformationJobObject, TerminateJobObject,
         },
+        SystemServices::{JOB_OBJECT_QUERY, JOB_OBJECT_TERMINATE},
         Threading::{
-            CREATE_NO_WINDOW, CREATE_SUSPENDED, OpenProcess, OpenThread,
-            PROCESS_QUERY_LIMITED_INFORMATION, ResumeThread, THREAD_SUSPEND_RESUME,
+            CREATE_NO_WINDOW, CREATE_SUSPENDED, GetCurrentProcess, OpenProcess, OpenThread,
+            PROCESS_QUERY_LIMITED_INFORMATION, ResumeThread, SYNCHRONIZATION_SYNCHRONIZE,
+            THREAD_SUSPEND_RESUME,
         },
     },
 };
@@ -81,22 +83,22 @@ impl SharedJob {
         self.lock().as_ref().map(OwnedHandle::raw)
     }
 
-    fn publish(&self, owned: OwnedHandle) {
+    /// Assign exactly one suspended root, then discard assignment/set rights.
+    /// Descendants inherit membership; a later unrelated root cannot join.
+    fn assign(&self, process: HANDLE) -> Result<()> {
         let mut guard = self.lock();
-        if guard.is_none() {
-            *guard = Some(owned);
+        if guard.is_some() {
+            return Err(Error::other("turn job already has a root process"));
         }
-    }
-
-    /// Create the kill-on-close job once, then return its handle.
-    fn ensure(&self) -> Result<HANDLE> {
-        if let Some(handle) = self.raw() {
-            return Ok(handle);
-        }
-        let owned = create_kill_on_close_job()?;
-        let handle = owned.raw();
-        self.publish(owned);
-        Ok(handle)
+        let full = create_kill_on_close_job()?;
+        // SAFETY: both handles are open; the caller has not resumed the child.
+        unsafe { AssignProcessToJobObject(full.raw(), process) }.map_err(Error::other)?;
+        let reduced = reduce_job_handle(&full)?;
+        // Keep the duplicate alive before closing the last all-access handle:
+        // kill-on-close must not fire between assignment and publication.
+        drop(full);
+        *guard = Some(reduced);
+        Ok(())
     }
 
     pub(crate) fn contains(&self, pid: u32) -> bool {
@@ -146,18 +148,9 @@ impl CommandWrapper for KillOnCloseJob {
             return Err(Error::other("child has no process handle"));
         };
         let process = HANDLE(borrowed.as_raw_handle());
-        let job = match self.job.ensure() {
-            Ok(job) => job,
-            Err(err) => {
-                let _ = inner.start_kill();
-                return Err(err);
-            }
-        };
-        // SAFETY: `process` is the suspended child and `job` is the turn job.
-        if let Err(err) = unsafe { AssignProcessToJobObject(job, process) } {
-            let _ = self.job.terminate();
+        if let Err(err) = self.job.assign(process) {
             let _ = inner.start_kill();
-            return Err(Error::other(err));
+            return Err(err);
         }
         let Some(pid) = inner.id() else {
             let _ = self.job.terminate();
@@ -244,6 +237,28 @@ fn create_kill_on_close_job() -> Result<OwnedHandle> {
     Ok(owned)
 }
 
+/// Retain only membership queries, whole-tree termination, and waiting.
+fn reduce_job_handle(full: &OwnedHandle) -> Result<OwnedHandle> {
+    let access = JOB_OBJECT_QUERY | JOB_OBJECT_TERMINATE | SYNCHRONIZATION_SYNCHRONIZE.0;
+    let mut reduced = HANDLE::default();
+    // SAFETY: the pseudo process handle is valid in this process, `full` is
+    // owned, and the output is initialized. No inheritance or SAME_ACCESS.
+    unsafe {
+        let process = GetCurrentProcess();
+        DuplicateHandle(
+            process,
+            full.raw(),
+            process,
+            &raw mut reduced,
+            access,
+            false,
+            DUPLICATE_HANDLE_OPTIONS(0),
+        )
+    }
+    .map_err(Error::other)?;
+    Ok(OwnedHandle(reduced))
+}
+
 fn process_in_job(pid: u32, job: HANDLE) -> bool {
     if pid == 0 || job.is_invalid() {
         return false;
@@ -305,5 +320,98 @@ fn resume_process(pid: u32) -> Result<()> {
         Ok(())
     } else {
         Err(Error::other("no suspended thread of the child was resumed"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::windows::process::CommandExt;
+    use windows::Win32::Foundation::ERROR_ACCESS_DENIED;
+    use windows::Win32::System::JobObjects::QueryInformationJobObject;
+
+    /// An inert suspended test harness: it cannot run tests or outlive this scope.
+    struct SuspendedChild(std::process::Child);
+    impl SuspendedChild {
+        fn new() -> Self {
+            Self(
+                std::process::Command::new(std::env::current_exe().unwrap())
+                    .arg("--list")
+                    .creation_flags((CREATE_SUSPENDED | CREATE_NO_WINDOW).0)
+                    .spawn()
+                    .unwrap(),
+            )
+        }
+        fn handle(&self) -> HANDLE {
+            HANDLE(self.0.as_raw_handle())
+        }
+    }
+    impl Drop for SuspendedChild {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    #[tokio::test]
+    async fn retained_job_cannot_assign_or_change_limits_but_can_query_and_terminate() {
+        let job = SharedJob::new();
+        let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
+        command.arg("--list").kill_on_drop(true);
+        let mut wrapped = crate::detect::isolate(command, job.clone());
+        let mut root = wrapped.spawn().unwrap();
+        let handle = job.raw().expect("published turn job");
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        let len = u32::try_from(std::mem::size_of_val(&info)).unwrap();
+        // SAFETY: live job and output with the documented size.
+        unsafe {
+            QueryInformationJobObject(
+                Some(handle),
+                JobObjectExtendedLimitInformation,
+                (&raw mut info).cast(),
+                len,
+                None,
+            )
+        }
+        .expect("query access retained");
+        assert_eq!(
+            info.BasicLimitInformation.LimitFlags,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        );
+        // SAFETY: the same valid structure; this operation must be denied.
+        let set = unsafe {
+            SetInformationJobObject(
+                handle,
+                JobObjectExtendedLimitInformation,
+                (&raw const info).cast(),
+                len,
+            )
+        };
+        assert_eq!(set.unwrap_err().code(), ERROR_ACCESS_DENIED.to_hresult());
+        let other = SuspendedChild::new();
+        // SAFETY: a disposable suspended child, never the test runner itself.
+        let assigned = unsafe { AssignProcessToJobObject(handle, other.handle()) };
+        assert_eq!(
+            assigned.unwrap_err().code(),
+            ERROR_ACCESS_DENIED.to_hresult()
+        );
+        job.terminate().expect("terminate access retained");
+        tokio::time::timeout(std::time::Duration::from_secs(10), root.wait())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[test]
+    fn assignment_is_single_use_and_does_not_kill_the_existing_root() {
+        let first = SuspendedChild::new();
+        let second = SuspendedChild::new();
+        let job = SharedJob::new();
+        job.assign(first.handle()).unwrap();
+        assert!(job.contains(first.0.id()));
+        assert!(job.assign(second.handle()).is_err());
+        assert!(!job.contains(second.0.id()));
+        assert!(job.contains(first.0.id()));
+        job.terminate().unwrap();
     }
 }
