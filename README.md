@@ -68,7 +68,7 @@ sidecar). No terminal is required:
 
 ## Build
 
-Requirements: Rust 1.88+, MSVC build tools (Windows) or a standard C toolchain
+Requirements: Rust 1.89+, MSVC build tools (Windows) or a standard C toolchain
 (Linux/macOS), Node 24+, and pnpm 10+.
 
 ```sh

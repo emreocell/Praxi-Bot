@@ -753,6 +753,28 @@ async fn duplicates_unlisted_files_and_entries_after_manifest_rejected() {
 }
 
 #[tokio::test]
+async fn sqlite_sidecar_entries_are_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    database(dir.path(), false);
+    let entries = unpack(&bundle(dir.path()).await);
+    for sidecar in [
+        "bot.db-wal",
+        "bot.db-shm",
+        "bot.db-journal",
+        "schedules.db-wal",
+        "memory.db-shm",
+    ] {
+        let mut malformed = entries.clone();
+        malformed.insert(0, (sidecar.into(), b"crafted".to_vec()));
+        let error = rejected(&pack(&malformed), ImportOptions::default()).await;
+        assert!(
+            matches!(&error, ImportError::Invalid(msg) if msg.contains("allowlist")),
+            "{sidecar}: {error:?}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn all_none_and_missing_secret_selection() {
     let dir = tempfile::tempdir().unwrap();
     database(dir.path(), false);
