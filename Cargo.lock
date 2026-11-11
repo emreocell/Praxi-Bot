@@ -868,6 +868,7 @@ dependencies = [
  "secret-store",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "storage",
  "tempfile",
  "tokio",
