@@ -100,10 +100,10 @@ pub fn tools(index: &SkillIndex) -> Vec<Arc<dyn Tool>> {
             Op::Publish,
             mk_spec(
                 "skill_publish",
-                "Publish this bot's skill to the shared scope, where other bots can read it. Requires write approval. A different shared skill is kept unless replace is explicitly true. Example: {\"name\":\"my-site\"}",
+                "Publish this bot's skill to the shared scope, where other bots can read it. Requires write approval. A different shared skill is kept unless replace is explicitly true. A name that matches a built-in skill is refused unless replace is true, which replaces the built-in skill for all bots. Example: {\"name\":\"my-site\"}",
                 json!({"type":"object","properties":{
                     "name":{"type":"string","description":"Name of a skill in this bot's own scope."},
-                    "replace":{"type":"boolean","default":false,"description":"Explicitly replace a different shared skill."}
+                    "replace":{"type":"boolean","default":false,"description":"Explicitly replace a different shared skill, or a built-in skill (for all bots)."}
                 },"required":["name"]}),
                 Effect::Write,
                 PermissionCategory::Fs,

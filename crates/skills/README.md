@@ -57,26 +57,26 @@ that a directory rename can overwrite a nonempty destination. Windows symlink
 fixtures print a skip note if the runner lacks symlink privilege; the locked-file
 replacement regression needs no symlink privilege.
 
-## Remaining caller integration
+## Prompt integration
 
 `SkillIndex::prompt_block_for_bot(bot_id, context, suggested)` builds prompt
-suggestions through exactly the same resolver as the tools. Its isolation is
-covered by a regression test. The current `agent-core::exec::skills_block` has
-no bot id in its `prompt_block_suggesting` call, and `AgentLoop` holds one index
-for all bots. This PR leaves `agent-core` untouched as required by the batch's
-file boundary. Until the owning branch changes that call, **automatic system
-prompt suggestions include shared/bundled skills only**. Per-bot list/read/write
-and publication are active through the daemon's `load_skills` wiring.
+suggestions through exactly the same resolver as the tools, and
+`agent-core::exec::skills_block` calls it with the run's bot id, so a bot's
+learned skills are suggested in its own prompt and never in another bot's
+(`a_skill_learned_by_this_bot_is_in_its_prompt_and_other_bots_skills_are_not`).
+Do not store a process-global "current bot": runs from different bots can
+execute concurrently.
 
-The follow-up is a single caller substitution using the run context's bot id:
+## Loading and publishing details
 
-```rust,ignore
-let block = index.prompt_block_for_bot(
-    Some(&ctx.bot_id.to_string()),
-    &skills::SkillContext { domain: hints.domain, app: hints.app, text },
-    suggested,
-).ok()?;
-```
-
-Do not store a process-global “current bot” to work around this call site: runs
-from different bots can execute concurrently.
+- Loading is read-only: it takes a shared lock on an existing lock file and
+  falls back to a lock-free read when the lock file is missing or cannot be
+  opened, so a read-only shared directory works and loads never create
+  `.praxi-skills.lock`. Writers and publication keep the exclusive lock.
+  `for_bot` reuses the last view of a bot while the scopes are unchanged
+  (directory/`SKILL.md` timestamps, plus a generation bumped by `reload`).
+- Publishing a name that matches a built-in skill is refused unless
+  `"replace": true`, which replaces the built-in skill for all bots.
+- A stray `x@...` directory (bad version, other name, version mismatch) is
+  skipped by publication and reported as a load issue.
+- State bundles exclude `.praxi-*` (lock files, write/publish staging).

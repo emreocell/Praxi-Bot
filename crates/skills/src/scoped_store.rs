@@ -10,7 +10,7 @@ use tempfile::TempDir;
 
 use crate::frontmatter;
 use crate::hub::util::{copy_files, ensure_deletable, hash_files, refuse_reparse, walk};
-use crate::index::{SKILL_FILE, load_dir_locked};
+use crate::index::{SKILL_FILE, SkillIssue, load_dir_locked};
 use crate::skill::{Skill, Source, parse_skill, validate_name};
 
 const LOCK_FILE: &str = ".praxi-skills.lock";
@@ -88,6 +88,34 @@ impl ScopeLock {
         fs4::FileExt::lock(&file)
             .map_err(|e| format!("lock skill scope {}: {e}", root.display()))?;
         Ok(Self { _file: file })
+    }
+}
+
+impl ScopeLock {
+    /// Shared lock for loading a scope. Reading never creates the lock file or
+    /// the directory: a missing lock file means no writer has run yet, and a
+    /// lock that cannot be opened or taken (read-only media, odd filesystems)
+    /// degrades to a lock-free read. Only an unsafe lock path is an error.
+    pub(crate) fn acquire_read(root: &Path) -> Result<Option<Self>, String> {
+        check_plain_path(root)?;
+        let path = root.join(LOCK_FILE);
+        check_plain_path(&path)?;
+        match fs::symlink_metadata(&path) {
+            Ok(meta) if !meta.is_file() => {
+                return Err(format!(
+                    "skill scope lock {} is not a regular file",
+                    path.display()
+                ));
+            }
+            Ok(_) => {}
+            Err(_) => return Ok(None),
+        }
+        let Ok(file) = OpenOptions::new().read(true).open(&path) else {
+            return Ok(None);
+        };
+        Ok(fs4::FileExt::lock_shared(&file)
+            .ok()
+            .map(|()| Self { _file: file }))
     }
 }
 
@@ -249,6 +277,10 @@ fn rollback(moved: Vec<MovedSkill>, error: &str) -> String {
     message
 }
 
+/// Existing publications of `name`. A directory that merely looks like one
+/// (bad version, another skill's name, a version that differs from its
+/// directory) is not a publication: it is left alone and never blocks. Unsafe
+/// paths and reparse points stay hard errors.
 fn published_dirs(shared: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
     let prefix = format!("{name}@");
     let mut out = Vec::new();
@@ -259,20 +291,28 @@ fn published_dirs(shared: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
         let Some(version) = filename.strip_prefix(&prefix) else {
             continue;
         };
-        check_version(version)?;
         let path = entry.path();
         ensure_deletable(shared, &path).map_err(|e| e.to_string())?;
-        let skill = read_skill(&path, name, Source::User)?;
-        if skill.version != version {
-            return Err(format!(
-                "published directory {} has a mismatched version",
-                path.display()
-            ));
+        check_plain_path(&path.join(SKILL_FILE))?;
+        if check_version(version).is_err() {
+            continue;
         }
-        out.push(path);
+        match read_skill(&path, name, Source::User) {
+            Ok(skill) if skill.version == version => out.push(path),
+            _ => {}
+        }
     }
     out.sort();
     Ok(out)
+}
+
+/// Load problems that do not stop publishing `name`: stray `name@...` entries
+/// are skipped by [`published_dirs`].
+fn blocks_publication(issue: &SkillIssue, name: &str) -> bool {
+    let prefix = format!("{name}@");
+    !Path::new(&issue.path)
+        .file_name()
+        .is_some_and(|file| file.to_string_lossy().starts_with(&prefix))
 }
 
 pub(crate) fn publish(
@@ -280,7 +320,13 @@ pub(crate) fn publish(
     shared: &Path,
     name: &str,
     replace: bool,
+    bundled: &[String],
 ) -> Result<PathBuf, String> {
+    if !replace && bundled.iter().any(|b| b == name) {
+        return Err(format!(
+            "`{name}` is a built-in skill; publishing it would replace the built-in skill for all bots.              Rename the skill, or call skill_publish with replace: true to replace the built-in skill for all bots"
+        ));
+    }
     publish_with(bot, shared, name, replace, |from, to| fs::rename(from, to))
 }
 
@@ -311,6 +357,7 @@ fn publish_with(
     let mut existing = Vec::new();
     let mut issues = Vec::new();
     load_dir_locked(shared, Source::User, &mut existing, &mut issues);
+    issues.retain(|issue| blocks_publication(issue, name));
     if !issues.is_empty() {
         return Err(format!(
             "cannot publish into an incomplete shared index: {}",

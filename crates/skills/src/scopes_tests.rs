@@ -355,11 +355,25 @@ fn link_dir(target: &Path, link: &Path) -> bool {
     let result: std::io::Result<()> = Err(std::io::ErrorKind::Unsupported.into());
     match result {
         Ok(()) => true,
-        Err(error) if cfg!(windows) && error.kind() == std::io::ErrorKind::PermissionDenied => {
-            eprintln!(
-                "Skipping directory symlink assertion: Windows symlink privilege is unavailable ({error})"
-            );
-            false
+        // ERROR_PRIVILEGE_NOT_HELD (1314) is not always mapped to PermissionDenied.
+        Err(error)
+            if cfg!(windows)
+                && (error.kind() == std::io::ErrorKind::PermissionDenied
+                    || error.raw_os_error() == Some(1314)) =>
+        {
+            // A junction needs no privilege and is also a reparse point.
+            let junction = std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(link)
+                .arg(target)
+                .output()
+                .is_ok_and(|out| out.status.success());
+            if !junction {
+                eprintln!(
+                    "Skipping directory link assertion: neither symlink nor junction could be created ({error})"
+                );
+            }
+            junction
         }
         Err(error) => panic!("create test symlink: {error}"),
     }
@@ -458,4 +472,166 @@ fn publication_overrides_legacy_directories_named_unlike_their_skill() {
         "published body"
     );
     assert!(shared.join("zzz@legacy/SKILL.md").exists());
+}
+
+#[test]
+fn publishing_a_bundled_skill_name_requires_replace_and_says_every_bot_is_affected() {
+    let tmp = TempDir::new().unwrap();
+    let root = SkillIndex::load_roots(SkillRoots::from_data_dir(tmp.path()));
+    let a = root.for_bot(Some("a")).unwrap();
+    a.write("custom-dropdowns", &content("custom-dropdowns", "mine"))
+        .unwrap();
+    let error = a.publish("custom-dropdowns", false).unwrap_err();
+    assert!(error.contains("built-in"), "{error}");
+    assert!(error.contains("all bots"), "{error}");
+    assert!(error.contains("replace"), "{error}");
+    assert_ne!(
+        root.for_bot(Some("b"))
+            .unwrap()
+            .read("custom-dropdowns", None)
+            .unwrap(),
+        "mine"
+    );
+    assert!(
+        !tmp.path()
+            .join("skills")
+            .join("custom-dropdowns@0.1.0")
+            .exists()
+    );
+    a.publish("custom-dropdowns", true).unwrap();
+    assert_eq!(
+        root.for_bot(Some("b"))
+            .unwrap()
+            .read("custom-dropdowns", None)
+            .unwrap(),
+        "mine"
+    );
+}
+
+#[test]
+fn publishing_an_on_disk_bundled_name_also_requires_replace() {
+    let tmp = TempDir::new().unwrap();
+    let shipped = tmp.path().join("shipped");
+    put(&shipped, "shipped-only", "shipped");
+    let root = SkillIndex::load_roots(SkillRoots {
+        bundled: Some(shipped),
+        ..SkillRoots::from_data_dir(tmp.path())
+    });
+    let a = root.for_bot(Some("a")).unwrap();
+    a.write("shipped-only", &content("shipped-only", "mine"))
+        .unwrap();
+    assert!(
+        a.publish("shipped-only", false)
+            .unwrap_err()
+            .contains("built-in")
+    );
+    a.publish("shipped-only", true).unwrap();
+}
+
+#[test]
+fn stray_versioned_directories_do_not_block_publishing_the_skill() {
+    let tmp = TempDir::new().unwrap();
+    let shared = tmp.path().join("skills");
+    // Bad version, name mismatch and version mismatch, none of them a real publication of x.
+    fs::create_dir_all(shared.join("x@not a version")).unwrap();
+    fs::create_dir_all(shared.join("x@2.0.0")).unwrap();
+    fs::write(shared.join("x@2.0.0/SKILL.md"), content("other", "o")).unwrap();
+    fs::create_dir_all(shared.join("x@9.9.9")).unwrap();
+    fs::write(shared.join("x@9.9.9/SKILL.md"), content("x", "stray")).unwrap();
+    let root = SkillIndex::load_roots(SkillRoots::from_data_dir(tmp.path()));
+    let a = root.for_bot(Some("a")).unwrap();
+    a.write("x", &content("x", "real")).unwrap();
+    a.publish("x", true).unwrap();
+    assert!(shared.join("x@0.1.0/SKILL.md").exists());
+    for stray in ["x@not a version", "x@2.0.0", "x@9.9.9"] {
+        assert!(shared.join(stray).exists(), "{stray} must be left alone");
+    }
+    let view = root.for_bot(None).unwrap();
+    assert_eq!(view.read("x", None).unwrap(), "real");
+    assert!(
+        view.issues().iter().any(|i| i.path.contains("x@9.9.9")),
+        "{:?}",
+        view.issues()
+    );
+}
+
+#[test]
+fn loading_does_not_create_lock_files_in_either_scope() {
+    let tmp = TempDir::new().unwrap();
+    put(&tmp.path().join("skills"), "s", "shared");
+    put(&tmp.path().join("bots/a/skills"), "m", "mine");
+    let root = SkillIndex::load_roots(SkillRoots::from_data_dir(tmp.path()));
+    let a = root.for_bot(Some("a")).unwrap();
+    assert!(a.get("s").is_some() && a.get("m").is_some());
+    assert!(a.issues().is_empty(), "{:?}", a.issues());
+    assert!(!tmp.path().join("skills/.praxi-skills.lock").exists());
+    assert!(!tmp.path().join("bots/a/skills/.praxi-skills.lock").exists());
+}
+
+#[test]
+fn readers_share_the_lock_instead_of_taking_it_exclusively() {
+    let tmp = TempDir::new().unwrap();
+    let shared = tmp.path().join("skills");
+    put(&shared, "s", "shared");
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(shared.join(".praxi-skills.lock"))
+        .unwrap();
+    fs4::FileExt::lock_shared(&lock).unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let data_dir = tmp.path().to_path_buf();
+    std::thread::spawn(move || {
+        let root = SkillIndex::load_roots(SkillRoots::from_data_dir(&data_dir));
+        let view = root.for_bot(None).unwrap();
+        let _ = tx.send((view.get("s").is_some(), view.issues().len()));
+    });
+    let (found, issues) = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("a reader must not wait for another shared lock holder");
+    assert!(found);
+    assert_eq!(issues, 0);
+    drop(lock);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_read_only_shared_directory_still_loads_without_issues() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = TempDir::new().unwrap();
+    let shared = tmp.path().join("skills");
+    put(&shared, "s", "shared");
+    fs::set_permissions(&shared, fs::Permissions::from_mode(0o555)).unwrap();
+    let writable = fs::File::create(shared.join("probe")).is_ok();
+    let root = SkillIndex::load_roots(SkillRoots::from_data_dir(tmp.path()));
+    let view = root.for_bot(None).unwrap();
+    let (found, issues) = (view.get("s").is_some(), view.issues());
+    fs::set_permissions(&shared, fs::Permissions::from_mode(0o755)).unwrap();
+    if writable {
+        return; // running with privileges that ignore directory modes
+    }
+    assert!(found);
+    assert!(issues.is_empty(), "{issues:?}");
+}
+
+#[test]
+fn an_unchanged_scope_is_not_reloaded_on_every_resolution() {
+    let tmp = TempDir::new().unwrap();
+    put(&tmp.path().join("skills"), "s", "shared");
+    let root = SkillIndex::load_roots(SkillRoots::from_data_dir(tmp.path()));
+    root.set_racy_window(std::time::Duration::ZERO);
+    let first = root.for_bot(Some("a")).unwrap();
+    let again = root.for_bot(Some("a")).unwrap();
+    assert!(first.same_view(&again));
+    assert!(!first.same_view(&root.for_bot(Some("b")).unwrap()));
+    // Out-of-process edits are noticed by the directory stamp.
+    put(&tmp.path().join("skills"), "t", "new shared");
+    let after_external = root.for_bot(Some("a")).unwrap();
+    assert!(after_external.get("t").is_some());
+    // A write through a tool-bound view is visible immediately to the next resolution.
+    after_external.write("m", &content("m", "mine")).unwrap();
+    root.reload();
+    assert!(root.for_bot(Some("a")).unwrap().get("m").is_some());
 }

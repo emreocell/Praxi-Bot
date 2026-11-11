@@ -23,9 +23,8 @@
 //! system_prompt.push_str(&block);
 //! ```
 //!
-//! The current agent-core caller still uses `prompt_block_suggesting` without
-//! a bot id. It therefore sees shared/bundled suggestions only until that
-//! caller is wired to `prompt_block_for_bot`; tool visibility is already scoped.
+//! The agent-core caller passes the run's bot id to `prompt_block_for_bot`, so
+//! a bot's learned skills are suggested in its own prompt and no other bot's.
 
 mod bundled;
 mod frontmatter;

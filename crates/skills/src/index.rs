@@ -1,12 +1,14 @@
 //! Skill loading, precedence, the prompt index and file access.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime};
 
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 
 use crate::bundled::BUNDLED;
 use crate::scoped_store::{self, ScopeLock};
@@ -125,10 +127,60 @@ struct State {
     issues: Vec<SkillIssue>,
 }
 
+/// Modification times newer than this are not trusted as a "nothing changed"
+/// proof: a second write may land inside the same filesystem timestamp tick.
+const RACY_WINDOW: Duration = Duration::from_secs(2);
+
+/// What a scope looked like when a per-bot view was loaded: for every
+/// directory its own mtime, and for every skill directory its mtime plus the
+/// `SKILL.md` mtime and length.
+type Stamp = Vec<(PathBuf, Option<SystemTime>, Option<SystemTime>, u64)>;
+
+struct CachedView {
+    generation: u64,
+    stamp: Stamp,
+    view: SkillIndex,
+}
+
 struct Shared {
     paths: SkillPaths,
     roots: SkillRoots,
     state: RwLock<State>,
+    /// Bumped by every [`SkillIndex::reload`] of this index.
+    generation: AtomicU64,
+    /// Last per-bot view handed out by [`SkillIndex::for_bot`].
+    views: Mutex<HashMap<Option<String>, CachedView>>,
+    racy_window: Mutex<Duration>,
+}
+
+fn stamp_dir(dir: &Path, window: Duration, out: &mut Stamp, racy: &mut bool) {
+    let now = SystemTime::now();
+    let mut note = |time: Option<SystemTime>| {
+        if time.is_some_and(|t| now.duration_since(t).is_ok_and(|age| age < window)) {
+            *racy = true;
+        }
+    };
+    let modified = |path: &Path| fs::symlink_metadata(path).and_then(|m| m.modified()).ok();
+    let dir_time = modified(dir);
+    note(dir_time);
+    out.push((dir.to_path_buf(), dir_time, None, 0));
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
+    entries.sort_by_key(fs::DirEntry::file_name);
+    for entry in entries {
+        if entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+        let path = entry.path();
+        let entry_time = modified(&path);
+        let file = fs::symlink_metadata(path.join(SKILL_FILE)).ok();
+        let file_time = file.as_ref().and_then(|m| m.modified().ok());
+        note(entry_time);
+        note(file_time);
+        out.push((path, entry_time, file_time, file.map_or(0, |m| m.len())));
+    }
 }
 
 /// The set of loaded skills. Cheap to clone; clones share state, so
@@ -154,8 +206,10 @@ fn load_dir(dir: &Path, source: Source, out: &mut Vec<Skill>, issues: &mut Vec<S
     let guard = if source == Source::Bundled {
         None
     } else {
-        match ScopeLock::acquire(dir) {
-            Ok(guard) => Some(guard),
+        // Loading only reads: a shared lock when one can be taken, never a
+        // write to the scope.
+        match ScopeLock::acquire_read(dir) {
+            Ok(guard) => guard,
             Err(message) => {
                 issues.push(SkillIssue {
                     source,
@@ -219,7 +273,19 @@ pub(crate) fn load_dir_locked(
             {
                 published.push(s);
             }
-            Ok(s) => out.push(s),
+            Ok(s) => {
+                if source == Source::User
+                    && e.file_name()
+                        .to_string_lossy()
+                        .starts_with(&format!("{}@", s.name))
+                {
+                    issues.push(issue(format!(
+                        "directory name does not match skill `{}` version {}; loaded as a legacy skill, not as a publication",
+                        s.name, s.version
+                    )));
+                }
+                out.push(s);
+            }
             Err(m) => issues.push(issue(m)),
         }
     }
@@ -275,6 +341,9 @@ impl SkillIndex {
                 paths,
                 roots,
                 state: RwLock::default(),
+                generation: AtomicU64::new(0),
+                views: Mutex::default(),
+                racy_window: Mutex::new(RACY_WINDOW),
             }),
         };
         index.reload();
@@ -287,8 +356,55 @@ impl SkillIndex {
     /// # Errors
     /// An invalid bot id or an unsafe bot scope path.
     pub fn for_bot(&self, bot_id: Option<&str>) -> Result<Self, String> {
+        // Validation and the reparse-point checks run on every call.
         let paths = self.inner.roots.resolve(bot_id)?;
-        Ok(Self::load_resolved(paths, self.inner.roots.clone()))
+        let window = *self.inner.racy_window.lock();
+        let generation = self.inner.generation.load(Ordering::Acquire);
+        let mut stamp = Stamp::new();
+        let mut racy = false;
+        for dir in [&self.inner.roots.bundled, &paths.user, &paths.bot]
+            .into_iter()
+            .flatten()
+        {
+            stamp_dir(dir, window, &mut stamp, &mut racy);
+        }
+        let key = bot_id.map(str::to_owned);
+        if let Some(cached) = self.inner.views.lock().get(&key)
+            && cached.generation == generation
+            && cached.stamp == stamp
+        {
+            return Ok(cached.view.clone());
+        }
+        let view = Self::load_resolved(paths, self.inner.roots.clone());
+        let mut views = self.inner.views.lock();
+        if racy {
+            views.remove(&key);
+        } else {
+            views.insert(
+                key,
+                CachedView {
+                    generation,
+                    stamp,
+                    view: view.clone(),
+                },
+            );
+        }
+        Ok(view)
+    }
+
+    /// Names of the shipped skills (embedded and the optional on-disk root).
+    fn bundled_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = BUNDLED
+            .iter()
+            .filter_map(|(_, text)| parse_skill(text, Source::Bundled, None).ok())
+            .map(|skill| skill.name)
+            .collect();
+        if let Some(dir) = &self.inner.roots.bundled {
+            let mut on_disk = Vec::new();
+            load_dir_locked(dir, Source::Bundled, &mut on_disk, &mut Vec::new());
+            names.extend(on_disk.into_iter().map(|skill| skill.name));
+        }
+        names
     }
 
     /// Build a per-bot prompt through the same resolver used by the tools.
@@ -305,6 +421,16 @@ impl SkillIndex {
         Ok(self
             .for_bot(bot_id)?
             .prompt_block_suggesting(ctx, suggested))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_racy_window(&self, window: Duration) {
+        *self.inner.racy_window.lock() = window;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn same_view(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
     }
 
     /// Re-read all sources from disk.
@@ -335,6 +461,7 @@ impl SkillIndex {
             skills.insert(s.name.clone(), s); // later source wins
         }
         *self.inner.state.write() = State { skills, issues };
+        self.inner.generation.fetch_add(1, Ordering::AcqRel);
     }
 
     fn check_bound_scope(&self) -> Result<(), String> {
@@ -524,7 +651,7 @@ impl SkillIndex {
             .user
             .as_deref()
             .ok_or("no shared skills directory is configured")?;
-        let path = scoped_store::publish(bot, shared, name, replace)?;
+        let path = scoped_store::publish(bot, shared, name, replace, &self.bundled_names())?;
         self.reload();
         Ok(path)
     }
