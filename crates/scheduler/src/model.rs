@@ -449,6 +449,15 @@ pub struct Schedule {
     pub next_run_at: Option<i64>,
     /// Misfire policy applied after downtime or wall-clock jumps.
     pub misfire_policy: MisfirePolicy,
+    /// Internal definition generation. Timer progress does not change it.
+    /// This is a persistence/concurrency detail, not part of the schedule DTO.
+    #[serde(skip)]
+    pub revision: i64,
+    /// Occurrences that were reserved or dispatched but never confirmed
+    /// because the process stopped (`missed` / `interrupted`). They are not
+    /// replayed automatically (task 136); UIs can show them as "missed".
+    #[serde(default)]
+    pub missed_occurrences: u32,
 }
 
 impl Schedule {
@@ -483,6 +492,8 @@ impl Schedule {
             last_run_at: None,
             next_run_at,
             misfire_policy,
+            revision: 0,
+            missed_occurrences: 0,
         })
     }
 }
