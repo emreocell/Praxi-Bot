@@ -5,16 +5,22 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
+mod common;
+
 const DEADLINE: Duration = Duration::from_secs(15);
+
+fn fixture_dir() -> tempfile::TempDir {
+    common::fixture_dir(Path::new(env!("CARGO_BIN_EXE_fake-cli")))
+}
 
 fn install_fake(root: &Path, name: &str) -> PathBuf {
     let program = root.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
-    std::fs::copy(env!("CARGO_BIN_EXE_fake-cli"), &program).unwrap();
+    common::install_binary(Path::new(env!("CARGO_BIN_EXE_fake-cli")), &program);
     program
 }
 
 async fn tree_fixture(mode: &str) -> (tempfile::TempDir, PathEnv, TcpListener, PathBuf) {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = fixture_dir();
     let root = dir.path().join("probe ö 空");
     std::fs::create_dir(&root).unwrap();
     let program = install_fake(&root, "claude");
@@ -172,7 +178,7 @@ async fn cursor_status(env: PathEnv) -> DetectedCli {
 
 #[tokio::test]
 async fn cursor_plain_status_rejects_negatives_and_conflicting_streams() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = fixture_dir();
     install_fake(dir.path(), "cursor-agent");
     for text in [
         "not logged in",
@@ -207,7 +213,7 @@ async fn cursor_plain_status_rejects_negatives_and_conflicting_streams() {
 
 #[tokio::test]
 async fn cursor_positive_help_with_failing_exit_is_unknown() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = fixture_dir();
     install_fake(dir.path(), "cursor-agent");
     let env = PathEnv::for_test(dir.path().into())
         .with_env_var("FAKE_CURSOR_PLAIN", "1")
@@ -223,7 +229,7 @@ async fn cursor_positive_help_with_failing_exit_is_unknown() {
 
 #[tokio::test]
 async fn cursor_structured_status_takes_precedence_over_plain_text() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = fixture_dir();
     install_fake(dir.path(), "cursor-agent");
     for (json, plain, expected) in [
         (
