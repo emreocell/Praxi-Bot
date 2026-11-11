@@ -346,6 +346,11 @@
     "composerHint": "Göndermek için Enter · Komutlar için / · Bot seçmek için @"
   },
   "botForm": {
+    "apps": {
+      "title": "Uygulamalar",
+      "hint": "Bu botun kullanabileceği bağlı uygulamalar. Tüm botlara açık bir uygulamanın seçimini kaldırırsan diğer botlarınla sınırlanır. Uygulamaları Uygulamalar ekranından yönetebilirsin.",
+      "none": "Henüz bağlı uygulama yok."
+    },
     "createTitle": "Yeni bot",
     "editTitle": "Botu düzenle",
     "create": "Botu oluştur",
@@ -735,6 +740,17 @@
     "toolCount_one": "{{count}} araç",
     "botsAll": "Tüm botlar",
     "botsSome": "Botlar: {{names}}",
+    "botsNone": "Hiçbir bot",
+    "access": {
+      "label": "Bu uygulamayı kimler kullanabilir",
+      "all": "Tüm botlar",
+      "some": "Yalnızca seçilen botlar",
+      "noBotsYet": "Henüz bot yok. Önce bir bot oluştur.",
+      "nobody": "En az bir bot seçmedikçe hiçbir bot bu uygulamayı kullanamaz.",
+      "edit": "Botlar",
+      "save": "Kaydet",
+      "savedToast": "{{name}}: bot erişimi kaydedildi"
+    },
     "reconnect": "Yeniden bağlan",
     "disconnectConfirm": "Bu sunucunun bağlantısı kesilsin mi?",
     "disconnect": "Bağlantıyı kes",

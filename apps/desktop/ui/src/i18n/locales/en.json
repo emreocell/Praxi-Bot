@@ -346,6 +346,11 @@
     "composerHint": "Enter to send · / for commands · @ to mention a bot"
   },
   "botForm": {
+    "apps": {
+      "title": "Apps",
+      "hint": "Connected apps this bot may use. Unticking an app that is open to every bot limits it to your other bots. Manage apps from the Apps screen.",
+      "none": "No apps are connected yet."
+    },
     "createTitle": "New bot",
     "editTitle": "Edit bot",
     "create": "Create bot",
@@ -735,6 +740,17 @@
     "toolCount_one": "{{count}} tool",
     "botsAll": "All bots",
     "botsSome": "Bots: {{names}}",
+    "botsNone": "No bots",
+    "access": {
+      "label": "Who can use this app",
+      "all": "All bots",
+      "some": "Only these bots",
+      "noBotsYet": "There are no bots yet. Create a bot first.",
+      "nobody": "No bot can use this app until you tick at least one.",
+      "edit": "Bots",
+      "save": "Save",
+      "savedToast": "{{name}}: bot access saved"
+    },
     "reconnect": "Reconnect",
     "disconnectConfirm": "Disconnect this server?",
     "disconnect": "Disconnect",

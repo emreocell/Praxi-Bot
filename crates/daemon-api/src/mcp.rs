@@ -402,6 +402,34 @@ pub trait McpControl: Send + Sync {
     /// # Errors
     /// [`McpControlError`].
     async fn reconnect(&self, name: &str) -> Result<McpServerDto, McpControlError>;
+    /// Remove a deleted bot's id from every server's `bots` list.  A list that
+    /// becomes empty stays an explicit empty list ("no bot"); it never turns
+    /// into `null` ("all bots").  Returns the number of servers changed.
+    ///
+    /// # Errors
+    /// The first [`McpControlError`] of an update (the remaining servers are
+    /// still tried).
+    async fn forget_bot(&self, bot_id: &str) -> Result<usize, McpControlError> {
+        let mut changed = 0;
+        let mut first_err = None;
+        for server in self.list() {
+            let Some(bots) = server.bots else { continue };
+            if !bots.iter().any(|b| b == bot_id) {
+                continue;
+            }
+            let rest: Vec<&String> = bots.iter().filter(|b| *b != bot_id).collect();
+            match self
+                .update(&server.name, serde_json::json!({ "bots": rest }))
+                .await
+            {
+                Ok(_) => changed += 1,
+                Err(e) => {
+                    first_err.get_or_insert(e);
+                }
+            }
+        }
+        first_err.map_or(Ok(changed), Err)
+    }
     /// The tools a server currently exposes.
     ///
     /// # Errors

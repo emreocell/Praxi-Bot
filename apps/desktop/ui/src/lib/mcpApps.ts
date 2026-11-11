@@ -186,7 +186,8 @@ const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,47}$/i;
 /** Validate the advanced "add MCP server" form and build the config. */
 export function customServerConfig(
   form: CustomServerForm,
-  existing: string[] = []
+  existing: string[] = [],
+  scope: BotScope = { mode: "all" }
 ): CustomServerResult {
   const name = form.name.trim();
   if (!NAME_RE.test(name) || existing.includes(name)) {
@@ -198,6 +199,11 @@ export function customServerConfig(
     category: "other",
     enabled: true
   };
+  // `bots` is written only when narrowed; omitted = every bot.
+  const bots = botsFromScope(scope);
+  if (bots !== null) {
+    config.bots = bots;
+  }
   if (form.transport === "stdio") {
     const parts = splitArgs(form.command.trim());
     if (parts.length === 0) {
@@ -239,6 +245,84 @@ export function statusTone(status: McpStatus): StatusTone {
     case "disconnected":
       return "muted";
   }
+}
+
+/**
+ * Who may use a server, as the editor sees it.  `all` is `bots: null`;
+ * `some` is an explicit list of bot storage UUIDs (what the daemon compares
+ * against `ctx.bot_id`), and an empty list means NO bot, never "all".
+ */
+export type BotScope = { mode: "all" } | { mode: "some"; ids: string[] };
+
+export function botScope(server: Pick<McpServer, "bots">): BotScope {
+  return server.bots === null || server.bots === undefined
+    ? { mode: "all" }
+    : { mode: "some", ids: [...server.bots] };
+}
+
+/** The `bots` value to send: `null` = all bots, otherwise the (maybe empty) list. */
+export function botsFromScope(scope: BotScope): string[] | null {
+  return scope.mode === "all" ? null : [...scope.ids];
+}
+
+/**
+ * Tick / untick one bot.  Ticking while on "all bots" narrows to just that
+ * bot; unticking the last bot leaves an explicit empty list.
+ */
+export function toggleBotInScope(
+  scope: BotScope,
+  botId: string,
+  on: boolean
+): BotScope {
+  const ids = scope.mode === "all" ? [] : scope.ids;
+  if (on) {
+    return { mode: "some", ids: ids.includes(botId) ? ids : [...ids, botId] };
+  }
+  return { mode: "some", ids: ids.filter((id) => id !== botId) };
+}
+
+/** Drop ids of bots that no longer exist; this never turns a list into "all". */
+export function botSelection(
+  scope: BotScope,
+  bots: Pick<Bot, "id">[]
+): BotScope {
+  return scope.mode === "all"
+    ? scope
+    : { mode: "some", ids: scope.ids.filter((id) => bots.some((b) => b.id === id)) };
+}
+
+/**
+ * Whether a bot may use a server.  `botId` is `undefined` for a bot that is
+ * not created yet: it only gets the servers open to every bot.
+ */
+export function botHasAccess(
+  server: Pick<McpServer, "bots">,
+  botId: string | undefined
+): boolean {
+  if (server.bots === null || server.bots === undefined) {
+    return true;
+  }
+  return botId !== undefined && server.bots.includes(botId);
+}
+
+/**
+ * The server's `bots` after ticking / unticking `botId` on the bot's form.
+ * Unticking on an open server lists every other bot explicitly; ticking on an
+ * open server leaves it open (`null`).
+ */
+export function botListAfterToggle(
+  server: Pick<McpServer, "bots">,
+  botId: string,
+  on: boolean,
+  allBotIds: string[]
+): string[] | null {
+  if (server.bots === null || server.bots === undefined) {
+    return on ? null : allBotIds.filter((id) => id !== botId);
+  }
+  if (on) {
+    return server.bots.includes(botId) ? [...server.bots] : [...server.bots, botId];
+  }
+  return server.bots.filter((id) => id !== botId);
 }
 
 /** Which bots may use a server: everyone, or the named bots. */

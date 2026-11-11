@@ -2,11 +2,13 @@ import { type ChangeEvent, type CSSProperties, useEffect, useMemo, useRef, useSt
 import { useTranslation } from "react-i18next";
 import { Avatar, Button, Card } from "ui";
 import {
+  type McpServer,
   PERMISSION_CATEGORIES,
   type PermissionCategoryName,
   type PermissionLevel
 } from "../api/types";
 import formStyles from "../components/Form.module.css";
+import { useToast } from "../components/Toast";
 import { avatarFromFile, AvatarFileError } from "../lib/avatar";
 import {
   BOT_COLORS,
@@ -17,6 +19,7 @@ import {
   PRESET_CHOICES,
   type PresetChoice
 } from "../lib/botProfile";
+import { botHasAccess, botListAfterToggle } from "../lib/mcpApps";
 import { FAKE_PROVIDER_ID } from "../lib/providers";
 import { type ProvidersView, providersView } from "../lib/providerView";
 import { useDaemon } from "../state/DaemonContext";
@@ -83,8 +86,13 @@ export function BotFormView({
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
+  const toast = useToast();
   const { client, bots, conn, refreshBots } = useDaemon();
   const existing = bots.find((b) => b.id === botId);
+  // Apps: one source of truth, the server's `bots` list (bot UUIDs).  `null`
+  // until loaded; `allowed` is this bot's ticked servers by name.
+  const [servers, setServers] = useState<McpServer[] | null>(null);
+  const [allowed, setAllowed] = useState<Record<string, boolean>>({});
   const [draft, setDraft] = useState<BotDraft>(() => draftFromBot(existing));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -111,6 +119,34 @@ export function BotFormView({
       cancelled = true;
     };
   }, [client]);
+
+  useEffect(() => {
+    if (!client) {
+      return undefined;
+    }
+    let cancelled = false;
+    client
+      .listMcpServers()
+      .then((list) => {
+        if (!cancelled) {
+          setServers(list);
+          setAllowed(
+            Object.fromEntries(
+              list.map((s) => [s.name, botHasAccess(s, existing?.id)])
+            )
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setServers([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+    // The list is loaded once per form; ticks are local until Save.
+  }, [client, existing?.id]);
 
   const providerIds = useMemo(() => {
     const ids = new Set<string>(providerList.selectable);
@@ -143,6 +179,31 @@ export function BotFormView({
   const nameMissing = draft.name.trim() === "";
   const executorMissing = draft.executor.model.trim() === "";
 
+  /** Write this bot's Apps ticks back to the servers' `bots` lists. */
+  const saveApps = async (savedId: string) => {
+    if (!client || !servers) {
+      return;
+    }
+    try {
+      // Work from the servers as they are now, not as they were when the form opened.
+      const fresh = await client.listMcpServers();
+      const allIds = bots.map((b) => b.id);
+      for (const s of fresh) {
+        const want = allowed[s.name];
+        if (want === undefined || want === botHasAccess(s, savedId)) {
+          continue;
+        }
+        const list = botListAfterToggle(s, savedId, want, allIds);
+        if (list === null && s.bots === null) {
+          continue;
+        }
+        await client.updateMcpServer(s.name, { bots: list });
+      }
+    } catch (e) {
+      toast.show(e instanceof Error ? e.message : String(e), "danger");
+    }
+  };
+
   const save = async () => {
     if (!client || nameMissing || executorMissing) {
       return;
@@ -155,6 +216,7 @@ export function BotFormView({
       const saved = existing
         ? await client.updateBot(existing.id, input)
         : await client.createBot(input);
+      await saveApps(saved.id);
       await refreshBots();
       onDone(saved.id);
     } catch (e) {
@@ -385,6 +447,35 @@ export function BotFormView({
               ))}
             </div>
           ) : null}
+        </Card>
+
+        <Card padding="md" className={styles.section}>
+          <h2 className={styles.heading}>{t("botForm.apps.title")}</h2>
+          {servers !== null && servers.length === 0 ? (
+            <p className={formStyles.hint}>{t("botForm.apps.none")}</p>
+          ) : (
+            <>
+              <p className={formStyles.hint}>{t("botForm.apps.hint")}</p>
+              <ul className={styles.appList} data-testid="bot-apps">
+                {(servers ?? []).map((s) => (
+                  <li key={s.name}>
+                    <label className={styles.appItem}>
+                      <input
+                        type="checkbox"
+                        className={styles.appCheck}
+                        checked={allowed[s.name] ?? false}
+                        data-testid={`bot-app-${s.name}`}
+                        onChange={(e) =>
+                          setAllowed((a) => ({ ...a, [s.name]: e.target.checked }))
+                        }
+                      />
+                      <span className={styles.appName}>{s.name}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </Card>
 
         <Card padding="md" className={styles.section}>

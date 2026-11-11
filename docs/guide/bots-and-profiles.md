@@ -67,6 +67,12 @@ informational in the current version: the loop runs on `executor`. The
 
 ### Permissions in a profile
 
+- Bots created by `bot setup` with the General preset get `mcp:*` and `email_*`
+  in `[tools] allow`, so they can reach MCP servers and email. This only makes
+  the tools visible: MCP tools and `email_send` still ask for approval under the
+  default policy. Profiles saved earlier are not changed; to give such a bot the
+  same reach, add `"mcp:*"` and `"email_*"` to its `[tools] allow` list. Which
+  servers a bot may use is set on the server (`bots`), see the MCP servers guide.
 - `preset` picks a starting policy. The four presets are explained in
   [Chatting and approvals](chatting-and-approvals.md#permission-levels).
 - `[permissions.categories.<name>.level]` then overrides single categories

@@ -1093,6 +1093,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn forget_bot_prunes_lists_persists_and_never_widens_to_all_bots() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = open(dir.path());
+        for (name, bots) in [
+            ("shared", Some(vec!["gone", "stay"])),
+            ("only-gone", Some(vec!["gone"])),
+            ("open", None),
+        ] {
+            let mut input = stdio(name, false);
+            input.bots = bots.map(|b| b.into_iter().map(str::to_owned).collect());
+            host.add(input).await.unwrap();
+        }
+        assert_eq!(host.forget_bot("gone").await.unwrap(), 2);
+        let bots_of = |n: &str| host.list().into_iter().find(|s| s.name == n).unwrap().bots;
+        assert_eq!(bots_of("shared"), Some(vec!["stay".to_owned()]));
+        assert_eq!(bots_of("only-gone"), Some(Vec::new()));
+        assert_eq!(bots_of("open"), None);
+        let saved = TomlFileStore::new(dir.path().join(MCP_FILE))
+            .load()
+            .unwrap();
+        let saved_of = |n: &str| saved.iter().find(|s| s.id == n).unwrap().bots.clone();
+        assert_eq!(saved_of("only-gone"), Some(Vec::new()));
+        assert_eq!(saved_of("open"), None);
+        host.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn invalid_update_keeps_the_old_server_registered_and_persisted() {
         let dir = tempfile::tempdir().unwrap();
         let host = open(dir.path());

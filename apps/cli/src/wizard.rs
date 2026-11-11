@@ -762,6 +762,15 @@ mod tests {
                     preset == BotPreset::Desktop
                 );
                 assert!(!profile.tool_visible("shell_run"));
+                // Only the General preset reaches MCP servers and email;
+                // permissions (not visibility) still gate every call.
+                for name in ["mcp:srv/tool", "email_send", "email_read"] {
+                    assert_eq!(
+                        profile.tool_visible(name),
+                        preset == BotPreset::General,
+                        "{preset:?} {name}"
+                    );
+                }
             }
         }
     }

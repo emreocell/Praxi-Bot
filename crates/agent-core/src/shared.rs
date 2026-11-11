@@ -664,10 +664,27 @@ impl Shared {
         let Ok(id) = run_id.parse::<Uuid>() else {
             return false;
         };
-        self.runs
+        let Some((profile, bot)) = self
+            .runs
             .lock()
             .get(&RunId(id))
-            .is_some_and(|c| c.profile.tool_visible(&spec.name) && platform_ok(&spec.platforms))
+            .map(|c| (Arc::clone(&c.profile), c.bot_id))
+        else {
+            return false;
+        };
+        self.spec_visible(&profile, bot, spec)
+    }
+
+    /// Profile allow / exclude lists, platform and the tool's own per-bot
+    /// visibility (an MCP server's `bots` list).  Call-time enforcement stays
+    /// in the tool itself; this keeps hidden tools out of what the model sees.
+    fn spec_visible(&self, profile: &BotProfile, bot: BotId, spec: &ToolSpec) -> bool {
+        profile.tool_visible(&spec.name)
+            && platform_ok(&spec.platforms)
+            && self
+                .tools
+                .get(&spec.name)
+                .is_none_or(|t| t.visible_to(Some(&bot.to_string())))
     }
 
     /// The loop's event journal (created over `storage` on first use).
@@ -761,11 +778,11 @@ impl Shared {
     ///
     /// `hints` (a router `ToolHint`) narrows the turn to those tools plus the
     /// discovery meta-tools, so the model can still reach everything else.
-    pub fn model_specs(&self, profile: &BotProfile, hints: &[String]) -> Vec<ToolSpec> {
+    pub fn model_specs(&self, profile: &BotProfile, bot: BotId, hints: &[String]) -> Vec<ToolSpec> {
         if !hints.is_empty() {
-            let narrowed = self.surface.hinted_specs(hints, &|s| {
-                profile.tool_visible(&s.name) && platform_ok(&s.platforms)
-            });
+            let narrowed = self
+                .surface
+                .hinted_specs(hints, &|s| self.spec_visible(profile, bot, s));
             // Only the meta-tools left: every hint was unknown or hidden.
             if narrowed.len() > 3 {
                 return narrowed;
@@ -775,7 +792,7 @@ impl Shared {
         // threshold; `mcp:` tools are reached via `use_tool` and never push
         // native tools behind it.
         self.surface
-            .specs_for(&|s| profile.tool_visible(&s.name) && platform_ok(&s.platforms))
+            .specs_for(&|s| self.spec_visible(profile, bot, s))
     }
 
     /// Resolve a model-requested call to the tool to run plus the spec and name
@@ -784,18 +801,17 @@ impl Shared {
     pub fn resolve_call(
         &self,
         profile: &BotProfile,
+        bot: BotId,
         name: &str,
         input: &serde_json::Value,
         hints: &[String],
     ) -> Option<Resolved> {
         let tool = if hints.is_empty() {
-            self.surface.resolve_with(name, &|s| {
-                profile.tool_visible(&s.name) && platform_ok(&s.platforms)
-            })?
+            self.surface
+                .resolve_with(name, &|s| self.spec_visible(profile, bot, s))?
         } else {
-            self.surface.resolve_hinted(name, hints, &|s| {
-                profile.tool_visible(&s.name) && platform_ok(&s.platforms)
-            })?
+            self.surface
+                .resolve_hinted(name, hints, &|s| self.spec_visible(profile, bot, s))?
         };
         let own = tool.spec().clone();
         let mut eff_input = input.clone();
@@ -803,7 +819,10 @@ impl Shared {
             let target = input.get("name").and_then(serde_json::Value::as_str);
             match (target, self.surface.effective_spec(name, input)) {
                 (Some(t), Some(s)) => {
-                    if !profile.tool_visible(t) || !platform_ok(&s.platforms) {
+                    if !profile.tool_visible(t)
+                        || !platform_ok(&s.platforms)
+                        || !self.spec_visible(profile, bot, &s)
+                    {
                         return None;
                     }
                     eff_input = input

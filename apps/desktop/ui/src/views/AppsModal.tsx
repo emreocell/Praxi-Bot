@@ -1,17 +1,22 @@
-import { Blocks, Cable, Check, FolderOpen, Plus, Search, Server, X } from "lucide-react";
+import { Blocks, Cable, Check, FolderOpen, Plus, Search, Server, Users, X } from "lucide-react";
 import { siGithub, siGitlab, siNotion, siGoogledrive, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siLinear, siTodoist, siObsidian, siHomeassistant } from "simple-icons";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import type { McpCatalogEntry, McpServer } from "../api/types";
 import formStyles from "../components/Form.module.css";
+import { BotAccessPicker } from "../components/BotAccessPicker";
 import { Modal } from "../components/Modal";
 import { Segmented } from "../components/SettingsUi";
 import { useToast } from "../components/Toast";
 import { openExternal } from "../lib/externalLink";
 import {
   ALL_CATEGORIES,
+  type BotScope,
   botAccess,
+  botScope,
+  botSelection,
+  botsFromScope,
   catalogCategories,
   connectCatalogEntry,
   customServerConfig,
@@ -40,16 +45,20 @@ function ConnectedRow({
   server,
   busy,
   onReconnect,
-  onDisconnect
+  onDisconnect,
+  onSaveBots
 }: {
   server: McpServer;
   busy: boolean;
   onReconnect: () => void;
   onDisconnect: () => void;
+  onSaveBots: (bots: string[] | null) => void;
 }) {
   const { t } = useTranslation();
   const { bots } = useDaemon();
   const [confirm, setConfirm] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [scope, setScope] = useState<BotScope>(() => botScope(server));
   const access = botAccess(server, bots);
   const tone = statusTone(server.status);
   const needsReconnect =
@@ -73,7 +82,9 @@ function ConnectedRow({
           <span>
             {access.all
               ? t("apps.botsAll")
-              : t("apps.botsSome", { names: access.names.join(", ") })}
+              : access.names.length === 0
+                ? t("apps.botsNone")
+                : t("apps.botsSome", { names: access.names.join(", ") })}
           </span>
           <span aria-hidden="true">·</span>
           <span>{server.transport}</span>
@@ -83,6 +94,19 @@ function ConnectedRow({
         ) : null}
       </div>
       <div className={styles.serverActions}>
+        <Button
+          size="sm"
+          variant="ghost"
+          active={editing}
+          disabled={busy}
+          data-testid={`mcp-access-${server.name}`}
+          onClick={() => {
+            setScope(botSelection(botScope(server), bots));
+            setEditing((e) => !e);
+          }}
+        >
+          <Users />{t("apps.access.edit")}
+        </Button>
         {needsReconnect ? (
           <Button size="sm" variant="secondary" disabled={busy} onClick={onReconnect}>
             {t("apps.reconnect")}
@@ -116,6 +140,28 @@ function ConnectedRow({
           </Button>
         )}
       </div>
+      {editing ? (
+        <div className={styles.accessPanel}>
+          <BotAccessPicker scope={scope} bots={bots} onChange={setScope} />
+          <div className={styles.formActions}>
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={busy}
+              data-testid={`mcp-access-save-${server.name}`}
+              onClick={() => {
+                setEditing(false);
+                onSaveBots(botsFromScope(scope));
+              }}
+            >
+              {t("apps.access.save")}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+              {t("common.cancel")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -258,6 +304,8 @@ function CustomServerForm({
   });
   const [error, setError] = useState<"name" | "command" | "url" | null>(null);
   const [busy, setBusy] = useState(false);
+  const { bots } = useDaemon();
+  const [scope, setScope] = useState<BotScope>({ mode: "all" });
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
 
   return (
@@ -265,7 +313,7 @@ function CustomServerForm({
       className={styles.custom}
       onSubmit={(e) => {
         e.preventDefault();
-        const result = customServerConfig(form, existing);
+        const result = customServerConfig(form, existing, botSelection(scope, bots));
         setError(result.ok ? null : result.error);
         if (result.ok) {
           setBusy(true);
@@ -346,6 +394,10 @@ function CustomServerForm({
           ) : null}
         </div>
       )}
+      <div className={formStyles.field}>
+        <span className={formStyles.label}>{t("apps.access.label")}</span>
+        <BotAccessPicker scope={scope} bots={bots} onChange={setScope} />
+      </div>
       <div className={styles.formActions}>
         <Button type="submit" variant="primary" size="sm" disabled={busy}>
           {t("apps.custom.add")}
@@ -520,6 +572,13 @@ export function AppsModal({
                         onReconnect={() =>
                           void run(s.name, async () => {
                             await client?.reconnectMcpServer(s.name);
+                            await reload();
+                          })
+                        }
+                        onSaveBots={(list) =>
+                          void run(s.name, async () => {
+                            await client?.updateMcpServer(s.name, { bots: list });
+                            toast.show(t("apps.access.savedToast", { name: s.name }), "success");
                             await reload();
                           })
                         }

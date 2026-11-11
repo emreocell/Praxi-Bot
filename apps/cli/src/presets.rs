@@ -95,6 +95,10 @@ impl BotPreset {
     ///
     /// Every preset keeps the agent-internal tools (questions, todos,
     /// sub-agents, skills, workflows, tool discovery) so the loop works.
+    /// The General preset also reaches MCP servers (`mcp:*`) and email
+    /// (`email_*`).  Stored profiles are not rewritten: to give an existing bot
+    /// the same reach, add `"mcp:*"` and `"email_*"` to `[tools] allow` of its
+    /// profile (for example in the bot's edit form or the profile TOML).
     #[must_use]
     pub fn tool_allow(self) -> Vec<&'static str> {
         let mut v = vec![
@@ -108,7 +112,11 @@ impl BotPreset {
             "workflow_*",
         ];
         match self {
-            Self::General => v.extend(["fs_read", "fs_list", "fs_search"]),
+            // `mcp:*` and `email_*` only make those tools reachable; every MCP
+            // tool is `Destructive` / `Accounts` unless its server is trusted and
+            // `email_send` is `Destructive`, so the permission policy still asks.
+            // Which bots may use which MCP server is the server's `bots` list.
+            Self::General => v.extend(["fs_read", "fs_list", "fs_search", "mcp:*", "email_*"]),
             Self::Browser => v.push("browser_*"),
             Self::Desktop => v.extend(["desktop_*", "fs_*", "checkpoint_*"]),
         }

@@ -145,6 +145,8 @@ pub(crate) struct TestTool {
     /// When set, behaves like `builtin_tools::finish_text`: writes `output` to
     /// this file and returns `max_inline_bytes - 100` of it plus a `SpillRef`.
     pub(crate) self_spill: Option<PathBuf>,
+    /// `Some(ids)`: only these bots may see the tool (like an MCP server's `bots`).
+    pub(crate) bots: Option<Vec<String>>,
 }
 
 pub(crate) fn tool(name: &str, effect: Effect, output: &str) -> TestTool {
@@ -162,6 +164,7 @@ pub(crate) fn tool(name: &str, effect: Effect, output: &str) -> TestTool {
         barrier: None,
         output: output.to_owned(),
         self_spill: None,
+        bots: None,
     }
 }
 
@@ -169,6 +172,11 @@ pub(crate) fn tool(name: &str, effect: Effect, output: &str) -> TestTool {
 impl Tool for TestTool {
     fn spec(&self) -> &ToolSpec {
         &self.spec
+    }
+    fn visible_to(&self, bot_id: Option<&str>) -> bool {
+        self.bots
+            .as_ref()
+            .is_none_or(|l| bot_id.is_some_and(|b| l.iter().any(|x| x == b)))
     }
     async fn call(&self, ctx: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
         self.count.fetch_add(1, Ordering::SeqCst);
@@ -2840,6 +2848,143 @@ async fn find_tool_and_get_tool_details_only_see_tools_visible_to_the_bot() {
     let details = &tool_messages(&fake.request(2))[1];
     assert!(details.contains("unknown tool"), "{details}");
     assert!(!details.contains("input_schema"), "{details}");
+}
+
+#[tokio::test]
+async fn bot_scoped_tools_are_hidden_from_other_bots_in_every_model_surface() {
+    let env = setup();
+    let mut scoped = tool("mcp:srv/secret", Effect::Read, "s");
+    scoped.bots = Some(vec!["some-other-bot".into()]);
+    let scoped = Arc::new(scoped);
+    let mut open = tool("mcp:open/ok", Effect::Read, "ok");
+    open.bots = None;
+    let open = Arc::new(open);
+    let mut listed = tool("mcp:mine/ok", Effect::Read, "ok");
+    listed.bots = Some(vec![env.bot.to_string()]);
+    let listed = Arc::new(listed);
+    let mut empty = tool("mcp:nobody/ok", Effect::Read, "ok");
+    empty.bots = Some(Vec::new());
+    let empty = Arc::new(empty);
+    let natives: Vec<Arc<TestTool>> = (0..4)
+        .map(|i| Arc::new(tool(&format!("t.extra{i}"), Effect::Read, "x")))
+        .collect();
+    let mut all = vec![&scoped, &open, &listed, &empty];
+    all.extend(natives.iter());
+    let fake = Fake::new(vec![
+        calls(&[("c1", "find_tool", json!({"query": "mcp tool", "k": 25}))]),
+        calls(&[("c2", "get_tool_details", json!({"name": "mcp:srv/secret"}))]),
+        calls(&[(
+            "c3",
+            "use_tool",
+            json!({"name": "mcp:srv/secret", "input": {}}),
+        )]),
+        text("done"),
+    ]);
+    let mut config = cfg(Policy::full());
+    config.discovery_threshold = 3;
+    let lp = make_loop(&env.storage, env.bot, &fake, &all, profile(""), config);
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+
+    let found = &tool_messages(&fake.request(1))[0];
+    assert!(found.contains("mcp:open/ok"), "{found}");
+    assert!(found.contains("mcp:mine/ok"), "{found}");
+    assert!(!found.contains("mcp:srv/secret"), "leaked: {found}");
+    assert!(
+        !found.contains("mcp:nobody/ok"),
+        "empty list = no bot: {found}"
+    );
+    let details = &tool_messages(&fake.request(2))[1];
+    assert!(details.contains("unknown tool"), "{details}");
+    let used = &tool_messages(&fake.request(3))[2];
+    assert!(used.contains("unknown tool"), "{used}");
+    assert_eq!(scoped.count.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn bot_scoped_tool_is_not_listed_directly_below_the_discovery_threshold() {
+    let env = setup();
+    let mut scoped = tool("n_secret", Effect::Read, "s");
+    scoped.bots = Some(vec!["some-other-bot".into()]);
+    let scoped = Arc::new(scoped);
+    let mut mine = tool("n_mine", Effect::Read, "m");
+    mine.bots = Some(vec![env.bot.to_string()]);
+    let mine = Arc::new(mine);
+    let fake = Fake::new(vec![calls(&[("c1", "n_secret", json!({}))]), text("done")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[&scoped, &mine],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let names = req_tool_names(&fake.request(0));
+    assert!(names.iter().any(|n| n.contains("mine")), "{names:?}");
+    assert!(!names.iter().any(|n| n.contains("secret")), "{names:?}");
+    assert!(tool_messages(&fake.request(1))[0].contains("unknown tool"));
+    assert_eq!(scoped.count.load(Ordering::SeqCst), 0);
+}
+
+/// The globs the wizard's General preset writes must make MCP and email tools
+/// *reachable*, not *prompt-free*: both still raise an approval by default.
+#[tokio::test]
+async fn preset_allow_globs_expose_mcp_and_email_tools_but_they_still_ask() {
+    let env = setup();
+    let mut mcp = tool("mcp:srv/do_it", Effect::Destructive, "mcp done");
+    mcp.spec.category = PermissionCategory::Accounts;
+    let mcp = Arc::new(mcp);
+    let mut mail = tool("email_send", Effect::Destructive, "sent");
+    mail.spec.category = PermissionCategory::Messaging;
+    let mail = Arc::new(mail);
+    let read = Arc::new(tool("fs_read", Effect::Read, "x"));
+    let fake = Fake::new(vec![
+        calls(&[(
+            "c1",
+            "use_tool",
+            json!({"name": "mcp:srv/do_it", "input": {}}),
+        )]),
+        calls(&[("c2", "email_send", json!({}))]),
+        text("done"),
+    ]);
+    let prof = profile(
+        "[tools]
+allow = [\"ask_user\", \"find_tool\", \"get_tool_details\", \"use_tool\",          \"fs_read\", \"mcp:*\", \"email_*\"]
+",
+    );
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[&mcp, &mail, &read],
+        prof,
+        cfg(Policy::approve_destructive()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(a.tool_name, "mcp:srv/do_it");
+    assert_eq!(mcp.count.load(Ordering::SeqCst), 0);
+    lp.approve(a.call_id, ApprovalScope::Once, env.user)
+        .unwrap();
+
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(a.tool_name, "email_send");
+    assert_eq!(mail.count.load(Ordering::SeqCst), 0);
+    lp.approve(a.call_id, ApprovalScope::Once, env.user)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(mcp.count.load(Ordering::SeqCst), 1);
+    assert_eq!(mail.count.load(Ordering::SeqCst), 1);
 }
 
 // ---------- global event order ----------

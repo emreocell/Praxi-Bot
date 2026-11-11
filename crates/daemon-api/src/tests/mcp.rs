@@ -412,6 +412,81 @@ async fn put_keeps_omitted_fields_and_null_bots_means_all() {
 }
 
 #[tokio::test]
+async fn deleting_a_bot_removes_its_id_from_every_server_and_never_widens_access() {
+    let (t, _) = with_mcp();
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/bots",
+        Some(json!({ "profile_toml": super::PROFILE })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    let bot = r.json()["id"].as_str().unwrap().to_owned();
+
+    for (name, bots) in [
+        ("shared", json!([bot, "other-bot"])),
+        ("only-me", json!([bot])),
+        ("others", json!(["other-bot"])),
+        ("open", Value::Null),
+    ] {
+        let mut body = stdio_body(name);
+        body["bots"] = bots;
+        let r = call(&t, Method::POST, "/v1/mcp/servers", Some(body)).await;
+        assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    }
+
+    let r = call(&t, Method::DELETE, &format!("/v1/bots/{bot}"), None).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+
+    let list = call(&t, Method::GET, "/v1/mcp/servers", None).await.json();
+    let bots_of = |n: &str| {
+        list.as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == n)
+            .unwrap()["bots"]
+            .clone()
+    };
+    assert_eq!(bots_of("shared"), json!(["other-bot"]));
+    // Emptied list stays an explicit empty list ("no bot"), never null ("all").
+    assert_eq!(bots_of("only-me"), json!([]));
+    assert_eq!(bots_of("others"), json!(["other-bot"]));
+    assert!(bots_of("open").is_null());
+}
+
+#[tokio::test]
+async fn failed_bot_delete_keeps_the_server_lists() {
+    let (t, _) = with_mcp();
+    let (bot, _chat) = make_chat(&t).await;
+    let mut body = stdio_body("mine");
+    body["bots"] = json!([bot]);
+    let r = call(&t, Method::POST, "/v1/mcp/servers", Some(body)).await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    let r = call(&t, Method::DELETE, &format!("/v1/bots/{bot}"), None).await;
+    assert_eq!(r.status, StatusCode::CONFLICT);
+    let list = call(&t, Method::GET, "/v1/mcp/servers", None).await.json();
+    assert_eq!(list[0]["bots"], json!([bot]));
+}
+
+#[tokio::test]
+async fn empty_bots_list_round_trips_and_differs_from_null() {
+    let (t, _) = with_mcp();
+    let mut body = stdio_body("nobody");
+    body["bots"] = json!([]);
+    let r = call(&t, Method::POST, "/v1/mcp/servers", Some(body)).await;
+    assert_eq!(r.json()["bots"], json!([]));
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/mcp/servers/nobody",
+        Some(json!({"enabled": true})),
+    )
+    .await;
+    assert_eq!(r.json()["bots"], json!([]));
+}
+
+#[tokio::test]
 async fn catalog_is_served() {
     let (t, _) = with_mcp();
     let r = call(&t, Method::GET, "/v1/mcp/catalog", None).await;

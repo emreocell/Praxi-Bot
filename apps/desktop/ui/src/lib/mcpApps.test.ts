@@ -7,6 +7,11 @@ import {
   ALL_CATEGORIES,
   applyServerEvent,
   botAccess,
+  botHasAccess,
+  botListAfterToggle,
+  botScope,
+  botSelection,
+  botsFromScope,
   catalogCategories,
   configFromCatalog,
   connectCatalogEntry,
@@ -17,7 +22,8 @@ import {
   MissingSecretError,
   secretStoreName,
   splitArgs,
-  statusTone
+  statusTone,
+  toggleBotInScope
 } from "./mcpApps.ts";
 
 const entry = (id: string): McpCatalogEntry => {
@@ -154,4 +160,124 @@ test("status tone, bot access and event application", () => {
   assert.equal(next?.[0].error, null);
   assert.equal(applyServerEvent(servers, { name: "zz", status: "connected" }), null);
   assert.equal(filterServers(servers, "A").length, 1);
+});
+
+const BOTS = [
+  { id: "11111111-aaaa", name: "Atlas" },
+  { id: "22222222-bbbb", name: "Borealis" },
+  { id: "33333333-cccc", name: "Cirrus" }
+];
+
+test("bot scope: null is all bots, an empty list is NO bot, never all", () => {
+  assert.deepEqual(botScope({ bots: null }), { mode: "all" });
+  assert.deepEqual(botScope({ bots: undefined }), { mode: "all" });
+  assert.deepEqual(botScope({ bots: [] }), { mode: "some", ids: [] });
+  assert.deepEqual(botsFromScope({ mode: "all" }), null);
+  // An emptied selection is written as [], not null.
+  assert.deepEqual(botsFromScope({ mode: "some", ids: [] }), []);
+  assert.deepEqual(botsFromScope({ mode: "some", ids: ["a"] }), ["a"]);
+  assert.deepEqual(botAccess({ bots: [] }, BOTS), { all: false, names: [] });
+});
+
+test("bot scope: switching to 'only these bots' starts from nobody, ids are UUIDs", () => {
+  let scope = botScope({ bots: null });
+  scope = toggleBotInScope(scope, BOTS[0].id, true);
+  // Ticking a bot while on "all" narrows to exactly that bot.
+  assert.deepEqual(scope, { mode: "some", ids: [BOTS[0].id] });
+  scope = toggleBotInScope(scope, BOTS[1].id, true);
+  scope = toggleBotInScope(scope, BOTS[1].id, true);
+  assert.deepEqual(botsFromScope(scope), [BOTS[0].id, BOTS[1].id]);
+  scope = toggleBotInScope(scope, BOTS[0].id, false);
+  scope = toggleBotInScope(scope, BOTS[1].id, false);
+  assert.deepEqual(botsFromScope(scope), []);
+});
+
+test("botSelection drops ids of bots that no longer exist without widening", () => {
+  assert.deepEqual(
+    botSelection({ mode: "some", ids: ["gone", BOTS[2].id] }, BOTS),
+    { mode: "some", ids: [BOTS[2].id] }
+  );
+  assert.deepEqual(botSelection({ mode: "some", ids: ["gone"] }, BOTS), {
+    mode: "some",
+    ids: []
+  });
+  assert.deepEqual(botSelection({ mode: "all" }, BOTS), { mode: "all" });
+});
+
+const srv = (name: string, bots: string[] | null) =>
+  ({ name, bots }) as unknown as McpServer;
+
+test("bot side: access of a bot to each server, and the list to write back", () => {
+  const open = srv("open", null);
+  const mine = srv("mine", [BOTS[0].id]);
+  const theirs = srv("theirs", [BOTS[1].id]);
+  const nobody = srv("nobody", []);
+  assert.equal(botHasAccess(open, BOTS[0].id), true);
+  assert.equal(botHasAccess(mine, BOTS[0].id), true);
+  assert.equal(botHasAccess(theirs, BOTS[0].id), false);
+  assert.equal(botHasAccess(nobody, BOTS[0].id), false);
+  // A bot that does not exist yet only gets the open servers.
+  assert.equal(botHasAccess(open, undefined), true);
+  assert.equal(botHasAccess(mine, undefined), false);
+
+  // Unticking on an open server makes an explicit list of every OTHER bot.
+  assert.deepEqual(
+    botListAfterToggle(open, BOTS[0].id, false, BOTS.map((b) => b.id)),
+    [BOTS[1].id, BOTS[2].id]
+  );
+  // Ticking on an open server changes nothing (it stays open).
+  assert.equal(botListAfterToggle(open, BOTS[0].id, true, []), null);
+  assert.deepEqual(botListAfterToggle(theirs, BOTS[0].id, true, []), [
+    BOTS[1].id,
+    BOTS[0].id
+  ]);
+  // The last bot removed leaves [] (no bot), never null.
+  assert.deepEqual(botListAfterToggle(mine, BOTS[0].id, false, []), []);
+});
+
+test("saving a server's bots goes through PUT with UUIDs and keeps other fields", async () => {
+  const api = new MockApiClient();
+  const before = api.servers.find((s) => s.name === "github");
+  assert.ok(before);
+  const updated = await api.updateMcpServer("github", { bots: [BOTS[0].id] });
+  assert.deepEqual(updated.bots, [BOTS[0].id]);
+  assert.equal(updated.command, before.command);
+  assert.equal(updated.tool_count, before.tool_count);
+  const none = await api.updateMcpServer("github", { bots: [] });
+  assert.deepEqual(none.bots, []);
+  const all = await api.updateMcpServer("github", { bots: null });
+  assert.equal(all.bots, null);
+  // Omitting bots keeps the stored list.
+  await api.updateMcpServer("github", { bots: [BOTS[1].id] });
+  const kept = await api.updateMcpServer("github", { enabled: true });
+  assert.deepEqual(kept.bots, [BOTS[1].id]);
+});
+
+test("a custom server can be created for chosen bots", () => {
+  const r = customServerConfig(
+    {
+      name: "mine",
+      transport: "stdio",
+      command: "npx -y x",
+      url: "",
+      env: ""
+    },
+    [],
+    { mode: "some", ids: [BOTS[0].id] }
+  );
+  assert.ok(r.ok);
+  assert.deepEqual(r.config.bots, [BOTS[0].id]);
+  const none = customServerConfig(
+    { name: "n", transport: "stdio", command: "x", url: "", env: "" },
+    [],
+    { mode: "some", ids: [] }
+  );
+  assert.ok(none.ok);
+  assert.deepEqual(none.config.bots, []);
+  const dflt = customServerConfig(
+    { name: "d", transport: "stdio", command: "x", url: "", env: "" },
+    []
+  );
+  assert.ok(dflt.ok);
+  assert.equal("bots" in dflt.config, false);
 });
