@@ -876,7 +876,9 @@ dependencies = [
  "tracing",
  "uuid",
  "vision",
+ "web-tools",
  "windows 0.62.2",
+ "wiremock",
 ]
 
 [[package]]
@@ -1253,7 +1255,9 @@ dependencies = [
  "tokio",
  "toml 0.8.2",
  "tool-registry",
+ "url",
  "uuid",
+ "web-tools",
  "wiremock",
  "workflow-replay",
 ]
@@ -7629,6 +7633,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
+ "fs4",
  "parking_lot",
  "serde",
  "serde_json",

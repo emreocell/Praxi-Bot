@@ -34,6 +34,7 @@ tool-registry = { path = "../tool-registry", version = "0.1.0" }
 tracing = "0.1"
 uuid.workspace = true
 vision = { path = "../vision", version = "0.1.0" }
+web-tools = { path = "../web-tools", version = "0.1.0" }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
@@ -45,6 +46,7 @@ windows = { workspace = true, features = [
 [dev-dependencies]
 secret-store.workspace = true
 tempfile.workspace = true
+wiremock.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "test-util"] }
 
 [target.'cfg(windows)'.dev-dependencies]

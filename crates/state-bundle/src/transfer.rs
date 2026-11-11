@@ -41,6 +41,8 @@ pub const EXCLUSIONS: &[&str] = &[
     "logs",
     "backup-*",
     "import-staging",
+    // Skill scope lock files and publication/write staging (crates/skills).
+    ".praxi-*",
 ];
 const METADATA_CAP: u64 = 8 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;

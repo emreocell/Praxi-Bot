@@ -1,7 +1,15 @@
 //! Background [`Scheduler`] engine: single Tokio task sleeping until the
 //! nearest `next_run_at`, waking on store changes, detecting wall-clock jumps
-//! via monotonic vs. wall time, applying [`MisfirePolicy`], persisting before
-//! execution, and enforcing a per-schedule concurrency limit of 1.
+//! via monotonic vs. wall time, applying [`MisfirePolicy`], reserving durable
+//! occurrence intents, and enforcing a per-schedule concurrency limit of 1.
+//!
+//! Recovery boundary (task 136): the current executor cannot accept the
+//! `schedule_id:due_ms` idempotency key or return a durable `run_id`. Pending
+//! and interrupted dispatches survive in SQLite but are deliberately NOT
+//! replayed on startup. Retrying a dispatch could duplicate an agent run.
+//! One-shot timers are consumed at reservation, but never disabled merely
+//! because an intent was written. `started(run_id)` and automatic recovery
+//! must be wired together with the durable `AgentLoop::start_scheduled` API.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -124,6 +132,17 @@ impl Scheduler {
         let init_wall = inner.clock.wall_ms();
         let init_mono = inner.clock.mono_ms();
 
+        // Nothing is dispatching yet, so every unresolved row is a leftover of
+        // an earlier process. Reclassify it as visible history; no replay.
+        match inner.store.recover_unresolved_occurrences() {
+            Ok(0) => {}
+            Ok(count) => tracing::warn!(
+                count,
+                "marked unresolved schedule occurrences missed/interrupted; automatic replay awaits durable idempotent starts (task 136)"
+            ),
+            Err(error) => tracing::error!(%error, "failed to recover unresolved schedule intents"),
+        }
+
         // Run the startup recovery/misfire pass synchronously so any schedule
         // already overdue at startup is handled deterministically before the
         // caller advances a fake clock.
@@ -226,7 +245,7 @@ impl Scheduler {
             return Err(SchedulerError::Busy(id.to_string()));
         };
         self.commit_replay(pending, now_ms)?;
-        spawn_executions(&self.inner, fired, 1, guard);
+        spawn_direct_execution(&self.inner, fired, guard);
         Ok(())
     }
 
@@ -263,7 +282,7 @@ impl Scheduler {
         let now_ms = self.inner.clock.wall_ms();
         self.inner.store.touch_last_run(id, now_ms)?;
         schedule.last_run_at = Some(now_ms);
-        spawn_executions(&self.inner, schedule, 1, guard);
+        spawn_direct_execution(&self.inner, schedule, guard);
         Ok(())
     }
 
@@ -440,15 +459,15 @@ fn process_due(
 
         let id = schedule.id;
         let outcome = if is_misfire {
-            handle_misfire(inner, schedule, first_due_ms, now_wall_ms)
+            handle_misfire(inner, &schedule, first_due_ms, now_wall_ms)
         } else {
-            handle_on_time(inner, schedule, first_due_ms, now_wall_ms)
+            handle_on_time(inner, &schedule, first_due_ms, now_wall_ms)
         };
         if let Err(e) = outcome {
             // One broken schedule (corrupt spec, DB hiccup) must not starve the
             // others nor spin the loop: park it as disabled and keep going.
             tracing::error!(schedule_id = %id, error = %e, "schedule failed; disabling it");
-            let _ = inner.store.set_enabled(id, false, None);
+            let _ = inner.store.disable_if_current(&schedule);
         }
     }
     Ok(())
@@ -468,7 +487,7 @@ fn reanchor_after_backward_jump(inner: &Arc<Inner>, now_wall_ms: i64) -> Result<
         if let Some(next) = schedule.spec.next_after(now_wall_ms)?
             && next < current
         {
-            inner.store.advance_next_run(schedule.id, Some(next))?;
+            inner.store.advance_if_current(&schedule, Some(next))?;
         }
     }
     Ok(())
@@ -476,71 +495,55 @@ fn reanchor_after_backward_jump(inner: &Arc<Inner>, now_wall_ms: i64) -> Result<
 
 fn handle_on_time(
     inner: &Arc<Inner>,
-    mut schedule: Schedule,
+    schedule: &Schedule,
     first_due_ms: i64,
     now_wall_ms: i64,
 ) -> Result<()> {
     let next_future = schedule.spec.next_after_due(first_due_ms, now_wall_ms)?;
-    let Some(guard) = try_acquire_in_flight(inner, &schedule) else {
-        inner.store.advance_next_run(schedule.id, next_future)?;
-        return Ok(());
-    };
-
-    // Persist before executing so a restart never fires the same occurrence twice.
-    inner
-        .store
-        .record_run_intent(schedule.id, now_wall_ms, next_future)?;
-    schedule.last_run_at = Some(now_wall_ms);
-    schedule.next_run_at = next_future;
-
-    spawn_executions(inner, schedule, 1, guard);
-    Ok(())
+    reserve_and_spawn(inner, schedule, vec![first_due_ms], next_future)
 }
 
 fn handle_misfire(
     inner: &Arc<Inner>,
-    mut schedule: Schedule,
+    schedule: &Schedule,
     first_due_ms: i64,
     now_wall_ms: i64,
 ) -> Result<()> {
     match schedule.misfire_policy {
         MisfirePolicy::Skip => {
             let next_future = schedule.spec.next_after_due(first_due_ms, now_wall_ms)?;
-            inner.store.advance_next_run(schedule.id, next_future)?;
+            inner.store.advance_if_current(schedule, next_future)?;
+            Ok(())
         }
-        MisfirePolicy::RunOnce => {
-            let next_future = schedule.spec.next_after_due(first_due_ms, now_wall_ms)?;
-            let Some(guard) = try_acquire_in_flight(inner, &schedule) else {
-                inner.store.advance_next_run(schedule.id, next_future)?;
-                return Ok(());
-            };
-            inner
-                .store
-                .record_run_intent(schedule.id, now_wall_ms, next_future)?;
-            schedule.last_run_at = Some(now_wall_ms);
-            schedule.next_run_at = next_future;
-            spawn_executions(inner, schedule, 1, guard);
-        }
+        MisfirePolicy::RunOnce => handle_on_time(inner, schedule, first_due_ms, now_wall_ms),
         MisfirePolicy::RunAll => {
             let (due_slots, next_future) = schedule
                 .spec
                 .collect_due_occurrences(first_due_ms, now_wall_ms)?;
-            let count = due_slots.len();
-            if count == 0 {
-                inner.store.advance_next_run(schedule.id, next_future)?;
-                return Ok(());
-            }
-            let Some(guard) = try_acquire_in_flight(inner, &schedule) else {
-                inner.store.advance_next_run(schedule.id, next_future)?;
-                return Ok(());
-            };
-            inner
-                .store
-                .record_run_intent(schedule.id, now_wall_ms, next_future)?;
-            schedule.last_run_at = Some(now_wall_ms);
-            schedule.next_run_at = next_future;
-            spawn_executions(inner, schedule, count, guard);
+            reserve_and_spawn(inner, schedule, due_slots, next_future)
         }
+    }
+}
+
+fn reserve_and_spawn(
+    inner: &Arc<Inner>,
+    schedule: &Schedule,
+    due_slots: Vec<i64>,
+    next_future: Option<i64>,
+) -> Result<()> {
+    if due_slots.is_empty() {
+        inner.store.advance_if_current(schedule, next_future)?;
+        return Ok(());
+    }
+    let Some(guard) = try_acquire_in_flight(inner, schedule) else {
+        inner.store.advance_if_current(schedule, next_future)?;
+        return Ok(());
+    };
+    if inner
+        .store
+        .reserve_occurrences(schedule, &due_slots, next_future)?
+    {
+        spawn_timer_executions(inner, schedule.id, schedule.revision, due_slots, guard);
     }
     Ok(())
 }
@@ -569,18 +572,77 @@ fn try_acquire_in_flight(inner: &Arc<Inner>, schedule: &Schedule) -> Option<InFl
     })
 }
 
-fn spawn_executions(inner: &Arc<Inner>, schedule: Schedule, count: usize, guard: InFlightGuard) {
+fn spawn_direct_execution(inner: &Arc<Inner>, schedule: Schedule, guard: InFlightGuard) {
     let executor = Arc::clone(&inner.executor);
     tokio::spawn(async move {
         let _guard = guard;
-        for _ in 0..count {
-            if let Err(e) = executor.execute(&schedule).await {
-                tracing::error!(
-                    schedule_id = %schedule.id,
-                    name = %schedule.name,
-                    error = %e,
-                    "scheduled execution failed"
-                );
+        if let Err(e) = executor.execute(&schedule).await {
+            tracing::error!(
+                schedule_id = %schedule.id,
+                name = %schedule.name,
+                error = %e,
+                "scheduled execution failed"
+            );
+        }
+    });
+}
+
+fn spawn_timer_executions(
+    inner: &Arc<Inner>,
+    id: TaskId,
+    revision: i64,
+    due_slots: Vec<i64>,
+    guard: InFlightGuard,
+) {
+    let inner = Arc::clone(inner);
+    tokio::spawn(async move {
+        let _guard = guard;
+        for due_ms in due_slots {
+            if inner.cancel.is_cancelled() {
+                break;
+            }
+            // Never keep executing an old cloned payload after a delete,
+            // disable or edit. The store rechecks this inside the claim
+            // transaction too, closing the read-to-claim race.
+            match inner.store.get(id) {
+                Ok(Some(current)) if current.enabled && current.revision == revision => {}
+                Ok(_) => {
+                    tracing::info!(schedule_id = %id, "catch-up cancelled: schedule changed");
+                    break;
+                }
+                Err(error) => {
+                    tracing::error!(schedule_id = %id, %error, "catch-up cancelled: read failed");
+                    break;
+                }
+            }
+            let schedule = match inner.store.claim_occurrence(
+                id,
+                revision,
+                due_ms,
+                inner.clock.wall_ms(),
+            ) {
+                Ok(Some(schedule)) => schedule,
+                Ok(None) => {
+                    // A backward clock adjustment can revisit an identity
+                    // that was already dispatched. Skip that identity but
+                    // still inspect later slots; definition cancellation is
+                    // rechecked at the top of every iteration.
+                    tracing::info!(schedule_id = %id, due_ms, "occurrence already consumed or cancelled");
+                    continue;
+                }
+                Err(error) => {
+                    tracing::error!(schedule_id = %id, %error, "catch-up cancelled: claim failed");
+                    break;
+                }
+            };
+            let occurrence = format!("{id}:{due_ms}");
+            let outcome = inner.executor.execute(&schedule).await;
+            if let Err(error) = &outcome {
+                tracing::error!(%occurrence, %error, "scheduled execution failed");
+            }
+            if let Err(error) = inner.store.finish_occurrence(id, due_ms, outcome.is_ok()) {
+                tracing::error!(%occurrence, %error, "failed to record occurrence outcome");
+                break;
             }
         }
     });
