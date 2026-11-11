@@ -647,11 +647,13 @@ impl ScheduleStore {
 
     #[cfg(test)]
     pub(crate) fn unresolved_occurrence_count(&self) -> Result<u64> {
-        Ok(self.conn().query_row(
+        let count: i64 = self.conn().query_row(
             "SELECT COUNT(*) FROM occurrences WHERE state IN ('pending', 'dispatched')",
             [],
             |row| row.get(0),
-        )?)
+        )?;
+        u64::try_from(count)
+            .map_err(|_| SchedulerError::InvalidSpec(format!("negative occurrence count {count}")))
     }
 
     /// Delete a schedule by ID. Returns `false` if it did not exist.

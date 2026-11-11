@@ -362,19 +362,27 @@ async fn secondary_future_schemas_name_the_database() {
     for db in ["memory.db", "schedules.db"] {
         let source = tempfile::tempdir().unwrap();
         database(source.path(), false);
+        if db == "schedules.db" {
+            drop(scheduler::ScheduleStore::open(source.path()).unwrap());
+        } else {
+            drop(
+                memory_store::MemoryStore::open(
+                    source.path(),
+                    Arc::new(memory_store::HashEmbedder::new(8)),
+                )
+                .unwrap(),
+            );
+        }
         let conn = Connection::open(source.path().join(db)).unwrap();
+        let supported: u32 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
         conn.execute_batch("CREATE TABLE future_table(value TEXT); PRAGMA user_version=999;")
             .unwrap();
         drop(conn);
         let error = rejected(&bundle(source.path()).await, ImportOptions::default()).await;
-        // Each database reports its own newest supported schema version.
-        let expected = if db == "schedules.db" {
-            scheduler::SCHEMA_VERSION
-        } else {
-            1
-        };
         assert!(
-            matches!(error, ImportError::IncompatibleSchema { db: name, found: 999, supported } if name == db && supported == expected)
+            matches!(error, ImportError::IncompatibleSchema { db: name, found: 999, supported: actual } if name == db && actual == supported)
         );
     }
 }
