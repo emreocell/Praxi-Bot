@@ -1694,7 +1694,7 @@ async fn the_event_stream_shows_a_short_label_never_the_full_device_key() {
     while let Ok(e) = events.try_recv() {
         seen.push(e);
     }
-    assert!(!seen.is_empty());
+    assert_ne!(seen.len(), 0);
     for e in &seen {
         assert_eq!(e.owner, "peer:abcdef01");
         assert!(!serde_json::to_string(e).unwrap().contains(LONG_KEY));
