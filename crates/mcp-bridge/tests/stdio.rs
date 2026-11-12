@@ -686,6 +686,7 @@ async fn bots_change_applies_live_without_dropping_in_flight_calls() {
     let echo = reg.get("mcp:t/echo").unwrap();
 
     // A call from bot `b` is running when `b` is removed from the list.
+    let started = std::time::Instant::now();
     let slow = {
         let echo = echo.clone();
         tokio::spawn(async move {
@@ -693,11 +694,31 @@ async fn bots_change_applies_live_without_dropping_in_flight_calls() {
                 .await
         })
     };
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    // Wait until the SERVER reports it is inside the slow call (a stale example
+    // binary that ignores `sleep_ms` never prints this: fail loudly).
+    let mut in_flight = false;
+    for _ in 0..100 {
+        if mgr
+            .stderr_tail("t")
+            .iter()
+            .any(|l| l.contains("sleeping 800ms in echo"))
+        {
+            in_flight = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        in_flight,
+        "the test_server example did not honour sleep_ms (rebuild it: cargo build -p mcp-bridge --examples)"
+    );
+    assert!(!slow.is_finished(), "the call must still be running");
     mgr.set_server_bots("t", Some(vec!["a".into()])).unwrap();
+    assert!(!slow.is_finished(), "the swap must not end the call");
 
     // The in-flight call survives (same connection, no restart) ...
     let out = slow.await.unwrap().expect("in-flight call must finish");
+    assert!(started.elapsed() >= Duration::from_millis(800));
     assert_eq!(text_of(&out.content), "late");
     // ... the removed bot is denied on its next call and no longer sees the
     // tool, while the remaining bot is unaffected.

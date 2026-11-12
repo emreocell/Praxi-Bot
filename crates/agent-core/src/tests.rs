@@ -3142,6 +3142,46 @@ allow = [\"ask_user\", \"find_tool\", \"get_tool_details\", \"use_tool\", \"fs_r
     assert_eq!(mcp.count.load(Ordering::SeqCst), 1);
 }
 
+/// The fail-closed `spec_visible` must not hide anything an ordinary bot may
+/// use: with the whole built-in set registered, the bot sees exactly the
+/// registry's tools (platform permitting), the discovery meta-tools included.
+#[tokio::test]
+async fn fail_closed_visibility_hides_no_registered_tool_from_an_ordinary_bot() {
+    let env = setup();
+    let fake = Fake::new(vec![text("x")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(""),
+        cfg(Policy::full()),
+    )
+    .with_builtin_tools(builtin_cfg(&env, Arc::new(NoGate)));
+    let registered: std::collections::BTreeSet<String> = lp
+        .sh
+        .tools
+        .list()
+        .into_iter()
+        .filter(|s| crate::shared::platform_ok(&s.platforms))
+        .map(|s| s.name)
+        .collect();
+    assert!(registered.len() > 20, "{registered:?}");
+    let visible: std::collections::BTreeSet<String> = lp
+        .sh
+        .visible_specs(&profile(""), env.bot)
+        .into_iter()
+        .map(|s| s.name)
+        .collect();
+    assert_eq!(visible, registered);
+    // And through the model-facing surface: nothing it offers is unregistered.
+    let offered = lp.sh.model_specs(&profile(""), env.bot, &[]);
+    assert!(!offered.is_empty());
+    for spec in offered {
+        assert!(registered.contains(&spec.name), "{}", spec.name);
+    }
+}
+
 // ---------- global event order ----------
 
 #[tokio::test]

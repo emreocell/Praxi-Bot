@@ -636,6 +636,14 @@ impl McpManager {
         Ok(McpServerHandle(server))
     }
 
+    /// The live `bots` list of server `id` (`None` = all bots).
+    ///
+    /// # Errors
+    /// No server with this id is registered.
+    pub fn server_bots(&self, id: &str) -> Result<Option<Vec<String>>> {
+        Ok(self.get(id)?.bots())
+    }
+
     /// Change who may use server `id` without touching its connection: calls
     /// already running finish, and the next call (and discovery) sees `bots`.
     ///

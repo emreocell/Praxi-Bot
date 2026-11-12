@@ -350,6 +350,7 @@
       "title": "Uygulamalar",
       "hint": "Bu botun kullanabileceği bağlı uygulamalar. Tüm botlara açık bir uygulamanın seçimini kaldırırsan diğer botlarınla sınırlanır. Uygulamaları Uygulamalar ekranından yönetebilirsin.",
       "none": "Henüz bağlı uygulama yok.",
+      "notApplied": "{{names}}: uygulanmadı, uygulama bu arada değişti (örneğin artık tüm botlara açık). Liste güncel durumu gösteriyor.",
       "partialFail": "Bot kaydedildi ama şu uygulamalar için erişim güncellenemedi: {{names}}. Tekrar Kaydet’i dene."
     },
     "createTitle": "Yeni bot",
@@ -751,6 +752,7 @@
       "deletedBot": "silinmiş bot",
       "edit": "Botlar",
       "save": "Kaydet",
+      "notApplied": "{{name}}: kaydedilmedi, bu uygulama başka yerde değiştirildi (örneğin artık tüm botlara açık). Güncel durum gösteriliyor.",
       "savedToast": "{{name}}: bot erişimi kaydedildi"
     },
     "reconnect": "Yeniden bağlan",

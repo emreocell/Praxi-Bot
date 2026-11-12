@@ -2,7 +2,7 @@ import { Blocks, Cable, Check, Plus, Search, Server, Users, X } from "lucide-rea
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
-import type { McpCatalogEntry, McpServer, McpServerPatch } from "../api/types";
+import type { McpCatalogEntry, McpServer } from "../api/types";
 import formStyles from "../components/Form.module.css";
 import { AppTile } from "../components/AppTile";
 import { BotAccessPicker } from "../components/BotAccessPicker";
@@ -16,7 +16,7 @@ import {
   botAccessLabels,
   botScope,
   botSelection,
-  scopePatch,
+  saveServerScope,
   catalogCategories,
   connectCatalogEntry,
   customServerConfig,
@@ -45,13 +45,16 @@ function ConnectedRow({
   busy: boolean;
   onReconnect: () => void;
   onDisconnect: () => void;
-  onSaveBots: (patch: McpServerPatch) => void;
+  onSaveBots: (from: BotScope, to: BotScope) => void;
 }) {
   const { t } = useTranslation();
   const { bots } = useDaemon();
   const [confirm, setConfirm] = useState(false);
   const [editing, setEditing] = useState(false);
   const [scope, setScope] = useState<BotScope>(() => botScope(server));
+  // The scope the editor opened with: the saved diff is against this, not
+  // against whatever the live server says at click time.
+  const [baseline, setBaseline] = useState<BotScope>(() => botScope(server));
   const access = botAccessLabels(server, bots, t("apps.access.deletedBot"));
   const tone = statusTone(server.status);
   const needsReconnect =
@@ -94,6 +97,7 @@ function ConnectedRow({
           disabled={busy}
           data-testid={`mcp-access-${server.name}`}
           onClick={() => {
+            setBaseline(botScope(server));
             setScope(botSelection(botScope(server), bots));
             setEditing((e) => !e);
           }}
@@ -144,7 +148,7 @@ function ConnectedRow({
               data-testid={`mcp-access-save-${server.name}`}
               onClick={() => {
                 setEditing(false);
-                onSaveBots(scopePatch(botScope(server), scope));
+                onSaveBots(baseline, scope);
               }}
             >
               {t("apps.access.save")}
@@ -568,10 +572,19 @@ export function AppsModal({
                             await reload();
                           })
                         }
-                        onSaveBots={(patch) =>
+                        onSaveBots={(from, to) =>
                           void run(s.name, async () => {
-                            await client?.updateMcpServer(s.name, patch);
-                            toast.show(t("apps.access.savedToast", { name: s.name }), "success");
+                            if (!client) {
+                              return;
+                            }
+                            const { applied } = await saveServerScope(client, s.name, from, to);
+                            if (applied) {
+                              toast.show(t("apps.access.savedToast", { name: s.name }), "success");
+                            } else {
+                              // The server is not in the state the user chose
+                              // (changed elsewhere meanwhile): say so, show the truth.
+                              toast.show(t("apps.access.notApplied", { name: s.name }), "danger");
+                            }
                             await reload();
                           })
                         }

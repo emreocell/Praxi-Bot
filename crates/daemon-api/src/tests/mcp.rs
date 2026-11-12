@@ -498,6 +498,40 @@ async fn empty_bots_list_round_trips_and_differs_from_null() {
 }
 
 #[tokio::test]
+async fn oversized_or_malformed_bot_id_lists_are_rejected_with_400() {
+    let (t, _) = with_mcp();
+    let long = "x".repeat(65);
+    let many: Vec<String> = (0..257).map(|i| format!("b{i}")).collect();
+    let mut body = stdio_body("ok");
+    body["bots"] = json!(["fine"]);
+    assert_eq!(
+        call(&t, Method::POST, "/v1/mcp/servers", Some(body))
+            .await
+            .status,
+        StatusCode::CREATED
+    );
+    for bad in [json!([long]), json!([""]), json!(many)] {
+        let mut b = stdio_body("bad");
+        b["bots"] = bad.clone();
+        let r = call(&t, Method::POST, "/v1/mcp/servers", Some(b)).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "create {bad}");
+        for field in ["bots", "bots_add", "bots_remove"] {
+            let r = call(
+                &t,
+                Method::PUT,
+                "/v1/mcp/servers/ok",
+                Some(json!({ field: bad })),
+            )
+            .await;
+            assert_eq!(r.status, StatusCode::BAD_REQUEST, "{field} {bad}");
+        }
+    }
+    // The stored list is untouched by the rejected requests.
+    let list = call(&t, Method::GET, "/v1/mcp/servers", None).await.json();
+    assert_eq!(list[0]["bots"], json!(["fine"]));
+}
+
+#[tokio::test]
 async fn catalog_is_served() {
     let (t, _) = with_mcp();
     let r = call(&t, Method::GET, "/v1/mcp/catalog", None).await;

@@ -350,6 +350,7 @@
       "title": "Apps",
       "hint": "Connected apps this bot may use. Unticking an app that is open to every bot limits it to your other bots. Manage apps from the Apps screen.",
       "none": "No apps are connected yet.",
+      "notApplied": "{{names}}: not applied, the app changed in the meantime (for example it is now open to all bots). The list shows its current state.",
       "partialFail": "The bot was saved, but app access could not be updated for: {{names}}. Try Save again."
     },
     "createTitle": "New bot",
@@ -751,6 +752,7 @@
       "deletedBot": "deleted bot",
       "edit": "Bots",
       "save": "Save",
+      "notApplied": "{{name}}: not saved, this app was changed elsewhere (for example it is now open to all bots). Showing its current state.",
       "savedToast": "{{name}}: bot access saved"
     },
     "reconnect": "Reconnect",

@@ -141,6 +141,7 @@ impl ServerHandler for TestServer {
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
         if sleep_ms > 0 {
+            eprintln!("test_server sleeping {sleep_ms}ms in {}", request.name);
             tokio::time::sleep(std::time::Duration::from_millis(sleep_ms)).await;
         }
         let result = match request.name.as_ref() {

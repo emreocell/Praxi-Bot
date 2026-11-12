@@ -2,6 +2,7 @@ import { type ChangeEvent, type CSSProperties, useEffect, useMemo, useRef, useSt
 import { useTranslation } from "react-i18next";
 import { Avatar, Button, Card } from "ui";
 import {
+  type Bot,
   type McpServer,
   PERMISSION_CATEGORIES,
   type PermissionCategoryName,
@@ -19,7 +20,7 @@ import {
   type PresetChoice
 } from "../lib/botProfile";
 import { AppTile } from "../components/AppTile";
-import { applyAppsSelection, botHasAccess, changedApps } from "../lib/mcpApps";
+import { botHasAccess, changedApps, saveBotAndApps } from "../lib/mcpApps";
 import { FAKE_PROVIDER_ID } from "../lib/providers";
 import { type ProvidersView, providersView } from "../lib/providerView";
 import { useDaemon } from "../state/DaemonContext";
@@ -95,8 +96,9 @@ export function BotFormView({
   // Snapshot of the ticks when the form loaded: only ticks the user changed
   // since are written back, never a difference caused by someone else.
   const [initialApps, setInitialApps] = useState<Record<string, boolean>>({});
-  // Id of a bot this form created (a retry after a partial failure updates it).
-  const [createdId, setCreatedId] = useState<string | null>(null);
+  // The bot this form created: a retry after a partial failure must update
+  // THIS bot (kept whole, so it does not depend on the bot list refreshing).
+  const [createdBot, setCreatedBot] = useState<Bot | null>(null);
   const [draft, setDraft] = useState<BotDraft>(() => draftFromBot(existing));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -190,38 +192,66 @@ export function BotFormView({
     setSaving(true);
     setError(null);
     try {
-      const target = existing ?? bots.find((b) => b.id === createdId);
+      const target = existing ?? createdBot ?? undefined;
       const config = configFromDraft(draft, target);
       const input = { name: draft.name.trim(), config };
-      const saved = target
-        ? await client.updateBot(target.id, input)
-        : await client.createBot(input);
-      if (!target) {
-        setCreatedId(saved.id);
-      }
-      const failed = await applyAppsSelection(
+      const { bot, failed, notApplied } = await saveBotAndApps(
         client,
-        saved.id,
+        target,
+        input,
         initialApps,
         allowed,
         bots.map((b) => b.id)
       );
-      await refreshBots();
-      if (failed.length > 0) {
-        // The bot itself is saved, its app access is not: say so and stay.
+      if (!target) {
+        setCreatedBot(bot);
+      }
+      await refreshBots().catch(() => {});
+      if (failed.length > 0 || notApplied.length > 0) {
+        // The bot itself is saved, its app access is not (or not as chosen):
+        // show what the servers really say now and stay on the form.
+        const fresh = await client.listMcpServers().catch(() => null);
+        const problem = new Set([...failed, ...notApplied]);
+        const actual = (name: string): boolean | undefined => {
+          const srv = fresh?.find((x) => x.name === name);
+          return srv ? botHasAccess(srv, bot.id) : undefined;
+        };
+        if (fresh) {
+          setServers(fresh);
+        }
+        setAllowed((prev) => {
+          const next = { ...prev };
+          for (const name of notApplied) {
+            next[name] = actual(name) ?? prev[name];
+          }
+          return next;
+        });
         setInitialApps((prev) => {
           const next = { ...prev };
           for (const name of changedApps(prev, allowed)) {
-            if (!failed.includes(name)) {
+            if (notApplied.includes(name)) {
+              next[name] = actual(name) ?? prev[name];
+            } else if (!problem.has(name)) {
               next[name] = allowed[name];
             }
           }
           return next;
         });
-        setError(t("botForm.apps.partialFail", { names: failed.join(", ") }));
+        setError(
+          [
+            failed.length > 0
+              ? t("botForm.apps.partialFail", { names: failed.join(", ") })
+              : "",
+            notApplied.length > 0
+              ? t("botForm.apps.notApplied", { names: notApplied.join(", ") })
+              : ""
+          ]
+            .filter(Boolean)
+            .join(" ")
+        );
         return;
       }
-      onDone(saved.id);
+      onDone(bot.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

@@ -373,6 +373,14 @@ fn json_bool(v: &serde_json::Value, field: &str) -> Result<bool, McpControlError
         .ok_or_else(|| invalid(format!("`{field}` must be a boolean")))
 }
 
+/// Keep the first occurrence of every id.
+fn dedup_ids(ids: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    ids.into_iter()
+        .filter(|id| seen.insert(id.clone()))
+        .collect()
+}
+
 fn json_strings(v: &serde_json::Value, field: &str) -> Result<Vec<String>, McpControlError> {
     let arr = v
         .as_array()
@@ -553,7 +561,7 @@ fn merge_update(
         cfg.bots = if v.is_null() {
             None
         } else {
-            Some(json_strings(v, "bots")?)
+            Some(dedup_ids(json_strings(v, "bots")?))
         };
     }
     // Atomic add / remove of single ids on the stored list (the caller holds
@@ -628,7 +636,7 @@ fn to_config(name: &str, input: McpServerInput) -> Result<McpServerConfig, McpCo
         category,
         secret_headers: input.secret_headers,
         secret_env: input.secret_env,
-        bots: input.bots,
+        bots: input.bots.map(dedup_ids),
     };
     cfg.validate().map_err(map_err)?;
     Ok(cfg)
@@ -1223,6 +1231,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn bots_lists_are_deduplicated_and_combine_as_documented() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = open(dir.path());
+        let mut input = stdio("s", false);
+        input.bots = Some(vec!["a".into(), "a".into(), "b".into()]);
+        let dto = host.add(input).await.unwrap();
+        assert_eq!(dto.bots, Some(vec!["a".to_owned(), "b".to_owned()]));
+        // Absolute `bots` first, then add, then remove (the documented order).
+        let dto = host
+            .update(
+                "s",
+                json!({"bots": ["x", "x", "y"], "bots_add": ["z", "x"], "bots_remove": ["y"]}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(dto.bots, Some(vec!["x".to_owned(), "z".to_owned()]));
+        // A `null` base makes add / remove inert in the same body.
+        let dto = host
+            .update("s", json!({"bots": null, "bots_add": ["q"]}))
+            .await
+            .unwrap();
+        assert_eq!(dto.bots, None);
+        host.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn add_remove_ids_are_atomic_and_keep_open_servers_open() {
         let dir = tempfile::tempdir().unwrap();
         let host = open(dir.path());
@@ -1247,20 +1281,23 @@ mod tests {
         host.shutdown().await;
     }
 
-    #[tokio::test]
+    /// Real parallelism: the removal and the update run on different worker
+    /// threads, so a read-modify-write `forget_bot` would lose one of them.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn concurrent_forget_and_update_lose_nothing() {
-        for round in 0..20 {
+        for round in 0..300 {
             let dir = tempfile::tempdir().unwrap();
             let host = open(dir.path());
             let mut input = stdio("s", false);
             input.bots = Some(vec!["gone".into(), "stay".into()]);
             host.add(input).await.unwrap();
-            let (forgot, updated) = tokio::join!(
-                host.forget_bot("gone"),
-                host.update("s", json!({"bots_add": ["new"]}))
-            );
-            forgot.unwrap();
-            updated.unwrap();
+            let h1 = Arc::clone(&host);
+            let h2 = Arc::clone(&host);
+            let forget = tokio::spawn(async move { h1.forget_bot("gone").await });
+            let update =
+                tokio::spawn(async move { h2.update("s", json!({"bots_add": ["new"]})).await });
+            forget.await.unwrap().unwrap();
+            update.await.unwrap().unwrap();
             let bots = host.list().remove(0).bots.unwrap();
             assert!(bots.contains(&"new".to_owned()), "round {round}: {bots:?}");
             assert!(bots.contains(&"stay".to_owned()), "round {round}: {bots:?}");
@@ -1272,8 +1309,34 @@ mod tests {
                 .load()
                 .unwrap();
             assert_eq!(saved[0].bots.as_ref().unwrap(), &bots);
+            assert_eq!(host.manager.server_bots("s").unwrap().as_ref(), Some(&bots));
             host.shutdown().await;
         }
+    }
+
+    #[tokio::test]
+    async fn a_failed_persist_leaves_the_live_list_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = open(dir.path());
+        let mut input = stdio("s", false);
+        input.bots = Some(vec!["a".into(), "b".into()]);
+        host.add(input).await.unwrap();
+        // Make saving impossible: a directory sits where `mcp.toml` must go.
+        let file = dir.path().join(MCP_FILE);
+        std::fs::remove_file(&file).unwrap();
+        std::fs::create_dir(&file).unwrap();
+
+        assert!(
+            host.update("s", json!({"bots_remove": ["a"]}))
+                .await
+                .is_err()
+        );
+        assert!(host.update("s", json!({"bots": []})).await.is_err());
+        assert!(host.forget_bot("a").await.is_err());
+        let expect = Some(vec!["a".to_owned(), "b".to_owned()]);
+        assert_eq!(host.list().remove(0).bots, expect);
+        assert_eq!(host.manager.server_bots("s").unwrap(), expect);
+        host.shutdown().await;
     }
 
     #[tokio::test]

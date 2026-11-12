@@ -11,6 +11,9 @@ import {
   appsPatch,
   scopePatch,
   applyAppsSelection,
+  saveBotAndApps,
+  saveServerScope,
+  scopeApplied,
   botAccessLabels,
   changedApps,
   botScope,
@@ -298,20 +301,20 @@ test("bot form only applies the ticks the user changed in this session", async (
   await api.updateMcpServer("github", { bots_remove: [Y] });
   // Saving an unrelated edit of the bot form: no tick was changed.
   assert.deepEqual(changedApps(initial, { ...initial }), []);
-  const failed = await applyAppsSelection(api, Y, initial, { ...initial }, all);
-  assert.deepEqual(failed, []);
+  const none = await applyAppsSelection(api, Y, initial, { ...initial }, all);
+  assert.deepEqual(none, { failed: [], notApplied: [] });
   const github = api.servers.find((s) => s.name === "github");
   assert.deepEqual(github?.bots, [BOTS[1].id], "Y must not be re-added");
 
   // A tick the user did change is applied, on the fresh server state.
-  const failed2 = await applyAppsSelection(
+  const second = await applyAppsSelection(
     api,
     Y,
     initial,
     { ...initial, filesystem: true, linear: false },
     all
   );
-  assert.deepEqual(failed2, []);
+  assert.deepEqual(second, { failed: [], notApplied: [] });
   assert.ok(api.servers.find((s) => s.name === "filesystem")?.bots?.includes(Y));
   assert.deepEqual(api.servers.find((s) => s.name === "linear")?.bots, [
     BOTS[1].id,
@@ -333,7 +336,7 @@ test("a failing server is reported, the others are still applied", async () => {
     { github: true, filesystem: true },
     BOTS.map((b) => b.id)
   );
-  assert.deepEqual(failed, ["github"]);
+  assert.deepEqual(failed, { failed: ["github"], notApplied: [] });
   assert.ok(api.servers.find((s) => s.name === "filesystem")?.bots?.includes(Y));
 });
 
@@ -357,4 +360,92 @@ test("the server editor sends a diff for list edits, absolute only across all-bo
     bots_add: [],
     bots_remove: ["a"]
   });
+});
+
+test("a removal that did not take effect (server now open to all) is reported, not 'saved'", async () => {
+  const api = new MockApiClient();
+  const Y = BOTS[0].id;
+  // The form saw github as a list containing Y; another window set it to all bots.
+  await api.updateMcpServer("github", { bots: null });
+  const real = api.listMcpServers.bind(api);
+  // The fresh list the save reads still shows the stale list state: a remove on
+  // an open server is the no-op the server reports back as `bots: null`.
+  api.listMcpServers = async () => {
+    const list = await real();
+    return list.map((s) => (s.name === "github" ? { ...s, bots: [Y] } : s));
+  };
+  const r = await applyAppsSelection(api, Y, { github: true }, { github: false }, BOTS.map((b) => b.id));
+  assert.deepEqual(r, { failed: [], notApplied: ["github"] });
+  assert.equal(api.servers.find((s) => s.name === "github")?.bots, null);
+});
+
+test("saving a bot: a failing server list after create reports failure and a retry updates the SAME bot", async () => {
+  const api = new MockApiClient();
+  let creates = 0;
+  const updates: string[] = [];
+  const made = { id: "new-bot-uuid", name: "N" } as unknown as import("../api/types.ts").Bot;
+  api.createBot = async () => {
+    creates += 1;
+    return made;
+  };
+  api.updateBot = async (id) => {
+    updates.push(id);
+    return made;
+  };
+  const real = api.listMcpServers.bind(api);
+  let listFails = true;
+  api.listMcpServers = async () => {
+    if (listFails) {
+      throw new Error("daemon hiccup");
+    }
+    return real();
+  };
+  const input = { name: "N", config: {} } as unknown as import("../api/types.ts").BotInput;
+  const initial = { github: true, linear: true };
+  const allowed = { github: true, linear: false };
+  const ids = BOTS.map((b) => b.id);
+
+  const first = await saveBotAndApps(api, undefined, input, initial, allowed, ids);
+  assert.equal(first.bot.id, made.id);
+  assert.deepEqual(first.failed, ["linear"]);
+  assert.equal(creates, 1);
+
+  // Retry: the form holds `first.bot`, so it updates it, never creates again.
+  listFails = false;
+  const retry = await saveBotAndApps(api, first.bot, input, initial, allowed, ids);
+  assert.equal(creates, 1);
+  assert.deepEqual(updates, [made.id]);
+  assert.deepEqual(retry.failed, []);
+  assert.deepEqual(api.servers.find((s) => s.name === "linear")?.bots?.includes(made.id), false);
+});
+
+test("the server editor diffs against the scope it opened with, not the live one", async () => {
+  const api = new MockApiClient();
+  const [a, b, c] = [BOTS[0].id, BOTS[1].id, BOTS[2].id];
+  await api.updateMcpServer("github", { bots: [a, b] });
+  const opened = { mode: "some" as const, ids: [a, b] };
+  // Someone else adds `c` while the editor is open (and a reload changes the live server).
+  await api.updateMcpServer("github", { bots_add: [c] });
+  // The user unticks `b` only.
+  const { applied, server } = await saveServerScope(api, "github", opened, {
+    mode: "some",
+    ids: [a]
+  });
+  assert.equal(applied, true);
+  assert.deepEqual(server.bots, [a, c], "the other window's change to c must survive");
+});
+
+test("the server editor reports a list edit that hit an open server", async () => {
+  const api = new MockApiClient();
+  const [a, b] = [BOTS[0].id, BOTS[1].id];
+  await api.updateMcpServer("github", { bots: [a, b] });
+  const opened = { mode: "some" as const, ids: [a, b] };
+  await api.updateMcpServer("github", { bots: null }); // set to all meanwhile
+  const { applied, server } = await saveServerScope(api, "github", opened, {
+    mode: "some",
+    ids: [a]
+  });
+  assert.equal(applied, false);
+  assert.equal(server.bots, null, "the server is not silently converted to a list");
+  assert.equal(scopeApplied(opened, { mode: "all" }, server), true);
 });

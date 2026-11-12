@@ -1,6 +1,7 @@
 import type { ApiClient } from "../api/client.ts";
 import type {
   Bot,
+  BotInput,
   McpCatalogEntry,
   McpServer,
   McpServerConfig,
@@ -351,9 +352,27 @@ export function changedApps(
   return Object.keys(allowed).filter((name) => allowed[name] !== initial[name]);
 }
 
+/** Result of writing the bot form's ticks. */
+export interface AppsResult {
+  /** Servers whose update failed (request error, or the list could not be read). */
+  failed: string[];
+  /** Servers whose update was accepted but did not take effect (e.g. now open to all bots). */
+  notApplied: string[];
+}
+
+/** Whether `result` gives (`on`) or denies (`!on`) the bot access, as intended. */
+export function appTickApplied(
+  result: Pick<McpServer, "bots">,
+  botId: string,
+  on: boolean
+): boolean {
+  return botHasAccess(result, botId) === on;
+}
+
 /**
  * Apply only the ticks the user changed in this form session, each against the
- * server's current state.  Returns the names of the servers that failed.
+ * server's current state, and check every response against the intent.  Never
+ * throws: a failing list call or update is reported in `failed`.
  */
 export async function applyAppsSelection(
   api: Pick<McpApi, "listMcpServers" | "updateMcpServer">,
@@ -361,13 +380,19 @@ export async function applyAppsSelection(
   initial: Record<string, boolean>,
   allowed: Record<string, boolean>,
   allBotIds: string[]
-): Promise<string[]> {
+): Promise<AppsResult> {
+  const result: AppsResult = { failed: [], notApplied: [] };
   const changed = changedApps(initial, allowed);
   if (changed.length === 0) {
-    return [];
+    return result;
   }
-  const fresh = await api.listMcpServers();
-  const failed: string[] = [];
+  let fresh: McpServer[];
+  try {
+    fresh = await api.listMcpServers();
+  } catch {
+    result.failed = changed;
+    return result;
+  }
   for (const name of changed) {
     const server = fresh.find((s) => s.name === name);
     if (!server) {
@@ -378,12 +403,70 @@ export async function applyAppsSelection(
       continue;
     }
     try {
-      await api.updateMcpServer(name, patch);
+      const updated = await api.updateMcpServer(name, patch);
+      if (!appTickApplied(updated, botId, allowed[name])) {
+        result.notApplied.push(name);
+      }
     } catch {
-      failed.push(name);
+      result.failed.push(name);
     }
   }
-  return failed;
+  return result;
+}
+
+/**
+ * Whether the server's resulting `bots` matches what the editor meant: all
+ * bots, or a list that has every ticked bot and none of the unticked ones.
+ */
+export function scopeApplied(
+  from: BotScope,
+  to: BotScope,
+  result: Pick<McpServer, "bots">
+): boolean {
+  const now = botScope(result);
+  if (to.mode === "all") {
+    return now.mode === "all";
+  }
+  if (now.mode === "all") {
+    return false;
+  }
+  const removed = from.mode === "some" ? from.ids.filter((id) => !to.ids.includes(id)) : [];
+  return to.ids.every((id) => now.ids.includes(id)) && removed.every((id) => !now.ids.includes(id));
+}
+
+/**
+ * Save the server editor: the diff against the scope it OPENED with, then
+ * check the response.  `applied: false` means the server is not in the state
+ * the user chose (for example it was set to all bots meanwhile).
+ */
+export async function saveServerScope(
+  api: Pick<McpApi, "updateMcpServer">,
+  name: string,
+  from: BotScope,
+  to: BotScope
+): Promise<{ applied: boolean; server: McpServer }> {
+  const server = await api.updateMcpServer(name, scopePatch(from, to));
+  return { applied: scopeApplied(from, to, server), server };
+}
+
+/**
+ * Save the bot form: create or update the bot, then its app ticks.  The bot
+ * the form holds afterwards (`bot`) is the one a retry must update, so a
+ * failure in the apps step can never lead to a second created bot.
+ */
+export async function saveBotAndApps(
+  api: Pick<ApiClient, "createBot" | "updateBot" | "listMcpServers" | "updateMcpServer">,
+  target: Bot | undefined,
+  input: BotInput,
+  initial: Record<string, boolean>,
+  allowed: Record<string, boolean>,
+  allBotIds: string[]
+): Promise<{ bot: Bot } & AppsResult> {
+  const bot = target
+    ? await api.updateBot(target.id, input)
+    : await api.createBot(input);
+  const apps = await applyAppsSelection(api, bot.id, initial, allowed, allBotIds);
+  return { bot, ...apps };
 }
 
 /** Like `botAccess`, but ids of bots that no longer exist read `deleted`. */
