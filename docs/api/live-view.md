@@ -17,10 +17,17 @@ user ID; remote identity is the paired public key. `client_id` is correlation
 only. Session UUIDs, takeover UUIDs, headers and request bodies do not grant an
 identity. Desktop and phone roles can watch/input subject to separate
 `screen:view` and `screen:input` privileges; node/host roles cannot use the API.
-Only the local UI or paired desktop may recover an ownerless/expired pause.
+The local user has both by default; a paired device has neither until the local
+user grants them per device with `PUT /v1/view/privileges/{peer_key}` (local only;
+`input` requires `view`). Grants are held in memory: after a daemon restart a
+paired device needs a new grant. Only the local UI or paired desktop may recover
+an ownerless/expired pause with a view session.
 
 `AppState::set_screen_privileges` changes policy as an input executor barrier
-and invalidates the active owner's input. The transport must close revoked
+and invalidates the active owner's input; removing `view` also ends that actor's
+sessions. `AppState::reconcile_paired_peers` applies the same to every
+`peer:<key>` actor that is no longer paired; the CLI daemon runs it every two
+seconds against the paired-device list. The transport must close revoked
 peer bodies (175); the daemon also rechecks policy during streaming and before
 every injected event. Neither SSE subscribers nor watching frames grant input.
 Frame viewers do not register as overlay controllers.
@@ -42,6 +49,15 @@ Frame viewers do not register as overlay controllers.
   bound), input reset, pinning and audit. Retries use `request_id`.
 - `POST /v1/view/sessions/{id}/input` carries version, takeover/epoch, generation,
   geometry revision, first sequence number and typed events.
+- `POST /v1/control/override` (local user only) interrupts any takeover, whoever
+  owns it, resets pressed inputs and keeps the bot paused. `PUT /v1/control/state`
+  with `mode: paused` from the local user does the same while a takeover is owned.
+- `POST /v1/control/recover` (local user only) clears a takeover latch, including
+  one restored after a restart, without a view session or a registered target.
+  A latch that never had a takeover owner is released with the ordinary release.
+- `GET /v1/control/state` returns the takeover's owner, target and state to
+  everyone, but the takeover id, session id and epoch only to the owner (the
+  others see nil ids and epoch 0).
 - `POST /v1/control/release` requires owner, takeover/epoch and `request_id` while
   owned. `outcome` is `completed`; optional `human_action` is an enum, never free
   text. Bodyless release and `PUT state release:true` cannot bypass ownership.
@@ -75,9 +91,9 @@ No arbitrary CDP, JavaScript, clipboard, file-transfer or shell RPC is exposed.
 
 The persistent global ControlHub latch applies to desktop, headed/headless
 browser, tool calls from scripts, and workflow native mutations. Action permits
-last through backend completion, including cancellation/partial failures. An
-already admitted script drains as one bounded action and its inner native calls
-inherit that admission. New scripts wait before starting their runtime budget.
+last through backend completion, including cancellation/partial failures. A script
+that uses the computer is admitted by its first computer call, drains as one
+bounded action and its later native calls inherit that admission (see below).
 Independent shell/MCP processes are not suspended by this mechanism.
 
 A paused acting call remains cancellable and does not consume its tool timeout
@@ -86,11 +102,37 @@ observation; replay admits before resolving locators again. Observation epochs
 also invalidate cached references in tools that were not waiting during takeover.
 Computer runs share a run-lifetime slot (default one); children share the root's
 slot. `BOT_MAX_COMPUTER_RUNS` overrides that limit. Managed Chromium closes after
-120 seconds without real bot work; `BOT_BROWSER_IDLE_SECONDS` overrides it.
+120 seconds without real bot work (a run that used the computer and is still
+active counts as work); `BOT_BROWSER_IDLE_SECONDS` overrides it.
 The adapter must call `CdpDriver::set_takeover_pin` for active takeover only.
 
+The global event stream (`GET /v1/events`, not replayed) carries
+`control_state_changed` (`state` acquiring/active/paused/released/recovered,
+`owner`, `target_id`, `reason`) for an indicator in a UI; it never carries ids,
+epochs, pixels, text or keys.
+
+While the latch is `human_driving`, observation tools are refused as well
+(browser snapshot/screenshot/tabs list/wait, desktop state/OCR/window list) with
+an "observation paused" result. Plain `paused` keeps today's read behaviour.
+A bot action that waits for the latch gives up after 30 minutes with a clear
+message; the latch is not changed.
+
+A script is admitted lazily: only its first computer (browser or desktop) call
+takes admission, later computer calls of that script inherit it, and a script
+that never touches the computer neither waits for a pause nor holds the computer
+slot. Managed Chromium does not idle-close while a run that used the computer is
+still active; its idle clock restarts when that run ends.
+
+Audit volume: session open/close, takeover acquire/release/interrupt/denied and
+input batches are audited; an open stream adds at most one `view.checkpoint` per
+minute (heartbeat records still flow every 5 seconds). One capture source serves
+all viewers of a target, so a viewer that asks for a very small size lowers the
+size and quality all viewers of that target get; a per-viewer transcode is not
+done on the small host.
+
 Release stops input, resets injected keys, persists a payload-free journal/outbox,
-adds one system continuation message per affected chat using durable message IDs,
+adds one continuation message per affected chat (role `control_note`, fixed text
+shape, delivered to the model as a system message) using durable message IDs,
 audits release and clears the latch durably before waking calls. Notes contain
 only event counts, target kind and optional allow-listed user report; login
 success is never inferred. A finished run is not restarted. Retries and explicit

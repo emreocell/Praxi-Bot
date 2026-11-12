@@ -539,6 +539,7 @@ impl ControlHub {
     ) -> Result<ActionPermit, String> {
         let start_epoch = self.state.lock().epoch;
         let mut waited = false;
+        let deadline = tokio::time::Instant::now() + self.cfg.latch_wait;
         loop {
             let changed = self.changed.notified();
             tokio::pin!(changed);
@@ -554,7 +555,12 @@ impl ControlHub {
             };
             if paused {
                 waited = true;
-                changed.await;
+                if tokio::time::timeout_at(deadline, changed).await.is_err() {
+                    return Err(format!(
+                        "The user is still controlling the desktop after {} minutes, so this                          action was not performed. Do not retry it; tell the user you are                          waiting and ask them to give control back.",
+                        (self.cfg.latch_wait.as_secs() / 60).max(1)
+                    ));
+                }
                 continue;
             }
             // Pending overlay decisions are not admitted actions.
@@ -675,6 +681,28 @@ mod tests {
         assert!(hub.latched().is_some());
         drop(permit);
         assert!(hub.activate(t.info.id, t.info.control_epoch).is_err());
+    }
+    #[tokio::test(start_paused = true)]
+    async fn a_bot_action_waits_a_bounded_time_for_the_latch_then_gets_a_clear_message() {
+        let hub = Arc::new(ControlHub::new(super::super::ControlConfig {
+            latch_wait: Duration::from_secs(60),
+            ..super::super::ControlConfig::default()
+        }));
+        let t = hub
+            .begin_takeover("alice", &request(), Uuid::now_v7(), 1, true)
+            .unwrap();
+        let other = hub.clone();
+        let waiting = tokio::spawn(async move { other.admit_action(action(), &|| {}).await });
+        tokio::time::sleep(Duration::from_secs(59)).await;
+        assert!(!waiting.is_finished(), "still within the bound");
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let message = waiting.await.unwrap().err().expect("bounded wait ends");
+        assert!(message.contains("still"), "{message}");
+        assert!(message.contains("Do not retry"), "{message}");
+        // The latch is untouched and nothing is admitted.
+        assert!(hub.latched().is_some());
+        assert_eq!(hub.state.lock().active_actions, 0);
+        assert!(hub.takeover().is_some_and(|x| x.info.id == t.info.id));
     }
     #[tokio::test]
     async fn late_overlay_proceed_and_cancelled_waiters_cannot_enter_the_barrier() {

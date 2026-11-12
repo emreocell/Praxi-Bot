@@ -33,6 +33,17 @@ pub trait DesktopControlGate: Send + Sync {
     fn observation_epoch(&self) -> u64 {
         0
     }
+    /// True while a bot run that used the computer is still active; keeps the
+    /// managed browser from idle-closing between that run's steps.
+    fn computer_in_use(&self) -> bool {
+        false
+    }
+    /// While the human drives, observation tools (snapshots, screenshots, OCR,
+    /// tab and window listings) are refused too: the model must not read what
+    /// the user types. `Some(message)` is returned to the model.
+    fn observation_refused(&self) -> Option<String> {
+        None
+    }
     /// Lifetime admission: held through action, settling and observation, including failures.
     async fn admit_action(&self, req: &ControlRequest) -> Result<ActionPermit, String> {
         self.before_action(req).await?;
@@ -96,15 +107,30 @@ impl Drop for PermitInner {
     }
 }
 
-// A script is one admitted action. Its computer tool calls inherit the permit,
-// so takeover drains the running script rather than deadlocking its next call.
-tokio::task_local! { static SCRIPT_ACTION: ActionPermit; }
-pub(crate) fn inherited_action() -> Option<ActionPermit> {
-    SCRIPT_ACTION.try_with(Clone::clone).ok()
+/// The admission of one script run, taken lazily by its first computer call.
+pub(crate) type ScriptAction = std::sync::Arc<tokio::sync::OnceCell<ActionPermit>>;
+
+// A script that uses the computer is one admitted action: the first computer
+// tool call admits, later ones inherit the permit, so takeover drains the
+// running script rather than deadlocking its next call. A script that never
+// touches the computer is never admitted (and takes no computer slot).
+tokio::task_local! { static SCRIPT_ACTION: ScriptAction; }
+
+/// Admit with `admit`, or inherit the enclosing script's admission (taking it
+/// with `admit` the first time).
+pub(crate) async fn admit_or_inherit<F, Fut>(admit: F) -> Result<ActionPermit, String>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<ActionPermit, String>>,
+{
+    match SCRIPT_ACTION.try_with(Clone::clone) {
+        Ok(cell) => cell.get_or_try_init(admit).await.cloned(),
+        Err(_) => admit().await,
+    }
 }
 pub(crate) async fn scope_action<F: std::future::Future>(
-    permit: ActionPermit,
+    action: ScriptAction,
     future: F,
 ) -> F::Output {
-    SCRIPT_ACTION.scope(permit, future).await
+    SCRIPT_ACTION.scope(action, future).await
 }

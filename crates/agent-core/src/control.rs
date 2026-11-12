@@ -49,6 +49,10 @@ pub trait ControlGate: Send + Sync {
     fn observation_epoch(&self) -> u64 {
         0
     }
+    /// A message while observation tools must be refused (the human drives).
+    fn observation_refused(&self) -> Option<String> {
+        None
+    }
     fn is_paused(&self) -> bool {
         false
     }
@@ -90,6 +94,23 @@ impl DesktopControlGate for LoopControl {
             .upgrade()
             .and_then(|sh| sh.control.read().clone())
             .map_or(0, |gate| gate.observation_epoch())
+    }
+
+    fn computer_in_use(&self) -> bool {
+        // A run that took a computer slot holds it until it ends.
+        self.sh.upgrade().is_some_and(|sh| {
+            sh.computer_slots.available_permits()
+                < sh.cfg
+                    .max_computer_runs
+                    .clamp(1, tokio::sync::Semaphore::MAX_PERMITS)
+        })
+    }
+
+    fn observation_refused(&self) -> Option<String> {
+        self.sh
+            .upgrade()
+            .and_then(|sh| sh.control.read().clone())
+            .and_then(|gate| gate.observation_refused())
     }
 
     async fn before_action(&self, req: &ToolRequest) -> Result<(), String> {

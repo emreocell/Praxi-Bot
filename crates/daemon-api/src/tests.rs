@@ -1473,6 +1473,7 @@ fn setup_desktop() -> (T, Arc<crate::fake::FakeDesktop>) {
         proceed_timeout: Duration::from_millis(150),
         refuse_timeout: Duration::from_millis(600),
         heartbeat_ttl: Duration::from_secs(5),
+        latch_wait: Duration::from_secs(30 * 60),
     };
     let state = AppState::new(agent.clone(), storage, cfg).unwrap();
     (
@@ -1607,6 +1608,23 @@ async fn human_driving_waits_then_discards_stale_click_without_model_retry() {
     assert!(r.contains("dispatched"), "{r}");
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
 
+    // A plain pause keeps reads working.
+    call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "paused"})),
+    )
+    .await;
+    let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
+    assert!(state.contains("Button 2"), "plain pause reads: {state}");
+    call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "idle", "release": true})),
+    )
+    .await;
     // The human takes the wheel: refused at once, nothing is dispatched.
     call(
         &t,
@@ -1615,8 +1633,27 @@ async fn human_driving_waits_then_discards_stale_click_without_model_retry() {
         Some(json!({"mode": "human_driving"})),
     )
     .await;
+    // Observation is refused too: the model must not read what the user types.
     let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
-    assert!(state.contains("Button 2"), "reads are not gated: {state}");
+    assert!(state.contains("observation paused"), "{state}");
+    assert!(!state.contains("Button 2"), "{state}");
+    // A bot that read the screen before the pause waits while paused; it
+    // cannot observe while the human drives, so the stale-click flow below
+    // runs under a plain pause.
+    call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "idle", "release": true})),
+    )
+    .await;
+    call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "paused"})),
+    )
+    .await;
     let instruction = click_after_state(3);
     let pending = run_and_reply_seen(&t, &chat, &instruction);
     tokio::pin!(pending);

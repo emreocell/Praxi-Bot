@@ -142,8 +142,13 @@ pub struct CdpDriver {
     settings: BrowserSettings,
     session: Arc<Mutex<Option<Session>>>,
     takeover_pin: Arc<std::sync::atomic::AtomicBool>,
+    /// True while a bot run that used the computer is still active.
+    activity: Arc<std::sync::RwLock<Option<ActivityProbe>>>,
     reaper_started: std::sync::atomic::AtomicBool,
 }
+
+/// Reports whether real bot work is going on (see [`CdpDriver::set_activity_probe`]).
+pub type ActivityProbe = Arc<dyn Fn() -> bool + Send + Sync>;
 
 fn snap_opts(interactive_only: bool) -> SnapshotOptions {
     SnapshotOptions {
@@ -231,6 +236,7 @@ impl CdpDriver {
             settings,
             session: Arc::new(Mutex::new(None)),
             takeover_pin: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            activity: Arc::new(std::sync::RwLock::new(None)),
             reaper_started: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -312,6 +318,13 @@ impl CdpDriver {
             .store(active, std::sync::atomic::Ordering::SeqCst);
     }
 
+    /// While `probe` returns true (a bot run that used the computer is
+    /// active) the idle reaper keeps the browser and restarts its idle clock;
+    /// watching never counts as activity.
+    pub fn set_activity_probe(&self, probe: ActivityProbe) {
+        *self.activity.write().expect("activity probe poisoned") = Some(probe);
+    }
+
     fn start_idle_reaper(&self) {
         if self
             .reaper_started
@@ -321,6 +334,7 @@ impl CdpDriver {
         }
         let weak_session = Arc::downgrade(&self.session);
         let pin = Arc::clone(&self.takeover_pin);
+        let activity = Arc::clone(&self.activity);
         let timeout = self.settings.idle_timeout;
         tokio::spawn(async move {
             loop {
@@ -334,6 +348,19 @@ impl CdpDriver {
                     break;
                 };
                 if pin.load(std::sync::atomic::Ordering::SeqCst) {
+                    continue;
+                }
+                let run_active = activity
+                    .read()
+                    .ok()
+                    .and_then(|probe| probe.clone())
+                    .is_some_and(|probe| probe());
+                if run_active {
+                    if let Ok(mut slot) = session.try_lock()
+                        && let Some(s) = slot.as_mut()
+                    {
+                        s.last_work = tokio::time::Instant::now();
+                    }
                     continue;
                 }
                 if let Ok(mut slot) = session.try_lock()
@@ -886,9 +913,6 @@ impl BrowserTool {
         action: &str,
         label: String,
     ) -> Result<ActionPermit, ToolError> {
-        if let Some(permit) = crate::control::inherited_action() {
-            return Ok(permit);
-        }
         let Some(gate) = self.shared.control.as_ref() else {
             return Ok(ActionPermit::default());
         };
@@ -898,15 +922,32 @@ impl BrowserTool {
             label,
             action: action.to_owned(),
         };
-        if self.shared.driver.on_desktop() {
-            gate.admit_action(&request).await
-        } else {
-            gate.admit_background_action(&request).await
-        }
+        crate::control::admit_or_inherit(|| async {
+            if self.shared.driver.on_desktop() {
+                gate.admit_action(&request).await
+            } else {
+                gate.admit_background_action(&request).await
+            }
+        })
+        .await
         .map_err(exec_err)
     }
 
     async fn run(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
+        let observing = match self.op {
+            Op::Snapshot | Op::Wait | Op::Screenshot => true,
+            Op::Tabs => input.get("switch_to").is_none_or(Value::is_null),
+            _ => false,
+        };
+        if observing
+            && let Some(message) = self
+                .shared
+                .control
+                .as_ref()
+                .and_then(|g| g.observation_refused())
+        {
+            return Err(exec_err(message));
+        }
         let d = Arc::clone(&self.shared.driver);
         let text = match self.op {
             Op::Open => {
@@ -1725,6 +1766,41 @@ mod tests {
         assert_eq!(fake.calls.lock().as_slice(), ["tabs:None"]);
     }
 
+    struct HumanDrives;
+
+    #[async_trait]
+    impl DesktopControlGate for HumanDrives {
+        fn observation_refused(&self) -> Option<String> {
+            Some("the user is controlling (observation paused)".into())
+        }
+        async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+            Err("the user has taken control".into())
+        }
+    }
+
+    #[tokio::test]
+    async fn browser_observation_is_refused_while_the_human_drives() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Arc::new(FakeBrowser::default());
+        let t = tools(fake.clone(), dir.path(), Some(Arc::new(HumanDrives)));
+        for (name, input) in [
+            ("browser_snapshot", json!({})),
+            ("browser_screenshot", json!({})),
+            ("browser_tabs", json!({})),
+            ("browser_wait", json!({"idle":true})),
+        ] {
+            let err = get(&t, name)
+                .call(&ToolContext::default(), input)
+                .await
+                .unwrap_err();
+            assert!(
+                err.to_string().contains("observation paused"),
+                "{name}: {err}"
+            );
+        }
+        assert!(fake.calls.lock().is_empty(), "{:?}", fake.calls.lock());
+    }
+
     #[tokio::test]
     async fn headless_mutations_all_obey_the_same_control_gate() {
         let dir = tempfile::tempdir().unwrap();
@@ -2177,6 +2253,49 @@ mod tests {
         }
         assert!(driver.session.lock().await.is_none());
         assert!(!log.exists(), "watch/idle must not launch a new process");
+        server.kill();
+    }
+
+    #[tokio::test]
+    async fn an_active_bot_run_keeps_the_browser_open_between_steps_then_idle_close_resumes() {
+        let dir = tempfile::tempdir().unwrap();
+        let driver = CdpDriver::new(BrowserSettings {
+            idle_timeout: Duration::from_millis(40),
+            ..BrowserSettings::isolated(dir.path())
+        });
+        let server = FakeCdp::start();
+        let browser = Browser::connect(&server.url).await.unwrap();
+        let page = browser.first_page().await.unwrap();
+        *driver.session.lock().await = Some(Session {
+            browser,
+            page,
+            profile: None,
+            last_work: tokio::time::Instant::now(),
+        });
+        // A run that used the computer is still active (for example it waits
+        // for the model or an approval for much longer than the idle timeout).
+        let run_active = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let probe = Arc::clone(&run_active);
+        driver.set_activity_probe(Arc::new(move || {
+            probe.load(std::sync::atomic::Ordering::SeqCst)
+        }));
+        driver.start_idle_reaper();
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert!(
+            driver.session.lock().await.is_some(),
+            "idle close must not take the browser from an active run"
+        );
+        // The idle clock starts when the run ends, not before.
+        run_active.store(false, std::sync::atomic::Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        assert!(driver.session.lock().await.is_some());
+        for _ in 0..100 {
+            if driver.session.lock().await.is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(driver.session.lock().await.is_none());
         server.kill();
     }
 

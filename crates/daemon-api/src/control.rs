@@ -36,6 +36,10 @@ pub struct ControlConfig {
     pub refuse_timeout: Duration,
     /// How long a `PUT /v1/control/state` keeps the registration alive.
     pub heartbeat_ttl: Duration,
+    /// How long a bot action waits for a latched pause / takeover to end
+    /// before it returns a clear message instead (the same 30 minutes a
+    /// scheduled run waits for an approval). The latch itself stays.
+    pub latch_wait: Duration,
 }
 
 impl Default for ControlConfig {
@@ -44,6 +48,7 @@ impl Default for ControlConfig {
             proceed_timeout: Duration::from_secs(2),
             refuse_timeout: Duration::from_secs(10),
             heartbeat_ttl: Duration::from_secs(15),
+            latch_wait: Duration::from_secs(30 * 60),
         }
     }
 }
@@ -107,6 +112,9 @@ impl Drop for PendingGuard<'_> {
         self.hub.state.lock().pending.remove(&self.id);
     }
 }
+
+/// Returned to the model by observation tools while the human drives.
+const OBSERVATION_PAUSED: &str = "The user is controlling the screen right now (observation paused), so this read was not performed: you must not see what they type. Do not retry it; wait until they give control back.";
 
 fn refused_while(mode: ControlMode) -> Option<&'static str> {
     match mode {
@@ -302,6 +310,9 @@ impl ControlGate for ControlHub {
     fn observation_epoch(&self) -> u64 {
         self.state.lock().epoch
     }
+    fn observation_refused(&self) -> Option<String> {
+        (self.latched() == Some(ControlMode::HumanDriving)).then(|| OBSERVATION_PAUSED.to_owned())
+    }
     fn is_paused(&self) -> bool {
         self.latched().is_some()
     }
@@ -407,6 +418,7 @@ mod tests {
             proceed_timeout: Duration::from_millis(80),
             refuse_timeout: Duration::from_millis(200),
             heartbeat_ttl: Duration::from_millis(150),
+            latch_wait: Duration::from_secs(30 * 60),
         }
     }
 

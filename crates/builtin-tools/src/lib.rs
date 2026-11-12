@@ -143,9 +143,15 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
             cfg.control.clone(),
         ));
     }
-    let driver: Arc<dyn BrowserDriver> = cfg
-        .browser
-        .unwrap_or_else(|| Arc::new(CdpDriver::new(cfg.browser_settings)));
+    let driver: Arc<dyn BrowserDriver> = if let Some(driver) = cfg.browser {
+        driver
+    } else {
+        let cdp = CdpDriver::new(cfg.browser_settings);
+        if let Some(gate) = cfg.control.clone() {
+            cdp.set_activity_probe(Arc::new(move || gate.computer_in_use()));
+        }
+        Arc::new(cdp)
+    };
     all.extend(browser::tools(driver, &cfg.data_dir, cfg.control.clone()));
     all.extend(files::tools_bounded(
         &cfg.data_dir,
@@ -359,6 +365,43 @@ mod tests {
         registry.get("script_run").unwrap().call(&tool_registry::ToolContext::default(),serde_json::json!({"code":"await tools.call('browser_click',{ref:'e1'}); return await tools.call('browser_press',{key:'Enter'});"})).await.unwrap();
         assert_eq!(gate.0.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert_eq!(browser.calls.lock().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_script_that_never_touches_the_computer_is_never_admitted() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::new();
+        // Admission is closed for everything: only computer calls may notice.
+        let gate = Arc::new(OneAdmission(std::sync::atomic::AtomicUsize::new(1)));
+        let browser = Arc::new(browser::fake::FakeBrowser::default());
+        let mut config = BuiltinConfig::new(dir.path().into(), Arc::new(AllowAll));
+        config.browser = Some(browser.clone());
+        config.control = Some(gate.clone());
+        let _ = register_builtin_tools(&registry, config);
+        let script = registry.get("script_run").unwrap();
+        let ctx = tool_registry::ToolContext::default();
+        let out = script
+            .call(&ctx, serde_json::json!({"code":"return 1 + 1;"}))
+            .await
+            .unwrap();
+        let tool_registry::ContentPart::Text { text } = &out.content[0] else {
+            panic!()
+        };
+        assert!(text.contains('2'), "{text}");
+        assert_eq!(gate.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        // The first computer call is where admission happens, and it is refused.
+        let out = script
+            .call(
+                &ctx,
+                serde_json::json!({"code":"try { await tools.call('browser_click',{ref:'e1'}); return 'ran'; } catch (e) { return 'refused: ' + e; }"}),
+            )
+            .await
+            .unwrap();
+        let tool_registry::ContentPart::Text { text } = &out.content[0] else {
+            panic!()
+        };
+        assert!(text.contains("refused"), "{text}");
+        assert!(browser.calls.lock().is_empty());
     }
 
     #[tokio::test]

@@ -965,7 +965,9 @@ impl AppState {
             live.privileges
                 .lock()
                 .iter()
-                .filter(|(k, p)| k.starts_with("peer:") && !paired.contains(*k) && (p.view || p.input))
+                .filter(|(k, p)| {
+                    k.starts_with("peer:") && !paired.contains(*k) && (p.view || p.input)
+                })
                 .map(|(k, _)| k.clone()),
         );
         for key in stale {

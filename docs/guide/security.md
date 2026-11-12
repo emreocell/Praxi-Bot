@@ -71,6 +71,12 @@ Be realistic about the limits:
 - **The never-list is a safety net, not a sandbox.** It recognises known
   catastrophic patterns; it cannot judge every harmful command. Shell access
   (`shell_run`) is as dangerous as giving someone a terminal.
+- **One approved shell command can reach the daemon.** `shell_run` runs with your
+  user rights. The bearer token file is readable by that user, and the daemon
+  API is on loopback, so a shell command can read the token and call the API
+  (approvals, takeover). The never-list and the file-tool protections raise the
+  bar but are string checks, not a boundary. A real separation of the shell from
+  the daemon credential is planned.
 - **Shell and desktop actions are not undoable.** Only file tools take
   checkpoints.
 - **Unattended runs.** Schedules run without you watching. They pause when an
@@ -118,9 +124,43 @@ outside that guarantee.
 Input requires the authenticated session owner to hold the active persistent
 global takeover latch, with a valid epoch and current target/frame geometry.
 Disconnect, expiry, revoke and restart invalidate input, reset injected keys best
-effort and retain pause. A legacy release request cannot release an owned or
-restored uncertain latch. Resume requires explicit owned release or privileged
-recovery, durable safe continuation notes and successful reset. Audit stores only
+effort and retain pause. A legacy release request cannot release an owned
+takeover. A pause that has no takeover owner (your own Pause, also after a
+daemon restart) is released by the local user through the normal release path;
+a takeover latch restored after a restart is cleared by the local user with
+`POST /v1/control/recover`, which needs no view session and no registered
+target. Resume otherwise requires explicit owned release or privileged
+recovery, durable safe continuation notes and successful reset.
+
+You always outrank a paired device. `POST /v1/control/override` (and the app's
+Pause) interrupts any takeover at once, resets pressed keys and keeps the bot
+paused; only the local user can call it. A paired device has no `screen:view` and
+no `screen:input` until you grant them for that device
+(`PUT /v1/view/privileges/{device}`); revoking a pairing, or the grant, ends that
+device's sessions and takeover within seconds. `GET /v1/control/state` shows who
+drives which target and in which state; only the owner also gets the takeover id
+and epoch. The global event stream carries a `control_state_changed`
+notification (who, which target, state, reason; no ids, pixels or text) whenever
+a takeover is acquired, becomes active, is interrupted, released or recovered.
+
+While you drive (`human_driving`), the bot's observation tools are refused too
+(snapshots, screenshots, OCR, tab and window lists): the model must not read what
+you type, such as passwords or one-time codes. A plain pause keeps reads. A bot
+action that waits for your pause or takeover to end waits at most 30 minutes
+(the same bound as a scheduled approval) and then reports that you are still in
+control; the pause itself stays.
+
+The continuation note a takeover leaves in the chat is the only message the
+model receives as a system message from stored history. It has its own role that
+only the daemon writes and exactly one fixed text shape (intervention type, event
+counts, target kind); a stored message with any other text or role is never
+delivered as a system message, and a state-bundle import downgrades such rows to
+ordinary user messages. The daemon's own files (`bot.db` with its WAL/SHM/journal,
+`control-latch.json`, `policy.json`, the bearer token) are protected from the
+bot's file tools for reading and writing, and a shell command that names them
+always asks for approval. That last rule is damping only: one approved
+`shell_run` still runs as you and can reach those files and the loopback API
+(see below). Audit stores only
 actor/target IDs, event-type counts, sequence ranges, timing and fixed outcomes;
 audit failure denies authorization and suspends input. See the
 [live-view API and integration status](../api/live-view.md).

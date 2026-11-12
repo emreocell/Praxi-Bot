@@ -158,7 +158,7 @@ fn output_to_json(out: &ToolOutput) -> Value {
 /// [`ScriptHost`] that routes script tool calls through the registry with a
 /// permission check on every call.
 pub struct GateHost {
-    action_permit: Option<crate::control::ActionPermit>,
+    action: Option<crate::control::ScriptAction>,
     registry: ToolRegistry,
     gate: Arc<dyn ToolGate>,
     run_id: String,
@@ -180,7 +180,7 @@ impl GateHost {
         bot_id: Option<String>,
     ) -> Self {
         Self {
-            action_permit: None,
+            action: None,
             registry,
             gate,
             run_id,
@@ -220,8 +220,8 @@ impl ScriptHost for GateHost {
             max_inline_bytes: self.max_inline_bytes,
             bot_id: self.bot_id.clone(),
         };
-        let out = if let Some(permit) = &self.action_permit {
-            crate::control::scope_action(permit.clone(), tool.call(&ctx, input)).await
+        let out = if let Some(action) = &self.action {
+            crate::control::scope_action(action.clone(), tool.call(&ctx, input)).await
         } else {
             tool.call(&ctx, input).await
         };
@@ -288,31 +288,6 @@ impl Tool for ScriptTool {
         if let Some(t) = i.timeout {
             limits.timeout = Duration::from_secs(t).min(limits.timeout);
         }
-        // Admission precedes QuickJS's wall-clock budget. Already admitted
-        // scripts drain with a lifetime permit, including all native tool calls.
-        let action_permit = if let Some(control) = &self.control {
-            Some(
-                control
-                    .admit_background_action(&crate::control::ControlRequest {
-                        run_id: ctx.run_id.clone(),
-                        rect: None,
-                        label: "script computer actions".into(),
-                        action: "script".into(),
-                    })
-                    .await
-                    .map_err(exec_err)?,
-            )
-        } else {
-            None
-        };
-        if action_permit
-            .as_ref()
-            .is_some_and(crate::control::ActionPermit::needs_observation)
-        {
-            return Ok(ToolOutput::text(
-                "Human intervention completed; previous script discarded. Obtain a fresh normal observation and replan.",
-            ));
-        }
         let mut host = GateHost::new(
             self.registry.clone(),
             self.gate.clone(),
@@ -320,7 +295,12 @@ impl Tool for ScriptTool {
             ctx.max_inline_bytes,
             ctx.bot_id.clone(),
         );
-        host.action_permit = action_permit;
+        // Admission is lazy: only a computer tool call inside the script takes
+        // it (one admission for the whole run), so a script that never touches
+        // the computer neither waits for a pause nor holds the computer slot.
+        if self.control.is_some() {
+            host.action = Some(Arc::default());
+        }
         let host = Arc::new(host);
         // QuickJS is synchronous CPU work: a busy loop would block the async
         // worker (and `tokio::time::timeout` cannot preempt it). Run it on the

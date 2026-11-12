@@ -896,7 +896,9 @@ async fn continuation_is_durable_exactly_once_and_does_not_restart_a_finished_ru
     let messages = t.state.storage().list_messages(chat).unwrap();
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].role, agent_core::control_note::ROLE);
-    assert!(agent_core::control_note::is_well_formed(&messages[0].content));
+    assert!(agent_core::control_note::is_well_formed(
+        &messages[0].content
+    ));
     assert!(messages[0].content.contains("user reports login completed"));
     assert_eq!(
         t.state.storage().get_run(run).unwrap().unwrap().state,
@@ -1318,7 +1320,70 @@ async fn takeover_lifecycle_is_announced_without_ids_pixels_or_text() {
         ("paused", Some(Reason::Expired))
     );
     let json = serde_json::to_string(&paused).unwrap();
-    for forbidden in [owned2.id.to_string(), TEXT_SECRET.to_owned(), "epoch".to_owned()] {
+    for forbidden in [
+        owned2.id.to_string(),
+        TEXT_SECRET.to_owned(),
+        "epoch".to_owned(),
+    ] {
         assert!(!json.contains(&forbidden), "{json}");
     }
+}
+#[tokio::test(start_paused = true)]
+async fn an_open_stream_audits_at_most_one_checkpoint_per_minute() {
+    let t = Test::new();
+    let id = t.session(None).await;
+    let response = t
+        .response(
+            None,
+            Method::GET,
+            &format!("/v1/view/sessions/{id}/frames"),
+            None,
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = response.into_body();
+    let mut heartbeats = 0;
+    for second in 1..=130u32 {
+        tokio::time::advance(Duration::from_secs(1)).await;
+        while let Ok(Some(Ok(frame))) =
+            tokio::time::timeout(Duration::from_millis(20), body.frame()).await
+        {
+            if let Ok(data) = frame.into_data()
+                && data.len() <= 8 + 8 * 1024
+                && String::from_utf8_lossy(&data).contains("\"heartbeat\"")
+            {
+                heartbeats += 1;
+            }
+        }
+        if second % 5 == 0 {
+            let status = t
+                .call(
+                    None,
+                    Method::PUT,
+                    &format!("/v1/view/sessions/{id}/heartbeat"),
+                    Some(json!({})),
+                )
+                .await
+                .0;
+            assert_eq!(status, StatusCode::NO_CONTENT);
+        }
+    }
+    assert!(
+        heartbeats >= 20,
+        "stream heartbeats still flow: {heartbeats}"
+    );
+    let checkpoints = t
+        .state
+        .storage()
+        .list_audit(t.state.user_id())
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.action == "view.checkpoint")
+        .count();
+    assert!(
+        (1..=3).contains(&checkpoints),
+        "one audit checkpoint per minute at most, saw {checkpoints}"
+    );
+    let all = t.state.storage().list_audit(t.state.user_id()).unwrap();
+    assert!(all.iter().any(|e| e.action == "view.started"));
 }

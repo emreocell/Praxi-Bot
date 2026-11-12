@@ -3885,6 +3885,79 @@ async fn control_bridge_fails_closed_for_unknown_runs_and_a_dropped_loop() {
 }
 
 #[tokio::test]
+async fn fail_closed_admission_still_admits_direct_and_scheduled_runs() {
+    use builtin_tools::DesktopControlGate as _;
+    let env = setup();
+    let fake = Fake::new(vec![calls(&[("c1", "t.desk", json!({}))]), text("done")]);
+    let lp = gate_loop(&env, &fake);
+    let gate = Arc::new(TestGate {
+        refuse: false,
+        seen: Mutex::new(Vec::new()),
+    });
+    lp.set_control_gate(gate.clone());
+    let bridge = crate::control::LoopControl {
+        sh: Arc::downgrade(&lp.sh),
+    };
+    assert!(!bridge.computer_in_use());
+    // A direct (CLI one-shot style) run is a live run: admitted.
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    // A scheduled run calling the computer tool directly is admitted too.
+    let schedule = protocol::TaskId::new();
+    let scheduled = lp
+        .run_scheduled(env.chat, schedule, tool_work("t.desk"))
+        .unwrap();
+    assert_eq!(lp.wait(scheduled).await.unwrap(), RunState::Succeeded);
+    let seen = gate.seen.lock().clone();
+    assert_eq!(seen.len(), 2, "both runs reached the gate");
+    assert_eq!((seen[0].run_id, seen[1].run_id), (run, scheduled));
+    // Runs end: their computer slot is returned, nothing keeps the browser pinned.
+    assert!(!bridge.computer_in_use());
+}
+
+#[tokio::test]
+async fn an_active_run_that_used_the_computer_holds_the_pin_until_it_ends() {
+    use builtin_tools::DesktopControlGate as _;
+    let env = setup();
+    let fake = Fake::new(vec![]);
+    let lp = gate_loop(&env, &fake);
+    lp.set_control_gate(Arc::new(TestGate {
+        refuse: false,
+        seen: Mutex::new(Vec::new()),
+    }));
+    let bridge = crate::control::LoopControl {
+        sh: Arc::downgrade(&lp.sh),
+    };
+    let now = storage::now_ms();
+    let run = storage::Run {
+        id: protocol::RunId::new(),
+        user_id: env.user,
+        bot_id: env.bot,
+        chat_id: Some(env.chat),
+        kind: "turn".into(),
+        state: "running".into(),
+        error: None,
+        created_at_ms: now,
+        updated_at_ms: now,
+        parent_run_id: None,
+        spec: None,
+    };
+    env.storage.insert_run(&run).unwrap();
+    lp.sh.ctx(&run).unwrap();
+    assert!(!bridge.computer_in_use(), "no computer use yet");
+    drop(
+        bridge
+            .admit_action(&desk_req(run.id.to_string()))
+            .await
+            .unwrap(),
+    );
+    // The action is over, the run is still active: the browser stays pinned.
+    assert!(bridge.computer_in_use());
+    lp.sh.runs.lock().remove(&run.id);
+    assert!(!bridge.computer_in_use(), "the run ended");
+}
+
+#[tokio::test]
 async fn without_a_control_gate_the_action_just_runs() {
     let env = setup();
     let fake = Fake::new(vec![calls(&[("c1", "t.desk", json!({}))]), text("done")]);

@@ -115,6 +115,9 @@ pub(crate) async fn frames(
         let mut last_frame: Option<(u64, u64)> = None;
         let mut publication = true;
         let mut heartbeat_at = Instant::now();
+        // Heartbeat records flow every 5 s; the audit proves the trail is
+        // writable at most once a minute (a failure still ends the stream).
+        let mut checkpoint_at = Instant::now();
         let mut token_at = Instant::now();
         let mut tokens = f64::from(EffectiveProfile::watch().burst_bytes);
         let mut last_sent = Instant::now()
@@ -275,15 +278,18 @@ pub(crate) async fn frames(
                 }
             }
             if heartbeat_at.elapsed() >= Duration::from_secs(5) {
-                if audit(
-                    &state,
-                    &actor,
-                    "view.checkpoint",
-                    serde_json::json!({"session_id":id,"target_id":target}),
-                )
-                .is_err()
-                {
-                    break;
+                if checkpoint_at.elapsed() >= Duration::from_secs(60) {
+                    if audit(
+                        &state,
+                        &actor,
+                        "view.checkpoint",
+                        serde_json::json!({"session_id":id,"target_id":target}),
+                    )
+                    .is_err()
+                    {
+                        break;
+                    }
+                    checkpoint_at = Instant::now();
                 }
                 if let Ok(bytes) = (Record {
                     header: RecordHeader::Heartbeat {

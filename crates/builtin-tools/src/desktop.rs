@@ -371,20 +371,18 @@ impl Shared {
         rect: Option<ControlRect>,
     ) -> Result<ActionPermit, ToolError> {
         async {
-            if let Some(permit) = crate::control::inherited_action() {
-                return Ok(permit);
-            }
             let Some(gate) = &self.control else {
                 return Ok(ActionPermit::default());
             };
-            gate.admit_action(&ControlRequest {
+            let request = ControlRequest {
                 run_id: run_id.to_owned(),
                 rect,
                 label,
                 action: action.to_owned(),
-            })
-            .await
-            .map_err(exec_err)
+            };
+            crate::control::admit_or_inherit(|| gate.admit_action(&request))
+                .await
+                .map_err(exec_err)
         }
         .instrument(tracing::info_span!("desktop.gate", run_id, action))
         .await
@@ -917,6 +915,11 @@ fn window_line(w: &desktop_api::WindowInfo) -> String {
 impl DesktopTool {
     async fn run(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
         let sh = &self.shared;
+        if matches!(self.op, Op::ListApps | Op::GetState)
+            && let Some(message) = sh.control.as_ref().and_then(|g| g.observation_refused())
+        {
+            return Err(exec_err(message));
+        }
         match self.op {
             Op::ListApps => {
                 let wins = sh
@@ -1965,6 +1968,50 @@ mod tests {
             ("launch", "notepad.exe")
         );
         assert_eq!(fake.actions.lock().len(), 2, "click + key were dispatched");
+    }
+
+    struct HumanDrives;
+
+    #[async_trait]
+    impl DesktopControlGate for HumanDrives {
+        fn observation_refused(&self) -> Option<String> {
+            Some("the user is controlling (observation paused)".into())
+        }
+        async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+            Err("the user has taken control".into())
+        }
+    }
+
+    #[tokio::test]
+    async fn desktop_observation_is_refused_while_the_human_drives() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let d = tempfile::tempdir().unwrap();
+        let t = tools(
+            fake.clone(),
+            None,
+            d.path(),
+            settings(),
+            Some(Arc::new(HumanDrives)),
+        );
+        let ctx = ToolContext::default();
+        for (name, input) in [
+            ("desktop_get_state", json!({})),
+            ("desktop_get_state", json!({"screenshot": true})),
+            ("desktop_list_apps", json!({})),
+        ] {
+            let err = get(&t, name).call(&ctx, input).await.unwrap_err();
+            assert!(
+                err.to_string().contains("observation paused"),
+                "{name}: {err}"
+            );
+        }
+        assert!(fake.actions.lock().is_empty());
+        // Without a refusing gate the same read works (plain pause keeps reads).
+        let (_d2, free, _gate) = gated(Arc::new(FakeDesktop::new(false)), false);
+        get(&free, "desktop_get_state")
+            .call(&ctx, json!({}))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
