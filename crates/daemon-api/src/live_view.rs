@@ -98,6 +98,9 @@ pub struct LiveView {
     /// Woken by a local Stop: queued input batches give up at once, so the
     /// Stop's key reset and audit never wait behind them.
     stop: tokio::sync::Notify,
+    /// A key reset is running under the executor; a retry must not stack up
+    /// behind it (see `override_takeover`).
+    reset_in_flight: std::sync::atomic::AtomicBool,
     /// Test seam: runs after an input batch is validated under the executor,
     /// right before its first event is applied.
     #[cfg(test)]
@@ -521,6 +524,7 @@ pub(crate) async fn heartbeat(
     let live = s.live_view();
     let _executor = live.executor.lock().await;
     live.session(&actor, id)?;
+    retry_release_audits(&s);
     match (i.takeover_id, i.control_epoch) {
         (Some(t), Some(e)) if live.allowed(&actor, true) => s
             .hub()
@@ -547,25 +551,50 @@ pub(crate) async fn delete_session(
 /// Reset pressed inputs of the takeover's target and drop live capture.
 /// `false` when the key reset itself failed.
 async fn reset_target(s: &AppState, t: &OwnedTakeover) -> bool {
-    // Every backend call is bounded: a hanging sink must not wedge the
-    // executor (and with it heartbeats and the next Stop).
+    struct InFlight<'a>(&'a std::sync::atomic::AtomicBool);
+    impl Drop for InFlight<'_> {
+        fn drop(&mut self) {
+            self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let live = s.live_view();
+    live.reset_in_flight
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let _in_flight = InFlight(&live.reset_in_flight);
+    // ONE budget for the whole reset: a hung backend holds the executor for
+    // BACKEND_CALL_TIMEOUT in total, not once per call.
+    let deadline = Instant::now() + BACKEND_CALL_TIMEOUT;
     let mut reset_ok = true;
-    if let Some(target) = s.live_view().registry.get(t.info.target_id) {
+    if let Some(target) = live.registry.get(t.info.target_id) {
         if let Some(sink) = target.input_sink() {
             reset_ok = matches!(
-                tokio::time::timeout(BACKEND_CALL_TIMEOUT, sink.release_pressed_inputs()).await,
+                tokio::time::timeout_at(deadline, sink.release_pressed_inputs()).await,
                 Ok(Ok(()))
             );
-            let _ =
-                tokio::time::timeout(BACKEND_CALL_TIMEOUT, sink.set_takeover_active(false)).await;
+            let _ = tokio::time::timeout_at(deadline, sink.set_takeover_active(false)).await;
         }
-        let _ = tokio::time::timeout(
-            BACKEND_CALL_TIMEOUT,
+        let _ = tokio::time::timeout_at(
+            deadline,
             target.frame_source().set_profile(EffectiveProfile::watch()),
         )
         .await;
     }
     reset_ok
+}
+
+/// A backend call made while the executor is held, bounded by
+/// [`BACKEND_CALL_TIMEOUT`]. A timeout drops the future (backends must be
+/// cancel-safe, see `live_view::InputSink`).
+async fn bounded<T>(
+    call: impl std::future::Future<Output = Result<T, ViewError>>,
+) -> Result<T, ApiError> {
+    match tokio::time::timeout(BACKEND_CALL_TIMEOUT, call).await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(e)) => Err(backend(e)),
+        Err(_) => Err(ApiError::unavailable(
+            "the display backend did not answer in time; the release is paused and can be retried with the same request_id",
+        )),
+    }
 }
 
 /// The audit row records the incoming reason and the one the hub actually
@@ -840,8 +869,23 @@ async fn override_takeover(
         if !reset_pending && !audit_pending {
             return Ok(None);
         }
+        // A retry is already running: do not stack another behind it.
+        if reset_pending
+            && live
+                .reset_in_flight
+                .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(ApiError::unavailable(
+                "a key reset is already in progress; it will be retried",
+            ));
+        }
         live.stop.notify_waiters();
-        let _executor = live.executor.lock().await;
+        let Ok(_executor) = tokio::time::timeout(BACKEND_CALL_TIMEOUT, live.executor.lock()).await
+        else {
+            return Err(ApiError::unavailable(
+                "the executor is busy; the pending key reset will be retried",
+            ));
+        };
         // Read again under the lock: a queued heartbeat that ran first may
         // already have finished the work (no double audit row).
         let (reset_pending, audit_pending) = s.hub().override_pending();
@@ -880,8 +924,15 @@ async fn override_takeover(
     // Queued input batches give up at once: the Stop must not wait behind them.
     live.stop.notify_waiters();
     // 3. Reset pressed inputs and audit. Failures are reported, but the stop
-    // and the revoke above already happened.
-    let _executor = live.executor.lock().await;
+    // and the revoke above already happened. The wait for the executor is
+    // bounded too: a wedged executor can never hang the Stop's HTTP call; the
+    // reset stays pending (already persisted with the stop) and is retried.
+    let Ok(_executor) = tokio::time::timeout(BACKEND_CALL_TIMEOUT, live.executor.lock()).await
+    else {
+        return Err(ApiError::unavailable(
+            "stopped, but the executor is busy; the pending key reset will be retried",
+        ));
+    };
     let t = s.hub().takeover().unwrap_or(old.clone());
     let local = reason == Reason::LocalOverride;
     interrupt(s, actor, &t, reason).await?;
@@ -927,9 +978,14 @@ pub(crate) async fn local_recover(
     Extension(actor): Extension<Actor>,
 ) -> Result<Json<crate::dto::ControlStateDto>, ApiError> {
     require_local(&s, &actor, "recover")?;
-    override_takeover(&s, &actor, Reason::LocalOverride).await?;
+    // The stop is in force either way; an unconfirmed key reset must not block
+    // clearing the latch (the target is reset again best-effort below).
+    let _ = override_takeover(&s, &actor, Reason::LocalOverride).await;
     let live = s.live_view();
-    let _executor = live.executor.lock().await;
+    let Ok(_executor) = tokio::time::timeout(BACKEND_CALL_TIMEOUT, live.executor.lock()).await
+    else {
+        return Err(ApiError::unavailable("the executor is busy; try again"));
+    };
     audit(
         &s,
         &actor,
@@ -1000,7 +1056,12 @@ pub(crate) async fn release(
     i: ReleaseRequest,
 ) -> Result<(), ApiError> {
     let live = s.live_view();
-    let _executor = live.executor.lock().await;
+    let Ok(_executor) = tokio::time::timeout(BACKEND_CALL_TIMEOUT, live.executor.lock()).await
+    else {
+        return Err(ApiError::unavailable(
+            "the executor is busy; retry the release",
+        ));
+    };
     if !live.allowed(actor, true) {
         return Err(ApiError::forbidden("screen:input denied"));
     }
@@ -1017,6 +1078,9 @@ pub(crate) async fn release(
             return Err(override_stands());
         }
         if old.completed {
+            // Completed, but its audit row may still be owed (the first
+            // attempt failed after the latch was cleared): write it now.
+            write_released_audit(s, &old)?;
             return Ok(());
         }
     }
@@ -1054,7 +1118,11 @@ pub(crate) async fn release(
             hook();
         }
     }
-    sink.release_pressed_inputs().await.map_err(backend)?;
+    // After a timed-out or failed backend call the takeover is left paused with
+    // input dead (`suspend_release` above); nothing else was applied. The
+    // journal and the chat note are idempotent by request id, so the same
+    // request can simply be retried.
+    bounded(sink.release_pressed_inputs()).await?;
     // A local Stop may have landed while the reset was awaited: stop before any
     // side effect that cannot be undone (the chat note, the resume).
     ensure_not_overridden(s)?;
@@ -1101,16 +1169,13 @@ pub(crate) async fn release(
             completed: false,
             noted: false,
             cancelled: false,
+            audit_pending: false,
         })
         .map_err(ApiError::unavailable)?;
     ensure_not_overridden(s)?;
     flush_note(s, &mut journal)?;
-    sink.set_takeover_active(false).await.map_err(backend)?;
-    target
-        .frame_source()
-        .set_profile(EffectiveProfile::watch())
-        .await
-        .map_err(backend)?;
+    bounded(sink.set_takeover_active(false)).await?;
+    bounded(target.frame_source().set_profile(EffectiveProfile::watch())).await?;
     s.hub()
         .finish_release(&actor.key, i.request_id)
         .map_err(|e| {
@@ -1124,14 +1189,47 @@ pub(crate) async fn release(
         session.profile = EffectiveProfile::watch();
     }
     // Recorded once the release really happened (never for one that failed or
-    // lost to a local Stop).
+    // lost to a local Stop). `finish_release` marked the audit as owed in the
+    // write that completed the journal: if this write fails, the marker stays
+    // and a retry (or a heartbeat) writes the row.
     audit(
         s,
         actor,
         "takeover.released",
         serde_json::json!({"target_id":t.info.target_id,"takeover_id":t.info.id,"control_epoch":t.info.control_epoch,"request_id":i.request_id,"counts":counts}),
     )?;
+    s.hub().resolve_release_audit(i.request_id);
     Ok(())
+}
+
+/// Write the owed `takeover.released` row of a completed release (idempotent:
+/// the marker is cleared only after the row exists).
+fn write_released_audit(s: &AppState, journal: &ReleaseJournal) -> Result<(), ApiError> {
+    if !journal.audit_pending {
+        return Ok(());
+    }
+    let actor = Actor {
+        key: journal.actor.clone(),
+        recovery: false,
+        local: false,
+    };
+    audit(
+        s,
+        &actor,
+        "takeover.released",
+        serde_json::json!({"takeover_id":journal.takeover_id,"control_epoch":journal.epoch,"request_id":journal.request_id,"retried":true}),
+    )?;
+    s.hub().resolve_release_audit(journal.request_id);
+    Ok(())
+}
+
+/// Best-effort retry of every owed release audit row (session heartbeats).
+fn retry_release_audits(s: &AppState) {
+    for journal in s.hub().release_audits_pending() {
+        if write_released_audit(s, &journal).is_err() {
+            break;
+        }
+    }
 }
 
 fn override_stands() -> ApiError {

@@ -41,6 +41,12 @@ pub struct ReleaseJournal {
     /// completed (a retry gets a refusal, not a resume).
     #[serde(default)]
     pub cancelled: bool,
+    /// The release completed but its `takeover.released` audit row is not
+    /// written yet. Set in the same write that completes the journal, cleared
+    /// only after the row exists; retried on a repeated release and on session
+    /// heartbeats. Only meaningful for a completed journal.
+    #[serde(default)]
+    pub audit_pending: bool,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -70,6 +76,7 @@ pub(super) fn restore(st: &mut State, path: &Path) {
                 // The file is not trusted: a journal text must have the fixed
                 // note format before it can become a chat message.
                 for j in &mut disk.releases {
+                    j.audit_pending = j.audit_pending && j.completed;
                     if !agent_core::control_note::is_well_formed(&j.summary) {
                         j.summary = agent_core::control_note::fallback();
                     }
@@ -387,12 +394,23 @@ impl ControlHub {
             st.epoch = st.epoch.saturating_add(1);
         }
         let epoch = st.epoch;
+        let local_override = reason == Reason::LocalOverride;
         if let Some(t) = st.owned.as_mut().filter(|t| t.info.id == id) {
             t.info.control_epoch = epoch;
             t.info.state = ViewState::Paused;
             t.info.reason = Some(reason);
             t.input_deadline = None;
             st.latched = Some(ControlMode::Paused);
+            if local_override {
+                // One atomic write: the sticky reason, the work it still owes
+                // (key reset, audit row) and the cancelled releases. A crash
+                // can never leave the override without its pending work.
+                st.reset_pending = true;
+                st.audit_pending = true;
+                for journal in st.releases.iter_mut().filter(|j| !j.completed) {
+                    journal.cancelled = true;
+                }
+            }
             if self.persist(&st).is_err() {
                 st.persistence_error = true;
             }
@@ -408,27 +426,7 @@ impl ControlHub {
     #[allow(clippy::needless_pass_by_value)] // Callers hand over a fresh reason.
     pub fn force_interrupt(&self, reason: Reason) -> Option<OwnedTakeover> {
         let owned = self.state.lock().owned.clone()?;
-        let already =
-            owned.info.state == ViewState::Paused && owned.info.reason.as_ref() == Some(&reason);
-        self.interrupt(owned.info.id, reason.clone());
-        if reason == Reason::LocalOverride && !already {
-            let mut st = self.state.lock();
-            if st
-                .owned
-                .as_ref()
-                .is_some_and(|t| t.info.reason == Some(Reason::LocalOverride))
-            {
-                st.reset_pending = true;
-                st.audit_pending = true;
-                // An open release can no longer complete.
-                for journal in st.releases.iter_mut().filter(|j| !j.completed) {
-                    journal.cancelled = true;
-                }
-                if self.persist(&st).is_err() {
-                    st.persistence_error = true;
-                }
-            }
-        }
+        self.interrupt(owned.info.id, reason);
         Some(owned)
     }
     /// What a standing local override still has to do: `(reset, audit)`.
@@ -586,6 +584,24 @@ impl ControlHub {
         }
         Ok(())
     }
+    /// Completed releases whose `takeover.released` audit row is still owed.
+    pub fn release_audits_pending(&self) -> Vec<ReleaseJournal> {
+        self.state
+            .lock()
+            .releases
+            .iter()
+            .filter(|j| j.completed && j.audit_pending)
+            .cloned()
+            .collect()
+    }
+    /// The release's audit row was written: clear the marker (durably).
+    pub fn resolve_release_audit(&self, request: Uuid) {
+        let mut st = self.state.lock();
+        if let Some(j) = st.releases.iter_mut().find(|j| j.request_id == request) {
+            j.audit_pending = false;
+        }
+        let _ = self.persist(&st);
+    }
     pub fn release_journal(&self, request: Uuid) -> Option<ReleaseJournal> {
         self.state
             .lock()
@@ -628,12 +644,14 @@ impl ControlHub {
         st.epoch = st.epoch.checked_add(1).ok_or("epoch exhausted")?;
         if let Some(j) = st.releases.iter_mut().find(|j| j.request_id == request) {
             j.completed = true;
+            j.audit_pending = true;
         }
         if let Err(e) = self.persist(&st) {
             st.owned = old_owned;
             st.epoch = old_epoch;
             if let Some(j) = st.releases.iter_mut().find(|j| j.request_id == request) {
                 j.completed = false;
+                j.audit_pending = false;
             }
             st.latched = Some(ControlMode::Paused);
             st.require_recovery = true;
@@ -760,6 +778,7 @@ mod tests {
             completed: false,
             noted: false,
             cancelled: false,
+            audit_pending: false,
         }
     }
     #[tokio::test]
@@ -1085,6 +1104,30 @@ mod tests {
         )
         .unwrap();
         assert_eq!(open().override_pending(), (false, false));
+    }
+    #[test]
+    fn the_override_and_its_pending_work_are_one_atomic_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("control-latch.json");
+        let hub = ControlHub::with_latch_file(super::super::ControlConfig::default(), path.clone());
+        let t = hub
+            .begin_takeover("peer:alice", &request(), Uuid::now_v7(), 1, true, false)
+            .unwrap();
+        hub.activate(t.info.id, t.info.control_epoch).unwrap();
+        let before = hub.persists.load(Ordering::SeqCst);
+        hub.force_interrupt(Reason::LocalOverride).unwrap();
+        assert_eq!(
+            hub.persists.load(Ordering::SeqCst),
+            before + 1,
+            "one write, so no crash point between the reason and its pending work"
+        );
+        // The file as a crash right after that write would leave it.
+        let file = std::fs::read_to_string(&path).unwrap();
+        assert!(file.contains("\"reset_pending\":true"), "{file}");
+        assert!(file.contains("\"audit_pending\":true"), "{file}");
+        assert!(file.contains("local_override"), "{file}");
+        let restarted = ControlHub::with_latch_file(super::super::ControlConfig::default(), path);
+        assert_eq!(restarted.override_pending(), (true, true));
     }
     #[test]
     fn a_release_cancelled_by_a_local_override_can_never_finish() {

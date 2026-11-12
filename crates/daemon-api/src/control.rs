@@ -93,6 +93,9 @@ pub struct ControlHub {
     changed: Notify,
     refresh: Mutex<Option<RefreshHook>>,
     action_seq: std::sync::atomic::AtomicU64,
+    /// Latch-file writes so far (tests assert that one transition is one write).
+    #[cfg(test)]
+    persists: AtomicUsize,
     /// Takeover state changes for the global event stream (not replayed).
     events: tokio::sync::broadcast::Sender<crate::dto::ControlStateChanged>,
 }
@@ -156,6 +159,8 @@ impl ControlHub {
             changed: Notify::new(),
             refresh: Mutex::new(None),
             action_seq: std::sync::atomic::AtomicU64::new(0),
+            #[cfg(test)]
+            persists: AtomicUsize::new(0),
             events: tokio::sync::broadcast::channel(64).0,
         }
     }
@@ -180,6 +185,8 @@ impl ControlHub {
 
     /// Persist while holding the authority lock. Errors keep admission closed.
     fn persist(&self, st: &State) -> Result<(), String> {
+        #[cfg(test)]
+        self.persists.fetch_add(1, Ordering::SeqCst);
         self.latch_file.as_ref().map_or(Ok(()), |p| {
             owned::persist(st, p).map_err(|_| "control persistence failed".into())
         })

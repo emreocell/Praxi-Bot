@@ -55,6 +55,16 @@ Frame viewers do not register as overlay controllers.
   behind them. Every backend call of a key reset is bounded (2 s); an unconfirmed
   reset leaves the Stop in force, answers 503 and is retried by the next `paused`
   heartbeat, also after a restart (the pending flags are in the latch file).
+- A completed release whose `takeover.released` audit row could not be written
+  keeps an `audit_pending` marker (written in the same latch write that completes
+  the journal, validated on load); a repeated release with the same `request_id`,
+  or the next session heartbeat (also after a restart), writes the row and only
+  then clears it, so the row is never lost. Every backend call a release makes is
+  bounded (2 s); after a timeout the takeover stays paused with input dead and
+  the same request can be retried. A key reset has one 2 s budget in total, and a
+  retry is refused (503) while one is already running. An input inject that
+  outlives its 2 s budget is aborted, and `InputSink` implementations must be
+  cancel-safe and idempotent (see the `InputSink` documentation).
 - `POST /v1/view/sessions/{id}/input` carries version, takeover/epoch, generation,
   geometry revision, first sequence number and typed events.
 - `POST /v1/control/override` (local user only) interrupts any takeover, whoever

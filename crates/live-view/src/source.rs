@@ -68,6 +68,19 @@ pub trait FrameSource: Send + Sync {
     async fn set_profile(&self, profile: EffectiveProfile) -> Result<(), ViewError>;
     async fn stop(&self) -> Result<(), ViewError>;
 }
+/// Where human input is applied.
+///
+/// # Contract: cancel-safe and idempotent
+///
+/// The daemon bounds every call with a timeout and then DROPS the future (and
+/// aborts the task it runs in). Implementations must therefore be cancel-safe:
+/// dropping a call at any `.await` leaves no half-applied state that a later
+/// call cannot repair, and must not detach work that keeps running after the
+/// drop (for example `spawn_blocking` or `tokio::spawn` whose result nobody
+/// awaits). [`InputSink::release_pressed_inputs`] must be idempotent: it is
+/// retried until it is confirmed, also after a restart, and releasing keys that
+/// are not pressed is a no-op. `inject` may be cancelled between events but
+/// never retried by the daemon after a partial application.
 #[async_trait]
 pub trait InputSink: Send + Sync {
     /// One event, called by the daemon's serialized ownership executor only.

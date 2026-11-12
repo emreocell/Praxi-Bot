@@ -161,8 +161,20 @@ pub(crate) async fn input(
         )?;
         return Err(ApiError::forbidden("screen:input denied"));
     }
-    live.session(&actor, id)?;
-    let early: InputBatch = parse(&body)?;
+    let (early_target, _, _) = live.session(&actor, id)?;
+    let early: InputBatch = match parse(&body) {
+        Ok(batch) => batch,
+        Err(e) => {
+            // Same (coalesced) audit the validation under the executor writes.
+            audit(
+                &s,
+                &actor,
+                "input.batch_rejected",
+                serde_json::json!({"target_id":early_target,"reason":"invalid_schema"}),
+            )?;
+            return Err(e);
+        }
+    };
     if !s.hub().takeover().is_some_and(|t| {
         t.actor == actor.key && t.info.session_id == id && t.info.id == early.takeover_id
     }) {
@@ -348,7 +360,7 @@ pub(crate) async fn input(
         live.pending_input
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let pending = PendingInput(std::sync::Arc::clone(&live.pending_input));
-        let work = tokio::spawn(async move {
+        let mut work = tokio::spawn(async move {
             let _pending = pending;
             let Some(inner) = weak.upgrade() else {
                 return Err(live_view::ViewError::Unavailable);
@@ -391,8 +403,18 @@ pub(crate) async fn input(
             }
             result
         });
-        let result = tokio::time::timeout(Duration::from_secs(2), work).await;
-        if !matches!(result, Ok(Ok(Ok(())))) {
+        let applied_ok = match tokio::time::timeout(Duration::from_secs(2), &mut work).await {
+            Ok(joined) => matches!(joined, Ok(Ok(()))),
+            Err(_) => {
+                // The inject outlived its budget: abort the task (dropping the
+                // backend future, which is why backends must be cancel-safe),
+                // not just detach it. `pending_input` is held by a guard inside
+                // the task, so it stays set until the task has really ended.
+                work.abort();
+                false
+            }
+        };
+        if !applied_ok {
             state = ViewState::Paused;
             break;
         }
