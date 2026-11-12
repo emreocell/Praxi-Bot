@@ -85,15 +85,19 @@ pub struct Manifest {
     pub files: Vec<FileRecord>,
 }
 
-/// `email/<account>/password`, where the daemon keeps mailbox passwords.
+/// `email/<account>/password` and `email/<account>/api_key`, where the daemon
+/// keeps mailbox passwords and mailbox-provider API keys.
 fn is_mailbox_password(name: &str) -> bool {
     name.strip_prefix("email/")
-        .and_then(|rest| rest.strip_suffix("/password"))
+        .and_then(|rest| {
+            rest.strip_suffix("/password")
+                .or_else(|| rest.strip_suffix("/api_key"))
+        })
         .is_some_and(|account| !account.is_empty() && !account.contains('/'))
 }
 
 /// Select secrets explicitly; the safe default is none.
-/// `All` leaves out mailbox passwords (`email/<account>/password`); they are
+/// `All` leaves out mailbox secrets (`email/<account>/password`, `email/<account>/api_key`); they are
 /// exported only when named in `Names`.
 #[derive(Debug, Clone, Default)]
 pub enum SecretSelection {

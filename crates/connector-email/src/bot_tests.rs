@@ -353,6 +353,8 @@ fn valid() -> AccountConfig {
         timeout_secs: 30,
         bot: None,
         allowed_senders: Vec::new(),
+        kind: crate::AccountKind::ImapSmtp,
+        inbox_id: None,
     }
 }
 

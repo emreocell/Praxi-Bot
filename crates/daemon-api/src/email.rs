@@ -22,6 +22,18 @@ pub enum EmailSecurity {
     StartTls,
 }
 
+/// What kind of mailbox an account is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
+pub enum EmailProviderKind {
+    /// The user's own mailbox over IMAP and SMTP.
+    #[default]
+    #[serde(rename = "imap_smtp")]
+    ImapSmtp,
+    /// An `AgentMail` inbox created with the user's own API key.
+    #[serde(rename = "agentmail")]
+    Agentmail,
+}
+
 /// An IMAP server (always implicit TLS).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct EmailImapServer {
@@ -45,6 +57,25 @@ pub struct EmailSmtpServer {
     pub security: EmailSecurity,
 }
 
+impl Default for EmailImapServer {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            port: default_imap_port(),
+        }
+    }
+}
+
+impl Default for EmailSmtpServer {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            port: default_smtp_port(),
+            security: EmailSecurity::default(),
+        }
+    }
+}
+
 fn default_imap_port() -> u16 {
     993
 }
@@ -57,11 +88,15 @@ fn default_smtp_port() -> u16 {
 pub struct EmailAccountDto {
     /// Account name.
     pub name: String,
+    /// Kind of mailbox.
+    pub provider: EmailProviderKind,
     /// Address mail is sent from.
     pub address: String,
+    /// The provider's id of the inbox (`agentmail` accounts); `null` otherwise.
+    pub inbox_id: Option<String>,
     /// Login name; empty = the address.
     pub username: String,
-    /// IMAP server.
+    /// IMAP server (empty host for API-backed accounts).
     pub imap: EmailImapServer,
     /// SMTP server.
     pub smtp: EmailSmtpServer,
@@ -73,7 +108,8 @@ pub struct EmailAccountDto {
     /// Senders whose mail may start a run (stored now, enforced by the inbound
     /// trigger).
     pub allowed_senders: Vec<String>,
-    /// Whether a password is stored. The password itself is never returned.
+    /// Whether the secret (password, or the API key of an `agentmail` account)
+    /// is stored. The secret itself is never returned.
     pub password_set: bool,
     /// Whether the account trusts an extra root certificate (a private CA).
     pub custom_ca: bool,
@@ -86,15 +122,34 @@ pub struct EmailAccountInput {
     /// create; for `POST /v1/email/test` it selects the stored password to
     /// reuse when `password` is left out.
     pub name: String,
-    /// Address mail is sent from.
+    /// Kind of mailbox; default `imap_smtp`. For `agentmail` the inbox is
+    /// created at the provider (its address is returned); `address`, `imap`
+    /// and `smtp` are not used and `api_key` is required.
+    #[serde(default)]
+    pub provider: EmailProviderKind,
+    /// Address mail is sent from (`imap_smtp`).
+    #[serde(default)]
     pub address: String,
     /// Login name; default (empty) = the address.
     #[serde(default)]
     pub username: Option<String>,
-    /// IMAP server.
+    /// IMAP server (`imap_smtp`).
+    #[serde(default)]
     pub imap: EmailImapServer,
-    /// SMTP server.
+    /// SMTP server (`imap_smtp`).
+    #[serde(default)]
     pub smtp: EmailSmtpServer,
+    /// The user's own `AgentMail` API key (`agentmail`). **Write-only**: it goes
+    /// to the secret store and is never returned or logged.
+    #[serde(default)]
+    pub api_key: Option<String>,
+    /// Hint for the local part of a new `agentmail` address.
+    #[serde(default)]
+    pub name_hint: Option<String>,
+    /// Custom (verified) domain for a new `agentmail` address; default the
+    /// provider's shared domain.
+    #[serde(default)]
+    pub domain: Option<String>,
     /// Folder drafts are saved to, default `Drafts`.
     #[serde(default)]
     pub drafts_folder: Option<String>,
@@ -116,6 +171,7 @@ impl std::fmt::Debug for EmailAccountInput {
             .field("name", &self.name)
             .field("address", &self.address)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
             .finish_non_exhaustive()
     }
 }
@@ -151,6 +207,9 @@ pub struct EmailAccountPatch {
     /// New password (write-only).
     #[serde(default)]
     pub password: Option<String>,
+    /// New `AgentMail` API key (write-only).
+    #[serde(default)]
+    pub api_key: Option<String>,
 }
 
 impl std::fmt::Debug for EmailAccountPatch {
@@ -185,8 +244,13 @@ pub struct EmailTestReport {
     pub imap: EmailProbeStatus,
     /// SMTP (sending mail); authentication only, nothing is sent.
     pub smtp: EmailProbeStatus,
-    /// Both servers accepted the login.
+    /// Both servers accepted the login (for `agentmail`: the API check
+    /// passed).
     pub ok: bool,
+    /// The one API check of an API-backed account (`agentmail`); `imap` and
+    /// `smtp` repeat it there. Absent for `imap_smtp`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api: Option<EmailProbeStatus>,
 }
 
 /// Why an [`EmailControl`] operation failed.
@@ -200,6 +264,9 @@ pub enum EmailControlError {
     Invalid(String),
     /// The config could not be saved, or another internal failure (`500`).
     Internal(String),
+    /// The mailbox provider refused or failed (`502`); the text is coarse and
+    /// never carries the provider's own words or any secret.
+    Upstream(String),
 }
 
 /// What `/v1/email/*` needs from the embedder: the accounts, their persistence
@@ -229,6 +296,24 @@ pub trait EmailControl: Send + Sync {
     /// # Errors
     /// [`EmailControlError`].
     async fn remove(&self, name: &str) -> Result<(), EmailControlError>;
+    /// Like [`EmailControl::remove`]; with `delete_remote` the inbox at the
+    /// provider is deleted first (irreversible; the account is kept when that
+    /// fails so it can be retried). The default supports only `false`.
+    ///
+    /// # Errors
+    /// [`EmailControlError`].
+    async fn remove_account(
+        &self,
+        name: &str,
+        delete_remote: bool,
+    ) -> Result<(), EmailControlError> {
+        if delete_remote {
+            return Err(EmailControlError::Invalid(
+                "deleting the inbox at the provider is not supported here".into(),
+            ));
+        }
+        self.remove(name).await
+    }
     /// Try IMAP login and SMTP authentication for a stored account.
     ///
     /// # Errors

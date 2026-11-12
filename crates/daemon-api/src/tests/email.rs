@@ -46,6 +46,8 @@ impl FakeEmail {
     fn dto(input: &EmailAccountInput) -> EmailAccountDto {
         EmailAccountDto {
             name: input.name.clone(),
+            provider: input.provider,
+            inbox_id: None,
             address: input.address.clone(),
             username: input.username.clone().unwrap_or_default(),
             imap: input.imap.clone(),
@@ -150,6 +152,7 @@ fn report(imap: EmailProbeStatus, smtp: EmailProbeStatus) -> EmailTestReport {
     EmailTestReport {
         imap,
         smtp,
+        api: None,
         ok: imap == EmailProbeStatus::Ok && smtp == EmailProbeStatus::Ok,
     }
 }
@@ -489,4 +492,148 @@ executor = \"fake/echo\"
         fake.accounts.lock().is_empty(),
         "the account was taken back"
     );
+}
+
+// ---- AgentMail kind ---------------------------------------------------------
+
+const API_KEY: &str = "am_route_test_KEY_5521";
+
+/// Records `remove_account` calls; can fail like an unhappy provider.
+struct RemoteFake {
+    calls: Mutex<Vec<(String, bool)>>,
+    fail_with: Option<EmailControlError>,
+}
+
+#[async_trait]
+impl EmailControl for RemoteFake {
+    fn list(&self) -> Vec<EmailAccountDto> {
+        Vec::new()
+    }
+    async fn add(&self, input: EmailAccountInput) -> Result<EmailAccountDto, EmailControlError> {
+        let mut dto = FakeEmail::dto(&input);
+        dto.address = "created@agentmail.to".into();
+        dto.inbox_id = Some("created@agentmail.to".into());
+        dto.password_set = input.api_key.is_some();
+        Ok(dto)
+    }
+    async fn update(&self, _: &str, _: Value) -> Result<EmailAccountDto, EmailControlError> {
+        Err(EmailControlError::NotFound("x".into()))
+    }
+    async fn remove(&self, name: &str) -> Result<(), EmailControlError> {
+        self.remove_account(name, false).await
+    }
+    async fn remove_account(&self, name: &str, remote: bool) -> Result<(), EmailControlError> {
+        self.calls.lock().push((name.to_owned(), remote));
+        self.fail_with.clone().map_or(Ok(()), Err)
+    }
+    async fn test_saved(&self, _: &str) -> Result<EmailTestReport, EmailControlError> {
+        Ok(report(EmailProbeStatus::Ok, EmailProbeStatus::Ok))
+    }
+    async fn test_draft(&self, _: EmailAccountInput) -> Result<EmailTestReport, EmailControlError> {
+        Ok(report(EmailProbeStatus::Ok, EmailProbeStatus::Ok))
+    }
+    async fn forget_bot(&self, _: &str) -> Result<usize, EmailControlError> {
+        Ok(0)
+    }
+}
+
+fn remote(fail_with: Option<EmailControlError>) -> (T, Arc<RemoteFake>) {
+    let t = setup();
+    let fake = Arc::new(RemoteFake {
+        calls: Mutex::new(Vec::new()),
+        fail_with,
+    });
+    t.state.set_email(fake.clone());
+    (t, fake)
+}
+
+#[tokio::test]
+async fn agentmail_create_needs_a_well_formed_write_only_api_key() {
+    let (t, _) = remote(None);
+    let ok =
+        json!({"name":"bot-mail","provider":"agentmail","api_key":API_KEY,"name_hint":"helper"});
+    let r = call(&t, Method::POST, "/v1/email/accounts", Some(ok)).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    let a = r.json();
+    assert_eq!(a["provider"], "agentmail");
+    assert_eq!(a["address"], "created@agentmail.to");
+    assert_eq!(a["password_set"], true);
+    assert!(
+        !String::from_utf8_lossy(&r.body).contains(API_KEY),
+        "the key is never echoed"
+    );
+
+    let no_key = json!({"name":"bot-mail","provider":"agentmail"});
+    let r = call(&t, Method::POST, "/v1/email/accounts", Some(no_key)).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    for bad in ["", "a\r\nb", "x\0y", &"k".repeat(1025)] {
+        let b = json!({"name":"bot-mail","provider":"agentmail","api_key":bad});
+        let r = call(&t, Method::POST, "/v1/email/accounts", Some(b)).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad:?}");
+        assert!(!String::from_utf8_lossy(&r.body).contains("kkkk"));
+    }
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/email/accounts/bot-mail",
+        Some(json!({"api_key": 5})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn deleting_an_account_asks_for_the_remote_inbox_only_when_told_to() {
+    let (t, fake) = remote(None);
+    let r = call(&t, Method::DELETE, "/v1/email/accounts/bot-mail", None).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    let r = call(
+        &t,
+        Method::DELETE,
+        "/v1/email/accounts/bot-mail?delete_inbox=true",
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        *fake.calls.lock(),
+        vec![
+            ("bot-mail".to_owned(), false),
+            ("bot-mail".to_owned(), true)
+        ],
+        "the default never deletes remotely"
+    );
+}
+
+#[tokio::test]
+async fn a_failing_provider_is_a_502_with_a_coarse_message() {
+    let (t, _) = remote(Some(EmailControlError::Upstream(
+        "the provider rejected the API key".into(),
+    )));
+    let r = call(
+        &t,
+        Method::DELETE,
+        "/v1/email/accounts/bot-mail?delete_inbox=true",
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_GATEWAY);
+    assert_eq!(r.json()["error"]["code"], "email_provider_error");
+}
+
+#[test]
+fn input_and_patch_debug_never_print_the_api_key() {
+    let input: EmailAccountInput =
+        serde_json::from_value(json!({"name":"x","provider":"agentmail","api_key":API_KEY}))
+            .unwrap();
+    assert!(!format!("{input:?}").contains(API_KEY));
+    let patch: crate::email::EmailAccountPatch =
+        serde_json::from_value(json!({"api_key": API_KEY})).unwrap();
+    assert!(!format!("{patch:?}").contains(API_KEY));
+}
+
+#[test]
+fn old_clients_that_send_no_provider_still_mean_imap_smtp() {
+    let input: EmailAccountInput = serde_json::from_value(body("x")).unwrap();
+    assert_eq!(input.provider, crate::email::EmailProviderKind::ImapSmtp);
 }

@@ -1011,12 +1011,47 @@
         "tls": "TLS failed",
         "auth_failed": "Login rejected",
         "protocol": "Unexpected reply",
-        "timeout": "No answer"
+        "timeout": "No answer",
+        "api": "AgentMail"
       },
       "toast": {
         "added": "{{name}} added",
         "saved": "{{name}} saved",
         "deleted": "{{name}} deleted"
+      },
+      "choice": {
+        "own": "Connect my own mailbox",
+        "ownText": "Use a mailbox you already have (Gmail, Outlook, iCloud, your own server) over IMAP and SMTP.",
+        "agentmail": "Give this bot an address (AgentMail)",
+        "agentmailText": "Create a new address such as name@agentmail.to for one bot, using your own AgentMail account. No domain needed."
+      },
+      "agentmail": {
+        "title": "Give a bot its own address",
+        "ownAccount": "You need your own free AgentMail account. Praxi-Bot does not hold any key for you: paste the API key from your account.",
+        "getKey": "Open AgentMail",
+        "limits": "Free plan at the time of writing: 3 inboxes, 3,000 e-mails a month, 100 a day. Limits can change.",
+        "pricing": "See their pricing",
+        "noColdOutreach": "Cold outreach and bulk mailing are prohibited on the shared agentmail.to domain. Use it for mail you or your bot have a reason to send.",
+        "apiKey": "AgentMail API key",
+        "apiKeyHint": "Stored in your OS keychain and never shown again. Only sent to AgentMail.",
+        "bot": "Which bot gets this address",
+        "nameHint": "Address name (optional)",
+        "nameHintHelp": "The part before the @, for example atlas. Left empty, AgentMail picks one.",
+        "create": "Create address",
+        "creating": "Creating…",
+        "created": "Address created",
+        "createdHint": "The bot can use it with the e-mail tools once you add email_* to its allowed tools. Sending still asks first.",
+        "copy": "Copy",
+        "copied": "Copied",
+        "done": "Done",
+        "viaApi": "AgentMail inbox",
+        "keyMissing": "No API key stored",
+        "alsoDelete": "Also delete the inbox at AgentMail (cannot be undone)",
+        "errors": {
+          "apiKey": "Paste the API key: 8 or more characters, no spaces.",
+          "nameHint": "Use letters, digits, dots, dashes or underscores, starting with a letter or digit (32 at most).",
+          "bot": "Pick the bot, or choose any bot."
+        }
       }
     }
   },

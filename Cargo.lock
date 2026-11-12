@@ -1377,15 +1377,21 @@ dependencies = [
  "mail-send",
  "protocol",
  "rcgen",
+ "reqwest 0.12.28",
  "secret-store",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-rustls",
  "toml 0.8.2",
  "tool-registry",
+ "url",
+ "uuid",
+ "web-tools",
  "webpki-roots",
+ "wiremock",
 ]
 
 [[package]]

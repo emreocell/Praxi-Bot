@@ -323,10 +323,18 @@ export class ApiClient {
       body: patch
     });
   }
-  deleteEmailAccount(name: string): Promise<void> {
+  /**
+   * Forget an account. With `deleteInbox` the inbox is first deleted at the
+   * provider too (irreversible; AgentMail accounts only).
+   */
+  deleteEmailAccount(
+    name: string,
+    opts: { deleteInbox?: boolean } = {}
+  ): Promise<void> {
     return this.request(
       "DELETE",
-      `/email/accounts/${encodeURIComponent(name)}`
+      `/email/accounts/${encodeURIComponent(name)}`,
+      opts.deleteInbox ? { query: { delete_inbox: "true" } } : {}
     );
   }
   /** IMAP login + SMTP authentication of a saved account; nothing is sent. */
