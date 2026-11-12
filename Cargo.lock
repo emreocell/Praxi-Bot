@@ -8828,6 +8828,7 @@ dependencies = [
  "protocol",
  "serde",
  "serde_json",
+ "syn 2.0.119",
  "thiserror 2.0.21",
 ]
 
