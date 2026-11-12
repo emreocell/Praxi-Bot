@@ -1311,6 +1311,14 @@ pub(crate) async fn release(
     flush_note(s, &mut journal)?;
     bounded(sink.set_takeover_active(false)).await?;
     bounded(target.frame_source().set_profile(EffectiveProfile::watch())).await?;
+    // The grant and the session are checked once more after every await: a
+    // revocation (or a session that ended) while the release ran must not
+    // resume the bot. The takeover stays paused; the release can be retried.
+    if !live.allowed(actor, true) {
+        return Err(ApiError::forbidden("screen:input denied"));
+    }
+    live.session(actor, t.info.session_id)?;
+    ensure_not_overridden(s)?;
     s.hub()
         .finish_release(&actor.key, i.request_id)
         .map_err(|e| {

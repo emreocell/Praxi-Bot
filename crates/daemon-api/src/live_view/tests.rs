@@ -3091,6 +3091,32 @@ async fn a_malformed_early_batch_is_audited_and_coalesced() {
     assert_eq!(rows.len(), 1, "audited once, the rest coalesced");
 }
 
+// ---- audit3 F6: a release re-checks the grant after its awaits
+#[tokio::test]
+async fn a_release_whose_grant_was_revoked_meanwhile_does_not_resume_the_bot() {
+    let t = Test::new();
+    let (_id, owned, _body) = t.active(Some("alice")).await;
+    let live = Arc::clone(t.state.live_view());
+    let revoker = Arc::clone(&live);
+    *live.release_hook.lock() = Some(Arc::new(move || {
+        // The local user revokes the device's input grant mid-release.
+        revoker.set_privileges(
+            "peer:alice".into(),
+            ScreenPrivileges {
+                view: true,
+                input: false,
+            },
+        );
+    }));
+    let (status, v) = t.release(Some("alice"), &owned, Uuid::now_v7()).await;
+    assert!(!status.is_success(), "{status} {v}");
+    assert!(
+        t.state.hub().latched().is_some(),
+        "a revoked device resumed the bot"
+    );
+    assert!(t.state.hub().takeover().is_some());
+}
+
 // ---- audit3 F4: the effect of a partial batch is never coalesced away
 #[tokio::test]
 async fn a_partial_injection_outcome_is_audited_even_after_a_denial() {
