@@ -3358,6 +3358,42 @@ async fn an_app_pause_that_races_a_finishing_release_still_pauses_the_bot() {
     assert_eq!(v["mode"], json!("paused"), "registration refreshed: {v}");
 }
 
+// ---- audit2 F2: PUT state racing a peer's takeover that starts
+#[tokio::test]
+async fn an_app_pause_that_races_a_starting_takeover_still_stops_it() {
+    let t = Test::new();
+    let id = t.session(Some("alice")).await;
+    let state = t.state.clone();
+    let target = t.target.info().target_id;
+    *t.state.live_view().put_state_hook.lock() = Some(Arc::new(move || {
+        // A peer's takeover is accepted between the route's check (none) and
+        // its `try_apply_state`.
+        let request: ::live_view::TakeoverRequest =
+            serde_json::from_value(json!({"session_id":id,"request_id":Uuid::now_v7()})).unwrap();
+        state
+            .hub()
+            .begin_takeover("peer:alice", &request, target, 1, false, false)
+            .unwrap();
+    }));
+    let (status, v) = t
+        .call(
+            None,
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode":"paused","release":false})),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the Stop must not lose the race: {v}"
+    );
+    assert_eq!(
+        t.state.hub().takeover().unwrap().info.reason,
+        Some(Reason::LocalOverride)
+    );
+}
+
 // ---- R7-7: a failed reset after a partial injection is retried
 #[tokio::test]
 async fn a_reset_that_failed_after_a_partial_injection_is_retried_by_the_heartbeat() {

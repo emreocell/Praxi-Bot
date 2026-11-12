@@ -824,38 +824,44 @@ pub(crate) async fn put_control_state(
     crate::live_view::require_latch_authority(&s, &actor)?;
     // The local app's Pause/Stop must work during anybody's takeover: it
     // overrides the takeover and keeps the pause. Paired peers cannot.
-    if actor.local
-        && !input.release
-        && input.mode == crate::dto::ControlMode::Paused
-        && s.hub().takeover().is_some()
-    {
-        #[cfg(test)]
-        {
-            let hook = s.live_view().put_state_hook.lock().clone();
-            if let Some(hook) = hook {
-                hook();
-            }
+    let local_pause =
+        actor.local && !input.release && input.mode == crate::dto::ControlMode::Paused;
+    let mut takeover_seen = local_pause && s.hub().takeover().is_some();
+    #[cfg(test)]
+    if local_pause {
+        let hook = s.live_view().put_state_hook.lock().clone();
+        if let Some(hook) = hook {
+            hook();
         }
-        crate::live_view::override_local_pause(&s, &actor).await?;
-        if s.hub().takeover().is_some() {
-            return Ok(Json(control_state_dto(&s, Some(&actor))));
-        }
-        // The takeover ended (a peer's release finished) between the check and
-        // the override: apply the pause the normal way, so it is not lost and
-        // the registration is refreshed.
     }
-    s.hub()
-        .try_apply_state(input.mode, input.release)
-        .map_err(|e| {
-            // A failed latch-file write is not a conflict: the pause is in
-            // force in memory and the write is retried.
-            if e == "control persistence failed" {
-                ApiError::unavailable(e)
-            } else {
-                ApiError::conflict(e)
+    // A takeover can start (or end) between the check and the write: the Stop
+    // is retried against whatever the hub holds now, never lost to a 409.
+    for _ in 0..3 {
+        if takeover_seen || (local_pause && s.hub().takeover().is_some()) {
+            takeover_seen = false;
+            crate::live_view::override_local_pause(&s, &actor).await?;
+            if s.hub().takeover().is_some() {
+                return Ok(Json(control_state_dto(&s, Some(&actor))));
             }
-        })?;
-    Ok(Json(control_state_dto(&s, Some(&actor))))
+            // The takeover ended (a peer's release finished) between the check
+            // and the override: apply the pause the normal way, so it is not
+            // lost and the registration is refreshed.
+        }
+        match s.hub().try_apply_state(input.mode, input.release) {
+            Err(e) if local_pause && e == "owned takeover controls the latch" => {}
+            Err(e) => {
+                // A failed latch-file write is not a conflict: the pause is in
+                // force in memory and the write is retried.
+                return Err(if e == "control persistence failed" {
+                    ApiError::unavailable(e)
+                } else {
+                    ApiError::conflict(e)
+                });
+            }
+            Ok(_) => return Ok(Json(control_state_dto(&s, Some(&actor)))),
+        }
+    }
+    Err(ApiError::conflict("owned takeover controls the latch"))
 }
 
 /// Answer a `control_requested` event: let the action `proceed` (after the
