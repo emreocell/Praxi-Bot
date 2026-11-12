@@ -838,8 +838,24 @@ fn is_protected(path: &Path, data_dir: &Path) -> bool {
     named || under_data_sensitive(path, data_dir)
 }
 
+/// `widen_path`, but a path it refuses as a whole (a `:stream` name counts as a
+/// device path) still gets its directory widened: the final name is appended
+/// unchanged. Comparing the raw spelling (`x\..ot.db::$DATA`, an 8.3
+/// `RUNNER~1` directory) with the widened data dir would never match.
+fn widen_for_compare(path: &Path) -> PathBuf {
+    if let Ok(widened) = widen_path(path) {
+        return widened;
+    }
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => {
+            widen_path(parent).map_or_else(|_| path.to_path_buf(), |dir| dir.join(name))
+        }
+        _ => path.to_path_buf(),
+    }
+}
+
 fn under_data_sensitive(path: &Path, data_dir: &Path) -> bool {
-    let path = widen_path(path).unwrap_or_else(|_| path.to_path_buf());
+    let path = widen_for_compare(path);
     let data_dir = widen_path(data_dir).unwrap_or_else(|_| data_dir.to_path_buf());
     let p = norm_parts(&path);
     let d = norm_parts(&data_dir);
@@ -3925,6 +3941,30 @@ mod tests {
                 "{dir} must stay usable"
             );
         }
+    }
+
+    /// A `:stream` name makes `widen_path` refuse the whole path, but the data
+    /// dir is widened (canonical form): the raw directory spelling must be
+    /// resolved too. A CI runner's temp dir is spelled with an 8.3 short name
+    /// (`RUNNER~1`); a directory with a trailing dot is another spelling of the
+    /// same directory that can be built anywhere.
+    #[cfg(windows)]
+    #[test]
+    fn a_stream_name_is_protected_however_its_directory_is_spelled() {
+        let d = tempfile::tempdir().unwrap();
+        let data = d.path().join("data");
+        fs::create_dir(&data).unwrap();
+        for name in ["bot.db::$DATA", "policy.json:stream", "BOT.DB::$DATA"] {
+            let spelled = d.path().join("data.").join(name);
+            assert!(
+                is_protected(&spelled, &data),
+                "{spelled:?} must resolve to a protected name"
+            );
+        }
+        assert!(!is_protected(
+            &d.path().join("data.").join("notes.txt:stream"),
+            &data
+        ));
     }
 
     #[test]
