@@ -1735,6 +1735,7 @@ dependencies = [
  "desktop-api",
  "futures",
  "getrandom 0.3.4",
+ "hmac",
  "http-body-util",
  "iana-time-zone",
  "parking_lot",
@@ -2015,10 +2016,12 @@ name = "desktop"
 version = "0.1.0"
 dependencies = [
  "getrandom 0.3.4",
+ "hmac",
  "parking_lot",
  "process-guard",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "storage",
  "tauri",
  "tauri-build",

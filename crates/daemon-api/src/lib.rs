@@ -568,6 +568,7 @@ macro_rules! classified_routes {
 
 classified_routes! {
     "/v1/health" => [GET: Public / Allow / Allow => r::health],
+    "/v1/auth/challenge" => [POST: Public / Deny / Deny => r::auth_challenge],
     "/v1/isolation" => [GET: Cli / Allow / Allow => r::isolation],
     "/v1/openapi.json" => [GET: Cli / Allow / Allow => openapi::serve_openapi],
     "/v1/bots" => [GET: Cli / Allow / Allow => r::list_bots, POST: Management / Deny / HostManagement => r::create_bot],

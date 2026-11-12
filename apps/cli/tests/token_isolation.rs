@@ -136,3 +136,98 @@ async fn credential_file_redirect_is_rejected_before_daemon_startup() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("pipe/socket"));
     assert!(!daemon_api::token_path(dir.path()).exists());
 }
+
+#[tokio::test]
+async fn external_guarded_daemon_proves_ownership_via_challenge_without_proc_fd() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut daemon = Daemon(
+        command(dir.path())
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let child_pid = daemon.0.id();
+    let stdout = daemon.0.stdout.take().unwrap();
+    let announcement = tokio::time::timeout(
+        Duration::from_secs(30),
+        tokio::task::spawn_blocking(move || {
+            let mut line = String::new();
+            std::io::BufReader::new(stdout)
+                .read_line(&mut line)
+                .unwrap();
+            serde_json::from_str::<serde_json::Value>(&line).unwrap()
+        }),
+    )
+    .await
+    .expect("daemon did not announce startup")
+    .unwrap();
+    let base = announcement["listening"].as_str().unwrap();
+    let low = daemon_api::read_token(dir.path()).unwrap();
+    let http = reqwest::Client::builder().no_proxy().build().unwrap();
+
+    let isolation: serde_json::Value = http
+        .get(format!("{base}/v1/isolation"))
+        .bearer_auth(&low)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        isolation["memory_guard"],
+        cfg!(any(windows, target_os = "linux"))
+    );
+
+    #[cfg(target_os = "linux")]
+    {
+        // Confirm PR_SET_DUMPABLE=0 is active and blocks /proc/<pid>/fd reads.
+        assert!(
+            std::fs::read_dir(format!("/proc/{child_pid}/fd")).is_err(),
+            "non-dumpable daemon must block /proc/<pid>/fd reads"
+        );
+        // Confirm /proc/net/tcp reports our UID for the listening socket.
+        let port: u16 = base.rsplit(':').next().unwrap().parse().unwrap();
+        let want = format!(":{port:04X}");
+        let my_uid = std::os::unix::fs::MetadataExt::uid(&std::fs::metadata("/proc/self").unwrap());
+        let tcp = std::fs::read_to_string("/proc/net/tcp").unwrap();
+        let uids: Vec<u32> = tcp
+            .lines()
+            .skip(1)
+            .filter_map(|l| {
+                let f: Vec<&str> = l.split_whitespace().collect();
+                let local = f.get(1)?;
+                let (addr, _) = local.split_once(':')?;
+                (f.get(3) == Some(&"0A")
+                    && local.ends_with(&want)
+                    && (addr == "0100007F" || addr == "00000000"))
+                    .then(|| f.get(7)?.parse::<u32>().ok())
+                    .flatten()
+            })
+            .collect();
+        assert!(!uids.is_empty() && uids.iter().all(|&u| u == my_uid));
+    }
+    let _ = child_pid;
+
+    let nonce = daemon_api::auth::launch_token().unwrap();
+    let resp: serde_json::Value = http
+        .post(format!("{base}/v1/auth/challenge"))
+        .json(&serde_json::json!({ "nonce": nonce, "scope": "cli" }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp["proof"].as_str().unwrap(),
+        daemon_api::auth::listener_proof(&low, "cli", &nonce)
+    );
+    drop(daemon);
+}

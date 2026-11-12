@@ -32,13 +32,20 @@ pub fn trusted(pids: &BTreeSet<u32>, expect: Expect, same_user: impl Fn(u32) -> 
 /// # Errors
 /// The owner cannot be determined or is not trusted (fail closed).
 pub fn verify(port: u16, expect: Expect) -> Result<(), String> {
-    let pids = platform::listener_pids(port)?;
-    if trusted(&pids, expect, platform::is_same_user) {
-        Ok(())
-    } else {
-        Err(format!(
-            "the listener on port {port} (pid {pids:?}) is not the daemon this app trusts"
-        ))
+    #[cfg(target_os = "linux")]
+    {
+        return platform::verify_linux(port, expect);
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let pids = platform::listener_pids(port)?;
+        if trusted(&pids, expect, platform::is_same_user) {
+            Ok(())
+        } else {
+            Err(format!(
+                "the listener on port {port} (pid {pids:?}) is not the daemon this app trusts"
+            ))
+        }
     }
 }
 
@@ -175,39 +182,14 @@ mod platform {
     use std::collections::BTreeSet;
     use std::os::unix::fs::MetadataExt;
 
-    pub fn listener_pids(port: u16) -> Result<BTreeSet<u32>, String> {
-        let table = std::fs::read_to_string("/proc/net/tcp").map_err(|e| e.to_string())?;
-        let inodes = inodes_for(&table, port);
-        let mut out = BTreeSet::new();
-        let procs = std::fs::read_dir("/proc").map_err(|e| e.to_string())?;
-        for ent in procs.flatten() {
-            let Some(pid) = ent.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else {
-                continue;
-            };
-            let Ok(fds) = std::fs::read_dir(ent.path().join("fd")) else {
-                continue;
-            };
-            for fd in fds.flatten() {
-                if let Ok(t) = std::fs::read_link(fd.path())
-                    && let Some(i) = t
-                        .to_str()
-                        .and_then(|s| s.strip_prefix("socket:["))
-                        .and_then(|s| s.strip_suffix(']'))
-                    && inodes.contains(i)
-                {
-                    out.insert(pid);
-                }
-            }
-        }
-        // A listener whose fd table we cannot read (another user) leaves a
-        // socket inode without owner: fail closed.
-        if !inodes.is_empty() && out.is_empty() {
-            return Err("cannot resolve the owner of the listening socket".to_owned());
-        }
-        Ok(out)
+    use super::Expect;
+
+    struct SocketEntry {
+        uid: u32,
+        inode: String,
     }
 
-    pub fn inodes_for(table: &str, port: u16) -> BTreeSet<String> {
+    fn entries_for(table: &str, port: u16) -> Vec<SocketEntry> {
         let want = format!(":{port:04X}");
         table
             .lines()
@@ -219,22 +201,69 @@ mod platform {
                 let ok = f.get(3) == Some(&"0A")
                     && local.ends_with(&want)
                     && (addr == "0100007F" || addr == "00000000");
-                if ok {
-                    f.get(9).map(|s| (*s).to_owned())
-                } else {
-                    None
+                if !ok {
+                    return None;
                 }
+                let uid = f.get(7)?.parse::<u32>().ok()?;
+                let inode = (*f.get(9)?).to_owned();
+                Some(SocketEntry { uid, inode })
             })
             .collect()
     }
 
-    pub fn is_same_user(pid: u32) -> bool {
-        match (
-            std::fs::metadata(format!("/proc/{pid}")),
-            std::fs::metadata("/proc/self"),
-        ) {
-            (Ok(a), Ok(b)) => a.uid() == b.uid(),
-            _ => false,
+    fn current_uid() -> Result<u32, String> {
+        std::fs::metadata("/proc/self")
+            .map(|m| m.uid())
+            .map_err(|e| format!("cannot read /proc/self uid: {e}"))
+    }
+
+    fn pid_holds_all_inodes(pid: u32, inodes: &BTreeSet<String>) -> Result<bool, String> {
+        let fds = std::fs::read_dir(format!("/proc/{pid}/fd"))
+            .map_err(|_| "cannot resolve the owner of the listening socket".to_owned())?;
+        let mut matched = BTreeSet::new();
+        for fd in fds.flatten() {
+            if let Ok(t) = std::fs::read_link(fd.path())
+                && let Some(i) = t
+                    .to_str()
+                    .and_then(|s| s.strip_prefix("socket:["))
+                    .and_then(|s| s.strip_suffix(']'))
+                && inodes.contains(i)
+            {
+                matched.insert(i.to_owned());
+            }
+        }
+        Ok(matched.len() == inodes.len())
+    }
+
+    /// Verify Linux loopback socket ownership without scanning `/proc/*/fd` across
+    /// unrelated processes. `Expect::SameUser` reads the kernel-recorded socket
+    /// UID directly from `/proc/net/tcp`, so it works even when the daemon has
+    /// `PR_SET_DUMPABLE=0`. `Expect::Child(pid)` inspects only `/proc/<pid>/fd`
+    /// (never unrelated forked test children).
+    pub fn verify_linux(port: u16, expect: Expect) -> Result<(), String> {
+        let table = std::fs::read_to_string("/proc/net/tcp").map_err(|e| e.to_string())?;
+        let entries = entries_for(&table, port);
+        if entries.is_empty() {
+            return Err(format!("no listener found on loopback port {port}"));
+        }
+        let my_uid = current_uid()?;
+        if !entries.iter().all(|e| e.uid == my_uid) {
+            return Err(format!(
+                "the listener on port {port} is owned by another OS user"
+            ));
+        }
+        match expect {
+            Expect::SameUser => Ok(()),
+            Expect::Child(pid) => {
+                let inodes: BTreeSet<String> = entries.into_iter().map(|e| e.inode).collect();
+                if pid_holds_all_inodes(pid, &inodes)? {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "the listener on port {port} is not owned by child pid {pid}"
+                    ))
+                }
+            }
         }
     }
 }
@@ -293,8 +322,6 @@ mod tests {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = l.local_addr().unwrap().port();
         let me = std::process::id();
-        assert!(platform::listener_pids(port).unwrap().contains(&me));
-        assert!(platform::is_same_user(me));
         assert!(verify(port, Expect::SameUser).is_ok());
         assert!(verify(port, Expect::Child(me)).is_ok());
         // A listener that is not the expected child is refused.

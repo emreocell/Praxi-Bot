@@ -500,3 +500,62 @@ async fn only_local_management_global_streams_attach_the_overlay_bridge() {
     drop(management);
     assert!(!t.state.hub().app_connected());
 }
+
+#[tokio::test]
+async fn listener_challenge_proves_holder_without_leaking_credentials_and_blocks_peers() {
+    let t = setup();
+    let nonce = "0123456789abcdef".repeat(4);
+
+    let cli = send(
+        &t.app,
+        Method::POST,
+        "/v1/auth/challenge",
+        Some(json!({"nonce": nonce, "scope": "cli"})),
+        &[],
+    )
+    .await;
+    assert_eq!(cli.status, StatusCode::OK);
+    assert_eq!(
+        cli.json()["proof"].as_str().unwrap(),
+        crate::auth::listener_proof(LOW_TOKEN, "cli", &nonce)
+    );
+
+    let mgmt = send(
+        &t.app,
+        Method::POST,
+        "/v1/auth/challenge",
+        Some(json!({"nonce": nonce, "scope": "management"})),
+        &[],
+    )
+    .await;
+    assert_eq!(mgmt.status, StatusCode::OK);
+    assert_eq!(
+        mgmt.json()["proof"].as_str().unwrap(),
+        crate::auth::listener_proof(TOKEN, "management", &nonce)
+    );
+    assert_ne!(cli.json()["proof"], mgmt.json()["proof"]);
+
+    let bad = send(
+        &t.app,
+        Method::POST,
+        "/v1/auth/challenge",
+        Some(json!({"nonce": "short", "scope": "cli"})),
+        &[],
+    )
+    .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+
+    for role in [crate::PeerRole::Phone, crate::PeerRole::Desktop] {
+        assert_eq!(
+            peer_call(
+                &t,
+                role,
+                Method::POST,
+                "/v1/auth/challenge",
+                json!({"nonce": nonce, "scope": "cli"}),
+            )
+            .await,
+            StatusCode::FORBIDDEN
+        );
+    }
+}

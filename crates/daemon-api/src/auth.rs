@@ -129,8 +129,27 @@ pub struct TokenInfo {
     pub restricted: bool,
 }
 
-fn valid_token(s: &str) -> bool {
+pub(crate) fn valid_token(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Compute the HMAC-SHA256 listener-ownership proof for a challenge nonce.
+///
+/// # Panics
+/// Never in practice: HMAC-SHA256 accepts keys of any length.
+#[must_use]
+pub fn listener_proof(secret: &str, scope: &str, nonce: &str) -> String {
+    use hmac::{Hmac, Mac as _};
+    use sha2::Sha256;
+    use std::fmt::Write as _;
+
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key");
+    mac.update(format!("praxi-listener-challenge-v1:{scope}:{nonce}").as_bytes());
+    let tag = mac.finalize().into_bytes();
+    tag.iter().fold(String::with_capacity(64), |mut out, b| {
+        let _ = write!(out, "{b:02x}");
+        out
+    })
 }
 
 /// Read the token written by the daemon (for clients such as the CLI or the

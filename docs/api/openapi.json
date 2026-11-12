@@ -150,6 +150,61 @@
         }
       }
     },
+    "/v1/auth/challenge": {
+      "post": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Prove ownership of the loopback listener without exposing any credential or\nrequiring `/proc/<pid>/fd` reads (blocked under Linux `PR_SET_DUMPABLE=0`).",
+        "operationId": "auth_challenge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListenerChallenge"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListenerChallengeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "x-praxi-peer-scopes": {
+          "desktop": "Deny",
+          "phone": "Deny"
+        }
+      }
+    },
     "/v1/bots": {
       "get": {
         "tags": [
@@ -3501,6 +3556,14 @@
           }
         }
       },
+      "ChallengeScope": {
+        "type": "string",
+        "description": "Which daemon credential a local listener-ownership challenge proves.",
+        "enum": [
+          "cli",
+          "management"
+        ]
+      },
       "ChannelDto": {
         "type": "object",
         "description": "A messaging channel (e.g. Telegram) as seen by the daemon.",
@@ -4413,6 +4476,37 @@
             "format": "int64",
             "description": "Highest daemon-wide event `gseq` (`0` = none yet).",
             "minimum": 0
+          }
+        }
+      },
+      "ListenerChallenge": {
+        "type": "object",
+        "description": "`POST /v1/auth/challenge`: loopback listener-ownership challenge.",
+        "required": [
+          "nonce",
+          "scope"
+        ],
+        "properties": {
+          "nonce": {
+            "type": "string",
+            "description": "Fresh 64-hex nonce chosen by the desktop app."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ChallengeScope",
+            "description": "Which credential the listener must prove it holds."
+          }
+        }
+      },
+      "ListenerChallengeResponse": {
+        "type": "object",
+        "description": "`POST /v1/auth/challenge` response.",
+        "required": [
+          "proof"
+        ],
+        "properties": {
+          "proof": {
+            "type": "string",
+            "description": "Hex-encoded HMAC-SHA256 over `\"praxi-listener-challenge-v1:{scope}:{nonce}\"`."
           }
         }
       },

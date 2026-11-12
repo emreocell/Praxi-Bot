@@ -248,6 +248,34 @@ pub(crate) async fn health(State(s): State<AppState>) -> Json<Health> {
     })
 }
 
+/// Prove ownership of the loopback listener without exposing any credential or
+/// requiring `/proc/<pid>/fd` reads (blocked under Linux `PR_SET_DUMPABLE=0`).
+#[utoipa::path(post, path = "/v1/auth/challenge", tag = "meta",
+    request_body = crate::dto::ListenerChallenge,
+    responses((status = 200, body = crate::dto::ListenerChallengeResponse),
+              (status = 400, body = ErrorBody),
+              (status = 403, body = ErrorBody)))]
+pub(crate) async fn auth_challenge(
+    State(s): State<AppState>,
+    ApiJson(input): ApiJson<crate::dto::ListenerChallenge>,
+) -> Result<Json<crate::dto::ListenerChallengeResponse>, ApiError> {
+    if !crate::auth::valid_token(&input.nonce) {
+        return Err(ApiError::bad_request(
+            "challenge nonce must be 64 hex characters",
+        ));
+    }
+    let secret = match input.scope {
+        crate::dto::ChallengeScope::Cli => s.token(),
+        crate::dto::ChallengeScope::Management => s
+            .management_token()
+            .filter(|t| !t.is_empty() && *t != s.token())
+            .ok_or_else(|| ApiError::forbidden("management credential unavailable"))?,
+    };
+    Ok(Json(crate::dto::ListenerChallengeResponse {
+        proof: crate::auth::listener_proof(secret, input.scope.as_str(), &input.nonce),
+    }))
+}
+
 /// Isolation observations, accessible with the low-privilege CLI bearer.
 #[utoipa::path(get, path = "/v1/isolation", tag = "meta", security(("bearer" = [])),
     responses((status = 200, body = crate::dto::IsolationStatus)))]

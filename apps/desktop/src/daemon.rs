@@ -350,29 +350,120 @@ fn loopback_port(url: &str) -> Option<u16> {
         .flatten()
 }
 
+fn challenge_proof(secret: &str, scope: &str, nonce: &str) -> String {
+    use hmac::{Hmac, Mac as _};
+    use sha2::Sha256;
+    use std::fmt::Write as _;
+
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key");
+    mac.update(format!("praxi-listener-challenge-v1:{scope}:{nonce}").as_bytes());
+    let tag = mac.finalize().into_bytes();
+    tag.iter().fold(String::with_capacity(64), |mut out, b| {
+        let _ = write!(out, "{b:02x}");
+        out
+    })
+}
+
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+#[derive(serde::Deserialize)]
+struct ChallengeReply {
+    proof: String,
+}
+
+async fn verify_challenge(url: &str, scope: &str, secret: &str) -> Result<(), String> {
+    use std::fmt::Write as _;
+
+    let hp = host_port(url).ok_or_else(|| format!("invalid daemon URL {url}"))?;
+    let mut nonce_bytes = [0u8; 32];
+    getrandom::fill(&mut nonce_bytes).map_err(|_| "cannot create listener challenge".to_owned())?;
+    let nonce = nonce_bytes
+        .iter()
+        .fold(String::with_capacity(64), |mut out, b| {
+            let _ = write!(out, "{b:02x}");
+            out
+        });
+    let payload = serde_json::json!({ "nonce": nonce, "scope": scope }).to_string();
+    let expected = challenge_proof(secret, scope, &nonce);
+
+    let probe = async {
+        let mut s = TcpStream::connect(&hp)
+            .await
+            .map_err(|e| format!("cannot connect for listener challenge: {e}"))?;
+        let req = format!(
+            "POST /v1/auth/challenge HTTP/1.1\r\nHost: {hp}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+            payload.len()
+        );
+        s.write_all(req.as_bytes())
+            .await
+            .map_err(|e| format!("listener challenge write failed: {e}"))?;
+        let mut buf = Vec::new();
+        s.read_to_end(&mut buf)
+            .await
+            .map_err(|e| format!("listener challenge read failed: {e}"))?;
+        let text = String::from_utf8_lossy(&buf);
+        let (head, body) = text
+            .split_once("\r\n\r\n")
+            .ok_or_else(|| "malformed listener challenge response".to_owned())?;
+        if !head.starts_with("HTTP/1.1 200") {
+            return Err("listener did not prove daemon identity".to_owned());
+        }
+        let reply: ChallengeReply = serde_json::from_str(body.trim())
+            .map_err(|_| "invalid listener challenge JSON".to_owned())?;
+        if ct_eq(reply.proof.as_bytes(), expected.as_bytes()) {
+            Ok(())
+        } else {
+            Err("listener challenge proof mismatch".to_owned())
+        }
+    };
+    tokio::time::timeout(PROBE_TIMEOUT, probe)
+        .await
+        .map_err(|_| "listener challenge timed out".to_owned())?
+}
+
 /// Identity gate run before the bearer token is handed out.  The health probe
-/// is unauthenticated, so an answer only proves "something listens".  The
-/// owning process of the socket must be the child this app spawned (exact PID),
-/// or, when the app has no running child and did not just spawn one, a process
-/// of the same OS user.  After our own spawn with no running child the
-/// listener is a squatter that won the bind race.
-async fn check_listener(handle: &DaemonHandle, url: &str, after_spawn: bool) -> Result<(), String> {
+/// is unauthenticated, so an answer only proves "something listens".  We verify
+/// both OS-level socket ownership (without `/proc/<pid>/fd` on Linux, which
+/// `PR_SET_DUMPABLE=0` blocks) and an HMAC-SHA256 challenge over loopback.
+async fn check_listener(
+    handle: &DaemonHandle,
+    url: &str,
+    after_spawn: bool,
+    data_dir: &Path,
+) -> Result<(), String> {
     let Some(port) = loopback_port(url) else {
         return Ok(());
     };
-    let expect = match child_pid(handle) {
-        Some(pid) => Expect::Child(pid),
+    let (expect, scope, secret) = match child_pid(handle) {
+        Some(pid) => {
+            let secret = handle
+                .management_token
+                .lock()
+                .clone()
+                .ok_or_else(|| "missing per-launch UI credential".to_owned())?;
+            let expect = if cfg!(target_os = "linux") {
+                Expect::SameUser
+            } else {
+                Expect::Child(pid)
+            };
+            (expect, "management", secret)
+        }
         None if after_spawn => {
             return Err(format!(
                 "something other than the daemon this app started answers at {url}; \
                  refusing to send the API token"
             ));
         }
-        None => Expect::SameUser,
+        None => (Expect::SameUser, "cli", read_token(data_dir)?),
     };
     tokio::task::spawn_blocking(move || listener::verify(port, expect))
         .await
         .map_err(|e| e.to_string())?
+        .map_err(|e| format!("{e}; refusing to send the API token to {url}"))?;
+    verify_challenge(url, scope, &secret)
+        .await
         .map_err(|e| format!("{e}; refusing to send the API token to {url}"))
 }
 
@@ -424,7 +515,7 @@ async fn connect_locked(handle: &DaemonHandle) -> Result<Connection, String> {
     let url = base_url();
     let data = data_dir()?;
     if healthy(&url).await {
-        check_listener(handle, &url, false).await?;
+        check_listener(handle, &url, false, &data).await?;
         return connection(handle, url, &data);
     }
     // A previously started child that died is dropped first.
@@ -440,7 +531,7 @@ async fn connect_locked(handle: &DaemonHandle) -> Result<Connection, String> {
     let deadline = tokio::time::Instant::now() + START_TIMEOUT;
     loop {
         if healthy(&url).await {
-            check_listener(handle, &url, true).await?;
+            check_listener(handle, &url, true, &data).await?;
             break;
         }
         if tokio::time::Instant::now() >= deadline {
@@ -600,16 +691,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    async fn ok_daemon() -> u16 {
+    async fn mock_daemon(cli_secret: Option<&str>, mgmt_secret: Option<&str>) -> u16 {
+        let cli_secret = cli_secret.map(str::to_owned);
+        let mgmt_secret = mgmt_secret.map(str::to_owned);
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = l.local_addr().unwrap().port();
         tokio::spawn(async move {
             while let Ok((mut s, _)) = l.accept().await {
-                let mut b = [0u8; 512];
-                let _ = s.read(&mut b).await;
-                let body = r#"{"status":"ok"}"#;
+                let mut b = [0u8; 2048];
+                let n = s.read(&mut b).await.unwrap_or(0);
+                let text = String::from_utf8_lossy(&b[..n]);
+                let (status, body) = if text.starts_with("POST /v1/auth/challenge ") {
+                    let json_body = text.split_once("\r\n\r\n").map_or("", |(_, body)| body);
+                    let req: serde_json::Value =
+                        serde_json::from_str(json_body.trim()).unwrap_or_default();
+                    let nonce = req["nonce"].as_str().unwrap_or("");
+                    let scope = req["scope"].as_str().unwrap_or("");
+                    let secret = match scope {
+                        "cli" => cli_secret.as_deref(),
+                        "management" => mgmt_secret.as_deref(),
+                        _ => None,
+                    };
+                    if let Some(secret) = secret {
+                        (
+                            "200 OK",
+                            serde_json::json!({ "proof": challenge_proof(secret, scope, nonce) })
+                                .to_string(),
+                        )
+                    } else {
+                        (
+                            "403 Forbidden",
+                            r#"{"error":{"code":"forbidden","message":"no"}}"#.into(),
+                        )
+                    }
+                } else {
+                    ("200 OK", r#"{"status":"ok"}"#.into())
+                };
                 let resp = format!(
-                    "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    "HTTP/1.1 {status}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
                     body.len()
                 );
                 let _ = s.write_all(resp.as_bytes()).await;
@@ -620,13 +739,19 @@ mod tests {
 
     #[tokio::test]
     async fn token_is_withheld_from_a_foreign_listener() {
-        // This test process plays the squatter: it answers a healthy probe.
-        let port = ok_daemon().await;
-        let url = format!("http://127.0.0.1:{port}");
-        assert!(healthy(&url).await);
+        let dir = temp_dir("listener-challenge");
+        let cli_token = "a".repeat(64);
+        let wrong_token = "b".repeat(64);
+        std::fs::write(dir.join(TOKEN_FILE_NAME), &cli_token).unwrap();
+
+        // A squatter that answers `/v1/health` without `/v1/auth/challenge` is refused.
+        let squatter_port = mock_daemon(None, None).await;
+        let squatter_url = format!("http://127.0.0.1:{squatter_port}");
+        assert!(healthy(&squatter_url).await);
 
         // The app spawned a child (any process that is not the listener).
         let handle = DaemonHandle::default();
+        *handle.management_token.lock() = Some("c".repeat(64));
         let mut cmd = if cfg!(windows) {
             let mut c = Command::new("cmd");
             c.args(["/C", "ping -n 30 127.0.0.1 >NUL"]);
@@ -637,17 +762,43 @@ mod tests {
             c
         };
         *handle.child.lock() = Some(cmd.stdout(Stdio::null()).spawn().unwrap());
-        let err = check_listener(&handle, &url, true).await.unwrap_err();
+        let err = check_listener(&handle, &squatter_url, true, &dir)
+            .await
+            .unwrap_err();
         assert!(err.contains("refusing to send the API token"), "{err}");
 
         // Squatter wins the race and our child is gone: still refused.
         handle.stop();
-        assert!(check_listener(&handle, &url, true).await.is_err());
+        assert!(
+            check_listener(&handle, &squatter_url, true, &dir)
+                .await
+                .is_err()
+        );
+        // Even on external attach, a listener without a valid challenge proof is refused.
+        assert!(
+            check_listener(&handle, &squatter_url, false, &dir)
+                .await
+                .is_err()
+        );
 
-        // Control: the check passes for the real owner of the socket.
-        assert!(listener::verify(port, Expect::Child(std::process::id())).is_ok());
-        // A pre-existing daemon of the same user is accepted.
-        assert!(check_listener(&handle, &url, false).await.is_ok());
+        // Wrong secret proof is refused.
+        let wrong_port = mock_daemon(Some(&wrong_token), None).await;
+        let wrong_url = format!("http://127.0.0.1:{wrong_port}");
+        let err = check_listener(&handle, &wrong_url, false, &dir)
+            .await
+            .unwrap_err();
+        assert!(err.contains("mismatch"), "{err}");
+
+        // Control: the check passes for the real owner of the socket with the right proof.
+        assert!(listener::verify(squatter_port, Expect::Child(std::process::id())).is_ok());
+        let valid_port = mock_daemon(Some(&cli_token), None).await;
+        let valid_url = format!("http://127.0.0.1:{valid_port}");
+        assert!(
+            check_listener(&handle, &valid_url, false, &dir)
+                .await
+                .is_ok()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

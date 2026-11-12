@@ -41,6 +41,40 @@ pub struct ApprovalCount {
     pub pending: u64,
 }
 
+/// Which daemon credential a local listener-ownership challenge proves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChallengeScope {
+    Cli,
+    Management,
+}
+
+impl ChallengeScope {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Cli => "cli",
+            Self::Management => "management",
+        }
+    }
+}
+
+/// `POST /v1/auth/challenge`: loopback listener-ownership challenge.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ListenerChallenge {
+    /// Fresh 64-hex nonce chosen by the desktop app.
+    pub nonce: String,
+    /// Which credential the listener must prove it holds.
+    pub scope: ChallengeScope,
+}
+
+/// `POST /v1/auth/challenge` response.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ListenerChallengeResponse {
+    /// Hex-encoded HMAC-SHA256 over `"praxi-listener-challenge-v1:{scope}:{nonce}"`.
+    pub proof: String,
+}
+
 /// A bot.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct BotDto {

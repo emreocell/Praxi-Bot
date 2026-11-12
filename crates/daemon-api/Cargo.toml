@@ -26,6 +26,7 @@ cli-provider.workspace = true
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
 futures.workspace = true
 getrandom = "0.3"
+hmac = "0.12"
 iana-time-zone = "0.1"
 parking_lot.workspace = true
 percent-encoding.workspace = true

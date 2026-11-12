@@ -75,6 +75,7 @@ impl Modify for Security {
     ),
     paths(
         routes::health,
+        routes::auth_challenge,
         routes::isolation,
         routes::list_bots,
         routes::create_bot,
@@ -135,7 +136,7 @@ impl Modify for Security {
         events_doc,
     ),
     components(schemas(
-        sse::SseStatus, sse::Gap, dto::IsolationStatus, dto::Health, dto::BotDto, dto::BotInput, dto::ChatDto, dto::CreateChat,
+        sse::SseStatus, sse::Gap, dto::ChallengeScope, dto::ListenerChallenge, dto::ListenerChallengeResponse, dto::IsolationStatus, dto::Health, dto::BotDto, dto::BotInput, dto::ChatDto, dto::CreateChat,
         dto::MessageDto, dto::Mode, dto::SendMessage, dto::DeliveryKind, dto::SendResponse,
         dto::ApprovalCount, dto::ApprovalDto, dto::Decision, dto::Scope, dto::DecideApproval,
         dto::DecisionResponse, dto::RunDto, dto::UsageTotals, dto::BotUsage,
