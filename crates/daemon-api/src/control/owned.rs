@@ -70,6 +70,8 @@ struct Disk {
     reset_pending: bool,
     #[serde(default)]
     audit_pending: bool,
+    #[serde(default)]
+    latch_by_local: bool,
 }
 /// How long a takeover may stay `Acquiring` (drain 10 s plus the activation).
 const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -93,6 +95,8 @@ pub(super) fn restore(st: &mut State, path: &Path) {
                     j.messages.truncate(64);
                 }
                 let (reset_pending, audit_pending) = (disk.reset_pending, disk.audit_pending);
+                st.latch_by_local =
+                    disk.latch_by_local && disk.owned.is_none() && disk.latched.is_some();
                 st.latched = disk.latched;
                 st.owned = disk.owned;
                 st.epoch = disk.epoch;
@@ -173,6 +177,7 @@ pub(super) fn persist(st: &State, path: &Path) -> std::io::Result<()> {
                 epoch: st.epoch,
                 releases: st.releases.clone(),
                 require_recovery: st.require_recovery,
+                latch_by_local: st.latch_by_local,
                 reset_pending: st.reset_pending,
                 audit_pending: st.audit_pending,
             },
@@ -267,6 +272,9 @@ impl ControlHub {
                 "the local user stopped the takeover; only the local user can clear it".into(),
             );
         }
+        if !local && st.owned.is_none() && st.latched.is_some() && st.latch_by_local {
+            return Err("the local user set this pause; only the local user can take over".into());
+        }
         if let Some(old) = &st.owned {
             if old.request_id == req.request_id {
                 if old.actor == actor
@@ -326,6 +334,7 @@ impl ControlHub {
             input_deadline: Some(tokio::time::Instant::now() + ACQUIRE_TIMEOUT),
         };
         st.latched = Some(ControlMode::HumanDriving);
+        st.latch_by_local = false;
         st.owned = Some(owned.clone());
         st.require_recovery = true;
         // Work the previous takeover owed (key reset, interrupt audit row) is

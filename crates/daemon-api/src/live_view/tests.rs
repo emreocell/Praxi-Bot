@@ -3679,6 +3679,106 @@ async fn an_acquiring_takeover_that_nobody_activates_expires() {
     assert_eq!(now.info.reason, Some(Reason::Expired));
 }
 
+// ---- audit3 F3: a latch the local app set is local-only to clear
+#[tokio::test]
+async fn a_latch_the_local_app_set_cannot_be_cleared_or_replaced_by_a_granted_peer() {
+    let t = Test::new();
+    let id = t.session(Some("alice")).await;
+    // The local app pauses (or reports human_driving): its own Stop.
+    for mode in ["paused", "human_driving"] {
+        t.state.hub().release();
+        let (status, v) = t
+            .call(
+                None,
+                Method::PUT,
+                "/v1/control/state",
+                Some(json!({"mode":mode,"release":false})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert!(t.state.hub().latched().is_some());
+        // A peer with an explicit input grant can neither release nor replace it.
+        assert_eq!(
+            t.call(Some("alice"), Method::POST, "/v1/control/release", None)
+                .await
+                .0,
+            StatusCode::FORBIDDEN,
+            "{mode}"
+        );
+        assert_eq!(
+            t.call(
+                Some("alice"),
+                Method::PUT,
+                "/v1/control/state",
+                Some(json!({"mode":"idle","release":true})),
+            )
+            .await
+            .0,
+            StatusCode::FORBIDDEN,
+            "{mode}"
+        );
+        let (status, _) = t
+            .call(
+                Some("alice"),
+                Method::POST,
+                "/v1/control/takeover",
+                Some(json!({"session_id":id,"request_id":Uuid::now_v7(),"recover":true,"reason":"daemon_restart"})),
+            )
+            .await;
+        assert!(!status.is_success(), "{mode}: {status}");
+        assert!(t.state.hub().latched().is_some(), "{mode}: still latched");
+        // The local user clears it.
+        let (status, v) = t
+            .call(
+                None,
+                Method::PUT,
+                "/v1/control/state",
+                Some(json!({"mode":"idle","release":true})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert!(t.state.hub().latched().is_none(), "{mode}");
+    }
+}
+#[tokio::test]
+async fn a_peers_own_pause_stays_clearable_by_a_granted_peer_and_the_bit_is_persisted() {
+    let t = Test::new();
+    // A pause the peer itself set (not local) is not local-only.
+    let (status, _) = t
+        .call(
+            Some("alice"),
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode":"paused","release":false})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        t.call(Some("alice"), Method::POST, "/v1/control/release", None)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    // The local app's pause survives a restart as local-only.
+    let (status, _) = t
+        .call(
+            None,
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode":"paused","release":false})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let t2 = t.restarted();
+    assert!(t2.state.hub().latched().is_some());
+    assert_eq!(
+        t2.call(Some("alice"), Method::POST, "/v1/control/release", None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+}
+
 // ---- audit2 F3: owed work never touches an active takeover
 #[tokio::test]
 async fn owed_reset_and_audit_work_never_touches_an_active_takeover() {

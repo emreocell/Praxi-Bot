@@ -78,6 +78,9 @@ struct State {
     /// (a failed attempt is retried by the app's next pause heartbeat).
     reset_pending: bool,
     audit_pending: bool,
+    /// The (ownerless) latch was set by the local app itself, as its own Stop:
+    /// only the local user clears it, like a local override.
+    latch_by_local: bool,
     /// A latch-file write failed: memory is ahead of the disk. The state stays
     /// in force (sticky), the failure is reported, and the next heartbeat
     /// retries the write until it succeeds.
@@ -230,9 +233,26 @@ impl ControlHub {
     /// # Errors
     /// Rejects owned/restart release bypasses and failed durable writes.
     pub fn try_apply_state(&self, mode: ControlMode, release: bool) -> Result<(), String> {
+        self.try_apply_state_as(mode, release, false)
+    }
+
+    /// [`ControlHub::try_apply_state`] for a known caller: a pause or
+    /// `human_driving` applied by the local app is its own Stop (local-only to
+    /// clear), one applied by a paired device is not.
+    /// # Errors
+    /// As `try_apply_state`, and a non-local release of a local latch.
+    pub fn try_apply_state_as(
+        &self,
+        mode: ControlMode,
+        release: bool,
+        local: bool,
+    ) -> Result<(), String> {
         let mut st = self.state.lock();
         if release && (st.owned.is_some() || st.require_recovery) {
             return Err("owned takeover requires authenticated release/recovery".into());
+        }
+        if release && !local && st.latched.is_some() && st.latch_by_local {
+            return Err("the local user set this pause; only the local user clears it".into());
         }
         if st.owned.is_some() && refused_while(mode).is_some() {
             return Err("owned takeover controls the latch".into());
@@ -240,10 +260,13 @@ impl ControlHub {
         let before = st.latched;
         st.registration = Some((mode, Instant::now()));
         if refused_while(mode).is_some() {
+            // A later peer heartbeat never takes a local latch over.
+            st.latch_by_local = local || (before.is_some() && st.latch_by_local);
             st.latched = Some(mode);
             st.pending.clear();
         } else if release {
             st.latched = None;
+            st.latch_by_local = false;
         }
         if st.latched != before {
             st.epoch = st.epoch.saturating_add(1);
@@ -255,6 +278,13 @@ impl ControlHub {
         }
         self.changed.notify_waiters();
         Ok(())
+    }
+
+    /// A latch with no takeover owner that the local app set itself.
+    #[must_use]
+    pub fn local_latch(&self) -> bool {
+        let st = self.state.lock();
+        st.latched.is_some() && st.owned.is_none() && st.latch_by_local
     }
 
     /// The latched `Paused` / `HumanDriving` mode, if any (never expires).
@@ -273,10 +303,21 @@ impl ControlHub {
     /// # Errors
     /// Rejects owned/restart release bypasses and failed durable writes.
     pub fn try_release(&self) -> Result<Option<ControlMode>, String> {
+        self.try_release_as(true)
+    }
+
+    /// [`ControlHub::try_release`] for a known caller.
+    /// # Errors
+    /// As `try_release`, and a non-local release of a latch the local app set.
+    pub fn try_release_as(&self, local: bool) -> Result<Option<ControlMode>, String> {
         let mut st = self.state.lock();
         if st.owned.is_some() || st.require_recovery {
             return Err("owned takeover requires authenticated release/recovery".into());
         }
+        if !local && st.latched.is_some() && st.latch_by_local {
+            return Err("the local user set this pause; only the local user clears it".into());
+        }
+        st.latch_by_local = false;
         let was = st.latched.take();
         if was.is_some() {
             st.epoch = st.epoch.saturating_add(1);

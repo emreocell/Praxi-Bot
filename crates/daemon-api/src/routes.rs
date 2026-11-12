@@ -759,7 +759,9 @@ pub(crate) async fn release_control(
     let mut dto;
     if body.is_empty() {
         crate::live_view::require_latch_authority(&s, &actor)?;
-        s.hub().try_release().map_err(ApiError::conflict)?;
+        s.hub()
+            .try_release_as(actor.local)
+            .map_err(ApiError::conflict)?;
         dto = control_state_dto(&s, Some(&actor));
     } else {
         let request: live_view::ReleaseRequest = serde_json::from_slice(&body)
@@ -847,7 +849,10 @@ pub(crate) async fn put_control_state(
             // and the override: apply the pause the normal way, so it is not
             // lost and the registration is refreshed.
         }
-        match s.hub().try_apply_state(input.mode, input.release) {
+        match s
+            .hub()
+            .try_apply_state_as(input.mode, input.release, actor.local)
+        {
             Err(e) if local_pause && e == "owned takeover controls the latch" => {}
             Err(e) => {
                 // A failed latch-file write is not a conflict: the pause is in

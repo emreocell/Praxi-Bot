@@ -919,7 +919,8 @@ pub(crate) fn require_latch_authority(s: &AppState, actor: &Actor) -> Result<(),
     let overridden = s
         .hub()
         .takeover()
-        .is_some_and(|t| t.info.reason == Some(Reason::LocalOverride));
+        .is_some_and(|t| t.info.reason == Some(Reason::LocalOverride))
+        || s.hub().local_latch();
     if overridden || !s.live_view().allowed(actor, true) {
         audit(
             s,
