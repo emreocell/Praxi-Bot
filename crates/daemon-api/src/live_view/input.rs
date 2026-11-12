@@ -14,6 +14,9 @@ use std::time::Duration;
 use tokio::time::Instant;
 use uuid::Uuid;
 
+/// How long a batch waits for the input executor before 429 `input_busy`.
+const INPUT_QUEUE_WAIT: Duration = Duration::from_secs(1);
+
 pub(super) struct Duplicate {
     first: u64,
     last: u64,
@@ -54,8 +57,12 @@ impl Rate {
         }
     }
     fn take(&mut self, events: usize, text: usize) -> bool {
-        let now = Instant::now();
-        let dt = now.duration_since(self.at).as_secs_f64();
+        self.take_at(Instant::now(), events, text)
+    }
+    /// The token bucket with an explicit clock: refill is `elapsed * rate`
+    /// capped at the burst, so the result depends only on the instants given.
+    fn take_at(&mut self, now: Instant, events: usize, text: usize) -> bool {
+        let dt = now.saturating_duration_since(self.at).as_secs_f64();
         self.at = now;
         self.events = (self.events + dt * 120.0).min(64.0);
         self.text = (self.text + dt * 8192.0).min(8192.0);
@@ -142,13 +149,19 @@ pub(crate) async fn input(
     body: Bytes,
 ) -> Result<Json<InputResult>, ApiError> {
     let live = s.live_view();
-    let _executor = live.executor.try_lock().map_err(|_| {
-        ApiError::new(
-            StatusCode::TOO_MANY_REQUESTS,
-            "input_busy",
-            "input executor busy",
-        )
-    })?;
+    // The executor is held briefly by the takeover activation task, the session
+    // reaper and the heartbeat/profile routes. A client that waited for `active`
+    // and sends its next batch at once must queue behind them (FIFO) rather than
+    // get a spurious 429; only a genuinely long-held executor is "busy".
+    let _executor = tokio::time::timeout(INPUT_QUEUE_WAIT, live.executor.lock())
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "input_busy",
+                "input executor busy",
+            )
+        })?;
     let (target, generation, _) = live.session(&actor, id)?;
     let batch: InputBatch = match parse(&body) {
         Ok(b) => b,
@@ -402,4 +415,54 @@ pub(crate) async fn input(
         ));
     }
     Ok(Json(result))
+}
+
+#[cfg(test)]
+mod rate_tests {
+    use super::Rate;
+    use std::time::Duration;
+    use tokio::time::Instant;
+
+    #[test]
+    fn burst_then_refill_is_exact_around_the_straddling_boundary() {
+        let t0 = Instant::now();
+        let mut rate = Rate::new();
+        rate.at = t0;
+        assert!(rate.take_at(t0, 32, 0));
+        assert!(rate.take_at(t0, 32, 0));
+        // The burst of 64 is spent: 32 more events at the same instant fail.
+        assert!(!rate.take_at(t0, 32, 0));
+        // 120 events/s: 32 tokens need 266.67 ms. A batch that straddles the
+        // boundary is refused just before it and accepted just after.
+        assert!(!rate.take_at(t0 + Duration::from_millis(266), 32, 0));
+        assert!(rate.take_at(t0 + Duration::from_millis(268), 32, 0));
+    }
+
+    #[test]
+    fn refill_never_exceeds_the_burst_and_text_has_its_own_budget() {
+        let t0 = Instant::now();
+        let mut rate = Rate::new();
+        rate.at = t0;
+        // A long idle period still allows only the burst of 64.
+        let later = t0 + Duration::from_secs(600);
+        assert!(rate.take_at(later, 64, 0));
+        assert!(!rate.take_at(later, 1, 0));
+        // 8192 text bytes/s, independent of the event budget.
+        assert!(rate.take_at(later + Duration::from_secs(10), 1, 8192));
+        assert!(!rate.take_at(later + Duration::from_secs(10), 1, 1));
+        assert!(rate.take_at(
+            later + Duration::from_secs(10) + Duration::from_millis(125),
+            1,
+            1024
+        ));
+    }
+
+    #[test]
+    fn a_clock_that_goes_backwards_never_refills() {
+        let t0 = Instant::now();
+        let mut rate = Rate::new();
+        rate.at = t0 + Duration::from_secs(5);
+        assert!(rate.take_at(t0, 64, 0));
+        assert!(!rate.take_at(t0, 1, 0));
+    }
 }

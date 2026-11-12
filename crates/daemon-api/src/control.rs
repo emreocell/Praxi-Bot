@@ -73,6 +73,10 @@ struct State {
     releases: Vec<ReleaseJournal>,
     persistence_error: bool,
     require_recovery: bool,
+    /// A local override still has to reset pressed inputs / write its audit row
+    /// (a failed attempt is retried by the app's next pause heartbeat).
+    reset_pending: bool,
+    audit_pending: bool,
 }
 
 /// State of the bridge; see the module docs.

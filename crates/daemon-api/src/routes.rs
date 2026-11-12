@@ -811,7 +811,8 @@ pub(crate) async fn get_control_state(
 /// user's resume), or use `POST /v1/control/release`.
 #[utoipa::path(put, path = "/v1/control/state", tag = "control", security(("bearer" = [])),
     request_body = ControlStateInput,
-    responses((status = 200, body = ControlStateDto), (status = 400, body = ErrorBody)))]
+    responses((status = 200, body = ControlStateDto), (status = 400, body = ErrorBody),
+        (status = 403, body = ErrorBody), (status = 409, body = ErrorBody)))]
 pub(crate) async fn put_control_state(
     State(s): State<AppState>,
     axum::Extension(actor): axum::Extension<crate::live_view::Actor>,

@@ -74,7 +74,12 @@ async fn guard(State(state): State<AppState>, mut req: Request, next: Next) -> R
             Ok(input) => input,
             Err(e) => return ApiError::bad_request(e.to_string()).into_response(),
         };
-        let changed = input.release || state.hub().reported_mode() != Some(input.mode);
+        // A device without the input grant is refused by the handler (and that
+        // denial is coalesced there): it must not write a decision row per try.
+        let granted = state
+            .live_view()
+            .allowed(&crate::live_view::Actor::peer(&peer), true);
+        let changed = granted && (input.release || state.hub().reported_mode() != Some(input.mode));
         (
             Request::from_parts(parts, axum::body::Body::from(bytes)),
             changed,
@@ -86,7 +91,17 @@ async fn guard(State(state): State<AppState>, mut req: Request, next: Next) -> R
     // Fail closed if attribution cannot be persisted. The normal approval audit
     // and permission engine remain in place and record the resulting decision.
     let mut audit_actor = None;
+    let refused_control = matches!(
+        path.as_str(),
+        "/v1/control/release"
+            | "/v1/control/takeover"
+            | "/v1/control/override"
+            | "/v1/control/recover"
+    ) && !state
+        .live_view()
+        .allowed(&crate::live_view::Actor::peer(&peer), true);
     if (req.method() == Method::POST
+        && !refused_control
         && (path.starts_with("/v1/approvals/")
             || path.starts_with("/v1/questions/")
             || path.starts_with("/v1/control/")))

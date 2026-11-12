@@ -339,6 +339,7 @@ impl CdpDriver {
         let activity = Arc::clone(&self.activity);
         let timeout = self.settings.idle_timeout;
         tokio::spawn(async move {
+            let mut state = ReapState::default();
             loop {
                 tokio::time::sleep(
                     timeout
@@ -349,30 +350,7 @@ impl CdpDriver {
                 let Some(session) = weak_session.upgrade() else {
                     break;
                 };
-                if pin.load(std::sync::atomic::Ordering::SeqCst) {
-                    continue;
-                }
-                let run_active = activity
-                    .read()
-                    .ok()
-                    .and_then(|probe| probe.clone())
-                    .is_some_and(|probe| probe());
-                if run_active {
-                    if let Ok(mut slot) = session.try_lock()
-                        && let Some(s) = slot.as_mut()
-                    {
-                        s.last_work = tokio::time::Instant::now();
-                    }
-                    continue;
-                }
-                if let Ok(mut slot) = session.try_lock()
-                    && slot
-                        .as_ref()
-                        .is_some_and(|s| s.last_work.elapsed() >= timeout)
-                    && let Some(s) = slot.take()
-                {
-                    let _ = s.browser.close().await;
-                }
+                reap_tick(&session, timeout, &pin, &activity, &mut state).await;
             }
         });
     }
@@ -386,6 +364,59 @@ impl CdpDriver {
 
     /// One extra launch after a dead session or a terminal transport error.
     const RELAUNCH_LIMIT: u32 = 1;
+}
+
+/// What the idle reaper remembers between ticks.
+#[derive(Default)]
+struct ReapState {
+    /// The previous tick saw a bot run using the computer.
+    was_active: bool,
+}
+
+/// One idle-reaper tick, separated from its timer so tests can drive it with a
+/// paused clock. The browser is kept while a takeover pins it or a bot run that
+/// used the computer is active; the idle clock restarts at the tick that sees
+/// the run end (never earlier, so the browser cannot be closed the instant a
+/// run finishes), and the probe is checked again under the session lock so an
+/// action admitted just before the close is not racing it.
+async fn reap_tick(
+    session: &Mutex<Option<Session>>,
+    timeout: Duration,
+    pin: &std::sync::atomic::AtomicBool,
+    activity: &std::sync::RwLock<Option<ActivityProbe>>,
+    state: &mut ReapState,
+) {
+    let run_active = || {
+        activity
+            .read()
+            .ok()
+            .and_then(|probe| probe.clone())
+            .is_some_and(|probe| probe())
+    };
+    if pin.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let active = run_active();
+    if active || state.was_active {
+        if let Ok(mut slot) = session.try_lock()
+            && let Some(s) = slot.as_mut()
+        {
+            s.last_work = tokio::time::Instant::now();
+        }
+        state.was_active = active;
+        return;
+    }
+    if let Ok(mut slot) = session.try_lock()
+        && slot
+            .as_ref()
+            .is_some_and(|s| s.last_work.elapsed() >= timeout)
+        // An action admitted since the check above holds the computer slot
+        // before it takes this lock, so it is seen here.
+        && !run_active()
+        && let Some(s) = slot.take()
+    {
+        let _ = s.browser.close().await;
+    }
 }
 
 /// Run `$body` against the cached session. A closed browser is replaced inside
@@ -2294,6 +2325,8 @@ mod tests {
         server.kill();
     }
 
+    /// Deterministic: the tick is driven by hand on a frozen clock (no timers,
+    /// no sleeps), so a slow CI runner cannot change the outcome.
     #[tokio::test]
     async fn an_active_bot_run_keeps_the_browser_open_between_steps_then_idle_close_resumes() {
         let dir = tempfile::tempdir().unwrap();
@@ -2310,30 +2343,106 @@ mod tests {
             profile: None,
             last_work: tokio::time::Instant::now(),
         });
-        // A run that used the computer is still active (for example it waits
-        // for the model or an approval for much longer than the idle timeout).
+        // Connected over real I/O; from here the clock is frozen and advanced by hand.
+        tokio::time::pause();
         let run_active = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let probe = Arc::clone(&run_active);
         driver.set_activity_probe(Arc::new(move || {
             probe.load(std::sync::atomic::Ordering::SeqCst)
         }));
-        driver.start_idle_reaper();
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        let timeout = Duration::from_millis(40);
+        let mut state = ReapState::default();
+        async fn tick(driver: &CdpDriver, timeout: Duration, state: &mut ReapState) {
+            reap_tick(
+                &driver.session,
+                timeout,
+                &driver.takeover_pin,
+                &driver.activity,
+                state,
+            )
+            .await;
+        }
+        // The run is active far longer than the idle timeout (waiting for the
+        // model or an approval between steps): the browser stays.
+        for _ in 0..10 {
+            tokio::time::advance(Duration::from_millis(100)).await;
+            tick(&driver, timeout, &mut state).await;
+            assert!(
+                driver.session.lock().await.is_some(),
+                "idle close must not take the browser from an active run"
+            );
+        }
+        // The run ends. The idle clock starts at the tick that sees it end:
+        // not closed on that tick, nor just before a full timeout after it.
+        // (The run ends 45 ms after the last tick that saw it active: longer
+        // than the idle timeout, but the run was active until just now.)
+        tokio::time::advance(Duration::from_millis(45)).await;
+        run_active.store(false, std::sync::atomic::Ordering::SeqCst);
+        tick(&driver, timeout, &mut state).await;
         assert!(
             driver.session.lock().await.is_some(),
-            "idle close must not take the browser from an active run"
+            "not closed on the tick that sees the run end"
         );
-        // The idle clock starts when the run ends, not before.
-        run_active.store(false, std::sync::atomic::Ordering::SeqCst);
-        tokio::time::sleep(Duration::from_millis(5)).await;
-        assert!(driver.session.lock().await.is_some());
-        for _ in 0..100 {
-            if driver.session.lock().await.is_none() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-        assert!(driver.session.lock().await.is_none());
+        tokio::time::advance(Duration::from_millis(39)).await;
+        tick(&driver, timeout, &mut state).await;
+        assert!(driver.session.lock().await.is_some(), "39 ms < 40 ms idle");
+        tokio::time::advance(Duration::from_millis(2)).await;
+        tick(&driver, timeout, &mut state).await;
+        assert!(driver.session.lock().await.is_none(), "idle close resumed");
+        server.kill();
+    }
+
+    #[tokio::test]
+    async fn a_takeover_pin_and_a_run_that_starts_just_before_the_close_keep_the_browser() {
+        let dir = tempfile::tempdir().unwrap();
+        let driver = CdpDriver::new(BrowserSettings {
+            idle_timeout: Duration::from_millis(40),
+            ..BrowserSettings::isolated(dir.path())
+        });
+        let server = FakeCdp::start();
+        let browser = Browser::connect(&server.url).await.unwrap();
+        let page = browser.first_page().await.unwrap();
+        *driver.session.lock().await = Some(Session {
+            browser,
+            page,
+            profile: None,
+            last_work: tokio::time::Instant::now(),
+        });
+        tokio::time::pause();
+        let timeout = Duration::from_millis(40);
+        let mut state = ReapState::default();
+        driver.set_takeover_pin(true);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        reap_tick(
+            &driver.session,
+            timeout,
+            &driver.takeover_pin,
+            &driver.activity,
+            &mut state,
+        )
+        .await;
+        assert!(driver.session.lock().await.is_some(), "pinned");
+        driver.set_takeover_pin(false);
+        // A run admits an action between the first probe and the close: the
+        // probe is read again under the session lock.
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = Arc::clone(&calls);
+        driver.set_activity_probe(Arc::new(move || {
+            // False for the first check, true from then on.
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 1
+        }));
+        reap_tick(
+            &driver.session,
+            timeout,
+            &driver.takeover_pin,
+            &driver.activity,
+            &mut state,
+        )
+        .await;
+        assert!(
+            driver.session.lock().await.is_some(),
+            "a run that became active before the close keeps the browser"
+        );
         server.kill();
     }
 

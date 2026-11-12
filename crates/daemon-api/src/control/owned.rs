@@ -37,6 +37,10 @@ pub struct ReleaseJournal {
     pub completed: bool,
     #[serde(default)]
     pub noted: bool,
+    /// A local override landed while this release was open: it can never be
+    /// completed (a retry gets a refusal, not a resume).
+    #[serde(default)]
+    pub cancelled: bool,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -75,7 +79,12 @@ pub(super) fn restore(st: &mut State, path: &Path) {
                 st.require_recovery = st.owned.is_some();
                 if let Some(t) = st.owned.as_mut() {
                     t.info.state = ViewState::Paused;
-                    t.info.reason = Some(Reason::Restart);
+                    // A local override survives a restart: only the local
+                    // user's explicit recovery clears it. Anything else is
+                    // an ordinary restart interruption.
+                    if t.info.reason != Some(Reason::LocalOverride) {
+                        t.info.reason = Some(Reason::Restart);
+                    }
                     t.info.input_expires_in_ms = 0;
                 }
                 return;
@@ -382,8 +391,41 @@ impl ControlHub {
     /// recorded, in any state, and keeps the bot paused. Never resumes.
     pub fn force_interrupt(&self, reason: Reason) -> Option<OwnedTakeover> {
         let owned = self.state.lock().owned.clone()?;
-        self.interrupt(owned.info.id, reason);
+        let already =
+            owned.info.state == ViewState::Paused && owned.info.reason.as_ref() == Some(&reason);
+        self.interrupt(owned.info.id, reason.clone());
+        if reason == Reason::LocalOverride && !already {
+            let mut st = self.state.lock();
+            if st
+                .owned
+                .as_ref()
+                .is_some_and(|t| t.info.reason == Some(Reason::LocalOverride))
+            {
+                st.reset_pending = true;
+                st.audit_pending = true;
+                // An open release can no longer complete.
+                for journal in st.releases.iter_mut().filter(|j| !j.completed) {
+                    journal.cancelled = true;
+                }
+                if self.persist(&st).is_err() {
+                    st.persistence_error = true;
+                }
+            }
+        }
         Some(owned)
+    }
+    /// What a standing local override still has to do: `(reset, audit)`.
+    pub fn override_pending(&self) -> (bool, bool) {
+        let st = self.state.lock();
+        (st.reset_pending, st.audit_pending)
+    }
+    /// The pressed inputs were reset.
+    pub fn resolve_override_reset(&self) {
+        self.state.lock().reset_pending = false;
+    }
+    /// The override's audit row was written.
+    pub fn resolve_override_audit(&self) {
+        self.state.lock().audit_pending = false;
     }
     /// Local recovery of a takeover latch (for example after a restart) without
     /// any registered target: clears owner and latch, bumps the epoch so cached
@@ -410,6 +452,8 @@ impl ControlHub {
         st.persistence_error = false;
         st.registration = None;
         st.affected_runs.clear();
+        st.reset_pending = false;
+        st.audit_pending = false;
         drop(st);
         self.changed.notify_waiters();
         self.emit_state(&old, "recovered", None);
@@ -444,7 +488,18 @@ impl ControlHub {
                 Err("release request conflict".into())
             };
         }
-        if st.releases.iter().any(|j| !j.completed && !j.noted) {
+        if st
+            .owned
+            .as_ref()
+            .is_some_and(|t| t.info.reason == Some(Reason::LocalOverride))
+        {
+            return Err("local override stands".into());
+        }
+        if st
+            .releases
+            .iter()
+            .any(|j| !j.completed && !j.noted && !j.cancelled)
+        {
             return Err("release reconciliation required".into());
         }
         journal.runs.extend(st.affected_runs.iter().copied());
@@ -488,7 +543,7 @@ impl ControlHub {
             .lock()
             .releases
             .iter()
-            .filter(|j| !j.completed && !j.noted)
+            .filter(|j| !j.completed && !j.noted && !j.cancelled)
             .cloned()
             .collect()
     }
@@ -530,6 +585,16 @@ impl ControlHub {
             .clone();
         if j.completed {
             return Ok(());
+        }
+        // Evaluated under the hub lock: a local override is never cleared by a
+        // release, however it got here (a retry, a race with the override).
+        if j.cancelled
+            || st
+                .owned
+                .as_ref()
+                .is_some_and(|t| t.info.reason == Some(Reason::LocalOverride))
+        {
+            return Err("local override stands".into());
         }
         if st.active_actions != 0 {
             return Err("actions still draining".into());
@@ -673,6 +738,7 @@ mod tests {
             messages: vec![],
             completed: false,
             noted: false,
+            cancelled: false,
         }
     }
     #[tokio::test]
@@ -935,6 +1001,46 @@ mod tests {
             hub.begin_takeover("local-ui:me", &recover, Uuid::now_v7(), 1, true, true)
                 .is_ok()
         );
+    }
+    #[test]
+    fn a_local_override_is_persisted_restored_and_cleared_only_by_local_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("control-latch.json");
+        let hub = ControlHub::with_latch_file(super::super::ControlConfig::default(), path.clone());
+        let t = hub
+            .begin_takeover("peer:alice", &request(), Uuid::now_v7(), 1, true, false)
+            .unwrap();
+        hub.activate(t.info.id, t.info.control_epoch).unwrap();
+        hub.force_interrupt(Reason::LocalOverride).unwrap();
+        let restarted = ControlHub::with_latch_file(super::super::ControlConfig::default(), path);
+        let now = restarted.takeover().unwrap();
+        assert_eq!(now.info.state, ViewState::Paused);
+        assert_eq!(now.info.reason, Some(Reason::LocalOverride));
+        let mut recover = request();
+        recover.recover = true;
+        recover.reason = Some(live_view::RecoveryReason::DaemonRestart);
+        assert!(
+            restarted
+                .begin_takeover("peer:bob", &recover, Uuid::now_v7(), 1, true, false)
+                .is_err()
+        );
+        assert!(restarted.clear_owned_latch().unwrap().is_some());
+        assert!(restarted.latched().is_none());
+    }
+    #[test]
+    fn a_release_cancelled_by_a_local_override_can_never_finish() {
+        let hub = ControlHub::new(super::super::ControlConfig::default());
+        let t = hub
+            .begin_takeover("peer:alice", &request(), Uuid::now_v7(), 1, true, false)
+            .unwrap();
+        hub.activate(t.info.id, t.info.control_epoch).unwrap();
+        hub.suspend_release(t.info.id);
+        let j = hub.prepare_release(journal(&t)).unwrap();
+        hub.force_interrupt(Reason::LocalOverride).unwrap();
+        assert!(hub.release_journal(j.request_id).unwrap().cancelled);
+        assert!(hub.finish_release(&t.actor, j.request_id).is_err());
+        assert!(hub.latched().is_some() && hub.takeover().is_some());
+        assert!(hub.pending_release_notes().is_empty());
     }
     #[test]
     fn write_failure_never_activates_or_releases_and_retries_restore_the_same_outbox() {

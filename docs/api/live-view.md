@@ -65,6 +65,15 @@ Frame viewers do not register as overlay controllers.
 - `POST /v1/control/recover` (local user only) clears a takeover latch, including
   one restored after a restart, without a view session or a registered target.
   A latch that never had a takeover owner is released with the ordinary release.
+- A paired device that registers as the controller (`PUT /v1/control/state`)
+  needs an `input` grant from the local user, like any other change of the latch
+  or of the registered mode; a remote-host peer that does this must be granted
+  first.
+- A release that is open (journal written) when the local override lands is
+  cancelled: a retry with the same `request_id`, or a new release, gets 403 and
+  cannot clear the override or resume the bot. A failed key reset or audit row
+  of the override is retried by the app's next `paused` heartbeat until it
+  succeeds. The override survives a daemon restart (persisted as its own reason).
 - Releasing or changing a latch the caller does not own (`POST /v1/control/release`
   without a body, `PUT /v1/control/state` with `release: true` or a different
   pause mode) needs the local user or a paired device that currently holds the

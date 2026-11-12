@@ -93,6 +93,10 @@ pub struct LiveView {
     /// Last written denial audit per `actor|event`, and how many were folded
     /// into it since (see [`audit`]).
     denials: Mutex<BTreeMap<String, DenialWindow>>,
+    /// Test seam: runs right after a release suspends input, to land a local
+    /// override in the middle of a release.
+    #[cfg(test)]
+    release_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 impl LiveView {
     pub(crate) fn capture_targets(&self) -> std::collections::BTreeSet<Uuid> {
@@ -116,7 +120,7 @@ impl LiveView {
     fn set_privileges(&self, actor: String, privileges: ScreenPrivileges) {
         self.privileges.lock().insert(actor, privileges);
     }
-    fn allowed(&self, actor: &Actor, input: bool) -> bool {
+    pub(crate) fn allowed(&self, actor: &Actor, input: bool) -> bool {
         // The local user may watch and drive by default. A paired device has
         // neither until the local user grants it, per device.
         let p = self
@@ -485,6 +489,44 @@ pub(crate) async fn delete_session(
     end_session(&s, &actor, id, Reason::Disconnected).await?;
     Ok(StatusCode::NO_CONTENT)
 }
+/// Reset pressed inputs of the takeover's target and drop live capture.
+/// `false` when the key reset itself failed.
+async fn reset_target(s: &AppState, t: &OwnedTakeover) -> bool {
+    let mut reset_ok = true;
+    if let Some(target) = s.live_view().registry.get(t.info.target_id) {
+        if let Some(sink) = target.input_sink() {
+            reset_ok = sink.release_pressed_inputs().await.is_ok();
+            let _ = sink.set_takeover_active(false).await;
+        }
+        let _ = target
+            .frame_source()
+            .set_profile(EffectiveProfile::watch())
+            .await;
+    }
+    reset_ok
+}
+
+/// The audit row records the incoming reason and the one the hub actually
+/// holds (a local override is sticky, so they can differ).
+fn audit_interrupted(
+    s: &AppState,
+    actor: &Actor,
+    t: &OwnedTakeover,
+    reason: &Reason,
+) -> Result<(), ApiError> {
+    let effective = s
+        .hub()
+        .takeover()
+        .filter(|now| now.info.id == t.info.id)
+        .and_then(|now| now.info.reason);
+    audit(
+        s,
+        actor,
+        "takeover.interrupted",
+        serde_json::json!({"target_id":t.info.target_id,"takeover_id":t.info.id,"control_epoch":t.info.control_epoch,"reason":reason,"effective_reason":effective}),
+    )
+}
+
 async fn interrupt(
     s: &AppState,
     actor: &Actor,
@@ -493,24 +535,17 @@ async fn interrupt(
 ) -> Result<(), ApiError> {
     // Mark input invalid before any fallible reset/audit operation.
     s.hub().interrupt(t.info.id, reason.clone());
-    if let Some(target) = s.live_view().registry.get(t.info.target_id) {
-        if let Some(sink) = target.input_sink() {
-            if sink.release_pressed_inputs().await.is_err() {
-                s.hub().interrupt(t.info.id, Reason::ResetFailed);
-            }
-            let _ = sink.set_takeover_active(false).await;
-        }
-        let _ = target
-            .frame_source()
-            .set_profile(EffectiveProfile::watch())
-            .await;
+    let reset_ok = reset_target(s, t).await;
+    if !reset_ok {
+        s.hub().interrupt(t.info.id, Reason::ResetFailed);
+    } else if reason == Reason::LocalOverride {
+        s.hub().resolve_override_reset();
     }
-    audit(
-        s,
-        actor,
-        "takeover.interrupted",
-        serde_json::json!({"target_id":t.info.target_id,"takeover_id":t.info.id,"control_epoch":t.info.control_epoch,"reason":reason}),
-    )
+    let audited = audit_interrupted(s, actor, t, &reason);
+    if audited.is_ok() && reason == Reason::LocalOverride {
+        s.hub().resolve_override_audit();
+    }
+    audited
 }
 async fn end_session(
     s: &AppState,
@@ -703,7 +738,7 @@ pub(crate) fn require_latch_authority(s: &AppState, actor: &Actor) -> Result<(),
             serde_json::json!({"reason":"latch_authority"}),
         )?;
         return Err(ApiError::forbidden(
-            "changing the user's pause needs the local user or an input grant for this device",
+            "this needs the local user or an input grant for this device",
         ));
     }
     Ok(())
@@ -732,13 +767,30 @@ async fn override_takeover(
 ) -> Result<Option<OwnedTakeover>, ApiError> {
     // Idempotent: an app heartbeat every few seconds must not re-run the
     // latch write, the event, the audit row and the key reset.
+    let live = s.live_view();
     if s.hub()
         .takeover()
         .is_some_and(|t| t.info.state == ViewState::Paused && t.info.reason == Some(reason.clone()))
     {
+        // Already stopped. Only a reset or audit that has not succeeded yet
+        // is retried, until it does.
+        let (reset_pending, audit_pending) = s.hub().override_pending();
+        if !reset_pending && !audit_pending {
+            return Ok(None);
+        }
+        let _executor = live.executor.lock().await;
+        let Some(t) = s.hub().takeover() else {
+            return Ok(None);
+        };
+        if reset_pending && reset_target(s, &t).await {
+            s.hub().resolve_override_reset();
+        }
+        if audit_pending {
+            audit_interrupted(s, actor, &t, &reason)?;
+            s.hub().resolve_override_audit();
+        }
         return Ok(None);
     }
-    let live = s.live_view();
     // 1. Revoke the overridden device's input grant FIRST, so that nothing
     // below (a failing audit write, a failing key reset) can leave it in
     // place. Set directly, not through `set_screen_privileges`.
@@ -871,6 +923,7 @@ pub(crate) async fn release(
     if !live.allowed(actor, true) {
         return Err(ApiError::forbidden("screen:input denied"));
     }
+    ensure_not_overridden(s)?;
     if let Some(old) = s.hub().release_journal(i.request_id) {
         if old.actor != actor.key
             || old.takeover_id != i.takeover_id
@@ -878,6 +931,9 @@ pub(crate) async fn release(
             || old.human_action != i.human_action
         {
             return Err(ApiError::conflict("release request conflict"));
+        }
+        if old.cancelled {
+            return Err(override_stands());
         }
         if old.completed {
             return Ok(());
@@ -910,7 +966,17 @@ pub(crate) async fn release(
         ));
     }
     s.hub().suspend_release(t.info.id);
+    #[cfg(test)]
+    {
+        let hook = live.release_hook.lock().clone();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
     sink.release_pressed_inputs().await.map_err(backend)?;
+    // A local Stop may have landed while the reset was awaited: stop before any
+    // side effect that cannot be undone (the chat note, the resume).
+    ensure_not_overridden(s)?;
     let (counts, kind) = {
         let sessions = live.sessions.lock();
         let session = sessions
@@ -953,8 +1019,10 @@ pub(crate) async fn release(
             messages: Vec::new(),
             completed: false,
             noted: false,
+            cancelled: false,
         })
         .map_err(ApiError::unavailable)?;
+    ensure_not_overridden(s)?;
     flush_note(s, &mut journal)?;
     audit(
         s,
@@ -970,9 +1038,32 @@ pub(crate) async fn release(
         .map_err(backend)?;
     s.hub()
         .finish_release(&actor.key, i.request_id)
-        .map_err(ApiError::unavailable)?;
+        .map_err(|e| {
+            if e == "local override stands" {
+                override_stands()
+            } else {
+                ApiError::unavailable(e)
+            }
+        })?;
     if let Some(session) = live.sessions.lock().get_mut(&t.info.session_id) {
         session.profile = EffectiveProfile::watch();
+    }
+    Ok(())
+}
+
+fn override_stands() -> ApiError {
+    ApiError::forbidden(
+        "the local user stopped this takeover; a release cannot clear it, only the local user can",
+    )
+}
+
+/// A standing local override is never released by anyone but the local user.
+fn ensure_not_overridden(s: &AppState) -> Result<(), ApiError> {
+    if s.hub()
+        .takeover()
+        .is_some_and(|t| t.info.reason == Some(Reason::LocalOverride))
+    {
+        return Err(override_stands());
     }
     Ok(())
 }
