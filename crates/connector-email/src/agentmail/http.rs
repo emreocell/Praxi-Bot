@@ -17,7 +17,7 @@
 //! request cannot be pinned to the API host: it is `https` only, carries no
 //! credentials, follows no redirects and is size-capped.
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -383,11 +383,8 @@ pub(crate) fn map_status(status: u16, retry_after: Option<u64>, body: Option<&Va
     }
 }
 
-/// Whether `ip` may never be contacted (used by tests of the guard).
-#[must_use]
-pub fn is_blocked_address(ip: IpAddr) -> bool {
+/// Whether `ip` may never be contacted (the guard the resolver applies).
+#[cfg(test)]
+pub(crate) fn is_blocked_address(ip: std::net::IpAddr) -> bool {
     DefaultUrlPolicy::default().check_ip("x", ip).is_err()
 }
-
-#[allow(dead_code)]
-const _: (Ipv4Addr, Ipv6Addr) = (Ipv4Addr::LOCALHOST, Ipv6Addr::LOCALHOST);

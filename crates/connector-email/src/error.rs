@@ -28,7 +28,7 @@ pub enum ProviderError {
     #[error("the provider is temporarily unavailable")]
     Transient,
     /// `4xx` the request itself was wrong (validation, name taken, ...).
-    /// `code` is the provider's snake_case error code when it was well formed.
+    /// `code` is the provider's `snake_case` error code when it was well formed.
     #[error("the provider rejected the request{}", .code.as_deref().map_or(String::new(), |c| format!(" ({c})")))]
     Rejected {
         /// Sanitised machine code, `[a-z0-9_]{1,64}`.

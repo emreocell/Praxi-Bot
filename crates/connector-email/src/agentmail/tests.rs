@@ -539,7 +539,7 @@ async fn list_new_without_a_cursor_keeps_the_cursor_when_nothing_is_new() {
     // a cursor that is not a timestamp is refused before any request
     assert!(matches!(r, Err(EmailError::Input(_))), "{r:?}");
     let r = bound(&server).list_new(Some("2026-11-12T09:00:00Z"), 10).await.unwrap();
-    assert!(r.messages.is_empty());
+    assert_eq!(r.messages.len(), 0);
     assert_eq!(r.next_cursor.as_deref(), Some("2026-11-12T09:00:00Z"));
 }
 

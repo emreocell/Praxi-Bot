@@ -37,7 +37,7 @@ pub use config::{
     AccountConfig, AccountKind, ImapSettings, SmtpSecurity, SmtpSettings, normalize_sender,
     validate_account_name, validate_host,
 };
-pub use connector::{EmailConnector, Scoped, SearchResult};
+pub use connector::{EmailConnector, MAX_ATTACHMENT_BYTES, Scoped, SearchResult};
 pub use error::{EmailError, ProviderError};
 pub use imap_provider::ImapSmtpProvider;
 pub use imap::{FolderInfo, SearchQuery};
@@ -73,3 +73,5 @@ mod probe_tests;
 mod tests;
 #[cfg(test)]
 mod testutil;
+#[cfg(test)]
+mod kind_tests;
