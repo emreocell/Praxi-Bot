@@ -16,6 +16,7 @@ use windows::Win32::{
         DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, PROTECTED_DACL_SECURITY_INFORMATION,
         PSECURITY_DESCRIPTOR,
     },
+    Storage::FileSystem::{FILE_TYPE_PIPE, GetFileType},
     System::Threading::GetCurrentProcess,
 };
 use windows::core::{BOOL, w};
@@ -37,6 +38,13 @@ pub(super) fn seal_stdin() -> io::Result<()> {
 }
 
 fn seal_handle(handle: HANDLE) -> io::Result<()> {
+    // SAFETY: caller holds this live handle; querying its type does not consume it.
+    if unsafe { GetFileType(handle) } != FILE_TYPE_PIPE {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "management bootstrap requires an inherited pipe/socket",
+        ));
+    }
     // SAFETY: caller holds this live stdin/pipe handle. Clear inheritance
     // only: never close it or read from it here.
     unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS::default()) }
@@ -93,6 +101,16 @@ pub(super) fn protect() -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bootstrap_channel_rejects_regular_files() {
+        let file = tempfile::tempfile().unwrap();
+        let handle = HANDLE(file.as_handle().as_raw_handle());
+        assert!(
+            seal_handle(handle).is_err(),
+            "same-user-readable files are not management channels"
+        );
+    }
     use windows::Win32::{
         Foundation::{CloseHandle, GetHandleInformation, WIN32_ERROR},
         System::Threading::{

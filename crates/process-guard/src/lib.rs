@@ -57,6 +57,16 @@ pub fn seal_bootstrap_stdin() -> io::Result<()> {
     }
     #[cfg(unix)]
     {
+        let stat = rustix::fs::fstat(std::io::stdin())?;
+        if !matches!(
+            rustix::fs::FileType::from_raw_mode(stat.st_mode),
+            rustix::fs::FileType::Fifo | rustix::fs::FileType::Socket
+        ) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "management bootstrap requires an inherited pipe/socket",
+            ));
+        }
         rustix::io::fcntl_setfd(std::io::stdin(), rustix::io::FdFlags::CLOEXEC).map_err(Into::into)
     }
     #[cfg(not(any(windows, unix)))]

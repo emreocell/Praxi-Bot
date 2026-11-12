@@ -117,6 +117,41 @@ devam eder; OS sandbox olmadan bot çocuğunun bunları çağırması önlenemez
 
 ## Sonuçlar
 
+### Masaüstüsüz host ve denetimli başlatma
+
+Terminal, systemd ve Windows autostart için `bot serve --peer
+--management-peer <eşleşmiş-Desktop-public-key>` açık operatör yetkilendirmesidir.
+Seçenek tekrarlanabilir; anahtar normalize edilir ve peer seçeneği zorunludur.
+Liste gizli değildir, argv/unit dosyasında tutulabilir; çalışma sırasında HTTP
+ile genişletilemez. Peer taşıması ayrıca eşleşmiş anahtarı doğrular; aynı anahtar
+Phone/Node/Host rolündeyse host yönetimi alamaz. Local overlay kararı bu remote
+manager'a da kapalı kalır. Allowlist verilmezse pairing host yönetimi kazandırmaz.
+
+Yerel headless yönetim için güvenilir supervisor `--management-stdin` seçeneğiyle
+her açılışta yeni 32 rastgele byte'ın 64 hex karakteri ve LF çerçevesini miras
+alınmış pipe/socket üzerinden verebilir. Masaüstünün eski `--ui-bootstrap-stdin`
+seçeneği alias olarak korunur. Kanal tipi sır okunmadan doğrulanır; normal dosya,
+terminal ve eksik/hatalı çerçeve startup'ı durdurur. Kanal inheritance biti/CLOEXEC
+araçlar başlamadan kapatılır. Argv/env/disk token'a yönetim fallback'i yoktur.
+Supervisor kendi belleğini ve capability'yi dağıttığı IPC'yi de korumalıdır;
+pipe kaynağının güvenilir olduğunu daemon tek başına kanıtlayamaz.
+
+systemd `LoadCredential` dosyasını servis UID'si okuyabiliyorsa aynı UID'deki bot
+çocuğu da okuyabilir. Böyle bir dosyayı stdin'e yönlendirmek veya `cat | bot`
+yapmak çözüm değildir. Ayrı/root supervisor korunan kaynaktan okuyup veya sırrı
+kendisi üretip pipe'a yazabilir; credential dizini bot UID'sine açılmamalıdır.
+Bu PR genel bir systemd credential broker veya terminal user-presence broker
+uygulamaz. Yerel yüksek CLI komutları masaüstü/supervised yönetim istemcisi ister;
+normal disk CLI yetkisi yükselmez. Bootstrap verilmeden çalışan daemon kanalın
+iç onay gateway'i için bellek sırrı üretir, bunu diske/terminale vermez.
+
+**Açık sınırlama:** `bot serve` için ilk headless peer eşleştirmesini yapan yeni
+bir invite CLI/broker bu PR'da yoktur. Buradaki remote yönetim yolu **önceden
+eşleşmiş** Desktop içindir. İlk provisioning güvenilir mevcut pairing entegrasyonu
+veya masaüstüyle yapılmalıdır; mevcut olmayan CLI komutları önerilmez. Tamamen
+yeni, masaüstüsüz kurulumda güvenli ilk-pair UX'i ayrı iştir. Aynı UID'nin
+devices/config dosyalarını doğrudan değiştirebilmesi halen OS sandbox ihtiyacıdır.
+
 - Token dosyasının okunması artık HTTP üzerinden kendine onay, politika
   değişikliği veya kontrol yetkisi vermez.
 - UI ve daemon yeniden başlayınca önceki yüksek sır geçersizdir.

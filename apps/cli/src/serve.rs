@@ -692,6 +692,8 @@ pub fn register_web(
 pub struct ServeOptions {
     /// Memory-only UI bootstrap; never obtained from the environment or a file.
     pub management_token: Option<String>,
+    /// Public keys explicitly authorized by the operator; pairing alone is insufficient.
+    pub peer_managers: std::collections::BTreeSet<String>,
     /// Use the host pairing role and default peer networking on.
     pub host_mode: bool,
     /// Explicitly enable peer networking.
@@ -748,6 +750,7 @@ pub fn serve(
         host_mode,
         peer_enabled,
         management_token,
+        peer_managers,
     } = opts;
     let (port, json, grace) = (*port, *json, *grace);
     let storage = Arc::new(Storage::open(data_dir)?);
@@ -791,6 +794,7 @@ pub fn serve(
     let recovered = agent.recover()?;
     let mut cfg = DaemonConfig::new(api_token.clone());
     cfg.management_token = Some(management_token.clone());
+    cfg.peer_managers.clone_from(peer_managers);
     cfg.children_scrubbed = true;
     cfg.shutdown_grace = grace;
     // Extra browser origins (e.g. the desktop app's dev server), comma separated.
