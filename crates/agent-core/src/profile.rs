@@ -150,6 +150,7 @@ impl TryFrom<Raw> for BotProfile {
         {
             return Err(format!("unknown permission preset {p:?}"));
         }
+        validate_profile_models(&r.models)?;
         Ok(Self {
             allow: globs(&r.tools.allow)?,
             exclude: globs(&r.tools.exclude)?,
@@ -164,6 +165,34 @@ impl TryFrom<Raw> for BotProfile {
             router: r.router,
         })
     }
+}
+
+fn validate_profile_models(models: &ModelsConfig) -> Result<(), String> {
+    for role in [models.planner.as_deref(), models.classifier.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        if role.starts_with("cli:") {
+            return Err(format!(
+                "planner/classifier models must be HTTP providers, got {role:?}"
+            ));
+        }
+    }
+    for model_ref in
+        std::iter::once(models.executor.as_str()).chain(models.fallback.iter().map(String::as_str))
+    {
+        if model_ref.starts_with("cli:") {
+            let parsed = provider_catalog::ModelRef(model_ref.to_owned());
+            if let Some(suffix) = parsed
+                .provider()
+                .map(|_| parsed.model())
+                .filter(|m| !m.is_empty() && *m != "default")
+            {
+                crate::cli::validate_cli_model(suffix)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 impl<'de> Deserialize<'de> for BotProfile {
@@ -320,5 +349,32 @@ exclude = ["fs.delete*"]
         });
         let p: BotProfile = serde_json::from_value(v).unwrap();
         assert!(p.policy().is_some());
+    }
+
+    #[test]
+    fn rejects_invalid_cli_models_and_cli_planner_or_classifier() {
+        let bad_exec = serde_json::json!({
+            "bot": {"id": "j", "name": "J"},
+            "models": {"executor": "cli:claude/--dangerously-skip-permissions"},
+        });
+        assert!(serde_json::from_value::<BotProfile>(bad_exec).is_err());
+
+        let bad_planner = serde_json::json!({
+            "bot": {"id": "j", "name": "J"},
+            "models": {"executor": "cli:claude/default", "planner": "cli:claude/default"},
+        });
+        assert!(serde_json::from_value::<BotProfile>(bad_planner).is_err());
+
+        let bad_classifier = serde_json::json!({
+            "bot": {"id": "j", "name": "J"},
+            "models": {"executor": "cli:claude/default", "classifier": "cli:claude/default"},
+        });
+        assert!(serde_json::from_value::<BotProfile>(bad_classifier).is_err());
+
+        let ok = serde_json::json!({
+            "bot": {"id": "j", "name": "J"},
+            "models": {"executor": "cli:claude/claude-sonnet-4-5", "planner": "openai/gpt-4o-mini"},
+        });
+        assert!(serde_json::from_value::<BotProfile>(ok).is_ok());
     }
 }

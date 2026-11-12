@@ -54,3 +54,7 @@ tempfile.workspace = true
 tool-registry = { path = "../tool-registry", version = "0.1.0" }
 workflow-replay = { path = "../workflow-replay", version = "0.1.0" }
 tower = { version = "0.5", features = ["util"] }
+
+[[bin]]
+name = "daemon-cli-fixture"
+path = "../cli-provider/tests/fixtures/runtime_cli.rs"

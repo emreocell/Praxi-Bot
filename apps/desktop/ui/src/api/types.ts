@@ -38,6 +38,9 @@ export type PolicyInput = S["PolicyInput"];
 export type ProvidersDto = S["ProvidersDto"];
 export type ConfiguredProviderDto = S["ConfiguredProviderDto"];
 export type CatalogProviderDto = S["CatalogProviderDto"];
+export type DetectedProviderDto = S["DetectedProviderDto"];
+export type CliAuthState = S["CliAuthState"];
+export type EnableCliProviderInput = S["EnableCliProviderInput"];
 
 /** The permission preset names accepted by a bot profile (`permissions.preset`). */
 export type PermissionPreset =

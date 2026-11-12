@@ -291,7 +291,12 @@ async fn native_tools_are_refused() {
 }
 #[tokio::test]
 async fn quota_and_unbounded_lines_are_non_retryable() {
-    for (mode, error) in [("quota", CliError::Quota), ("flood", CliError::Protocol)] {
+    for (mode, error) in [
+        ("quota", CliError::Quota),
+        ("flood", CliError::Protocol),
+        ("signed-out", CliError::SignedOut),
+        ("signed-out-stderr", CliError::SignedOut),
+    ] {
         let (_dir, cli) = fixture(Engine::Claude, mode, false);
         assert_eq!(
             cli.run_turn(turn(), Host::new(true), CancellationToken::new())

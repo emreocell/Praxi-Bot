@@ -103,9 +103,11 @@
   margin: var(--space-0);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
+  border: var(--size-border) solid var(--color-danger);
   background-color: var(--color-danger-subtle);
   color: var(--color-danger);
   font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
 }
 
 .working {

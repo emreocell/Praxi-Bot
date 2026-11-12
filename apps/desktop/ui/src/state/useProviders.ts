@@ -2,6 +2,15 @@ import { useCallback, useEffect, useState } from "react";
 import type { ProvidersDto } from "../api/types";
 import { useDaemon } from "./DaemonContext";
 
+const listeners = new Set<() => void>();
+
+/** Notify every `useProviders()` subscriber to refetch `GET /v1/providers`. */
+export function notifyProvidersChanged() {
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
 /** `GET /v1/providers`, loaded once and on `reload()`; `null` until known. */
 export function useProviders(): {
   dto: ProvidersDto | null;
@@ -26,6 +35,13 @@ export function useProviders(): {
 
   useEffect(() => {
     void reload();
+    const onChanged = () => {
+      void reload();
+    };
+    listeners.add(onChanged);
+    return () => {
+      listeners.delete(onChanged);
+    };
   }, [reload]);
 
   return { dto, error, reload };

@@ -602,3 +602,33 @@ async fn npm_claude_package_exe_is_the_probed_binary() {
     assert!(claude.detail.is_none());
     assert!(!root.join("spawned.txt").exists());
 }
+
+#[test]
+fn cli_engines_catalog_marks_only_claude_runnable() {
+    let ids: Vec<&str> = cli_provider::CLI_ENGINES.iter().map(|e| e.id).collect();
+    assert_eq!(
+        ids,
+        [
+            "claude",
+            "codex",
+            "cursor",
+            "opencode",
+            "gemini",
+            "chatgpt-plan",
+        ]
+    );
+    let claude = cli_provider::engine_spec("claude").expect("claude spec");
+    assert!(claude.runnable);
+    assert_eq!(claude.command, "claude");
+
+    for id in ["codex", "chatgpt-plan", "cursor", "opencode", "gemini"] {
+        let spec = cli_provider::engine_spec(id).expect("spec exists");
+        assert!(!spec.runnable, "{id} must not be runnable");
+        let msg = cli_provider::enable_refusal_message(id);
+        assert_ne!(msg, "", "{id} refusal message must not be empty");
+    }
+    assert!(cli_provider::enable_refusal_message("codex").contains("unified_exec"));
+    assert!(cli_provider::enable_refusal_message("chatgpt-plan").contains("unified_exec"));
+    assert!(cli_provider::engine_spec("unknown").is_none());
+    assert_ne!(cli_provider::enable_refusal_message("unknown"), "");
+}

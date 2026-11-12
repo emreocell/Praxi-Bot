@@ -18,6 +18,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 secret-store.workspace = true
 toml.workspace = true
+toml_edit = "0.20"
+fs4 = "1"
 reqwest.workspace = true
 tokio = { workspace = true }
 

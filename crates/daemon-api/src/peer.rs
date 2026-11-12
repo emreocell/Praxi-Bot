@@ -28,6 +28,9 @@ pub struct PeerIdentity {
 /// Future host transfer endpoints forbidden to phones.
 pub const PHONE_DENIED_POST_PATHS: &[&str] = &["/v1/host/import", "/v1/host/handover"];
 
+/// Host-local provider management endpoints forbidden to ALL paired peers.
+pub const PEER_DENIED_POST_PATHS: &[&str] = &["/v1/providers/cli/enable", "/v1/providers/reload"];
+
 /// Same API and permissions as loopback, with transport authentication.
 pub fn peer_router(state: AppState) -> Router {
     crate::api_routes()
@@ -39,20 +42,47 @@ pub fn peer_router(state: AppState) -> Router {
 #[derive(Clone, Debug)]
 pub struct PeerName(pub String);
 
+fn normalize_deny_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    let mut prev_slash = false;
+    for ch in path.chars() {
+        if ch == '/' {
+            if !prev_slash {
+                out.push('/');
+                prev_slash = true;
+            }
+        } else {
+            out.push(ch);
+            prev_slash = false;
+        }
+    }
+    if out.len() > 1 && out.ends_with('/') {
+        out.pop();
+    }
+    out
+}
+
 async fn guard(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let Some(peer) = req.extensions().get::<PeerIdentity>().cloned() else {
         return ApiError::forbidden("paired peer identity required").into_response();
     };
-    // Decode before checking: encoded path characters must not bypass scopes.
+    // Decode and collapse redundant slashes before checking: encoded or
+    // non-canonical path characters must not bypass scopes.
     let path = match percent_encoding::percent_decode_str(req.uri().path()).decode_utf8() {
         Ok(path) => path.into_owned(),
         Err(_) => return ApiError::forbidden("invalid path").into_response(),
     };
+    let check_path = normalize_deny_path(&path);
+    if req.method() == Method::POST && PEER_DENIED_POST_PATHS.contains(&check_path.as_str()) {
+        return ApiError::forbidden("host-local provider management is not allowed for peers")
+            .into_response();
+    }
     let denied = peer.role != PeerRole::Desktop
         && (peer.role != PeerRole::Phone
-            || (req.method() == Method::POST && PHONE_DENIED_POST_PATHS.contains(&path.as_str()))
+            || (req.method() == Method::POST
+                && PHONE_DENIED_POST_PATHS.contains(&check_path.as_str()))
             || (matches!(*req.method(), Method::POST | Method::PUT)
-                && path.starts_with("/v1/secrets")));
+                && check_path.starts_with("/v1/secrets")));
     if denied {
         return ApiError::forbidden("peer role does not allow this operation").into_response();
     }

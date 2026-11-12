@@ -2,7 +2,19 @@ import { siGithub, siGitlab, siNotion, siGoogledrive, siGooglecalendar, siGmail,
 
 const icons = [siGithub, siGitlab, siNotion, siGoogledrive, siGooglecalendar, siGmail, siDiscord, siFigma, siLinear, siAnthropic, siGooglegemini, siOllama, siClaude, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siTodoist, siObsidian, siHomeassistant];
 const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-const aliases: Record<string, string> = { 'bravesearch': 'brave', postgres: 'postgresql', gemini: 'googlegemini', claudecode: 'claude', claudecodecli: 'claude', google: 'googlegemini' };
+const aliases: Record<string, string> = {
+  'bravesearch': 'brave',
+  postgres: 'postgresql',
+  gemini: 'googlegemini',
+  geminicli: 'googlegemini',
+  claudecode: 'claude',
+  claudecodecli: 'claude',
+  cliclaude: 'claude',
+  codex: 'openai',
+  clicodex: 'openai',
+  chatgptplan: 'openai',
+  google: 'googlegemini'
+};
 export function brandIcon(name: string) {
   const key = aliases[normalize(name)] ?? normalize(name);
   const brand = icons.find(i => key === i.slug || key === normalize(i.title));
