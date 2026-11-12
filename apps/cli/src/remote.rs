@@ -641,7 +641,10 @@ mod tests {
             dir.path(),
             None,
         );
-        let state = AppState::new(agent, storage, DaemonConfig::new(TOKEN)).unwrap();
+        // Exercise management handlers with a memory-only principal, not the disk token.
+        let mut cfg = DaemonConfig::new("disk-cli-token");
+        cfg.management_token = Some(TOKEN.to_owned());
+        let state = AppState::new(agent, storage, cfg).unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         tokio::spawn(daemon_api::serve(listener, state, std::future::pending()));
@@ -729,6 +732,27 @@ mod tests {
         std::fs::write(&file, "[bot]\nid = \"x\"\n").unwrap();
         let err = bots_add(&c, &file, false, &mut out).await.unwrap_err();
         assert_eq!(code_of(&*err), exit::REJECTED);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn disk_credential_retains_status_and_reports_desktop_only_migration() {
+        let (_dir, url) = daemon().await;
+        let cli = Client::new(&url, "disk-cli-token".to_owned());
+        status(&cli, true, &mut Vec::new()).await.unwrap();
+        bots_list(&cli, true, &mut Vec::new()).await.unwrap();
+        let error = approve(
+            &cli,
+            &uuid_like(),
+            "once",
+            false,
+            None,
+            false,
+            &mut Vec::new(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(code_of(&*error), exit::AUTH);
+        assert!(error.to_string().contains("desktop-only operation"));
     }
 
     fn uuid_like() -> String {

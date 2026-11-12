@@ -27,6 +27,24 @@ Commands that talk to a running daemon (`status`, `chat`, `bots`, `answer`,
 from `<data dir>/api-token`; make sure they use the same data directory as
 `bot serve`.
 
+## Local management migration (ADR-0030)
+
+The on-disk `api-token` now has limited authority. `status`, bot/chat/run lists,
+chat creation/messages, and run cancel/resume continue to work. Local HTTP
+management commands (including `approve`, `answer`, bot creation/update/deletion,
+grant revocation, schedule changes/run-now, email configuration and Telegram
+pair-code creation) return exit code 4 with a **desktop-only operation** message.
+Use the desktop app or an authorized paired device. Do not copy its in-memory
+credential into `BOT_API_TOKEN`, scripts or a token file.
+
+Existing installations need no re-pairing: the desktop automatically establishes
+its management identity when it starts its sidecar. If you started `bot serve`
+manually, stop it in that terminal and let the desktop start it for local
+management. The desktop does not kill another process to claim ownership.
+A headless host remains manageable through its paired devices. Offline CLI
+configuration commands still have the full rights of the OS user; this change
+does not protect their files against arbitrary same-user programs.
+
 ## Exit codes
 
 For the client commands:

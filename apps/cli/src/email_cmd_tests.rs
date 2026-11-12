@@ -37,7 +37,10 @@ async fn daemon() -> Daemon {
     let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
     let (host, _) =
         crate::email_host::start_email(dir.path(), &agent.tool_registry(), Some(&store)).unwrap();
-    let state = AppState::new(agent, storage, DaemonConfig::new(TOKEN)).unwrap();
+    // Exercise management handlers with a memory-only principal, not the disk token.
+    let mut cfg = DaemonConfig::new("disk-cli-token");
+    cfg.management_token = Some(TOKEN.to_owned());
+    let state = AppState::new(agent, storage, cfg).unwrap();
     state.set_email(host);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());

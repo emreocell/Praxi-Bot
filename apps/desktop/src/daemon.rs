@@ -3,7 +3,8 @@
 //! The app talks to `bot serve` over loopback HTTP.  [`connect`] probes the
 //! configured port; if no daemon answers it starts `bot serve` as a child
 //! process (a "sidecar": the `bot` binary next to the app), waits until it is
-//! healthy and reads the per-install bearer token from `<data dir>/api-token`.
+//! healthy. The app-owned sidecar receives a per-launch management token over
+//! an anonymous stdin pipe; an external daemon gets only the disk CLI token.
 //! A daemon the app started is stopped again when the app exits; one that was
 //! already running is never touched.
 
@@ -28,11 +29,11 @@ const START_TIMEOUT: Duration = Duration::from_secs(20);
 const PROBE_TIMEOUT: Duration = Duration::from_millis(800);
 
 /// What the web UI needs to talk to the daemon.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct Connection {
     /// `http://127.0.0.1:PORT`.
     pub base_url: String,
-    /// Bearer token (`api-token` file of the data directory).
+    /// Per-launch management bearer for our sidecar; CLI bearer for external daemons.
     pub token: String,
     /// `true` when this app started the daemon (and will stop it on exit).
     pub started_by_app: bool,
@@ -42,6 +43,15 @@ pub struct Connection {
     pub data_dir: String,
 }
 
+impl std::fmt::Debug for Connection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Connection")
+            .field("base_url", &self.base_url)
+            .field("started_by_app", &self.started_by_app)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Owns the daemon child process, if the app started one.
 #[derive(Default)]
 pub struct DaemonHandle {
@@ -49,6 +59,7 @@ pub struct DaemonHandle {
     /// retry) never start two daemons.
     connecting: tokio::sync::Mutex<()>,
     child: Mutex<Option<Child>>,
+    management_token: Mutex<Option<String>>,
     fake: Mutex<bool>,
     /// Daemon log length when the current child was spawned.
     log_offset: Mutex<u64>,
@@ -57,6 +68,7 @@ pub struct DaemonHandle {
 impl DaemonHandle {
     /// Stop the daemon if (and only if) this app started it.
     pub fn stop(&self) {
+        *self.management_token.lock() = None;
         if let Some(mut child) = self.child.lock().take() {
             let _ = child.kill();
             let _ = child.wait();
@@ -224,9 +236,13 @@ pub fn bot_command() -> Command {
     cmd
 }
 
-fn spawn_daemon(data_dir: &Path, fake: bool) -> Result<Child, String> {
+fn spawn_daemon(data_dir: &Path, fake: bool, token: &str) -> Result<Child, String> {
+    use std::io::Write as _;
     let mut cmd = bot_command();
-    cmd.arg("serve").arg("--port").arg(port().to_string());
+    cmd.arg("serve")
+        .arg("--ui-bootstrap-stdin")
+        .arg("--port")
+        .arg(port().to_string());
     if fake {
         cmd.arg("--fake-provider");
     }
@@ -241,13 +257,29 @@ fn spawn_daemon(data_dir: &Path, fake: bool) -> Result<Child, String> {
         .append(true)
         .open(data_dir.join("desktop-daemon.log"))
         .map_or_else(|_| Stdio::null(), Stdio::from);
-    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(log);
-    cmd.spawn().map_err(|e| {
+    cmd.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(log);
+    let mut child = cmd.spawn().map_err(|e| {
         format!(
             "cannot start `{}` ({e}); set PRAXIBOT_BOT_BIN or put `bot` next to the app",
             bot_binary().to_string_lossy()
         )
-    })
+    })?;
+    // ChildStdin is an anonymous pipe, not an environment variable or file.
+    // Close the writer after the fixed-size frame; tool children start later
+    // with their own stdin and cannot consume this credential.
+    let delivered = child
+        .stdin
+        .take()
+        .ok_or_else(|| "missing bootstrap pipe".to_owned())
+        .and_then(|mut pipe| {
+            writeln!(pipe, "{token}").map_err(|_| "UI bootstrap failed".to_owned())
+        });
+    if let Err(e) = delivered {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(e);
+    }
+    Ok(child)
 }
 
 /// Marker `bot serve` prints (to the daemon log) when it cannot build a single
@@ -277,8 +309,16 @@ fn no_usable_provider_since(data_dir: &Path, offset: u64) -> bool {
 
 /// Spawn the daemon and remember where its log output will start.
 fn spawn_tracked(handle: &DaemonHandle, data: &Path, fake: bool) -> Result<(), String> {
+    use std::fmt::Write as _;
     let offset = log_len(data);
-    let child = spawn_daemon(data, fake)?;
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).map_err(|_| "cannot create UI credential".to_owned())?;
+    let token = bytes.iter().fold(String::with_capacity(64), |mut s, b| {
+        let _ = write!(s, "{b:02x}");
+        s
+    });
+    let child = spawn_daemon(data, fake, &token)?;
+    *handle.management_token.lock() = Some(token);
     *handle.log_offset.lock() = offset;
     *handle.child.lock() = Some(child);
     *handle.fake.lock() = fake;
@@ -337,7 +377,15 @@ async fn check_listener(handle: &DaemonHandle, url: &str, after_spawn: bool) -> 
 }
 
 fn connection(handle: &DaemonHandle, url: String, data: &Path) -> Result<Connection, String> {
-    let token = read_token(data)?;
+    let token = if handle.started_by_app() {
+        handle
+            .management_token
+            .lock()
+            .clone()
+            .ok_or("missing per-launch UI credential")?
+    } else {
+        read_token(data)?
+    };
     Ok(Connection {
         base_url: url,
         token,

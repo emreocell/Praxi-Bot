@@ -91,6 +91,9 @@ enum Command {
     /// Exit codes of the client commands: 0 ok, 1 error, 2 usage, 3 daemon
     /// unreachable, 4 auth rejected, 5 not found, 6 request rejected, 7 run failed.
     Serve {
+        /// Internal desktop bootstrap: read a per-launch management credential from stdin.
+        #[arg(long, hide = true)]
+        ui_bootstrap_stdin: bool,
         /// Run as an always-on host (peer networking defaults on).
         #[arg(long)]
         host: bool,
@@ -664,6 +667,17 @@ fn run_doctor(cli: &Cli, c: &DoctorCmd, data_dir: &std::path::Path) -> Result<()
 fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result<()> {
     use std::sync::Arc;
 
+    let management_token = if matches!(
+        command,
+        Command::Serve {
+            ui_bootstrap_stdin: true,
+            ..
+        }
+    ) {
+        Some(daemon_api::auth::bootstrap_from_stdin()?)
+    } else {
+        None
+    };
     let (host_mode, peer_enabled) = match command {
         Command::Serve { host, peer, .. } => (*host, *peer),
         _ => (false, false),
@@ -689,6 +703,7 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
             telegram_store: None,
             host_mode,
             peer_enabled,
+            management_token,
         };
         return serve::serve(data_dir, &opts, providers, None, Some(desktop));
     }
@@ -719,6 +734,7 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
         telegram_store: Some(telegram_store),
         host_mode,
         peer_enabled,
+        management_token,
     };
     serve::serve(data_dir, &opts, providers, Some(host), desktop)
 }

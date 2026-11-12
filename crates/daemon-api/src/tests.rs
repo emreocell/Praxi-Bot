@@ -23,10 +23,19 @@ use crate::fake::FakeProvider;
 use crate::{AppState, DaemonConfig, router};
 
 mod email;
+mod isolation;
 mod mcp;
 mod schedules;
 
 const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+const LOW_TOKEN: &str = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+
+fn test_config() -> DaemonConfig {
+    let mut cfg = DaemonConfig::new(LOW_TOKEN);
+    cfg.management_token = Some(TOKEN.to_owned());
+    cfg
+}
 
 const PROFILE: &str = r#"
 [bot]
@@ -82,7 +91,7 @@ fn setup_with(prepare: impl FnOnce(&std::path::Path)) -> T {
         Providers::single(Arc::new(FakeProvider)),
         LoopConfig::default(),
     );
-    let state = AppState::new(agent.clone(), storage, DaemonConfig::new(TOKEN)).unwrap();
+    let state = AppState::new(agent.clone(), storage, test_config()).unwrap();
     state.set_detector(Arc::new(cli_provider::Detector::with_env(
         cli_provider::PathEnv::for_test(dir.path().join("sealed-cli-path")),
     )));
@@ -1315,7 +1324,7 @@ async fn events_route_accepts_the_token_in_the_query_only_there() {
         .to_owned();
     wait_state(&t, &run, "succeeded").await;
 
-    let url = format!("/v1/events?run_id={run}&token={TOKEN}");
+    let url = format!("/v1/events?run_id={run}&token={LOW_TOKEN}");
     let r = send(&t.app, Method::GET, &url, None, &[]).await;
     assert_eq!(r.status, StatusCode::OK);
     assert_ne!(frames(&r.body).len(), 0);
@@ -1385,7 +1394,7 @@ async fn events_route_accepts_the_token_in_the_query_only_there() {
     let r = send(
         &t.app,
         Method::POST,
-        &format!("/v1/events?token={TOKEN}"),
+        &format!("/v1/events?token={LOW_TOKEN}"),
         None,
         &[],
     )
@@ -1469,7 +1478,7 @@ fn setup_desktop() -> (T, Arc<crate::fake::FakeDesktop>) {
         },
     )
     .with_builtin_tools(bt);
-    let mut cfg = DaemonConfig::new(TOKEN);
+    let mut cfg = test_config();
     cfg.control = crate::ControlConfig {
         proceed_timeout: Duration::from_millis(150),
         refuse_timeout: Duration::from_millis(600),
@@ -1769,7 +1778,7 @@ async fn global_policy_is_editable_and_persisted() {
             LoopConfig::default(),
         ),
         Arc::new(Storage::open(t._dir.path()).unwrap()),
-        DaemonConfig::new(TOKEN),
+        test_config(),
     );
     // A second handle on the same sqlite file is fine for this read-only check.
     if let Ok(reborn) = reborn {
@@ -2190,7 +2199,7 @@ async fn usage_carries_cost_only_when_a_price_is_known() {
         Providers::single(Arc::new(FakeProvider)),
         config,
     );
-    let state = AppState::new(agent.clone(), storage, DaemonConfig::new(TOKEN)).unwrap();
+    let state = AppState::new(agent.clone(), storage, test_config()).unwrap();
     let priced = T {
         app: router(state.clone()),
         state,
@@ -2230,7 +2239,7 @@ async fn usage_cost_uses_the_providers_catalog_prices_and_follows_a_reload() {
         priced(2.0),
         LoopConfig::default(),
     );
-    let state = AppState::new(agent.clone(), storage, DaemonConfig::new(TOKEN)).unwrap();
+    let state = AppState::new(agent.clone(), storage, test_config()).unwrap();
     let t = T {
         app: router(state.clone()),
         state,
@@ -2466,7 +2475,7 @@ async fn latched_pause_survives_a_daemon_restart() {
         Providers::single(Arc::new(FakeProvider)),
         LoopConfig::default(),
     );
-    let state = AppState::new(agent, storage, DaemonConfig::new(TOKEN)).unwrap();
+    let state = AppState::new(agent, storage, test_config()).unwrap();
     assert_eq!(state.hub().latched(), Some(crate::dto::ControlMode::Paused));
 }
 

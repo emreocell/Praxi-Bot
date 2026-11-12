@@ -33,6 +33,22 @@ from calling it (only the desktop app and origins you list in
 with `icacls` on Windows; the daemon warns if that fails). The one route without
 the token, `POST /v1/webhooks/{id}`, requires a valid HMAC signature.
 
+The disk token has only CLI authority (status, lists, chat and run cancellation /
+resumption). Management, approval/question decisions, account configuration and
+all screen control routes require a per-launch in-memory management bearer.
+The desktop generates it, writes it to its daemon's anonymous stdin pipe and
+uses it only in HTTP headers. It is never loaded from a file or environment
+variable, and is not accepted as an events URL token. Paired peers still use
+their transport identities; Telegram keeps its in-process gateway credential.
+See [ADR-0030](../kararlar/0030-yerel-api-yetki-ayrimi.md).
+
+**This does not sandbox arbitrary same-user code.** A shell can still modify
+configuration/database/peer-key files directly, invoke offline CLI commands,
+automate the UI or (where OS policy permits) read daemon/UI process memory.
+Existing process groups/jobs manage lifetimes; they are not a memory or file
+security boundary. Do not approve untrusted shell/MCP/CLI-engine programs on
+the assumption that the credential split isolates the whole computer.
+
 **6. Secrets stay out of files and logs.** API keys and the Telegram token are in
 the OS keychain or an encrypted file, never in `providers.toml` or on a command
 line (`--key-env` and hidden prompts only). Output sent to Telegram is passed

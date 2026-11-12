@@ -173,7 +173,10 @@ async fn the_daemon_runs_the_channel_and_stops_it_on_shutdown() {
         Providers::single(Arc::new(daemon_api::fake::FakeProvider)),
         LoopConfig::default(),
     );
-    let state = AppState::new(agent, storage, DaemonConfig::new(API_TOKEN)).unwrap();
+    // Exercise management handlers with a memory-only principal, not the disk token.
+    let mut cfg = DaemonConfig::new("disk-cli-token");
+    cfg.management_token = Some(API_TOKEN.to_owned());
+    let state = AppState::new(agent, storage, cfg).unwrap();
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
         .unwrap();

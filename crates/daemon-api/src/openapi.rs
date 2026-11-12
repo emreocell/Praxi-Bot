@@ -5,7 +5,7 @@
 //! `UPDATE_OPENAPI=1 cargo test -p daemon-api openapi_snapshot`.
 
 use axum::Json;
-use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityRequirement, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
 use crate::{dto, email, email_routes, error, mcp, mcp_routes, routes, sse};
@@ -20,10 +20,42 @@ impl Modify for Security {
                 SecurityScheme::Http(
                     HttpBuilder::new()
                         .scheme(HttpAuthScheme::Bearer)
-                        .description(Some("Per-install token stored in `<data dir>/api-token`."))
+                        .description(Some("Low-privilege CLI token stored in `<data dir>/api-token`. Management routes require the separate per-launch memory-only UI bearer; desktop-only locally. The UI bearer is accepted only in Authorization headers, never query parameters."))
                         .build(),
                 ),
             );
+            c.add_security_scheme("management", SecurityScheme::Http(
+                HttpBuilder::new().scheme(HttpAuthScheme::Bearer)
+                    .description(Some("Per-launch desktop management credential. Memory and anonymous bootstrap pipe only; never the api-token file. Paired peers authenticate through their transport instead."))
+                    .build()));
+        }
+        // Keep the documented scope tied to the same declaration that builds
+        // the router. Changing a handler cannot silently omit its scope.
+        for (path, method, privilege) in crate::ROUTE_PRIVILEGES {
+            let path = path.replace("{*name}", "{name}");
+            let Some(item) = openapi.paths.paths.get_mut(&path) else {
+                continue;
+            };
+            let operation = match *method {
+                "GET" => &mut item.get,
+                "POST" => &mut item.post,
+                "PUT" => &mut item.put,
+                "DELETE" => &mut item.delete,
+                _ => continue,
+            };
+            if let Some(operation) = operation {
+                operation.security = match privilege {
+                    crate::auth::Privilege::Public => None,
+                    crate::auth::Privilege::Cli => Some(vec![
+                        SecurityRequirement::new("bearer", Vec::<String>::new()),
+                        SecurityRequirement::new("management", Vec::<String>::new()),
+                    ]),
+                    crate::auth::Privilege::Management => Some(vec![SecurityRequirement::new(
+                        "management",
+                        Vec::<String>::new(),
+                    )]),
+                };
+            }
         }
     }
 }
@@ -37,7 +69,7 @@ impl Modify for Security {
         version = "1.0.0",
         description = "Local HTTP API of the bot daemon. Bind: 127.0.0.1 only. Host must be \
             loopback; a browser Origin must be an allowed desktop-app origin; all routes \
-            except GET /v1/health need `Authorization: Bearer <token>`."
+            except GET /v1/health and HMAC webhooks need `Authorization: Bearer <token>`. The disk token has CLI authority only; management, approvals, questions, email configuration and all control/view operations require the desktop per-launch memory-only bearer. Forbidden operations return 403 with migration guidance (ADR-0030)."
     ),
     paths(
         routes::health,

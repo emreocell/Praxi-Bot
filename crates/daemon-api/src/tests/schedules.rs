@@ -14,9 +14,9 @@ use tokio::sync::broadcast;
 use tool_registry::ToolRegistry;
 use workflow_replay::{Handles, Step, ToolStep, Workflow, WorkflowStore};
 
-use super::{Danger, T, TOKEN, auth, call, make_chat, send, wait_state};
+use super::{Danger, T, auth, call, make_chat, send, wait_state};
 use crate::fake::FakeProvider;
-use crate::{AppState, DaemonConfig, router};
+use crate::{AppState, router};
 
 /// A daemon with the workflow tools wired and the given global policy.
 fn setup_with(policy: Policy) -> T {
@@ -41,7 +41,7 @@ fn setup_with(policy: Policy) -> T {
             tools: ToolRegistry::new(),
         },
     );
-    let state = AppState::new(agent.clone(), storage, DaemonConfig::new(TOKEN)).unwrap();
+    let state = AppState::new(agent.clone(), storage, super::test_config()).unwrap();
     T {
         app: router(state.clone()),
         state,
