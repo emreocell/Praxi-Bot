@@ -7,26 +7,47 @@ import formStyles from "./Form.module.css";
 import { Segmented } from "./SettingsUi";
 import styles from "./BotAccessPicker.module.css";
 
+/** Wording of the picker; the defaults are the MCP "app" texts. */
+export interface BotAccessTexts {
+  label: string;
+  all: string;
+  some: string;
+  nobody: string;
+}
+
 /**
  * "All bots / Only these bots" for one MCP server.  Writes bot storage UUIDs;
  * shows names.  Choosing "only these bots" starts from nobody, and an emptied
  * list is kept (and warned about), never silently widened to everyone.
+ *
+ * With `single` the choice is exactly one bot (radio buttons), for things that
+ * belong to one bot such as a mailbox.
  */
 export function BotAccessPicker({
   scope,
   bots,
-  onChange
+  onChange,
+  single = false,
+  texts
 }: {
   scope: BotScope;
   bots: Pick<Bot, "id" | "name">[];
   onChange: (scope: BotScope) => void;
+  single?: boolean;
+  texts?: Partial<BotAccessTexts>;
 }) {
   const { t } = useTranslation();
   const uid = useId();
+  const words: BotAccessTexts = {
+    label: texts?.label ?? t("apps.access.label"),
+    all: texts?.all ?? t("apps.access.all"),
+    some: texts?.some ?? t("apps.access.some"),
+    nobody: texts?.nobody ?? t("apps.access.nobody")
+  };
   return (
     <div className={styles.root} data-testid="bot-access-picker">
       <Segmented
-        label={t("apps.access.label")}
+        label={words.label}
         value={scope.mode}
         onChange={(mode) =>
           onChange(
@@ -36,8 +57,8 @@ export function BotAccessPicker({
           )
         }
         options={[
-          { value: "all", label: t("apps.access.all") },
-          { value: "some", label: t("apps.access.some") }
+          { value: "all", label: words.all },
+          { value: "some", label: words.some }
         ]}
       />
       {scope.mode === "some" ? (
@@ -51,11 +72,16 @@ export function BotAccessPicker({
                   <label className={styles.item}>
                     <input
                       id={`${uid}-${b.id}`}
-                      type="checkbox"
+                      type={single ? "radio" : "checkbox"}
+                      name={single ? `${uid}-bot` : undefined}
                       className={styles.check}
                       checked={scope.ids.includes(b.id)}
                       onChange={(e) =>
-                        onChange(toggleBotInScope(scope, b.id, e.target.checked))
+                        onChange(
+                          single
+                            ? { mode: "some", ids: [b.id] }
+                            : toggleBotInScope(scope, b.id, e.target.checked)
+                        )
                       }
                     />
                     <span className={styles.name}>{b.name}</span>
@@ -67,7 +93,7 @@ export function BotAccessPicker({
           {scope.ids.length === 0 ? (
             <p className={styles.warn} role="status">
               <TriangleAlert aria-hidden="true" />
-              {t("apps.access.nobody")}
+              {words.nobody}
             </p>
           ) : null}
         </>
