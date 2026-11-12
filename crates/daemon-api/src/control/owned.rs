@@ -294,6 +294,7 @@ impl ControlHub {
             st.epoch,
             st.affected_runs.clone(),
             std::mem::take(&mut st.pending),
+            (st.reset_pending, st.audit_pending),
         );
         if st.owned.is_none() {
             st.affected_runs = st.active_runs.keys().copied().collect();
@@ -324,6 +325,11 @@ impl ControlHub {
         st.latched = Some(ControlMode::HumanDriving);
         st.owned = Some(owned.clone());
         st.require_recovery = true;
+        // Work the previous takeover owed (key reset, interrupt audit row) is
+        // not inherited: the takeover handler settles it before replacing the
+        // old one, and a retry must never act on this one's sink.
+        st.reset_pending = false;
+        st.audit_pending = false;
         if let Err(e) = self.persist(&st) {
             (
                 st.owned,
@@ -332,6 +338,7 @@ impl ControlHub {
                 st.epoch,
                 st.affected_runs,
                 st.pending,
+                (st.reset_pending, st.audit_pending),
             ) = snapshot;
             st.persistence_error = true;
             // Fail closed, but as an ownerless pause (the local user releases
@@ -1123,6 +1130,30 @@ mod tests {
             hub.begin_takeover("peer:desk2", &req, Uuid::now_v7(), 1, true, false)
                 .is_err()
         );
+    }
+    #[test]
+    fn a_new_takeover_does_not_inherit_the_work_the_old_one_owed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("control-latch.json");
+        let hub = ControlHub::with_latch_file(super::super::ControlConfig::default(), path.clone());
+        let t = hub
+            .begin_takeover("peer:alice", &request(), Uuid::now_v7(), 1, true, false)
+            .unwrap();
+        hub.activate(t.info.id, t.info.control_epoch).unwrap();
+        hub.force_interrupt(Reason::LocalOverride).unwrap();
+        assert_eq!(hub.override_pending(), (true, true));
+        let mut req = request();
+        req.recover = true;
+        req.reason = Some(live_view::RecoveryReason::DaemonRestart);
+        hub.begin_takeover("local", &req, Uuid::now_v7(), 1, true, true)
+            .unwrap();
+        assert_eq!(
+            hub.override_pending(),
+            (false, false),
+            "the new takeover would be reset / audited for the old one"
+        );
+        let restarted = ControlHub::with_latch_file(super::super::ControlConfig::default(), path);
+        assert_eq!(restarted.override_pending(), (false, false));
     }
     #[test]
     fn a_tampered_latch_file_cannot_smuggle_text_into_the_release_note() {

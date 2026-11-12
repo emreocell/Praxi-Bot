@@ -3394,6 +3394,32 @@ async fn an_app_pause_that_races_a_starting_takeover_still_stops_it() {
     );
 }
 
+// ---- audit2 F3: owed work never touches an active takeover
+#[tokio::test]
+async fn owed_reset_and_audit_work_never_touches_an_active_takeover() {
+    let t = Test::new();
+    let (_id, _owned, _body) = t.active(Some("alice")).await;
+    assert_eq!(
+        t.state.hub().takeover().unwrap().info.state,
+        ViewState::Active
+    );
+    // A flag left over from an earlier takeover.
+    t.state.hub().mark_reset_pending();
+    assert!(t.state.hub().override_pending().0);
+    let resets = t.target.sink.resets.load(Ordering::SeqCst);
+    super::retry_owed_work(&t.state).await;
+    assert_eq!(
+        t.target.sink.resets.load(Ordering::SeqCst),
+        resets,
+        "the retry reset the sink of a live takeover"
+    );
+    assert!(t.target.sink.pin.load(Ordering::SeqCst), "pin dropped");
+    assert_eq!(
+        t.state.hub().takeover().unwrap().info.state,
+        ViewState::Active
+    );
+}
+
 // ---- R7-7: a failed reset after a partial injection is retried
 #[tokio::test]
 async fn a_reset_that_failed_after_a_partial_injection_is_retried_by_the_heartbeat() {

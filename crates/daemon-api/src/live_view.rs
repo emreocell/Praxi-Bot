@@ -784,6 +784,15 @@ pub(crate) async fn takeover(
         old.info.state == ViewState::Paused
             || (old.info.state == ViewState::Active && old.info.input_expires_in_ms == 0)
     });
+    // A pending `takeover.interrupted` row of the takeover being replaced is
+    // written now: `begin_takeover` drops the flag with it.
+    if let Some(old) = &previous
+        && s.hub().override_pending().1
+        && let Some(reason) = old.info.reason.clone()
+    {
+        audit_interrupted(&s, &actor, old, &reason)?;
+        s.hub().resolve_override_audit();
+    }
     let owned = s
         .hub()
         .begin_takeover(
@@ -1339,7 +1348,9 @@ async fn retry_owed_reset(s: &AppState) {
     {
         return;
     }
+    // Only an interrupted (paused) takeover can owe a reset: never a live one.
     if let Some(t) = s.hub().takeover()
+        && t.info.state == ViewState::Paused
         && reset_target(s, &t).await
     {
         s.hub().resolve_override_reset();
@@ -1371,6 +1382,7 @@ pub(crate) async fn retry_owed_work(s: &AppState) {
     retry_owed_reset(s).await;
     if hub.override_pending().1
         && let Some(t) = hub.takeover()
+        && t.info.state == ViewState::Paused
         && let Some(reason) = t.info.reason.clone()
         && audit_interrupted(s, &Actor::local(s), &t, &reason).is_ok()
     {
