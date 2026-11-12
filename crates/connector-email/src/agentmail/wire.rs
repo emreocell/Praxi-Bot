@@ -221,3 +221,32 @@ pub(super) fn day_start(date: &str) -> Result<String, EmailError> {
     crate::message::imap_date(date)?; // validates the calendar date
     Ok(format!("{date}T00:00:00Z"))
 }
+
+/// Whether `s` is a plain `local@domain` address: ASCII only, no display name,
+/// comment, quoting, routing or whitespace. The provider is sent exactly this
+/// string, so it is also exactly what the approval card shows: there is no
+/// second parser that could read it as a different recipient.
+pub(super) fn is_plain_address(s: &str) -> bool {
+    let Some((local, domain)) = s.split_once('@') else {
+        return false;
+    };
+    let local_ok = !local.is_empty()
+        && local.len() <= 64
+        && !local.starts_with('.')
+        && !local.ends_with('.')
+        && !local.contains("..")
+        && local
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'+' | b'\'' | b'-'));
+    let labels: Vec<&str> = domain.split('.').collect();
+    let domain_ok = domain.len() <= 253
+        && labels.len() >= 2
+        && labels.iter().all(|l| {
+            !l.is_empty()
+                && l.len() <= 63
+                && !l.starts_with('-')
+                && !l.ends_with('-')
+                && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        });
+    local_ok && domain_ok && s.len() <= 254
+}

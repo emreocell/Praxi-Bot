@@ -202,6 +202,17 @@ impl AgentMailProvider {
     fn check_outgoing(&self, mail: &OutgoingMail, need_recipient: bool) -> Result<(), EmailError> {
         let from = self.address().unwrap_or("bot@example.com");
         let any = !(mail.to.is_empty() && mail.cc.is_empty() && mail.bcc.is_empty());
+        // What is validated is what is sent (and shown for approval): only plain
+        // `local@domain` strings, never a form another parser could read as a
+        // different recipient.
+        for r in mail.to.iter().chain(&mail.cc).chain(&mail.bcc) {
+            if !wire::is_plain_address(r) {
+                return Err(EmailError::Input(
+                    "each recipient must be a plain address like name@example.com (no display name, comments or quotes)"
+                        .into(),
+                ));
+            }
+        }
         if need_recipient || any {
             smtp::compose(from, mail).map(|_| ())
         } else if mail.body.len() > smtp::MAX_BODY_BYTES {

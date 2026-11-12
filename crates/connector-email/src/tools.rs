@@ -70,7 +70,7 @@ fn account_prop() -> Value {
 }
 
 fn mail_props() -> Value {
-    let addrs = json!({"type":"array","items":{"type":"string"},"description":"Addresses, optionally `Name <addr>`."});
+    let addrs = json!({"type":"array","items":{"type":"string"},"description":"Addresses: name@example.com. IMAP/SMTP accounts also accept `Name <addr>`; API mailboxes (AgentMail) need the plain form."});
     json!({
         "account": account_prop(),
         "to": addrs, "cc": addrs, "bcc": addrs,
@@ -156,7 +156,7 @@ fn specs() -> Vec<(Kind, ToolSpec)> {
             Kind::Send,
             spec(
                 SEND,
-                "Send an e-mail NOW over SMTP. Irreversible and visible to third parties: requires user approval. \
+                "Send an e-mail NOW from the account. Irreversible and visible to third parties: requires user approval. \
                  Prefer email_draft unless the user asked to send. \
                  Example: {\"to\":[\"bob@example.com\"],\"subject\":\"Hi\",\"body\":\"...\"}",
                 json!({"type":"object","properties":mail_props(),"required":["to","subject","body"]}),

@@ -1049,3 +1049,86 @@ async fn unsupported_operations_say_so() {
     assert!(matches!(e, EmailError::Unsupported(_)), "{e}");
     assert!(server.received_requests().await.unwrap().is_empty());
 }
+
+// ---- validated recipients are the sent recipients -------------------------
+
+/// Forms one parser reads as a single address while another may read them
+/// differently (comments, quoting, display names, routing tricks).
+const AMBIGUOUS: &[&str] = &[
+    "Ann <ann@example.com>",
+    "<ann@example.com>",
+    "ann@example.com (evil@attacker.test)",
+    "ann(evil@attacker.test)@example.com",
+    "\"ann\"@example.com",
+    "\"evil@attacker.test\"@example.com",
+    "ann@example.com ",
+    " ann@example.com",
+    "ann@[127.0.0.1]",
+    "ann@example.com;evil@attacker.test",
+    "ann@example.com,evil@attacker.test",
+    "ann%evil@attacker.test@example.com",
+    "@attacker.test:ann@example.com",
+];
+
+fn one(field: &str, value: &str) -> OutgoingMail {
+    let mut m = OutgoingMail {
+        to: vec!["bob@example.com".into()],
+        subject: "s".into(),
+        body: "b".into(),
+        ..Default::default()
+    };
+    match field {
+        "to" => m.to = vec![value.into()],
+        "cc" => m.cc = vec![value.into()],
+        _ => m.bcc = vec![value.into()],
+    }
+    m
+}
+
+#[tokio::test]
+async fn ambiguous_recipient_forms_are_refused_before_any_request() {
+    let server = MockServer::start().await;
+    let p = bound(&server);
+    for form in AMBIGUOUS {
+        for field in ["to", "cc", "bcc"] {
+            let e = p.send(&one(field, form)).await.unwrap_err();
+            assert!(
+                matches!(e, EmailError::Input(_)),
+                "send {field} {form:?}: {e}"
+            );
+            let e = p.reply("m1", &one(field, form), false).await.unwrap_err();
+            assert!(
+                matches!(e, EmailError::Input(_)),
+                "reply {field} {form:?}: {e}"
+            );
+        }
+    }
+    assert_eq!(server.received_requests().await.unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn the_recipients_in_the_request_are_exactly_the_ones_given_and_validated() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"message_id":"s1","thread_id":"t"})),
+        )
+        .mount(&server)
+        .await;
+    let p = bound(&server);
+    let mail = OutgoingMail {
+        to: vec!["bob@example.com".into(), "o'neil+tag@Example.COM".into()],
+        cc: vec!["cy@example.com".into()],
+        bcc: vec!["hidden@example.com".into()],
+        subject: "s".into(),
+        body: "b".into(),
+    };
+    p.send(&mail).await.unwrap();
+    p.reply("m1", &mail, true).await.unwrap();
+    for r in server.received_requests().await.unwrap() {
+        let b: Value = serde_json::from_slice(&r.body).unwrap();
+        assert_eq!(b["to"], json!(mail.to));
+        assert_eq!(b["cc"], json!(mail.cc));
+        assert_eq!(b["bcc"], json!(mail.bcc));
+    }
+}

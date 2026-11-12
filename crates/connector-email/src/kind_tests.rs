@@ -379,3 +379,54 @@ async fn attachments_are_saved_under_a_generated_name_and_never_beside_the_decla
         "{name}"
     );
 }
+
+#[tokio::test]
+async fn the_value_the_user_approves_is_the_value_sent_through_email_send() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!("/v0/inboxes/{INBOX}/messages/send")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"message_id":"sent1","thread_id":"t"})),
+        )
+        .mount(&server)
+        .await;
+    let conn = connector(&server, vec![account("bot-mail", Some(BOT_A))]);
+    // The approval card shows this exact input; ambiguous forms never reach the provider.
+    let input = json!({"to":["bob@example.com"],"cc":["cy@example.com"],"subject":"s","body":"b"});
+    call(&conn, Some(BOT_A), "email_send", input.clone())
+        .await
+        .unwrap();
+    let sent: Value =
+        serde_json::from_slice(&server.received_requests().await.unwrap()[0].body).unwrap();
+    assert_eq!(sent["to"], input["to"]);
+    assert_eq!(sent["cc"], input["cc"]);
+    let bad = json!({"to":["Bob <bob@example.com>"],"subject":"s","body":"b"});
+    let e = call(&conn, Some(BOT_A), "email_send", bad)
+        .await
+        .unwrap_err();
+    assert!(matches!(e, ToolError::InvalidInput(_)), "{e:?}");
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+#[test]
+fn the_imap_smtp_path_sends_the_parsed_address_not_the_raw_string() {
+    // The message is built from the parsed (name, address) pair and the envelope
+    // from the parsed address, so a trailing comment never becomes a recipient.
+    let mail = crate::OutgoingMail {
+        to: vec!["Ann <ann@example.com> (evil@attacker.test)".into()],
+        subject: "s".into(),
+        body: "b".into(),
+        ..Default::default()
+    };
+    let composed = crate::smtp::compose("me@example.com", &mail).unwrap();
+    let raw = composed.formatted();
+    let parsed = mail_parser::MessageParser::default().parse(&raw).unwrap();
+    let recipients: Vec<String> = parsed
+        .to()
+        .unwrap()
+        .iter()
+        .filter_map(|a| a.address.as_deref().map(str::to_owned))
+        .collect();
+    // Anything after the address ends up, at most, inside the quoted display name.
+    assert_eq!(recipients, ["ann@example.com"]);
+}
