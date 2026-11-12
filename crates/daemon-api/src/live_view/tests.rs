@@ -3562,6 +3562,44 @@ async fn a_failed_interrupt_audit_row_is_retried_for_every_reason() {
     );
 }
 
+// ---- audit2 F8: a revocation takes effect before it waits for the executor
+#[tokio::test]
+async fn a_revoked_input_grant_stops_applying_while_the_executor_is_busy() {
+    let t = Test::new();
+    grant(&t, "alice", true, true).await;
+    let live = Arc::clone(t.state.live_view());
+    let peer = Actor {
+        key: "peer:alice".into(),
+        recovery: false,
+        local: false,
+    };
+    assert!(live.allowed(&peer, true));
+    let busy = live.executor.lock().await; // a long input batch holds it
+    let state = t.state.clone();
+    let revoke = tokio::spawn(async move {
+        state
+            .set_screen_privileges(
+                "peer:alice".into(),
+                ScreenPrivileges {
+                    view: true,
+                    input: false,
+                },
+            )
+            .await
+    });
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        !live.allowed(&peer, true),
+        "the revoked grant still applies while the barrier waits for the executor"
+    );
+    drop(busy);
+    revoke.await.unwrap().unwrap();
+    assert!(!live.allowed(&peer, true));
+    assert!(live.allowed(&peer, false), "view stays");
+}
+
 // ---- audit2 F3: owed work never touches an active takeover
 #[tokio::test]
 async fn owed_reset_and_audit_work_never_touches_an_active_takeover() {

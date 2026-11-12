@@ -1485,6 +1485,23 @@ impl AppState {
         privileges: ScreenPrivileges,
     ) -> Result<(), ApiError> {
         let live = self.live_view();
+        // A revocation takes effect at once, before the wait for the executor
+        // (a long input batch may hold it): only the more restrictive of the
+        // old and the new grant applies until the barrier is reached. Input
+        // batches re-check the grant between events.
+        let current = live.privileges.lock().get(&actor_key).copied();
+        if let Some(current) = current
+            && (!privileges.view || !privileges.input)
+        {
+            live.set_privileges(
+                actor_key.clone(),
+                ScreenPrivileges {
+                    view: current.view && privileges.view,
+                    input: current.input && privileges.input,
+                },
+            );
+            live.stop.notify_waiters();
+        }
         let executor = live.executor.lock().await;
         live.set_privileges(actor_key.clone(), privileges);
         let actor = Actor {
