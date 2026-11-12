@@ -1,4 +1,4 @@
-use super::{Actor, ApiError, AppState, audit, backend, end_session, input, interrupt};
+use super::{Actor, ApiError, AppState, audit, end_session, input, interrupt};
 use axum::{
     Extension,
     body::Bytes,
@@ -91,13 +91,14 @@ pub(crate) async fn frames(
         session.stream = Some(cancel.clone());
     }
     let source = target_impl.frame_source();
-    let subscription = match source.subscribe(profile).await {
+    // Bounded like every backend call made under the executor.
+    let subscription = match super::bounded(source.subscribe(profile)).await {
         Ok(sub) => sub,
         Err(e) => {
             if let Some(session) = live.sessions.lock().get_mut(&id) {
                 session.stream = None;
             }
-            return Err(backend(e));
+            return Err(e);
         }
     };
     if let Err(error) = live.source_profile(target).await {
@@ -331,7 +332,7 @@ pub(crate) async fn frames(
             .values()
             .any(|s| s.target == target && s.stream.is_some())
         {
-            let _ = source.stop().await;
+            let _ = tokio::time::timeout(super::BACKEND_CALL_TIMEOUT, source.stop()).await;
         }
         let _ = audit(
             &state,

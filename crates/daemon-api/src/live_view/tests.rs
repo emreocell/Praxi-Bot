@@ -85,6 +85,8 @@ struct Target {
     info: Mutex<TargetInfo>,
     source: Arc<SyntheticSource>,
     sink: Arc<Sink>,
+    hang_subscribe: Arc<AtomicBool>,
+    hang_stop: Arc<AtomicBool>,
 }
 impl Target {
     fn new() -> Self {
@@ -106,6 +108,8 @@ impl Target {
             }),
             source: Arc::default(),
             sink: Arc::default(),
+            hang_subscribe: Arc::default(),
+            hang_stop: Arc::default(),
         }
     }
     fn frame(&self, seq: u64, revision: u64) {
@@ -136,13 +140,44 @@ impl Target {
             .unwrap();
     }
 }
+/// The target's frame source, optionally hanging `subscribe` / `stop`.
+struct HangingSource {
+    inner: Arc<SyntheticSource>,
+    hang_subscribe: Arc<AtomicBool>,
+    hang_stop: Arc<AtomicBool>,
+}
+#[async_trait]
+impl FrameSource for HangingSource {
+    async fn subscribe(&self, profile: EffectiveProfile) -> Result<FrameSubscription, ViewError> {
+        if self.hang_subscribe.load(Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
+        self.inner.subscribe(profile).await
+    }
+    async fn request_refresh(&self, action_seq: u64) -> Result<(), ViewError> {
+        self.inner.request_refresh(action_seq).await
+    }
+    async fn set_profile(&self, profile: EffectiveProfile) -> Result<(), ViewError> {
+        self.inner.set_profile(profile).await
+    }
+    async fn stop(&self) -> Result<(), ViewError> {
+        if self.hang_stop.load(Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
+        self.inner.stop().await
+    }
+}
 #[async_trait]
 impl ViewTarget for Target {
     fn info(&self) -> TargetInfo {
         self.info.lock().clone()
     }
     fn frame_source(&self) -> Arc<dyn FrameSource> {
-        self.source.clone()
+        Arc::new(HangingSource {
+            inner: self.source.clone(),
+            hang_subscribe: self.hang_subscribe.clone(),
+            hang_stop: self.hang_stop.clone(),
+        })
     }
     fn input_sink(&self) -> Option<Arc<dyn InputSink>> {
         Some(self.sink.clone())
@@ -3391,6 +3426,40 @@ async fn an_app_pause_that_races_a_starting_takeover_still_stops_it() {
     assert_eq!(
         t.state.hub().takeover().unwrap().info.reason,
         Some(Reason::LocalOverride)
+    );
+}
+
+// ---- audit2 F6: frame source calls under the executor are bounded
+#[tokio::test(start_paused = true)]
+async fn a_hanging_frame_source_never_wedges_the_executor() {
+    let t = Arc::new(Test::new());
+    let id = t.session(Some("alice")).await;
+    t.target.hang_subscribe.store(true, Ordering::SeqCst);
+    let call = {
+        let t = Arc::clone(&t);
+        async move {
+            t.response(
+                Some("alice"),
+                Method::GET,
+                &format!("/v1/view/sessions/{id}/frames"),
+                None,
+            )
+            .await
+            .status()
+        }
+    };
+    let status = tokio::time::timeout(Duration::from_secs(10), call)
+        .await
+        .expect("subscribe is bounded");
+    assert!(!status.is_success(), "{status}");
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(50),
+            t.state.live_view().executor.lock()
+        )
+        .await
+        .is_ok(),
+        "the executor is free"
     );
 }
 

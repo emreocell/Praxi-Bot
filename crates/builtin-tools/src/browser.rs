@@ -988,16 +988,19 @@ impl BrowserTool {
         let gate = self.shared.control.clone();
         let epoch = gate.as_ref().map(|g| g.observation_epoch());
         let text = self.run_inner(run_id, input).await?;
-        if let (Some(gate), Some(epoch)) = (gate, epoch)
-            && (gate.observation_epoch() != epoch || gate.observation_refused().is_some())
-        {
+        if let (Some(gate), Some(epoch)) = (gate, epoch) {
+            if observing
+                && (gate.observation_epoch() != epoch || gate.observation_refused().is_some())
+            {
+                return Err(exec_err(crate::control::OBSERVATION_DISCARDED));
+            }
             // An action's own result carries a fresh observation (the refresh
-            // after it, or the re-observation that replaced it): withheld too.
-            return if observing {
-                Err(exec_err(crate::control::OBSERVATION_DISCARDED))
-            } else {
-                Ok(crate::control::OBSERVATION_WITHHELD.to_owned())
-            };
+            // after it, or the re-observation that replaced it): withheld if
+            // the human drives by now. The epoch is not compared here: an
+            // action legitimately waits through a pause and its release.
+            if !observing && gate.observation_refused().is_some() {
+                return Ok(crate::control::OBSERVATION_WITHHELD.to_owned());
+            }
         }
         Ok(text)
     }
