@@ -574,6 +574,11 @@ async fn reset_target(s: &AppState, t: &OwnedTakeover) -> bool {
     live.reset_in_flight
         .store(true, std::sync::atomic::Ordering::SeqCst);
     let _in_flight = InFlight(&live.reset_in_flight);
+    // The session no longer claims a live profile: the combined profile (and
+    // with it the stream rate) follows the sessions, whatever the backend does.
+    if let Some(session) = live.sessions.lock().get_mut(&t.info.session_id) {
+        session.profile = EffectiveProfile::watch();
+    }
     // ONE budget for the whole reset: a hung backend holds the executor for
     // BACKEND_CALL_TIMEOUT in total, not once per call.
     let deadline = Instant::now() + BACKEND_CALL_TIMEOUT;
@@ -1030,29 +1035,31 @@ pub(crate) async fn local_recover(
     else {
         return Err(ApiError::unavailable("the executor is busy; try again"));
     };
+    let Some(owned) = s.hub().takeover() else {
+        return Err(ApiError::conflict("no takeover is recorded"));
+    };
+    // Everything that can fail happens BEFORE the latch is cleared: the human
+    // must not resume a bot while a note is owed or keys may still be pressed.
+    for mut journal in s.hub().pending_release_notes() {
+        flush_note(&s, &mut journal)?;
+    }
+    // A target that is gone has nothing to reset; one that is present must
+    // confirm the key reset, takeover pin and watch profile.
+    if live.registry.get(owned.info.target_id).is_some() && !reset_target(&s, &owned).await {
+        return Err(ApiError::unavailable(
+            "the display target did not confirm the key reset; the latch is kept, try again",
+        ));
+    }
     audit(
         &s,
         &actor,
         "takeover.recovered",
         serde_json::json!({"by":"local","reason":"local_recovery"}),
     )?;
-    let old = s
-        .hub()
+    s.hub()
         .clear_owned_latch()
         .map_err(ApiError::unavailable)?
         .ok_or_else(|| ApiError::conflict("no takeover is recorded"))?;
-    for mut journal in s.hub().pending_release_notes() {
-        flush_note(&s, &mut journal)?;
-    }
-    // Best effort: the old target may be gone.
-    if let Some(sink) = live
-        .registry
-        .get(old.info.target_id)
-        .and_then(|t| t.input_sink())
-    {
-        let _ = tokio::time::timeout(BACKEND_CALL_TIMEOUT, sink.release_pressed_inputs()).await;
-        let _ = tokio::time::timeout(BACKEND_CALL_TIMEOUT, sink.set_takeover_active(false)).await;
-    }
     Ok(Json(crate::routes::control_state_dto(&s, Some(&actor))))
 }
 

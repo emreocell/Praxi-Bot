@@ -1278,6 +1278,25 @@ async fn local_override_stops_a_peer_takeover_and_keeps_the_bot_paused() {
     );
 }
 #[tokio::test]
+async fn an_interrupted_takeover_puts_the_session_profile_back_to_watch() {
+    let t = Test::new();
+    let (id, _owned, _body) = t.active(Some("alice")).await;
+    assert_eq!(
+        t.state.live_view().sessions.lock()[&id].profile.profile,
+        ::live_view::Profile::Live
+    );
+    let (status, _) = t
+        .call(None, Method::POST, "/v1/control/override", None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    // The backend dropped to watch; the session must not still claim live
+    // (the combined profile would keep streaming at the live rate).
+    assert_eq!(
+        t.state.live_view().sessions.lock()[&id].profile.profile,
+        ::live_view::Profile::Watch
+    );
+}
+#[tokio::test]
 async fn explicit_override_endpoint_stops_a_peer_takeover_too() {
     let t = Test::new();
     let (_id, _owned, _body) = t.active(Some("alice")).await;
@@ -3065,6 +3084,15 @@ async fn recover_with_a_hanging_sink_is_bounded_and_clears_the_latch() {
     let (status, v) = tokio::time::timeout(Duration::from_secs(10), recover)
         .await
         .expect("recover is bounded, not wedged on the hung sink");
+    // The key reset could not be confirmed: the latch stays (the human cannot
+    // resume a bot while keys may still be pressed) and the call is a 503.
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{v}");
+    assert!(t.state.hub().takeover().is_some(), "the latch is kept");
+    t.target.sink.hang_reset.store(false, Ordering::SeqCst);
+    t.target.sink.hang_active.store(false, Ordering::SeqCst);
+    let (status, v) = t
+        .call(None, Method::POST, "/v1/control/recover", None)
+        .await;
     assert_eq!(status, StatusCode::OK, "{v}");
     assert!(t.state.hub().takeover().is_none());
     assert!(
