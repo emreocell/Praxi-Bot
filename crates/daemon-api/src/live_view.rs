@@ -1349,8 +1349,11 @@ async fn retry_owed_reset(s: &AppState) {
         return;
     }
     // Only an interrupted (paused) takeover can owe a reset: never a live one.
+    // And only once its target is registered: a target that is not there yet
+    // (just after a restart) has not been reset by this daemon.
     if let Some(t) = s.hub().takeover()
         && t.info.state == ViewState::Paused
+        && live.registry.get(t.info.target_id).is_some()
         && reset_target(s, &t).await
     {
         s.hub().resolve_override_reset();

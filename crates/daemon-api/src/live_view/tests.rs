@@ -3463,6 +3463,31 @@ async fn a_hanging_frame_source_never_wedges_the_executor() {
     );
 }
 
+// ---- audit2 F6: an owed reset is not forgotten because the target is not registered yet
+#[tokio::test]
+async fn an_owed_reset_waits_for_its_target_to_register_after_a_restart() {
+    let t = Test::new();
+    let (_id, _owned, _body) = t.active(Some("alice")).await;
+    t.target.sink.fail_reset.store(true, Ordering::SeqCst);
+    let _ = t
+        .call(None, Method::POST, "/v1/control/override", None)
+        .await;
+    assert!(t.state.hub().override_pending().0);
+    let t2 = t.restarted();
+    t2.target.sink.fail_reset.store(false, Ordering::SeqCst);
+    let target_id = t2.target.info().target_id;
+    // The embedder has not registered the target yet.
+    t2.state.live_view().registry.remove(target_id);
+    super::retry_owed_work(&t2.state).await;
+    assert!(
+        t2.state.hub().override_pending().0,
+        "the owed reset was dropped without any backend reset having run"
+    );
+    t2.state.live_view().registry.register(t2.target.clone());
+    super::retry_owed_work(&t2.state).await;
+    assert!(!t2.state.hub().override_pending().0);
+}
+
 // ---- audit2 F3: owed work never touches an active takeover
 #[tokio::test]
 async fn owed_reset_and_audit_work_never_touches_an_active_takeover() {
