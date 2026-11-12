@@ -891,14 +891,26 @@ impl TelegramChannel {
                 true,
             ),
             Some(d) => match protocol::approval_text::describe_details(d) {
-                Some(full) => (
-                    format!(
+                Some(full) => {
+                    let shown = format!(
                         "⚠️ Approval needed ({prefix}{})
 {full}",
                         a.tool_name
-                    ),
-                    true,
-                ),
+                    );
+                    // This channel's own redactor must not change what is shown
+                    // either: the stored request holds the raw text.
+                    if self.redact(&shown) == shown {
+                        (shown, true)
+                    } else {
+                        (
+                            format!(
+                                "⚠️ {} needs approval, but part of it would be masked here, so this chat cannot show it fully. Approve or deny it in the desktop app.",
+                                a.tool_name
+                            ),
+                            false,
+                        )
+                    }
+                }
                 None => (
                     format!(
                         "⚠️ {} needs approval, but this chat cannot show what it would do. Approve or deny it in the desktop app.",

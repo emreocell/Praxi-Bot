@@ -592,3 +592,42 @@ fn set_origin_flips_ownership_and_bumps_the_revision() {
     assert!(!store.set_origin(s.id, crate::ScheduleOrigin::User).unwrap());
     assert_eq!(store.get(s.id).unwrap().unwrap().revision, before + 1);
 }
+
+#[test]
+fn delete_exact_only_deletes_the_state_that_was_approved() {
+    let store = ScheduleStore::open_in_memory().unwrap();
+    let mut s = recurring();
+    s.origin = crate::ScheduleOrigin::Bot;
+    store.insert(&s).unwrap();
+    let cur = store.get(s.id).unwrap().unwrap();
+    // A user edit lands in between: revision moves, nothing is deleted.
+    let mut edited = cur.clone();
+    edited.name = "edited".into();
+    store.update_definition_and_rearm(&edited, None, 5).unwrap();
+    assert!(
+        !store
+            .delete_exact(s.id, cur.revision, crate::ScheduleOrigin::Bot)
+            .unwrap()
+    );
+    assert!(store.get(s.id).unwrap().is_some());
+    // Ownership moved to the user: not deleted either.
+    let now = store.get(s.id).unwrap().unwrap();
+    store.set_origin(s.id, crate::ScheduleOrigin::User).unwrap();
+    assert!(
+        !store
+            .delete_exact(s.id, now.revision, crate::ScheduleOrigin::Bot)
+            .unwrap()
+    );
+    let latest = store.get(s.id).unwrap().unwrap();
+    assert!(
+        !store
+            .delete_exact(s.id, latest.revision, crate::ScheduleOrigin::Bot)
+            .unwrap()
+    );
+    assert!(
+        store
+            .delete_exact(s.id, latest.revision, crate::ScheduleOrigin::User)
+            .unwrap()
+    );
+    assert!(store.get(s.id).unwrap().is_none());
+}

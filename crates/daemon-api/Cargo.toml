@@ -48,6 +48,7 @@ uuid.workspace = true
 rustix = { version = "1", default-features = false, features = ["fs", "process", "std"] }
 
 [dev-dependencies]
+rusqlite.workspace = true
 http-body-util = "0.1"
 tempfile.workspace = true
 tool-registry = { path = "../tool-registry", version = "0.1.0" }

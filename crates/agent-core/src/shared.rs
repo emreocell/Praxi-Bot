@@ -909,7 +909,7 @@ pub(crate) fn redact_event_checked(
 }
 
 /// Redact all strings of `v` in place; `true` if anything changed.
-fn redact_value(r: &SharedRedactor, v: &mut serde_json::Value) -> bool {
+pub(crate) fn redact_value(r: &SharedRedactor, v: &mut serde_json::Value) -> bool {
     match v {
         serde_json::Value::String(s) => {
             if r.contains_secret(s) {

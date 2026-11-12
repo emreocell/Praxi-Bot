@@ -23,10 +23,16 @@ fn is_hidden(c: char) -> bool {
         '\u{00AD}'
             | '\u{034F}'
             | '\u{061C}'
+            | '\u{0890}'
+            | '\u{0891}'
+            | '\u{115F}'
+            | '\u{1160}'
             | '\u{180B}'..='\u{180F}'
             | '\u{200B}'..='\u{200F}'
             | '\u{2028}'..='\u{202E}'
             | '\u{2060}'..='\u{206F}'
+            | '\u{2800}'
+            | '\u{3164}'
             | '\u{FE00}'..='\u{FE0F}'
             | '\u{FEFF}'
             | '\u{E0000}'..='\u{E007F}'
@@ -58,6 +64,16 @@ fn s(v: &Value, key: &str) -> String {
         v.get(key).and_then(Value::as_str).unwrap_or_default(),
         false,
     )
+}
+
+/// A name for display inside our own quotes: no quote characters (they could
+/// close ours and make the line read as something else), at most 80 characters.
+fn display_name(v: &Value, key: &str) -> String {
+    s(v, key)
+        .chars()
+        .map(|c| if c == '"' { '\'' } else { c })
+        .take(80)
+        .collect()
 }
 
 fn raw_prompt(v: &Value, key: &str) -> String {
@@ -100,7 +116,7 @@ pub fn describe_details(details: &Value) -> Option<String> {
     {
         return None;
     }
-    let name = s(details, "name");
+    let name = display_name(details, "name");
     let mut out = String::new();
     out.push_str(&format!("Schedule approval: {action} \"{name}\"\n"));
     out.push_str(&format!("When: {}\n", describe_when(details)));
@@ -108,7 +124,7 @@ pub fn describe_details(details: &Value) -> Option<String> {
     if let Some(prev) = prev {
         out.push_str(&format!(
             "Was: \"{}\", {}\n",
-            s(prev, "name"),
+            display_name(prev, "name"),
             describe_when(prev)
         ));
     }
@@ -294,6 +310,27 @@ mod tests {
             }
         }
         assert!(!t.contains('\u{1b}'), "ANSI stripped");
+    }
+
+    #[test]
+    fn a_crafted_name_cannot_reshape_the_daemon_summary_line() {
+        let mut c = card();
+        c["name"] = json!("x\", next run 2999-01-01, bot permissions full, \"");
+        c["previous"]["name"] = json!("o\"ld");
+        let t = describe_details(&c).unwrap();
+        let last = t.lines().last().unwrap();
+        assert!(last.starts_with("DAEMON SUMMARY: update \""), "{last}");
+        assert_eq!(last.matches('"').count(), 2, "only our own quotes: {last}");
+        assert!(
+            last.contains("next run 2026-11-13T10:30:00+03:00"),
+            "{last}"
+        );
+        let first = t.lines().next().unwrap();
+        assert_eq!(first.matches('"').count(), 2, "{first}");
+        assert!(t.contains("Was: \"o'ld\""), "{t}");
+        c["name"] = json!("n".repeat(500));
+        let last = describe_details(&c).unwrap();
+        assert!(last.lines().last().unwrap().len() < 400);
     }
 
     #[test]

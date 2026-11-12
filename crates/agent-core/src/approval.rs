@@ -21,12 +21,22 @@ use crate::AUDIT_GRANT_ALWAYS;
 use crate::history::truncate_utf8;
 use crate::shared::{ApprovalScope, Grant, GrantTarget, Pending, RunCtx, Shared, Verdict};
 
-/// Tells the tool when an approval it prepared ends without running (drop =
-/// denied, cancelled, timed out); disarmed once the user approved.
+/// The `approval_ref` token a tool put in its details, if any.
+fn approval_ref(details: &Value) -> Option<String> {
+    details
+        .get("approval_ref")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
+/// Tells the tool when an approval it prepared ends without the call running
+/// (drop = denied, cancelled, timed out, or an approved permit that never
+/// executed); disarmed when the call is committed to run.
 struct ClosedGuard {
     tool: Option<Arc<dyn tool_registry::Tool>>,
     ctx: tool_registry::ToolContext,
     input: Value,
+    token: Option<String>,
 }
 
 impl ClosedGuard {
@@ -38,7 +48,7 @@ impl ClosedGuard {
 impl Drop for ClosedGuard {
     fn drop(&mut self) {
         if let Some(t) = self.tool.take() {
-            t.approval_closed(&self.ctx, &self.input);
+            t.approval_closed(&self.ctx, &self.input, self.token.as_deref());
         }
     }
 }
@@ -180,8 +190,15 @@ impl Shared {
         self.tools.get(name).is_some_and(|t| t.always_ask())
     }
 
-    fn closed_guard(&self, ctx: &RunCtx, name: &str, input: &Value) -> ClosedGuard {
+    fn closed_guard(
+        &self,
+        ctx: &RunCtx,
+        name: &str,
+        input: &Value,
+        token: Option<String>,
+    ) -> ClosedGuard {
         ClosedGuard {
+            token,
             tool: self.tools.get(name),
             ctx: tool_registry::ToolContext {
                 run_id: ctx.run_id.to_string(),
@@ -218,10 +235,12 @@ impl Shared {
         // The card is redacted on its way to the user while the tool stores
         // the raw text: if redaction would change anything the user would
         // approve something other than what is stored, so refuse.
-        if let Some(d) = &details {
-            let raw = d.to_string();
-            if self.redact(raw.clone()) != raw {
-                tool.approval_closed(&tctx, input);
+        // Checked per string leaf with the very function the event path uses
+        // (a serialized-JSON comparison would miss secrets with newlines or quotes).
+        if let (Some(d), Some(r)) = (&details, &self.cfg.redactor) {
+            let mut shown = d.clone();
+            if crate::shared::redact_value(r, &mut shown) {
+                tool.approval_closed(&tctx, input, approval_ref(d).as_deref());
                 return Err(
                     "the request contains text that looks like a secret (a key or token), which cannot be shown for approval; remove it and ask again"
                         .into(),
@@ -432,8 +451,13 @@ impl Shared {
         effect: Effect,
         category: PermissionCategory,
         input: &Value,
-        details: Option<Value>,
+        mut details: Option<Value>,
     ) -> Result<ExecPermit, Option<String>> {
+        // The tool's token for this approval: kept for the close guard, never shown.
+        let token = details.as_ref().and_then(approval_ref);
+        if let Some(o) = details.as_mut().and_then(Value::as_object_mut) {
+            o.remove("approval_ref");
+        }
         // An always-ask tool must show the user what it does: refuse to ask
         // without details rather than fall back to the generic card.
         if self.always_ask(name) && details.is_none() {
@@ -443,7 +467,7 @@ impl Shared {
             ));
         }
         let once_only = details.is_some() || self.always_ask(name);
-        let mut closed = self.closed_guard(ctx, name, input);
+        let closed = self.closed_guard(ctx, name, input, token);
         let args = input.to_string();
         let summary = self.redact(format!("{name} {}", truncate_utf8(&args, 300)));
         let (approval_id, mut guard, rx) = self.park(ctx, call_id, &summary, once_only);
@@ -485,8 +509,8 @@ impl Shared {
                         return Err(Some("denied by policy".into()));
                     }
                 }
-                closed.disarm();
                 Ok(ExecPermit {
+                    closed,
                     sh: Arc::clone(self),
                     ctx: Arc::clone(ctx),
                     approval_id,
@@ -646,6 +670,9 @@ impl Shared {
 /// and only then records the approval and any grant. Dropping the permit
 /// without committing runs nothing and keeps no grant.
 pub(crate) struct ExecPermit {
+    /// Armed until the call is committed to run: dropping the permit (or a
+    /// failed commit) tells the tool this approval ended without executing.
+    closed: ClosedGuard,
     sh: Arc<Shared>,
     ctx: Arc<RunCtx>,
     approval_id: Uuid,
@@ -665,7 +692,7 @@ impl ExecPermit {
     /// `decide` and the caller's decision to invoke the tool.
     ///
     /// `Err` — do not call the tool; no grant is stored.
-    pub(crate) fn commit(self) -> Result<(), Option<String>> {
+    pub(crate) fn commit(mut self) -> Result<(), Option<String>> {
         let _gate = self.sh.exec_gate.lock();
         #[cfg(test)]
         {
@@ -740,6 +767,7 @@ impl ExecPermit {
                 approved_by: self.by,
             }),
         );
+        self.closed.disarm();
         Ok(())
     }
 }

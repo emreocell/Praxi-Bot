@@ -693,6 +693,23 @@ impl ScheduleStore {
         Ok(changed > 0)
     }
 
+    /// Delete a schedule only if it still has this definition `revision` and
+    /// `origin` (compare-and-set: an edit that landed meanwhile is not deleted).
+    /// `Ok(false)` when the row is gone or changed.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn delete_exact(&self, id: TaskId, revision: i64, origin: ScheduleOrigin) -> Result<bool> {
+        let changed = self.conn().execute(
+            "DELETE FROM schedules WHERE id = ?1 AND revision = ?2 AND origin = ?3",
+            params![id.to_string(), revision, origin.as_str()],
+        )?;
+        if changed > 0 {
+            self.notify();
+        }
+        Ok(changed > 0)
+    }
+
     /// Attach or replace a [`Trigger`] (e.g. [`Trigger::Webhook`]) for `schedule_id`.
     ///
     /// # Errors

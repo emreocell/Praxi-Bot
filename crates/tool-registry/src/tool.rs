@@ -119,9 +119,12 @@ pub trait Tool: Send + Sync {
     }
 
     /// Called when an approval that [`Tool::approval_details`] prepared ends
-    /// without the call running (denied, cancelled, timed out, or rejected
-    /// before it was shown), so the tool can drop what it froze for it.
-    fn approval_closed(&self, _ctx: &ToolContext, _input: &Value) {}
+    /// without the call running (denied, cancelled, timed out, rejected before
+    /// it was shown, or approved but never executed), so the tool can drop what
+    /// it froze for it. `token` is the `approval_ref` string the tool put in
+    /// its details (the loop removes it before the card is shown): only what
+    /// was created for that very approval may be dropped.
+    fn approval_closed(&self, _ctx: &ToolContext, _input: &Value, _token: Option<&str>) {}
 
     /// `true` when the call must always be confirmed by the user: a policy
     /// that would allow it is raised to "ask", and neither "always allow"
@@ -134,28 +137,40 @@ pub trait Tool: Send + Sync {
 
 #[cfg(test)]
 mod delegation_guard {
+    use std::collections::BTreeSet;
     use std::path::{Path, PathBuf};
 
-    /// Files whose tools dispatch to other tools but are known to keep the
-    /// confirmation guarantees, and why. A new delegating `Tool` is not on this
-    /// list: it must forward `always_ask` / `approval_details` /
-    /// `approval_closed` (and mention them), or be added here with a reason.
-    const REVIEWED: &[(&str, &str)] = &[
+    /// `file :: type` pairs whose tools dispatch to other tools (or hold a
+    /// registry / gate) without forwarding the approval hooks themselves, each
+    /// reviewed and why. The list must match the repository EXACTLY: a new
+    /// delegating `impl Tool` fails this test until it forwards
+    /// `always_ask` / `approval_details` / `approval_closed` or is added here
+    /// with a reason; an entry that no longer matches must be removed.
+    const REVIEWED: &[(&str, &str, &str)] = &[
         (
             "agent-router/src/surface.rs",
-            "find_tool / use_tool: the loop resolves `use_tool` to its target by name and runs decide + approval_details against the TARGET tool",
+            "FindTool",
+            "find_tool only lists tools; it calls none",
+        ),
+        (
+            "agent-router/src/surface.rs",
+            "UseTool",
+            "the loop resolves `use_tool` to its TARGET by name and runs decide + approval_details against the target, then the target's own hooks apply",
         ),
         (
             "builtin-tools/src/script.rs",
+            "ScriptTool",
             "script_run: every inner call goes through the loop's ToolGate (decide + approval_details)",
         ),
         (
             "workflow-replay/src/tool.rs",
+            "WorkflowRun",
             "workflow_run: every step goes through the loop's ToolGate (decide + approval_details)",
         ),
         (
-            "tool-registry/src/registry.rs",
-            "the registry's own test tools",
+            "agent-router/src/surface.rs",
+            "GetToolDetails",
+            "get_tool_details only describes tools; it calls none",
         ),
     ];
 
@@ -186,8 +201,8 @@ mod delegation_guard {
             .trim_start_matches("pub(crate) ")
             .trim_start_matches("pub ");
         let ty = ty.trim().trim_end_matches(',');
-        name.chars().all(|c| c.is_ascii_lowercase() || c == '_')
-            && !name.is_empty()
+        !name.is_empty()
+            && name.chars().all(|c| c.is_ascii_lowercase() || c == '_')
             && matches!(
                 ty,
                 "Arc<dyn Tool>"
@@ -195,7 +210,42 @@ mod delegation_guard {
                     | "Arc<ToolRegistry>"
                     | "Option<ToolRegistry>"
                     | "Arc<dyn ToolGate>"
+                    | "ToolSurface"
+                    | "Arc<ToolSurface>"
+                    | "Arc<Discovery>"
             )
+    }
+
+    /// The text from `start` to the closing brace at column 0.
+    fn block_from(src: &str, start: usize) -> &str {
+        let rest = &src[start..];
+        let end = rest.find("\n}").map_or(rest.len(), |i| i + 2);
+        &rest[..end]
+    }
+
+    /// Every `impl Tool for X` in `src`: (X, impl block, struct body).
+    fn impls(src: &str) -> Vec<(String, String, String)> {
+        let mut out = Vec::new();
+        let marker = "impl Tool for ";
+        let mut from = 0;
+        while let Some(i) = src[from..].find(marker) {
+            let at = from + i;
+            from = at + marker.len();
+            let ident: String = src[from..]
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            let block = block_from(src, at).to_owned();
+            let body = ["pub(crate) struct ", "pub struct ", "struct "]
+                .iter()
+                .find_map(|kw| {
+                    let needle = format!("{kw}{ident} {{");
+                    src.find(&needle).map(|s| block_from(src, s).to_owned())
+                })
+                .unwrap_or_default();
+            out.push((ident, block, body));
+        }
+        out
     }
 
     #[test]
@@ -204,35 +254,56 @@ mod delegation_guard {
         let mut files = Vec::new();
         rust_files(&root.join("crates"), &mut files);
         rust_files(&root.join("apps"), &mut files);
-        let mut offenders = Vec::new();
+        // Delegating implementations that do not forward all three hooks.
+        let mut found: BTreeSet<(String, String)> = BTreeSet::new();
         for f in files {
             let Ok(src) = std::fs::read_to_string(&f) else {
                 continue;
             };
-            if !src.contains("impl Tool for") || !src.lines().any(is_delegating_field) {
-                continue;
-            }
             let rel = f
                 .strip_prefix(root.join("crates"))
                 .or_else(|_| f.strip_prefix(root.join("apps")))
                 .unwrap_or(&f)
                 .to_string_lossy()
                 .replace(std::path::MAIN_SEPARATOR, "/");
-            let forwards = src.contains("fn always_ask") && src.contains("fn approval_details");
-            if !forwards && !REVIEWED.iter().any(|(p, _)| rel.ends_with(p)) {
-                offenders.push(rel);
+            for (ident, block, body) in impls(&src) {
+                let delegates = body.lines().any(is_delegating_field);
+                let forwards = block.contains("fn always_ask")
+                    && block.contains("fn approval_details")
+                    && block.contains("fn approval_closed");
+                if delegates && !forwards {
+                    found.insert((rel.clone(), ident));
+                }
             }
         }
+        let reviewed: BTreeSet<(String, String)> = REVIEWED
+            .iter()
+            .map(|(f, t, _)| ((*f).to_owned(), (*t).to_owned()))
+            .collect();
+        let new: Vec<_> = found.difference(&reviewed).collect();
+        let stale: Vec<_> = reviewed.difference(&found).collect();
         assert!(
-            offenders.is_empty(),
-            "these files implement Tool and hold another tool, registry or gate but do not forward always_ask / approval_details (see the delegation rule on `Tool`): {offenders:?}"
+            new.is_empty() && stale.is_empty(),
+            "delegating `impl Tool` without always_ask/approval_details/approval_closed (see the delegation rule on `Tool`): new {new:?}; stale reviewed entries {stale:?}"
         );
     }
 
     #[test]
-    fn the_detector_sees_a_delegating_field() {
+    fn the_detector_is_per_impl_block_and_sees_delegating_fields() {
         assert!(is_delegating_field("    inner: Arc<dyn Tool>,"));
         assert!(is_delegating_field("    pub(crate) tools: ToolRegistry,"));
         assert!(!is_delegating_field("    name: String,"));
+        // A forwarding impl in the same file does not excuse a non-forwarding one.
+        let src = "struct A {\n    inner: Arc<dyn Tool>,\n}\nimpl Tool for A {\n    fn call(&self) {}\n}\nstruct B {\n    n: u8,\n}\nimpl Tool for B {\n    fn always_ask(&self) {}\n    fn approval_details(&self) {}\n    fn approval_closed(&self) {}\n}\n";
+        let found = impls(src);
+        assert_eq!(found.len(), 2);
+        let (a, ablock, abody) = &found[0];
+        assert_eq!(a, "A");
+        assert!(abody.lines().any(is_delegating_field));
+        assert!(
+            !ablock.contains("fn always_ask"),
+            "B's hooks do not count for A"
+        );
+        assert!(found[1].1.contains("fn approval_closed"));
     }
 }

@@ -3419,3 +3419,16 @@ async fn a_failing_middle_chunk_leaves_no_button_and_points_to_the_desktop() {
     channel.handle_update(u).await.unwrap();
     assert!(daemon.approvals.lock().is_empty());
 }
+
+#[tokio::test]
+async fn details_this_channel_would_mask_are_not_offered_for_approval_here() {
+    // The channel's own redactor knows the bot token; a prompt carrying it would be
+    // shown masked while the stored schedule keeps the raw text.
+    let card = schedule_card(&format!("send it to {TEST_BOT_TOKEN} please"));
+    let msgs = approval_messages(Some(card)).await;
+    assert_eq!(msgs.len(), 1);
+    let text = msgs[0]["text"].as_str().unwrap();
+    assert!(text.contains("desktop app"), "{text}");
+    assert!(!text.contains(TEST_BOT_TOKEN));
+    assert!(msgs[0].get("reply_markup").is_none(), "no approve button");
+}

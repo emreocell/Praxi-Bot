@@ -155,6 +155,10 @@ pub struct SchedulePreview {
     pub next_runs: Vec<String>,
     /// For `update`: what it is now (old to new).
     pub previous: Option<PreviousSchedule>,
+    /// Identifies this preview: the approval loop hands it back when the
+    /// approval ends without the call running, and only the entry created for
+    /// it is dropped. Never shown to the user.
+    pub approval_ref: String,
 }
 
 /// The daemon side of the schedule tools. Every method is scoped to
@@ -181,7 +185,7 @@ pub trait ScheduleHost: Send + Sync {
 
     /// Forget what [`Self::preview`] froze for `change`: its approval ended
     /// without the call running (denied, cancelled, timed out).
-    fn discard(&self, caller: &ScheduleCaller, change: &ScheduleChange);
+    fn discard(&self, caller: &ScheduleCaller, change: &ScheduleChange, approval_ref: &str);
 
     /// Create a schedule (armed). Audited.
     ///
@@ -381,9 +385,9 @@ impl Tool for ScheduleTool {
         matches!(self.op, Op::Create | Op::Update | Op::Resume)
     }
 
-    fn approval_closed(&self, ctx: &ToolContext, input: &Value) {
-        if let (Ok(who), Ok(Some(change))) = (caller(ctx), self.change(input)) {
-            self.host.discard(&who, &change);
+    fn approval_closed(&self, ctx: &ToolContext, input: &Value, token: Option<&str>) {
+        if let (Some(token), Ok(who), Ok(Some(change))) = (token, caller(ctx), self.change(input)) {
+            self.host.discard(&who, &change, token);
         }
     }
 
@@ -515,12 +519,13 @@ mod tests {
                 timezone: "UTC".into(),
                 next_runs: vec!["a".into(), "b".into(), "c".into()],
                 previous: None,
+                approval_ref: "tok-1".into(),
             })
         }
-        fn discard(&self, c: &ScheduleCaller, ch: &ScheduleChange) {
+        fn discard(&self, c: &ScheduleCaller, ch: &ScheduleChange, token: &str) {
             self.calls
                 .lock()
-                .push(format!("discard {} {ch:?}", c.bot_id));
+                .push(format!("discard {} {ch:?} {token}", c.bot_id));
         }
         fn create(&self, c: &ScheduleCaller, _: &ScheduleRequest) -> Result<ScheduleView, String> {
             self.calls
@@ -681,16 +686,19 @@ mod tests {
     async fn a_closed_approval_discards_what_the_host_froze() {
         let host = Arc::new(Fake::default());
         let t = tool(&host, "schedule_create");
-        t.approval_closed(
-            &ctx(Some("bot-a")),
-            &json!({"name":"n","prompt":"p","when":"daily"}),
-        );
+        let input = json!({"name":"n","prompt":"p","when":"daily"});
+        t.approval_closed(&ctx(Some("bot-a")), &input, Some("tok-9"));
         let log = host.calls.lock().clone();
         assert_eq!(log.len(), 1);
         assert!(log[0].starts_with("discard bot-a Create"), "{log:?}");
-        // No bot, or a tool without a card: nothing to discard.
-        t.approval_closed(&ctx(None), &json!({"name":"n","prompt":"p"}));
-        tool(&host, "schedule_list").approval_closed(&ctx(Some("bot-a")), &json!({}));
+        assert!(
+            log[0].ends_with("tok-9"),
+            "only that approval's entry: {log:?}"
+        );
+        // No token (nothing was previewed), no bot, or a tool without a card: nothing to discard.
+        t.approval_closed(&ctx(Some("bot-a")), &input, None);
+        t.approval_closed(&ctx(None), &json!({"name":"n","prompt":"p"}), Some("tok"));
+        tool(&host, "schedule_list").approval_closed(&ctx(Some("bot-a")), &json!({}), Some("tok"));
         assert_eq!(host.calls.lock().len(), 1);
     }
 

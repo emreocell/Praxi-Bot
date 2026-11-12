@@ -4469,6 +4469,8 @@ struct AskTool {
     veto: Option<&'static str>,
     /// Times `approval_closed` ran (approval ended without the call running).
     closed: Arc<AtomicUsize>,
+    /// The `approval_ref` tokens `approval_closed` received.
+    tokens: Arc<Mutex<Vec<Option<String>>>>,
     /// Offer details at all (an always-ask tool that does not is refused).
     with_details: bool,
 }
@@ -4486,6 +4488,7 @@ fn ask_tool(veto: Option<&'static str>) -> Arc<AskTool> {
         count: Arc::new(AtomicUsize::new(0)),
         veto,
         closed: Arc::new(AtomicUsize::new(0)),
+        tokens: Arc::new(Mutex::new(Vec::new())),
         with_details: true,
     })
 }
@@ -4514,10 +4517,12 @@ impl Tool for AskTool {
             "prompt": input["prompt"],
             "bot_id": ctx.bot_id,
             "next_runs": ["a", "b", "c"],
+            "approval_ref": "tok-xyz",
         })))
     }
-    fn approval_closed(&self, _: &ToolContext, _: &Value) {
+    fn approval_closed(&self, _: &ToolContext, _: &Value, token: Option<&str>) {
         self.closed.fetch_add(1, Ordering::SeqCst);
+        self.tokens.lock().push(token.map(str::to_owned));
     }
     async fn call(&self, _: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
         self.count.fetch_add(1, Ordering::SeqCst);
@@ -4851,6 +4856,128 @@ async fn details_that_redaction_would_change_are_refused_before_asking() {
     let msg = tool_messages(&fake.request(1)).join("\n");
     assert!(msg.contains("looks like a secret"), "{msg}");
     assert!(!msg.contains(secret));
+    while let Ok(item) = rx.try_recv() {
+        assert!(!matches!(item.envelope.event, Event::ApprovalNeeded(_)));
+    }
+}
+
+#[tokio::test]
+async fn the_approval_ref_reaches_the_close_hook_but_never_the_card() {
+    let env = setup();
+    let t = ask_tool(None);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "sched_make", json!({"prompt": "p"}))]),
+        text("ok"),
+    ]);
+    let lp = ask_loop(&env, &fake, &t, Policy::approve_destructive());
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    let d = a.details.unwrap();
+    assert!(d.get("approval_ref").is_none(), "{d}");
+    assert_eq!(d["kind"], "schedule");
+    lp.deny(a.call_id, env.user, None).unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(*t.tokens.lock(), [Some("tok-xyz".to_owned())]);
+}
+
+#[tokio::test]
+async fn an_approved_permit_that_never_executes_releases_the_tools_entry() {
+    let env = setup();
+    let t = ask_tool(None);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "sched_make", json!({"prompt": "p"}))]),
+        text("ok"),
+    ]);
+    let lp = ask_loop(&env, &fake, &t, Policy::approve_destructive());
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    // The user approves, but the policy now denies the category: the call is
+    // never executed, so the approval's frozen state must be released.
+    let mut deny = Policy::approve_destructive();
+    deny.categories
+        .insert(PermissionCategory::System, Rule::new(Level::Deny));
+    lp.set_global_policy(deny);
+    let _ = lp.approve(a.call_id, ApprovalScope::Once, env.user);
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(t.count.load(Ordering::SeqCst), 0, "never executed");
+    assert_eq!(t.closed.load(Ordering::SeqCst), 1);
+    assert_eq!(*t.tokens.lock(), [Some("tok-xyz".to_owned())]);
+}
+
+#[tokio::test]
+async fn an_executed_approval_does_not_call_the_close_hook() {
+    let env = setup();
+    let t = ask_tool(None);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "sched_make", json!({"prompt": "p"}))]),
+        text("ok"),
+    ]);
+    let lp = ask_loop(&env, &fake, &t, Policy::approve_destructive());
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    lp.approve(a.call_id, ApprovalScope::Once, env.user)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(t.count.load(Ordering::SeqCst), 1);
+    assert_eq!(t.closed.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn a_multiline_secret_in_the_details_is_refused_like_any_other() {
+    let env = setup();
+    let t = ask_tool(None);
+    let pem = concat!(
+        "-----BEGIN PRIVATE KEY-----\n",
+        "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n",
+        "\"quoted\" \\ back\n",
+        "-----END PRIVATE KEY-----"
+    );
+    let fake = Fake::new(vec![
+        calls(&[(
+            "c1",
+            "sched_make",
+            json!({"prompt": format!("deploy with {pem}")}),
+        )]),
+        text("ok"),
+    ]);
+    let mut redactor = secret_store::Redactor::new();
+    redactor.add_secret(pem);
+    let mut config = cfg(Policy::approve_destructive());
+    config.redactor = Some(redactor.into());
+    let registry = ToolRegistry::new();
+    registry.register(Arc::clone(&t) as Arc<dyn Tool>);
+    let lp = AgentLoop::new(
+        Arc::clone(&env.storage),
+        registry,
+        Providers::single(Arc::clone(&fake) as Arc<dyn ChatProvider>),
+        config,
+    );
+    lp.add_profile(env.bot, profile(""));
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(t.count.load(Ordering::SeqCst), 0);
+    assert_eq!(t.closed.load(Ordering::SeqCst), 1);
+    assert!(
+        tool_messages(&fake.request(1))
+            .join(
+                "
+"
+            )
+            .contains("looks like a secret")
+    );
     while let Ok(item) = rx.try_recv() {
         assert!(!matches!(item.envelope.event, Event::ApprovalNeeded(_)));
     }

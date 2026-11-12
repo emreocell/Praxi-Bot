@@ -304,7 +304,8 @@ export function ApprovalCard({
         >
           {t("chat.approval.once")}
         </Button>
-        {schedule ? null : (
+        {/* The daemon refuses a standing grant for any card with details. */}
+        {tool.details != null ? null : (
           <>
             <Button
               size="sm"

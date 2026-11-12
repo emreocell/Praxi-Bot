@@ -1740,6 +1740,7 @@ dependencies = [
  "permission-engine",
  "protocol",
  "provider-catalog",
+ "rusqlite",
  "rustix",
  "scheduler",
  "secret-store",

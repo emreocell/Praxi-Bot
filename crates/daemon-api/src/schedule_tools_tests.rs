@@ -38,7 +38,7 @@ struct Fx {
     run_a: RunId,
     clock: Arc<AtomicI64>,
     events: broadcast::Receiver<ScheduleChanged>,
-    _dir: tempfile::TempDir,
+    dir: tempfile::TempDir,
 }
 
 fn limits(max: usize, min_secs: u64) -> ScheduleLimits {
@@ -113,7 +113,7 @@ fn fx_at(l: ScheduleLimits, start_ms: i64, known_user: bool) -> Fx {
             spec: None,
         })
         .unwrap();
-    let store = Arc::new(ScheduleStore::open_in_memory().unwrap());
+    let store = Arc::new(ScheduleStore::open(dir.path()).unwrap());
     let (tx, events) = broadcast::channel(64);
     let clock = Arc::new(AtomicI64::new(start_ms));
     let c = Arc::clone(&clock);
@@ -137,7 +137,7 @@ fn fx_at(l: ScheduleLimits, start_ms: i64, known_user: bool) -> Fx {
         run_a,
         clock,
         events,
-        _dir: dir,
+        dir,
     }
 }
 
@@ -854,22 +854,42 @@ fn names_and_prompts_are_capped_and_stripped_of_control_and_bidi_characters() {
         "a\u{200F}b",
         // Invisible text in an instruction channel.
         "a\u{200B}b",
-        "a\u{200C}b",
-        "a\u{200D}b",
         "a\u{2060}b",
         "a\u{FEFF}b",
         "a\u{00AD}b",
         "a\u{2028}b",
         "a\u{2029}b",
-        "a\u{FE0F}b",
         "a\u{E0100}b",
         "a\u{E0041}b", // a Unicode tag character
         "a\u{034F}b",
+        // Invisible fillers that render as blank.
+        "a\u{0890}b",
+        "a\u{0891}b",
+        "a\u{3164}b",
+        "a\u{115F}b",
+        "a\u{1160}b",
+        "a\u{2800}b",
     ] {
         let e = ok("n", bad).unwrap_err();
         assert!(e.contains("direction-override"), "{bad:?}: {e}");
         let e = ok(bad, "p").unwrap_err();
         assert!(e.contains("direction-override"), "{bad:?}: {e}");
+    }
+    // Emoji machinery gets its own plain explanation.
+    for bad in [
+        "a\u{200C}b",
+        "a\u{200D}b",
+        "a\u{FE0F}b",
+        "\u{1F468}\u{200D}\u{1F4BB}",
+    ] {
+        for e in [ok("n", bad).unwrap_err(), ok(bad, "p").unwrap_err()] {
+            assert!(
+                e.contains("variation selector or a zero-width (non-)joiner")
+                    && e.contains("not accepted in schedule prompts and names")
+                    && e.contains("plain text"),
+                "{bad:?}: {e}"
+            );
+        }
     }
     // Ordinary non-ASCII text is fine (homoglyphs are not filtered).
     assert!(ok("Günlük özet ☕", "Özetle: é ü ğ — ok").is_ok());
@@ -1175,14 +1195,14 @@ async fn enabling_registers_six_always_ask_tools_that_run_as_the_calling_bot() {
 // ---------------------------------------------------------------- frozen store: bound to the approval
 
 #[test]
-fn a_denied_preview_is_replaced_so_the_next_card_is_what_gets_stored() {
+fn a_denied_preview_is_discarded_so_the_next_card_is_what_gets_stored() {
     let start = utc_ms(2026, 11, 12, 12, 0);
     let f = fx_at(limits(20, 300), start, true);
     let r = when("Once", "in 2 hours");
     let ch = ScheduleChange::Create(r.clone());
     // T0: card shown (T0+2h), user denies.
-    f.host.preview(&f.caller_a(), &ch).unwrap();
-    f.host.discard(&f.caller_a(), &ch);
+    let p0 = f.host.preview(&f.caller_a(), &ch).unwrap();
+    f.host.discard(&f.caller_a(), &ch, &p0.approval_ref);
     f.advance(30 * 60_000);
     // T0+30m: the same call again; the card shows T0+2h30m, user approves.
     let p = f.host.preview(&f.caller_a(), &ch).unwrap();
@@ -1207,29 +1227,58 @@ fn a_denied_preview_is_replaced_so_the_next_card_is_what_gets_stored() {
 }
 
 #[test]
-fn an_abandoned_preview_is_replaced_by_the_next_one_even_without_a_discard() {
+fn a_second_identical_preview_is_refused_while_the_first_is_pending() {
     let start = utc_ms(2026, 11, 12, 12, 0);
     let f = fx_at(limits(20, 300), start, true);
     let r = when("Once", "in 2 hours");
     let ch = ScheduleChange::Create(r.clone());
-    f.host.preview(&f.caller_a(), &ch).unwrap(); // card nobody answered
-    f.advance(45 * 60_000);
-    f.host.preview(&f.caller_a(), &ch).unwrap(); // the card that was approved
+    let a = f.host.preview(&f.caller_a(), &ch).unwrap(); // card A: 14:00
+    assert!(a.next_runs[0].starts_with("2026-11-12T17:00:00+03:00"));
+    f.advance(30 * 60_000);
+    // Card B (same call, 12:30) must not replace A's entry.
+    let e = f.host.preview(&f.caller_a(), &ch).unwrap_err();
+    assert!(
+        e.contains("an identical approval is already waiting"),
+        "{e}"
+    );
+    // User approves A: exactly A's time is stored.
     f.host.create(&f.caller_a(), &r).unwrap();
     let sc = f.store.list_by_bot(f.a).unwrap().remove(0);
     assert_eq!(
         sc.spec,
         ScheduleSpec::At {
-            unix_ms: start + 165 * 60_000
+            unix_ms: start + 120 * 60_000
         }
     );
-    // One preview, one apply: the entry is gone now.
-    assert!(
-        f.host
-            .create(&f.caller_a(), &r)
-            .unwrap_err()
-            .contains("not previewed")
-    );
+    // One preview, one apply: the key is free again afterwards.
+    f.host.preview(&f.caller_a(), &ch).unwrap();
+}
+
+#[test]
+fn closing_an_approval_drops_only_the_entry_made_for_it() {
+    let f = fx(limits(20, 300));
+    let r = when("n", "daily");
+    let ch = ScheduleChange::Create(r.clone());
+    let p = f.host.preview(&f.caller_a(), &ch).unwrap();
+    // A close from some other approval (wrong reference) changes nothing.
+    f.host.discard(&f.caller_a(), &ch, "some-other-approval");
+    assert!(f.host.preview(&f.caller_a(), &ch).is_err(), "still pending");
+    f.host.create(&f.caller_a(), &r).unwrap();
+    // A close that arrives after the entry was used (or for a stale ref) is harmless.
+    let p2 = f.host.preview(&f.caller_a(), &ch).unwrap();
+    f.host.discard(&f.caller_a(), &ch, &p.approval_ref);
+    f.host.create(&f.caller_a(), &r).unwrap();
+    assert_eq!(f.store.list_by_bot(f.a).unwrap().len(), 2);
+    assert_ne!(p.approval_ref, p2.approval_ref);
+}
+
+#[test]
+fn an_expired_entry_does_not_block_a_new_preview() {
+    let f = fx(limits(20, 300));
+    let ch = ScheduleChange::Create(when("n", "daily"));
+    f.host.preview(&f.caller_a(), &ch).unwrap();
+    f.advance(7 * 3_600_000);
+    f.host.preview(&f.caller_a(), &ch).unwrap();
 }
 
 #[test]
@@ -1265,7 +1314,7 @@ fn a_stale_preview_past_its_time_to_live_is_refused() {
 }
 
 #[test]
-fn preview_spam_from_one_run_cannot_evict_another_runs_pending_entry() {
+fn preview_spam_never_evicts_another_runs_pending_entry() {
     let f = fx(limits(20, 300));
     let run_b = ScheduleCaller {
         bot_id: f.a.to_string(),
@@ -1275,21 +1324,29 @@ fn preview_spam_from_one_run_cannot_evict_another_runs_pending_entry() {
     f.host
         .preview(&run_b, &ScheduleChange::Create(rb.clone()))
         .unwrap();
-    // 20 other runs each spam 40 distinct previews (more than the overall cap in total).
+    // 20 other runs each try 40 distinct previews (more than the overall cap in total).
+    let mut refused = 0;
     for run in 0..20 {
         let c = ScheduleCaller {
             bot_id: f.a.to_string(),
             run_id: format!("spam-{run}"),
         };
         for i in 0..40 {
-            f.host
+            if f.host
                 .preview(&c, &ScheduleChange::Create(when(&format!("s{i}"), "daily")))
-                .unwrap();
+                .is_err()
+            {
+                refused += 1;
+            }
         }
     }
+    assert!(
+        refused > 0,
+        "once the overall cap is reached, newcomers are refused"
+    );
     f.host.create(&run_b, &rb).unwrap();
     assert_eq!(f.store.list_by_bot(f.a).unwrap().len(), 1);
-    // The spammer's own oldest entries went first.
+    // Within the per-run cap a run evicts only its own oldest entry.
     let c0 = ScheduleCaller {
         bot_id: f.a.to_string(),
         run_id: "spam-0".into(),
@@ -1383,6 +1440,100 @@ async fn every_mutating_schedule_tool_has_the_expected_approval_behaviour() {
             d["schedule"].as_str().is_some_and(|s| !s.is_empty()),
             "{name}"
         );
-        t.approval_closed(&ctx, &input); // never panics, drops the frozen entry
+        t.approval_closed(&ctx, &input, None); // never panics
     }
+}
+
+#[test]
+fn deleting_does_not_delete_a_schedule_the_user_edited_meanwhile() {
+    let f = fx(limits(20, 300));
+    let v = f.make(&f.caller_a(), &when("mine", "daily")).unwrap();
+    let id = scheduler::TaskId(uuid::Uuid::parse_str(&v.id).unwrap());
+    f.host
+        .preview(&f.caller_a(), &ScheduleChange::Delete { id: v.id.clone() })
+        .unwrap();
+    // A UI edit lands between the approval card and the delete.
+    let mut cur = f.store.get(id).unwrap().unwrap();
+    cur.name = "user's rewrite".into();
+    f.store
+        .update_definition_and_rearm(&cur, None, now_ms())
+        .unwrap();
+    let e = f.host.delete(&f.caller_a(), &v.id).unwrap_err();
+    assert!(e.contains("changed or was deleted"), "{e}");
+    assert_eq!(f.store.get(id).unwrap().unwrap().name, "user's rewrite");
+    assert!(
+        f.audit().iter().all(|e| e.action != "schedule.delete"),
+        "no deletion was logged: nothing was deleted"
+    );
+    // Ownership handed to the user in between: also kept.
+    f.host
+        .preview(&f.caller_a(), &ScheduleChange::Delete { id: v.id.clone() })
+        .unwrap();
+    f.store.set_origin(id, ScheduleOrigin::User).unwrap();
+    assert!(f.host.delete(&f.caller_a(), &v.id).is_err());
+    assert!(f.store.get(id).unwrap().is_some());
+}
+
+/// Make every write to `schedules.db` fail from now on (a second connection
+/// installs triggers), as a disk or lock failure after the audit write would.
+fn break_writes(f: &Fx, what: &[&str]) {
+    let conn = rusqlite::Connection::open(f.dir.path().join("schedules.db")).unwrap();
+    for w in what {
+        conn.execute_batch(&format!(
+            "CREATE TRIGGER block_{w} BEFORE {w} ON schedules BEGIN SELECT RAISE(ABORT, 'disk on fire'); END;"
+        ))
+        .unwrap();
+    }
+}
+
+#[test]
+fn schedule_failed_is_written_when_the_store_fails_after_the_audit_entry() {
+    let f = fx(limits(20, 300));
+    let v = f.make(&f.caller_a(), &when("keep", "daily")).unwrap();
+    break_writes(&f, &["INSERT", "UPDATE", "DELETE"]);
+    let attempts: Vec<(&str, Result<ScheduleView, String>)> = vec![
+        ("create", f.make(&f.caller_a(), &when("new", "daily"))),
+        (
+            "update",
+            f.edit(
+                &f.caller_a(),
+                &v.id,
+                &patch(|r| r.prompt = Some("x".into())),
+            ),
+        ),
+        ("pause", f.toggle(&f.caller_a(), &v.id, false)),
+        ("delete", f.remove(&f.caller_a(), &v.id)),
+    ];
+    for (what, r) in &attempts {
+        let e = r.as_ref().unwrap_err();
+        assert!(e.contains("disk on fire"), "{what}: {e}");
+    }
+    let log = f.storage.list_audit(f.user).unwrap();
+    let failed: Vec<(&str, &str)> = log
+        .iter()
+        .filter(|e| e.action == "schedule.failed")
+        .map(|e| {
+            (
+                e.detail["attempted"].as_str().unwrap(),
+                e.detail["change"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        failed,
+        [
+            ("schedule.create", "created"),
+            ("schedule.update", "updated"),
+            ("schedule.update", "paused"),
+            ("schedule.delete", "deleted"),
+        ]
+    );
+    for e in log.iter().filter(|e| e.action == "schedule.failed") {
+        assert!(e.detail["error"].as_str().unwrap().contains("disk on fire"));
+        assert_eq!(e.detail["bot_id"], f.a.to_string());
+    }
+    // Nothing changed.
+    let still = f.store.list_by_bot(f.a).unwrap();
+    assert_eq!(still.len(), 1);
+    assert!(still[0].enabled);
 }

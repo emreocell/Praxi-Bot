@@ -9,7 +9,7 @@
 //! * Limits and the default timezone come from `<data dir>/schedule.toml`
 //!   ([`load_schedule_limits`]); a bad file disables the tools (fail closed).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -140,6 +140,8 @@ struct Frozen {
     key: String,
     /// `bot|run` that previewed it (per-owner cap).
     owner: String,
+    /// Identifies the preview (the approval) this entry was made for.
+    nonce: String,
     made_ms: i64,
     name: String,
     prompt: String,
@@ -314,6 +316,12 @@ fn is_hidden(c: char) -> bool {
         '\u{00AD}'
             | '\u{034F}'
             | '\u{0600}'..='\u{0605}'
+            | '\u{0890}'
+            | '\u{0891}'
+            | '\u{115F}'
+            | '\u{1160}'
+            | '\u{2800}'
+            | '\u{3164}'
             | '\u{061C}'
             | '\u{06DD}'
             | '\u{070F}'
@@ -348,6 +356,12 @@ fn clean_text(field: &str, raw: &str, max: usize, allow_newlines: bool) -> Resul
     }
     for c in t.chars() {
         let bad_control = c.is_control() && !(allow_newlines && (c == '\n' || c == '\t'));
+        if matches!(c, '\u{FE0F}' | '\u{200D}' | '\u{200C}') {
+            return Err(format!(
+                "`{field}` contains an emoji variation selector or a zero-width (non-)joiner (U+{:04X}). Emoji built with variation selectors or joiners, and zero-width joiners in general, are not accepted in schedule prompts and names; use plain text instead",
+                u32::from(c)
+            ));
+        }
         if bad_control || is_hidden(c) {
             return Err(format!(
                 "`{field}` contains a control, invisible or direction-override character (U+{:04X}); remove it",
@@ -568,37 +582,41 @@ impl DaemonScheduleHost {
         )
     }
 
-    /// Remember `f`. A new preview of the same call REPLACES the older one (a
-    /// denied or abandoned approval leaves nothing that could be applied for
-    /// the next card); one run cannot evict another run's pending entry.
-    fn freeze(&self, f: Frozen) {
+    /// Remember `f` for the approval about to be shown.
+    ///
+    /// * An unexpired entry for the same call is still waiting for its
+    ///   approval: the second preview is refused (replacing it would let card A
+    ///   store card B's time). Entries of closed approvals are gone already.
+    /// * Caps only ever evict the requester's OWN oldest entry; when the
+    ///   overall cap is reached and the requester has none, the preview is
+    ///   refused rather than pushing out another run's pending approval.
+    fn freeze(&self, f: Frozen) -> Result<(), String> {
         let now = self.now();
         let mut q = self.frozen.lock();
-        q.retain(|x| now - x.made_ms < FROZEN_TTL_MS && x.key != f.key);
-        // Own oldest first.
-        while q.iter().filter(|x| x.owner == f.owner).count() >= FROZEN_PER_OWNER {
-            if let Some(i) = q.iter().position(|x| x.owner == f.owner) {
-                q.remove(i);
-            }
+        q.retain(|x| now - x.made_ms < FROZEN_TTL_MS);
+        if q.iter().any(|x| x.key == f.key) {
+            return Err(
+                "an identical approval is already waiting; answer or dismiss it first".into(),
+            );
         }
-        // Overall cap: shed the oldest entry of whoever holds the most.
+        let evict_own_oldest = |q: &mut VecDeque<Frozen>| -> bool {
+            q.iter()
+                .position(|x| x.owner == f.owner)
+                .is_some_and(|i| q.remove(i).is_some())
+        };
+        while q.iter().filter(|x| x.owner == f.owner).count() >= FROZEN_PER_OWNER {
+            evict_own_oldest(&mut q);
+        }
         while q.len() >= FROZEN_MAX {
-            let mut counts: HashMap<&str, usize> = HashMap::new();
-            for x in q.iter() {
-                *counts.entry(x.owner.as_str()).or_default() += 1;
-            }
-            let Some(biggest) = counts
-                .into_iter()
-                .max_by_key(|(_, n)| *n)
-                .map(|(o, _)| o.to_owned())
-            else {
-                break;
-            };
-            if let Some(i) = q.iter().position(|x| x.owner == biggest) {
-                q.remove(i);
+            if !evict_own_oldest(&mut q) {
+                return Err(
+                    "too many approvals are waiting right now; try again after some are answered"
+                        .into(),
+                );
             }
         }
         q.push_back(f);
+        Ok(())
     }
 
     /// The current frozen change for exactly this call, removed; `None` when
@@ -635,6 +653,7 @@ impl DaemonScheduleHost {
                 Ok(Frozen {
                     key,
                     owner: Self::owner(caller),
+                    nonce: Uuid::now_v7().to_string(),
                     made_ms: now,
                     name,
                     prompt,
@@ -672,6 +691,7 @@ impl DaemonScheduleHost {
                 Ok(Frozen {
                     key,
                     owner: Self::owner(caller),
+                    nonce: Uuid::now_v7().to_string(),
                     made_ms: now,
                     name,
                     prompt,
@@ -702,6 +722,7 @@ impl DaemonScheduleHost {
         Frozen {
             key,
             owner,
+            nonce: Uuid::now_v7().to_string(),
             made_ms: now,
             name: cur.name.clone(),
             prompt: prompt_of(&cur.payload),
@@ -765,6 +786,7 @@ impl DaemonScheduleHost {
                     .map(|t| local(t, f.tz))
                     .collect()
             },
+            approval_ref: String::new(),
             previous: before.filter(|_| action == "update").map(|b| {
                 let tz = spec_tz(&b.spec, self.default_tz());
                 PreviousSchedule {
@@ -987,14 +1009,17 @@ impl ScheduleHost for DaemonScheduleHost {
             ScheduleChange::Pause { id } => ("pause", None, Some(self.own(caller, id)?.id)),
             ScheduleChange::Delete { id } => ("delete", None, Some(self.own(caller, id)?.id)),
         };
-        let p = self.preview_of(action, &f, before.as_ref(), id);
-        self.freeze(f);
+        let mut p = self.preview_of(action, &f, before.as_ref(), id);
+        p.approval_ref.clone_from(&f.nonce);
+        self.freeze(f)?;
         Ok(p)
     }
 
-    fn discard(&self, caller: &ScheduleCaller, change: &ScheduleChange) {
+    fn discard(&self, caller: &ScheduleCaller, change: &ScheduleChange, approval_ref: &str) {
         let key = Self::key(caller, change);
-        self.frozen.lock().retain(|f| f.key != key);
+        self.frozen
+            .lock()
+            .retain(|f| !(f.key == key && f.nonce == approval_ref));
     }
 
     fn create(
@@ -1075,7 +1100,18 @@ impl ScheduleHost for DaemonScheduleHost {
         self.audit(caller, "schedule.delete", "deleted", &cur, None)?;
         // One statement: the webhook trigger goes with the schedule (cascade),
         // so nothing is removed unless the whole delete succeeds.
-        if let Err(e) = self.store.delete(cur.id).map_err(err) {
+        let deleted = self
+            .store
+            .delete_exact(cur.id, cur.revision, ScheduleOrigin::Bot)
+            .map_err(err)
+            .and_then(|ok| {
+                if ok {
+                    Ok(())
+                } else {
+                    Err("that schedule changed or was deleted after the approval was requested; nothing was deleted".to_owned())
+                }
+            });
+        if let Err(e) = deleted {
             self.audit_failed(caller, "schedule.delete", "deleted", &cur, &e);
             return Err(e);
         }
