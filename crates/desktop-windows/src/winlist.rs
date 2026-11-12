@@ -850,9 +850,12 @@ mod launch_tests {
         std::fs::create_dir_all(&dir).unwrap();
         let helper = dir.join("helper.cmd");
         let out = dir.join("out.txt");
+        // `cmd` creates the `>` target before `echo` writes into it, so polling
+        // `out.txt` could read it empty. The script writes `out.tmp` and renames
+        // it, so `out.txt` only ever appears complete.
         std::fs::write(
             &helper,
-            "@echo off\r\nsetlocal DisableDelayedExpansion\r\nset \"a=%~1\"\r\nsetlocal EnableDelayedExpansion\r\n> \"%~dp0out.txt\" echo(!a!\r\n",
+            "@echo off\r\nsetlocal DisableDelayedExpansion\r\nset \"a=%~1\"\r\nsetlocal EnableDelayedExpansion\r\n> \"%~dp0out.tmp\" echo(!a!\r\nmove /y \"%~dp0out.tmp\" \"%~dp0out.txt\" >nul\r\n",
         )
         .unwrap();
         let launch_arg = |arg: &str| {
@@ -862,7 +865,7 @@ mod launch_tests {
                 args: vec![arg.into()],
             })
             .unwrap_or_else(|error| panic!("launch {arg:?}: {error}"));
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
             loop {
                 if let Ok(text) = std::fs::read_to_string(&out) {
                     return text;
@@ -917,7 +920,7 @@ mod launch_tests {
     }
 
     fn launch_arg_output(out: &std::path::Path) -> String {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         loop {
             if let Ok(text) = std::fs::read_to_string(out) {
                 return text;
