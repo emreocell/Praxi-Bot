@@ -4,6 +4,8 @@ use std::{path::PathBuf, time::Duration};
 
 #[path = "support/capture.rs"]
 mod capture;
+#[path = "support/example_bin.rs"]
+mod example_bin;
 
 use mcp_bridge::{
     Backoff, McpManager, McpPolicy, McpServerConfig, McpTransport, OS_ESSENTIAL_ENV, ServerStatus,
@@ -12,14 +14,7 @@ use serde_json::json;
 use tool_registry::{ContentPart, Effect, ToolContext, ToolError, ToolRegistry};
 
 fn server_exe() -> PathBuf {
-    // target/debug/deps/<test>.exe -> target/debug/examples/test_server[.exe]
-    let mut p = std::env::current_exe().unwrap();
-    p.pop();
-    p.pop();
-    p.push("examples");
-    p.push(format!("test_server{}", std::env::consts::EXE_SUFFIX));
-    assert!(p.exists(), "build the example first: {}", p.display());
-    p
+    example_bin::test_server().to_path_buf()
 }
 
 fn config(id: &str) -> McpServerConfig {
