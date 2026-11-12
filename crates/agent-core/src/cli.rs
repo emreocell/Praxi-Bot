@@ -5,7 +5,7 @@ use crate::{
     shared::{ModelOut, STEP_TOOLS, Shared, xe},
 };
 use async_trait::async_trait;
-use cli_provider::runtime::{CliEngine, Engine, ToolReply, Turn, TurnHost};
+use cli_provider::runtime::{CliEngine, CliError, Engine, ToolReply, Turn, TurnHost};
 use permission_engine::Decision;
 use protocol::{Event, ToolCallId, event::MessageDelta};
 use provider_catalog::{
@@ -222,7 +222,7 @@ impl TurnExecutor {
         )
         .await
         .map_err(|_| xe("CLI turn timed out"))?
-        .map_err(xe)?;
+        .map_err(|e| cli_exec_error(engine, &e))?;
         Ok(ModelOut {
             text: self.sh.redact(host.text.lock().clone()),
             model: req.model.0.clone(),
@@ -236,6 +236,45 @@ impl TurnExecutor {
             ..ModelOut::default()
         })
     }
+}
+
+fn cli_exec_error(engine: Engine, err: &CliError) -> ExecError {
+    let (name, cmd) = match engine {
+        Engine::Claude => ("Claude Code", "claude"),
+        Engine::Codex => ("Codex CLI", "codex"),
+    };
+    let code = err.code();
+    let msg = match err {
+        CliError::Cancelled => return ExecError(code.to_owned()),
+        CliError::NotInstalled => format!(
+            "{name} is not installed or needs an update. Install or update {name}, then sign in by running `{cmd}` in a terminal. ({code})"
+        ),
+        CliError::ShimRefused => format!(
+            "{name} could not be launched because a wrapper shim was refused. Install {name} natively or put the real `{cmd}` binary on PATH. ({code})"
+        ),
+        CliError::SignedOut => format!(
+            "{name} is signed out. Sign in by running `{cmd}` in a terminal, then try again. ({code})"
+        ),
+        CliError::Protocol => format!(
+            "{name} ended unexpectedly or returned an unreadable response. Sign in by running `{cmd}` in a terminal, or update the CLI and try again. ({code})"
+        ),
+        CliError::NativeToolsOpen => format!(
+            "{name} could not be started safely because required isolation flags are missing or unsupported. Update the CLI and try again. ({code})"
+        ),
+        CliError::Quota => format!(
+            "{name} subscription usage limit reached. Wait for your quota to reset or switch providers. ({code})"
+        ),
+        CliError::Io => format!(
+            "Could not communicate with {name}. Verify `{cmd}` runs in a terminal and try again. ({code})"
+        ),
+        CliError::BinaryChanged => format!(
+            "The {name} binary changed while starting the turn. Try sending your message again. ({code})"
+        ),
+        CliError::CodexUnconfinable => format!(
+            "The installed Codex cannot disable unified_exec, so Praxi will not run it. ({code})"
+        ),
+    };
+    ExecError(msg)
 }
 
 /// Validate a `--model` override destined for a subprocess CLI engine.
@@ -366,6 +405,33 @@ mod tests {
         assert_eq!(lp.wait(run).await.unwrap(), task_runtime::RunState::Failed);
         let events = storage::read_event_log(env.dir.path(), run).unwrap();
         assert!(format!("{events:?}").contains("not_installed"));
+        assert!(format!("{events:?}").contains("Install or update Claude Code"));
+    }
+
+    #[test]
+    fn cli_exec_error_includes_actionable_guidance_and_stable_code() {
+        for (err, expected_code, expected_phrase) in [
+            (
+                CliError::NotInstalled,
+                "not_installed",
+                "Install or update Claude Code",
+            ),
+            (
+                CliError::ShimRefused,
+                "shim_refused",
+                "Install Claude Code natively",
+            ),
+            (
+                CliError::SignedOut,
+                "signed_out",
+                "Sign in by running `claude` in a terminal",
+            ),
+            (CliError::Protocol, "cli_protocol_error", "update the CLI"),
+        ] {
+            let out = cli_exec_error(Engine::Claude, &err);
+            assert!(out.0.contains(expected_code), "{err:?} -> {}", out.0);
+            assert!(out.0.contains(expected_phrase), "{err:?} -> {}", out.0);
+        }
     }
     #[test]
     fn cli_model_arg_omits_default_placeholder() {

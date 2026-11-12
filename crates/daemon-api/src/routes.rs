@@ -1062,8 +1062,12 @@ fn persist_cli_enable(
     let provider_id = format!("cli:{}", spec.id);
     let _guard = s.providers_lock();
     let path = provider_catalog::config_path(&s.data_dir());
-    let _file_lock = provider_catalog::ProviderConfig::lock(&path)
-        .map_err(|e| ApiError::internal(format!("providers.lock: {e}")))?;
+    let _file_lock = provider_catalog::ProviderConfig::lock(&path).map_err(|e| match e {
+        provider_catalog::ConfigError::LockTimeout(_) => {
+            ApiError::unavailable(format!("providers.lock: {e}"))
+        }
+        other => ApiError::internal(format!("providers.lock: {other}")),
+    })?;
     let mut cfg = provider_catalog::ProviderConfig::load(&path)
         .map_err(|e| ApiError::internal(format!("providers.toml: {e}")))?;
     let existing = cfg.get(&provider_id).cloned();
@@ -1146,7 +1150,10 @@ pub(crate) async fn enable_cli_provider(
             )));
         }
     };
-    let dto = persist_cli_enable(&s, spec, engine)?;
+    let st = s.clone();
+    let dto = tokio::task::spawn_blocking(move || persist_cli_enable(&st, spec, engine))
+        .await
+        .map_err(ApiError::internal)??;
     if s.provider_host().is_some() {
         let _ = reload_from_host(&s).await?;
     }

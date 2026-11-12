@@ -2839,7 +2839,15 @@ async fn peer_router_denies_provider_cli_enable_and_reload_for_all_peers() {
     for role in [crate::PeerRole::Phone, crate::PeerRole::Desktop] {
         for (path, body) in [
             ("/v1/providers/cli/enable", Some(json!({ "id": "claude" }))),
+            (
+                "/v1/providers/cli%2Fenable",
+                Some(json!({ "id": "claude" })),
+            ),
+            ("/v1/providers/cli/enable/", Some(json!({ "id": "claude" }))),
+            ("/v1/providers//cli/enable", Some(json!({ "id": "claude" }))),
             ("/v1/providers/reload", None),
+            ("/v1/providers/reload/", None),
+            ("/v1/providers//reload", None),
         ] {
             let mut req = Request::builder()
                 .method(Method::POST)

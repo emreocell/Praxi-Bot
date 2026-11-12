@@ -385,15 +385,21 @@ pub fn configure_provider(
     model: Option<&str>,
 ) -> Result<(ProviderSettings, ProviderConfig)> {
     let entry = entry_for(choice, env.catalog)?;
+    let secret_ref = if let Some(k) = key {
+        let name = api_key_secret_name(&entry.id);
+        let secret_ref = SecretRef::new(name.clone())?;
+        // Write to the OS keychain/secret store before taking providers.lock so
+        // an interactive unlock prompt never stalls concurrent config writers.
+        env.store.set(&name, k.expose())?;
+        Some(secret_ref)
+    } else {
+        None
+    };
     let path = config_path(env.data_dir);
     let _guard = ProviderConfig::lock(&path)?;
     let mut cfg = ProviderConfig::load(&path)?;
     let mut s = ProviderSettings::new(&entry.id, now_ms());
-    if let Some(k) = key {
-        let name = api_key_secret_name(&entry.id);
-        env.store.set(&name, k.expose())?;
-        s.key = Some(SecretRef::new(name)?);
-    }
+    s.key = secret_ref;
     if matches!(choice, ProviderChoice::Custom { .. }) {
         s.custom = Some(entry);
     }

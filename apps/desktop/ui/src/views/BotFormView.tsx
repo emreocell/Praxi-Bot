@@ -6,7 +6,8 @@ import {
   type McpServer,
   PERMISSION_CATEGORIES,
   type PermissionCategoryName,
-  type PermissionLevel
+  type PermissionLevel,
+  type ProvidersDto
 } from "../api/types";
 import formStyles from "../components/Form.module.css";
 import { avatarFromFile, AvatarFileError } from "../lib/avatar";
@@ -26,7 +27,6 @@ import { FAKE_PROVIDER_ID } from "../lib/providers";
 import {
   isCliProvider,
   nonCliProviderIds,
-  type ProvidersView,
   providersView
 } from "../lib/providerView";
 import { useDaemon } from "../state/DaemonContext";
@@ -38,19 +38,21 @@ function ModelField({
   label,
   value,
   providers,
+  providersDto,
   required,
   onChange
 }: {
   label: string;
   value: ModelRef;
   providers: string[];
+  providersDto: ProvidersDto | null;
   required?: boolean;
   onChange: (v: ModelRef) => void;
 }) {
   const { t } = useTranslation();
   const known = providers.includes(value.provider) || value.provider === "";
   const options = known ? providers : [value.provider, ...providers];
-  const cli = isCliProvider(value.provider);
+  const cli = isCliProvider(value.provider, providersDto);
   return (
     <div className={formStyles.field}>
       <span className={formStyles.label}>
@@ -66,7 +68,11 @@ function ModelField({
             const next = e.target.value;
             onChange({
               provider: next,
-              model: isCliProvider(next) ? "default" : cli ? "" : value.model
+              model: isCliProvider(next, providersDto)
+                ? "default"
+                : cli
+                  ? ""
+                  : value.model
             });
           }}
         >
@@ -127,8 +133,10 @@ export function BotFormView({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
-  const [providerList, setProviderList] = useState<ProvidersView>(() =>
-    providersView(null)
+  const [providersDto, setProvidersDto] = useState<ProvidersDto | null>(null);
+  const providerList = useMemo(
+    () => providersView(providersDto),
+    [providersDto]
   );
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -141,7 +149,7 @@ export function BotFormView({
       .providers()
       .then((p) => {
         if (!cancelled) {
-          setProviderList(providersView(p));
+          setProvidersDto(p);
         }
       })
       .catch(() => {});
@@ -187,8 +195,8 @@ export function BotFormView({
   }, [providerList, conn?.fake_provider]);
 
   const httpProviders = useMemo(
-    () => nonCliProviderIds(providerIds),
-    [providerIds]
+    () => nonCliProviderIds(providerIds, providersDto),
+    [providerIds, providersDto]
   );
 
   const patch = (p: Partial<BotDraft>) => setDraft((d) => ({ ...d, ...p }));
@@ -405,6 +413,7 @@ export function BotFormView({
             required
             value={draft.executor}
             providers={providerIds}
+            providersDto={providersDto}
             onChange={(executor) => patch({ executor })}
           />
           {executorMissing ? (
@@ -414,12 +423,14 @@ export function BotFormView({
             label={t("botForm.role.planner")}
             value={draft.planner}
             providers={httpProviders}
+            providersDto={providersDto}
             onChange={(planner) => patch({ planner })}
           />
           <ModelField
             label={t("botForm.role.classifier")}
             value={draft.classifier}
             providers={httpProviders}
+            providersDto={providersDto}
             onChange={(classifier) => patch({ classifier })}
           />
           <div className={formStyles.field}>

@@ -120,6 +120,20 @@ fn main() {
         emit(json!({"type":"result","is_error":true,"error":"rate_limit quota"}));
         return;
     }
+    if mode == "signed-out" {
+        eprint!("Not logged in. Please run `claude` to sign in.");
+        emit(json!({
+            "type": "result",
+            "subtype": "error_during_execution",
+            "is_error": true,
+            "errors": ["Not logged in · Please run /login"]
+        }));
+        return;
+    }
+    if mode == "signed-out-stderr" {
+        eprintln!("Error: Not logged in. Please run `claude` to sign in.");
+        std::process::exit(1);
+    }
     let stdin = std::io::stdin();
     let mut reader = stdin.lock();
     let (url, auth, tool) = if args.iter().any(|s| s == "-p") {

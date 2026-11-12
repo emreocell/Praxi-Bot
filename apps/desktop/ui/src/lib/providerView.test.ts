@@ -145,6 +145,26 @@ test("providersView excludes cli catalog entries from add-provider catalog while
     "ghost",
     "second"
   ]);
+  const dtoCustomCli: ProvidersDto = {
+    ...withCli,
+    catalog: [
+      ...withCli.catalog,
+      {
+        id: "claude-code-custom",
+        kind: "cli",
+        base_url: "",
+        auth: "none",
+        key_env: null,
+        tools: true,
+        vision: false,
+        configured: true
+      }
+    ]
+  };
+  assert.deepEqual(
+    nonCliProviderIds(["aaa", "claude-code-custom", "second"], dtoCustomCli),
+    ["aaa", "second"]
+  );
   assert.equal(
     defaultModelRef({ ...withCli, default_provider: "cli:claude" }),
     "cli:claude/default"

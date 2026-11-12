@@ -9,6 +9,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use secret_store::{SecretRef, SecretStore, resolve};
 use serde::{Deserialize, Serialize};
@@ -226,7 +227,14 @@ pub enum ConfigError {
     /// Unknown provider id.
     #[error("provider {0:?} is not configured")]
     Unknown(String),
+    /// Timed out waiting for the cross-process `providers.lock` advisory lock.
+    #[error(
+        "timed out waiting for providers.lock after {0:?}: another process may still be editing providers.toml"
+    )]
+    LockTimeout(Duration),
 }
+
+const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_secs(10);
 
 static PROCESS_LOCK: Mutex<()> = Mutex::new(());
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -248,15 +256,29 @@ impl Drop for ConfigLockGuard {
 }
 
 impl ProviderConfig {
-    /// Acquire the in-process and cross-process advisory lock for `path`.
+    /// Acquire the in-process and cross-process advisory lock for `path` with a
+    /// bounded wait of 10 seconds.
     ///
     /// Callers performing a read-modify-write must hold this guard across
     /// [`Self::load`], mutation, and [`Self::save`]. [`Self::save`] itself does
     /// not lock so single-process callers never deadlock re-entrantly.
     ///
     /// # Errors
-    /// Directory creation, file open, or OS lock errors.
+    /// Directory creation, file open, lock timeout, or OS lock errors.
     pub fn lock(path: &Path) -> Result<ConfigLockGuard, ConfigError> {
+        Self::lock_with_timeout(path, DEFAULT_LOCK_TIMEOUT)
+    }
+
+    /// Acquire the in-process and cross-process advisory lock for `path`,
+    /// failing closed with [`ConfigError::LockTimeout`] if `timeout` elapses
+    /// before the OS lock becomes available.
+    ///
+    /// # Errors
+    /// Directory creation, file open, lock timeout, or OS lock errors.
+    pub fn lock_with_timeout(
+        path: &Path,
+        timeout: Duration,
+    ) -> Result<ConfigLockGuard, ConfigError> {
         let process = PROCESS_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -266,17 +288,38 @@ impl ProviderConfig {
             std::fs::create_dir_all(dir)?;
         }
         let lock_path = path.with_extension("lock");
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(&lock_path)?;
-        fs4::FileExt::lock(&file)?;
-        Ok(ConfigLockGuard {
-            file,
-            _process: process,
-        })
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).read(true).write(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(&lock_path)?;
+        let start = Instant::now();
+        let mut backoff = Duration::from_millis(5);
+        loop {
+            match fs4::FileExt::try_lock(&file) {
+                Ok(()) => {
+                    return Ok(ConfigLockGuard {
+                        file,
+                        _process: process,
+                    });
+                }
+                Err(fs4::TryLockError::WouldBlock) => {
+                    let elapsed = start.elapsed();
+                    let Some(remaining) = timeout.checked_sub(elapsed) else {
+                        return Err(ConfigError::LockTimeout(timeout));
+                    };
+                    if remaining.is_zero() {
+                        return Err(ConfigError::LockTimeout(timeout));
+                    }
+                    std::thread::sleep(backoff.min(remaining));
+                    backoff = (backoff * 2).min(Duration::from_millis(50));
+                }
+                Err(fs4::TryLockError::Error(err)) => return Err(err.into()),
+            }
+        }
     }
 
     /// Load the config; a missing file yields an empty config.
@@ -543,12 +586,18 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ConfigError> {
     };
 
     let res: std::io::Result<()> = (|| {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
         #[cfg(unix)]
-        if let Some(perms) = existing_perms {
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&tmp)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = existing_perms.unwrap_or_else(|| std::fs::Permissions::from_mode(0o600));
             file.set_permissions(perms)?;
         }
         file.write_all(bytes)?;
@@ -1046,5 +1095,130 @@ added_at_ms = 10
                 path.display()
             );
         }
+    }
+
+    fn maybe_run_lock_holder_child(test_name: &str) -> bool {
+        let Ok(dir) = std::env::var("PRAXI_LOCK_HOLD_DIR") else {
+            return false;
+        };
+        if std::env::var("PRAXI_LOCK_TEST_NAME").ok().as_deref() != Some(test_name) {
+            return false;
+        }
+        let path = config_path(Path::new(&dir));
+        let _guard = ProviderConfig::lock(&path).unwrap();
+        let ready = std::env::var("PRAXI_LOCK_READY_FILE").unwrap();
+        std::fs::write(&ready, "locked").unwrap();
+        let hold_ms: u64 = std::env::var("PRAXI_LOCK_HOLD_MS")
+            .unwrap()
+            .parse()
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(hold_ms));
+        true
+    }
+
+    fn spawn_lock_holder(
+        test_name: &str,
+        dir: &Path,
+        ready: &Path,
+        hold_ms: u64,
+    ) -> std::process::Child {
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", test_name, "--nocapture"])
+            .env("PRAXI_LOCK_TEST_NAME", test_name)
+            .env("PRAXI_LOCK_HOLD_DIR", dir)
+            .env("PRAXI_LOCK_READY_FILE", ready)
+            .env("PRAXI_LOCK_HOLD_MS", hold_ms.to_string())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !ready.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "lock holder child did not signal readiness"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        child
+    }
+
+    #[test]
+    fn cross_process_lock_waits_and_succeeds() {
+        const TEST: &str = "config::cli_tests::cross_process_lock_waits_and_succeeds";
+        if maybe_run_lock_holder_child(TEST) {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let ready = dir.path().join("ready");
+        let mut child = spawn_lock_holder(TEST, dir.path(), &ready, 300);
+
+        let path = config_path(dir.path());
+        let start = Instant::now();
+        let guard = ProviderConfig::lock_with_timeout(&path, Duration::from_secs(5)).unwrap();
+        let waited = start.elapsed();
+        assert!(
+            waited >= Duration::from_millis(150),
+            "expected parent to wait for child lock release, waited {waited:?}"
+        );
+        let mut cfg = ProviderConfig::load(&path).unwrap();
+        cfg.upsert(ProviderSettings::new("after-wait", 1));
+        cfg.save(&path).unwrap();
+        drop(guard);
+
+        let status = child.wait().unwrap();
+        assert!(status.success());
+        assert!(
+            ProviderConfig::load(&path)
+                .unwrap()
+                .get("after-wait")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn cross_process_lock_times_out_with_clear_error() {
+        const TEST: &str = "config::cli_tests::cross_process_lock_times_out_with_clear_error";
+        if maybe_run_lock_holder_child(TEST) {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let ready = dir.path().join("ready");
+        let mut child = spawn_lock_holder(TEST, dir.path(), &ready, 5_000);
+
+        let path = config_path(dir.path());
+        let Err(err) = ProviderConfig::lock_with_timeout(&path, Duration::from_millis(200)) else {
+            panic!("expected lock timeout while child holds providers.lock");
+        };
+        assert!(
+            matches!(err, ConfigError::LockTimeout(_)),
+            "unexpected error: {err}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("timed out") && msg.contains("providers.lock"),
+            "error message should be clear: {msg}"
+        );
+
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn newly_created_lock_and_toml_have_0600_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = config_path(dir.path());
+        let _guard = ProviderConfig::lock(&path).unwrap();
+        let cfg = ProviderConfig::default();
+        cfg.save(&path).unwrap();
+
+        let lock_mode = std::fs::metadata(path.with_extension("lock"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        let toml_mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(lock_mode, 0o600);
+        assert_eq!(toml_mode, 0o600);
     }
 }

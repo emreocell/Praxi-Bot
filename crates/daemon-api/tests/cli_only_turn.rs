@@ -236,3 +236,203 @@ fn cli_only_enable_and_chat_turn_end_to_end() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+async fn run_failing_turn(root: &std::path::Path) -> Value {
+    let app = build_cli_only_app(root);
+
+    let (status, enabled) = request(
+        &app,
+        Method::POST,
+        "/v1/providers/cli/enable",
+        Some(json!({ "id": "claude" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{enabled}");
+
+    let profile_toml = "\
+[bot]
+id = \"cli-only\"
+name = \"CLI Only\"
+
+[models]
+executor = \"cli:claude/default\"
+";
+    let (status, bot) = request(
+        &app,
+        Method::POST,
+        "/v1/bots",
+        Some(json!({ "profile_toml": profile_toml })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{bot}");
+    let bot_id = bot["id"].as_str().unwrap().to_owned();
+
+    let (status, chat) = request(
+        &app,
+        Method::POST,
+        "/v1/chats",
+        Some(json!({ "bot_id": bot_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{chat}");
+    let chat_id = chat["id"].as_str().unwrap().to_owned();
+
+    let (status, accepted) = request(
+        &app,
+        Method::POST,
+        &format!("/v1/chats/{chat_id}/messages"),
+        Some(json!({ "text": "say hello", "mode": "steer" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{accepted}");
+    let run_id = accepted["run_id"].as_str().unwrap().to_owned();
+
+    for _ in 0..400 {
+        let (status, run) = request(&app, Method::GET, &format!("/v1/runs/{run_id}"), None).await;
+        assert_eq!(status, StatusCode::OK, "{run}");
+        let state_str = run["state"].as_str().unwrap_or("");
+        if matches!(state_str, "succeeded" | "failed" | "cancelled") {
+            return run;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("run {run_id} did not finish in time");
+}
+
+#[test]
+fn cli_only_missing_and_signed_out_surface_actionable_errors() {
+    if let Ok(mode) = std::env::var("DAEMON_CLI_FAIL_CHILD") {
+        let root = std::path::PathBuf::from(std::env::var("DAEMON_CLI_ROOT").unwrap());
+        let run = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(run_failing_turn(&root));
+        assert_eq!(run["state"], "failed", "{run}");
+        let err = run["error"].as_str().unwrap_or("");
+        match mode.as_str() {
+            "missing" => {
+                assert!(err.contains("not_installed"), "{err}");
+                assert!(err.contains("Install or update Claude Code"), "{err}");
+            }
+            "signed-out" => {
+                assert!(err.contains("signed_out"), "{err}");
+                assert!(
+                    err.contains("Sign in by running `claude` in a terminal"),
+                    "{err}"
+                );
+            }
+            other => panic!("unexpected mode: {other}"),
+        }
+        return;
+    }
+
+    // 1. Missing claude binary on PATH.
+    let missing_dir = tempfile::tempdir().unwrap();
+    let empty_bin = missing_dir.path().join("empty-bin");
+    std::fs::create_dir_all(&empty_bin).unwrap();
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "cli_only_missing_and_signed_out_surface_actionable_errors",
+            "--nocapture",
+        ])
+        .env("DAEMON_CLI_FAIL_CHILD", "missing")
+        .env("DAEMON_CLI_ROOT", missing_dir.path())
+        .env("PATH", &empty_bin)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "missing child failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // 2. Installed fixture CLI that reports signed-out at turn time.
+    let signed_out_dir = tempfile::tempdir().unwrap();
+    let bin_dir = signed_out_dir.path().join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    std::fs::copy(
+        env!("CARGO_BIN_EXE_daemon-cli-fixture"),
+        bin_dir.join(format!("claude{}", std::env::consts::EXE_SUFFIX)),
+    )
+    .unwrap();
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "cli_only_missing_and_signed_out_surface_actionable_errors",
+            "--nocapture",
+        ])
+        .env("DAEMON_CLI_FAIL_CHILD", "signed-out")
+        .env("DAEMON_CLI_ROOT", signed_out_dir.path())
+        .env("PATH", &bin_dir)
+        .env("FAKE_MODE", "signed-out")
+        .env("FAKE_LOG", signed_out_dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "signed-out child failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn enable_cli_provider_waits_for_cross_process_lock_without_blocking_health() {
+    if let Ok(lock_dir) = std::env::var("DAEMON_CLI_LOCK_HOLD_DIR") {
+        let cfg_path = provider_catalog::config_path(std::path::Path::new(&lock_dir));
+        let _guard = provider_catalog::ProviderConfig::lock(&cfg_path).unwrap();
+        let ready = std::env::var("DAEMON_CLI_LOCK_READY").unwrap();
+        std::fs::write(&ready, "locked").unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        return;
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let data_dir = dir.path().join("data");
+    std::fs::create_dir_all(&data_dir).unwrap();
+    let ready = dir.path().join("ready");
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "enable_cli_provider_waits_for_cross_process_lock_without_blocking_health",
+            "--nocapture",
+        ])
+        .env("DAEMON_CLI_LOCK_HOLD_DIR", &data_dir)
+        .env("DAEMON_CLI_LOCK_READY", &ready)
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !ready.exists() {
+        assert!(std::time::Instant::now() < deadline, "child did not lock");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let app = build_cli_only_app(dir.path());
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let app_enable = app.clone();
+            let enable_fut = tokio::spawn(async move {
+                request(
+                    &app_enable,
+                    Method::POST,
+                    "/v1/providers/cli/enable",
+                    Some(json!({ "id": "claude" })),
+                )
+                .await
+            });
+            // While enable_cli_provider is waiting on providers.lock in
+            // spawn_blocking, /v1/health stays responsive on the runtime.
+            let (health_status, _) = request(&app, Method::GET, "/v1/health", None).await;
+            assert_eq!(health_status, StatusCode::OK);
+            let (status, body) = enable_fut.await.unwrap();
+            assert_eq!(status, StatusCode::OK, "{body}");
+        });
+
+    assert!(child.wait().unwrap().success());
+}

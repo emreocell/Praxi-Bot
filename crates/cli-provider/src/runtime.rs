@@ -39,6 +39,8 @@ pub enum CliError {
     NotInstalled,
     #[error("shim_refused")]
     ShimRefused,
+    #[error("signed_out")]
+    SignedOut,
     #[error("native_tools_open")]
     NativeToolsOpen,
     #[error("cancelled")]
@@ -55,6 +57,25 @@ pub enum CliError {
     /// The file at the exact path that would be spawned changed between probes.
     #[error("binary_changed")]
     BinaryChanged,
+}
+
+impl CliError {
+    /// Stable `snake_case` error code for APIs and logs.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::NotInstalled => "not_installed",
+            Self::ShimRefused => "shim_refused",
+            Self::SignedOut => "signed_out",
+            Self::NativeToolsOpen => "native_tools_open",
+            Self::Cancelled => "cancelled",
+            Self::Quota => "quota_exceeded",
+            Self::Protocol => "cli_protocol_error",
+            Self::Io => "cli_io_error",
+            Self::CodexUnconfinable => "codex_unconfinable",
+            Self::BinaryChanged => "binary_changed",
+        }
+    }
 }
 impl From<std::io::Error> for CliError {
     fn from(_: std::io::Error) -> Self {
@@ -805,6 +826,7 @@ async fn session(
                 ring.push_back(*b);
             }
         }
+        ring
     });
     let result = tokio::select! {
         () = stop.cancelled() => Err(CliError::Cancelled),
@@ -812,6 +834,23 @@ async fn session(
     };
     stop.cancel();
     child.terminate().await;
+    if matches!(result, Err(CliError::Protocol)) {
+        let abort_handle = stderr_task.abort_handle();
+        if let Ok(Ok(ring)) =
+            tokio::time::timeout(std::time::Duration::from_millis(50), stderr_task).await
+        {
+            let (head, tail) = ring.as_slices();
+            let mut combined = Vec::with_capacity(ring.len());
+            combined.extend_from_slice(head);
+            combined.extend_from_slice(tail);
+            if is_signed_out_text(&String::from_utf8_lossy(&combined)) {
+                return Err(CliError::SignedOut);
+            }
+        } else {
+            abort_handle.abort();
+        }
+        return result;
+    }
     stderr_task.abort();
     result
 }
@@ -850,7 +889,12 @@ async fn protocol(
         if n == 0 || n > 1024 * 1024 {
             return Err(CliError::Protocol);
         }
-        let v: Value = serde_json::from_slice(&bytes).map_err(|_| CliError::Protocol)?;
+        let Ok(v) = serde_json::from_slice::<Value>(&bytes) else {
+            if is_signed_out_text(&String::from_utf8_lossy(&bytes)) {
+                return Err(CliError::SignedOut);
+            }
+            return Err(CliError::Protocol);
+        };
         if v.get("error").is_some() || v["is_error"] == true || v["method"] == "error" {
             return Err(child_error(&v));
         }
@@ -867,9 +911,31 @@ async fn protocol(
         }
     }
 }
+fn is_signed_out_text(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    [
+        "not logged in",
+        "not signed in",
+        "signed out",
+        "logged out",
+        "please log in",
+        "please sign in",
+        "please login",
+        "unauthenticated",
+        "not authenticated",
+        "authentication_error",
+        "auth_required",
+        "invalid api key",
+        "/login",
+    ]
+    .iter()
+    .any(|s| lower.contains(s))
+}
 fn child_error(v: &Value) -> CliError {
     let text = v.to_string().to_ascii_lowercase();
-    if ["quota", "rate_limit", "rate limit", "usage limit"]
+    if is_signed_out_text(&text) {
+        CliError::SignedOut
+    } else if ["quota", "rate_limit", "rate limit", "usage limit"]
         .iter()
         .any(|s| text.contains(s))
     {
