@@ -80,9 +80,11 @@ impl Default for ToolContext {
 /// **Delegation rule:** a `Tool` that forwards calls to another tool (a
 /// wrapper, bridge or dispatcher) must also forward [`Tool::always_ask`],
 /// [`Tool::approval_details`] and [`Tool::approval_closed`] to it, otherwise
-/// the wrapped tool's confirmation guarantees are silently lost. A repository
-/// test (`delegating_tools_forward_the_approval_hooks`) fails for a new
-/// delegating implementation that does not mention them.
+/// the wrapped tool's confirmation guarantees are silently lost. Prefer
+/// implementing [`ToolWrapper`] (where the hooks are required methods with no
+/// defaults); a repository test (`delegating_tools_forward_the_approval_hooks`)
+/// also inspects every `impl Tool` AST and fails for a new delegating
+/// implementation that does not forward them.
 ///
 /// Implementors describe themselves via [`Tool::spec`] and execute via
 /// [`Tool::call`].  All implementations must be `Send + Sync` so they can be
@@ -135,17 +137,92 @@ pub trait Tool: Send + Sync {
     }
 }
 
+/// A wrapper trait for tools that delegate to another [`Tool`].
+///
+/// Unlike [`Tool`], the approval hooks (`always_ask`, `approval_details`,
+/// `approval_closed`) have no default implementations here, so any wrapper
+/// implementing [`ToolWrapper`] fails to compile if it forgets to forward them.
+#[async_trait]
+pub trait ToolWrapper: Send + Sync {
+    /// Return the static specification for this tool.
+    fn spec(&self) -> &ToolSpec;
+
+    /// Whether the bot `bot_id` (`None` = no bot) may see this tool.
+    fn visible_to(&self, _bot_id: Option<&str>) -> bool {
+        true
+    }
+
+    /// Execute the tool with the given `input` and return its output.
+    ///
+    /// # Errors
+    /// Returns [`ToolError`] if input is invalid or tool execution fails.
+    async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError>;
+
+    /// Forward [`Tool::always_ask`] to the wrapped tool.
+    fn always_ask(&self) -> bool;
+
+    /// Forward [`Tool::approval_details`] to the wrapped tool.
+    ///
+    /// # Errors
+    /// Returns [`ToolError`] if the wrapped tool rejects the call.
+    async fn approval_details(
+        &self,
+        ctx: &ToolContext,
+        input: &Value,
+    ) -> Result<Option<Value>, ToolError>;
+
+    /// Forward [`Tool::approval_closed`] to the wrapped tool.
+    fn approval_closed(&self, ctx: &ToolContext, input: &Value, token: Option<&str>);
+}
+
+#[async_trait]
+impl<W: ToolWrapper> Tool for W {
+    fn spec(&self) -> &ToolSpec {
+        ToolWrapper::spec(self)
+    }
+
+    fn visible_to(&self, bot_id: Option<&str>) -> bool {
+        ToolWrapper::visible_to(self, bot_id)
+    }
+
+    async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
+        ToolWrapper::call(self, ctx, input).await
+    }
+
+    async fn approval_details(
+        &self,
+        ctx: &ToolContext,
+        input: &Value,
+    ) -> Result<Option<Value>, ToolError> {
+        ToolWrapper::approval_details(self, ctx, input).await
+    }
+
+    fn approval_closed(&self, ctx: &ToolContext, input: &Value, token: Option<&str>) {
+        ToolWrapper::approval_closed(self, ctx, input, token);
+    }
+
+    fn always_ask(&self) -> bool {
+        ToolWrapper::always_ask(self)
+    }
+}
+
 #[cfg(test)]
 mod delegation_guard {
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::path::{Path, PathBuf};
+
+    use syn::visit::{self, Visit};
+    use syn::{
+        Expr, Fields, Generics, ImplItem, ItemEnum, ItemImpl, ItemStruct, PathSegment, Type,
+    };
 
     /// `file :: type` pairs whose tools dispatch to other tools (or hold a
     /// registry / gate) without forwarding the approval hooks themselves, each
     /// reviewed and why. The list must match the repository EXACTLY: a new
     /// delegating `impl Tool` fails this test until it forwards
-    /// `always_ask` / `approval_details` / `approval_closed` or is added here
-    /// with a reason; an entry that no longer matches must be removed.
+    /// `always_ask` / `approval_details` / `approval_closed` (or implements
+    /// `ToolWrapper`) or is added here with a reason; an entry that no longer
+    /// matches must be removed.
     const REVIEWED: &[(&str, &str, &str)] = &[
         (
             "agent-router/src/surface.rs",
@@ -174,6 +251,248 @@ mod delegation_guard {
         ),
     ];
 
+    const DELEGATING_TYPES: &[&str] = &[
+        "Tool",
+        "ToolRegistry",
+        "ToolGate",
+        "ToolSurface",
+        "Discovery",
+    ];
+
+    const REQUIRED_HOOKS: &[&str] = &["always_ask", "approval_details", "approval_closed"];
+
+    #[derive(Default)]
+    struct TypeInfo {
+        field_types: Vec<Type>,
+        bounded_params: BTreeSet<String>,
+    }
+
+    struct IdentFinder<'a> {
+        targets: &'a BTreeSet<String>,
+        found: bool,
+    }
+
+    impl<'ast> Visit<'ast> for IdentFinder<'_> {
+        fn visit_path_segment(&mut self, node: &'ast PathSegment) {
+            if self.targets.contains(&node.ident.to_string()) {
+                self.found = true;
+            }
+            visit::visit_path_segment(self, node);
+        }
+    }
+
+    fn type_mentions_any(ty: &Type, targets: &BTreeSet<String>) -> bool {
+        let mut finder = IdentFinder {
+            targets,
+            found: false,
+        };
+        finder.visit_type(ty);
+        finder.found
+    }
+
+    fn delegating_set() -> BTreeSet<String> {
+        DELEGATING_TYPES.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    fn bounded_type_params(generics: &Generics) -> BTreeSet<String> {
+        let targets = delegating_set();
+        let mut out = BTreeSet::new();
+        for param in generics.type_params() {
+            let has_bound = param.bounds.iter().any(|b| {
+                let mut finder = IdentFinder {
+                    targets: &targets,
+                    found: false,
+                };
+                finder.visit_type_param_bound(b);
+                finder.found
+            });
+            if has_bound {
+                out.insert(param.ident.to_string());
+            }
+        }
+        if let Some(wc) = &generics.where_clause {
+            for pred in &wc.predicates {
+                if let syn::WherePredicate::Type(pt) = pred {
+                    let has_bound = pt.bounds.iter().any(|b| {
+                        let mut finder = IdentFinder {
+                            targets: &targets,
+                            found: false,
+                        };
+                        finder.visit_type_param_bound(b);
+                        finder.found
+                    });
+                    if has_bound
+                        && let Type::Path(tp) = &pt.bounded_ty
+                        && let Some(ident) = tp.path.get_ident()
+                    {
+                        out.insert(ident.to_string());
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn field_types_of(fields: &Fields) -> Vec<Type> {
+        match fields {
+            Fields::Named(f) => f.named.iter().map(|x| x.ty.clone()).collect(),
+            Fields::Unnamed(f) => f.unnamed.iter().map(|x| x.ty.clone()).collect(),
+            Fields::Unit => Vec::new(),
+        }
+    }
+
+    struct Collector {
+        types: BTreeMap<String, Vec<TypeInfo>>,
+        tool_impls: Vec<ItemImpl>,
+    }
+
+    impl<'ast> Visit<'ast> for Collector {
+        fn visit_item_struct(&mut self, node: &'ast ItemStruct) {
+            self.types
+                .entry(node.ident.to_string())
+                .or_default()
+                .push(TypeInfo {
+                    field_types: field_types_of(&node.fields),
+                    bounded_params: bounded_type_params(&node.generics),
+                });
+            visit::visit_item_struct(self, node);
+        }
+
+        fn visit_item_enum(&mut self, node: &'ast ItemEnum) {
+            let field_types = node
+                .variants
+                .iter()
+                .flat_map(|v| field_types_of(&v.fields))
+                .collect();
+            self.types
+                .entry(node.ident.to_string())
+                .or_default()
+                .push(TypeInfo {
+                    field_types,
+                    bounded_params: bounded_type_params(&node.generics),
+                });
+            visit::visit_item_enum(self, node);
+        }
+
+        fn visit_item_impl(&mut self, node: &'ast ItemImpl) {
+            if let Some((_, path, _)) = &node.trait_
+                && path.segments.last().is_some_and(|s| s.ident == "Tool")
+            {
+                self.tool_impls.push(node.clone());
+            }
+            visit::visit_item_impl(self, node);
+        }
+    }
+
+    fn self_type_name(ty: &Type) -> Option<String> {
+        match ty {
+            Type::Path(tp) => tp.path.segments.last().map(|s| s.ident.to_string()),
+            Type::Group(g) => self_type_name(&g.elem),
+            Type::Paren(p) => self_type_name(&p.elem),
+            _ => None,
+        }
+    }
+
+    fn is_bare_self(expr: &Expr) -> bool {
+        match expr {
+            Expr::Path(p) => p.path.is_ident("self"),
+            Expr::Reference(r) => is_bare_self(&r.expr),
+            Expr::Paren(p) => is_bare_self(&p.expr),
+            Expr::Group(g) => is_bare_self(&g.expr),
+            _ => false,
+        }
+    }
+
+    struct HookCallFinder<'a> {
+        hook: &'a str,
+        found: bool,
+    }
+
+    impl<'ast> Visit<'ast> for HookCallFinder<'_> {
+        fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+            if node.method == self.hook && !is_bare_self(&node.receiver) {
+                self.found = true;
+            }
+            visit::visit_expr_method_call(self, node);
+        }
+
+        fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+            if let Expr::Path(p) = &*node.func
+                && p.path.segments.len() >= 2
+                && p.path.segments.last().is_some_and(|s| s.ident == self.hook)
+            {
+                self.found = true;
+            }
+            visit::visit_expr_call(self, node);
+        }
+    }
+
+    fn forwards_hook(impl_item: &ItemImpl, hook: &str) -> bool {
+        impl_item.items.iter().any(|item| {
+            let ImplItem::Fn(f) = item else {
+                return false;
+            };
+            if f.sig.ident != hook {
+                return false;
+            }
+            let mut finder = HookCallFinder { hook, found: false };
+            finder.visit_block(&f.block);
+            finder.found
+        })
+    }
+
+    fn is_delegating_impl(
+        impl_item: &ItemImpl,
+        self_name: &str,
+        types: &BTreeMap<String, Vec<TypeInfo>>,
+    ) -> bool {
+        let impl_bounded = bounded_type_params(&impl_item.generics);
+        if !impl_bounded.is_empty() {
+            return true;
+        }
+        let Some(defs) = types.get(self_name) else {
+            return false;
+        };
+        let targets = delegating_set();
+        for def in defs {
+            let mut all_targets = targets.clone();
+            all_targets.extend(def.bounded_params.iter().cloned());
+            if def
+                .field_types
+                .iter()
+                .any(|ty| type_mentions_any(ty, &all_targets))
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Return the type names of delegating `impl Tool` blocks in `src` that do
+    /// not genuinely forward all three approval hooks.
+    fn missing_hooks_in_source(src: &str) -> Vec<String> {
+        let file = syn::parse_file(src).expect("valid Rust source");
+        let mut collector = Collector {
+            types: BTreeMap::new(),
+            tool_impls: Vec::new(),
+        };
+        collector.visit_file(&file);
+        let mut out = Vec::new();
+        for imp in &collector.tool_impls {
+            let Some(name) = self_type_name(&imp.self_ty) else {
+                continue;
+            };
+            if !is_delegating_impl(imp, &name, &collector.types) {
+                continue;
+            }
+            let forwards_all = REQUIRED_HOOKS.iter().all(|hook| forwards_hook(imp, hook));
+            if !forwards_all {
+                out.push(name);
+            }
+        }
+        out
+    }
+
     fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(rd) = std::fs::read_dir(dir) else {
             return;
@@ -191,70 +510,12 @@ mod delegation_guard {
         }
     }
 
-    fn is_delegating_field(line: &str) -> bool {
-        let t = line.trim();
-        let Some((name, ty)) = t.split_once(':') else {
-            return false;
-        };
-        let name = name
-            .trim()
-            .trim_start_matches("pub(crate) ")
-            .trim_start_matches("pub ");
-        let ty = ty.trim().trim_end_matches(',');
-        !name.is_empty()
-            && name.chars().all(|c| c.is_ascii_lowercase() || c == '_')
-            && matches!(
-                ty,
-                "Arc<dyn Tool>"
-                    | "ToolRegistry"
-                    | "Arc<ToolRegistry>"
-                    | "Option<ToolRegistry>"
-                    | "Arc<dyn ToolGate>"
-                    | "ToolSurface"
-                    | "Arc<ToolSurface>"
-                    | "Arc<Discovery>"
-            )
-    }
-
-    /// The text from `start` to the closing brace at column 0.
-    fn block_from(src: &str, start: usize) -> &str {
-        let rest = &src[start..];
-        let end = rest.find("\n}").map_or(rest.len(), |i| i + 2);
-        &rest[..end]
-    }
-
-    /// Every `impl Tool for X` in `src`: (X, impl block, struct body).
-    fn impls(src: &str) -> Vec<(String, String, String)> {
-        let mut out = Vec::new();
-        let marker = "impl Tool for ";
-        let mut from = 0;
-        while let Some(i) = src[from..].find(marker) {
-            let at = from + i;
-            from = at + marker.len();
-            let ident: String = src[from..]
-                .chars()
-                .take_while(|c| c.is_alphanumeric() || *c == '_')
-                .collect();
-            let block = block_from(src, at).to_owned();
-            let body = ["pub(crate) struct ", "pub struct ", "struct "]
-                .iter()
-                .find_map(|kw| {
-                    let needle = format!("{kw}{ident} {{");
-                    src.find(&needle).map(|s| block_from(src, s).to_owned())
-                })
-                .unwrap_or_default();
-            out.push((ident, block, body));
-        }
-        out
-    }
-
     #[test]
     fn delegating_tools_forward_the_approval_hooks() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let mut files = Vec::new();
         rust_files(&root.join("crates"), &mut files);
         rust_files(&root.join("apps"), &mut files);
-        // Delegating implementations that do not forward all three hooks.
         let mut found: BTreeSet<(String, String)> = BTreeSet::new();
         for f in files {
             let Ok(src) = std::fs::read_to_string(&f) else {
@@ -266,14 +527,8 @@ mod delegation_guard {
                 .unwrap_or(&f)
                 .to_string_lossy()
                 .replace(std::path::MAIN_SEPARATOR, "/");
-            for (ident, block, body) in impls(&src) {
-                let delegates = body.lines().any(is_delegating_field);
-                let forwards = block.contains("fn always_ask")
-                    && block.contains("fn approval_details")
-                    && block.contains("fn approval_closed");
-                if delegates && !forwards {
-                    found.insert((rel.clone(), ident));
-                }
+            for ident in missing_hooks_in_source(&src) {
+                found.insert((rel.clone(), ident));
             }
         }
         let reviewed: BTreeSet<(String, String)> = REVIEWED
@@ -290,20 +545,219 @@ mod delegation_guard {
 
     #[test]
     fn the_detector_is_per_impl_block_and_sees_delegating_fields() {
-        assert!(is_delegating_field("    inner: Arc<dyn Tool>,"));
-        assert!(is_delegating_field("    pub(crate) tools: ToolRegistry,"));
-        assert!(!is_delegating_field("    name: String,"));
-        // A forwarding impl in the same file does not excuse a non-forwarding one.
-        let src = "struct A {\n    inner: Arc<dyn Tool>,\n}\nimpl Tool for A {\n    fn call(&self) {}\n}\nstruct B {\n    n: u8,\n}\nimpl Tool for B {\n    fn always_ask(&self) {}\n    fn approval_details(&self) {}\n    fn approval_closed(&self) {}\n}\n";
-        let found = impls(src);
-        assert_eq!(found.len(), 2);
-        let (a, ablock, abody) = &found[0];
-        assert_eq!(a, "A");
-        assert!(abody.lines().any(is_delegating_field));
-        assert!(
-            !ablock.contains("fn always_ask"),
-            "B's hooks do not count for A"
+        let src = r"
+struct A {
+    inner: Arc<dyn Tool>,
+}
+impl Tool for A {
+    fn call(&self) {}
+}
+struct B {
+    n: u8,
+}
+impl Tool for B {
+    fn always_ask(&self) -> bool { self.inner.always_ask() }
+    async fn approval_details(&self, c: &ToolContext, i: &Value) -> Result<Option<Value>, ToolError> {
+        self.inner.approval_details(c, i).await
+    }
+    fn approval_closed(&self, c: &ToolContext, i: &Value, t: Option<&str>) {
+        self.inner.approval_closed(c, i, t);
+    }
+}
+";
+        assert_eq!(missing_hooks_in_source(src), vec!["A"]);
+    }
+
+    #[test]
+    fn bypass_vectors_are_caught() {
+        // 1. Box<dyn Tool>, Vec<Arc<dyn Tool>>, dyn Tool + Send + Sync, tuple struct,
+        //    generic wrapper, qualified impl tool_registry::Tool.
+        for (label, src) in [
+            (
+                "Box<dyn Tool>",
+                "struct W { inner: Box<dyn Tool> } impl Tool for W { fn call(&self) {} }",
+            ),
+            (
+                "Vec<Arc<dyn Tool>>",
+                "struct W { inner: Vec<Arc<dyn Tool>> } impl Tool for W { fn call(&self) {} }",
+            ),
+            (
+                "Arc<dyn Tool + Send + Sync>",
+                "struct W { inner: Arc<dyn Tool + Send + Sync> } impl Tool for W { fn call(&self) {} }",
+            ),
+            (
+                "tuple struct",
+                "struct W(Arc<dyn Tool>); impl Tool for W { fn call(&self) {} }",
+            ),
+            (
+                "generic impl<T: Tool>",
+                "struct W<T>(T); impl<T: Tool> Tool for W<T> { fn call(&self) {} }",
+            ),
+            (
+                "qualified trait path",
+                "struct W { inner: Arc<dyn Tool> } impl tool_registry::Tool for W { fn call(&self) {} }",
+            ),
+            (
+                "comment instead of fn",
+                "struct W { inner: Arc<dyn Tool> } impl Tool for W { /* fn always_ask fn approval_details fn approval_closed */ }",
+            ),
+            (
+                "empty stub fn approval_closed",
+                r"
+struct W { inner: Arc<dyn Tool> }
+impl Tool for W {
+    fn always_ask(&self) -> bool { self.inner.always_ask() }
+    async fn approval_details(&self, c: &ToolContext, i: &Value) -> Result<Option<Value>, ToolError> {
+        self.inner.approval_details(c, i).await
+    }
+    fn approval_closed(&self, _: &ToolContext, _: &Value, _: Option<&str>) {}
+}
+",
+            ),
+            (
+                "forgets approval_closed",
+                r"
+struct W { inner: Arc<dyn Tool> }
+impl Tool for W {
+    fn always_ask(&self) -> bool { self.inner.always_ask() }
+    async fn approval_details(&self, c: &ToolContext, i: &Value) -> Result<Option<Value>, ToolError> {
+        self.inner.approval_details(c, i).await
+    }
+}
+",
+            ),
+        ] {
+            assert_eq!(
+                missing_hooks_in_source(src),
+                vec!["W"],
+                "failed to flag {label}"
+            );
+        }
+
+        // 2. Column-0 closing brace inside a string literal must not truncate the impl,
+        //    and genuine forwarding passes.
+        let genuine = r#"
+struct Good {
+    inner: Box<dyn Tool + Send + Sync>,
+}
+impl tool_registry::Tool for Good {
+    fn spec(&self) -> &ToolSpec {
+        let _s = "
+}
+";
+        self.inner.spec()
+    }
+    fn always_ask(&self) -> bool {
+        self.inner.always_ask()
+    }
+    async fn approval_details(&self, c: &ToolContext, i: &Value) -> Result<Option<Value>, ToolError> {
+        self.inner.approval_details(c, i).await
+    }
+    fn approval_closed(&self, c: &ToolContext, i: &Value, t: Option<&str>) {
+        self.inner.approval_closed(c, i, t);
+    }
+}
+"#;
+        assert!(missing_hooks_in_source(genuine).is_empty(), "{genuine}");
+    }
+
+    #[test]
+    fn tool_wrapper_trait_forwards_all_approval_hooks() {
+        use crate::{Effect, ToolError, ToolSpec};
+        use protocol::PermissionCategory;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct Inner {
+            spec: ToolSpec,
+            closed: Arc<AtomicBool>,
+        }
+
+        #[async_trait::async_trait]
+        impl crate::Tool for Inner {
+            fn spec(&self) -> &ToolSpec {
+                &self.spec
+            }
+            async fn call(
+                &self,
+                _ctx: &crate::ToolContext,
+                _input: serde_json::Value,
+            ) -> Result<crate::ToolOutput, ToolError> {
+                Ok(crate::ToolOutput::text("ok"))
+            }
+            fn always_ask(&self) -> bool {
+                true
+            }
+            async fn approval_details(
+                &self,
+                _ctx: &crate::ToolContext,
+                _input: &serde_json::Value,
+            ) -> Result<Option<serde_json::Value>, ToolError> {
+                Ok(Some(serde_json::json!({"kind": "schedule"})))
+            }
+            fn approval_closed(
+                &self,
+                _ctx: &crate::ToolContext,
+                _input: &serde_json::Value,
+                _token: Option<&str>,
+            ) {
+                self.closed.store(true, Ordering::SeqCst);
+            }
+        }
+
+        struct Wrap(Arc<dyn crate::Tool>);
+
+        #[async_trait::async_trait]
+        impl crate::ToolWrapper for Wrap {
+            fn spec(&self) -> &ToolSpec {
+                self.0.spec()
+            }
+            async fn call(
+                &self,
+                ctx: &crate::ToolContext,
+                input: serde_json::Value,
+            ) -> Result<crate::ToolOutput, ToolError> {
+                self.0.call(ctx, input).await
+            }
+            fn always_ask(&self) -> bool {
+                self.0.always_ask()
+            }
+            async fn approval_details(
+                &self,
+                ctx: &crate::ToolContext,
+                input: &serde_json::Value,
+            ) -> Result<Option<serde_json::Value>, ToolError> {
+                self.0.approval_details(ctx, input).await
+            }
+            fn approval_closed(
+                &self,
+                ctx: &crate::ToolContext,
+                input: &serde_json::Value,
+                token: Option<&str>,
+            ) {
+                self.0.approval_closed(ctx, input, token);
+            }
+        }
+
+        let closed = Arc::new(AtomicBool::new(false));
+        let inner = Arc::new(Inner {
+            spec: ToolSpec {
+                name: "w".into(),
+                description: "w".into(),
+                input_schema: serde_json::json!({"type": "object"}),
+                effect: Effect::Write,
+                category: PermissionCategory::System,
+                platforms: vec![protocol::Platform::All],
+            },
+            closed: Arc::clone(&closed),
+        });
+        let wrapped: Arc<dyn crate::Tool> = Arc::new(Wrap(inner));
+        assert!(wrapped.always_ask());
+        wrapped.approval_closed(
+            &crate::ToolContext::default(),
+            &serde_json::json!({}),
+            Some("tok"),
         );
-        assert!(found[1].1.contains("fn approval_closed"));
+        assert!(closed.load(Ordering::SeqCst));
     }
 }

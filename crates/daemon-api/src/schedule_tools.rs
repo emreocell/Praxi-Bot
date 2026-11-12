@@ -170,6 +170,8 @@ pub(crate) struct DaemonScheduleHost {
     /// Serialises "count, then insert" so the quota cannot be raced.
     gate: parking_lot::Mutex<()>,
     frozen: parking_lot::Mutex<VecDeque<Frozen>>,
+    #[cfg(test)]
+    pub(crate) before_delete_hook: parking_lot::Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 /// Upper bound on cron occurrences inspected for the minimum interval.
@@ -305,48 +307,12 @@ fn human_secs(s: u64) -> String {
     }
 }
 
-/// Characters that hide or disguise text. The stored prompt is run unattended
-/// as an instruction, so nothing invisible may ride along: Unicode category
-/// Cf (format: zero-width, bidi, soft hyphen, BOM, tag characters ...), Zl, Zp
-/// and variation selectors, plus the combining grapheme joiner. Homoglyphs
-/// (look-alike letters) are NOT filtered.
-fn is_hidden(c: char) -> bool {
-    matches!(
-        c,
-        '\u{00AD}'
-            | '\u{034F}'
-            | '\u{0600}'..='\u{0605}'
-            | '\u{0890}'
-            | '\u{0891}'
-            | '\u{115F}'
-            | '\u{1160}'
-            | '\u{2800}'
-            | '\u{3164}'
-            | '\u{061C}'
-            | '\u{06DD}'
-            | '\u{070F}'
-            | '\u{08E2}'
-            | '\u{180B}'..='\u{180F}'
-            | '\u{200B}'..='\u{200F}'
-            | '\u{2028}'..='\u{202E}'
-            | '\u{2060}'..='\u{206F}'
-            | '\u{FE00}'..='\u{FE0F}'
-            | '\u{FEFF}'
-            | '\u{FFF9}'..='\u{FFFB}'
-            | '\u{110BD}'
-            | '\u{110CD}'
-            | '\u{13430}'..='\u{1343F}'
-            | '\u{1BCA0}'..='\u{1BCA3}'
-            | '\u{1D173}'..='\u{1D17A}'
-            | '\u{E0000}'..='\u{E007F}'
-            | '\u{E0100}'..='\u{E01EF}'
-    )
-}
-
-/// Trim and check a free-text field: not empty, at most `max` characters,
-/// no control characters except newline and tab, no bidi controls.
+/// Trim and check a free-text field: normalise CRLF to LF, not empty, at most
+/// `max` characters, no control characters except newline and tab, no invisible
+/// or bidi controls.
 fn clean_text(field: &str, raw: &str, max: usize, allow_newlines: bool) -> Result<String, String> {
-    let t = raw.trim();
+    let normalized = raw.replace("\r\n", "\n");
+    let t = normalized.trim();
     if t.is_empty() {
         return Err(format!("`{field}` must not be empty"));
     }
@@ -362,7 +328,7 @@ fn clean_text(field: &str, raw: &str, max: usize, allow_newlines: bool) -> Resul
                 u32::from(c)
             ));
         }
-        if bad_control || is_hidden(c) {
+        if bad_control || protocol::approval_text::is_hidden(c) {
             return Err(format!(
                 "`{field}` contains a control, invisible or direction-override character (U+{:04X}); remove it",
                 u32::from(c)
@@ -411,6 +377,8 @@ impl DaemonScheduleHost {
             clock,
             gate: parking_lot::Mutex::new(()),
             frozen: parking_lot::Mutex::new(VecDeque::new()),
+            #[cfg(test)]
+            before_delete_hook: parking_lot::Mutex::new(None),
         }
     }
 
@@ -596,7 +564,7 @@ impl DaemonScheduleHost {
         q.retain(|x| now - x.made_ms < FROZEN_TTL_MS);
         if q.iter().any(|x| x.key == f.key) {
             return Err(
-                "an identical approval is already waiting; answer or dismiss it first".into(),
+                "an identical request is awaiting the user's decision; do not repeat it, wait for the result of the earlier call".into(),
             );
         }
         let evict_own_oldest = |q: &mut VecDeque<Frozen>| -> bool {
@@ -1098,6 +1066,10 @@ impl ScheduleHost for DaemonScheduleHost {
         let cur = self.current_matches(caller, &f)?;
         let view = self.view(&cur);
         self.audit(caller, "schedule.delete", "deleted", &cur, None)?;
+        #[cfg(test)]
+        if let Some(hook) = self.before_delete_hook.lock().take() {
+            hook();
+        }
         // One statement: the webhook trigger goes with the schedule (cascade),
         // so nothing is removed unless the whole delete succeeds.
         let deleted = self

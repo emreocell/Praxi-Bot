@@ -869,6 +869,11 @@ fn names_and_prompts_are_capped_and_stripped_of_control_and_bidi_characters() {
         "a\u{115F}b",
         "a\u{1160}b",
         "a\u{2800}b",
+        "a\u{17B4}b",
+        "a\u{17B5}b",
+        "a\u{FFA0}b",
+        "a\u{FFF0}b",
+        "a\u{E0000}b",
     ] {
         let e = ok("n", bad).unwrap_err();
         assert!(e.contains("direction-override"), "{bad:?}: {e}");
@@ -1238,7 +1243,9 @@ fn a_second_identical_preview_is_refused_while_the_first_is_pending() {
     // Card B (same call, 12:30) must not replace A's entry.
     let e = f.host.preview(&f.caller_a(), &ch).unwrap_err();
     assert!(
-        e.contains("an identical approval is already waiting"),
+        e.contains(
+            "an identical request is awaiting the user's decision; do not repeat it, wait for the result of the earlier call"
+        ),
         "{e}"
     );
     // User approves A: exactly A's time is stored.
@@ -1279,6 +1286,87 @@ fn an_expired_entry_does_not_block_a_new_preview() {
     f.host.preview(&f.caller_a(), &ch).unwrap();
     f.advance(7 * 3_600_000);
     f.host.preview(&f.caller_a(), &ch).unwrap();
+}
+
+#[test]
+fn expired_entries_do_not_block_other_runs_or_reuse_old_timestamps() {
+    let start = utc_ms(2026, 11, 12, 12, 0);
+    let f = fx_at(limits(20, 300), start, true);
+    // 1. Previewing after expiry replaces the frozen entry so create stores the new time.
+    let r = when("Once", "in 2 hours");
+    let ch = ScheduleChange::Create(r.clone());
+    let p1 = f.host.preview(&f.caller_a(), &ch).unwrap();
+    assert!(p1.next_runs[0].starts_with("2026-11-12T17:00:00+03:00"));
+    f.advance(7 * 3_600_000);
+    let p2 = f.host.preview(&f.caller_a(), &ch).unwrap();
+    assert!(p2.next_runs[0].starts_with("2026-11-13T00:00:00+03:00"));
+    let v = f.host.create(&f.caller_a(), &r).unwrap();
+    assert_eq!(v.next_runs, p2.next_runs);
+    let sc = f.store.list_by_bot(f.a).unwrap().remove(0);
+    assert_eq!(
+        sc.spec,
+        ScheduleSpec::At {
+            unix_ms: start + 9 * 3_600_000
+        }
+    );
+
+    // 2. Filling FROZEN_MAX (256) with other runs' entries and expiring them
+    // must free capacity for a new run's preview.
+    for i in 0..256 {
+        let c = ScheduleCaller {
+            bot_id: f.a.to_string(),
+            run_id: format!("fill-{i}"),
+        };
+        f.host
+            .preview(&c, &ScheduleChange::Create(when("s", "daily")))
+            .unwrap();
+    }
+    let newcomer = ScheduleCaller {
+        bot_id: f.a.to_string(),
+        run_id: "newcomer".into(),
+    };
+    assert!(
+        f.host
+            .preview(&newcomer, &ScheduleChange::Create(when("s", "daily")))
+            .is_err(),
+        "capacity is full before expiry"
+    );
+    f.advance(7 * 3_600_000);
+    f.host
+        .preview(&newcomer, &ScheduleChange::Create(when("s", "daily")))
+        .expect("expired entries from other runs must be purged");
+}
+
+#[test]
+fn crlf_prompts_are_normalised_to_lf_while_bare_cr_is_still_rejected() {
+    let f = fx(limits(20, 300));
+    let c = f.caller_a();
+    let mut r = when("Windows prompt", "daily");
+    r.prompt = Some("line 1\r\nline 2\r\n".into());
+    let p = f
+        .host
+        .preview(&c, &ScheduleChange::Create(r.clone()))
+        .expect("CRLF prompt must be accepted");
+    assert_eq!(p.prompt, "line 1\nline 2");
+    let v = f.host.create(&c, &r).unwrap();
+    assert_eq!(v.prompt, "line 1\nline 2");
+
+    // Names still forbid newlines after CRLF -> LF normalisation.
+    let name_crlf = when("bad\r\nname", "daily");
+    assert!(
+        f.host
+            .preview(&c, &ScheduleChange::Create(name_crlf))
+            .is_err()
+    );
+    // Bare CR is still rejected even in prompts.
+    let mut bare_cr = when("bare", "daily");
+    bare_cr.prompt = Some("a\rb".into());
+    assert!(
+        f.host
+            .preview(&c, &ScheduleChange::Create(bare_cr))
+            .unwrap_err()
+            .contains("direction-override")
+    );
 }
 
 #[test]
@@ -1472,6 +1560,52 @@ fn deleting_does_not_delete_a_schedule_the_user_edited_meanwhile() {
     f.store.set_origin(id, ScheduleOrigin::User).unwrap();
     assert!(f.host.delete(&f.caller_a(), &v.id).is_err());
     assert!(f.store.get(id).unwrap().is_some());
+}
+
+#[test]
+fn deleting_does_not_delete_when_edited_between_check_and_delete_exact() {
+    let f = fx(limits(20, 300));
+    let v = f.make(&f.caller_a(), &when("mine", "daily")).unwrap();
+    let id = scheduler::TaskId(uuid::Uuid::parse_str(&v.id).unwrap());
+    f.host
+        .preview(&f.caller_a(), &ScheduleChange::Delete { id: v.id.clone() })
+        .unwrap();
+    // Interleave a UI edit *after* `current_matches` has passed and *before*
+    // `delete_exact` runs: only the exact (id, revision, origin) check saves it.
+    let store_h = Arc::clone(&f.store);
+    *f.host.before_delete_hook.lock() = Some(Box::new(move || {
+        let mut cur = store_h.get(id).unwrap().unwrap();
+        cur.name = "edited mid-delete".into();
+        store_h
+            .update_definition_and_rearm(&cur, None, now_ms())
+            .unwrap();
+    }));
+    let e = f.host.delete(&f.caller_a(), &v.id).unwrap_err();
+    assert!(e.contains("changed or was deleted"), "{e}");
+    assert_eq!(
+        f.store.get(id).unwrap().unwrap().name,
+        "edited mid-delete",
+        "the interleaved UI edit must survive"
+    );
+    assert!(
+        f.audit().iter().any(|e| e.action == "schedule.failed"),
+        "failed delete_exact after audit must be marked schedule.failed"
+    );
+
+    // Same interleave, this time handing ownership to the user mid-delete.
+    f.host
+        .preview(&f.caller_a(), &ScheduleChange::Delete { id: v.id.clone() })
+        .unwrap();
+    let store_h = Arc::clone(&f.store);
+    *f.host.before_delete_hook.lock() = Some(Box::new(move || {
+        store_h.set_origin(id, ScheduleOrigin::User).unwrap();
+    }));
+    let e = f.host.delete(&f.caller_a(), &v.id).unwrap_err();
+    assert!(e.contains("changed or was deleted"), "{e}");
+    assert_eq!(
+        f.store.get(id).unwrap().unwrap().origin,
+        ScheduleOrigin::User
+    );
 }
 
 /// Make every write to `schedules.db` fail from now on (a second connection
