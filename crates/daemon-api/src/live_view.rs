@@ -664,7 +664,7 @@ async fn interrupt(
         s.hub().mark_reset_pending();
     }
     let audited = audit_interrupted(s, actor, t, &reason);
-    if audited.is_ok() && reason == Reason::LocalOverride {
+    if audited.is_ok() {
         s.hub().resolve_override_audit();
     }
     audited
@@ -875,8 +875,12 @@ pub(crate) async fn takeover(
                 if !state.hub().takeover().is_some_and(|now| now.info.id == owned.info.id && now.info.control_epoch == owned.info.control_epoch && now.info.state == ViewState::Acquiring) {
                     return Err(ApiError::conflict("the takeover ended while it was being activated"));
                 }
-                audit(&state,&actor,"takeover.active",serde_json::json!({"takeover_id":owned.info.id,"control_epoch":owned.info.control_epoch,"target_id":owned.info.target_id}))?;
+                // Activated first, audited after: no `takeover.active` row for a
+                // takeover that never became active. Nothing can drive in
+                // between (input needs this executor); an audit failure here
+                // interrupts the takeover below.
                 state.hub().activate(owned.info.id,owned.info.control_epoch).map_err(ApiError::conflict)?;
+                audit(&state,&actor,"takeover.active",serde_json::json!({"takeover_id":owned.info.id,"control_epoch":owned.info.control_epoch,"target_id":owned.info.target_id}))?;
                 if let Some(session) = live.sessions.lock().get_mut(&owned.info.session_id) { session.profile = EffectiveProfile::live(); session.next_seq = 1; session.duplicates.clear(); }
                 live.source_profile(owned.info.target_id).await?;
                 bounded(target.frame_source().request_refresh(0)).await

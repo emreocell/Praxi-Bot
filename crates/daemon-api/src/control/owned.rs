@@ -491,12 +491,14 @@ impl ControlHub {
             t.info.reason = Some(reason);
             t.input_deadline = None;
             st.latched = Some(ControlMode::Paused);
+            // Every interruption owes its `takeover.interrupted` row until it
+            // is written (in the same write as the interruption itself).
+            st.audit_pending = true;
             if local_override {
                 // One atomic write: the sticky reason, the work it still owes
                 // (key reset, audit row) and the cancelled releases. A crash
                 // can never leave the override without its pending work.
                 st.reset_pending = true;
-                st.audit_pending = true;
                 for journal in st.releases.iter_mut().filter(|j| !j.completed) {
                     journal.cancelled = true;
                 }

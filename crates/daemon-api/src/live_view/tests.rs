@@ -3488,6 +3488,80 @@ async fn an_owed_reset_waits_for_its_target_to_register_after_a_restart() {
     assert!(!t2.state.hub().override_pending().0);
 }
 
+// ---- audit2 F7
+#[tokio::test]
+async fn no_active_row_is_written_for_a_takeover_that_could_not_be_activated() {
+    let t = Test::new();
+    let id = t.session(Some("alice")).await;
+    let (status, v) = t
+        .call(
+            Some("alice"),
+            Method::POST,
+            "/v1/control/takeover",
+            Some(json!({"session_id":id,"request_id":Uuid::now_v7()})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{v}");
+    let held = t.state.live_view().executor.lock().await;
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+    // The latch file can no longer be written when the activation commits.
+    t.state.hub().set_persist_failure(true);
+    drop(held);
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+    assert_ne!(
+        t.state.hub().takeover().unwrap().info.state,
+        ViewState::Active
+    );
+    assert_eq!(
+        audit_count(&t, "takeover.active"),
+        0,
+        "a takeover that never became active was audited as active"
+    );
+}
+#[tokio::test(start_paused = true)]
+async fn a_failed_interrupt_audit_row_is_retried_for_every_reason() {
+    let t = Test::new();
+    let id = t.session(Some("alice")).await;
+    let (status, v) = t
+        .call(
+            Some("alice"),
+            Method::POST,
+            "/v1/control/takeover",
+            Some(json!({"session_id":id,"request_id":Uuid::now_v7()})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{v}");
+    for _ in 0..100 {
+        if t.state.hub().takeover().unwrap().info.state == ViewState::Active {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    let db = rusqlite::Connection::open(t.dir.path().join("bot.db")).unwrap();
+    db.execute_batch("CREATE TRIGGER fail_live_audit BEFORE INSERT ON audit_log WHEN NEW.action = 'takeover.interrupted' BEGIN SELECT RAISE(ABORT, 'injected audit failure'); END;").unwrap();
+    // The session ends (Disconnected): its audit row fails.
+    let _ = t
+        .call(
+            Some("alice"),
+            Method::DELETE,
+            &format!("/v1/view/sessions/{id}"),
+            None,
+        )
+        .await;
+    assert_eq!(audit_count(&t, "takeover.interrupted"), 0);
+    db.execute_batch("DROP TRIGGER fail_live_audit").unwrap();
+    tokio::time::sleep(Duration::from_secs(30)).await;
+    assert_eq!(
+        audit_count(&t, "takeover.interrupted"),
+        1,
+        "the interruption was never audited"
+    );
+}
+
 // ---- audit2 F3: owed work never touches an active takeover
 #[tokio::test]
 async fn owed_reset_and_audit_work_never_touches_an_active_takeover() {
