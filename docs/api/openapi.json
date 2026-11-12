@@ -1117,7 +1117,7 @@
         "tags": [
           "email"
         ],
-        "summary": "Remove an account and the password it owned. Takes effect for the next tool\ncall.",
+        "summary": "Remove an account and the secret it owned. Takes effect for the next tool\ncall. With `delete_inbox=true` the inbox is first deleted at the provider\n(irreversible); if that fails the account is kept (`502`) so it can be\nretried. Deleting a bot never deletes inboxes at the provider.",
         "operationId": "delete_email_account",
         "parameters": [
           {
@@ -1128,6 +1128,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "delete_inbox",
+            "in": "path",
+            "description": "Also delete the inbox at the provider (`agentmail` accounts). Default\n`false`: removing an account only forgets it locally.",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -1136,6 +1145,26 @@
           },
           "404": {
             "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "the account has no remote inbox",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "the provider refused or failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -3548,6 +3577,7 @@
         "description": "A configured account (`GET /v1/email/accounts`): the non-secret fields only.",
         "required": [
           "name",
+          "provider",
           "address",
           "username",
           "imap",
@@ -3586,7 +3616,14 @@
           },
           "imap": {
             "$ref": "#/components/schemas/EmailImapServer",
-            "description": "IMAP server."
+            "description": "IMAP server (empty host for API-backed accounts)."
+          },
+          "inbox_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The provider's id of the inbox (`agentmail` accounts); `null` otherwise."
           },
           "name": {
             "type": "string",
@@ -3594,7 +3631,11 @@
           },
           "password_set": {
             "type": "boolean",
-            "description": "Whether a password is stored. The password itself is never returned."
+            "description": "Whether the secret (password, or the API key of an `agentmail` account)\nis stored. The secret itself is never returned."
+          },
+          "provider": {
+            "$ref": "#/components/schemas/EmailProviderKind",
+            "description": "Kind of mailbox."
           },
           "smtp": {
             "$ref": "#/components/schemas/EmailSmtpServer",
@@ -3610,15 +3651,12 @@
         "type": "object",
         "description": "Body of `POST /v1/email/accounts` and `POST /v1/email/test`.",
         "required": [
-          "name",
-          "address",
-          "imap",
-          "smtp"
+          "name"
         ],
         "properties": {
           "address": {
             "type": "string",
-            "description": "Address mail is sent from."
+            "description": "Address mail is sent from (`imap_smtp`)."
           },
           "allowed_senders": {
             "type": "array",
@@ -3627,12 +3665,26 @@
             },
             "description": "Senders whose mail may start a run (addresses or `@domain`)."
           },
+          "api_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The user's own `AgentMail` API key (`agentmail`). **Write-only**: it goes\nto the secret store and is never returned or logged."
+          },
           "bot": {
             "type": [
               "string",
               "null"
             ],
             "description": "Bot (storage UUID) that owns the account; absent / `null` = every bot."
+          },
+          "domain": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Custom (verified) domain for a new `agentmail` address; default the\nprovider's shared domain."
           },
           "drafts_folder": {
             "type": [
@@ -3643,11 +3695,18 @@
           },
           "imap": {
             "$ref": "#/components/schemas/EmailImapServer",
-            "description": "IMAP server."
+            "description": "IMAP server (`imap_smtp`)."
           },
           "name": {
             "type": "string",
             "description": "Account name: 1 to 64 characters of `[A-Za-z0-9._-]`. Required on\ncreate; for `POST /v1/email/test` it selects the stored password to\nreuse when `password` is left out."
+          },
+          "name_hint": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Hint for the local part of a new `agentmail` address."
           },
           "password": {
             "type": [
@@ -3656,9 +3715,13 @@
             ],
             "description": "The account password or app password. **Write-only**: it goes to the\nsecret store and is never returned or logged. Required on create."
           },
+          "provider": {
+            "$ref": "#/components/schemas/EmailProviderKind",
+            "description": "Kind of mailbox; default `imap_smtp`. For `agentmail` the inbox is\ncreated at the provider (its address is returned); `address`, `imap`\nand `smtp` are not used and `api_key` is required."
+          },
           "smtp": {
             "$ref": "#/components/schemas/EmailSmtpServer",
-            "description": "SMTP server."
+            "description": "SMTP server (`imap_smtp`)."
           },
           "username": {
             "type": [
@@ -3689,6 +3752,13 @@
               "type": "string"
             },
             "description": "Allowed senders; present list replaces the stored one."
+          },
+          "api_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New `AgentMail` API key (write-only)."
           },
           "bot": {
             "type": [
@@ -3773,6 +3843,14 @@
           "timeout"
         ]
       },
+      "EmailProviderKind": {
+        "type": "string",
+        "description": "What kind of mailbox an account is.",
+        "enum": [
+          "imap_smtp",
+          "agentmail"
+        ]
+      },
       "EmailSecurity": {
         "type": "string",
         "description": "How the SMTP connection is secured.",
@@ -3813,13 +3891,24 @@
           "ok"
         ],
         "properties": {
+          "api": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EmailProbeStatus",
+                "description": "The one API check of an API-backed account (`agentmail`); `imap` and\n`smtp` repeat it there. Absent for `imap_smtp`."
+              }
+            ]
+          },
           "imap": {
             "$ref": "#/components/schemas/EmailProbeStatus",
             "description": "IMAP (reading mail)."
           },
           "ok": {
             "type": "boolean",
-            "description": "Both servers accepted the login."
+            "description": "Both servers accepted the login (for `agentmail`: the API check\npassed)."
           },
           "smtp": {
             "$ref": "#/components/schemas/EmailProbeStatus",
