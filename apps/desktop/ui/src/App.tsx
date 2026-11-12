@@ -1,11 +1,11 @@
-import { BellDot, CalendarDays, FlaskConical, Grid2X2, MessageSquare, Plus, Sparkles } from "lucide-react";
-import { isMockMode } from "./api/mock";
-import type { CSSProperties } from "react";
+import { BellDot, CalendarDays, FlaskConical, LoaderCircle, MessageSquare, Plus, Search, ServerOff, Settings2, Monitor, Minus, Square, X } from "lucide-react";
+import { isMockMode } from "./api/mockMode";
+
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   applyTheme,
-  Avatar,
+  BotAvatar,
   Button,
   Card,
   resolveTheme,
@@ -19,7 +19,8 @@ import {
   type ThemeMode
 } from "ui";
 import styles from "./App.module.css";
-import { PRODUCT_CONFIG } from "./config/product";
+import { BrandIcon } from "./components/BrandIcon";
+import { useMcp } from "./state/useMcp";
 import { AccountMenu, type AccountAction } from "./components/AccountMenu";
 import { HealthIndicator } from "./components/HealthIndicator";
 import { HelpModal } from "./components/HelpModal";
@@ -80,6 +81,7 @@ function AppShell() {
   const {
     phase,
     error: daemonError,
+    runs,
     bots,
     chats,
     needs,
@@ -97,8 +99,9 @@ function AppShell() {
     null
   );
   const [appsOpen, setAppsOpen] = useState(false);
+  const [botSearch, setBotSearch] = useState<string | null>(null);
+  const { servers: appServers } = useMcp(true);
   const [helpOpen, setHelpOpen] = useState(false);
-
   useEffect(() => {
     let mounted = true;
     void loadSettings().then(async (loaded) => {
@@ -118,8 +121,18 @@ function AppShell() {
       };
       if (mock) {
         setRoute({ kind: "chat", chatId: "33333333-3333-4333-8333-333333333333", botId: "11111111-1111-4111-8111-111111111111" });
-        if (params.get("screen") === "settings") setSettingsOpen("general");
-        if (params.get("screen") === "apps") setAppsOpen(true);
+        const screen = params.get("screen");
+        if (screen === "settings") setSettingsOpen((params.get("section") ?? "general") as SettingsSectionId);
+        if (screen === "apps") setAppsOpen(true);
+        // Review states of the other routes (mock mode only).
+        const atlas = "11111111-1111-4111-8111-111111111111";
+        if (screen === "onboarding") merged.onboardingCompleted = false;
+        if (screen === "botform") setRoute({ kind: "botForm", botId: atlas });
+        if (screen === "newbot") setRoute({ kind: "botForm" });
+        if (screen === "bot") setRoute({ kind: "bot", botId: atlas });
+        if (screen === "schedules") setRoute({ kind: "schedules" });
+        if (screen === "needs") setRoute({ kind: "needs" });
+        if (screen === "home" || screen === "offline") setRoute({ kind: "home" });
       }
       setSettings(merged);
       if (shouldOpenOnboardingOnStart(merged)) {
@@ -316,6 +329,8 @@ function AppShell() {
       setSettingsOpen("general");
     } else if (action === "computer") {
       setSettingsOpen("computer");
+    } else if (action === "schedules") {
+      setRoute({ kind: "schedules" });
     } else if (action === "apps") {
       setAppsOpen(true);
     } else {
@@ -409,112 +424,60 @@ function AppShell() {
       sidebar={
         <Sidebar>
           <SidebarHeader>
-            <div className={styles.brandBlock}>
-              <span className={styles.brandTitle}><span className={styles.brandMark}><Sparkles /></span>{PRODUCT_CONFIG.appName}</span>
-              <HealthIndicator />
+            <div className={styles.botTop}>
+              <button className={styles.characterTile} title={selectedBot?.name} onClick={() => selectedBot && setRoute({ kind: "bot", botId: selectedBot.id })}>
+                {selectedBot ? <BotAvatar bot={botView(selectedBot)} size="hero" decorative /> : null}
+                <span>{selectedBot?.name ?? "Praxi-Bot"}</span>
+              </button>
+              <div className={styles.topActions}>
+                <button className={styles.iconButton} title={t("sidebar.searchBots")} aria-label={t("sidebar.searchBots")} onClick={() => setBotSearch(botSearch === null ? "" : null)}><Search /></button>
+                <button className={styles.iconButton} title={t("sidebar.newBot")} aria-label={t("sidebar.newBot")} onClick={() => setRoute({ kind: "botForm" })}><Plus /></button>
+              </div>
             </div>
+            {botSearch !== null ? <input className={styles.botSearch} autoFocus value={botSearch} onChange={e => setBotSearch(e.target.value)} aria-label={t("sidebar.searchBots")} placeholder={t("sidebar.searchBots")} /> : null}
           </SidebarHeader>
-
-          <SidebarSection label={t("sidebar.botsSection")}>
-            {needs.length > 0 ? (
-              <SidebarItem
-                active={route.kind === "needs"}
-                onClick={() => setRoute({ kind: "needs" })}
-              >
-                <BellDot /><span className={styles.botName}>{t("sidebar.needsYou")}</span>
-                <span
-                  className={styles.needsBadge}
-                  data-testid="needs-you-badge"
-                  aria-label={t("sidebar.needsYouCount", {
-                    count: needs.length
-                  })}
-                >
-                  {needs.length}
-                </span>
-              </SidebarItem>
-            ) : null}
-            {bots.map((bot) => {
+          <SidebarSection>
+            {needs.length > 0 ? <SidebarItem active={route.kind === "needs"} onClick={() => setRoute({ kind: "needs" })}><BellDot /><span className={styles.botName}>{t("sidebar.needsYou")}</span><span className={styles.needsBadge} data-testid="needs-you-badge" aria-label={t("sidebar.needsYouCount", { count: needs.length })}>{needs.length}</span></SidebarItem> : null}
+            {bots.filter(bot => bot.name.toLowerCase().includes((botSearch ?? "").toLowerCase())).map((bot) => {
               const view = botView(bot);
-              const isSelected =
-                (route.kind === "bot" ||
-                  route.kind === "chat" ||
-                  route.kind === "botForm") &&
-                routeBotId === bot.id;
-              return (
-                <SidebarItem
-                  key={bot.id}
-                  active={isSelected}
-                  accentColor={view.color}
-                  onClick={() => setRoute({ kind: "bot", botId: bot.id })}
-                >
-                  <Avatar
-                    name={view.name}
-                    initials={view.initials}
-                    src={view.avatar}
-                    color={view.color}
-                    size="md"
-                  />
-                  <div className={styles.botMeta}>
-                    <span className={styles.botName}>{view.name}</span>
-                    <span className={styles.botRole}>
-                      {view.executor.split("/").pop() || t("bots.noModel")}
-                    </span>
-                  </div>
-                  <span
-                    className={styles.botColorDot}
-                    style={{ "--bot-dot-color": view.color } as CSSProperties}
-                    aria-hidden="true"
-                  />
-                </SidebarItem>
-              );
+              const latest = chats.filter(c => c.bot_id === bot.id).sort((a,b) => b.created_at_ms - a.created_at_ms)[0];
+              const config = bot.config as { bot?: { preview?: string; state?: string; unread?: boolean } };
+              const live = runs.find(r => r.bot_id === bot.id && ["running", "pending", "waiting_approval"].includes(r.state));
+              const state = needs.some(n => n.botId === bot.id) || live?.state === "waiting_approval" ? "waiting-approval" : live ? "working" : isMockMode() ? config.bot?.state : "idle";
+              const avatarState = state === "thinking" || state === "working" || state === "waiting-approval" || state === "error" ? state : "idle";
+              return <SidebarItem key={bot.id} active={routeBotId === bot.id} onClick={() => latest ? openChat(latest.id) : setRoute({ kind: "bot", botId: bot.id })}>
+                <BotAvatar bot={view} size="md" state={avatarState} decorative />
+                <div className={styles.botMeta}><span className={styles.botName}>{view.name}</span><span className={styles.botRole}>{(isMockMode() ? config.bot?.preview : undefined) ?? latest?.title ?? t("bots.newChat")}</span></div>
+              </SidebarItem>;
             })}
-            <Button
-              variant="secondary"
-              size="sm"
-              fullWidth
-              onClick={() => setRoute({ kind: "botForm" })}
-            >
-              <Plus />{t("sidebar.newBot")}
-            </Button>
           </SidebarSection>
 
           <SidebarFooter>
             <div className={styles.footerActions}>
-              {import.meta.env.DEV ? (
-                <Button
-                  variant="ghost"
-                  fullWidth
-                  onClick={handleSimulateBotRun}
-                >
-                  <FlaskConical />{t("dev.simulateBotRun")}
-                </Button>
-              ) : null}
-              <Button
-                variant={route.kind === "schedules" ? "primary" : "ghost"}
-                fullWidth
-                onClick={() => setRoute({ kind: "schedules" })}
-              >
-                <CalendarDays />{t("sidebar.schedules")}
-              </Button>
-              <Button
-                variant="ghost"
-                fullWidth
-                data-testid="open-apps"
-                onClick={() => setAppsOpen(true)}
-              >
-                <Grid2X2 />{t("sidebar.apps")}
-              </Button>
-              <AccountMenu
-                name={settings.accountName}
-                computerTarget={settings.computerTarget}
-                onAction={handleAccountAction}
-              />
+              {import.meta.env.DEV && new URLSearchParams(window.location.search).get("dev") === "1" ? <Button variant="ghost" onClick={handleSimulateBotRun}><FlaskConical />{t("dev.simulateBotRun")}</Button> : null}
+              <button className={styles.footerLink} data-testid="open-schedules" aria-current={route.kind === "schedules" ? "page" : undefined} onClick={() => setRoute({ kind: "schedules" })}><CalendarDays /><span>{t("sidebar.schedules")}</span></button>
+              <div className={styles.bottomRow}>
+                <button className={styles.appsPill} data-testid="open-apps" onClick={() => setAppsOpen(true)}><span>{t("sidebar.apps")}</span><span className={styles.appStack}>{appServers.filter(s => s.status === "connected").slice(0, 4).map(s => <BrandIcon key={s.name} name={s.name} small />)}</span></button>
+              </div>
+              <AccountMenu name={settings.accountName} computerTarget={settings.computerTarget} onAction={handleAccountAction} />
             </div>
           </SidebarFooter>
         </Sidebar>
       }
     >
       <div className={styles.mainColumn}>
+        <div className={styles.titleBar} data-tauri-drag-region>
+          <span className={styles.runtimeLabel} data-tauri-drag-region><Monitor />{t("account.localComputer")}</span>
+          <div className={styles.windowActions}>
+            <button className={styles.iconButton} title={t("account.settings")} aria-label={t("account.settings")} onClick={() => setSettingsOpen("general")}><Settings2 /></button>
+            {isTauriRuntime() && !settings.windowFrame ? <>
+              <button className={styles.iconButton} title={t("window.minimize")} aria-label={t("window.minimize")} onClick={() => void getCurrentWindow().minimize()}><Minus /></button>
+              <button className={styles.iconButton} title={t("window.maximize")} aria-label={t("window.maximize")} onClick={() => void getCurrentWindow().toggleMaximize()}><Square /></button>
+              <button className={styles.iconButton} title={t("common.close")} aria-label={t("common.close")} onClick={() => void getCurrentWindow().close()}><X /></button>
+            </> : null}
+          </div>
+        </div>
+        <HealthIndicator />
         <ShellBridgeHost
           settings={settings}
           onOpenChat={openChat}
@@ -555,34 +518,26 @@ function AppShell() {
           <div className={styles.centerPane}>
             <Card padding="lg" className={styles.emptyStateCard}>
               {phase === "error" ? (
-                <div
-                  className={styles.selectedBotContent}
-                  data-testid="daemon-offline-empty-state"
-                >
-                  <MessageSquare className={styles.emptyIcon} /><h1 className={styles.emptyStateTitle}>
+                <div className={styles.selectedBotContent} data-testid="daemon-offline-empty-state">
+                  <span className={`${styles.stateIcon} ${styles.stateIconDanger}`}><ServerOff /></span><h1 className={styles.emptyStateTitle}>
                     {t("main.daemonOfflineTitle")}
                   </h1>
                   <p className={styles.emptyStateDescription}>
                     {t("main.daemonOfflineDescription")}
                   </p>
-                  {daemonError ? (
-                    <pre className={styles.errorDetailMono}>{daemonError}</pre>
-                  ) : null}
+                  {daemonError ? <pre className={styles.errorDetailMono}>{daemonError}</pre> : null}
                   <div className={styles.optionRow}>
                     <Button variant="primary" onClick={retry}>
                       {t("main.daemonRetry")}
                     </Button>
-                    <Button
-                      variant="secondary"
-                      onClick={() => handleOpenOnboarding(false)}
-                    >
+                    <Button variant="secondary" onClick={() => handleOpenOnboarding(false)}>
                       {t("main.runSetupWizard")}
                     </Button>
                   </div>
                 </div>
               ) : phase === "connecting" && bots.length === 0 ? (
                 <div className={styles.selectedBotContent}>
-                  <MessageSquare className={styles.emptyIcon} /><h1 className={styles.emptyStateTitle}>
+                  <span className={styles.stateIcon}><LoaderCircle className={styles.spin} /></span><h1 className={styles.emptyStateTitle}>
                     {t("main.daemonConnectingTitle")}
                   </h1>
                   <p className={styles.emptyStateDescription}>
@@ -593,52 +548,52 @@ function AppShell() {
                   </Button>
                 </div>
               ) : (
-                <div
-                  className={styles.selectedBotContent}
-                  data-testid="home-empty-state"
-                >
-                  <MessageSquare className={styles.emptyIcon} /><h1 className={styles.emptyStateTitle}>
-                    {bots.length === 0
-                      ? t("main.welcomeTitle")
-                      : t("main.selectBotTitle")}
-                  </h1>
-                  <p className={styles.emptyStateDescription}>
-                    {bots.length === 0
-                      ? t("main.welcomeDescription")
-                      : t("main.selectBotDescription")}
-                  </p>
-                  <div className={styles.optionRow}>
-                    {bots.length === 0 ? (
-                      <>
+                  <div
+                    className={styles.selectedBotContent}
+                    data-testid="home-empty-state"
+                  >
+                    <MessageSquare className={styles.emptyIcon} /><h1 className={styles.emptyStateTitle}>
+                      {bots.length === 0
+                        ? t("main.welcomeTitle")
+                        : t("main.selectBotTitle")}
+                    </h1>
+                    <p className={styles.emptyStateDescription}>
+                      {bots.length === 0
+                        ? t("main.welcomeDescription")
+                        : t("main.selectBotDescription")}
+                    </p>
+                    <div className={styles.optionRow}>
+                      {bots.length === 0 ? (
+                        <>
+                          <Button
+                            variant="primary"
+                            onClick={() => handleOpenOnboarding(false)}
+                          >
+                            {t("main.runSetupWizard")}
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            onClick={() => setRoute({ kind: "botForm" })}
+                          >
+                            <Plus />{t("sidebar.newBot")}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            onClick={() => void refreshBots()}
+                          >
+                            {t("main.refreshBots")}
+                          </Button>
+                        </>
+                      ) : (
                         <Button
                           variant="primary"
-                          onClick={() => handleOpenOnboarding(false)}
-                        >
-                          {t("main.runSetupWizard")}
-                        </Button>
-                        <Button
-                          variant="secondary"
                           onClick={() => setRoute({ kind: "botForm" })}
                         >
                           <Plus />{t("sidebar.newBot")}
                         </Button>
-                        <Button
-                          variant="ghost"
-                          onClick={() => void refreshBots()}
-                        >
-                          {t("main.refreshBots")}
-                        </Button>
-                      </>
-                    ) : (
-                      <Button
-                        variant="primary"
-                        onClick={() => setRoute({ kind: "botForm" })}
-                      >
-                        <Plus />{t("sidebar.newBot")}
-                      </Button>
-                    )}
+                      )}
+                    </div>
                   </div>
-                </div>
               )}
             </Card>
           </div>
@@ -671,6 +626,7 @@ function AppShell() {
             key={route.chatId}
             chatId={route.chatId}
             onBack={() => setRoute({ kind: "bot", botId: route.botId })}
+            onOpenBot={() => setRoute({ kind: "botForm", botId: route.botId })}
             onSwitchChat={openChat}
             showAgentRoute={settings.showAgentRoute}
             sendWith={settings.sendWith}

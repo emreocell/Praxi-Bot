@@ -12,7 +12,7 @@ import {
 import { ApiClient } from "../api/client";
 import { type Connection, connectDaemon } from "../api/connection";
 import { subscribeEvents } from "../api/events";
-import { MOCK_BASE_URL, MockApiClient } from "../api/mock";
+import { MOCK_BASE_URL } from "../api/mockMode";
 import type { Bot, Chat, GlobalEnvelope, Health, Run } from "../api/types";
 import {
   applyEvent,
@@ -94,15 +94,29 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
   const [events, dispatch] = useReducer(reducer, EMPTY_EVENTS);
   const [attempt, setAttempt] = useState(0);
 
-  const client = useMemo(
-    () =>
-      conn
-        ? conn.base_url === MOCK_BASE_URL
-          ? new MockApiClient()
-          : new ApiClient(conn)
-        : null,
-    [conn]
-  );
+  const [client, setClient] = useState<ApiClient | null>(null);
+  useEffect(() => {
+    if (!conn) {
+      setClient(null);
+      return undefined;
+    }
+    if (conn.base_url !== MOCK_BASE_URL) {
+      setClient(new ApiClient(conn));
+      return undefined;
+    }
+    // Mock code is only reachable in dev builds or with VITE_MOCK=1.
+    if (!(import.meta.env.DEV || import.meta.env.VITE_MOCK === "1")) {
+      setClient(null);
+      return undefined;
+    }
+    let live = true;
+    void import("../api/mock").then((m) => {
+      if (live) setClient(new m.MockApiClient());
+    });
+    return () => {
+      live = false;
+    };
+  }, [conn]);
   const clientRef = useRef<ApiClient | null>(null);
   clientRef.current = client;
   const listeners = useRef(new Set<(env: GlobalEnvelope) => void>());
@@ -166,9 +180,21 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
     void Promise.all([refreshBots(), refreshChats(), refreshRuns()]).catch(
       () => {}
     );
-    if (client instanceof MockApiClient) {
+    if (client.baseUrl === MOCK_BASE_URL) {
       setEventsConnected(true);
-      return undefined;
+      if (!(import.meta.env.DEV || import.meta.env.VITE_MOCK === "1")) {
+        return undefined;
+      }
+      let live = true;
+      void import("../api/mock").then((m) => {
+        if (!live) return;
+        m.mockReviewEvents().forEach((event, i) =>
+          dispatch({ type: "event", env: { v: 1, seq: i + 1, gseq: i + 1, ts_ms: event.ts_ms, event: event.event } })
+        );
+      });
+      return () => {
+        live = false;
+      };
     }
     return subscribeEvents(client, {
       lastEventId: 0,

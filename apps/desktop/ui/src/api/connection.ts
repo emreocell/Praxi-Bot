@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "../overlay/events";
-import { isMockMode, MOCK_BASE_URL } from "./mock";
+import { isMockMode, MOCK_BASE_URL } from "./mockMode";
 
 /** What the shell hands us after starting / finding the daemon. */
 export interface Connection {
@@ -20,6 +20,10 @@ export interface Connection {
  */
 export async function connectDaemon(restart = false): Promise<Connection> {
   if (isMockMode()) {
+    // Review state: the daemon cannot be reached (`?mock=1&screen=offline`).
+    if (new URLSearchParams(window.location.search).get("screen") === "offline") {
+      throw new Error("connect ECONNREFUSED 127.0.0.1:47821");
+    }
     return {
       base_url: MOCK_BASE_URL,
       token: "mock",

@@ -15,6 +15,9 @@
   --space-8: 32px;
   --space-10: 40px;
   --space-12: 48px;
+  --space-16: 64px;
+  --font-size-ui: 13px;
+  --size-titlebar: 28px;
 
   /* Sizing tokens */
   --size-border: 1px;
@@ -86,17 +89,17 @@
 [data-theme-preview="obsidian"] {
   color-scheme: dark;
   --color-background: #111217;
-  --color-surface: #18191F;
-  --color-surface-elevated: #202127;
-  --color-surface-active: #2A2B33;
+  --color-surface: #1A1A1B;
+  --color-surface-elevated: #222223;
+  --color-surface-active: #2C2C2D;
   --color-text: #F2F2F5;
-  --color-text-secondary: #B8B8C2;
-  --color-text-muted: #999AA8;
+  --color-text-secondary: #CBCBCB;
+  --color-text-muted: #A3A3A3;
   --color-accent: #B6B8FA;
   --color-accent-contrast: #171824;
   --color-accent-text: #C4C5FF;
   --color-border: #ffffff12;
-  --color-border-strong: #797B8C;
+  --color-border-strong: #7E808F;
   --color-text-inverse: #171824;
   --color-accent-hover: color-mix(in srgb, #B6B8FA 88%, #ffffff);
   --color-accent-subtle: color-mix(in srgb, #B6B8FA 12%, #18191F);
@@ -109,8 +112,8 @@
   --color-danger-contrast: #351111;
   --color-danger-subtle: color-mix(in srgb, var(--color-danger) 10%, #18191F);
   --color-warning-subtle: color-mix(in srgb, var(--color-warning) 10%, #18191F);
-  --color-focus: #797B8C;
-  --color-scrollbar: #797B8C;
+  --color-focus: #A5A5A5;
+  --color-scrollbar: #484848;
   --color-selection: #2A2B33;
   --color-selection-text: #F2F2F5;
   --color-code-bg: #111217;
@@ -129,23 +132,27 @@
   --shadow-focus: 0 0 0 2px var(--color-background), 0 0 0 4px var(--color-focus);
   --shadow-target: 0 0 0 4px var(--color-accent-subtle);
   --shadow-human-banner: 0 0 0 3px var(--color-warning-subtle);
+  --color-primary: #F4F4F4;
+  --color-primary-contrast: #171717;
+  --color-logo-tile: #F5F5F3;
+  --color-creature-eyes: #172125;
 }
 
 :root[data-theme="cobalt"],
 [data-theme-preview="cobalt"] {
   color-scheme: dark;
   --color-background: #010102;
-  --color-surface: #08090C;
-  --color-surface-elevated: #101116;
-  --color-surface-active: #1C1D24;
+  --color-surface: #171717;
+  --color-surface-elevated: #202020;
+  --color-surface-active: #2A2A2A;
   --color-text: #FAFAFC;
-  --color-text-secondary: #C3C5D0;
-  --color-text-muted: #A3A6B7;
+  --color-text-secondary: #CBCBCB;
+  --color-text-muted: #A3A3A3;
   --color-accent: #9DBBFF;
   --color-accent-contrast: #07152B;
   --color-accent-text: #B7CDFF;
   --color-border: #ffffff0d;
-  --color-border-strong: #747A8C;
+  --color-border-strong: #7C7C7C;
   --color-text-inverse: #07152B;
   --color-accent-hover: color-mix(in srgb, #9DBBFF 88%, #ffffff);
   --color-accent-subtle: color-mix(in srgb, #9DBBFF 12%, #08090C);
@@ -158,8 +165,8 @@
   --color-danger-contrast: #351111;
   --color-danger-subtle: color-mix(in srgb, var(--color-danger) 10%, #08090C);
   --color-warning-subtle: color-mix(in srgb, var(--color-warning) 10%, #08090C);
-  --color-focus: #747A8C;
-  --color-scrollbar: #747A8C;
+  --color-focus: #A5A5A5;
+  --color-scrollbar: #484848;
   --color-selection: #1C1D24;
   --color-selection-text: #FAFAFC;
   --color-code-bg: #010102;
@@ -178,23 +185,27 @@
   --shadow-focus: 0 0 0 2px var(--color-background), 0 0 0 4px var(--color-focus);
   --shadow-target: 0 0 0 4px var(--color-accent-subtle);
   --shadow-human-banner: 0 0 0 3px var(--color-warning-subtle);
+  --color-primary: #F4F4F4;
+  --color-primary-contrast: #171717;
+  --color-logo-tile: #F5F5F3;
+  --color-creature-eyes: #172125;
 }
 
 :root[data-theme="raven"],
 [data-theme-preview="raven"] {
   color-scheme: dark;
   --color-background: #191613;
-  --color-surface: #211D19;
-  --color-surface-elevated: #2B2520;
-  --color-surface-active: #352D27;
+  --color-surface: #211F1C;
+  --color-surface-elevated: #2A2723;
+  --color-surface-active: #35312B;
   --color-text: #FDEFD6;
   --color-text-secondary: #D0BEA6;
-  --color-text-muted: #BBA990;
+  --color-text-muted: #BBAF9D;
   --color-accent: #E4B683;
   --color-accent-contrast: #24180D;
   --color-accent-text: #F0C99D;
   --color-border: #fdefd617;
-  --color-border-strong: #9D8973;
+  --color-border-strong: #85807A;
   --color-text-inverse: #24180D;
   --color-accent-hover: color-mix(in srgb, #E4B683 88%, #ffffff);
   --color-accent-subtle: color-mix(in srgb, #E4B683 12%, #211D19);
@@ -207,8 +218,8 @@
   --color-danger-contrast: #351111;
   --color-danger-subtle: color-mix(in srgb, var(--color-danger) 10%, #211D19);
   --color-warning-subtle: color-mix(in srgb, var(--color-warning) 10%, #211D19);
-  --color-focus: #9D8973;
-  --color-scrollbar: #9D8973;
+  --color-focus: #A5A5A5;
+  --color-scrollbar: #484848;
   --color-selection: #352D27;
   --color-selection-text: #FDEFD6;
   --color-code-bg: #191613;
@@ -227,6 +238,10 @@
   --shadow-focus: 0 0 0 2px var(--color-background), 0 0 0 4px var(--color-focus);
   --shadow-target: 0 0 0 4px var(--color-accent-subtle);
   --shadow-human-banner: 0 0 0 3px var(--color-warning-subtle);
+  --color-primary: #FDEFD6;
+  --color-primary-contrast: #171717;
+  --color-logo-tile: #F5F5F3;
+  --color-creature-eyes: #172125;
 }
 
 :root[data-theme="clay"],
@@ -243,7 +258,7 @@
   --color-accent-contrast: #1A100B;
   --color-accent-text: #7C4525;
   --color-border: #D8D3CC;
-  --color-border-strong: #7D7066;
+  --color-border-strong: #757069;
   --color-text-inverse: #1A100B;
   --color-accent-hover: #DB825F;
   --color-accent-subtle: color-mix(in srgb, #C86B4A 12%, #FAF8F5);
@@ -256,8 +271,8 @@
   --color-danger-contrast: #FFFFFF;
   --color-danger-subtle: color-mix(in srgb, var(--color-danger) 10%, #FAF8F5);
   --color-warning-subtle: color-mix(in srgb, var(--color-warning) 10%, #FAF8F5);
-  --color-focus: #7D7066;
-  --color-scrollbar: #7D7066;
+  --color-focus: #8A4E2A;
+  --color-scrollbar: #BDB5AC;
   --color-selection: #D8D3CC;
   --color-selection-text: #1A1A1A;
   --color-code-bg: #F4F1ED;
@@ -276,4 +291,8 @@
   --shadow-focus: 0 0 0 2px var(--color-background), 0 0 0 4px var(--color-focus);
   --shadow-target: 0 0 0 4px var(--color-accent-subtle);
   --shadow-human-banner: 0 0 0 3px var(--color-warning-subtle);
+  --color-primary: #1A1A1A;
+  --color-primary-contrast: #FFFFFF;
+  --color-logo-tile: #F5F5F3;
+  --color-creature-eyes: #172125;
 }

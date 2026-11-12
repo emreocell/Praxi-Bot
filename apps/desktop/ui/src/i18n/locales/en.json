@@ -7,7 +7,9 @@
     "newBot": "New bot",
     "usage": "Usage",
     "schedules": "Scheduled tasks",
-    "apps": "Apps"
+    "apps": "Apps",
+    "searchBots": "Search bots",
+    "unread": "Unread message"
   },
   "main": {
     "selectBotTitle": "Select a bot",
@@ -365,7 +367,9 @@
       "noMatch": "No match"
     },
     "conversationLabel": "Today",
-    "composerHint": "Enter to send · / for commands · @ to mention a bot"
+    "composerHint": "Enter to send · / for commands · @ to mention a bot",
+    "openBot": "Open {{name}}",
+    "emptyTitle": "What shall we work on?"
   },
   "botForm": {
     "apps": {
@@ -383,8 +387,8 @@
     "nameRequired": "A name is required.",
     "avatar": "Avatar",
     "avatarChoose": "Choose image or GIF",
-    "avatarUseInitials": "Use initials",
-    "avatarInitialsHint": "Initials are shown until you pick an image.",
+    "avatarUseInitials": "Use character",
+    "avatarInitialsHint": "A character unique to your bot.",
     "avatarHint": "PNG, JPEG, WebP or GIF (GIFs up to 400 KB keep their animation).",
     "avatarTooLarge": "That image is too large.",
     "avatarUnreadable": "That file could not be read as an image.",
@@ -736,11 +740,12 @@
     "settings": "Settings",
     "apps": "Apps",
     "computer": "Computer",
-    "help": "Help"
+    "help": "Help",
+    "localComputer": "This computer"
   },
   "apps": {
     "title": "Apps",
-    "subtitle": "Connect MCP servers so your bots can use external tools.",
+    "subtitle": "Connect your apps once. Choose which bots can use them.",
     "search": "Search apps and servers",
     "mcpServers": "Custom MCP server",
     "categoriesLabel": "Categories",
@@ -790,7 +795,7 @@
     "connectedToast": "{{name}} connected",
     "disconnectedToast": "{{name}} disconnected",
     "missingSecret": "Enter every required secret.",
-    "connectedSection": "Connected",
+    "connectedSection": "Connected apps",
     "catalogSection": "Catalog",
     "loading": "Loading catalog…",
     "noResults": "No matching servers.",
@@ -910,6 +915,11 @@
         "title": "How updates work",
         "description": "Releases are distributed separately; check the project docs for upgrade steps."
       }
+    },
+    "groups": {
+      "account": "Account",
+      "appearance": "Appearance",
+      "behavior": "Behavior"
     },
     "email": {
       "title": "E-mail",
@@ -1046,5 +1056,9 @@
     "switchBot": "Switch to {{name}}",
     "runSchedule": "Run now: {{name}}",
     "scheduleStarted": "Schedule started"
+  },
+  "window": {
+    "minimize": "Minimize",
+    "maximize": "Maximize / restore"
   }
 }

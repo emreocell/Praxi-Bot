@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   applyTheme,
-  Avatar,
+  BotAvatar,
   Button,
   Card,
   resolveTheme,
@@ -196,13 +196,7 @@ export function WidgetWindow() {
           aria-label={t("widget.dragHandleAria")}
         >
           <div className={styles.botIdentity}>
-            <Avatar
-              name={bot.botName}
-              initials={bot.botInitials}
-              src={bot.botAvatar}
-              color={bot.botColor}
-              size="md"
-            />
+            <BotAvatar bot={{ id: bot.botId, name: bot.botName, avatar: bot.botAvatar, color: bot.botColor }} size="md" state={controlState.mode === "paused" ? "waiting-approval" : controlState.mode === "idle" ? "idle" : "working"} />
             <div className={styles.botTextMeta}>
               <span className={styles.botName}>{bot.botName}</span>
               <span className={styles.hotkeyHint}>

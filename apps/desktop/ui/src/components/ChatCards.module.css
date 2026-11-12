@@ -132,20 +132,19 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
-  border: var(--size-border-thick) solid var(--color-warning);
-  background-color: var(--color-warning-subtle);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-card);
+  border: var(--size-border) solid var(--color-border);
+  background-color: var(--color-surface);
+  box-shadow: inset var(--size-border-thick) 0 0 var(--color-warning);
 }
 
 .question {
-  border-color: var(--color-accent);
-  background-color: var(--color-accent-subtle);
+  box-shadow: inset var(--size-border-thick) 0 0 var(--color-accent);
 }
 
 .outbound {
-  border-color: var(--color-danger);
-  background-color: var(--color-danger-subtle);
+  box-shadow: inset var(--size-border-thick) 0 0 var(--color-danger);
 }
 
 .approvalHead {
@@ -323,4 +322,15 @@
   color: var(--color-text-muted);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.approvalTool {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.scheduleBody .code {
+  max-height: calc(var(--space-16) * 3);
 }

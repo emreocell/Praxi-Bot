@@ -41,3 +41,5 @@ export {
   type ThemeMode,
   type ThemeOverrides
 } from "./theme";
+
+export { BotAvatar, type BotAvatarState, type BotIdentity } from "./components/BotAvatar";
