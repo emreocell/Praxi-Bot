@@ -71,6 +71,9 @@ struct Disk {
     #[serde(default)]
     audit_pending: bool,
 }
+/// How long a takeover may stay `Acquiring` (drain 10 s plus the activation).
+const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(20);
+
 pub(super) fn restore(st: &mut State, path: &Path) {
     match std::fs::read(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -318,7 +321,9 @@ impl ControlHub {
             actor: actor.into(),
             request_id: req.request_id,
             generation,
-            input_deadline: None,
+            // An acquisition nobody finishes (the request was dropped before
+            // its activation task started) expires: the reaper pauses it.
+            input_deadline: Some(tokio::time::Instant::now() + ACQUIRE_TIMEOUT),
         };
         st.latched = Some(ControlMode::HumanDriving);
         st.owned = Some(owned.clone());

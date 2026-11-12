@@ -40,19 +40,19 @@ pub(super) fn spawn_reaper(s: &AppState, id: Uuid, actor: Actor) {
                 return;
             }
             let _executor = live.executor.lock().await;
-            if let Some(t) = s
-                .hub()
-                .takeover()
-                .filter(|t| t.info.session_id == id && t.info.state == ViewState::Active)
-            {
+            if let Some(t) = s.hub().takeover().filter(|t| {
+                t.info.session_id == id
+                    && matches!(t.info.state, ViewState::Active | ViewState::Acquiring)
+            }) {
                 if t.info.input_expires_in_ms == 0 || !live.allowed(&actor, true) {
                     let _ = interrupt(&s, &actor, &t, Reason::Expired).await;
-                } else if live
-                    .sessions
-                    .lock()
-                    .get(&id)
-                    .and_then(|s| s.geometry)
-                    .is_some_and(|(_, _, at)| at.elapsed() > Duration::from_secs(2))
+                } else if t.info.state == ViewState::Active
+                    && live
+                        .sessions
+                        .lock()
+                        .get(&id)
+                        .and_then(|s| s.geometry)
+                        .is_some_and(|(_, _, at)| at.elapsed() > Duration::from_secs(2))
                 {
                     let _ = interrupt(&s, &actor, &t, Reason::Stale).await;
                 }

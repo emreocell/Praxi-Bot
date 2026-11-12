@@ -3632,6 +3632,47 @@ async fn a_revoked_input_grant_stops_applying_while_the_executor_is_busy() {
     assert!(live.allowed(&peer, false), "view stays");
 }
 
+// ---- audit3 F2: a takeover whose request was dropped does not stay Acquiring forever
+#[tokio::test(start_paused = true)]
+async fn an_acquiring_takeover_that_nobody_activates_expires() {
+    let t = Test::new();
+    let id = t.session(Some("alice")).await;
+    let request: ::live_view::TakeoverRequest =
+        serde_json::from_value(json!({"session_id":id,"request_id":Uuid::now_v7()})).unwrap();
+    // The handler future was dropped after `begin_takeover`: no activation task.
+    t.state
+        .hub()
+        .begin_takeover(
+            "peer:alice",
+            &request,
+            t.target.info().target_id,
+            1,
+            false,
+            false,
+        )
+        .unwrap();
+    // Keep the session alive (a heartbeat every 10 s, as a live client would).
+    for _ in 0..3 {
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        let _ = t
+            .call(
+                Some("alice"),
+                Method::PUT,
+                &format!("/v1/view/sessions/{id}/heartbeat"),
+                Some(json!({})),
+            )
+            .await;
+    }
+    let now = t.state.hub().takeover().unwrap();
+    assert_eq!(
+        now.info.state,
+        ViewState::Paused,
+        "still {:?}",
+        now.info.state
+    );
+    assert_eq!(now.info.reason, Some(Reason::Expired));
+}
+
 // ---- audit2 F3: owed work never touches an active takeover
 #[tokio::test]
 async fn owed_reset_and_audit_work_never_touches_an_active_takeover() {
