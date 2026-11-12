@@ -12,7 +12,7 @@ import {
 import { ApiClient } from "../api/client";
 import { type Connection, connectDaemon } from "../api/connection";
 import { subscribeEvents } from "../api/events";
-import { MOCK_BASE_URL, MockApiClient } from "../api/mock";
+import { MOCK_BASE_URL } from "../api/mockMode";
 import type { Bot, Chat, GlobalEnvelope, Health, Run } from "../api/types";
 import {
   applyEvent,
@@ -94,15 +94,29 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
   const [events, dispatch] = useReducer(reducer, EMPTY_EVENTS);
   const [attempt, setAttempt] = useState(0);
 
-  const client = useMemo(
-    () =>
-      conn
-        ? conn.base_url === MOCK_BASE_URL
-          ? new MockApiClient()
-          : new ApiClient(conn)
-        : null,
-    [conn]
-  );
+  const [client, setClient] = useState<ApiClient | null>(null);
+  useEffect(() => {
+    if (!conn) {
+      setClient(null);
+      return undefined;
+    }
+    if (conn.base_url !== MOCK_BASE_URL) {
+      setClient(new ApiClient(conn));
+      return undefined;
+    }
+    // Mock code is only reachable in dev builds or with VITE_MOCK=1.
+    if (!(import.meta.env.DEV || import.meta.env.VITE_MOCK === "1")) {
+      setClient(null);
+      return undefined;
+    }
+    let live = true;
+    void import("../api/mock").then((m) => {
+      if (live) setClient(new m.MockApiClient());
+    });
+    return () => {
+      live = false;
+    };
+  }, [conn]);
   const clientRef = useRef<ApiClient | null>(null);
   clientRef.current = client;
   const listeners = useRef(new Set<(env: GlobalEnvelope) => void>());
@@ -166,36 +180,21 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
     void Promise.all([refreshBots(), refreshChats(), refreshRuns()]).catch(
       () => {}
     );
-    if (client instanceof MockApiClient) {
+    if (client.baseUrl === MOCK_BASE_URL) {
       setEventsConnected(true);
-      const screen = new URLSearchParams(window.location.search).get("screen");
-      if (screen === "approval" || screen === "approval-schedule" || screen === "streaming") {
-        const bot_id = "11111111-1111-4111-8111-111111111111";
-        const chat_id = "33333333-3333-4333-8333-333333333333";
-        const events: GlobalEnvelope["event"][] = [
-          { type: "run_started", run_id: "mock-live", bot_id, chat_id },
-          { type: "message_delta", run_id: "mock-live", text: screen === "approval" ? "Raporu hazırladım. Paylaşmadan önce eski taslakları temizlemem gerekiyor." : "Taslağı oluşturuyorum, önce kaynakları karşılaştırıyorum…" },
-          ...(screen === "approval-schedule" ? [
-            { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-sch", tool_name: "schedule_create", input: {} },
-            { type: "approval_needed", run_id: "mock-live", call_id: "mock-sch", tool_name: "schedule_create", input: {}, summary: "Create a schedule", details: { kind: "schedule", action: "create", name: "Pazartesi özeti", prompt: "Geçen haftanın GitHub ve takvim hareketlerinden kısa bir özet hazırla ve bana gönder.", prompt_chars: 76, previous: null, schedule: "Her pazartesi 09:00", timezone: "Europe/Istanbul", next_runs: ["2026-11-16T09:00:00+03:00", "2026-11-23T09:00:00+03:00"], permission: { level: "mixed", allow: ["github.*"], ask: ["email_send"], deny: [] } } }
-          ] as GlobalEnvelope["event"][] : []),
-          ...(screen === "approval" ? [
-            { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-rm", tool_name: "shell.run", input: { command: "rm -rf ./drafts/old" } },
-            { type: "approval_needed", run_id: "mock-live", call_id: "mock-rm", tool_name: "shell.run", input: { command: "rm -rf ./drafts/old" }, summary: "drafts/old klasörünü ve içindeki 14 dosyayı sil" }
-          ] as GlobalEnvelope["event"][] : [])
-        ];
-        events.forEach((event, i) => dispatch({ type: "event", env: { v: 1, seq: i + 1, gseq: i + 1, ts_ms: Date.now() - 4000 + i * 300, event } }));
-      } else if (screen !== "empty") {
-        const runId = "mock-review-run";
-        const events: GlobalEnvelope["event"][] = [
-          { type: "run_started", run_id: runId, bot_id: "11111111-1111-4111-8111-111111111111", chat_id: "33333333-3333-4333-8333-333333333333" },
-          { type: "tool_call_requested", run_id: runId, call_id: "mock-tool", tool_name: "github.search", input: { query: "is:closed updated:this-week" } },
-          { type: "tool_call_completed", run_id: runId, call_id: "mock-tool", error: null },
-          { type: "run_finished", run_id: runId, error: null }
-        ];
-        events.forEach((event, i) => dispatch({ type: "event", env: { v: 1, seq: i + 1, gseq: i + 1, ts_ms: 1750000000000 + (i === 3 ? 2000 : 200 + i * 100), event } }));
+      if (!(import.meta.env.DEV || import.meta.env.VITE_MOCK === "1")) {
+        return undefined;
       }
-      return undefined;
+      let live = true;
+      void import("../api/mock").then((m) => {
+        if (!live) return;
+        m.mockReviewEvents().forEach((event, i) =>
+          dispatch({ type: "event", env: { v: 1, seq: i + 1, gseq: i + 1, ts_ms: event.ts_ms, event: event.event } })
+        );
+      });
+      return () => {
+        live = false;
+      };
     }
     return subscribeEvents(client, {
       lastEventId: 0,

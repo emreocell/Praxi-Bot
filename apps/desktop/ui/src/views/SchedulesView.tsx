@@ -222,7 +222,7 @@ export function SchedulesView({
                       <div>
                         <dt>{t("schedules.bot")}</dt>
                         <dd className={styles.botCell}>
-                          {view ? <BotAvatar bot={view} size="xs" /> : null}
+                          {view ? <BotAvatar bot={view} size="xs" decorative /> : null}
                           {view?.name ?? t("schedules.deletedBot")}
                         </dd>
                       </div>

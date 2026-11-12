@@ -179,3 +179,13 @@
   font-size: var(--font-size-sm);
   color: var(--color-text);
 }
+
+.alert {
+  margin: var(--space-0);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-danger-subtle);
+  box-shadow: inset var(--size-border-thick) 0 0 var(--color-danger);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+}

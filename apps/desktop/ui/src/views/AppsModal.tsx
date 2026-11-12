@@ -80,7 +80,7 @@ function ConnectedRow({
           <span className={styles.usedBy}>
             {bots
               .filter((b) => access.all || server.bots?.includes(b.id))
-              .map((b) => <BotAvatar key={b.id} bot={botView(b)} size="xs" />)}
+              .map((b) => <BotAvatar key={b.id} bot={botView(b)} size="xs" decorative />)}
             <span className={styles.usedByLabel}>
               {access.all
                 ? t("apps.botsAll")
@@ -89,6 +89,8 @@ function ConnectedRow({
                   : t("apps.botsSome", { names: access.names.join(", ") })}
             </span>
           </span>
+          <span aria-hidden="true">·</span>
+          <span>{server.transport}</span>
         </div>
         {server.error ? (
           <p className={`${formStyles.error} ${styles.connectionError}`} title={server.error}>{server.error}</p>

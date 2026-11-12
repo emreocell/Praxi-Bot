@@ -99,7 +99,7 @@
   --color-accent-contrast: #171824;
   --color-accent-text: #C4C5FF;
   --color-border: #ffffff12;
-  --color-border-strong: #484848;
+  --color-border-strong: #7E808F;
   --color-text-inverse: #171824;
   --color-accent-hover: color-mix(in srgb, #B6B8FA 88%, #ffffff);
   --color-accent-subtle: color-mix(in srgb, #B6B8FA 12%, #18191F);
@@ -152,7 +152,7 @@
   --color-accent-contrast: #07152B;
   --color-accent-text: #B7CDFF;
   --color-border: #ffffff0d;
-  --color-border-strong: #484848;
+  --color-border-strong: #7C7C7C;
   --color-text-inverse: #07152B;
   --color-accent-hover: color-mix(in srgb, #9DBBFF 88%, #ffffff);
   --color-accent-subtle: color-mix(in srgb, #9DBBFF 12%, #08090C);
@@ -205,7 +205,7 @@
   --color-accent-contrast: #24180D;
   --color-accent-text: #F0C99D;
   --color-border: #fdefd617;
-  --color-border-strong: #484848;
+  --color-border-strong: #85807A;
   --color-text-inverse: #24180D;
   --color-accent-hover: color-mix(in srgb, #E4B683 88%, #ffffff);
   --color-accent-subtle: color-mix(in srgb, #E4B683 12%, #211D19);
@@ -258,7 +258,7 @@
   --color-accent-contrast: #1A100B;
   --color-accent-text: #7C4525;
   --color-border: #D8D3CC;
-  --color-border-strong: #BDB5AC;
+  --color-border-strong: #757069;
   --color-text-inverse: #1A100B;
   --color-accent-hover: #DB825F;
   --color-accent-subtle: color-mix(in srgb, #C86B4A 12%, #FAF8F5);

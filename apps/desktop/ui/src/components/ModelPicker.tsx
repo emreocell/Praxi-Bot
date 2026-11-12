@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { filterModelGroups, type ModelGroup } from "../lib/modelPicker";
 import { BrandIcon } from "./BrandIcon";
-import { isMockMode } from "../api/mock";
+import { isMockMode } from "../api/mockMode";
 import styles from "./ModelPicker.module.css";
 
 /**

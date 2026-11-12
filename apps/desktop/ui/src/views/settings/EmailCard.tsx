@@ -421,7 +421,7 @@ function AccountRow({
           <span className={styles.name}>{account.name}</span>
           <span className={styles.address}>{account.address}</span>
           <span className={styles.tag}>
-            {boundBot ? <BotAvatar bot={botView(boundBot)} size="xs" /> : <Users aria-hidden="true" />}
+            {boundBot ? <BotAvatar bot={botView(boundBot)} size="xs" decorative /> : <Users aria-hidden="true" />}
             {botName === null
               ? t("settingsModal.email.allBots")
               : t("settingsModal.email.onlyBot", { name: botName })}

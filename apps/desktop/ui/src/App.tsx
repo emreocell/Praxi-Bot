@@ -1,5 +1,5 @@
-import { BellDot, FlaskConical, LoaderCircle, MessageSquare, Plus, Search, ServerOff, Settings2, Monitor, Minus, Square, X } from "lucide-react";
-import { isMockMode } from "./api/mock";
+import { BellDot, CalendarDays, FlaskConical, LoaderCircle, MessageSquare, Plus, Search, ServerOff, Settings2, Monitor, Minus, Square, X } from "lucide-react";
+import { isMockMode } from "./api/mockMode";
 
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -81,7 +81,6 @@ function AppShell() {
   const {
     phase,
     error: daemonError,
-    client,
     runs,
     bots,
     chats,
@@ -103,20 +102,6 @@ function AppShell() {
   const [botSearch, setBotSearch] = useState<string | null>(null);
   const { servers: appServers } = useMcp(true);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [previews, setPreviews] = useState<Record<string, string>>({});
-  const previewRevision = runs.map(run => `${run.id}:${run.state}`).join("|");
-  useEffect(() => {
-    if (!client) return;
-    let cancelled = false;
-    const latest = [...chats].sort((a,b) => b.created_at_ms - a.created_at_ms).filter((chat, index, all) => all.findIndex(c => c.bot_id === chat.bot_id) === index);
-    void Promise.allSettled(latest.map(async chat => {
-      const messages = await client.listMessages(chat.id);
-      const last = messages[messages.length - 1];
-      if (last && !cancelled) setPreviews(prev => ({ ...prev, [chat.bot_id]: last.content.replace(/[#*`|]/g, '').split('\n').find(line => line.trim())?.trim() ?? chat.title }));
-    }));
-    return () => { cancelled = true; };
-  }, [client, chats, previewRevision]);
-
   useEffect(() => {
     let mounted = true;
     void loadSettings().then(async (loaded) => {
@@ -441,7 +426,7 @@ function AppShell() {
           <SidebarHeader>
             <div className={styles.botTop}>
               <button className={styles.characterTile} title={selectedBot?.name} onClick={() => selectedBot && setRoute({ kind: "bot", botId: selectedBot.id })}>
-                {selectedBot ? <BotAvatar bot={botView(selectedBot)} size="hero" /> : null}
+                {selectedBot ? <BotAvatar bot={botView(selectedBot)} size="hero" decorative /> : null}
                 <span>{selectedBot?.name ?? "Praxi-Bot"}</span>
               </button>
               <div className={styles.topActions}>
@@ -461,9 +446,8 @@ function AppShell() {
               const state = needs.some(n => n.botId === bot.id) || live?.state === "waiting_approval" ? "waiting-approval" : live ? "working" : isMockMode() ? config.bot?.state : "idle";
               const avatarState = state === "thinking" || state === "working" || state === "waiting-approval" || state === "error" ? state : "idle";
               return <SidebarItem key={bot.id} active={routeBotId === bot.id} onClick={() => latest ? openChat(latest.id) : setRoute({ kind: "bot", botId: bot.id })}>
-                <BotAvatar bot={view} size="md" state={avatarState} />
-                <div className={styles.botMeta}><span className={styles.botName}>{view.name}</span><span className={styles.botRole}>{(isMockMode() ? config.bot?.preview : undefined) ?? previews[bot.id] ?? latest?.title ?? t("bots.newChat")}</span></div>
-                {config.bot?.unread ? <span className={styles.botColorDot} aria-label={t("sidebar.unread")} /> : null}
+                <BotAvatar bot={view} size="md" state={avatarState} decorative />
+                <div className={styles.botMeta}><span className={styles.botName}>{view.name}</span><span className={styles.botRole}>{(isMockMode() ? config.bot?.preview : undefined) ?? latest?.title ?? t("bots.newChat")}</span></div>
               </SidebarItem>;
             })}
           </SidebarSection>
@@ -471,10 +455,11 @@ function AppShell() {
           <SidebarFooter>
             <div className={styles.footerActions}>
               {import.meta.env.DEV && new URLSearchParams(window.location.search).get("dev") === "1" ? <Button variant="ghost" onClick={handleSimulateBotRun}><FlaskConical />{t("dev.simulateBotRun")}</Button> : null}
+              <button className={styles.footerLink} data-testid="open-schedules" aria-current={route.kind === "schedules" ? "page" : undefined} onClick={() => setRoute({ kind: "schedules" })}><CalendarDays /><span>{t("sidebar.schedules")}</span></button>
               <div className={styles.bottomRow}>
-                <AccountMenu name={settings.accountName} computerTarget={settings.computerTarget} onAction={handleAccountAction} />
                 <button className={styles.appsPill} data-testid="open-apps" onClick={() => setAppsOpen(true)}><span>{t("sidebar.apps")}</span><span className={styles.appStack}>{appServers.filter(s => s.status === "connected").slice(0, 4).map(s => <BrandIcon key={s.name} name={s.name} small />)}</span></button>
               </div>
+              <AccountMenu name={settings.accountName} computerTarget={settings.computerTarget} onAction={handleAccountAction} />
             </div>
           </SidebarFooter>
         </Sidebar>
@@ -641,6 +626,7 @@ function AppShell() {
             key={route.chatId}
             chatId={route.chatId}
             onBack={() => setRoute({ kind: "bot", botId: route.botId })}
+            onOpenBot={() => setRoute({ kind: "botForm", botId: route.botId })}
             onSwitchChat={openChat}
             showAgentRoute={settings.showAgentRoute}
             sendWith={settings.sendWith}

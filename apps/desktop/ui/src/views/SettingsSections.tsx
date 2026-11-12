@@ -351,7 +351,7 @@ function BotPermissions({ bot }: { bot: Bot }) {
   return (
     <div className={styles.botPerm}>
       <div className={styles.botPermHead}>
-        <BotAvatar bot={view} size="sm" />
+        <BotAvatar bot={view} size="sm" decorative />
         <span className={styles.rowName}>{view.name}</span>
       </div>
       {error ? <p className={formStyles.error}>{error}</p> : null}

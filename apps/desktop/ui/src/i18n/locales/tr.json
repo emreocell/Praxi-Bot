@@ -368,11 +368,8 @@
     },
     "conversationLabel": "Bugün",
     "composerHint": "Göndermek için Enter · Komutlar için / · Bot seçmek için @",
-    "attach": "Dosya ekle",
-    "attachments": "Ekler",
-    "emptyTitle": "Birlikte ne yapalım?",
-    "fileTooLarge": "Metin dosyası en fazla 1 MB olabilir.",
-    "removeAttachment": "{{name}} ekini kaldır"
+    "openBot": "{{name}} ayrıntılarını aç",
+    "emptyTitle": "Birlikte ne yapalım?"
   },
   "botForm": {
     "apps": {

@@ -95,7 +95,7 @@ export function BotAccessPicker({
                         )
                       }
                     />
-                    <BotAvatar bot={b.config === undefined ? { id: b.id, name: b.name } : botView(b as Bot)} size="sm" />
+                    <BotAvatar bot={b.config === undefined ? { id: b.id, name: b.name } : botView(b as Bot)} size="sm" decorative />
                     <span className={styles.name}>{b.name}</span>
                   </label>
                 </li>

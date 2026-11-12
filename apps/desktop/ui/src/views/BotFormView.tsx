@@ -548,7 +548,7 @@ export function BotFormView({
         </Card>
 
         {error ? (
-          <p className={formStyles.error} role="alert">
+          <p className={styles.alert} role="alert">
             {error}
           </p>
         ) : null}

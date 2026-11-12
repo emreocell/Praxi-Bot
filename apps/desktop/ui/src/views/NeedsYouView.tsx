@@ -31,7 +31,7 @@ export function NeedsYouView({
               return (
                 <li key={n.callId}>
                   <Card padding="md" className={styles.row}>
-                    <BotAvatar bot={view ?? { id: "unknown", name: "Bot" }} size="md" />
+                    <BotAvatar bot={view ?? { id: "unknown", name: "Bot" }} size="md" decorative />
                     <div className={styles.text}>
                       <span className={styles.kind}>
                         {t(`needs.kind.${n.kind}`)}

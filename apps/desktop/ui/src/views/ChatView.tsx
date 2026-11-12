@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowUp, Bookmark, Plus, X, Square, Zap } from "lucide-react";
+import { ArrowLeft, ArrowUp, Bookmark, Square, Zap } from "lucide-react";
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -10,7 +10,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, Button } from "ui";
-import { isMockMode } from "../api/mock";
+import { isMockMode } from "../api/mockMode";
 import { ApiError } from "../api/client";
 import type { Message, SendMode } from "../api/types";
 import {
@@ -84,12 +84,14 @@ function canOfferRemember(run: RunState): boolean {
 export function ChatView({
   chatId,
   onBack,
+  onOpenBot,
   onSwitchChat,
   showAgentRoute = false,
   sendWith = "enter"
 }: {
   chatId: string;
   onBack: () => void;
+  onOpenBot?: () => void;
   /** Open another chat (after a `/new` turn created one). */
   onSwitchChat?: (chatId: string) => void;
   /** Debug: also show the chip for a plain `Agent` decision at K4. */
@@ -140,8 +142,6 @@ export function ChatView({
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
-  const fileRef = useRef<HTMLInputElement | null>(null);
-  const [attachments, setAttachments] = useState<{ name: string; content: string }[]>([]);
   const [mode, setMode] = useState<SendMode>("queue");
   const [sending, setSending] = useState(false);
   const [caret, setCaret] = useState(0);
@@ -378,7 +378,7 @@ export function ChatView({
   };
 
   const send = async () => {
-    let body = [text.trim(), ...attachments.map(f => `--- ${f.name} ---\n${f.content}`)].filter(Boolean).join("\n\n");
+    let body = text.trim();
     if (!client || !body || sending) {
       return;
     }
@@ -395,7 +395,6 @@ export function ChatView({
         await client.sendMessage(created.id, mention.rest);
         await refreshChats().catch(() => {});
         setText("");
-        setAttachments([]);
         onSwitchChat?.(created.id);
         return;
       }
@@ -411,7 +410,6 @@ export function ChatView({
         toast.show(t("chat.stopped"), "info");
       }
       setText("");
-      setAttachments([]);
       stickToBottom.current = true;
       await Promise.all([loadMessages(), refreshRuns()]);
     } catch (e) {
@@ -489,7 +487,7 @@ export function ChatView({
   const awaitingApproval = serverLive?.state === "waiting_approval" || chatRuns.some(run => run.finishedMs === undefined && run.items.some(item => item.kind === "tool" && item.status === "awaiting_approval"));
   const lastFailed = [...chatRuns].reverse()[0]?.error;
   const avatarState = awaitingApproval ? "waiting-approval" : active ? (lastItem?.kind === "item" && lastItem.item.kind === "tool" ? "working" : "thinking") : lastFailed ? "error" : "idle";
-  const botAvatar = <BotAvatar bot={view ?? { id: chat?.bot_id ?? "unknown", name: "Bot" }} size="sm" state={avatarState} />;
+  const botAvatarFor = (decorative: boolean) => <BotAvatar bot={view ?? { id: chat?.bot_id ?? "unknown", name: "Bot" }} size="sm" state={avatarState} decorative={decorative} />;
 
   const rememberRun = async (runId: string) => {
     if (!client) {
@@ -535,7 +533,7 @@ export function ChatView({
         }
         return (
           <div className={styles.assistantRow}>
-            {botAvatar}
+            {botAvatarFor(false)}
             <div className={styles.assistantBubble}>
               <Markdown text={item.text} />
             </div>
@@ -611,11 +609,19 @@ export function ChatView({
         <Button size="sm" variant="ghost" title={t("common.back")} aria-label={t("common.back")} onClick={onBack}>
           <ArrowLeft />
         </Button>
-        {botAvatar}
-        <div className={styles.headerText}>
-          <span className={styles.title}>{chat.title}</span>
-          <span className={styles.subtitle}>{view?.name}</span>
-        </div>
+        <button
+          type="button"
+          className={styles.headerBot}
+          title={t("chat.openBot", { name: view?.name })}
+          aria-label={t("chat.openBot", { name: view?.name })}
+          onClick={onOpenBot}
+        >
+          {botAvatarFor(true)}
+          <span className={styles.headerText}>
+            <span className={styles.title}>{chat.title}</span>
+            <span className={styles.subtitle}>{view?.name}</span>
+          </span>
+        </button>
         {bot ? (
           <ModelPicker
             groups={pickerGroups}
@@ -658,7 +664,7 @@ export function ChatView({
               case "assistant":
                 return (
                   <div key={e.key} className={styles.assistantRow}>
-                    {botAvatar}
+                    {botAvatarFor(false)}
                     <div className={styles.assistantBubble}>
                       <Markdown text={e.text} />
                     </div>
@@ -805,18 +811,7 @@ export function ChatView({
             ))}
           </ul>
         ) : null}
-        {attachments.length > 0 ? <div className={styles.attachments} aria-label={t("chat.attachments")}>{attachments.map((f,i) => <button key={`${f.name}-${i}`} onClick={() => setAttachments(prev => prev.filter((_,idx) => idx !== i))} title={t("chat.removeAttachment", { name: f.name })} aria-label={t("chat.removeAttachment", { name: f.name })}>{f.name}<X /></button>)}</div> : null}
         <div className={styles.inputRow}>
-          <input type="file" ref={fileRef} className={styles.hidden} accept=".txt,.md,.csv,.json,.ts,.js,.py,.html,.css,.log" multiple onChange={async e => {
-            const files = [...(e.target.files ?? [])];
-            try {
-              if (files.some(f => f.size > 1024 * 1024)) throw new Error(t("chat.fileTooLarge"));
-              const added = await Promise.all(files.map(async f => ({ name: f.name, content: await f.text() })));
-              setAttachments(prev => [...prev, ...added]);
-            } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
-            e.target.value = "";
-          }} />
-          <button className={styles.attachButton} title={t("chat.attach")} aria-label={t("chat.attach")} onClick={() => fileRef.current?.click()}><Plus /></button>
           <textarea
             ref={inputRef}
             className={styles.input}
@@ -834,10 +829,9 @@ export function ChatView({
             onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onKeyDown={onKeyDown}
           />
-          {bot ? <div className={styles.composerModel}><ModelPicker groups={pickerGroups} value={view?.executor ?? ""} disabled={!client} onPick={ref => void pickModel(ref)} reviewOpen={false} /></div> : null}
           <Button
             variant="primary"
-            disabled={sending || (!text.trim() && attachments.length === 0)}
+            disabled={sending || !text.trim()}
             title={t("chat.send")}
             aria-label={t("chat.send")}
             onClick={() => void send()}

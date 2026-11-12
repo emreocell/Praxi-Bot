@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import { useDaemon } from "../state/DaemonContext";
+import { healthStripMode } from "../lib/health";
 import styles from "./HealthIndicator.module.css";
 
 type Level = "ok" | "wait" | "bad";
@@ -38,7 +39,15 @@ export function HealthIndicator() {
       })
     : (error ?? label);
 
-  if (level === "ok") return null;
+  const mode = healthStripMode(level, Boolean(conn?.fake_provider));
+  if (mode === "hidden") return null;
+  if (mode === "tag") {
+    return (
+      <div className={`${styles.root} ${styles.fakeOnly}`} role="status" title={t("health.fakeProvider")}>
+        <span className={styles.tag}>{t("health.fakeProvider")}</span>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.root} role="status" title={title}>
@@ -47,6 +56,7 @@ export function HealthIndicator() {
         aria-hidden="true"
       />
       <span className={styles.label}>{label}</span>
+      {conn?.fake_provider ? <span className={styles.tag}>{t("health.fakeProvider")}</span> : null}
       {phase === "error" || (phase === "ready" && !health) ? (
         <Button
           size="sm"

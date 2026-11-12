@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "../overlay/events";
-import { isMockMode, MOCK_BASE_URL } from "./mock";
+import { isMockMode, MOCK_BASE_URL } from "./mockMode";
 
 /** What the shell hands us after starting / finding the daemon. */
 export interface Connection {

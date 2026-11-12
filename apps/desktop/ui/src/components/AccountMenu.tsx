@@ -1,4 +1,4 @@
-import { CalendarDays, CircleHelp, Grid2X2, Monitor, Settings2 } from "lucide-react";
+import { CalendarDays, ChevronsUpDown, CircleHelp, Grid2X2, Monitor, Settings2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ComputerTarget } from "../lib/settingsPrefs";
@@ -103,7 +103,8 @@ export function AccountMenu({
         <span className={styles.avatar} aria-hidden="true">
           {label.slice(0, 1).toUpperCase()}
         </span>
-
+        <span className={styles.name}>{label}</span>
+        <ChevronsUpDown aria-hidden="true" />
       </button>
     </div>
   );

@@ -11,29 +11,12 @@ import type {
   Message,
   PolicyDto,
   ProvidersDto,
-  UsageSummary
+  UsageSummary,
+  GlobalEnvelope
 } from "./types.ts";
 
-/** `base_url` of the connection the mock mode hands out. */
-export const MOCK_BASE_URL = "mock://praxi";
-
-/**
- * Mock mode: design review, screenshots and demos without a daemon.  Opt-in
- * with `?mock=1` in dev builds or `VITE_MOCK=1` at build time.
- */
-export function isMockMode(): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  // Use direct `import.meta.env` access so Vite can replace `VITE_MOCK` at build time.
-  if (import.meta.env.VITE_MOCK === "1") {
-    return true;
-  }
-  return (
-    import.meta.env.DEV &&
-    new URLSearchParams(window.location.search).get("mock") === "1"
-  );
-}
+import { isMockMode, MOCK_BASE_URL } from "./mockMode.ts";
+export { isMockMode, MOCK_BASE_URL };
 
 const NOW = 1_750_000_000_000;
 
@@ -61,6 +44,7 @@ const BOTS: Bot[] = [
 
 const previews = ["Haftalık özetin hazır.", "Kaynakları inceliyorum…", "Tasarım dosyalarını düzenledim.", "Devam etmek için onayını bekliyorum."];
 BOTS.forEach((b, i) => { Object.assign((b.config as { bot: object }).bot, { preview: previews[i], state: ["idle", "thinking", "working", "waiting-approval"][i], unread: i === 2 }); });
+const LONG_PROMPT = Array.from({ length: 9 }, (_, i) => `${i + 1}. Geçen haftanın GitHub kapanan sorunlarını, takvimdeki toplantıları ve gelen kutusundaki yanıt bekleyen iletileri tara; her biri için tek cümlelik bir özet çıkar ve önem sırasına göre listele.`).join(String.fromCharCode(10));
 const SCHEDULES = [
   { id: "sch-1", origin: "user", bot_id: ATLAS, name: "Haftalık özet", enabled: true, has_webhook: false, created_at_ms: NOW, last_run_at_ms: NOW - 6 * 86400000, next_run_at_ms: NOW + 86400000, misfire_policy: "skip", spec: { cron: "0 9 * * 1 Europe/Istanbul" }, payload: { kind: "agent_prompt", text: "Geçen haftanın GitHub ve takvim hareketlerinden kısa bir özet hazırla." } },
   { id: "sch-2", origin: "bot", bot_id: NOVA, name: "Kaynak taraması", enabled: true, has_webhook: true, created_at_ms: NOW, last_run_at_ms: null, next_run_at_ms: NOW + 3600000, misfire_policy: "run_once", spec: { every: { seconds: 3600 } }, payload: { kind: "agent_prompt", text: "Takip listesindeki sitelerde yeni içerik var mı bak." } },
@@ -345,7 +329,7 @@ export class MockApiClient extends ApiClient {
       case "GET /approvals":
         return ok(typeof window !== "undefined" && new URLSearchParams(window.location.search).get("screen") === "approval"
           ? [{ call_id: "mock-rm", run_id: "mock-live", requested_at_ms: Date.now() - 3000, decision: null, tool_name: "shell.run", summary: "drafts/old klasörünü ve içindeki 14 dosyayı sil" }]
-          : typeof window !== "undefined" && new URLSearchParams(window.location.search).get("screen") === "approval-schedule"
+          : typeof window !== "undefined" && new URLSearchParams(window.location.search).get("screen")?.startsWith("approval-schedule")
           ? [{ call_id: "mock-sch", run_id: "mock-live", requested_at_ms: Date.now() - 3000, decision: null, tool_name: "schedule_create", summary: "Create a schedule" }]
           : []);
       case "GET /runs":
@@ -364,6 +348,15 @@ export class MockApiClient extends ApiClient {
       case "POST /secrets":
         this.secrets.set(seg[1] ?? "", Date.now());
         return ok(undefined);
+      case "POST /bots": {
+        const input = opts.body as { name: string; config: unknown };
+        if (this.bots.some((b) => b.name.toLowerCase() === input.name.toLowerCase())) {
+          throw new ApiError(409, "conflict", `a bot named "${input.name}" already exists`);
+        }
+        const created = { id: crypto.randomUUID(), name: input.name, config: input.config, created_at_ms: Date.now() } as Bot;
+        this.bots.push(created);
+        return ok(created);
+      }
       case "PUT /bots":
         { const index = this.bots.findIndex(b => b.id === seg[1]);
           if (index >= 0) this.bots[index] = { ...this.bots[index], ...(opts.body as Partial<Bot>) };
@@ -503,4 +496,37 @@ export class MockApiClient extends ApiClient {
     this.servers[idx] = merged;
     return merged;
   }
+}
+
+/** Review-state events for `?mock=1&screen=...` (approval, streaming, default run). */
+export function mockReviewEvents(): { ts_ms: number; event: GlobalEnvelope["event"] }[] {
+  const out: { ts_ms: number; event: GlobalEnvelope["event"] }[] = [];
+  const screen = new URLSearchParams(window.location.search).get("screen");
+  if (screen === "approval" || screen?.startsWith("approval-schedule") || screen === "streaming") {
+    const bot_id = "11111111-1111-4111-8111-111111111111";
+    const chat_id = "33333333-3333-4333-8333-333333333333";
+    const events: GlobalEnvelope["event"][] = [
+      { type: "run_started", run_id: "mock-live", bot_id, chat_id },
+      { type: "message_delta", run_id: "mock-live", text: screen === "approval" ? "Raporu hazırladım. Paylaşmadan önce eski taslakları temizlemem gerekiyor." : "Taslağı oluşturuyorum, önce kaynakları karşılaştırıyorum…" },
+      ...(screen?.startsWith("approval-schedule") ? [
+        { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-sch", tool_name: "schedule_create", input: {} },
+        { type: "approval_needed", run_id: "mock-live", call_id: "mock-sch", tool_name: "schedule_create", input: {}, summary: "Create a schedule", details: { kind: "schedule", action: "create", name: "Pazartesi özeti", prompt: screen === "approval-schedule-long" ? LONG_PROMPT : "Geçen haftanın GitHub ve takvim hareketlerinden kısa bir özet hazırla ve bana gönder.", prompt_chars: screen === "approval-schedule-long" ? LONG_PROMPT.length : 76, previous: null, schedule: "Her pazartesi 09:00", timezone: "Europe/Istanbul", next_runs: ["2026-11-16T09:00:00+03:00", "2026-11-23T09:00:00+03:00"], permission: { level: "mixed", allow: ["github.*"], ask: ["email_send"], deny: [] } } }
+      ] as GlobalEnvelope["event"][] : []),
+      ...(screen === "approval" ? [
+        { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-rm", tool_name: "shell.run", input: { command: "rm -rf ./drafts/old" } },
+        { type: "approval_needed", run_id: "mock-live", call_id: "mock-rm", tool_name: "shell.run", input: { command: "rm -rf ./drafts/old" }, summary: "drafts/old klasörünü ve içindeki 14 dosyayı sil" }
+      ] as GlobalEnvelope["event"][] : [])
+    ];
+    events.forEach((event, i) => out.push({ ts_ms: Date.now() - 4000 + i * 300, event }));
+  } else if (screen !== "empty") {
+    const runId = "mock-review-run";
+    const events: GlobalEnvelope["event"][] = [
+      { type: "run_started", run_id: runId, bot_id: "11111111-1111-4111-8111-111111111111", chat_id: "33333333-3333-4333-8333-333333333333" },
+      { type: "tool_call_requested", run_id: runId, call_id: "mock-tool", tool_name: "github.search", input: { query: "is:closed updated:this-week" } },
+      { type: "tool_call_completed", run_id: runId, call_id: "mock-tool", error: null },
+      { type: "run_finished", run_id: runId, error: null }
+    ];
+    events.forEach((event, i) => out.push({ ts_ms: 1750000000000 + (i === 3 ? 2000 : 200 + i * 100), event }));
+  }
+  return out;
 }

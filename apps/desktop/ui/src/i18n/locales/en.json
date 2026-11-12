@@ -368,11 +368,8 @@
     },
     "conversationLabel": "Today",
     "composerHint": "Enter to send · / for commands · @ to mention a bot",
-    "attach": "Attach files",
-    "attachments": "Attachments",
-    "emptyTitle": "What shall we work on?",
-    "fileTooLarge": "Text files must be 1 MB or smaller.",
-    "removeAttachment": "Remove {{name}} attachment"
+    "openBot": "Open {{name}}",
+    "emptyTitle": "What shall we work on?"
   },
   "botForm": {
     "apps": {

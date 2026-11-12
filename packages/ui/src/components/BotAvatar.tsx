@@ -6,12 +6,14 @@ export type BotAvatarState = 'idle' | 'thinking' | 'working' | 'waiting-approval
 export interface BotIdentity { id: string; name: string; color?: string; avatar?: string | null }
 
 /** One art slot for every bot surface. Uploaded character art replaces the SVG. */
-export function BotAvatar({ bot, size = 'md', state = 'idle' }: {
+export function BotAvatar({ bot, size = 'md', state = 'idle', decorative = false }: {
   bot: BotIdentity; size?: 'xs' | 'sm' | 'md' | 'lg' | 'hero'; state?: BotAvatarState;
+  /** Set when the bot's name is shown next to it: hidden from assistive tech. */
+  decorative?: boolean;
 }) {
   const shape = botShape(bot.id);
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  return <span className={`${styles.avatar} ${styles[size]} ${styles[state]}`} style={{ '--bot-color': bot.color || 'var(--color-accent)' } as CSSProperties} role="img" aria-label={bot.name} title={bot.name} data-state={state}>
+  return <span className={`${styles.avatar} ${styles[size]} ${styles[state]}`} style={{ '--bot-color': bot.color || 'var(--color-accent)' } as CSSProperties} {...(decorative ? { 'aria-hidden': true } : { role: 'img', 'aria-label': bot.name, title: bot.name })} data-state={state}>
     {bot.avatar && bot.avatar !== failedSrc ? <img src={bot.avatar} alt="" onError={() => setFailedSrc(bot.avatar ?? null)} /> :
       <svg viewBox="0 0 72 72" aria-hidden="true">
         <path className={styles.body} d={shape.path} />

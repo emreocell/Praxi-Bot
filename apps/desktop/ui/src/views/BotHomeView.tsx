@@ -92,7 +92,7 @@ export function BotHomeView({
     <div className={styles.pane}>
       <div className={styles.container}>
         <Card padding="lg" accentColor={view.color} className={styles.hero}>
-          <BotAvatar bot={view} size="lg" />
+          <BotAvatar bot={view} size="lg" decorative />
           <div className={styles.heroText}>
             <h1 className={styles.title}>{view.name}</h1>
             <p className={styles.meta}>

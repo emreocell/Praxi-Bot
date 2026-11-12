@@ -13,7 +13,7 @@
     "--color-accent-contrast": "#24180D",
     "--color-accent-text": "#F0C99D",
     "--color-border": "#fdefd617",
-    "--color-border-strong": "#484848",
+    "--color-border-strong": "#85807A",
     "--color-text-inverse": "#24180D",
     "--color-accent-hover": "color-mix(in srgb, #E4B683 88%, #ffffff)",
     "--color-accent-subtle": "color-mix(in srgb, #E4B683 12%, #211D19)",

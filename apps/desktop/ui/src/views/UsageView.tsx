@@ -153,7 +153,7 @@ export function UsageView({ embedded = false }: { embedded?: boolean }) {
                       <tr key={u.bot_id}>
                         <th scope="row">
                           <div className={styles.botCell}>
-                          <BotAvatar bot={view ?? { id: "unknown", name: "Bot" }} size="sm" />
+                          <BotAvatar bot={view ?? { id: "unknown", name: "Bot" }} size="sm" decorative />
                           <span>{view?.name ?? t("usage.deletedBot")}</span>
                           </div>
                         </th>

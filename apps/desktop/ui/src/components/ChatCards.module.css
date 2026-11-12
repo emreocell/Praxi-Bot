@@ -323,3 +323,14 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.approvalTool {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.scheduleBody .code {
+  max-height: calc(var(--space-16) * 3);
+}
