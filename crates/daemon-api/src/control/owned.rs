@@ -389,6 +389,7 @@ impl ControlHub {
     }
     /// The authenticated local user's override: interrupts whatever takeover is
     /// recorded, in any state, and keeps the bot paused. Never resumes.
+    #[allow(clippy::needless_pass_by_value)] // Callers hand over a fresh reason.
     pub fn force_interrupt(&self, reason: Reason) -> Option<OwnedTakeover> {
         let owned = self.state.lock().owned.clone()?;
         let already =

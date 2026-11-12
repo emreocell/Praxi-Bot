@@ -2329,6 +2329,16 @@ mod tests {
     /// no sleeps), so a slow CI runner cannot change the outcome.
     #[tokio::test]
     async fn an_active_bot_run_keeps_the_browser_open_between_steps_then_idle_close_resumes() {
+        async fn tick(driver: &CdpDriver, timeout: Duration, state: &mut ReapState) {
+            reap_tick(
+                &driver.session,
+                timeout,
+                &driver.takeover_pin,
+                &driver.activity,
+                state,
+            )
+            .await;
+        }
         let dir = tempfile::tempdir().unwrap();
         let driver = CdpDriver::new(BrowserSettings {
             idle_timeout: Duration::from_millis(40),
@@ -2352,16 +2362,6 @@ mod tests {
         }));
         let timeout = Duration::from_millis(40);
         let mut state = ReapState::default();
-        async fn tick(driver: &CdpDriver, timeout: Duration, state: &mut ReapState) {
-            reap_tick(
-                &driver.session,
-                timeout,
-                &driver.takeover_pin,
-                &driver.activity,
-                state,
-            )
-            .await;
-        }
         // The run is active far longer than the idle timeout (waiting for the
         // model or an approval between steps): the browser stays.
         for _ in 0..10 {

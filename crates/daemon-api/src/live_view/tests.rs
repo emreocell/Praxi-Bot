@@ -2048,12 +2048,6 @@ async fn a_local_stop_that_lands_in_the_middle_of_a_release_wins() {
 
 #[tokio::test]
 async fn a_failed_key_reset_during_override_is_retried_until_it_succeeds() {
-    let t = Test::new();
-    let (_id, _owned, _body) = t.active(Some("alice")).await;
-    t.target.sink.fail_reset.store(true, Ordering::SeqCst);
-    local_override(&t).await;
-    assert!(t.state.hub().override_pending().0, "reset is pending");
-    let after_first = t.target.sink.resets.load(Ordering::SeqCst);
     async fn heartbeat(t: &Test) {
         t.call(
             None,
@@ -2063,6 +2057,12 @@ async fn a_failed_key_reset_during_override_is_retried_until_it_succeeds() {
         )
         .await;
     }
+    let t = Test::new();
+    let (_id, _owned, _body) = t.active(Some("alice")).await;
+    t.target.sink.fail_reset.store(true, Ordering::SeqCst);
+    local_override(&t).await;
+    assert!(t.state.hub().override_pending().0, "reset is pending");
+    let after_first = t.target.sink.resets.load(Ordering::SeqCst);
     // The next heartbeat retries (and fails again), still pending.
     heartbeat(&t).await;
     assert_eq!(t.target.sink.resets.load(Ordering::SeqCst), after_first + 1);

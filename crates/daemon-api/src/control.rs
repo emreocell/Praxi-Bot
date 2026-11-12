@@ -59,6 +59,7 @@ struct Answer {
 }
 
 #[derive(Default)]
+#[allow(clippy::struct_excessive_bools)] // Independent latch/persistence/retry flags.
 struct State {
     /// Last reported mode and when.
     registration: Option<(ControlMode, Instant)>,
