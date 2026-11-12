@@ -152,3 +152,26 @@ Once enabled, six tools are registered under the `Messaging` permission category
 - **Mandatory TLS**: IMAP requires implicit TLS (port 993). SMTP requires implicit TLS (port 465) or mandatory STARTTLS (port 587). Hostname and certificate validation against Mozilla roots are always enforced; plaintext connections and insecure certificates are rejected.
 - **Safe credentials**: Passwords are never echoed or written to logs; credentials resolve lazily from the secret store when establishing connections.
 - **Drafts**: `email_draft` saves directly to your IMAP drafts folder and never contacts SMTP.
+
+## Give a bot its own address (AgentMail)
+
+Besides your own mailbox, a bot can have an address such as `name@agentmail.to`,
+created at [AgentMail](https://agentmail.to) with **your own** AgentMail account
+and API key. Praxi-Bot holds no key of its own and runs no relay.
+
+- In **Settings, Computer, E-mail** choose "Give this bot an address (AgentMail)",
+  paste your API key, pick the bot (or any bot, explicitly) and, optionally, a name
+  for the address. From the command line:
+  `bot email add --provider agentmail --name helper --bot Atlas --api-key-env AGENTMAIL_KEY`.
+- The key is write-only: it goes to the secret store as `email/<account>/api_key`
+  (excluded from state bundles unless you name it) and is only ever sent, in the
+  `Authorization` header, to `api.agentmail.to` over HTTPS. Redirects are never followed.
+- `email.toml` stores `kind = "agentmail"` and the `inbox_id`; older files without a
+  `kind` are IMAP/SMTP accounts, as before.
+- The same `email_*` tools work. For an AgentMail account messages are identified by
+  `message_id` (shown by `email_search`) instead of an IMAP `uid`; folders and drafts are
+  not supported and say so.
+- Removing an account (or deleting a bot) only forgets it locally. The inbox at AgentMail is
+  deleted only when you ask: `bot email rm <name> --delete-inbox`, or the checkbox in the app.
+- At the time of writing the free plan allows 3 inboxes, 3,000 e-mails a month and 100 a day;
+  see their [pricing](https://agentmail.to/pricing). Cold outreach is prohibited on the shared domain.

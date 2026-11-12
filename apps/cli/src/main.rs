@@ -68,6 +68,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)] // one-shot CLI args, built once
 enum Command {
     /// Interactive first-run setup (or scripted with --provider).
     Setup(SetupCmd),
@@ -225,16 +226,37 @@ enum SchedulesCmd {
 
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)] // one-shot CLI args, built once
+#[allow(clippy::doc_markdown)] // doc comments are the --help text; product names stay plain
 enum EmailCmd {
     /// List the accounts (never shows passwords).
     List,
-    /// Add an account: `bot email add work me@gmail.com --preset gmail --password-env MAIL_PW`.
+    /// Add an account: `bot email add work me@gmail.com --preset gmail --password-env MAIL_PW`,
+    /// or an AgentMail inbox: `bot email add --provider agentmail --name helper --bot Atlas --api-key-env AGENTMAIL_KEY`.
     #[command(group = clap::ArgGroup::new("scope").required(true).args(["bot", "all_bots"]))]
     Add {
         /// Account name (letters, digits, `.`, `_`, `-`).
-        name: String,
-        /// Address mail is sent from.
-        address: String,
+        #[arg(required_unless_present = "name_flag")]
+        name: Option<String>,
+        /// Address mail is sent from (not used by `--provider agentmail`).
+        #[arg(required_unless_present = "provider")]
+        address: Option<String>,
+        /// Account name as a flag (same as the positional name).
+        #[arg(long = "name", conflicts_with = "name")]
+        name_flag: Option<String>,
+        /// `imap_smtp` (your own mailbox, the default) or `agentmail` (an inbox
+        /// created at AgentMail with your own API key).
+        #[arg(long, value_parser = ["imap_smtp", "agentmail"])]
+        provider: Option<String>,
+        /// AgentMail: hint for the part before the @ of the new address.
+        #[arg(long)]
+        name_hint: Option<String>,
+        /// AgentMail: custom verified domain (default: the shared agentmail.to).
+        #[arg(long)]
+        domain: Option<String>,
+        /// AgentMail: environment variable holding your API key; hidden prompt
+        /// when omitted. The key is never a command-line argument.
+        #[arg(long)]
+        api_key_env: Option<String>,
         /// Fill the servers for gmail, outlook, yahoo or icloud.
         #[arg(long, value_parser = ["gmail", "outlook", "yahoo", "icloud"])]
         preset: Option<String>,
@@ -270,12 +292,16 @@ enum EmailCmd {
         #[arg(long)]
         password_env: Option<String>,
     },
-    /// Remove an account and its stored password.
+    /// Remove an account and its stored password or key.
     Rm {
         /// Account name.
         name: String,
+        /// AgentMail: also delete the inbox at AgentMail (irreversible; off by
+        /// default, removing an account only forgets it here).
+        #[arg(long)]
+        delete_inbox: bool,
     },
-    /// Check IMAP login and SMTP authentication (sends nothing).
+    /// Check IMAP login and SMTP authentication, or the AgentMail key (sends nothing).
     Test {
         /// Account name.
         name: String,
@@ -895,6 +921,11 @@ async fn run_email(
         EmailCmd::Add {
             name,
             address,
+            name_flag,
+            provider,
+            name_hint,
+            domain,
+            api_key_env,
             preset,
             imap_host,
             imap_port,
@@ -907,8 +938,29 @@ async fn run_email(
             allowed_senders,
             password_env,
         } => {
+            let Some(account) = name.as_deref().or(name_flag.as_deref()) else {
+                return Err(email_cmd::rejected("an account name is required"));
+            };
+            if provider.as_deref() == Some("agentmail") {
+                let hint = name_hint.as_deref().unwrap_or(account);
+                let add = email_cmd::AgentmailAdd {
+                    name: account,
+                    name_hint: hint,
+                    domain: domain.as_deref(),
+                    bot: bot.as_deref(),
+                    allowed_senders,
+                };
+                let key = read_value(
+                    api_key_env.as_deref(),
+                    "AgentMail API key (from your own AgentMail account); input hidden",
+                )?;
+                return email_cmd::add_agentmail(c, &add, key.expose(), json, out).await;
+            }
+            let Some(address) = address.as_deref() else {
+                return Err(email_cmd::rejected("an address is required"));
+            };
             let add = email_cmd::EmailAdd {
-                name,
+                name: account,
                 address,
                 preset: preset.as_deref(),
                 imap_host: imap_host.as_deref(),
@@ -928,7 +980,9 @@ async fn run_email(
             )?;
             email_cmd::add(c, &add, password.expose(), json, out).await
         }
-        EmailCmd::Rm { name } => email_cmd::rm(c, name, json, out).await,
+        EmailCmd::Rm { name, delete_inbox } => {
+            email_cmd::rm_with(c, name, *delete_inbox, json, out).await
+        }
         EmailCmd::Test { name } => email_cmd::test(c, name, json, out).await,
     }
 }
@@ -1093,7 +1147,10 @@ mod tests {
         else {
             panic!("not an email add");
         };
-        assert_eq!((name.as_str(), address.as_str()), ("work", "me@gmail.com"));
+        assert_eq!(
+            (name.as_deref(), address.as_deref()),
+            (Some("work"), Some("me@gmail.com"))
+        );
         assert_eq!(preset.as_deref(), Some("gmail"));
         assert_eq!(bot.as_deref(), Some("b1"));
         assert_eq!(allowed_senders, ["a@example.com", "@corp.example"]);
@@ -1125,6 +1182,92 @@ mod tests {
         // The password is never a command-line flag (it would land in shell history).
         assert!(
             Cli::try_parse_from(["bot", "email", "add", "w", "a@b.c", "--password", "x"]).is_err()
+        );
+    }
+
+    #[test]
+    fn parses_the_agentmail_form_and_keeps_the_key_out_of_argv() {
+        let ok = Cli::try_parse_from([
+            "bot",
+            "email",
+            "add",
+            "--provider",
+            "agentmail",
+            "--name",
+            "helper",
+            "--bot",
+            "Atlas",
+            "--api-key-env",
+            "AGENTMAIL_KEY",
+        ])
+        .unwrap()
+        .command
+        .unwrap();
+        let Command::Email {
+            action:
+                EmailCmd::Add {
+                    name,
+                    name_flag,
+                    address,
+                    provider,
+                    api_key_env,
+                    ..
+                },
+        } = ok
+        else {
+            panic!("not an email add");
+        };
+        assert_eq!(name, None);
+        assert_eq!(name_flag.as_deref(), Some("helper"));
+        assert_eq!(address, None);
+        assert_eq!(provider.as_deref(), Some("agentmail"));
+        assert_eq!(api_key_env.as_deref(), Some("AGENTMAIL_KEY"));
+        // Still a bot or --all-bots, never a default; never a key flag.
+        assert!(
+            Cli::try_parse_from([
+                "bot",
+                "email",
+                "add",
+                "--provider",
+                "agentmail",
+                "--name",
+                "h"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "bot",
+                "email",
+                "add",
+                "--provider",
+                "agentmail",
+                "--name",
+                "h",
+                "--all-bots",
+                "--api-key",
+                "am_x"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "bot",
+                "email",
+                "add",
+                "--provider",
+                "agentmail",
+                "--name",
+                "h",
+                "--all-bots",
+                "--provider",
+                "nope"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from(["bot", "email", "rm", "h", "--delete-inbox"]).is_ok(),
+            "remote deletion is an explicit flag"
         );
     }
 

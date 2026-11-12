@@ -4,12 +4,13 @@
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 
 use crate::AppState;
 use crate::email::{
-    EmailAccountDto, EmailAccountInput, EmailControl, EmailControlError, EmailTestReport,
+    EmailAccountDto, EmailAccountInput, EmailControl, EmailControlError, EmailProviderKind,
+    EmailTestReport,
 };
 use crate::error::{ApiError, ErrorBody};
 use crate::mcp_routes::MAX_BOT_ID_LEN;
@@ -28,6 +29,9 @@ impl From<EmailControlError> for ApiError {
                 Self::new(StatusCode::UNPROCESSABLE_ENTITY, "bad_email_config", m)
             }
             EmailControlError::Internal(m) => Self::internal(m),
+            EmailControlError::Upstream(m) => {
+                Self::new(StatusCode::BAD_GATEWAY, "email_provider_error", m)
+            }
         }
     }
 }
@@ -35,6 +39,15 @@ impl From<EmailControlError> for ApiError {
 fn email(s: &AppState) -> Result<Arc<dyn EmailControl>, ApiError> {
     s.email()
         .ok_or_else(|| ApiError::unavailable("e-mail management is not available in this daemon"))
+}
+
+fn check_api_key(p: &str) -> Result<(), ApiError> {
+    if p.is_empty() || p.len() > MAX_PASSWORD_BYTES || p.contains(['\0', '\r', '\n']) {
+        return Err(ApiError::bad_request(
+            "the API key must be 1 to 1024 bytes without line breaks or NUL",
+        ));
+    }
+    Ok(())
 }
 
 fn check_password(p: &str) -> Result<(), ApiError> {
@@ -61,6 +74,9 @@ fn canonical_bot(s: &AppState, raw: &str) -> Result<String, ApiError> {
 fn check_input(s: &AppState, input: &mut EmailAccountInput) -> Result<(), ApiError> {
     if let Some(p) = &input.password {
         check_password(p)?;
+    }
+    if let Some(k) = &input.api_key {
+        check_api_key(k)?;
     }
     if let Some(bot) = input.bot.take() {
         input.bot = Some(canonical_bot(s, &bot)?);
@@ -97,8 +113,14 @@ pub(crate) async fn create_email_account(
 ) -> Result<(StatusCode, Json<EmailAccountDto>), ApiError> {
     let control = email(&s)?;
     check_input(&s, &mut input)?;
-    if input.password.is_none() {
-        return Err(ApiError::bad_request("`password` is required"));
+    match input.provider {
+        EmailProviderKind::ImapSmtp if input.password.is_none() => {
+            return Err(ApiError::bad_request("`password` is required"));
+        }
+        EmailProviderKind::Agentmail if input.api_key.is_none() => {
+            return Err(ApiError::bad_request("`api_key` is required"));
+        }
+        _ => {}
     }
     let created = control.add(input).await?;
     // The bot may have been deleted between the check and the insert (its
@@ -136,6 +158,11 @@ pub(crate) async fn update_email_account(
             Some(serde_json::Value::Null) | None => {}
             Some(_) => return Err(ApiError::bad_request("`password` must be a string")),
         }
+        match obj.get("api_key") {
+            Some(serde_json::Value::String(k)) => check_api_key(k)?,
+            Some(serde_json::Value::Null) | None => {}
+            Some(_) => return Err(ApiError::bad_request("`api_key` must be a string")),
+        }
         match obj.get("bot") {
             Some(serde_json::Value::String(b)) => {
                 let canon = canonical_bot(&s, b)?;
@@ -169,18 +196,32 @@ pub(crate) async fn update_email_account(
     Ok(Json(updated))
 }
 
-/// Remove an account and the password it owned. Takes effect for the next tool
-/// call.
+/// Query of `DELETE /v1/email/accounts/{name}`.
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
+pub(crate) struct DeleteAccountQuery {
+    /// Also delete the inbox at the provider (`agentmail` accounts). Default
+    /// `false`: removing an account only forgets it locally.
+    #[serde(default)]
+    delete_inbox: bool,
+}
+
+/// Remove an account and the secret it owned. Takes effect for the next tool
+/// call. With `delete_inbox=true` the inbox is first deleted at the provider
+/// (irreversible); if that fails the account is kept (`502`) so it can be
+/// retried. Deleting a bot never deletes inboxes at the provider.
 #[utoipa::path(delete, path = "/v1/email/accounts/{name}", tag = "email",
     security(("bearer" = [])),
-    params(("name" = String, Path, description = "Account name")),
+    params(("name" = String, Path, description = "Account name"), DeleteAccountQuery),
     responses((status = 204), (status = 404, body = ErrorBody),
+              (status = 422, body = ErrorBody, description = "the account has no remote inbox"),
+              (status = 502, body = ErrorBody, description = "the provider refused or failed"),
               (status = 503, body = ErrorBody, description = "e-mail management is not available")))]
 pub(crate) async fn delete_email_account(
     State(s): State<AppState>,
     Path(name): Path<String>,
+    Query(q): Query<DeleteAccountQuery>,
 ) -> Result<StatusCode, ApiError> {
-    email(&s)?.remove(&name).await?;
+    email(&s)?.remove_account(&name, q.delete_inbox).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -222,6 +263,9 @@ pub(crate) async fn test_email_draft(
     input.bot = None;
     if let Some(p) = &input.password {
         check_password(p)?;
+    }
+    if let Some(k) = &input.api_key {
+        check_api_key(k)?;
     }
     let _permit = s.email_test_permit()?;
     Ok(Json(control.test_draft(input).await?))

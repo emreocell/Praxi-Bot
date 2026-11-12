@@ -3,8 +3,10 @@ import { test } from "node:test";
 import { MockApiClient } from "../api/mock.ts";
 import type { EmailAccount } from "../api/types.ts";
 import {
+  agentmailAccountName,
   applyPreset,
   botFromScope,
+  emptyAgentmailForm,
   emptyForm,
   EMAIL_PRESETS,
   formFromAccount,
@@ -12,8 +14,10 @@ import {
   presetOf,
   probeTone,
   scopeFromBot,
+  toAgentmailInput,
   toInput,
   toPatch,
+  validateAgentmailForm,
   validateForm
 } from "./emailAccounts.ts";
 
@@ -22,6 +26,8 @@ const ATLAS = "11111111-1111-4111-8111-111111111111";
 function account(over: Partial<EmailAccount> = {}): EmailAccount {
   return {
     name: "work",
+    provider: "imap_smtp",
+    inbox_id: null,
     address: "me@gmail.com",
     username: "",
     imap: { host: "imap.gmail.com", port: 993 },
@@ -215,4 +221,78 @@ test("the mock daemon runs the same client paths and never returns the password"
   await c.deleteEmailAccount("new");
   assert.equal((await c.listEmailAccounts()).length, before.length);
   await assert.rejects(() => c.deleteEmailAccount("new"));
+});
+
+// ---- AgentMail ------------------------------------------------------------
+
+test("an AgentMail form needs a plausible key and a bot, and the name hint is optional", () => {
+  const base = { ...emptyAgentmailForm(), apiKey: "am_abcdefgh1234" };
+  assert.deepEqual(validateAgentmailForm(base), ["bot"], "least privilege: pick a bot");
+  const ok = { ...base, bot: { mode: "some" as const, ids: [ATLAS] } };
+  assert.deepEqual(validateAgentmailForm(ok), []);
+  assert.deepEqual(
+    validateAgentmailForm({ ...ok, apiKey: "short" }),
+    ["apiKey"]
+  );
+  assert.deepEqual(
+    validateAgentmailForm({ ...ok, apiKey: "has a space inside" }),
+    ["apiKey"]
+  );
+  assert.deepEqual(validateAgentmailForm({ ...ok, nameHint: "-bad" }), ["nameHint"]);
+  assert.deepEqual(validateAgentmailForm({ ...ok, nameHint: "Atlas helper" }), []);
+  // Everyone is allowed only when chosen explicitly.
+  assert.deepEqual(
+    validateAgentmailForm({ ...base, bot: { mode: "all" } }),
+    []
+  );
+});
+
+test("the AgentMail request carries the key write-only and a free local name", () => {
+  const form = {
+    apiKey: " am_abcdefgh1234 ",
+    nameHint: "Atlas Helper",
+    bot: { mode: "some" as const, ids: [ATLAS] }
+  };
+  const input = toAgentmailInput(form, ["agentmail-atlas-helper"]);
+  assert.equal(input.provider, "agentmail");
+  assert.equal(input.api_key, "am_abcdefgh1234");
+  assert.equal(input.bot, ATLAS);
+  assert.equal(input.name_hint, "Atlas Helper");
+  assert.equal(input.name, "agentmail-atlas-helper-2");
+  assert.equal(input.address, undefined, "no address: the provider creates it");
+  assert.equal(
+    toAgentmailInput({ ...form, nameHint: "" }, []).name,
+    "agentmail"
+  );
+  assert.equal(
+    "name_hint" in toAgentmailInput({ ...form, nameHint: "" }, []),
+    false
+  );
+  assert.equal(agentmailAccountName("  ÜÇ ", []), "agentmail");
+});
+
+test("creating an AgentMail account on the mock returns the address and never the key", async () => {
+  const api = new MockApiClient();
+  const created = await api.createEmailAccount(
+    toAgentmailInput(
+      {
+        apiKey: "am_abcdefgh1234",
+        nameHint: "helper",
+        bot: { mode: "some", ids: [ATLAS] }
+      },
+      []
+    )
+  );
+  assert.equal(created.provider, "agentmail");
+  assert.equal(created.address, "helper@agentmail.to");
+  assert.equal(created.password_set, true);
+  assert.equal(JSON.stringify(created).includes("am_abcdefgh1234"), false);
+  const report = await api.testEmailAccount(created.name);
+  assert.equal(report.api, "ok");
+  await api.deleteEmailAccount(created.name, { deleteInbox: true });
+  assert.equal((await api.listEmailAccounts()).some((a) => a.name === created.name), false);
+});
+
+test("toInput names the provider so a stored IMAP account is never mistaken", () => {
+  assert.equal(toInput(filled()).provider, "imap_smtp");
 });
