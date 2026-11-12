@@ -525,6 +525,38 @@ impl ControlHub {
         self.emit_state(&old, "recovered", None);
         Ok(Some(old))
     }
+    /// A latch that demands local recovery although no takeover owns it (the
+    /// latch file could not be read at startup).
+    pub fn unowned_recovery_required(&self) -> bool {
+        let st = self.state.lock();
+        st.owned.is_none() && st.require_recovery && st.latched.is_some()
+    }
+    /// Local recovery of [`Self::unowned_recovery_required`]: clears the
+    /// latch, bumps the epoch so cached observations are discarded.
+    /// # Errors
+    /// Keeps the pause if the durable write fails.
+    pub fn clear_unowned_recovery(&self) -> Result<bool, String> {
+        let mut st = self.state.lock();
+        if st.owned.is_some() || !st.require_recovery || st.latched.is_none() {
+            return Ok(false);
+        }
+        let (old_latched, old_epoch) = (st.latched, st.epoch);
+        st.latched = None;
+        st.require_recovery = false;
+        st.epoch = st.epoch.saturating_add(1);
+        if let Err(e) = self.persist(&st) {
+            st.latched = old_latched;
+            st.require_recovery = true;
+            st.epoch = old_epoch;
+            st.persistence_error = true;
+            return Err(e);
+        }
+        st.persistence_error = false;
+        st.persist_dirty = false;
+        drop(st);
+        self.changed.notify_waiters();
+        Ok(true)
+    }
     /// Fixed-shape notification for the global event stream: who, which target,
     /// state. No epoch, ids of the takeover, pixels or payloads.
     fn emit_state(&self, t: &OwnedTakeover, state: &str, reason: Option<Reason>) {

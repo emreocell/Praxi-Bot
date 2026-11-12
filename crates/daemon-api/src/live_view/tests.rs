@@ -1278,6 +1278,46 @@ async fn local_override_stops_a_peer_takeover_and_keeps_the_bot_paused() {
     );
 }
 #[tokio::test]
+async fn an_unreadable_latch_file_is_cleared_by_local_recovery_with_an_audit_row() {
+    let t = Test::new();
+    // The latch path cannot be read (here: it is a directory) at startup.
+    let latch = t.dir.path().join("control-latch.json");
+    std::fs::create_dir(&latch).unwrap();
+    let t = t.restarted();
+    std::fs::remove_dir(&latch).unwrap(); // the fault is gone by recovery time
+    assert_eq!(
+        t.state.hub().latched(),
+        Some(crate::dto::ControlMode::Paused),
+        "an unreadable latch fails closed"
+    );
+    // Nothing but local recovery can lift it: there is no owner to release.
+    assert_ne!(
+        t.call(
+            None,
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode":"idle","release":true})),
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    let (status, v) = t
+        .call(None, Method::POST, "/v1/control/recover", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert!(t.state.hub().latched().is_none());
+    assert!(
+        t.state
+            .storage()
+            .list_audit(t.state.user_id())
+            .unwrap()
+            .iter()
+            .any(|e| e.action == "takeover.recovered"),
+        "the recovery is audited"
+    );
+}
+#[tokio::test]
 async fn an_interrupted_takeover_puts_the_session_profile_back_to_watch() {
     let t = Test::new();
     let (id, _owned, _body) = t.active(Some("alice")).await;

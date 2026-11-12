@@ -1036,6 +1036,19 @@ pub(crate) async fn local_recover(
         return Err(ApiError::unavailable("the executor is busy; try again"));
     };
     let Some(owned) = s.hub().takeover() else {
+        // No owner, but a latch that demands recovery (an unreadable latch file).
+        if s.hub().unowned_recovery_required() {
+            audit(
+                &s,
+                &actor,
+                "takeover.recovered",
+                serde_json::json!({"by":"local","reason":"unreadable_latch"}),
+            )?;
+            s.hub()
+                .clear_unowned_recovery()
+                .map_err(ApiError::unavailable)?;
+            return Ok(Json(crate::routes::control_state_dto(&s, Some(&actor))));
+        }
         return Err(ApiError::conflict("no takeover is recorded"));
     };
     // Everything that can fail happens BEFORE the latch is cleared: the human
