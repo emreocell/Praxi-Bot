@@ -10,6 +10,8 @@ use tool_registry::{ContentPart, ToolContext, ToolRegistry};
 
 #[path = "support/capture.rs"]
 mod capture;
+#[path = "support/example_bin.rs"]
+mod example_bin;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn dependency_payload_logs_cannot_escape_to_the_global_subscriber() {
@@ -18,11 +20,7 @@ async fn dependency_payload_logs_cannot_escape_to_the_global_subscriber() {
     tracing::subscriber::set_global_default(capture.clone()).unwrap();
     tracing::info!("application tracing remains enabled");
 
-    let mut example = std::env::current_exe().unwrap();
-    example.pop();
-    example.pop();
-    example.push("examples");
-    example.push(format!("test_server{}", std::env::consts::EXE_SUFFIX));
+    let example = example_bin::test_server();
     let directory = tempfile::tempdir().unwrap();
     let unicode = directory.path().join("Masaüstü-秘密");
     std::fs::create_dir(&unicode).unwrap();
