@@ -8,12 +8,25 @@ export interface SchedulePermission {
   deny: string[];
 }
 
-/** What `schedule_create` / `schedule_update` / `schedule_resume` ask approval for. */
-export interface ScheduleApprovalDetails {
-  action: "create" | "update" | "resume";
+export interface PreviousSchedule {
   name: string;
-  /** The exact prompt that will run at every firing. */
   prompt: string;
+  schedule: string;
+  timezone: string;
+}
+
+export type ScheduleAction = "create" | "update" | "resume" | "pause" | "delete";
+
+/** What the `schedule_*` tools ask approval for. */
+export interface ScheduleApprovalDetails {
+  action: ScheduleAction;
+  name: string;
+  /** The exact prompt that will run at every firing (empty for pause / delete). */
+  prompt: string;
+  /** Prompt length in characters (so a long prompt's size is obvious). */
+  promptChars: number;
+  /** For an update: what it is now. */
+  previous: PreviousSchedule | null;
   /** Human-readable timing. */
   schedule: string;
   timezone: string;
@@ -32,12 +45,32 @@ const strings = (v: unknown): string[] =>
 export function scheduleDetails(details: unknown): ScheduleApprovalDetails | null {
   if (!isObject(details) || details.kind !== "schedule") return null;
   const action = details.action;
-  if (action !== "create" && action !== "update" && action !== "resume") return null;
+  if (
+    action !== "create" &&
+    action !== "update" &&
+    action !== "resume" &&
+    action !== "pause" &&
+    action !== "delete"
+  ) {
+    return null;
+  }
   const perm = details.permission;
+  const prev = details.previous;
+  const prompt = typeof details.prompt === "string" ? details.prompt : "";
   return {
     action,
     name: typeof details.name === "string" ? details.name : "",
-    prompt: typeof details.prompt === "string" ? details.prompt : "",
+    prompt,
+    promptChars:
+      typeof details.prompt_chars === "number" ? details.prompt_chars : [...prompt].length,
+    previous: isObject(prev)
+      ? {
+          name: typeof prev.name === "string" ? prev.name : "",
+          prompt: typeof prev.prompt === "string" ? prev.prompt : "",
+          schedule: typeof prev.schedule === "string" ? prev.schedule : "",
+          timezone: typeof prev.timezone === "string" ? prev.timezone : ""
+        }
+      : null,
     schedule: typeof details.schedule === "string" ? details.schedule : "",
     timezone: typeof details.timezone === "string" ? details.timezone : "",
     nextRuns: strings(details.next_runs),

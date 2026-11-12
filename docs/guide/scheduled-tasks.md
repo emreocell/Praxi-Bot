@@ -88,14 +88,22 @@ A schedule runs one run at a time: if the previous firing is still in flight
 Bots whose profile allows `schedule_*` (the General preset does; existing
 profiles are not changed) can ask for schedules in chat ("remind me every weekday
 at 10:30"). The tools are `schedule_list`, `schedule_create`, `schedule_update`,
-`schedule_pause`, `schedule_resume` and `schedule_delete`; a bot sees and changes
-only its own schedules, and a new schedule posts into the chat it was asked in.
+`schedule_pause`, `schedule_resume` and `schedule_delete`. A bot sees only its own
+schedules and can change (update, pause, resume, delete) only the ones it created
+itself; schedules you made in the app, CLI or API are read-only to it (shown as
+"Made by bot" in the list when a bot made them). A bot can never edit or resume a
+schedule that has a webhook. A new schedule posts into the chat it was asked in.
 
 A schedule is authority you hand over for later, so **create, update and resume
 always ask you**, whatever the policy says (a policy that denies them still
 denies). The card shows the exact prompt, the timing, the next three firing times
-in your timezone and what the bot may do unattended. "Always allow" and "this
-chat" grants never apply to them. Pause and delete follow the normal rules.
+in your timezone and what the bot may do unattended (for an update, old and new
+side by side). What you approve is exactly what is stored: a time like "in 2 hours"
+is fixed when the card is shown, and if the schedule changed meanwhile the change is
+refused. Prompts are limited to 4,000 characters and names to 80, without control
+or text-direction characters. "Always allow" and "this chat" grants never apply to
+these three. Pause and delete follow the normal rules. Telegram and the CLI show the
+full details too; if a client cannot, approve in the desktop app.
 
 Limits (in `<data dir>/schedule.toml`, all optional):
 
@@ -104,6 +112,10 @@ max_per_bot = 20          # schedules per bot, whoever made them
 min_interval_secs = 300   # shortest gap between firings of a bot-made schedule
 timezone = "Europe/Istanbul"   # default for "9:00"; else the computer's, else UTC
 ```
+
+`max_per_bot` must be 1 to 1000 and `min_interval_secs` 1 to 604800. If the file is
+broken or has a nonsensical value, the schedule tools are switched off (they never
+fall back to the defaults) and `bot doctor` reports it.
 
 Every create, update, pause, resume and delete by a bot is written to the audit
 log with the bot id and run id.

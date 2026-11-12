@@ -659,6 +659,7 @@ async fn approval_buttons_map_to_daemon_decisions() {
                 tool_name: "fs_delete".into(),
                 input: json!({ "path": "/tmp/a.txt" }),
                 summary: "Delete /tmp/a.txt".into(),
+                details: None,
             }),
         ))
         .unwrap();
@@ -1260,6 +1261,7 @@ async fn forged_approval_callbacks_are_rejected() {
             tool_name: "shell".into(),
             input: json!({}),
             summary: "rm".into(),
+            details: None,
         }),
     ))
     .unwrap();
@@ -2126,6 +2128,7 @@ async fn subagent_approvals_and_questions_are_shown_in_the_parent_chat() {
                 tool_name: "shell".into(),
                 input: json!({}),
                 summary: "child wants rm".into(),
+                details: None,
             }),
         ))
         .unwrap();
@@ -3146,5 +3149,107 @@ async fn priority_stop_does_not_start_older_messages_from_the_same_batch() {
             .map(|(_, text)| text.clone())
             .collect::<Vec<_>>(),
         vec!["later new request"]
+    );
+}
+
+async fn approval_messages(details: Option<serde_json::Value>) -> Vec<serde_json::Value> {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let bot = BotSummary {
+        id: BotId::new(),
+        name: "Mira".into(),
+    };
+    let daemon = Arc::new(FakeDaemon::new(vec![bot]));
+    let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+        .with_api_base_url(server.uri())
+        .with_paired_users([PAIRED_USER_ID]);
+    let channel = TelegramChannel::new(cfg, daemon.clone()).unwrap();
+    let run_id = RunId::new();
+    let (tx, rx) = mpsc::unbounded_channel::<Envelope>();
+    tx.send(Envelope::new(
+        0,
+        Event::ApprovalNeeded(ApprovalNeeded {
+            run_id,
+            call_id: ToolCallId::new(),
+            tool_name: "schedule_create".into(),
+            input: json!({}),
+            summary: "schedule_create {\"prompt\":\"cut at 300\"".into(),
+            details,
+        }),
+    ))
+    .unwrap();
+    daemon.queue_run_stream(
+        run_id,
+        Box::pin(futures::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|item| (item, rx))
+        })),
+    );
+    channel
+        .handle_update(
+            serde_json::from_value(text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, "go")).unwrap(),
+        )
+        .await
+        .unwrap();
+    let reqs = server.received_requests().await.unwrap();
+    sent_messages(&reqs)
+}
+
+fn schedule_card(prompt: &str) -> serde_json::Value {
+    json!({
+        "kind": "schedule", "action": "create", "name": "Standup",
+        "prompt": prompt, "schedule": "Every weekday at 10:30", "timezone": "Europe/Istanbul",
+        "next_runs": ["2026-11-13T10:30:00+03:00", "2026-11-16T10:30:00+03:00", "2026-11-17T10:30:00+03:00"],
+        "permission": {"level": "ask_first", "allow": [], "ask": ["fs"], "deny": []}
+    })
+}
+
+#[tokio::test]
+async fn schedule_approval_shows_everything_without_always_and_chunks_long_prompts() {
+    let prompt = format!("{}\nTAIL-MARKER", "long prompt line. ".repeat(400));
+    let msgs = approval_messages(Some(schedule_card(&prompt))).await;
+    assert!(msgs.len() >= 2, "a long prompt spans several messages");
+    let all: String = msgs.iter().map(|m| m["text"].as_str().unwrap()).collect();
+    for want in [
+        "Every weekday at 10:30 (Europe/Istanbul)",
+        "2026-11-17T10:30:00+03:00",
+        "permissions: ask_first",
+        "TAIL-MARKER",
+    ] {
+        assert!(all.contains(want), "{want} missing");
+    }
+    for m in &msgs[..msgs.len() - 1] {
+        assert!(
+            m.get("reply_markup").is_none(),
+            "buttons only on the last message"
+        );
+    }
+    let kb = &msgs[msgs.len() - 1]["reply_markup"]["inline_keyboard"][0];
+    let labels: Vec<&str> = kb
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(labels, ["Approve once", "Deny"], "no Always for a schedule");
+}
+
+#[tokio::test]
+async fn unrenderable_details_leave_approval_to_the_desktop_app() {
+    let msgs = approval_messages(Some(json!({"kind": "future-thing"}))).await;
+    assert_eq!(msgs.len(), 1);
+    assert!(msgs[0]["text"].as_str().unwrap().contains("desktop app"));
+    assert!(msgs[0].get("reply_markup").is_none(), "no approve button");
+}
+
+#[tokio::test]
+async fn plain_approvals_keep_their_three_buttons() {
+    let msgs = approval_messages(None).await;
+    assert_eq!(msgs.len(), 1);
+    assert_eq!(
+        msgs[0]["reply_markup"]["inline_keyboard"][0]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
     );
 }

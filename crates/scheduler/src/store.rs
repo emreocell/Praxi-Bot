@@ -13,7 +13,7 @@ use tokio::sync::Notify;
 use uuid::Uuid;
 
 use crate::error::{Result, SchedulerError};
-use crate::model::{MisfirePolicy, Payload, Schedule, ScheduleSpec, Trigger};
+use crate::model::{MisfirePolicy, Payload, Schedule, ScheduleOrigin, ScheduleSpec, Trigger};
 
 /// Embedded forward-only migrations; schema version = index + 1.
 const MIGRATIONS: &[(&str, &str)] = &[
@@ -29,10 +29,14 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0003_occurrence_recovery",
         include_str!("../migrations/0003_occurrence_recovery.sql"),
     ),
+    (
+        "0004_schedule_origin",
+        include_str!("../migrations/0004_schedule_origin.sql"),
+    ),
 ];
 
 /// Schema version produced by the newest embedded migration.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// Terminal occurrence rows kept per schedule; older ones are pruned in the
 /// transaction that finishes an occurrence. Unresolved rows are never pruned.
@@ -41,7 +45,7 @@ const OCCURRENCE_HISTORY_LIMIT: i64 = 100;
 const TERMINAL_STATES: &str = "'succeeded', 'failed', 'started', 'missed', 'interrupted'";
 
 const SCHEDULE_SELECT: &str = "SELECT id, bot_id, chat_id, name, spec_json, payload_json, \
-    enabled, created_at_ms, last_run_at_ms, next_run_at_ms, misfire_policy, revision,     (SELECT COUNT(*) FROM occurrences o WHERE o.schedule_id = schedules.id      AND o.state IN ('missed', 'interrupted')) FROM schedules";
+    enabled, created_at_ms, last_run_at_ms, next_run_at_ms, misfire_policy, revision, origin,     (SELECT COUNT(*) FROM occurrences o WHERE o.schedule_id = schedules.id      AND o.state IN ('missed', 'interrupted')) FROM schedules";
 
 /// Type alias for [`ScheduleStore`].
 pub type Store = ScheduleStore;
@@ -154,8 +158,8 @@ impl ScheduleStore {
         let payload_json = serde_json::to_string(&schedule.payload)?;
         self.conn().execute(
             "INSERT INTO schedules (id, bot_id, chat_id, name, spec_json, payload_json, \
-             enabled, created_at_ms, last_run_at_ms, next_run_at_ms, misfire_policy) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             enabled, created_at_ms, last_run_at_ms, next_run_at_ms, misfire_policy, origin) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 schedule.id.to_string(),
                 schedule.bot_id.to_string(),
@@ -168,6 +172,7 @@ impl ScheduleStore {
                 schedule.last_run_at,
                 schedule.next_run_at,
                 schedule.misfire_policy.as_str(),
+                schedule.origin.as_str(),
             ],
         )?;
         self.notify();
@@ -199,8 +204,8 @@ impl ScheduleStore {
         } else {
             tx.execute(
                 "INSERT INTO schedules (id, bot_id, chat_id, name, spec_json, payload_json, \
-                 enabled, created_at_ms, last_run_at_ms, next_run_at_ms, misfire_policy) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                 enabled, created_at_ms, last_run_at_ms, next_run_at_ms, misfire_policy, origin) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     schedule.id.to_string(),
                     schedule.bot_id.to_string(),
@@ -213,6 +218,7 @@ impl ScheduleStore {
                     schedule.last_run_at,
                     schedule.next_run_at,
                     schedule.misfire_policy.as_str(),
+                    schedule.origin.as_str(),
                 ],
             )?;
         }
@@ -905,7 +911,19 @@ fn schedule_row(row: &Row<'_>) -> rusqlite::Result<Schedule> {
         next_run_at: row.get(9)?,
         misfire_policy,
         revision: row.get(11)?,
-        missed_occurrences: row.get(12)?,
+        origin: {
+            let o: String = row.get(12)?;
+            ScheduleOrigin::parse(&o).ok_or_else(|| {
+                conv_err(
+                    12,
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("unknown origin '{o}'"),
+                    ),
+                )
+            })?
+        },
+        missed_occurrences: row.get(13)?,
     })
 }
 

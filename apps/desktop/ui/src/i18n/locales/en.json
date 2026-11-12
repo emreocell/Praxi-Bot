@@ -295,9 +295,13 @@
         "title": {
           "create": "Create a recurring task?",
           "update": "Change a recurring task?",
-          "resume": "Resume a recurring task?"
+          "resume": "Resume a recurring task?",
+          "pause": "Pause a recurring task?",
+          "delete": "Delete a recurring task?"
         },
-        "prompt": "Runs this prompt each time:",
+        "prompt": "Runs this prompt each time ({{count}} characters; scroll to read all of it):",
+        "promptNew": "New prompt ({{count}} characters, runs every time):",
+        "was": "Was:",
         "next": "Next runs:",
         "permission": "Each run uses this bot's permissions ({{level}}).",
         "allowed": "Allowed without asking: {{list}}.",
@@ -640,6 +644,8 @@
       "finished": "Finished"
     },
     "enabled": "Enabled",
+    "originBot": "Made by bot",
+    "originBotHint": "A bot created this after you approved it. Bots can change only schedules they made themselves.",
     "bot": "Bot",
     "deletedBot": "Deleted bot",
     "when": "When",

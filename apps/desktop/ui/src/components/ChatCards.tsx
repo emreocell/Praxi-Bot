@@ -175,9 +175,29 @@ function ScheduleApprovalBody({ d }: { d: ScheduleApprovalDetails }) {
         </span>
       </div>
       {d.name ? <p className={styles.bodyLabel}>{d.name}</p> : null}
-      <span className={styles.bodyLabel}>{t("chat.approval.schedule.prompt")}</span>
-      <pre className={styles.code}>{d.prompt}</pre>
-      {d.nextRuns.length > 0 ? (
+      {d.previous ? (
+        <div className={styles.scheduleWas} data-testid="approval-schedule-previous">
+          <span className={styles.bodyLabel}>{t("chat.approval.schedule.was")}</span>
+          <span>
+            {d.previous.name} · {d.previous.schedule}
+            {d.previous.timezone ? ` (${d.previous.timezone})` : ""}
+          </span>
+          <pre className={styles.code}>{d.previous.prompt}</pre>
+        </div>
+      ) : null}
+      {d.prompt ? (
+        <>
+          <span className={styles.bodyLabel}>
+            {d.previous
+              ? t("chat.approval.schedule.promptNew", { count: d.promptChars })
+              : t("chat.approval.schedule.prompt", { count: d.promptChars })}
+          </span>
+          <pre className={styles.code} tabIndex={0}>
+            {d.prompt}
+          </pre>
+        </>
+      ) : null}
+      {d.nextRuns.length > 0 && d.action !== "pause" && d.action !== "delete" ? (
         <div className={styles.scheduleRow}>
           <Clock size={14} aria-hidden="true" />
           <span>
@@ -186,7 +206,7 @@ function ScheduleApprovalBody({ d }: { d: ScheduleApprovalDetails }) {
           </span>
         </div>
       ) : null}
-      {perm ? (
+      {perm && d.prompt ? (
         <div className={styles.scheduleRow} data-testid="approval-schedule-permission">
           <ShieldAlert size={14} aria-hidden="true" />
           <span>
@@ -201,7 +221,7 @@ function ScheduleApprovalBody({ d }: { d: ScheduleApprovalDetails }) {
           </span>
         </div>
       ) : null}
-      <p className={styles.bodyLabel}>{t("chat.approval.schedule.note")}</p>
+      {d.prompt ? <p className={styles.bodyLabel}>{t("chat.approval.schedule.note")}</p> : null}
     </div>
   );
 }

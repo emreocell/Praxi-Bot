@@ -295,9 +295,13 @@
         "title": {
           "create": "Yinelenen görev oluşturulsun mu?",
           "update": "Yinelenen görev değiştirilsin mi?",
-          "resume": "Yinelenen görev sürdürülsün mü?"
+          "resume": "Yinelenen görev sürdürülsün mü?",
+          "pause": "Yinelenen görev duraklatılsın mı?",
+          "delete": "Yinelenen görev silinsin mi?"
         },
-        "prompt": "Her seferinde şu istemi çalıştırır:",
+        "prompt": "Her seferinde şu istemi çalıştırır ({{count}} karakter; tamamını okumak için kaydırın):",
+        "promptNew": "Yeni istem ({{count}} karakter, her seferinde çalışır):",
+        "was": "Şu an:",
         "next": "Sonraki çalışmalar:",
         "permission": "Her çalışma bu botun izinlerini kullanır ({{level}}).",
         "allowed": "Sormadan izin verilenler: {{list}}.",
@@ -639,6 +643,8 @@
       "disabled": "Duraklatıldı",
       "finished": "Bitti"
     },
+    "originBot": "Bot oluşturdu",
+    "originBotHint": "Onayınızla bir bot oluşturdu. Botlar yalnızca kendi oluşturdukları zamanlamaları değiştirebilir.",
     "enabled": "Etkin",
     "bot": "Bot",
     "deletedBot": "Silinmiş bot",

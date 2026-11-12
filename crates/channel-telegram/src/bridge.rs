@@ -863,6 +863,85 @@ impl TelegramChannel {
         first_error.map_or(Ok(()), Err)
     }
 
+    /// Show an approval request. Details a tool attaches (a schedule) are shown
+    /// in full before approval is offered; if that is impossible, approval is
+    /// left to the desktop app. The buttons go on the last message only.
+    async fn send_approval(
+        &self,
+        chat_id: i64,
+        is_child: bool,
+        a: protocol::event::ApprovalNeeded,
+    ) -> Result<()> {
+        let run_is_child = is_child;
+        let prefix = if run_is_child { "subagent: " } else { "" };
+        // A tool that attaches details (a schedule) must be shown in
+        // full before anyone can approve it here; if that is not
+        // possible, approval is left to the desktop app.
+        let (body, offer) = match &a.details {
+            None => (
+                format!(
+                    "⚠️ Approval needed ({prefix}{})
+{}",
+                    a.tool_name, a.summary
+                ),
+                true,
+            ),
+            Some(d) => match protocol::approval_text::describe_details(d) {
+                Some(full) => (
+                    format!(
+                        "⚠️ Approval needed ({prefix}{})
+{full}",
+                        a.tool_name
+                    ),
+                    true,
+                ),
+                None => (
+                    format!(
+                        "⚠️ {} needs approval, but this chat cannot show what it would do. Approve or deny it in the desktop app.",
+                        a.tool_name
+                    ),
+                    false,
+                ),
+            },
+        };
+        let markup = if offer {
+            {
+                let mut pending = self.inner.pending_approvals.lock();
+                if pending.len() >= MAX_PENDING_PROMPTS {
+                    pending.clear();
+                }
+                pending.insert(a.call_id, chat_id);
+            }
+            let mut row = vec![InlineButton::new(
+                "Approve once",
+                format_approval_callback(a.call_id, "once"),
+            )];
+            // No standing grant for tools that bring details.
+            if a.details.is_none() {
+                row.push(InlineButton::new(
+                    "Always",
+                    format_approval_callback(a.call_id, "always"),
+                ));
+            }
+            row.push(InlineButton::new(
+                "Deny",
+                format_approval_callback(a.call_id, "deny"),
+            ));
+            InlineKeyboardMarkup::from_rows(vec![row])
+        } else {
+            None
+        };
+        // Redact first, then split, so a secret cannot straddle two
+        // messages; the buttons go on the last message only.
+        let chunks = protocol::approval_text::chunk_text(&self.redact(&body), 3500);
+        let last = chunks.len() - 1;
+        for (i, chunk) in chunks.iter().enumerate() {
+            let m = if i == last { markup.as_ref() } else { None };
+            self.send_redacted(chat_id, chunk, m).await?;
+        }
+        Ok(())
+    }
+
     async fn send_redacted(
         &self,
         chat_id: i64,
@@ -1739,27 +1818,7 @@ impl TelegramChannel {
                     self.send_redacted(chat_id, &line, None).await?;
                 }
             }
-            Event::ApprovalNeeded(a) => {
-                {
-                    let mut pending = self.inner.pending_approvals.lock();
-                    if pending.len() >= MAX_PENDING_PROMPTS {
-                        pending.clear();
-                    }
-                    pending.insert(a.call_id, chat_id);
-                }
-                let rows = vec![vec![
-                    InlineButton::new("Approve once", format_approval_callback(a.call_id, "once")),
-                    InlineButton::new("Always", format_approval_callback(a.call_id, "always")),
-                    InlineButton::new("Deny", format_approval_callback(a.call_id, "deny")),
-                ]];
-                let markup = InlineKeyboardMarkup::from_rows(rows);
-                let prefix = if run.is_child { "subagent: " } else { "" };
-                let text = format!(
-                    "⚠️ Approval needed ({prefix}{})\n{}",
-                    a.tool_name, a.summary
-                );
-                self.send_redacted(chat_id, &text, markup.as_ref()).await?;
-            }
+            Event::ApprovalNeeded(a) => self.send_approval(chat_id, run.is_child, a).await?,
             Event::QuestionAsked(q) => {
                 let rows: Vec<Vec<InlineButton>> = q
                     .options

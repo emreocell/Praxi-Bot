@@ -29,12 +29,35 @@ test("a schedule card is parsed with the prompt, timing, firings and permission"
   assert.deepEqual(d.permission?.deny, ["money"]);
 });
 
+test("an update carries old and new, pause carries name and timing", () => {
+  const d = scheduleDetails({
+    ...card,
+    action: "update",
+    prompt_chars: 19,
+    previous: { name: "Old", prompt: "old p", schedule: "Every day at 09:00", timezone: "UTC" }
+  });
+  assert.ok(d);
+  assert.equal(d.promptChars, 19);
+  assert.equal(d.previous?.prompt, "old p");
+  assert.equal(d.previous?.schedule, "Every day at 09:00");
+  const p = scheduleDetails({
+    kind: "schedule",
+    action: "pause",
+    name: "Nightly",
+    schedule: "Every day at 09:00",
+    prompt: ""
+  });
+  assert.equal(p?.name, "Nightly");
+  assert.equal(p?.schedule, "Every day at 09:00");
+  assert.equal(p?.previous, null);
+});
+
 test("anything else is not a schedule card", () => {
   assert.equal(scheduleDetails(undefined), null);
   assert.equal(scheduleDetails(null), null);
   assert.equal(scheduleDetails("x"), null);
   assert.equal(scheduleDetails({ kind: "other" }), null);
-  assert.equal(scheduleDetails({ ...card, action: "delete" }), null);
+  assert.equal(scheduleDetails({ ...card, action: "explode" }), null);
 });
 
 test("missing or malformed fields degrade instead of throwing", () => {

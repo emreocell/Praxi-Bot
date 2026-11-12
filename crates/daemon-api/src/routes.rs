@@ -1093,6 +1093,7 @@ fn schedule_dto(sc: &Schedule, has_webhook: bool) -> ScheduleDto {
         next_run_at_ms: sc.next_run_at,
         misfire_policy: sc.misfire_policy.as_str().to_owned(),
         has_webhook,
+        origin: sc.origin.as_str().to_owned(),
     }
 }
 

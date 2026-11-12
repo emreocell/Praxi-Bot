@@ -175,6 +175,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/control/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Explicitly release a latched `paused` / `human_driving`: bots may use the
+         *     desktop again.  This is the only way (besides a daemon restart) to end a
+         *     pause; heartbeats and a lost app never do.  Idempotent.
+         */
+        post: operations["release_control"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/control/state": {
         parameters: {
             query?: never;
@@ -188,7 +209,9 @@ export interface paths {
          * Register the desktop app as controller and report its mode (heartbeat: send
          *     it on every state change and at least every 5 s; it expires after 15 s).
          *     While the mode is `human_driving` or `paused`, desktop actions of bots are
-         *     refused immediately.
+         *     refused immediately.  A latched pause is never released by a heartbeat
+         *     (`idle` included): send `release: true` with `idle` / `bot_driving` (the
+         *     user's resume), or use `POST /v1/control/release`.
          */
         put: operations["put_control_state"];
         post?: never;
@@ -243,12 +266,62 @@ export interface paths {
          *     through the API.  They have no SSE `id`, are not replayed and are not
          *     envelopes: treat them as a hint to refetch `/v1/schedules`.
          *
+         *     A replay gap is explicit: `event: gap` has an `id` equal to `to_gseq` and
+         *     data `{from_gseq, to_gseq, run_id, reason}`; reason is `log_line_missing` or
+         *     `log_unreadable`. It is audited before the cursor passes the missing row.
+         *     `/v1/events/status.sse_gaps_total` (authenticated) counts these notifications since daemon startup.
+         *     After three consecutive replay failures (or live-buffer overflow),
+         *     `event: error` carries `{code: "replay_unavailable", last_event_id}` and the
+         *     stream closes. This error has no `id`; reconnect with the last received ID.
+         *     Retry delays start at 250 ms and double up to 5 s. Live buffering is limited
+         *     to 1000 events and 4 MiB per subscriber; replay chunks hold at most 2 MiB of serialized events (a single larger event closes the stream with `replay_unavailable`), and at most `max_sse_subscribers` streams (default 16) may be open: further requests get `503`. The desktop currently ignores unknown
+         *     event names; card 144 can surface gap/error notifications without changing
+         *     the ordering or cursor contract.
+         *
          *     It likewise carries `mcp_server_changed` events (`mcp::McpServerChanged`:
          *     `{"type":"mcp_server_changed","name","status"}`) when an MCP server is
          *     added, updated, removed or changes status (connecting / connected / error /
          *     quarantined ...); same rules: a hint to refetch `/v1/mcp/servers`.
          */
         get: operations["events_doc"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/events/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The newest daemon-wide event cursor (`gseq`, `0` = no event yet): what a
+         *     client stores as its resume point after loading a snapshot, so a later
+         *     `GET /v1/events` with `Last-Event-ID: <gseq>` replays exactly what came
+         *     after.
+         */
+        get: operations["latest_cursor"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/events/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["status"];
         put?: never;
         post?: never;
         delete?: never;
@@ -930,7 +1003,6 @@ export interface components {
              * @description Milliseconds until the registration expires; `0` when not registered.
              */
             expires_in_ms: number;
-            /** @description `paused` / `human_driving` while latched: refuses bot actions until `POST /v1/control/release` (or a `PUT` with `release: true`), regardless of the heartbeat.  `null` when nothing is latched. */
             latched?: null | components["schemas"]["ControlMode"];
             mode?: null | components["schemas"]["ControlMode"];
         };
@@ -942,7 +1014,10 @@ export interface components {
         ControlStateInput: {
             /** @description The app's current mode. */
             mode: components["schemas"]["ControlMode"];
-            /** @description With `idle` / `bot_driving`: the user's explicit resume, clears a latched pause.  Plain heartbeats (without it) never release. */
+            /**
+             * @description With `idle` / `bot_driving`: the user's explicit resume, clears a
+             *     latched pause.  Plain heartbeats (without it) never release.
+             */
             release?: boolean;
         };
         /**
@@ -1037,6 +1112,17 @@ export interface components {
             /** @description Human-readable message. */
             message: string;
         };
+        Gap: {
+            /** Format: int64 */
+            from_gseq: number;
+            reason: components["schemas"]["GapReason"];
+            /** Format: uuid */
+            run_id: string;
+            /** Format: int64 */
+            to_gseq: number;
+        };
+        /** @enum {string} */
+        GapReason: "log_line_missing" | "log_unreadable";
         /** @description A persisted "always allow" rule of a bot. */
         GrantDto: {
             /**
@@ -1073,6 +1159,14 @@ export interface components {
             uptime_secs: number;
             /** @description Daemon crate version. */
             version: string;
+        };
+        /** @description `GET /v1/events/latest`. */
+        LatestCursor: {
+            /**
+             * Format: int64
+             * @description Highest daemon-wide event `gseq` (`0` = none yet).
+             */
+            gseq: number;
         };
         /** @description An entry of the curated MCP catalog (`GET /v1/mcp/catalog`). */
         McpCatalogEntryDto: {
@@ -1411,12 +1505,15 @@ export interface components {
                 [key: string]: string;
             };
             /**
+             * @description Set when the persisted `policy.json` could not be loaded: the daemon is
+             *     locked to deny-all until a new policy is saved with `PUT /v1/policy`.
+             */
+            load_error?: string | null;
+            /**
              * @description Name of the preset the policy equals (`read-only`,
              *     `approve-destructive`, `read-and-draft`, `full`); `null` = custom.
              */
             preset?: string | null;
-            /** @description Set when the persisted `policy.json` could not be loaded: the daemon is locked to deny-all until a new policy is saved with `PUT /v1/policy`. */
-            load_error?: string | null;
         };
         /**
          * @description `PUT /v1/policy`.  Start from `preset` (or, without it, from the current
@@ -1580,6 +1677,11 @@ export interface components {
              */
             next_run_at_ms?: number | null;
             /**
+             * @description Who created it: `user`, or `bot` (a bot's schedule tools, after you
+             *     approved it). A bot may change only its own `bot` schedules.
+             */
+            origin: string;
+            /**
              * @description What it does: `{"kind": "agent_prompt", "text": "..."}`,
              *     `{"kind": "workflow", "name": "...", "params": {}}` or
              *     `{"kind": "tool", "name": "...", "input": {}}`.
@@ -1645,6 +1747,24 @@ export interface components {
         SetSecret: {
             /** @description The secret value.  Write-only: no route returns it. */
             value: string;
+        };
+        /** @description Counters of the SSE machinery (authenticated, unlike `/v1/health`). */
+        SseStatus: {
+            /**
+             * Format: int64
+             * @description Configured cap on open event streams.
+             */
+            max_sse_subscribers: number;
+            /**
+             * Format: int64
+             * @description Gap notifications emitted by this daemon (per subscriber, since startup).
+             */
+            sse_gaps_total: number;
+            /**
+             * Format: int64
+             * @description Event streams open right now.
+             */
+            sse_subscribers: number;
         };
         /** @description `GET /v1/usage`. */
         UsageSummary: {
@@ -2186,6 +2306,25 @@ export interface operations {
             };
         };
     };
+    release_control: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlStateDto"];
+                };
+            };
+        };
+    };
     get_control_state: {
         parameters: {
             query?: never;
@@ -2303,6 +2442,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    latest_cursor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LatestCursor"];
+                };
+            };
+        };
+    };
+    status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SseStatus"];
                 };
             };
         };

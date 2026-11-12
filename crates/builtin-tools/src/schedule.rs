@@ -48,7 +48,7 @@ pub struct ScheduleCaller {
 
 /// The fields a bot may set. Create needs `name`, `prompt` and exactly one of
 /// `when` / `cron`; update changes only what is given.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScheduleRequest {
     /// Short name.
     pub name: Option<String>,
@@ -63,7 +63,11 @@ pub struct ScheduleRequest {
 }
 
 /// One proposed change, to be previewed before the user is asked.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// The host freezes what the preview resolved (timing, the schedule's
+/// revision); the later `create` / `update` / `set_enabled` / `delete` for the
+/// same call applies exactly that, or fails if the schedule changed meanwhile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum ScheduleChange {
     /// `schedule_create`.
     Create(ScheduleRequest),
@@ -76,6 +80,16 @@ pub enum ScheduleChange {
     },
     /// `schedule_resume` of schedule `id`.
     Resume {
+        /// Schedule id.
+        id: String,
+    },
+    /// `schedule_pause` of schedule `id`.
+    Pause {
+        /// Schedule id.
+        id: String,
+    },
+    /// `schedule_delete` of schedule `id`.
+    Delete {
         /// Schedule id.
         id: String,
     },
@@ -100,23 +114,47 @@ pub struct ScheduleView {
     pub next_runs: Vec<String>,
     /// Last firing (RFC 3339, in `timezone`).
     pub last_run: Option<String>,
+    /// `bot` (you made it, you may change it) or `user` (made by the user:
+    /// read-only for you).
+    pub origin: String,
+    /// `false` for user-made schedules: you may only read them.
+    pub editable: bool,
+}
+
+/// The schedule as it is before an update.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviousSchedule {
+    /// Name before.
+    pub name: String,
+    /// Prompt before.
+    pub prompt: String,
+    /// Human-readable timing before.
+    pub schedule: String,
+    /// Timezone before.
+    pub timezone: String,
 }
 
 /// What an approval card shows about a proposed change.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SchedulePreview {
-    /// `create`, `update` or `resume`.
+    /// `create`, `update`, `resume`, `pause` or `delete`.
     pub action: String,
+    /// Id of the schedule being changed (not for `create`).
+    pub schedule_id: Option<String>,
     /// Name after the change.
     pub name: String,
-    /// The exact prompt that will run.
+    /// The exact prompt that will run (empty for pause / delete).
     pub prompt: String,
+    /// Length of `prompt` in characters.
+    pub prompt_chars: usize,
     /// Human-readable timing after the change.
     pub schedule: String,
     /// Timezone the timing is read in.
     pub timezone: String,
     /// The next 3 firing times (RFC 3339, in the user's timezone).
     pub next_runs: Vec<String>,
+    /// For `update`: what it is now (old to new).
+    pub previous: Option<PreviousSchedule>,
 }
 
 /// The daemon side of the schedule tools. Every method is scoped to
@@ -245,7 +283,7 @@ pub fn tools(host: &Arc<dyn ScheduleHost>) -> Vec<Arc<dyn Tool>> {
     vec![
         mk(
             "schedule_list",
-            "List your own scheduled tasks (id, name, prompt, timing, next runs). You cannot see other bots' schedules.",
+            "List your own scheduled tasks (id, name, prompt, timing, next runs, origin). Schedules with editable=false were made by the user: you can read them but not change them. You cannot see other bots' schedules.",
             json!({"type":"object","properties":{}}),
             Effect::Read,
             Op::List,
@@ -259,28 +297,28 @@ pub fn tools(host: &Arc<dyn ScheduleHost>) -> Vec<Arc<dyn Tool>> {
         ),
         mk(
             "schedule_update",
-            "Change one of your scheduled tasks (name, prompt or timing). The user must approve the result.",
+            "Change a scheduled task you created (name, prompt or timing). The user must approve the change. Not for schedules the user made.",
             json!({"type":"object","properties":update_props,"required":["id"]}),
             Effect::Write,
             Op::Update,
         ),
         mk(
             "schedule_pause",
-            "Pause one of your scheduled tasks (it stops firing until resumed).",
+            "Pause a scheduled task you created (it stops firing until resumed).",
             id_schema.clone(),
             Effect::Write,
             Op::Pause,
         ),
         mk(
             "schedule_resume",
-            "Resume a paused scheduled task of yours. The user must approve it again.",
+            "Resume a paused scheduled task you created. The user must approve it again.",
             id_schema.clone(),
             Effect::Write,
             Op::Resume,
         ),
         mk(
             "schedule_delete",
-            "Delete one of your scheduled tasks.",
+            "Delete a scheduled task you created.",
             id_schema,
             Effect::Write,
             Op::Delete,
@@ -318,7 +356,13 @@ impl ScheduleTool {
             Op::Resume => Some(ScheduleChange::Resume {
                 id: parse::<IdIn>(input.clone())?.id,
             }),
-            Op::List | Op::Pause | Op::Delete => None,
+            Op::Pause => Some(ScheduleChange::Pause {
+                id: parse::<IdIn>(input.clone())?.id,
+            }),
+            Op::Delete => Some(ScheduleChange::Delete {
+                id: parse::<IdIn>(input.clone())?.id,
+            }),
+            Op::List => None,
         })
     }
 }
@@ -430,6 +474,8 @@ mod tests {
             timezone: "UTC".into(),
             next_runs: vec![],
             last_run: None,
+            origin: "bot".into(),
+            editable: true,
         }
     }
 
@@ -451,11 +497,14 @@ mod tests {
             }
             Ok(SchedulePreview {
                 action: "create".into(),
+                schedule_id: None,
                 name: "n".into(),
                 prompt: "do it".into(),
+                prompt_chars: 5,
                 schedule: "Every day".into(),
                 timezone: "UTC".into(),
                 next_runs: vec!["a".into(), "b".into(), "c".into()],
+                previous: None,
             })
         }
         fn create(&self, c: &ScheduleCaller, _: &ScheduleRequest) -> Result<ScheduleView, String> {
@@ -596,10 +645,17 @@ mod tests {
         assert_eq!(d["kind"], "schedule");
         assert_eq!(d["prompt"], "do it");
         assert_eq!(d["next_runs"].as_array().unwrap().len(), 3);
-        // Non-gated tools add nothing.
+        // Pause / delete show the schedule too (not just an id); list has no card.
         assert!(
             tool(&host, "schedule_delete")
                 .approval_details(&ctx(Some("b")), &json!({"id":"x"}))
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            tool(&host, "schedule_list")
+                .approval_details(&ctx(Some("b")), &json!({}))
                 .await
                 .unwrap()
                 .is_none()

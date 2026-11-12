@@ -1,14 +1,21 @@
-#![allow(clippy::too_many_lines, clippy::assert_is_empty)]
+#![allow(
+    clippy::too_many_lines,
+    clippy::assert_is_empty,
+    clippy::many_single_char_names
+)]
 //! The daemon side of the bot schedule tools.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use agent_core::{AgentLoop, LoopConfig, Providers};
 use builtin_tools::{
     SCHEDULE_TOOL_NAMES, ScheduleCaller, ScheduleChange, ScheduleHost, ScheduleRequest,
+    ScheduleView,
 };
+use chrono::TimeZone;
 use protocol::{BotId, ChatId, RunId, UserId};
-use scheduler::{Payload, ScheduleStore};
+use scheduler::{MisfirePolicy, Payload, Schedule, ScheduleOrigin, ScheduleSpec, ScheduleStore};
 use serde_json::{Value, json};
 use storage::{Bot, Chat, Run, Storage, User, now_ms};
 use tokio::sync::broadcast;
@@ -16,7 +23,7 @@ use tool_registry::{ToolContext, ToolRegistry};
 
 use crate::dto::{ScheduleChangeKind, ScheduleChanged};
 use crate::fake::FakeProvider;
-use crate::schedule_tools::{DaemonScheduleHost, ScheduleLimits, load_schedule_limits};
+use crate::schedule_tools::{DaemonScheduleHost, ScheduleLimits, load_schedule_limits, upcoming};
 use crate::{AppState, DaemonConfig};
 
 struct Fx {
@@ -28,6 +35,7 @@ struct Fx {
     b: BotId,
     chat_a: ChatId,
     run_a: RunId,
+    clock: Arc<AtomicI64>,
     events: broadcast::Receiver<ScheduleChanged>,
     _dir: tempfile::TempDir,
 }
@@ -40,7 +48,20 @@ fn limits(max: usize, min_secs: u64) -> ScheduleLimits {
     }
 }
 
+fn utc_ms(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> i64 {
+    chrono::Utc
+        .with_ymd_and_hms(y, mo, d, h, mi, 0)
+        .unwrap()
+        .timestamp_millis()
+}
+
 fn fx(l: ScheduleLimits) -> Fx {
+    fx_at(l, now_ms(), true)
+}
+
+/// `known_user = false` builds a host whose user is not in the database, so
+/// every audit write fails.
+fn fx_at(l: ScheduleLimits, start_ms: i64, known_user: bool) -> Fx {
     let dir = tempfile::tempdir().unwrap();
     let storage = Arc::new(Storage::open(dir.path()).unwrap());
     let user = UserId::new();
@@ -92,8 +113,18 @@ fn fx(l: ScheduleLimits) -> Fx {
         })
         .unwrap();
     let store = Arc::new(ScheduleStore::open_in_memory().unwrap());
-    let (tx, events) = broadcast::channel(32);
-    let host = DaemonScheduleHost::new(Arc::clone(&store), Arc::clone(&storage), user, tx, l);
+    let (tx, events) = broadcast::channel(64);
+    let clock = Arc::new(AtomicI64::new(start_ms));
+    let c = Arc::clone(&clock);
+    let host_user = if known_user { user } else { UserId::new() };
+    let host = DaemonScheduleHost::with_clock(
+        Arc::clone(&store),
+        Arc::clone(&storage),
+        host_user,
+        tx,
+        l,
+        Arc::new(move || c.load(Ordering::SeqCst)),
+    );
     Fx {
         host,
         store,
@@ -103,6 +134,7 @@ fn fx(l: ScheduleLimits) -> Fx {
         b,
         chat_a,
         run_a,
+        clock,
         events,
         _dir: dir,
     }
@@ -120,6 +152,73 @@ impl Fx {
             bot_id: self.b.to_string(),
             run_id: String::new(),
         }
+    }
+    fn advance(&self, ms: i64) {
+        self.clock.fetch_add(ms, Ordering::SeqCst);
+    }
+    /// The approval flow: preview (what the card shows), then apply.
+    fn make(&self, c: &ScheduleCaller, req: &ScheduleRequest) -> Result<ScheduleView, String> {
+        self.host.preview(c, &ScheduleChange::Create(req.clone()))?;
+        self.host.create(c, req)
+    }
+    fn edit(
+        &self,
+        c: &ScheduleCaller,
+        id: &str,
+        req: &ScheduleRequest,
+    ) -> Result<ScheduleView, String> {
+        self.host.preview(
+            c,
+            &ScheduleChange::Update {
+                id: id.into(),
+                req: req.clone(),
+            },
+        )?;
+        self.host.update(c, id, req)
+    }
+    fn toggle(&self, c: &ScheduleCaller, id: &str, on: bool) -> Result<ScheduleView, String> {
+        let ch = if on {
+            ScheduleChange::Resume { id: id.into() }
+        } else {
+            ScheduleChange::Pause { id: id.into() }
+        };
+        self.host.preview(c, &ch)?;
+        self.host.set_enabled(c, id, on)
+    }
+    fn remove(&self, c: &ScheduleCaller, id: &str) -> Result<ScheduleView, String> {
+        self.host
+            .preview(c, &ScheduleChange::Delete { id: id.into() })?;
+        self.host.delete(c, id)
+    }
+    /// A schedule not made by a bot tool.
+    fn insert(
+        &self,
+        bot: BotId,
+        origin: ScheduleOrigin,
+        spec: ScheduleSpec,
+        payload: Payload,
+    ) -> Schedule {
+        let mut sc = Schedule::new(
+            bot,
+            None,
+            "made elsewhere",
+            spec,
+            payload,
+            MisfirePolicy::default(),
+            now_ms(),
+        )
+        .unwrap();
+        sc.origin = origin;
+        self.store.insert(&sc).unwrap();
+        sc
+    }
+    fn audit(&self) -> Vec<storage::AuditEntry> {
+        self.storage
+            .list_audit(self.user)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.action.starts_with("schedule."))
+            .collect()
     }
 }
 
@@ -145,24 +244,40 @@ fn cron(c: &str) -> ScheduleRequest {
     }
 }
 
+fn patch(f: impl FnOnce(&mut ScheduleRequest)) -> ScheduleRequest {
+    let mut r = ScheduleRequest::default();
+    f(&mut r);
+    r
+}
+
+fn user_every_hour() -> ScheduleSpec {
+    ScheduleSpec::Every { seconds: 3600 }
+}
+
+fn text(t: &str) -> Payload {
+    Payload::AgentPrompt { text: t.into() }
+}
+
+// ---------------------------------------------------------------- creation
+
 #[test]
 fn natural_language_creation_uses_the_users_timezone_and_previews_three_firings() {
     let f = fx(limits(20, 300));
     let v = f
-        .host
-        .create(&f.caller_a(), &when("Standup", "every weekday at 10:30"))
+        .make(&f.caller_a(), &when("Standup", "every weekday at 10:30"))
         .unwrap();
     assert_eq!(v.schedule, "Every weekday at 10:30");
     assert_eq!(v.timezone, "Europe/Istanbul");
     assert_eq!(v.prompt, "do the thing");
     assert!(v.enabled);
+    assert_eq!((v.origin.as_str(), v.editable), ("bot", true));
     assert_eq!(v.next_runs.len(), 3);
     for t in &v.next_runs {
         assert!(t.contains("T10:30:00+03:00"), "{t}");
     }
-    // Stored for the right bot, with the run's chat, as an agent prompt.
     let sc = f.store.list_by_bot(f.a).unwrap().remove(0);
     assert_eq!(sc.chat_id, Some(f.chat_a));
+    assert_eq!(sc.origin, ScheduleOrigin::Bot, "origin is recorded");
     assert!(matches!(sc.payload, Payload::AgentPrompt { ref text } if text == "do the thing"));
     assert!(sc.next_run_at.is_some());
 }
@@ -172,160 +287,196 @@ fn explicit_timezone_and_turkish_phrase() {
     let f = fx(limits(20, 300));
     let mut r = when("Sabah", "her gün 09:00");
     r.tz = Some("America/New_York".into());
-    let v = f.host.create(&f.caller_a(), &r).unwrap();
+    let v = f.make(&f.caller_a(), &r).unwrap();
     assert_eq!(v.timezone, "America/New_York");
     assert_eq!(v.schedule, "Every day at 09:00");
     for t in &v.next_runs {
         assert!(t.contains("T09:00:00-0"), "{t}");
     }
     r.tz = Some("Mars/Olympus".into());
-    let e = f.host.create(&f.caller_a(), &r).unwrap_err();
-    assert!(e.contains("unknown timezone"), "{e}");
+    assert!(
+        f.make(&f.caller_a(), &r)
+            .unwrap_err()
+            .contains("unknown timezone")
+    );
 }
 
 #[test]
 fn cron_creation_with_and_without_embedded_timezone() {
     let f = fx(limits(20, 300));
-    let v = f
-        .host
-        .create(&f.caller_a(), &cron("30 10 * * 1-5"))
-        .unwrap();
+    let v = f.make(&f.caller_a(), &cron("30 10 * * 1-5")).unwrap();
     assert_eq!(v.schedule, "Every weekday at 10:30");
-    assert_eq!(v.timezone, "Europe/Istanbul", "default timezone applied");
+    assert_eq!(v.timezone, "Europe/Istanbul");
     let v = f
-        .host
-        .create(&f.caller_a(), &cron("0 8 * * 1,3 Europe/London"))
+        .make(&f.caller_a(), &cron("0 8 * * 1,3 Europe/London"))
         .unwrap();
     assert_eq!(v.timezone, "Europe/London");
     assert_eq!(v.schedule, "Every Monday, Wednesday at 08:00");
-    let e = f
-        .host
-        .create(&f.caller_a(), &cron("not a cron"))
-        .unwrap_err();
-    assert!(e.contains("cron"), "{e}");
+    assert!(
+        f.make(&f.caller_a(), &cron("not a cron"))
+            .unwrap_err()
+            .contains("cron")
+    );
 }
 
 #[test]
-fn one_off_in_the_future_ok_and_when_and_cron_are_exclusive() {
+fn one_off_ok_and_when_and_cron_are_exclusive() {
     let f = fx(limits(20, 300));
-    let v = f
-        .host
-        .create(&f.caller_a(), &when("Once", "in 2 hours"))
-        .unwrap();
+    let v = f.make(&f.caller_a(), &when("Once", "in 2 hours")).unwrap();
     assert!(v.schedule.starts_with("Once, at "), "{}", v.schedule);
     assert_eq!(v.next_runs.len(), 1);
     let mut both = when("x", "daily");
     both.cron = Some("0 9 * * *".into());
     assert!(
-        f.host
-            .create(&f.caller_a(), &both)
+        f.make(&f.caller_a(), &both)
             .unwrap_err()
             .contains("not both")
     );
     assert!(
-        f.host
-            .create(&f.caller_a(), &req("x", "y"))
+        f.make(&f.caller_a(), &req("x", "y"))
             .unwrap_err()
             .contains("`when`")
     );
     assert!(
-        f.host
-            .create(&f.caller_a(), &when("x", "whenever you feel like it"))
+        f.make(&f.caller_a(), &when("x", "whenever you feel like it"))
             .unwrap_err()
             .contains("cannot understand")
     );
 }
 
+// ---------------------------------------------------------------- isolation & ownership
+
 #[test]
 fn bot_b_cannot_see_or_touch_bot_a() {
     let f = fx(limits(20, 300));
-    let v = f.host.create(&f.caller_a(), &when("A's", "daily")).unwrap();
+    let v = f.make(&f.caller_a(), &when("A's", "daily")).unwrap();
     assert!(f.host.list(&f.caller_b()).unwrap().is_empty());
     assert_eq!(f.host.list(&f.caller_a()).unwrap().len(), 1);
     let b = f.caller_b();
-    let patch = ScheduleRequest {
-        prompt: Some("hijack".into()),
-        ..ScheduleRequest::default()
-    };
-    for e in [
-        f.host.update(&b, &v.id, &patch).unwrap_err(),
-        f.host.set_enabled(&b, &v.id, false).unwrap_err(),
-        f.host.set_enabled(&b, &v.id, true).unwrap_err(),
-        f.host.delete(&b, &v.id).unwrap_err(),
-        f.host
-            .preview(&b, &ScheduleChange::Resume { id: v.id.clone() })
-            .unwrap_err(),
-        f.host
-            .preview(
-                &b,
-                &ScheduleChange::Update {
-                    id: v.id.clone(),
-                    req: patch.clone(),
-                },
-            )
-            .unwrap_err(),
-    ] {
+    let p = patch(|r| r.prompt = Some("hijack".into()));
+    let changes = [
+        ScheduleChange::Update {
+            id: v.id.clone(),
+            req: p.clone(),
+        },
+        ScheduleChange::Pause { id: v.id.clone() },
+        ScheduleChange::Resume { id: v.id.clone() },
+        ScheduleChange::Delete { id: v.id.clone() },
+    ];
+    for ch in &changes {
+        let e = f.host.preview(&b, ch).unwrap_err();
         assert!(e.contains("no schedule with id"), "{e}");
     }
-    // Untouched, and a made-up id looks the same as another bot's.
+    for e in [
+        f.host.update(&b, &v.id, &p).unwrap_err(),
+        f.host.set_enabled(&b, &v.id, false).unwrap_err(),
+        f.host.delete(&b, &v.id).unwrap_err(),
+    ] {
+        assert!(
+            e.contains("no schedule with id")
+                || e.contains("not previewed")
+                || e.contains("changed"),
+            "{e}"
+        );
+    }
     let sc = f.store.list_by_bot(f.a).unwrap().remove(0);
     assert!(sc.enabled);
     assert_eq!(sc.name, "A's");
-    assert!(matches!(sc.payload, Payload::AgentPrompt { ref text } if text == "do the thing"));
-    let e = f
-        .host
-        .delete(&b, &uuid::Uuid::now_v7().to_string())
-        .unwrap_err();
+    let e = f.remove(&b, &uuid::Uuid::now_v7().to_string()).unwrap_err();
     assert!(e.contains("no schedule with id"));
-    // Isolation also covers audit: B's attempts wrote nothing.
     assert!(
-        f.storage
-            .list_audit(f.user)
-            .unwrap()
+        f.audit()
             .iter()
             .all(|e| e.detail["bot_id"] == f.a.to_string())
     );
 }
 
 #[test]
+fn a_bot_may_read_but_never_change_schedules_the_user_made() {
+    let f = fx(limits(20, 300));
+    let user_made = f.insert(
+        f.a,
+        ScheduleOrigin::User,
+        user_every_hour(),
+        text("user's job"),
+    );
+    let id = user_made.id.0.to_string();
+    let listed = f.host.list(&f.caller_a()).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].origin, "user");
+    assert!(!listed[0].editable, "marked read-only");
+    assert_eq!(listed[0].prompt, "user's job");
+    let c = f.caller_a();
+    for ch in [
+        ScheduleChange::Update {
+            id: id.clone(),
+            req: patch(|r| r.prompt = Some("x".into())),
+        },
+        ScheduleChange::Pause { id: id.clone() },
+        ScheduleChange::Resume { id: id.clone() },
+        ScheduleChange::Delete { id: id.clone() },
+    ] {
+        let e = f.host.preview(&c, &ch).unwrap_err();
+        assert!(
+            e.contains("created by the user") && e.contains("only read"),
+            "{e}"
+        );
+    }
+    assert!(f.host.delete(&c, &id).is_err());
+    assert!(f.host.set_enabled(&c, &id, false).is_err());
+    let after = f.store.get(user_made.id).unwrap().unwrap();
+    assert!(after.enabled);
+    assert_eq!(after.revision, user_made.revision);
+    assert!(f.audit().is_empty(), "nothing was changed or logged");
+}
+
+#[test]
+fn a_bot_cannot_edit_or_resume_a_schedule_with_a_webhook_but_may_pause_or_delete_it() {
+    let f = fx(limits(20, 300));
+    let v = f.make(&f.caller_a(), &when("hooked", "daily")).unwrap();
+    let id = scheduler::TaskId(uuid::Uuid::parse_str(&v.id).unwrap());
+    f.toggle(&f.caller_a(), &v.id, false).unwrap();
+    f.store
+        .set_trigger(id, &scheduler::Trigger::Webhook { secret: "s".into() })
+        .unwrap();
+    for e in [
+        f.edit(
+            &f.caller_a(),
+            &v.id,
+            &patch(|r| r.prompt = Some("x".into())),
+        )
+        .unwrap_err(),
+        f.toggle(&f.caller_a(), &v.id, true).unwrap_err(),
+    ] {
+        assert!(e.contains("webhook"), "{e}");
+    }
+    assert!(!f.store.get(id).unwrap().unwrap().enabled);
+    f.remove(&f.caller_a(), &v.id).unwrap();
+    assert!(f.store.get(id).unwrap().is_none());
+}
+
+// ---------------------------------------------------------------- limits
+
+#[test]
 fn quota_is_per_bot_and_counts_every_origin() {
     let f = fx(limits(2, 300));
-    // A schedule made elsewhere (the UI) counts too.
-    let ui = scheduler::Schedule::new(
+    f.insert(
         f.a,
-        None,
-        "ui",
-        scheduler::ScheduleSpec::cron("0 9 * * *"),
-        Payload::AgentPrompt { text: "x".into() },
-        scheduler::MisfirePolicy::default(),
-        now_ms(),
-    )
-    .unwrap();
-    f.store.insert(&ui).unwrap();
-    f.host.create(&f.caller_a(), &when("one", "daily")).unwrap();
-    let e = f
-        .host
-        .create(&f.caller_a(), &when("two", "daily"))
-        .unwrap_err();
+        ScheduleOrigin::User,
+        ScheduleSpec::cron("0 9 * * *"),
+        text("x"),
+    );
+    f.make(&f.caller_a(), &when("one", "daily")).unwrap();
+    let e = f.make(&f.caller_a(), &when("two", "daily")).unwrap_err();
     assert!(
         e.contains("schedule limit reached") && e.contains("2 of 2"),
         "{e}"
     );
-    let e = f
-        .host
-        .preview(&f.caller_a(), &ScheduleChange::Create(when("two", "daily")))
-        .unwrap_err();
-    assert!(
-        e.contains("schedule limit reached"),
-        "approval is never requested over quota"
-    );
-    // Bot B has its own quota; deleting frees a slot.
-    f.host.create(&f.caller_b(), &when("b1", "daily")).unwrap();
-    let id = f.host.list(&f.caller_a()).unwrap()[0].id.clone();
-    f.host.delete(&f.caller_a(), &id).unwrap();
-    f.host
-        .create(&f.caller_a(), &when("again", "daily"))
-        .unwrap();
+    f.make(&f.caller_b(), &when("b1", "daily")).unwrap();
+    let mine = f.host.list(&f.caller_a()).unwrap();
+    let id = mine.iter().find(|s| s.editable).unwrap().id.clone();
+    f.remove(&f.caller_a(), &id).unwrap();
+    f.make(&f.caller_a(), &when("again", "daily")).unwrap();
 }
 
 #[test]
@@ -337,20 +488,18 @@ fn default_limits_are_twenty_and_five_minutes() {
         ..l
     });
     for i in 0..20 {
-        f.host
-            .create(&f.caller_a(), &when(&format!("s{i}"), "daily"))
+        f.make(&f.caller_a(), &when(&format!("s{i}"), "daily"))
             .unwrap();
     }
     assert!(
-        f.host
-            .create(&f.caller_a(), &when("s20", "daily"))
+        f.make(&f.caller_a(), &when("s20", "daily"))
             .unwrap_err()
             .contains("20 of 20")
     );
 }
 
 #[test]
-fn minimum_interval_applies_to_phrases_and_cron() {
+fn minimum_interval_applies_to_phrases_and_cron_including_dense_bursts() {
     let f = fx(limits(20, 300));
     for (r, what) in [
         (when("x", "every minute"), "1 minute"),
@@ -358,156 +507,382 @@ fn minimum_interval_applies_to_phrases_and_cron() {
         (cron("* * * * *"), "1 minute"),
         (cron("*/2 * * * *"), "2 minutes"),
         (cron("0,2 * * * *"), "2 minutes"),
+        // One burst a year: every minute from 09:00 to 09:59 on 1 January.
+        (cron("*/1 9 1 1 *"), "1 minute"),
     ] {
-        let e = f.host.create(&f.caller_a(), &r).unwrap_err();
+        let e = f.make(&f.caller_a(), &r).unwrap_err();
         assert!(e.contains("minimum interval is 5 minutes"), "{e}");
         assert!(e.contains(what), "{e} / {what}");
     }
-    f.host
-        .create(&f.caller_a(), &when("ok", "every 5 minutes"))
+    f.make(&f.caller_a(), &when("ok", "every 5 minutes"))
         .unwrap();
-    f.host.create(&f.caller_a(), &cron("*/5 * * * *")).unwrap();
-    f.host.create(&f.caller_a(), &cron("0 * * * *")).unwrap();
-    // Configurable.
+    f.make(&f.caller_a(), &cron("*/5 * * * *")).unwrap();
+    f.make(&f.caller_a(), &cron("0 * * * *")).unwrap();
     let f = fx(limits(20, 60));
-    f.host
-        .create(&f.caller_a(), &when("m", "every minute"))
-        .unwrap();
+    f.make(&f.caller_a(), &when("m", "every minute")).unwrap();
     let f = fx(limits(20, 3600));
     let e = f
-        .host
-        .create(&f.caller_a(), &when("m", "every 30 minutes"))
+        .make(&f.caller_a(), &when("m", "every 30 minutes"))
         .unwrap_err();
     assert!(e.contains("minimum interval is 1 hour"), "{e}");
 }
 
 #[test]
-fn updates_change_only_what_is_given_and_rearm() {
+fn every_below_the_minimum_is_rejected_for_the_raw_spec_too() {
     let f = fx(limits(20, 300));
-    let v = f
-        .host
-        .create(&f.caller_a(), &when("Standup", "daily"))
+    let spec = ScheduleSpec::Every { seconds: 299 };
+    let e = f.host.check_interval(&spec, now_ms()).unwrap_err();
+    assert!(e.contains("4 minutes") || e.contains("299 seconds"), "{e}");
+    f.host
+        .check_interval(&ScheduleSpec::Every { seconds: 300 }, now_ms())
         .unwrap();
+}
+
+#[test]
+fn dst_transitions_neither_skip_the_preview_nor_create_a_sub_minimum_gap() {
+    // 2027-03-14 02:00 America/New_York does not exist (spring forward);
+    // 2027-11-07 01:30 happens twice (fall back).
+    let ny = |expr: &str| ScheduleSpec::cron_tz(expr, "America/New_York");
+    for (start, expr) in [
+        (utc_ms(2027, 3, 13, 12, 0), "30 2 * * *"),
+        (utc_ms(2027, 3, 14, 6, 30), "*/5 * * * *"),
+        (utc_ms(2027, 11, 6, 12, 0), "30 1 * * *"),
+        (utc_ms(2027, 11, 7, 4, 30), "*/5 * * * *"),
+    ] {
+        let f = fx_at(limits(20, 300), start, true);
+        let spec = ny(expr);
+        let times = upcoming(&spec, start, 3);
+        assert_eq!(
+            times.len(),
+            3,
+            "{expr}: preview must still list three firings"
+        );
+        f.host
+            .check_interval(&spec, start)
+            .unwrap_or_else(|e| panic!("{expr} at {start}: {e}"));
+        let gaps: Vec<i64> = times.windows(2).map(|w| w[1] - w[0]).collect();
+        assert!(gaps.iter().all(|g| *g >= 300_000), "{expr}: {gaps:?}");
+    }
+    // Through the host: a daily 02:30 created the day before the gap works.
+    let f = fx_at(limits(20, 300), utc_ms(2027, 3, 13, 12, 0), true);
+    let mut r = cron("30 2 * * *");
+    r.tz = Some("America/New_York".into());
+    let v = f.make(&f.caller_a(), &r).unwrap();
+    assert_eq!(v.next_runs.len(), 3);
+}
+
+// ---------------------------------------------------------------- update / pause / resume
+
+#[test]
+fn update_card_shows_old_and_new_and_changes_only_what_is_given() {
+    let f = fx(limits(20, 300));
+    let v = f.make(&f.caller_a(), &when("Standup", "daily")).unwrap();
+    let p = f
+        .host
+        .preview(
+            &f.caller_a(),
+            &ScheduleChange::Update {
+                id: v.id.clone(),
+                req: patch(|r| {
+                    r.prompt = Some("new prompt".into());
+                    r.when = Some("every weekday at 7:15".into());
+                }),
+            },
+        )
+        .unwrap();
+    assert_eq!(p.action, "update");
+    assert_eq!(p.schedule_id.as_deref(), Some(v.id.as_str()));
+    assert_eq!(
+        (p.name.as_str(), p.prompt.as_str()),
+        ("Standup", "new prompt")
+    );
+    assert_eq!(p.schedule, "Every weekday at 07:15");
+    let prev = p.previous.expect("old values for old -> new");
+    assert_eq!(prev.prompt, "do the thing");
+    assert_eq!(prev.schedule, "Every day at 09:00");
+    assert_eq!(prev.name, "Standup");
+    // Apply what was previewed.
     let u = f
         .host
         .update(
             &f.caller_a(),
             &v.id,
-            &ScheduleRequest {
-                prompt: Some("new prompt".into()),
-                ..ScheduleRequest::default()
-            },
+            &patch(|r| {
+                r.prompt = Some("new prompt".into());
+                r.when = Some("every weekday at 7:15".into());
+            }),
         )
         .unwrap();
     assert_eq!(
         (u.name.as_str(), u.prompt.as_str()),
         ("Standup", "new prompt")
     );
-    assert_eq!(u.schedule, "Every day at 09:00");
-    let u = f
-        .host
-        .update(
-            &f.caller_a(),
-            &v.id,
-            &ScheduleRequest {
-                when: Some("every weekday at 7:15".into()),
-                ..ScheduleRequest::default()
-            },
-        )
-        .unwrap();
     assert_eq!(u.schedule, "Every weekday at 07:15");
     let e = f
-        .host
-        .update(
-            &f.caller_a(),
-            &v.id,
-            &ScheduleRequest {
-                tz: Some("UTC".into()),
-                ..ScheduleRequest::default()
-            },
-        )
+        .edit(&f.caller_a(), &v.id, &patch(|r| r.tz = Some("UTC".into())))
         .unwrap_err();
     assert!(e.contains("`tz` only applies"), "{e}");
     let e = f
-        .host
-        .update(
+        .edit(
             &f.caller_a(),
             &v.id,
-            &ScheduleRequest {
-                when: Some("every minute".into()),
-                ..ScheduleRequest::default()
-            },
+            &patch(|r| r.when = Some("every minute".into())),
         )
         .unwrap_err();
     assert!(e.contains("minimum interval"), "{e}");
 }
 
 #[test]
+fn pause_resume_and_delete_cards_name_the_schedule_and_its_timing() {
+    let f = fx(limits(20, 300));
+    let v = f
+        .make(&f.caller_a(), &when("Nightly", "every weekday at 10:30"))
+        .unwrap();
+    for (ch, action) in [
+        (ScheduleChange::Pause { id: v.id.clone() }, "pause"),
+        (ScheduleChange::Resume { id: v.id.clone() }, "resume"),
+        (ScheduleChange::Delete { id: v.id.clone() }, "delete"),
+    ] {
+        let p = f.host.preview(&f.caller_a(), &ch).unwrap();
+        assert_eq!(p.action, action);
+        assert_eq!(p.name, "Nightly");
+        assert_eq!(p.schedule, "Every weekday at 10:30");
+        assert_eq!(p.schedule_id.as_deref(), Some(v.id.as_str()));
+    }
+}
+
+#[test]
 fn pause_and_resume_toggle_the_timer() {
     let f = fx(limits(20, 300));
-    let v = f.host.create(&f.caller_a(), &when("n", "daily")).unwrap();
-    let p = f.host.set_enabled(&f.caller_a(), &v.id, false).unwrap();
-    assert!(!p.enabled);
-    assert!(p.next_runs.is_empty());
-    let sc = f.store.list_by_bot(f.a).unwrap().remove(0);
-    assert!(!sc.enabled);
-    let r = f.host.set_enabled(&f.caller_a(), &v.id, true).unwrap();
+    let v = f.make(&f.caller_a(), &when("n", "daily")).unwrap();
+    let p = f.toggle(&f.caller_a(), &v.id, false).unwrap();
+    assert!(!p.enabled && p.next_runs.is_empty());
+    assert!(!f.store.list_by_bot(f.a).unwrap()[0].enabled);
+    let r = f.toggle(&f.caller_a(), &v.id, true).unwrap();
     assert!(r.enabled);
     assert_eq!(r.next_runs.len(), 3);
     assert!(f.store.list_by_bot(f.a).unwrap()[0].next_run_at.is_some());
-    let pv = f
-        .host
-        .preview(&f.caller_a(), &ScheduleChange::Resume { id: v.id })
-        .unwrap();
-    assert_eq!(pv.action, "resume");
-    assert_eq!(pv.next_runs.len(), 3);
 }
 
 #[test]
-fn preview_shows_exact_prompt_schedule_and_three_times_without_storing() {
+fn pause_and_delete_work_without_an_approval_preview_but_resume_does_not() {
     let f = fx(limits(20, 300));
-    let pv = f
+    let v = f.make(&f.caller_a(), &when("n", "daily")).unwrap();
+    // The loop only previews when it asks; pause / delete may run unasked.
+    assert!(
+        !f.host
+            .set_enabled(&f.caller_a(), &v.id, false)
+            .unwrap()
+            .enabled
+    );
+    let e = f.host.set_enabled(&f.caller_a(), &v.id, true).unwrap_err();
+    assert!(e.contains("not previewed"), "{e}");
+    assert!(
+        f.host
+            .create(&f.caller_a(), &when("x", "daily"))
+            .unwrap_err()
+            .contains("not previewed")
+    );
+    f.host.delete(&f.caller_a(), &v.id).unwrap();
+}
+
+#[test]
+fn the_interval_limit_is_applied_on_resume() {
+    let f = fx(limits(20, 300));
+    let sc = f.insert(
+        f.a,
+        ScheduleOrigin::Bot,
+        ScheduleSpec::Every { seconds: 60 },
+        text("p"),
+    );
+    let id = sc.id.0.to_string();
+    f.host.set_enabled(&f.caller_a(), &id, false).unwrap();
+    let e = f.toggle(&f.caller_a(), &id, true).unwrap_err();
+    assert!(e.contains("minimum interval"), "{e}");
+    assert!(!f.store.get(sc.id).unwrap().unwrap().enabled);
+}
+
+#[test]
+fn a_workflow_schedule_cannot_be_rewritten_by_a_bot() {
+    let f = fx(limits(20, 300));
+    let sc = f.insert(
+        f.a,
+        ScheduleOrigin::Bot,
+        ScheduleSpec::cron("0 9 * * *"),
+        Payload::Workflow {
+            name: "w".into(),
+            params: Value::Null,
+        },
+    );
+    let id = sc.id.0.to_string();
+    let e = f
+        .edit(&f.caller_a(), &id, &patch(|r| r.prompt = Some("x".into())))
+        .unwrap_err();
+    assert!(e.contains("workflow or tool"), "{e}");
+    assert!(!f.toggle(&f.caller_a(), &id, false).unwrap().enabled);
+}
+
+// ---------------------------------------------------------------- what is approved is what is stored
+
+#[test]
+fn a_relative_time_is_frozen_at_preview_not_recomputed_after_the_approval_wait() {
+    let start = utc_ms(2026, 11, 12, 12, 0);
+    let f = fx_at(limits(20, 300), start, true);
+    let r = when("Once", "in 2 hours");
+    let p = f
         .host
+        .preview(&f.caller_a(), &ScheduleChange::Create(r.clone()))
+        .unwrap();
+    assert_eq!(p.next_runs.len(), 1);
+    assert!(
+        p.next_runs[0].starts_with("2026-11-12T17:00:00+03:00"),
+        "{:?}",
+        p.next_runs
+    );
+    f.advance(90 * 60_000); // the user takes 90 minutes to approve
+    let v = f.host.create(&f.caller_a(), &r).unwrap();
+    assert_eq!(v.next_runs, p.next_runs, "stored exactly what was shown");
+    let sc = f.store.list_by_bot(f.a).unwrap().remove(0);
+    assert_eq!(
+        sc.spec,
+        ScheduleSpec::At {
+            unix_ms: start + 2 * 3_600_000
+        }
+    );
+}
+
+#[test]
+fn a_one_shot_whose_frozen_time_passed_fails_clearly_before_any_change() {
+    let start = utc_ms(2026, 11, 12, 12, 0);
+    let f = fx_at(limits(20, 300), start, true);
+    let r = when("Soon", "in 5 minutes");
+    f.host
+        .preview(&f.caller_a(), &ScheduleChange::Create(r.clone()))
+        .unwrap();
+    f.advance(20 * 60_000); // slow approval
+    let e = f.host.create(&f.caller_a(), &r).unwrap_err();
+    assert!(
+        e.contains("already passed") && e.contains("nothing was created"),
+        "{e}"
+    );
+    assert!(f.store.list_by_bot(f.a).unwrap().is_empty());
+    assert!(f.audit().is_empty());
+}
+
+#[test]
+fn an_edit_fails_if_the_row_changed_after_the_preview() {
+    let f = fx(limits(20, 300));
+    let v = f.make(&f.caller_a(), &when("n", "daily")).unwrap();
+    let id = scheduler::TaskId(uuid::Uuid::parse_str(&v.id).unwrap());
+    let r = patch(|r| r.prompt = Some("approved text".into()));
+    f.host
         .preview(
             &f.caller_a(),
-            &ScheduleChange::Create(ScheduleRequest {
-                when: Some("every weekday at 10:30".into()),
-                ..req("Standup", "  Summarise my inbox.  ")
-            }),
-        )
-        .unwrap();
-    assert_eq!(pv.action, "create");
-    assert_eq!(pv.prompt, "Summarise my inbox.");
-    assert_eq!(pv.schedule, "Every weekday at 10:30");
-    assert_eq!(pv.timezone, "Europe/Istanbul");
-    assert_eq!(pv.next_runs.len(), 3);
-    assert!(f.store.list_by_bot(f.a).unwrap().is_empty());
-}
-
-#[test]
-fn every_create_update_pause_delete_is_audited_with_bot_and_run() {
-    let f = fx(limits(20, 300));
-    let v = f.host.create(&f.caller_a(), &when("n", "daily")).unwrap();
-    f.host
-        .update(
-            &f.caller_a(),
-            &v.id,
-            &ScheduleRequest {
-                name: Some("n2".into()),
-                ..ScheduleRequest::default()
+            &ScheduleChange::Update {
+                id: v.id.clone(),
+                req: r.clone(),
             },
         )
         .unwrap();
-    f.host.set_enabled(&f.caller_a(), &v.id, false).unwrap();
-    f.host.set_enabled(&f.caller_a(), &v.id, true).unwrap();
-    f.host.delete(&f.caller_a(), &v.id).unwrap();
-    let log: Vec<_> = f
-        .storage
-        .list_audit(f.user)
-        .unwrap()
-        .into_iter()
-        .filter(|e| e.action.starts_with("schedule."))
-        .collect();
+    // The user edits the schedule while the card is open.
+    let mut cur = f.store.get(id).unwrap().unwrap();
+    cur.name = "renamed by user".into();
+    f.store
+        .update_definition_and_rearm(&cur, None, now_ms())
+        .unwrap();
+    let e = f.host.update(&f.caller_a(), &v.id, &r).unwrap_err();
+    assert!(
+        e.contains("changed or was deleted") && e.contains("nothing was applied"),
+        "{e}"
+    );
+    let after = f.store.get(id).unwrap().unwrap();
+    assert_eq!(after.name, "renamed by user");
+    assert!(matches!(after.payload, Payload::AgentPrompt { ref text } if text == "do the thing"));
+    // Same for resume and delete.
+    f.toggle(&f.caller_a(), &v.id, false).unwrap();
+    f.host
+        .preview(&f.caller_a(), &ScheduleChange::Resume { id: v.id.clone() })
+        .unwrap();
+    let mut cur = f.store.get(id).unwrap().unwrap();
+    cur.name = "again".into();
+    f.store
+        .update_definition_and_rearm(&cur, None, now_ms())
+        .unwrap();
+    assert!(
+        f.host
+            .set_enabled(&f.caller_a(), &v.id, true)
+            .unwrap_err()
+            .contains("changed")
+    );
+    assert!(!f.store.get(id).unwrap().unwrap().enabled);
+}
+
+// ---------------------------------------------------------------- hygiene
+
+#[test]
+fn names_and_prompts_are_capped_and_stripped_of_control_and_bidi_characters() {
+    let f = fx(limits(20, 300));
+    let c = f.caller_a();
+    let ok = |name: &str, prompt: &str| {
+        let mut r = when(name, "daily");
+        r.prompt = Some(prompt.into());
+        f.host.preview(&c, &ScheduleChange::Create(r))
+    };
+    assert!(
+        ok("n", "line one\n\tline two").is_ok(),
+        "newline and tab are fine"
+    );
+    assert!(ok(&"n".repeat(80), "p").is_ok());
+    assert!(
+        ok(&"n".repeat(81), "p")
+            .unwrap_err()
+            .contains("limit is 80")
+    );
+    assert!(ok("n", &"p".repeat(4000)).is_ok());
+    assert!(
+        ok("n", &"p".repeat(4001))
+            .unwrap_err()
+            .contains("limit is 4000")
+    );
+    for bad in [
+        "a\u{0}b",
+        "a\u{1b}[31mb",
+        "a\rb",
+        "a\u{202E}b",
+        "a\u{2066}b",
+        "a\u{200F}b",
+    ] {
+        let e = ok("n", bad).unwrap_err();
+        assert!(e.contains("control or direction-override"), "{bad:?}: {e}");
+        let e = ok(bad, "p").unwrap_err();
+        assert!(e.contains("control or direction-override"), "{bad:?}: {e}");
+    }
+    assert!(ok("n", "   ").unwrap_err().contains("must not be empty"));
+    assert!(ok("a\nb", "p").is_err(), "no newline in a name");
+    // Updates are checked the same way.
+    let v = f.make(&c, &when("n", "daily")).unwrap();
+    let e = f
+        .edit(&c, &v.id, &patch(|r| r.prompt = Some("x\u{202E}y".into())))
+        .unwrap_err();
+    assert!(e.contains("direction-override"), "{e}");
+}
+
+// ---------------------------------------------------------------- audit & events
+
+#[test]
+fn every_create_update_pause_delete_is_audited_with_bot_run_and_old_values() {
+    let f = fx(limits(20, 300));
+    let v = f.make(&f.caller_a(), &when("n", "daily")).unwrap();
+    f.edit(
+        &f.caller_a(),
+        &v.id,
+        &patch(|r| r.prompt = Some("a new prompt".into())),
+    )
+    .unwrap();
+    f.toggle(&f.caller_a(), &v.id, false).unwrap();
+    f.toggle(&f.caller_a(), &v.id, true).unwrap();
+    f.remove(&f.caller_a(), &v.id).unwrap();
+    let log = f.audit();
     let actions: Vec<(&str, &str)> = log
         .iter()
         .map(|e| (e.action.as_str(), e.detail["change"].as_str().unwrap()))
@@ -533,24 +908,49 @@ fn every_create_update_pause_delete_is_audited_with_bot_and_run() {
             "the prompt text is not copied into audit"
         );
     }
+    let upd = &log[1].detail;
+    assert_eq!(upd["old_prompt_chars"], "do the thing".len());
+    assert_eq!(upd["prompt_chars"], "a new prompt".len());
+    assert_ne!(upd["old_prompt_fnv1a64"], upd["prompt_fnv1a64"]);
+    assert_eq!(upd["old_schedule"], "Every day at 09:00");
+}
+
+#[test]
+fn a_failed_audit_write_fails_the_operation_before_anything_is_committed() {
+    let f = fx_at(limits(20, 300), now_ms(), false);
+    let e = f.make(&f.caller_a(), &when("n", "daily")).unwrap_err();
+    assert!(
+        e.contains("audit log could not be written") && e.contains("nothing was changed"),
+        "{e}"
+    );
+    assert!(f.store.list_by_bot(f.a).unwrap().is_empty());
+    // An existing bot schedule is neither edited, paused nor deleted.
+    let sc = f.insert(f.a, ScheduleOrigin::Bot, user_every_hour(), text("keep"));
+    let id = sc.id.0.to_string();
+    assert!(
+        f.edit(
+            &f.caller_a(),
+            &id,
+            &patch(|r| r.prompt = Some("new".into()))
+        )
+        .is_err()
+    );
+    assert!(f.toggle(&f.caller_a(), &id, false).is_err());
+    assert!(f.remove(&f.caller_a(), &id).is_err());
+    let after = f.store.get(sc.id).unwrap().unwrap();
+    assert!(after.enabled);
+    assert!(matches!(after.payload, Payload::AgentPrompt { ref text } if text == "keep"));
+    assert_eq!(after.revision, sc.revision);
 }
 
 #[test]
 fn the_ui_is_told_about_every_change() {
     let mut f = fx(limits(20, 300));
-    let v = f.host.create(&f.caller_a(), &when("n", "daily")).unwrap();
-    f.host
-        .update(
-            &f.caller_a(),
-            &v.id,
-            &ScheduleRequest {
-                name: Some("n2".into()),
-                ..ScheduleRequest::default()
-            },
-        )
+    let v = f.make(&f.caller_a(), &when("n", "daily")).unwrap();
+    f.edit(&f.caller_a(), &v.id, &patch(|r| r.name = Some("n2".into())))
         .unwrap();
-    f.host.set_enabled(&f.caller_a(), &v.id, false).unwrap();
-    f.host.delete(&f.caller_a(), &v.id).unwrap();
+    f.toggle(&f.caller_a(), &v.id, false).unwrap();
+    f.remove(&f.caller_a(), &v.id).unwrap();
     let kinds: Vec<ScheduleChangeKind> = std::iter::from_fn(|| f.events.try_recv().ok())
         .map(|e| {
             assert_eq!(e.schedule_id.to_string(), v.id);
@@ -569,71 +969,75 @@ fn the_ui_is_told_about_every_change() {
 }
 
 #[test]
-fn a_workflow_schedule_can_be_paused_but_not_rewritten() {
+fn preview_shows_exact_prompt_schedule_and_three_times_without_storing() {
     let f = fx(limits(20, 300));
-    let sc = scheduler::Schedule::new(
-        f.a,
-        None,
-        "wf",
-        scheduler::ScheduleSpec::cron("0 9 * * *"),
-        Payload::Workflow {
-            name: "w".into(),
-            params: Value::Null,
-        },
-        scheduler::MisfirePolicy::default(),
-        now_ms(),
-    )
-    .unwrap();
-    f.store.insert(&sc).unwrap();
-    let id = sc.id.0.to_string();
-    let e = f
+    let pv = f
         .host
-        .update(
+        .preview(
             &f.caller_a(),
-            &id,
-            &ScheduleRequest {
-                prompt: Some("x".into()),
-                ..ScheduleRequest::default()
-            },
+            &ScheduleChange::Create(ScheduleRequest {
+                when: Some("every weekday at 10:30".into()),
+                ..req("Standup", "  Summarise my inbox.  ")
+            }),
         )
-        .unwrap_err();
-    assert!(e.contains("workflow or tool"), "{e}");
-    assert!(
-        !f.host
-            .set_enabled(&f.caller_a(), &id, false)
-            .unwrap()
-            .enabled
-    );
+        .unwrap();
+    assert_eq!(pv.action, "create");
+    assert_eq!(pv.prompt, "Summarise my inbox.");
+    assert_eq!(pv.prompt_chars, 19);
+    assert_eq!(pv.schedule, "Every weekday at 10:30");
+    assert_eq!(pv.timezone, "Europe/Istanbul");
+    assert_eq!(pv.next_runs.len(), 3);
+    assert!(f.store.list_by_bot(f.a).unwrap().is_empty());
 }
 
+// ---------------------------------------------------------------- schedule.toml
+
 #[test]
-fn schedule_toml_sets_limits_and_bad_files_fall_back_with_a_warning() {
+fn schedule_toml_sets_limits() {
     let dir = tempfile::tempdir().unwrap();
-    let (l, w) = load_schedule_limits(dir.path());
-    assert_eq!(l, ScheduleLimits::default());
-    assert!(w.is_empty());
+    assert_eq!(
+        load_schedule_limits(dir.path()).unwrap(),
+        ScheduleLimits::default()
+    );
     std::fs::write(
         dir.path().join("schedule.toml"),
         "max_per_bot = 3\nmin_interval_secs = 900\ntimezone = \"Europe/Istanbul\"\n",
     )
     .unwrap();
-    let (l, w) = load_schedule_limits(dir.path());
+    let l = load_schedule_limits(dir.path()).unwrap();
     assert_eq!(
         (l.max_per_bot, l.min_interval_secs, l.timezone.as_deref()),
         (3, 900, Some("Europe/Istanbul"))
     );
-    assert!(w.is_empty());
+}
+
+#[test]
+fn a_bad_schedule_toml_is_an_error_never_the_looser_defaults() {
+    let dir = tempfile::tempdir().unwrap();
     for bad in [
         "max_per_bot = \"many\"",
-        "bogus = 1",
+        "min_interval_secs = 900\nbogus = 1",
         "timezone = \"Nope/Zone\"",
+        "max_per_bot = 0",
+        "max_per_bot = 100000",
+        "min_interval_secs = 0",
+        "min_interval_secs = 99999999999",
+        "= nonsense",
     ] {
         std::fs::write(dir.path().join("schedule.toml"), bad).unwrap();
-        let (l, w) = load_schedule_limits(dir.path());
-        assert_eq!(l, ScheduleLimits::default(), "{bad}");
-        assert_eq!(w.len(), 1, "{bad}");
+        let e = load_schedule_limits(dir.path()).unwrap_err();
+        assert!(e.contains("schedule.toml"), "{bad}: {e}");
     }
+    // A tightened file with one broken key does not become the defaults.
+    std::fs::write(
+        dir.path().join("schedule.toml"),
+        "max_per_bot = 2\nmin_interval_secs = 0",
+    )
+    .unwrap();
+    assert!(load_schedule_limits(dir.path()).is_err());
 }
+
+// ---------------------------------------------------------------- registration
 
 #[tokio::test]
 async fn enabling_registers_six_always_ask_tools_that_run_as_the_calling_bot() {
@@ -657,8 +1061,6 @@ async fn enabling_registers_six_always_ask_tools_that_run_as_the_calling_bot() {
         );
         assert_eq!(t.always_ask(), gated, "{name}");
     }
-    // A bot-less call is refused; a real bot's call lands in the store and
-    // wakes the UI stream.
     let create = reg.get("schedule_create").unwrap();
     let args = json!({"name":"n","prompt":"p","when":"daily"});
     assert!(
@@ -682,17 +1084,24 @@ async fn enabling_registers_six_always_ask_tools_that_run_as_the_calling_bot() {
         bot_id: Some(bot.to_string()),
         ..ToolContext::default()
     };
-    create.call(&ctx, args).await.unwrap();
-    assert_eq!(
+    // Without the approval preview nothing is stored.
+    let e = create.call(&ctx, args.clone()).await.unwrap_err();
+    assert!(e.to_string().contains("not previewed"), "{e}");
+    assert!(
         state
             .schedule_store()
             .unwrap()
             .list_by_bot(bot)
             .unwrap()
-            .len(),
-        1
+            .is_empty()
     );
+    // With it (what the loop does when it asks), the schedule lands, marked as a bot's.
+    let details = create.approval_details(&ctx, &args).await.unwrap().unwrap();
+    assert_eq!(details["action"], "create");
+    create.call(&ctx, args).await.unwrap();
+    let stored = state.schedule_store().unwrap().list_by_bot(bot).unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].origin, ScheduleOrigin::Bot);
     assert_eq!(events.try_recv().unwrap().kind, ScheduleChangeKind::Created);
-    // A second call registers nothing new (names are unique).
     assert_eq!(state.enable_schedule_tools(limits(20, 300)).unwrap(), 0);
 }

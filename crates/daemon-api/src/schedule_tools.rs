@@ -1,21 +1,28 @@
 //! The daemon side of the bot schedule tools: a [`ScheduleHost`] over the
-//! schedule store, with per-bot scoping, limits, audit and UI notifications.
+//! schedule store, with per-bot scoping, ownership, limits, audit and UI
+//! notifications.
 //!
-//! Limits and the default timezone come from `<data dir>/schedule.toml`
-//! ([`load_schedule_limits`]); every key is optional.
+//! * A bot may change only schedules a bot-tool call created for it
+//!   ([`ScheduleOrigin::Bot`]); user-made schedules are read-only to it.
+//! * `preview` resolves a change once (timing, schedule revision) and freezes
+//!   it; the later apply stores exactly that, or fails if the row changed.
+//! * Limits and the default timezone come from `<data dir>/schedule.toml`
+//!   ([`load_schedule_limits`]); a bad file disables the tools (fail closed).
 
+use std::collections::VecDeque;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 
 use builtin_tools::{
-    ScheduleCaller, ScheduleChange, ScheduleHost, SchedulePreview, ScheduleRequest, ScheduleView,
+    PreviousSchedule, ScheduleCaller, ScheduleChange, ScheduleHost, SchedulePreview,
+    ScheduleRequest, ScheduleView,
 };
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use protocol::{BotId, ChatId, RunId, TaskId, UserId};
 use scheduler::{
-    MisfirePolicy, ParsedCron, Payload, Schedule, ScheduleSpec, ScheduleStore,
+    MisfirePolicy, ParsedCron, Payload, Schedule, ScheduleOrigin, ScheduleSpec, ScheduleStore,
     parse_natural_language_with_tz,
 };
 use serde::Deserialize;
@@ -33,6 +40,14 @@ pub const SCHEDULE_FILE: &str = "schedule.toml";
 pub const DEFAULT_MAX_SCHEDULES_PER_BOT: usize = 20;
 /// Default [`ScheduleLimits::min_interval_secs`] (5 minutes).
 pub const DEFAULT_MIN_INTERVAL_SECS: u64 = 300;
+/// Largest accepted `max_per_bot`.
+pub const MAX_SCHEDULES_CEILING: usize = 1_000;
+/// Largest accepted `min_interval_secs` (one week).
+pub const MIN_INTERVAL_CEILING_SECS: u64 = 7 * 86_400;
+/// Longest prompt a bot may schedule, in characters.
+pub const MAX_PROMPT_CHARS: usize = 4_000;
+/// Longest schedule name, in characters.
+pub const MAX_NAME_CHARS: usize = 80;
 
 /// Limits for schedules a bot creates (schedules made in the UI are not
 /// limited by the interval, but they count toward the per-bot maximum).
@@ -45,9 +60,10 @@ pub const DEFAULT_MIN_INTERVAL_SECS: u64 = 300;
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct ScheduleLimits {
-    /// Most schedules one bot may have (any origin).
+    /// Most schedules one bot may have (any origin); `1..=1000`.
     pub max_per_bot: usize,
-    /// Shortest allowed gap between firings of a bot-made schedule.
+    /// Shortest allowed gap between firings of a bot-made schedule;
+    /// `1..=604800` seconds.
     pub min_interval_secs: u64,
     /// IANA timezone used when a call names none; `None` = the system's,
     /// else UTC.
@@ -64,35 +80,71 @@ impl Default for ScheduleLimits {
     }
 }
 
-/// Read `<data_dir>/schedule.toml`. A missing file is the default; a bad one
-/// yields the default plus a warning (it never stops the daemon).
-#[must_use]
-pub fn load_schedule_limits(data_dir: &Path) -> (ScheduleLimits, Vec<String>) {
-    let path = data_dir.join(SCHEDULE_FILE);
-    if !path.exists() {
-        return (ScheduleLimits::default(), Vec::new());
-    }
-    let parsed = std::fs::read_to_string(&path)
-        .map_err(|e| format!("cannot read {}: {e}", path.display()))
-        .and_then(|s| {
-            toml::from_str::<ScheduleLimits>(&s).map_err(|e| format!("{}: {e}", path.display()))
-        })
-        .and_then(|l| match l.timezone.as_deref().map(Tz::from_str) {
-            Some(Err(_)) => Err(format!(
-                "{}: unknown timezone {:?}",
-                path.display(),
-                l.timezone.unwrap_or_default()
-            )),
-            _ => Ok(l),
-        });
-    match parsed {
-        Ok(l) => (l, Vec::new()),
-        Err(e) => (
-            ScheduleLimits::default(),
-            vec![format!("{e}; using the default schedule limits")],
-        ),
+impl ScheduleLimits {
+    /// Reject values that make no sense (0, absurdly large, unknown timezone).
+    ///
+    /// # Errors
+    /// What is wrong.
+    pub fn validate(&self) -> Result<(), String> {
+        if !(1..=MAX_SCHEDULES_CEILING).contains(&self.max_per_bot) {
+            return Err(format!(
+                "max_per_bot must be between 1 and {MAX_SCHEDULES_CEILING}, got {}",
+                self.max_per_bot
+            ));
+        }
+        if !(1..=MIN_INTERVAL_CEILING_SECS).contains(&self.min_interval_secs) {
+            return Err(format!(
+                "min_interval_secs must be between 1 and {MIN_INTERVAL_CEILING_SECS}, got {}",
+                self.min_interval_secs
+            ));
+        }
+        if let Some(tz) = &self.timezone
+            && Tz::from_str(tz).is_err()
+        {
+            return Err(format!("unknown timezone {tz:?}"));
+        }
+        Ok(())
     }
 }
+
+/// Read `<data_dir>/schedule.toml`. A missing file is the default.
+///
+/// # Errors
+/// The file exists but cannot be read, parsed or validated. The caller must
+/// then NOT enable the schedule tools: falling back to the defaults would
+/// silently undo limits the user tightened.
+pub fn load_schedule_limits(data_dir: &Path) -> Result<ScheduleLimits, String> {
+    let path = data_dir.join(SCHEDULE_FILE);
+    if !path.exists() {
+        return Ok(ScheduleLimits::default());
+    }
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let limits: ScheduleLimits =
+        toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    limits
+        .validate()
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(limits)
+}
+
+/// A change resolved at preview time, applied as-is later.
+struct Frozen {
+    key: String,
+    made_ms: i64,
+    name: String,
+    prompt: String,
+    spec: ScheduleSpec,
+    tz: Tz,
+    /// The schedule being changed and its revision when previewed.
+    target: Option<(TaskId, i64)>,
+}
+
+/// Frozen changes kept at most this long / this many.
+const FROZEN_TTL_MS: i64 = 6 * 3_600_000;
+const FROZEN_MAX: usize = 256;
+
+type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
 /// [`ScheduleHost`] over the daemon's schedule store.
 pub(crate) struct DaemonScheduleHost {
@@ -101,8 +153,10 @@ pub(crate) struct DaemonScheduleHost {
     user_id: UserId,
     events: broadcast::Sender<ScheduleChanged>,
     limits: ScheduleLimits,
+    clock: Clock,
     /// Serialises "count, then insert" so the quota cannot be raced.
     gate: parking_lot::Mutex<()>,
+    frozen: parking_lot::Mutex<VecDeque<Frozen>>,
 }
 
 /// Upper bound on cron occurrences inspected for the minimum interval.
@@ -119,7 +173,7 @@ fn local(ms: i64, tz: Tz) -> String {
 }
 
 /// The next `n` firings after `from_ms`.
-fn upcoming(spec: &ScheduleSpec, from_ms: i64, n: usize) -> Vec<i64> {
+pub(crate) fn upcoming(spec: &ScheduleSpec, from_ms: i64, n: usize) -> Vec<i64> {
     let mut out = Vec::new();
     let mut at = from_ms;
     while out.len() < n {
@@ -228,12 +282,52 @@ fn prompt_of(p: &Payload) -> String {
     }
 }
 
-/// A validated, not yet stored definition.
-struct Plan {
-    name: String,
-    prompt: String,
-    spec: ScheduleSpec,
-    tz: Tz,
+fn human_secs(s: u64) -> String {
+    if s >= 3_600 && s.is_multiple_of(3_600) {
+        plural(s / 3_600, "hour")
+    } else if s >= 60 && s.is_multiple_of(60) {
+        plural(s / 60, "minute")
+    } else {
+        plural(s, "second")
+    }
+}
+
+/// Characters that can disguise text: Unicode bidi overrides / isolates / marks.
+fn is_bidi(c: char) -> bool {
+    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}' | '\u{061C}')
+}
+
+/// Trim and check a free-text field: not empty, at most `max` characters,
+/// no control characters except newline and tab, no bidi controls.
+fn clean_text(field: &str, raw: &str, max: usize, allow_newlines: bool) -> Result<String, String> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return Err(format!("`{field}` must not be empty"));
+    }
+    let n = t.chars().count();
+    if n > max {
+        return Err(format!("`{field}` is {n} characters; the limit is {max}"));
+    }
+    for c in t.chars() {
+        let bad_control = c.is_control() && !(allow_newlines && (c == '\n' || c == '\t'));
+        if bad_control || is_bidi(c) {
+            return Err(format!(
+                "`{field}` contains a control or direction-override character (U+{:04X}); remove it",
+                u32::from(c)
+            ));
+        }
+    }
+    Ok(t.to_owned())
+}
+
+/// FNV-1a 64-bit hash, hex: a stable fingerprint of old values for audit.
+fn fnv1a(text: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in text.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{h:016x}")
 }
 
 impl DaemonScheduleHost {
@@ -244,14 +338,31 @@ impl DaemonScheduleHost {
         events: broadcast::Sender<ScheduleChanged>,
         limits: ScheduleLimits,
     ) -> Self {
+        Self::with_clock(store, storage, user_id, events, limits, Arc::new(now_ms))
+    }
+
+    pub(crate) fn with_clock(
+        store: Arc<ScheduleStore>,
+        storage: Arc<Storage>,
+        user_id: UserId,
+        events: broadcast::Sender<ScheduleChanged>,
+        limits: ScheduleLimits,
+        clock: Clock,
+    ) -> Self {
         Self {
             store,
             storage,
             user_id,
             events,
             limits,
+            clock,
             gate: parking_lot::Mutex::new(()),
+            frozen: parking_lot::Mutex::new(VecDeque::new()),
         }
+    }
+
+    fn now(&self) -> i64 {
+        (self.clock)()
     }
 
     fn default_tz(&self) -> Tz {
@@ -273,7 +384,8 @@ impl DaemonScheduleHost {
             .map_err(|_| "schedule tools need a valid calling bot".to_owned())
     }
 
-    /// The caller's own schedule `id`; another bot's schedule is "not found".
+    /// The caller's own schedule `id` (read access); another bot's schedule is
+    /// "not found".
     fn own(&self, caller: &ScheduleCaller, id: &str) -> Result<Schedule, String> {
         let bot = Self::bot(caller)?;
         let not_found = || format!("no schedule with id {id:?}; call schedule_list to see yours");
@@ -287,7 +399,31 @@ impl DaemonScheduleHost {
             .ok_or_else(not_found)
     }
 
-    fn check_interval(&self, spec: &ScheduleSpec, now: i64) -> Result<(), String> {
+    /// The caller's own schedule that a bot made (write access).
+    fn own_editable(&self, caller: &ScheduleCaller, id: &str) -> Result<Schedule, String> {
+        let s = self.own(caller, id)?;
+        if s.origin != ScheduleOrigin::Bot {
+            return Err(format!(
+                "schedule {:?} was created by the user, so you can only read it; ask the user to change it",
+                s.name
+            ));
+        }
+        Ok(s)
+    }
+
+    /// A webhook trigger lets outsiders fire the schedule, so a bot may not
+    /// edit or resume it (it may still pause or delete it).
+    fn refuse_if_webhook(&self, s: &Schedule) -> Result<(), String> {
+        if self.store.get_trigger(s.id).map_err(err)?.is_some() {
+            return Err(format!(
+                "schedule {:?} has a webhook trigger, so only the user can edit or resume it",
+                s.name
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn check_interval(&self, spec: &ScheduleSpec, now: i64) -> Result<(), String> {
         let min = self.limits.min_interval_secs;
         let too_often = |gap_secs: u64| {
             format!(
@@ -326,10 +462,18 @@ impl DaemonScheduleHost {
         let cron = req.cron.as_deref().map(str::trim).filter(|w| !w.is_empty());
         let spec = match (when, cron) {
             (Some(_), Some(_)) => return Err("give either `when` or `cron`, not both".into()),
-            (None, None) => return Err("give `when` (for example \"every weekday at 10:30\") or `cron`".into()),
-            (Some(w), None) => parse_natural_language_with_tz(w, now, Some(tz.name())).ok_or_else(|| {
-                format!("cannot understand {w:?}; try \"every weekday at 10:30\", \"every 15 minutes\" or \"in 2 hours\", or pass `cron`")
-            })?,
+            (None, None) => {
+                return Err(
+                    "give `when` (for example \"every weekday at 10:30\") or `cron`".into(),
+                );
+            }
+            (Some(w), None) => {
+                parse_natural_language_with_tz(w, now, Some(tz.name())).ok_or_else(|| {
+                    format!(
+                        "cannot understand {w:?}; try \"every weekday at 10:30\", \"every 15 minutes\" or \"in 2 hours\", or pass `cron`"
+                    )
+                })?
+            }
             (None, Some(c)) => {
                 if c.split_whitespace().count() == 5 {
                     ScheduleSpec::cron_tz(c, tz.name())
@@ -360,72 +504,132 @@ impl DaemonScheduleHost {
         Ok(())
     }
 
-    fn plan_create(
-        &self,
-        caller: &ScheduleCaller,
-        req: &ScheduleRequest,
-        now: i64,
-    ) -> Result<Plan, String> {
-        let bot = Self::bot(caller)?;
-        let name = req.name.as_deref().map(str::trim).unwrap_or_default();
-        let prompt = req.prompt.as_deref().map(str::trim).unwrap_or_default();
-        if name.is_empty() || prompt.is_empty() {
-            return Err("`name` and `prompt` must not be empty".into());
-        }
-        self.quota(bot)?;
-        let (spec, tz) = self.spec_of(req, now)?;
-        Ok(Plan {
-            name: name.to_owned(),
-            prompt: prompt.to_owned(),
-            spec,
-            tz,
-        })
+    fn key(caller: &ScheduleCaller, change: &ScheduleChange) -> String {
+        format!(
+            "{}|{}|{}",
+            caller.bot_id,
+            caller.run_id,
+            serde_json::to_string(change).unwrap_or_default()
+        )
     }
 
-    /// The stored schedule with `req` applied.
-    fn plan_update(
-        &self,
-        current: &Schedule,
-        req: &ScheduleRequest,
-        now: i64,
-    ) -> Result<Plan, String> {
-        let Payload::AgentPrompt { text } = &current.payload else {
-            return Err(
-                "this schedule runs a workflow or tool; a bot can only pause or delete it".into(),
-            );
-        };
-        let name = match req.name.as_deref().map(str::trim) {
-            Some("") => return Err("`name` must not be empty".into()),
-            Some(n) => n.to_owned(),
-            None => current.name.clone(),
-        };
-        let prompt = match req.prompt.as_deref().map(str::trim) {
-            Some("") => return Err("`prompt` must not be empty".into()),
-            Some(p) => p.to_owned(),
-            None => text.clone(),
-        };
-        let retimed = req.when.is_some() || req.cron.is_some();
-        if !retimed && req.tz.is_some() {
-            return Err("`tz` only applies together with `when` or `cron`".into());
+    fn freeze(&self, f: Frozen) {
+        let now = self.now();
+        let mut q = self.frozen.lock();
+        q.retain(|x| now - x.made_ms < FROZEN_TTL_MS);
+        while q.len() >= FROZEN_MAX {
+            q.pop_front();
         }
-        let (spec, tz) = if retimed {
-            self.spec_of(req, now)?
-        } else {
-            let s = current.spec.clone();
-            let tz = spec_tz(&s, self.default_tz());
-            (s, tz)
-        };
-        Ok(Plan {
-            name,
-            prompt,
-            spec,
-            tz,
-        })
+        q.push_back(f);
+    }
+
+    /// The oldest frozen change for exactly this call, removed.
+    fn take(&self, key: &str) -> Option<Frozen> {
+        let mut q = self.frozen.lock();
+        let i = q.iter().position(|f| f.key == key)?;
+        q.remove(i)
+    }
+
+    /// Resolve `change` against the current state (no side effects).
+    fn resolve(&self, caller: &ScheduleCaller, change: &ScheduleChange) -> Result<Frozen, String> {
+        let now = self.now();
+        let key = Self::key(caller, change);
+        match change {
+            ScheduleChange::Create(req) => {
+                let bot = Self::bot(caller)?;
+                let name = clean_text(
+                    "name",
+                    req.name.as_deref().unwrap_or_default(),
+                    MAX_NAME_CHARS,
+                    false,
+                )?;
+                let prompt = clean_text(
+                    "prompt",
+                    req.prompt.as_deref().unwrap_or_default(),
+                    MAX_PROMPT_CHARS,
+                    true,
+                )?;
+                self.quota(bot)?;
+                let (spec, tz) = self.spec_of(req, now)?;
+                Ok(Frozen {
+                    key,
+                    made_ms: now,
+                    name,
+                    prompt,
+                    spec,
+                    tz,
+                    target: None,
+                })
+            }
+            ScheduleChange::Update { id, req } => {
+                let cur = self.own_editable(caller, id)?;
+                self.refuse_if_webhook(&cur)?;
+                let Payload::AgentPrompt { text } = &cur.payload else {
+                    return Err(
+                        "this schedule runs a workflow or tool; a bot can only pause or delete it"
+                            .into(),
+                    );
+                };
+                let name = match req.name.as_deref() {
+                    Some(n) => clean_text("name", n, MAX_NAME_CHARS, false)?,
+                    None => cur.name.clone(),
+                };
+                let prompt = match req.prompt.as_deref() {
+                    Some(p) => clean_text("prompt", p, MAX_PROMPT_CHARS, true)?,
+                    None => text.clone(),
+                };
+                let retimed = req.when.is_some() || req.cron.is_some();
+                if !retimed && req.tz.is_some() {
+                    return Err("`tz` only applies together with `when` or `cron`".into());
+                }
+                let (spec, tz) = if retimed {
+                    self.spec_of(req, now)?
+                } else {
+                    (cur.spec.clone(), spec_tz(&cur.spec, self.default_tz()))
+                };
+                Ok(Frozen {
+                    key,
+                    made_ms: now,
+                    name,
+                    prompt,
+                    spec,
+                    tz,
+                    target: Some((cur.id, cur.revision)),
+                })
+            }
+            ScheduleChange::Resume { id } | ScheduleChange::Pause { id } => {
+                let cur = self.own_editable(caller, id)?;
+                let resume = matches!(change, ScheduleChange::Resume { .. });
+                if resume {
+                    self.refuse_if_webhook(&cur)?;
+                    // The limit applies when re-arming too.
+                    self.check_interval(&cur.spec, now)?;
+                }
+                Ok(self.same_as(key, &cur, now))
+            }
+            ScheduleChange::Delete { id } => {
+                let cur = self.own_editable(caller, id)?;
+                Ok(self.same_as(key, &cur, now))
+            }
+        }
+    }
+
+    /// A frozen change that keeps the stored definition as it is.
+    fn same_as(&self, key: String, cur: &Schedule, now: i64) -> Frozen {
+        Frozen {
+            key,
+            made_ms: now,
+            name: cur.name.clone(),
+            prompt: prompt_of(&cur.payload),
+            spec: cur.spec.clone(),
+            tz: spec_tz(&cur.spec, self.default_tz()),
+            target: Some((cur.id, cur.revision)),
+        }
     }
 
     fn view(&self, s: &Schedule) -> ScheduleView {
         let tz = spec_tz(&s.spec, self.default_tz());
-        let now = now_ms();
+        let now = self.now();
         ScheduleView {
             id: s.id.0.to_string(),
             name: s.name.clone(),
@@ -442,20 +646,50 @@ impl DaemonScheduleHost {
                 Vec::new()
             },
             last_run: s.last_run_at.map(|t| local(t, tz)),
+            origin: s.origin.as_str().to_owned(),
+            editable: s.origin == ScheduleOrigin::Bot,
         }
     }
 
-    fn preview_of(action: &str, p: &Plan, now: i64) -> SchedulePreview {
+    fn preview_of(
+        &self,
+        action: &str,
+        f: &Frozen,
+        before: Option<&Schedule>,
+        id: Option<TaskId>,
+    ) -> SchedulePreview {
+        let now = self.now();
+        let drop_prompt = matches!(action, "pause" | "delete");
+        let prompt = if drop_prompt {
+            String::new()
+        } else {
+            f.prompt.clone()
+        };
         SchedulePreview {
             action: action.to_owned(),
-            name: p.name.clone(),
-            prompt: p.prompt.clone(),
-            schedule: describe(&p.spec, p.tz),
-            timezone: p.tz.name().to_owned(),
-            next_runs: upcoming(&p.spec, now, 3)
-                .into_iter()
-                .map(|t| local(t, p.tz))
-                .collect(),
+            schedule_id: id.map(|i| i.0.to_string()),
+            name: f.name.clone(),
+            prompt_chars: prompt.chars().count(),
+            prompt,
+            schedule: describe(&f.spec, f.tz),
+            timezone: f.tz.name().to_owned(),
+            next_runs: if drop_prompt {
+                Vec::new()
+            } else {
+                upcoming(&f.spec, now, 3)
+                    .into_iter()
+                    .map(|t| local(t, f.tz))
+                    .collect()
+            },
+            previous: before.filter(|_| action == "update").map(|b| {
+                let tz = spec_tz(&b.spec, self.default_tz());
+                PreviousSchedule {
+                    name: b.name.clone(),
+                    prompt: prompt_of(&b.payload),
+                    schedule: describe(&b.spec, tz),
+                    timezone: tz.name().to_owned(),
+                }
+            }),
         }
     }
 
@@ -464,25 +698,46 @@ impl DaemonScheduleHost {
         let _ = self.events.send(ScheduleChanged::new(id.0, kind));
     }
 
-    fn audit(&self, caller: &ScheduleCaller, action: &str, s: &Schedule, change: &str) {
+    /// Write the audit entry; a failure fails the operation (this runs before
+    /// the change is committed).
+    fn audit(
+        &self,
+        caller: &ScheduleCaller,
+        action: &str,
+        change: &str,
+        s: &Schedule,
+        old: Option<&Schedule>,
+    ) -> Result<(), String> {
         let run = Uuid::parse_str(&caller.run_id).ok().map(RunId);
         let tz = spec_tz(&s.spec, self.default_tz());
-        let name: String = s.name.chars().take(80).collect();
-        let _ = self.storage.append_audit(
-            self.user_id,
-            run,
-            "bot",
-            action,
-            &json!({
-                "bot_id": caller.bot_id,
-                "run_id": caller.run_id,
-                "schedule_id": s.id.0.to_string(),
-                "name": name,
-                "change": change,
-                "schedule": describe(&s.spec, tz),
-                "prompt_chars": prompt_of(&s.payload).chars().count(),
-            }),
-        );
+        let name: String = s.name.chars().take(MAX_NAME_CHARS).collect();
+        let mut detail = json!({
+            "bot_id": caller.bot_id,
+            "run_id": caller.run_id,
+            "schedule_id": s.id.0.to_string(),
+            "name": name,
+            "change": change,
+            "schedule": describe(&s.spec, tz),
+            "prompt_chars": prompt_of(&s.payload).chars().count(),
+            "prompt_fnv1a64": fnv1a(&prompt_of(&s.payload)),
+        });
+        if let (Some(old), Some(o)) = (old, detail.as_object_mut()) {
+            let p = prompt_of(&old.payload);
+            o.insert("old_prompt_chars".into(), json!(p.chars().count()));
+            o.insert("old_prompt_fnv1a64".into(), json!(fnv1a(&p)));
+            o.insert(
+                "old_name".into(),
+                json!(old.name.chars().take(MAX_NAME_CHARS).collect::<String>()),
+            );
+            o.insert(
+                "old_schedule".into(),
+                json!(describe(&old.spec, spec_tz(&old.spec, self.default_tz()))),
+            );
+        }
+        self.storage
+            .append_audit(self.user_id, run, "bot", action, &detail)
+            .map(|_| ())
+            .map_err(|e| format!("the audit log could not be written, so nothing was changed: {e}"))
     }
 
     /// The chat of the calling run (the schedule posts there).
@@ -492,15 +747,92 @@ impl DaemonScheduleHost {
         let chat = self.storage.get_chat(run.chat_id?).ok().flatten()?;
         (chat.bot_id == bot && chat.user_id == self.user_id).then_some(chat.id)
     }
-}
 
-fn human_secs(s: u64) -> String {
-    if s >= 3_600 && s.is_multiple_of(3_600) {
-        plural(s / 3_600, "hour")
-    } else if s >= 60 && s.is_multiple_of(60) {
-        plural(s / 60, "minute")
-    } else {
-        plural(s, "second")
+    /// The frozen change for this call, if any; otherwise (only for changes
+    /// that reduce authority: pause, delete) resolved now.
+    fn frozen_or_fresh(
+        &self,
+        caller: &ScheduleCaller,
+        change: &ScheduleChange,
+        may_resolve_now: bool,
+    ) -> Result<Frozen, String> {
+        match self.take(&Self::key(caller, change)) {
+            Some(f) => Ok(f),
+            None if may_resolve_now => self.resolve(caller, change),
+            None => {
+                Err("this change was not previewed for approval, so it was not applied".to_owned())
+            }
+        }
+    }
+
+    /// The stored row must still be the one that was approved.
+    fn current_matches(&self, caller: &ScheduleCaller, f: &Frozen) -> Result<Schedule, String> {
+        let (id, rev) = f.target.ok_or("internal: no target")?;
+        let changed = || {
+            "that schedule changed or was deleted after the approval was requested; nothing was applied. Call schedule_list and ask again"
+                .to_owned()
+        };
+        let cur = self
+            .own_editable(caller, &id.0.to_string())
+            .map_err(|_| changed())?;
+        if cur.revision != rev {
+            return Err(changed());
+        }
+        Ok(cur)
+    }
+
+    /// Re-check, audit, then commit a frozen update / pause / resume.
+    fn apply_edit(
+        &self,
+        caller: &ScheduleCaller,
+        f: &Frozen,
+        enabled: Option<bool>,
+        label: &str,
+    ) -> Result<Schedule, String> {
+        let now = self.now();
+        let cur = self.current_matches(caller, f)?;
+        if label != "paused" {
+            self.refuse_if_webhook(&cur)?;
+        }
+        let mut next = cur.clone();
+        next.name.clone_from(&f.name);
+        if matches!(cur.payload, Payload::AgentPrompt { .. }) {
+            next.payload = Payload::AgentPrompt {
+                text: f.prompt.clone(),
+            };
+        }
+        next.spec = f.spec.clone();
+        if let Some(e) = enabled {
+            next.enabled = e;
+        }
+        if let ScheduleSpec::At { unix_ms } = next.spec
+            && next.enabled
+            && unix_ms <= now
+        {
+            return Err(format!(
+                "the one-time moment {} has already passed; nothing was applied",
+                local(unix_ms, f.tz)
+            ));
+        }
+        self.audit(caller, "schedule.update", label, &next, Some(&cur))?;
+        let ok = self.store.update_definition(&next).map_err(err)?;
+        if !ok {
+            return Err("that schedule changed or was deleted while it was being applied; nothing was applied".into());
+        }
+        let after = self
+            .store
+            .get(cur.id)
+            .map_err(err)?
+            .ok_or("that schedule was deleted meanwhile")?;
+        self.notify(
+            cur.id,
+            if cur.enabled == after.enabled {
+                ScheduleChangeKind::Updated
+            } else {
+                ScheduleChangeKind::Toggled
+            },
+        );
+        Ok(after)
     }
 }
 
@@ -521,32 +853,21 @@ impl ScheduleHost for DaemonScheduleHost {
         caller: &ScheduleCaller,
         change: &ScheduleChange,
     ) -> Result<SchedulePreview, String> {
-        let now = now_ms();
-        match change {
-            ScheduleChange::Create(req) => {
-                let p = self.plan_create(caller, req, now)?;
-                Ok(Self::preview_of("create", &p, now))
+        let f = self.resolve(caller, change)?;
+        let (action, before, id) = match change {
+            ScheduleChange::Create(_) => ("create", None, None),
+            ScheduleChange::Update { id, .. } => {
+                let b = self.own(caller, id)?;
+                let tid = b.id;
+                ("update", Some(b), Some(tid))
             }
-            ScheduleChange::Update { id, req } => {
-                let cur = self.own(caller, id)?;
-                let p = self.plan_update(&cur, req, now)?;
-                Ok(Self::preview_of("update", &p, now))
-            }
-            ScheduleChange::Resume { id } => {
-                let cur = self.own(caller, id)?;
-                let tz = spec_tz(&cur.spec, self.default_tz());
-                Ok(Self::preview_of(
-                    "resume",
-                    &Plan {
-                        name: cur.name.clone(),
-                        prompt: prompt_of(&cur.payload),
-                        spec: cur.spec.clone(),
-                        tz,
-                    },
-                    now,
-                ))
-            }
-        }
+            ScheduleChange::Resume { id } => ("resume", None, Some(self.own(caller, id)?.id)),
+            ScheduleChange::Pause { id } => ("pause", None, Some(self.own(caller, id)?.id)),
+            ScheduleChange::Delete { id } => ("delete", None, Some(self.own(caller, id)?.id)),
+        };
+        let p = self.preview_of(action, &f, before.as_ref(), id);
+        self.freeze(f);
+        Ok(p)
     }
 
     fn create(
@@ -555,22 +876,32 @@ impl ScheduleHost for DaemonScheduleHost {
         req: &ScheduleRequest,
     ) -> Result<ScheduleView, String> {
         let bot = Self::bot(caller)?;
-        let now = now_ms();
+        let f = self.frozen_or_fresh(caller, &ScheduleChange::Create(req.clone()), false)?;
+        let now = self.now();
         let _gate = self.gate.lock();
-        let p = self.plan_create(caller, req, now)?;
-        let sc = Schedule::new(
+        self.quota(bot)?;
+        if let ScheduleSpec::At { unix_ms } = f.spec
+            && unix_ms <= now
+        {
+            return Err(format!(
+                "the one-time moment {} has already passed; nothing was created",
+                local(unix_ms, f.tz)
+            ));
+        }
+        let mut sc = Schedule::new(
             bot,
             self.chat_of(caller, bot),
-            p.name,
-            p.spec,
-            Payload::AgentPrompt { text: p.prompt },
+            f.name,
+            f.spec,
+            Payload::AgentPrompt { text: f.prompt },
             MisfirePolicy::default(),
             now,
         )
         .map_err(err)?;
+        sc.origin = ScheduleOrigin::Bot;
+        self.audit(caller, "schedule.create", "created", &sc, None)?;
         self.store.insert(&sc).map_err(err)?;
         self.notify(sc.id, ScheduleChangeKind::Created);
-        self.audit(caller, "schedule.create", &sc, "created");
         Ok(self.view(&sc))
     }
 
@@ -580,20 +911,13 @@ impl ScheduleHost for DaemonScheduleHost {
         id: &str,
         req: &ScheduleRequest,
     ) -> Result<ScheduleView, String> {
-        let now = now_ms();
-        let mut sc = self.own(caller, id)?;
-        let p = self.plan_update(&sc, req, now)?;
-        sc.name = p.name;
-        sc.payload = Payload::AgentPrompt { text: p.prompt };
-        sc.spec = p.spec;
-        let (sc, _) = self
-            .store
-            .update_definition_and_rearm(&sc, None, now)
-            .map_err(err)?
-            .ok_or_else(|| "that schedule was deleted meanwhile".to_owned())?;
-        self.notify(sc.id, ScheduleChangeKind::Updated);
-        self.audit(caller, "schedule.update", &sc, "updated");
-        Ok(self.view(&sc))
+        let change = ScheduleChange::Update {
+            id: id.to_owned(),
+            req: req.clone(),
+        };
+        let f = self.frozen_or_fresh(caller, &change, false)?;
+        let after = self.apply_edit(caller, &f, None, "updated")?;
+        Ok(self.view(&after))
     }
 
     fn set_enabled(
@@ -602,37 +926,26 @@ impl ScheduleHost for DaemonScheduleHost {
         id: &str,
         enabled: bool,
     ) -> Result<ScheduleView, String> {
-        let now = now_ms();
-        let sc = self.own(caller, id)?;
-        let (sc, was) = self
-            .store
-            .update_definition_and_rearm(&sc, Some(enabled), now)
-            .map_err(err)?
-            .ok_or_else(|| "that schedule was deleted meanwhile".to_owned())?;
-        self.notify(
-            sc.id,
-            if was == sc.enabled {
-                ScheduleChangeKind::Updated
-            } else {
-                ScheduleChangeKind::Toggled
-            },
-        );
-        self.audit(
-            caller,
-            "schedule.update",
-            &sc,
-            if enabled { "resumed" } else { "paused" },
-        );
-        Ok(self.view(&sc))
+        let change = if enabled {
+            ScheduleChange::Resume { id: id.to_owned() }
+        } else {
+            ScheduleChange::Pause { id: id.to_owned() }
+        };
+        let f = self.frozen_or_fresh(caller, &change, !enabled)?;
+        let label = if enabled { "resumed" } else { "paused" };
+        let after = self.apply_edit(caller, &f, Some(enabled), label)?;
+        Ok(self.view(&after))
     }
 
     fn delete(&self, caller: &ScheduleCaller, id: &str) -> Result<ScheduleView, String> {
-        let sc = self.own(caller, id)?;
-        let view = self.view(&sc);
-        self.store.remove_trigger(sc.id).map_err(err)?;
-        self.store.delete(sc.id).map_err(err)?;
-        self.notify(sc.id, ScheduleChangeKind::Deleted);
-        self.audit(caller, "schedule.delete", &sc, "deleted");
+        let change = ScheduleChange::Delete { id: id.to_owned() };
+        let f = self.frozen_or_fresh(caller, &change, true)?;
+        let cur = self.current_matches(caller, &f)?;
+        let view = self.view(&cur);
+        self.audit(caller, "schedule.delete", "deleted", &cur, None)?;
+        self.store.remove_trigger(cur.id).map_err(err)?;
+        self.store.delete(cur.id).map_err(err)?;
+        self.notify(cur.id, ScheduleChangeKind::Deleted);
         Ok(view)
     }
 }
