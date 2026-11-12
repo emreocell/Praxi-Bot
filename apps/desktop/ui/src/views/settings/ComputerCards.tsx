@@ -6,6 +6,7 @@ import {
 } from "../../lib/settingsPrefs";
 import styles from "../SettingsModal.module.css";
 import { PermissionsSection } from "../SettingsSections";
+import { EmailCard } from "./EmailCard";
 import type { CardDef, SettingsBridge } from "./types";
 
 /** Where the bot runs: this PC, a browser tab, a remote host (soon) or nowhere. */
@@ -93,6 +94,15 @@ export function computerCards(b: SettingsBridge, t: TFunction): CardDef[] {
       description: t("settings.permissions.description"),
       keywords: "policy permission izin",
       node: <PermissionsSection />
+    },
+    {
+      id: "email",
+      section: "computer",
+      kind: "block",
+      title: t("settingsModal.email.title"),
+      description: t("settingsModal.email.description"),
+      keywords: "mail e-posta eposta imap smtp gmail outlook yahoo icloud mailbox posta kutusu",
+      node: <EmailCard />
     }
   ];
 }

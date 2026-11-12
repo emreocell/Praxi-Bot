@@ -870,6 +870,49 @@ async fn sqlite_sidecar_entries_are_rejected() {
 }
 
 #[tokio::test]
+async fn all_does_not_carry_mailbox_passwords_unless_named() {
+    let dir = tempfile::tempdir().unwrap();
+    database(dir.path(), false);
+    let store = MemoryStore::new();
+    store.set("provider/key", "k").unwrap();
+    store.set("email/work/password", "mailbox-pw").unwrap();
+    store.set("email/a.b/password", "mailbox-pw-2").unwrap();
+    // Not a managed mailbox secret: still exported by `All`.
+    store.set("email/notes", "n").unwrap();
+    let mut bytes = Vec::new();
+    let manifest = export(
+        dir.path(),
+        &store,
+        ExportOptions {
+            secrets: SecretSelection::All,
+            ..Default::default()
+        },
+        &mut bytes,
+    )
+    .await
+    .unwrap();
+    assert_eq!(manifest.secret_names, ["email/notes", "provider/key"]);
+    assert!(
+        !bytes.windows(10).any(|w| w == b"mailbox-pw"),
+        "a mailbox password is in the bundle"
+    );
+    // Naming it explicitly is the user's choice and still works.
+    let mut bytes = Vec::new();
+    let manifest = export(
+        dir.path(),
+        &store,
+        ExportOptions {
+            secrets: SecretSelection::Names(vec!["email/work/password".into()]),
+            ..Default::default()
+        },
+        &mut bytes,
+    )
+    .await
+    .unwrap();
+    assert_eq!(manifest.secret_names, ["email/work/password"]);
+}
+
+#[tokio::test]
 async fn all_none_and_missing_secret_selection() {
     let dir = tempfile::tempdir().unwrap();
     database(dir.path(), false);

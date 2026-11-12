@@ -240,3 +240,14 @@ export type McpServerPatch = S["McpServerPatch"];
 export type McpTool = S["McpToolDto"];
 export type McpRequiredSecret = S["McpRequiredSecretDto"];
 export type McpCatalogEntry = S["McpCatalogEntryDto"];
+
+// ---- E-mail accounts (`/v1/email/*`) ---------------------------------------
+
+export type EmailAccount = S["EmailAccountDto"];
+/** Body of `POST /v1/email/accounts` and `POST /v1/email/test`. */
+export type EmailAccountInput = S["EmailAccountInput"];
+/** Body of `PUT /v1/email/accounts/{name}` (every field optional). */
+export type EmailAccountPatch = S["EmailAccountPatch"];
+export type EmailSecurity = S["EmailSecurity"];
+export type EmailProbeStatus = S["EmailProbeStatus"];
+export type EmailTestReport = S["EmailTestReport"];

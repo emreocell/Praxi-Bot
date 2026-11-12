@@ -8,7 +8,7 @@ use axum::Json;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
-use crate::{dto, error, live_view, mcp, mcp_routes, routes, sse};
+use crate::{dto, email, email_routes, error, live_view, mcp, mcp_routes, routes, sse};
 
 struct Security;
 
@@ -101,6 +101,12 @@ impl Modify for Security {
         mcp_routes::list_mcp_tools,
         mcp_routes::mcp_catalog,
         mcp_routes::set_secret,
+        email_routes::list_email_accounts,
+        email_routes::create_email_account,
+        email_routes::update_email_account,
+        email_routes::delete_email_account,
+        email_routes::test_email_account,
+        email_routes::test_email_draft,
         events_doc,
     ),
     components(schemas(
@@ -119,6 +125,9 @@ impl Modify for Security {
         mcp::McpTransportKind, mcp::McpStatus, mcp::McpServerDto, mcp::McpTransportObject,
         mcp::McpTransportInput, mcp::McpServerInput, mcp::McpToolDto, mcp::McpRequiredSecretDto,
         mcp::McpCatalogInstallDto, mcp::McpCatalogEntryDto, mcp::SetSecret, mcp::McpServerChanged,
+        email::EmailSecurity, email::EmailImapServer, email::EmailSmtpServer,
+        email::EmailAccountDto, email::EmailAccountInput, email::EmailAccountPatch,
+        email::EmailProbeStatus, email::EmailTestReport,
         error::ErrorBody, error::ErrorDetail,
     )),
     modifiers(&Security),
@@ -126,7 +135,7 @@ impl Modify for Security {
         (name = "view"), (name = "meta"), (name = "bots"), (name = "chats"), (name = "approvals"),
         (name = "runs"), (name = "usage"), (name = "events"), (name = "control"),
         (name = "policy"), (name = "providers"), (name = "schedules"), (name = "channels"),
-        (name = "mcp"), (name = "secrets")
+        (name = "mcp"), (name = "secrets"), (name = "email")
     )
 )]
 pub struct ApiDoc;

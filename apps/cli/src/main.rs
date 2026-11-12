@@ -6,6 +6,8 @@ mod channels_tests;
 mod client;
 mod commands;
 mod doctor;
+mod email_cmd;
+mod email_host;
 mod mcp_host;
 mod peer;
 mod presets;
@@ -140,6 +142,11 @@ enum Command {
         #[command(subcommand)]
         action: SchedulesCmd,
     },
+    /// Manage the e-mail accounts of the daemon (IMAP/SMTP, optionally one bot's own).
+    Email {
+        #[command(subcommand)]
+        action: EmailCmd,
+    },
     /// Messaging channels (Telegram).
     Channels {
         #[command(subcommand)]
@@ -213,6 +220,65 @@ enum SchedulesCmd {
     RunNow {
         /// Schedule id.
         id: String,
+    },
+}
+
+#[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)] // one-shot CLI args, built once
+enum EmailCmd {
+    /// List the accounts (never shows passwords).
+    List,
+    /// Add an account: `bot email add work me@gmail.com --preset gmail --password-env MAIL_PW`.
+    #[command(group = clap::ArgGroup::new("scope").required(true).args(["bot", "all_bots"]))]
+    Add {
+        /// Account name (letters, digits, `.`, `_`, `-`).
+        name: String,
+        /// Address mail is sent from.
+        address: String,
+        /// Fill the servers for gmail, outlook, yahoo or icloud.
+        #[arg(long, value_parser = ["gmail", "outlook", "yahoo", "icloud"])]
+        preset: Option<String>,
+        /// IMAP host (port 993, TLS).
+        #[arg(long)]
+        imap_host: Option<String>,
+        /// IMAP port.
+        #[arg(long)]
+        imap_port: Option<u16>,
+        /// SMTP host.
+        #[arg(long)]
+        smtp_host: Option<String>,
+        /// SMTP port (465 with implicit TLS, 587 with `start_tls`).
+        #[arg(long)]
+        smtp_port: Option<u16>,
+        /// SMTP transport security.
+        #[arg(long, value_parser = ["implicit", "start_tls"])]
+        smtp_security: Option<String>,
+        /// Login name when it differs from the address.
+        #[arg(long)]
+        username: Option<String>,
+        /// Only this bot may use the account (bot name or id). Required unless `--all-bots`.
+        #[arg(long)]
+        bot: Option<String>,
+        /// Let every bot that has the e-mail tools use (and read) this mailbox
+        /// without asking. There is no default: choose this or `--bot`.
+        #[arg(long)]
+        all_bots: bool,
+        /// Sender whose mail may start a run later (repeatable).
+        #[arg(long = "allowed-sender")]
+        allowed_senders: Vec<String>,
+        /// Environment variable holding the (app) password; hidden prompt when omitted.
+        #[arg(long)]
+        password_env: Option<String>,
+    },
+    /// Remove an account and its stored password.
+    Rm {
+        /// Account name.
+        name: String,
+    },
+    /// Check IMAP login and SMTP authentication (sends nothing).
+    Test {
+        /// Account name.
+        name: String,
     },
 }
 
@@ -418,6 +484,7 @@ fn run() -> Result<()> {
                 | Command::Approve { .. }
                 | Command::Answer { .. }
                 | Command::Schedules { .. }
+                | Command::Email { .. }
                 | Command::Grants { .. }
                 | Command::Channels {
                     action: ChannelsCmd::Telegram {
@@ -426,7 +493,7 @@ fn run() -> Result<()> {
                 }
         )
     {
-        return Err("--remote supports daemon client commands (status, bots, chat, approve, answer, grants, schedules, channels telegram pair); this command manages the local installation".into());
+        return Err("--remote supports daemon client commands (status, bots, chat, approve, answer, grants, schedules, email, channels telegram pair); this command manages the local installation".into());
     }
 
     // Daemon commands (no secret store needed, except `serve` with real providers).
@@ -439,6 +506,7 @@ fn run() -> Result<()> {
         | Command::Approve { .. }
         | Command::Answer { .. }
         | Command::Schedules { .. }
+        | Command::Email { .. }
         | Command::Grants { .. }
         | Command::Channels {
             action: ChannelsCmd::Telegram {
@@ -499,6 +567,7 @@ fn run() -> Result<()> {
         | Command::Approve { .. }
         | Command::Answer { .. }
         | Command::Schedules { .. }
+        | Command::Email { .. }
         | Command::Grants { .. } => Ok(()),
         Command::Providers { action } => match action {
             ProvidersCmd::Add {
@@ -781,6 +850,7 @@ fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Resul
                 remote::grants_revoke(&c, bot_id, target, json, &mut out).await
             }
             Command::Schedules { action } => run_schedules(&c, action, json, &mut out).await,
+            Command::Email { action } => run_email(&c, action, json, &mut out).await,
             Command::Channels {
                 action:
                     ChannelsCmd::Telegram {
@@ -812,6 +882,55 @@ fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Resul
         rt.block_on(net.shutdown());
     }
     outcome
+}
+
+async fn run_email(
+    c: &Client,
+    action: &EmailCmd,
+    json: bool,
+    out: &mut dyn std::io::Write,
+) -> Result<()> {
+    match action {
+        EmailCmd::List => email_cmd::list(c, json, out).await,
+        EmailCmd::Add {
+            name,
+            address,
+            preset,
+            imap_host,
+            imap_port,
+            smtp_host,
+            smtp_port,
+            smtp_security,
+            username,
+            bot,
+            all_bots: _,
+            allowed_senders,
+            password_env,
+        } => {
+            let add = email_cmd::EmailAdd {
+                name,
+                address,
+                preset: preset.as_deref(),
+                imap_host: imap_host.as_deref(),
+                imap_port: *imap_port,
+                smtp_host: smtp_host.as_deref(),
+                smtp_port: *smtp_port,
+                smtp_security: smtp_security.as_deref(),
+                username: username.as_deref(),
+                bot: bot.as_deref(),
+                allowed_senders,
+            };
+            // Validate the servers before asking for a password.
+            email_cmd::add_body(&add, "")?;
+            let password = read_value(
+                password_env.as_deref(),
+                &format!("Password (or app password) for {address}; input hidden"),
+            )?;
+            email_cmd::add(c, &add, password.expose(), json, out).await
+        }
+        EmailCmd::Rm { name } => email_cmd::rm(c, name, json, out).await,
+        EmailCmd::Test { name } => email_cmd::test(c, name, json, out).await,
+    }
 }
 
 async fn run_schedules(
@@ -932,6 +1051,81 @@ mod tests {
         assert!(parse(&["setup", "123:abc"]).is_err());
         assert!(parse(&[]).is_err());
         assert!(parse(&["pair", "extra"]).is_err());
+    }
+
+    #[test]
+    fn parses_email_commands() {
+        let parsed = |args: &[&str]| Cli::try_parse_from(args).unwrap().command.unwrap();
+        assert!(matches!(
+            parsed(&["bot", "email", "list"]),
+            Command::Email {
+                action: EmailCmd::List
+            }
+        ));
+        let Command::Email {
+            action:
+                EmailCmd::Add {
+                    name,
+                    address,
+                    preset,
+                    bot,
+                    allowed_senders,
+                    password_env,
+                    ..
+                },
+        } = parsed(&[
+            "bot",
+            "email",
+            "add",
+            "work",
+            "me@gmail.com",
+            "--preset",
+            "gmail",
+            "--bot",
+            "b1",
+            "--allowed-sender",
+            "a@example.com",
+            "--allowed-sender",
+            "@corp.example",
+            "--password-env",
+            "MAIL_PW",
+        ])
+        else {
+            panic!("not an email add");
+        };
+        assert_eq!((name.as_str(), address.as_str()), ("work", "me@gmail.com"));
+        assert_eq!(preset.as_deref(), Some("gmail"));
+        assert_eq!(bot.as_deref(), Some("b1"));
+        assert_eq!(allowed_senders, ["a@example.com", "@corp.example"]);
+        assert_eq!(password_env.as_deref(), Some("MAIL_PW"));
+        assert!(matches!(
+            parsed(&["bot", "email", "rm", "work"]),
+            Command::Email {
+                action: EmailCmd::Rm { .. }
+            }
+        ));
+        assert!(matches!(
+            parsed(&["bot", "email", "test", "work"]),
+            Command::Email {
+                action: EmailCmd::Test { .. }
+            }
+        ));
+        // No implicit "every bot": a bot or `--all-bots` must be chosen, not both.
+        let base = ["bot", "email", "add", "w", "a@b.c", "--preset", "gmail"];
+        assert!(Cli::try_parse_from(base).is_err(), "no scope given");
+        let with = |extra: &[&str]| Cli::try_parse_from(base.iter().chain(extra));
+        assert!(with(&["--all-bots"]).is_ok());
+        assert!(with(&["--bot", "Atlas"]).is_ok());
+        assert!(with(&["--all-bots", "--bot", "Atlas"]).is_err());
+        // Unknown presets and a missing address are refused by the parser.
+        assert!(
+            Cli::try_parse_from(["bot", "email", "add", "w", "a@b.c", "--preset", "aol"]).is_err()
+        );
+        assert!(Cli::try_parse_from(["bot", "email", "add", "w"]).is_err());
+        // The password is never a command-line flag (it would land in shell history).
+        assert!(
+            Cli::try_parse_from(["bot", "email", "add", "w", "a@b.c", "--password", "x"]).is_err()
+        );
     }
 
     #[test]

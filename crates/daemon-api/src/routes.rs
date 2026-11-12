@@ -378,6 +378,15 @@ pub(crate) async fn delete_bot(
     if let Some(mcp) = s.mcp() {
         let _ = mcp.forget_bot(&bot.id.to_string()).await;
     }
+    // Accounts bound to the bot are removed, never unbound: an unbound account
+    // is usable by every bot, so unbinding would silently widen access.  Ids
+    // are never reused, so an account that survives a failure here stays inert
+    // (bound to a bot that no longer exists).
+    if let Some(email) = s.email()
+        && let Err(e) = email.forget_bot(&bot.id.to_string()).await
+    {
+        eprintln!("daemon-api: warning: could not remove e-mail accounts of deleted bot: {e:?}");
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
