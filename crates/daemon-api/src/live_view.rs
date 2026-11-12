@@ -793,21 +793,21 @@ pub(crate) async fn release(
         (session.counts.clone(), target.info().kind)
     };
     let declared = match i.human_action {
-        Some(HumanAction::LoginCompleted) => "user reports login completed",
-        Some(HumanAction::ApplicationOpened) => "user reports application opened",
-        _ => "user intervened",
-    };
-    let summary = format!(
-        "Human intervention completed; {declared}. {} pointer events, {} wheel events, {} key events, {} text entries; target: {}. Discard cached references and obtain a fresh observation.",
-        counts.pointer,
-        counts.wheel,
-        counts.key,
-        counts.text,
-        if kind == TargetKind::Browser {
-            "browser"
-        } else {
-            "desktop"
+        Some(HumanAction::LoginCompleted) => agent_core::control_note::Declared::LoginCompleted,
+        Some(HumanAction::ApplicationOpened) => {
+            agent_core::control_note::Declared::ApplicationOpened
         }
+        _ => agent_core::control_note::Declared::Intervened,
+    };
+    let summary = agent_core::control_note::build(
+        declared,
+        agent_core::control_note::Counts {
+            pointer: counts.pointer,
+            wheel: counts.wheel,
+            key: counts.key,
+            text: counts.text,
+        },
+        kind == TargetKind::Browser,
     );
     let mut journal = s
         .hub()
@@ -852,6 +852,11 @@ pub(crate) async fn release(
 }
 
 fn flush_note(s: &AppState, journal: &mut ReleaseJournal) -> Result<(), ApiError> {
+    // The latch file is not trusted: only the fixed note format may become a
+    // chat message the model reads as a system message.
+    if !agent_core::control_note::is_well_formed(&journal.summary) {
+        return Err(ApiError::unavailable("release note is not well formed"));
+    }
     if journal.messages.is_empty() {
         let mut chats = std::collections::BTreeSet::new();
         for run in &journal.runs {
@@ -873,7 +878,7 @@ fn flush_note(s: &AppState, journal: &mut ReleaseJournal) -> Result<(), ApiError
                 user_id: s.user_id(),
                 chat_id: *chat,
                 run_id: None,
-                role: "system".into(),
+                role: agent_core::control_note::ROLE.into(),
                 content: journal.summary.clone(),
                 created_at_ms: storage::now_ms(),
             })?;

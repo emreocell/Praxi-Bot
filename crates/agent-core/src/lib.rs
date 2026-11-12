@@ -15,6 +15,7 @@ mod approval;
 mod cli;
 mod config;
 mod control;
+pub mod control_note;
 mod exec;
 mod history;
 mod memory;

@@ -85,6 +85,30 @@ fn incompatible_schema(db: &str, found: u32, supported: u32) -> ImportError {
     }
 }
 
+/// Chat history is delivered to the model; only the daemon's own well-formed
+/// control note may be a system message. An imported row claiming a system role,
+/// or the control-note marker with any other text, becomes an ordinary user
+/// message (nothing is deleted).
+fn neutralise_system_messages(conn: &Connection) -> rusqlite::Result<()> {
+    let rows: Vec<(String, String, String)> = {
+        let mut stmt =
+            conn.prepare("SELECT id, role, content FROM messages WHERE role IN ('system', ?1)")?;
+        stmt.query_map([agent_core::control_note::ROLE], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?
+    };
+    for (id, role, content) in rows {
+        if role == agent_core::control_note::ROLE
+            && agent_core::control_note::is_well_formed(&content)
+        {
+            continue;
+        }
+        conn.execute("UPDATE messages SET role = 'user' WHERE id = ?1", [id])?;
+    }
+    Ok(())
+}
+
 fn prepare_database(path: &Path, db: &str, manifest: &Manifest) -> Result<()> {
     let open = || {
         Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)
@@ -115,6 +139,7 @@ fn prepare_database(path: &Path, db: &str, manifest: &Manifest) -> Result<()> {
                 }
                 other => database_error(db, other),
             })?;
+            neutralise_system_messages(&conn).map_err(|error| database_error(db, error))?;
             drop(conn);
         }
         "schedules.db" => {

@@ -850,9 +850,25 @@ fn under_data_sensitive(path: &Path, data_dir: &Path) -> bool {
     let Some(base) = rel.last().map(String::as_str) else {
         return false;
     };
+    // Only directly under the data dir: these names are ordinary elsewhere.
     base == "devices.json"
         || base == "peer-node"
         || rel.iter().any(|s| s == "vault" || s == "secrets")
+        || (rel.len() == 1 && daemon_state_name(base))
+}
+
+/// The daemon's own state: the SQLite store (and WAL/SHM/journal siblings),
+/// the control latch and its atomic-write temp files, and the policy file.
+/// A bot able to write them could forge approvals, audit rows or a takeover
+/// release; reading them leaks chats and the latch.
+fn daemon_state_name(base: &str) -> bool {
+    const STATE: [&str; 3] = ["bot.db", "control-latch.json", "policy.json"];
+    STATE.iter().any(|s| {
+        base == *s
+            || base
+                .strip_prefix(s)
+                .is_some_and(|rest| matches!(rest, "-wal" | "-shm" | "-journal" | ".tmp" | ".bak"))
+    }) || base.starts_with(".tmp")
 }
 
 /// A protected path is readable only when that path itself is granted.
@@ -3744,6 +3760,53 @@ mod tests {
                 "{name}: {err}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn daemon_state_files_in_the_data_dir_are_protected_for_read_and_write() {
+        let (d, w, t) = setup();
+        let c = ctx();
+        let secret = "PRAXI_SENTINEL_state_files";
+        for name in [
+            "control-latch.json",
+            "bot.db",
+            "bot.db-wal",
+            "bot.db-shm",
+            "bot.db-journal",
+            "policy.json",
+            "policy.json.tmp",
+            ".tmpAbC123",
+        ] {
+            let file = d.path().join(name);
+            fs::write(&file, secret).unwrap();
+            let err = get(&t, "fs_read")
+                .call(&c, json!({"path": &file}))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "read {name}: {err}"
+            );
+            assert!(!err.to_string().contains(secret), "{name}: {err}");
+            let err = get(&t, "fs_write")
+                .call(&c, json!({"path": &file, "content": "x"}))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "write {name}: {err}"
+            );
+            assert_eq!(fs::read_to_string(&file).unwrap(), secret, "{name}");
+        }
+        // The same names elsewhere (a user's own project) are ordinary files.
+        let project = w.path().join("policy.json");
+        fs::write(&project, "{}").unwrap();
+        assert!(
+            get(&t, "fs_read")
+                .call(&c, json!({"path": &project}))
+                .await
+                .is_ok()
+        );
     }
 
     #[tokio::test]

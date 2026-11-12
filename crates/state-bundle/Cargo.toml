@@ -11,6 +11,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+agent-core = { path = "../agent-core", version = "0.1.0" }
 daemon-api = { path = "../daemon-api", version = "0.1.0" }
 permission-engine = { path = "../permission-engine", version = "0.1.0" }
 protocol.workspace = true
@@ -30,5 +31,4 @@ sha2 = "0.10"
 zeroize = { version = "1", features = ["serde"] }
 
 [dev-dependencies]
-agent-core = { path = "../agent-core", version = "0.1.0" }
 tool-registry = { path = "../tool-registry", version = "0.1.0" }
