@@ -357,7 +357,7 @@ impl TurnExecutor {
     fn is_read(&self, ctx: &RunCtx, hints: &[String], name: &str, args: &str) -> bool {
         let input: Value = serde_json::from_str(args).unwrap_or(Value::Null);
         self.sh
-            .resolve_call(&ctx.profile, name, &input, hints)
+            .resolve_call(&ctx.profile, ctx.bot_id, name, &input, hints)
             .and_then(|r| r.spec)
             .is_some_and(|s| s.effect == tool_registry::Effect::Read)
     }
@@ -453,7 +453,7 @@ impl TurnExecutor {
         let specs = if guard_reason.is_some() {
             Vec::new()
         } else {
-            self.sh.model_specs(&ctx.profile, &hints.tools)
+            self.sh.model_specs(&ctx.profile, ctx.bot_id, &hints.tools)
         };
         let note = guard_reason
             .as_deref()
@@ -774,9 +774,9 @@ impl TurnExecutor {
                     continue;
                 }
             };
-            let Some(resolved) = self
-                .sh
-                .resolve_call(&ctx.profile, &call.name, &input, &hints)
+            let Some(resolved) =
+                self.sh
+                    .resolve_call(&ctx.profile, ctx.bot_id, &call.name, &input, &hints)
             else {
                 slots.push(err(format!("unknown tool {:?}", call.name)));
                 continue;

@@ -26,6 +26,17 @@ pub mod script;
 pub mod shell;
 mod util;
 
+/// Windows drive letters (DOS devices) live in the logon session, not in one
+/// test, and PowerShell enumerates all of them while it starts. A test that
+/// defines a drive letter pointing at an unreachable share therefore stalls
+/// every PowerShell launched meanwhile, until the SMB timeout expires. Tests
+/// that spawn the shell and tests that define drive letters hold this lock.
+#[cfg(all(test, windows))]
+pub(crate) mod test_serial {
+    pub(crate) static WINDOWS_SHELL_TESTS: tokio::sync::Mutex<()> =
+        tokio::sync::Mutex::const_new(());
+}
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

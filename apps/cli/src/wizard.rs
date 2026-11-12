@@ -762,6 +762,17 @@ mod tests {
                     preset == BotPreset::Desktop
                 );
                 assert!(!profile.tool_visible("shell_run"));
+                // Only the General preset reaches MCP servers; permissions (not
+                // visibility) still gate every call.  No preset exposes email:
+                // its read tools are prompt-free and would pair with `web_*`.
+                assert_eq!(
+                    profile.tool_visible("mcp:srv/tool"),
+                    preset == BotPreset::General,
+                    "{preset:?}"
+                );
+                for name in ["email_send", "email_read", "email_search"] {
+                    assert!(!profile.tool_visible(name), "{preset:?} {name}");
+                }
             }
         }
     }

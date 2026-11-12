@@ -1351,6 +1351,17 @@ export interface components {
             args?: string[] | null;
             /** @description Bots that may use the server.  Omit to keep the list; `null` = all bots. */
             bots?: string[] | null;
+            /**
+             * @description Bot ids to add to `bots`, applied atomically on the stored list (no
+             *     read-modify-write by the client).  No effect while the server is open to
+             *     every bot (`bots: null`).  Applied after `bots`.
+             */
+            bots_add?: string[] | null;
+            /**
+             * @description Bot ids to remove from `bots`, applied atomically; an emptied list stays
+             *     `[]` (no bot), it never becomes `null`.  Applied after `bots_add`.
+             */
+            bots_remove?: string[] | null;
             /** @description Permission category of the tools; `null` clears it; `meta` is rejected. */
             category?: string | null;
             /** @description Executable (stdio). */

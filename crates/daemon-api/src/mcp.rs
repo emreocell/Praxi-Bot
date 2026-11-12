@@ -245,6 +245,15 @@ pub struct McpServerPatch {
     #[serde(default)]
     #[schema(nullable = true)]
     pub bots: Option<Vec<String>>,
+    /// Bot ids to add to `bots`, applied atomically on the stored list (no
+    /// read-modify-write by the client).  No effect while the server is open to
+    /// every bot (`bots: null`).  Applied after `bots`.
+    #[serde(default)]
+    pub bots_add: Option<Vec<String>>,
+    /// Bot ids to remove from `bots`, applied atomically; an emptied list stays
+    /// `[]` (no bot), it never becomes `null`.  Applied after `bots_add`.
+    #[serde(default)]
+    pub bots_remove: Option<Vec<String>>,
 }
 
 /// A tool of an MCP server (`GET /v1/mcp/servers/{name}/tools`).
@@ -402,6 +411,35 @@ pub trait McpControl: Send + Sync {
     /// # Errors
     /// [`McpControlError`].
     async fn reconnect(&self, name: &str) -> Result<McpServerDto, McpControlError>;
+    /// Remove a deleted bot's id from every server's `bots` list (an atomic
+    /// remove-id, never a list written back from a snapshot).  A list that
+    /// becomes empty stays an explicit empty list ("no bot"); it never turns
+    /// into `null` ("all bots").  Returns the number of servers changed.
+    ///
+    /// # Errors
+    /// The first [`McpControlError`] of an update (the remaining servers are
+    /// still tried).
+    async fn forget_bot(&self, bot_id: &str) -> Result<usize, McpControlError> {
+        // Each server is updated with the atomic `bots_remove` (the embedder
+        // applies it under its own lock), not with a list read from a snapshot.
+        let mut changed = 0;
+        let mut first_err = None;
+        for server in self.list() {
+            if server.bots.is_none() {
+                continue;
+            }
+            match self
+                .update(&server.name, serde_json::json!({ "bots_remove": [bot_id] }))
+                .await
+            {
+                Ok(_) => changed += 1,
+                Err(e) => {
+                    first_err.get_or_insert(e);
+                }
+            }
+        }
+        first_err.map_or(Ok(changed), Err)
+    }
     /// The tools a server currently exposes.
     ///
     /// # Errors

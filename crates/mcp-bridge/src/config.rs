@@ -426,6 +426,19 @@ mod tests {
     }
 
     #[test]
+    fn empty_bots_list_survives_the_file_and_is_not_all_bots() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = TomlFileStore::new(dir.path().join("mcp.toml"));
+        let mut none = McpServerConfig::stdio("none", "x", NO_ARGS);
+        none.bots = Some(Vec::new());
+        let all = McpServerConfig::stdio("all", "x", NO_ARGS);
+        store.save(&[none, all]).unwrap();
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded[0].bots, Some(Vec::new()));
+        assert_eq!(loaded[1].bots, None);
+    }
+
+    #[test]
     fn defaults_apply_when_fields_are_omitted() {
         let cfg: FileLayout = toml::from_str(
             "[[server]]\nid = \"a\"\n[server.transport]\ntype = \"stdio\"\ncommand = \"x\"\n",

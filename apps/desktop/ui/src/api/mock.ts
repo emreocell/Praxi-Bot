@@ -342,10 +342,30 @@ export class MockApiClient extends ApiClient {
       this.servers.splice(idx, 1);
       return undefined;
     }
-    this.servers[idx] = {
-      ...serverFromConfig(body as McpServerConfig, this.servers[idx].category),
-      tool_count: this.servers[idx].tool_count
+    // PUT is a patch: a field left out keeps its value, `bots: null` = all bots.
+    const patch = (body ?? {}) as Record<string, unknown>;
+    const prev = this.servers[idx];
+    const merged: McpServer = {
+      ...prev,
+      ...(typeof patch.enabled === "boolean" ? { enabled: patch.enabled } : {}),
+      ...(typeof patch.category === "string" ? { category: patch.category } : {}),
+      ...(typeof patch.command === "string" ? { command: patch.command } : {}),
+      ...(typeof patch.url === "string" ? { url: patch.url } : {}),
+      ...("bots" in patch ? { bots: (patch.bots as string[] | null) ?? null } : {})
     };
-    return this.servers[idx];
+    // Atomic id operations; an open server (null) stays open.
+    if (merged.bots != null) {
+      let list = [...merged.bots];
+      for (const id of (patch.bots_add as string[] | undefined) ?? []) {
+        if (!list.includes(id)) {
+          list.push(id);
+        }
+      }
+      const rm = (patch.bots_remove as string[] | undefined) ?? [];
+      list = list.filter((id) => !rm.includes(id));
+      merged.bots = list;
+    }
+    this.servers[idx] = merged;
+    return merged;
   }
 }
