@@ -170,3 +170,9 @@ The desktop UI streams events with fetch and Authorization/Last-Event-ID headers
 not native EventSource. It never puts the management secret in a URL. Only the
 legacy low-privilege events query-token exception remains; it receives the same
 filtered stream. Other routes do not authenticate query tokens.
+
+The isolation report identifies the daemon OS and native guard kind. Doctor marks
+missing memory/environment protection, or disabled Linux no-new-privs, as
+`DEGRADED`. Windows reports no-new-privs as not applicable. Temporary and backup
+siblings (`.tmp*`, `.bak*`) and SQLite journal siblings use the same canonical
+protected-name comparison as the base file; credential ADS aliases are covered.

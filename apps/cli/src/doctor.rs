@@ -431,18 +431,36 @@ fn isolation_report(report: Option<&Value>) -> Check {
             "update the daemon; do not infer protection from its version",
         );
     };
+    let (Some(platform), Some(guard_kind)) = (
+        report["platform"].as_str(),
+        report["memory_guard_kind"].as_str(),
+    ) else {
+        return Check::warn(
+            NAME,
+            "unverified: daemon does not identify its native process guard",
+            "update the daemon; platform protection cannot be inferred",
+        );
+    };
+    let degraded = !fields[1] || !fields[2] || (platform == "linux" && !fields[3]);
     let detail = format!(
-        "split active; children {}; memory guard {}; no-new-privs {}; OS sandbox {}",
+        "{}split active; children {}; memory guard {} ({guard_kind}, {platform}); no-new-privs {}; OS sandbox {}",
+        if degraded { "DEGRADED: " } else { "" },
         if fields[1] {
             "scrubbed"
         } else {
             "scrubbing unverified"
         },
         if fields[2] { "active" } else { "inactive" },
-        if fields[3] { "active" } else { "inactive" },
+        if platform != "linux" {
+            "not applicable"
+        } else if fields[3] {
+            "active"
+        } else {
+            "inactive"
+        },
         if fields[4] { "active" } else { "not active" }
     );
-    if fields[1] && fields[2] && fields[4] {
+    if !degraded && fields[4] {
         Check::ok(NAME, detail)
     } else {
         Check::warn(
@@ -458,6 +476,21 @@ mod isolation_tests {
     use super::*;
 
     #[test]
+    fn doctor_distinguishes_native_guards_and_disabled_protection() {
+        let check = isolation_report(Some(
+            &json!({"privilege_split":true,"children_scrubbed":true,"memory_guard":true,"no_new_privs":false,"os_sandbox":false,"platform":"windows","memory_guard_kind":"windows_owner_dacl"}),
+        ));
+        assert!(check.detail.contains("windows_owner_dacl"));
+        assert!(check.detail.contains("no-new-privs not applicable"));
+        let check = isolation_report(Some(
+            &json!({"privilege_split":true,"children_scrubbed":true,"memory_guard":false,"no_new_privs":false,"os_sandbox":false,"platform":"linux","memory_guard_kind":"disabled"}),
+        ));
+        assert_eq!(check.status, Status::Warn);
+        assert!(check.detail.contains("DEGRADED"));
+        assert!(check.detail.contains("disabled"));
+    }
+
+    #[test]
     fn doctor_does_not_infer_isolation_from_version_or_missing_fields() {
         for report in [
             None,
@@ -468,7 +501,7 @@ mod isolation_tests {
             assert_eq!(check.status, Status::Warn);
             assert!(check.detail.contains("unverified"));
         }
-        let report = json!({"privilege_split":true,"children_scrubbed":true,"memory_guard":true,"no_new_privs":false,"os_sandbox":false});
+        let report = json!({"privilege_split":true,"children_scrubbed":true,"memory_guard":true,"no_new_privs":false,"os_sandbox":false,"platform":"windows","memory_guard_kind":"windows_owner_dacl"});
         let check = isolation_report(Some(&report));
         assert_eq!(check.status, Status::Warn);
         assert!(check.detail.contains("split active"));

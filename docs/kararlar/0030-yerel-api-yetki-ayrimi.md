@@ -248,3 +248,19 @@ Authorization ve Last-Event-ID başlıklarını her bağlantıda gönderir. UI y
 sırrı URL'ye koymaz. Geriye uyum için yalnız events yolundaki düşük disk-token
 query istisnası kalır; bu akış filtrelidir ve yüksek token query'de reddedilir.
 Diğer yollarda query token kimlik doğrulaması değildir.
+
+### M3 devamı: ortak kanonik eşleştirme ve platform raporu
+
+PR #30'un helper adları ve akışı korunur. DB ve yapılandırma dosyaları aynı
+`FILES` listesinde toplanır; global credential isimleriyle veri dizini dosyaları
+aynı `sensitive_file_name` kıyasını kullanır. `-wal`, `-shm`, `-journal`, `.tmp*`
+ve `.bak*` kardeşleri, ADS ve trailing dot/space adları aynı korumaya tabidir.
+`peer-node` altındaki özel adlandırılmış anahtarlar da özel dizin kapsamındadır.
+Veri dizini dışındaki sıradan `providers.toml.bak` gibi proje dosyaları kapatılmaz.
+
+`GET /v1/isolation` artık çalışan daemon'un OS adını ve guard türünü de verir:
+`windows_owner_dacl`, `linux_non_dumpable`, `disabled_or_uninitialized` veya
+`unsupported`. Doctor OS'u kendi çalıştığı makineden tahmin etmez. Linux'ta
+no-new-privs kapalıysa veya memory/env koruması yoksa `DEGRADED` yazar;
+Windows'ta no-new-privs için “not applicable” der. Eksik rapor alanlarını
+başarılı saymaz. Full child sandbox'ın yokluğu ayrıca görünür kalır.

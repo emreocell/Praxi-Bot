@@ -824,8 +824,12 @@ const CREDENTIAL_NAMES: &[&str] = &[
 /// is not detected. These tools cannot create a hard link; a second directory
 /// entry for the same file is a known limitation of the name denylist.
 fn name_is_credential(name: &str) -> bool {
-    let n = name.trim_end_matches([' ', '.']).to_ascii_lowercase();
-    n == ".env" || n.starts_with(".env.") || CREDENTIAL_NAMES.contains(&n.as_str())
+    let n = canonical_name(name);
+    n == ".env"
+        || n.starts_with(".env.")
+        || CREDENTIAL_NAMES
+            .iter()
+            .any(|base| sensitive_file_name(&n, base))
 }
 
 fn is_protected(path: &Path, data_dir: &Path) -> bool {
@@ -857,7 +861,7 @@ fn under_data_sensitive(path: &Path, data_dir: &Path) -> bool {
         return false;
     };
     // Directly under the data dir only: these names are ordinary elsewhere.
-    base == "devices.json"
+    sensitive_file_name(base, DEVICE_LIST_FILE)
         || base == "peer-node"
         || rel.iter().any(|s| s == "vault" || s == "secrets")
         || rel
@@ -880,7 +884,16 @@ fn canonical_name(part: &str) -> String {
 /// Deliberately NOT protected, with the reason: `skills` and `workflows`
 /// (the bot authors them on purpose), `checkpoints` (the file tools' own undo
 /// store), `files`, `spill` and `screenshots` (bot output), logs (no authority).
-const DAEMON_STATE_DIRS: [&str; 4] = ["peer", "bots", "profiles", "runs"];
+const DAEMON_STATE_DIRS: [&str; 7] = [
+    "peer",
+    "peer-node",
+    "vault",
+    "secrets",
+    "bots",
+    "profiles",
+    "runs",
+];
+const DEVICE_LIST_FILE: &str = "devices.json";
 
 /// The daemon's own state files directly under the data dir, each one a file
 /// that grants authority or forges history if tampered with:
@@ -902,8 +915,11 @@ const DAEMON_STATE_DIRS: [&str; 4] = ["peer", "bots", "profiles", "runs"];
 /// Deliberately NOT listed: `skills.lock.json` / `skills-usage.json` (counters
 /// and a lockfile for bot-writable skills; no authority) and logs.
 fn daemon_state_name(base: &str) -> bool {
-    const DATABASES: [&str; 3] = ["bot.db", "schedules.db", "memory.db"];
-    const FILES: [&str; 13] = [
+    const FILES: [&str; 17] = [
+        DEVICE_LIST_FILE,
+        "bot.db",
+        "schedules.db",
+        "memory.db",
         "control-latch.json",
         "policy.json",
         "host.toml",
@@ -918,17 +934,17 @@ fn daemon_state_name(base: &str) -> bool {
         "schedule.toml",
         "isolation.toml",
     ];
-    DATABASES.iter().any(|s| {
-        base == *s
-            || base
-                .strip_prefix(s)
-                .is_some_and(|rest| matches!(rest, "-wal" | "-shm" | "-journal"))
-    }) || FILES.iter().any(|s| {
-        base == *s
-            || base
-                .strip_prefix(s)
-                .is_some_and(|rest| matches!(rest, ".tmp" | ".bak"))
-    }) || base.starts_with(".tmp")
+    FILES.iter().any(|name| sensitive_file_name(base, name)) || base.starts_with(".tmp")
+}
+
+/// Shared by global credential names and data-directory authority files.
+fn sensitive_file_name(candidate: &str, name: &str) -> bool {
+    candidate == name
+        || candidate.strip_prefix(name).is_some_and(|suffix| {
+            matches!(suffix, "-wal" | "-shm" | "-journal")
+                || suffix.starts_with(".tmp")
+                || suffix.starts_with(".bak")
+        })
 }
 
 /// A protected path is readable only when that path itself is granted.
@@ -2658,6 +2674,55 @@ impl Tool for FsTool {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::many_single_char_names)]
+    #[test]
+    fn sensitive_state_and_credential_siblings_use_the_same_canonical_comparison() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in [
+            "devices.json",
+            "identity.key",
+            "api-token",
+            "secrets.enc",
+            "bot.db",
+            "schedules.db",
+            "memory.db",
+            "policy.json",
+            "control-latch.json",
+            "providers.toml",
+            "email.toml",
+            "web.toml",
+            "schedule.toml",
+            "isolation.toml",
+            "mcp.toml",
+        ] {
+            for suffix in [
+                "", "-wal", "-shm", "-journal", ".tmp", ".tmp-123", ".bak", ".bak.1",
+            ] {
+                let file = format!("{name}{suffix}");
+                for canonical_alias in [
+                    file.clone(),
+                    format!("{}. .", file.to_uppercase()),
+                    format!("{file}:stream"),
+                    format!("{file}::$DATA"),
+                ] {
+                    assert!(
+                        super::is_protected(&dir.path().join(&canonical_alias), dir.path()),
+                        "{canonical_alias}"
+                    );
+                }
+            }
+        }
+        for directory in ["peer", "peer-node", "vault", "secrets"] {
+            assert!(super::is_protected(
+                &dir.path().join(directory).join("private-key"),
+                dir.path()
+            ));
+        }
+        let ordinary = tempfile::tempdir().unwrap();
+        assert!(!super::is_protected(
+            &ordinary.path().join("providers.toml.bak"),
+            dir.path()
+        ));
+    }
     use super::*;
 
     fn setup() -> (tempfile::TempDir, tempfile::TempDir, Vec<Arc<dyn Tool>>) {

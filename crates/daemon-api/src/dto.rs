@@ -23,6 +23,10 @@ pub struct Health {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[allow(clippy::struct_excessive_bools)] // independent observed safeguards, not a state machine
 pub struct IsolationStatus {
+    /// OS of the running daemon (not the CLI client).
+    pub platform: String,
+    /// Active native guard, or an explicit inactive/unsupported description.
+    pub memory_guard_kind: String,
     pub privilege_split: bool,
     pub children_scrubbed: bool,
     pub memory_guard: bool,

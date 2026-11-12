@@ -1423,9 +1423,13 @@ export interface components {
         IsolationStatus: {
             children_scrubbed: boolean;
             memory_guard: boolean;
+            /** @description Active native guard, or an explicit inactive/unsupported description. */
+            memory_guard_kind: string;
             no_new_privs: boolean;
             /** @description Praxi does not yet provide a full restricted-token/namespace sandbox. */
             os_sandbox: boolean;
+            /** @description OS of the running daemon (not the CLI client). */
+            platform: string;
             privilege_split: boolean;
         };
         /** @description `GET /v1/events/latest`. */

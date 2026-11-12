@@ -4366,6 +4366,8 @@
         "type": "object",
         "description": "Observed daemon isolation state; never contains credentials.",
         "required": [
+          "platform",
+          "memory_guard_kind",
           "privilege_split",
           "children_scrubbed",
           "memory_guard",
@@ -4379,12 +4381,20 @@
           "memory_guard": {
             "type": "boolean"
           },
+          "memory_guard_kind": {
+            "type": "string",
+            "description": "Active native guard, or an explicit inactive/unsupported description."
+          },
           "no_new_privs": {
             "type": "boolean"
           },
           "os_sandbox": {
             "type": "boolean",
             "description": "Praxi does not yet provide a full restricted-token/namespace sandbox."
+          },
+          "platform": {
+            "type": "string",
+            "description": "OS of the running daemon (not the CLI client)."
           },
           "privilege_split": {
             "type": "boolean"

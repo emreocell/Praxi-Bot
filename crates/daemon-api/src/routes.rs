@@ -253,7 +253,20 @@ pub(crate) async fn health(State(s): State<AppState>) -> Json<Health> {
     responses((status = 200, body = crate::dto::IsolationStatus)))]
 pub(crate) async fn isolation(State(s): State<AppState>) -> Json<crate::dto::IsolationStatus> {
     let observed = process_guard::status();
+    let memory_guard_kind = if observed.memory_guard {
+        if cfg!(windows) {
+            "windows_owner_dacl"
+        } else {
+            "linux_non_dumpable"
+        }
+    } else if cfg!(any(windows, target_os = "linux")) {
+        "disabled_or_uninitialized"
+    } else {
+        "unsupported"
+    };
     Json(crate::dto::IsolationStatus {
+        platform: std::env::consts::OS.into(),
+        memory_guard_kind: memory_guard_kind.into(),
         privilege_split: true,
         children_scrubbed: s.children_scrubbed(),
         memory_guard: observed.memory_guard,
