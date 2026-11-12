@@ -3141,6 +3141,47 @@ async fn the_override_route_pauses_the_bot_even_with_no_takeover() {
     );
 }
 
+// ---- audit3 F5a: a session delete cancelled during the key reset owes it
+#[tokio::test(start_paused = true)]
+async fn a_cancelled_session_delete_still_owes_the_key_reset() {
+    let t = Arc::new(Test::new());
+    let (id, _owned, _body) = t.active(Some("alice")).await;
+    t.target.sink.hang_reset.store(true, Ordering::SeqCst);
+    let before = t.target.sink.resets.load(Ordering::SeqCst);
+    let worker = Arc::clone(&t);
+    let delete = tokio::spawn(async move {
+        worker
+            .call(
+                Some("alice"),
+                Method::DELETE,
+                &format!("/v1/view/sessions/{id}"),
+                None,
+            )
+            .await
+    });
+    for _ in 0..50 {
+        if t.target.sink.resets.load(Ordering::SeqCst) > before {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        t.target.sink.resets.load(Ordering::SeqCst) > before,
+        "reset entered"
+    );
+    // The peer drops the request while the reset is in flight.
+    delete.abort();
+    let _ = delete.await;
+    assert!(
+        t.state.hub().override_pending().0,
+        "the aborted reset is owed to nobody: pressed keys may stay down"
+    );
+    // The daemon finishes it once the backend works again.
+    t.target.sink.hang_reset.store(false, Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_secs(30)).await;
+    assert!(!t.state.hub().override_pending().0);
+}
+
 // ---- audit3 F4: the effect of a partial batch is never coalesced away
 #[tokio::test]
 async fn a_partial_injection_outcome_is_audited_even_after_a_denial() {

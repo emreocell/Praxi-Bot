@@ -668,6 +668,9 @@ async fn settle_interrupted(
     t: &OwnedTakeover,
     reason: Reason,
 ) -> Result<(), ApiError> {
+    // Owed BEFORE it is attempted (durably, in the hub): if the caller is
+    // dropped while the backend call is in flight, the daemon still retries it.
+    s.hub().mark_reset_pending();
     let reset_ok = reset_target(s, t).await;
     if reset_ok {
         // Also clears a reset that an earlier interruption still owed.
@@ -1086,6 +1089,7 @@ pub(crate) async fn local_override(
     if override_takeover(&s, &actor, Reason::LocalOverride)
         .await?
         .is_none()
+        && s.hub().takeover().is_none()
     {
         // Nothing to override (no takeover, or it ended a moment ago): the
         // acknowledged Stop still pauses the bot, as the app's own pause.
