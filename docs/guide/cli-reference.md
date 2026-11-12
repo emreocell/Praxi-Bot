@@ -133,7 +133,8 @@ Manage the e-mail accounts of the running daemon (see [email](email.md)). Change
 | --- | --- |
 | `bot email list` | List accounts (never shows passwords) |
 | `bot email add <NAME> <ADDRESS>` | Add an account. Options: `--preset gmail\|outlook\|yahoo\|icloud`, `--imap-host`, `--imap-port`, `--smtp-host`, `--smtp-port`, `--smtp-security implicit\|start_tls`, `--username`, `--bot <NAME_OR_ID>` (only this bot) or `--all-bots` (one of the two is required), `--allowed-sender <ADDR>` (repeatable), `--password-env <VAR>` (hidden prompt when omitted) |
-| `bot email rm <NAME>` | Remove an account and its stored password |
+| `bot email add --provider agentmail --name <NAME> --bot <NAME_OR_ID>\|--all-bots` | Create an AgentMail inbox with **your own** AgentMail API key and add it as an account. Options: `--name-hint <TEXT>` (part before the `@`), `--domain <VERIFIED_DOMAIN>`, `--allowed-sender`, `--api-key-env <VAR>` (hidden prompt when omitted; the key is never an argument) |
+| `bot email rm <NAME>` | Remove an account and its stored password or key. `--delete-inbox` also deletes the inbox at AgentMail (irreversible; off by default) |
 | `bot email test <NAME>` | IMAP login and SMTP authentication, nothing is sent; exit 6 when a server does not accept |
 
 ### `bot providers`
