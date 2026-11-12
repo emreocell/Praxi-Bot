@@ -81,6 +81,19 @@ pub trait FrameSource: Send + Sync {
 /// retried until it is confirmed, also after a restart, and releasing keys that
 /// are not pressed is a no-op. `inject` may be cancelled between events but
 /// never retried by the daemon after a partial application.
+///
+/// # Hard rule: `inject` must not outlive `release_pressed_inputs`
+///
+/// After the daemon has aborted an `inject` (timeout, cancelled request) it
+/// calls `release_pressed_inputs`, possibly repeatedly until it is confirmed
+/// (also after a failed or partial batch, a disconnect, or a restart). No
+/// keystroke or click of an aborted `inject` may be delivered after
+/// `release_pressed_inputs` has returned. A backend that applies input on
+/// another thread (`spawn_blocking`, an OS hook thread) must therefore hold the
+/// "keys released" barrier itself: `release_pressed_inputs` must wait for, or
+/// cancel, that thread's queued work before it reports success. Synchronous
+/// code that blocks without an `.await` cannot be aborted by the daemon at all
+/// and is not allowed in `inject`.
 #[async_trait]
 pub trait InputSink: Send + Sync {
     /// One event, called by the daemon's serialized ownership executor only.

@@ -65,6 +65,19 @@ Frame viewers do not register as overlay controllers.
   retry is refused (503) while one is already running. An input inject that
   outlives its 2 s budget is aborted, and `InputSink` implementations must be
   cancel-safe and idempotent (see the `InputSink` documentation).
+- A latch-file write that fails during an override never yields a clean answer:
+  the Stop stays in force in memory (sticky, input dead), the call returns 503
+  ("the latch file could not be written"), and every later `paused` heartbeat
+  retries the write until it succeeds; only then is it acknowledged and durable
+  across a restart. A Stop re-checks under the executor that it still addresses
+  the same takeover and that its work is still owed, so a stale or duplicate Stop
+  never touches a later takeover. A reset counts as done only when the key
+  release, the backend deactivation and the profile reset all succeeded; a
+  failed reset after a partial injection or a cancelled request is owed and
+  retried by the next session or `paused` heartbeat. A cancelled input request
+  aborts its inject task. `PUT /v1/control/state {paused}` falls through to the
+  normal pause if the takeover ended meanwhile. Every backend call under the
+  executor is bounded (2 s), including recover, takeover and stream start.
 - `POST /v1/view/sessions/{id}/input` carries version, takeover/epoch, generation,
   geometry revision, first sequence number and typed events.
 - `POST /v1/control/override` (local user only) interrupts any takeover, whoever

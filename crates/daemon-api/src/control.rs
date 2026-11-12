@@ -78,6 +78,10 @@ struct State {
     /// (a failed attempt is retried by the app's next pause heartbeat).
     reset_pending: bool,
     audit_pending: bool,
+    /// A latch-file write failed: memory is ahead of the disk. The state stays
+    /// in force (sticky), the failure is reported, and the next heartbeat
+    /// retries the write until it succeeds.
+    persist_dirty: bool,
 }
 
 /// State of the bridge; see the module docs.
@@ -96,6 +100,9 @@ pub struct ControlHub {
     /// Latch-file writes so far (tests assert that one transition is one write).
     #[cfg(test)]
     persists: AtomicUsize,
+    /// Test seam: every latch-file write fails (disk full / read-only).
+    #[cfg(test)]
+    persist_fail: std::sync::atomic::AtomicBool,
     /// Takeover state changes for the global event stream (not replayed).
     events: tokio::sync::broadcast::Sender<crate::dto::ControlStateChanged>,
 }
@@ -148,6 +155,12 @@ fn refused_while(mode: ControlMode) -> Option<&'static str> {
 }
 
 impl ControlHub {
+    /// Test seam: make every latch-file write fail (or work again).
+    #[cfg(test)]
+    pub(crate) fn set_persist_failure(&self, fail: bool) {
+        self.persist_fail.store(fail, Ordering::SeqCst);
+    }
+
     /// A hub with the given timing.
     #[must_use]
     pub fn new(cfg: ControlConfig) -> Self {
@@ -161,6 +174,8 @@ impl ControlHub {
             action_seq: std::sync::atomic::AtomicU64::new(0),
             #[cfg(test)]
             persists: AtomicUsize::new(0),
+            #[cfg(test)]
+            persist_fail: std::sync::atomic::AtomicBool::new(false),
             events: tokio::sync::broadcast::channel(64).0,
         }
     }
@@ -186,7 +201,12 @@ impl ControlHub {
     /// Persist while holding the authority lock. Errors keep admission closed.
     fn persist(&self, st: &State) -> Result<(), String> {
         #[cfg(test)]
-        self.persists.fetch_add(1, Ordering::SeqCst);
+        {
+            self.persists.fetch_add(1, Ordering::SeqCst);
+            if self.persist_fail.load(Ordering::SeqCst) {
+                return Err("control persistence failed".into());
+            }
+        }
         self.latch_file.as_ref().map_or(Ok(()), |p| {
             owned::persist(st, p).map_err(|_| "control persistence failed".into())
         })

@@ -101,6 +101,10 @@ pub struct LiveView {
     /// A key reset is running under the executor; a retry must not stack up
     /// behind it (see `override_takeover`).
     reset_in_flight: std::sync::atomic::AtomicBool,
+    /// Test seam: runs in `PUT /v1/control/state` between its takeover check and
+    /// the override.
+    #[cfg(test)]
+    pub(crate) put_state_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     /// Test seam: runs after an input batch is validated under the executor,
     /// right before its first event is applied.
     #[cfg(test)]
@@ -250,9 +254,9 @@ impl LiveView {
         });
         if let Some(t) = self.registry.get(target) {
             if let Some(p) = profile {
-                t.frame_source().set_profile(p).await.map_err(backend)?;
+                bounded(t.frame_source().set_profile(p)).await?;
             } else {
-                t.frame_source().stop().await.map_err(backend)?;
+                bounded(t.frame_source().stop()).await?;
             }
         }
         Ok(())
@@ -510,7 +514,7 @@ pub(crate) async fn update_session(
         session.rendered = i.last_rendered_frame_seq;
     }
     live.source_profile(target).await?;
-    t.frame_source().request_refresh(0).await.map_err(backend)?;
+    bounded(t.frame_source().request_refresh(0)).await?;
     Ok(Json(p))
 }
 #[utoipa::path(put,path="/v1/view/sessions/{id}/heartbeat",tag="view",security(("bearer"=[])),params(("id"=Uuid,Path)),request_body=Heartbeat,responses((status=204)))]
@@ -525,6 +529,7 @@ pub(crate) async fn heartbeat(
     let _executor = live.executor.lock().await;
     live.session(&actor, id)?;
     retry_release_audits(&s);
+    retry_owed_reset(&s).await;
     match (i.takeover_id, i.control_epoch) {
         (Some(t), Some(e)) if live.allowed(&actor, true) => s
             .hub()
@@ -567,17 +572,25 @@ async fn reset_target(s: &AppState, t: &OwnedTakeover) -> bool {
     let mut reset_ok = true;
     if let Some(target) = live.registry.get(t.info.target_id) {
         if let Some(sink) = target.input_sink() {
-            reset_ok = matches!(
+            reset_ok &= matches!(
                 tokio::time::timeout_at(deadline, sink.release_pressed_inputs()).await,
                 Ok(Ok(()))
             );
-            let _ = tokio::time::timeout_at(deadline, sink.set_takeover_active(false)).await;
+            // The reset is only complete when the backend also dropped its
+            // takeover pin and live profile, like a release requires.
+            reset_ok &= matches!(
+                tokio::time::timeout_at(deadline, sink.set_takeover_active(false)).await,
+                Ok(Ok(()))
+            );
         }
-        let _ = tokio::time::timeout_at(
-            deadline,
-            target.frame_source().set_profile(EffectiveProfile::watch()),
-        )
-        .await;
+        reset_ok &= matches!(
+            tokio::time::timeout_at(
+                deadline,
+                target.frame_source().set_profile(EffectiveProfile::watch()),
+            )
+            .await,
+            Ok(Ok(()))
+        );
     }
     reset_ok
 }
@@ -627,10 +640,15 @@ async fn interrupt(
     // Mark input invalid before any fallible reset/audit operation.
     s.hub().interrupt(t.info.id, reason.clone());
     let reset_ok = reset_target(s, t).await;
-    if !reset_ok {
+    if reset_ok {
+        // Also clears a reset that an earlier interruption still owed.
+        if s.hub().override_pending().0 {
+            s.hub().resolve_override_reset();
+        }
+    } else {
         s.hub().interrupt(t.info.id, Reason::ResetFailed);
-    } else if reason == Reason::LocalOverride {
-        s.hub().resolve_override_reset();
+        // Keys may still be pressed: owed until a retry confirms it.
+        s.hub().mark_reset_pending();
     }
     let audited = audit_interrupted(s, actor, t, &reason);
     if audited.is_ok() && reason == Reason::LocalOverride {
@@ -739,8 +757,8 @@ pub(crate) async fn takeover(
         }
         if let Some(t) = live.registry.get(old.info.target_id) {
             if let Some(sink) = t.input_sink() {
-                sink.release_pressed_inputs().await.map_err(backend)?;
-                sink.set_takeover_active(false).await.map_err(backend)?;
+                bounded(sink.release_pressed_inputs()).await?;
+                bounded(sink.set_takeover_active(false)).await?;
             }
         } else {
             return Err(ApiError::unavailable("old target reset cannot be verified"));
@@ -794,13 +812,13 @@ pub(crate) async fn takeover(
             let activation = async {
                 let target = live.target(owned.info.target_id,owned.generation)?;
                 let sink = target.input_sink().ok_or_else(|| ApiError::unavailable("input unavailable"))?;
-                sink.release_pressed_inputs().await.map_err(backend)?;
-                sink.set_takeover_active(true).await.map_err(backend)?;
+                bounded(sink.release_pressed_inputs()).await?;
+                bounded(sink.set_takeover_active(true)).await?;
                 audit(&state,&actor,"takeover.active",serde_json::json!({"takeover_id":owned.info.id,"control_epoch":owned.info.control_epoch,"target_id":owned.info.target_id}))?;
                 state.hub().activate(owned.info.id,owned.info.control_epoch).map_err(ApiError::conflict)?;
                 if let Some(session) = live.sessions.lock().get_mut(&owned.info.session_id) { session.profile = EffectiveProfile::live(); session.next_seq = 1; session.duplicates.clear(); }
                 live.source_profile(owned.info.target_id).await?;
-                target.frame_source().request_refresh(0).await.map_err(backend)
+                bounded(target.frame_source().request_refresh(0)).await
             }.await;
             if activation.is_err() {
                 let _ = interrupt(&state, &actor, &owned, Reason::Unavailable).await;
@@ -859,14 +877,14 @@ async fn override_takeover(
     // Idempotent: an app heartbeat every few seconds must not re-run the
     // latch write, the event, the audit row and the key reset.
     let live = s.live_view();
-    if s.hub()
-        .takeover()
-        .is_some_and(|t| t.info.state == ViewState::Paused && t.info.reason == Some(reason.clone()))
-    {
-        // Already stopped. Only a reset or audit that has not succeeded yet
-        // is retried, until it does.
+    let stopped = |t: &OwnedTakeover| {
+        t.info.state == ViewState::Paused && t.info.reason == Some(reason.clone())
+    };
+    if s.hub().takeover().is_some_and(|t| stopped(&t)) {
+        // Already stopped. Only work that has not succeeded yet (a key reset,
+        // an audit row, the latch-file write) is retried, until it does.
         let (reset_pending, audit_pending) = s.hub().override_pending();
-        if !reset_pending && !audit_pending {
+        if !reset_pending && !audit_pending && !s.hub().persist_dirty() {
             return Ok(None);
         }
         // A retry is already running: do not stack another behind it.
@@ -887,11 +905,13 @@ async fn override_takeover(
             ));
         };
         // Read again under the lock: a queued heartbeat that ran first may
-        // already have finished the work (no double audit row).
+        // already have finished the work (no double audit row), and the
+        // takeover may have been recovered or replaced meanwhile.
         let (reset_pending, audit_pending) = s.hub().override_pending();
-        let Some(t) = s.hub().takeover() else {
+        let Some(t) = s.hub().takeover().filter(|t| stopped(t)) else {
             return Ok(None);
         };
+        let _ = s.hub().retry_persist();
         if reset_pending && reset_target(s, &t).await {
             s.hub().resolve_override_reset();
         }
@@ -933,8 +953,17 @@ async fn override_takeover(
             "stopped, but the executor is busy; the pending key reset will be retried",
         ));
     };
-    let t = s.hub().takeover().unwrap_or(old.clone());
+    // Under the executor again: only act on the takeover this Stop stopped,
+    // and only if its work is still owed. Another task may have recovered it,
+    // started a new takeover, or already done the reset and the audit.
+    let Some(t) = s.hub().takeover().filter(|t| t.info.id == old.info.id) else {
+        return Ok(Some(old));
+    };
     let local = reason == Reason::LocalOverride;
+    let (reset_pending, audit_pending) = s.hub().override_pending();
+    if local && !reset_pending && !audit_pending {
+        return reset_confirmed(s, local).map(|()| Some(old));
+    }
     interrupt(s, actor, &t, reason).await?;
     reset_confirmed(s, local)?;
     Ok(Some(old))
@@ -946,6 +975,13 @@ fn reset_confirmed(s: &AppState, local_override: bool) -> Result<(), ApiError> {
     if local_override && s.hub().override_pending().0 {
         return Err(ApiError::unavailable(
             "stopped, but the pressed-key reset did not complete; it will be retried",
+        ));
+    }
+    if local_override && s.hub().persist_dirty() {
+        // Never a clean answer for a stop the disk does not know about: it is
+        // in force in memory and the write is retried by the next heartbeat.
+        return Err(ApiError::unavailable(
+            "stopped, but the latch file could not be written; it will be retried",
         ));
     }
     Ok(())
@@ -1006,8 +1042,8 @@ pub(crate) async fn local_recover(
         .get(old.info.target_id)
         .and_then(|t| t.input_sink())
     {
-        let _ = sink.release_pressed_inputs().await;
-        let _ = sink.set_takeover_active(false).await;
+        let _ = tokio::time::timeout(BACKEND_CALL_TIMEOUT, sink.release_pressed_inputs()).await;
+        let _ = tokio::time::timeout(BACKEND_CALL_TIMEOUT, sink.set_takeover_active(false)).await;
     }
     Ok(Json(crate::routes::control_state_dto(&s, Some(&actor))))
 }
@@ -1170,6 +1206,8 @@ pub(crate) async fn release(
             noted: false,
             cancelled: false,
             audit_pending: false,
+            target: Some(t.info.target_id),
+            counts: serde_json::to_value(&counts).ok(),
         })
         .map_err(ApiError::unavailable)?;
     ensure_not_overridden(s)?;
@@ -1217,10 +1255,28 @@ fn write_released_audit(s: &AppState, journal: &ReleaseJournal) -> Result<(), Ap
         s,
         &actor,
         "takeover.released",
-        serde_json::json!({"takeover_id":journal.takeover_id,"control_epoch":journal.epoch,"request_id":journal.request_id,"retried":true}),
+        serde_json::json!({"target_id":journal.target,"takeover_id":journal.takeover_id,"control_epoch":journal.epoch,"request_id":journal.request_id,"counts":journal.counts,"retried":true}),
     )?;
     s.hub().resolve_release_audit(journal.request_id);
     Ok(())
+}
+
+/// A key reset that failed after an interruption (a partial injection, a
+/// disconnect) is owed until a retry confirms it; session heartbeats retry it.
+async fn retry_owed_reset(s: &AppState) {
+    let live = s.live_view();
+    if !s.hub().override_pending().0
+        || live
+            .reset_in_flight
+            .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return;
+    }
+    if let Some(t) = s.hub().takeover()
+        && reset_target(s, &t).await
+    {
+        s.hub().resolve_override_reset();
+    }
 }
 
 /// Best-effort retry of every owed release audit row (session heartbeats).

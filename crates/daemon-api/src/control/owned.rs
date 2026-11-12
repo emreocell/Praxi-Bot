@@ -48,6 +48,11 @@ pub struct ReleaseJournal {
     /// heartbeats. Only meaningful for a completed journal.
     #[serde(default)]
     pub audit_pending: bool,
+    /// For the (possibly retried) `takeover.released` row.
+    #[serde(default)]
+    pub target: Option<Uuid>,
+    #[serde(default)]
+    pub counts: Option<serde_json::Value>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -107,7 +112,11 @@ pub(super) fn restore(st: &mut State, path: &Path) {
                     .owned
                     .as_ref()
                     .is_some_and(|t| t.info.reason == Some(Reason::LocalOverride));
-                st.reset_pending = reset_pending && overridden;
+                let reset_failed = st
+                    .owned
+                    .as_ref()
+                    .is_some_and(|t| t.info.reason == Some(Reason::ResetFailed));
+                st.reset_pending = reset_pending && (overridden || reset_failed);
                 st.audit_pending = audit_pending && overridden;
                 return;
             }
@@ -167,6 +176,43 @@ pub(super) fn persist(st: &State, path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 impl ControlHub {
+    /// Write the latch file and remember whether it worked: a failed write
+    /// leaves `persist_dirty` set (memory ahead of disk) until a write succeeds.
+    fn persist_tracked(&self, st: &mut State) {
+        if self.persist(st).is_ok() {
+            st.persist_dirty = false;
+        } else {
+            st.persistence_error = true;
+            st.persist_dirty = true;
+        }
+    }
+    /// Memory is ahead of the latch file (a write failed and is being retried).
+    pub fn persist_dirty(&self) -> bool {
+        self.state.lock().persist_dirty
+    }
+    /// Retry a failed latch-file write.
+    /// # Errors
+    /// The write still fails: the state stays in force in memory.
+    pub fn retry_persist(&self) -> Result<(), String> {
+        let mut st = self.state.lock();
+        if !st.persist_dirty {
+            return Ok(());
+        }
+        self.persist_tracked(&mut st);
+        if st.persist_dirty {
+            Err("control persistence failed".into())
+        } else {
+            Ok(())
+        }
+    }
+    /// A key reset is owed (a failed reset after an interruption), durably.
+    pub fn mark_reset_pending(&self) {
+        let mut st = self.state.lock();
+        if st.owned.is_some() && !st.reset_pending {
+            st.reset_pending = true;
+            self.persist_tracked(&mut st);
+        }
+    }
     pub fn takeover(&self) -> Option<OwnedTakeover> {
         let mut owned = self.state.lock().owned.clone()?;
         owned.info.input_expires_in_ms = owned.input_deadline.map_or(0, |d| {
@@ -412,9 +458,9 @@ impl ControlHub {
                     journal.cancelled = true;
                 }
             }
-            if self.persist(&st).is_err() {
-                st.persistence_error = true;
-            }
+            // A failed write leaves the stop in force in memory (sticky) and
+            // marks the state dirty: the caller reports it and retries.
+            self.persist_tracked(&mut st);
             self.changed.notify_waiters();
             if let Some(owned) = st.owned.clone() {
                 drop(st);
@@ -439,13 +485,13 @@ impl ControlHub {
     pub fn resolve_override_reset(&self) {
         let mut st = self.state.lock();
         st.reset_pending = false;
-        let _ = self.persist(&st);
+        self.persist_tracked(&mut st);
     }
     /// The override's audit row was written.
     pub fn resolve_override_audit(&self) {
         let mut st = self.state.lock();
         st.audit_pending = false;
-        let _ = self.persist(&st);
+        self.persist_tracked(&mut st);
     }
     /// Local recovery of a takeover latch (for example after a restart) without
     /// any registered target: clears owner and latch, bumps the epoch so cached
@@ -526,7 +572,13 @@ impl ControlHub {
         journal.runs.sort();
         journal.runs.dedup();
         if st.releases.len() >= 64 {
-            st.releases.remove(0);
+            // Drop the oldest entry, but never one whose audit row is owed.
+            let victim = st
+                .releases
+                .iter()
+                .position(|j| !j.audit_pending)
+                .unwrap_or(0);
+            st.releases.remove(victim);
         }
         st.releases.push(journal.clone());
         if let Err(e) = self.persist(&st) {
@@ -601,7 +653,12 @@ impl ControlHub {
         if let Some(j) = st.releases.iter_mut().find(|j| j.request_id == request) {
             j.audit_pending = false;
         }
-        let _ = self.persist(&st);
+        // A failed write only risks one duplicate `retried` row after a
+        // restart (it over-audits, never under-audits); log it.
+        self.persist_tracked(&mut st);
+        if st.persist_dirty {
+            eprintln!("warning: could not persist the release audit marker");
+        }
     }
     pub fn release_journal(&self, request: Uuid) -> Option<ReleaseJournal> {
         self.state
@@ -780,6 +837,8 @@ mod tests {
             noted: false,
             cancelled: false,
             audit_pending: false,
+            target: None,
+            counts: None,
         }
     }
     #[tokio::test]
@@ -1129,6 +1188,45 @@ mod tests {
         assert!(file.contains("local_override"), "{file}");
         let restarted = ControlHub::with_latch_file(super::super::ControlConfig::default(), path);
         assert_eq!(restarted.override_pending(), (true, true));
+    }
+    #[test]
+    fn the_journal_cap_never_drops_a_release_whose_audit_is_owed() {
+        let hub = ControlHub::new(super::super::ControlConfig::default());
+        {
+            let mut st = hub.state.lock();
+            for n in 0..64 {
+                let mut j = journal(&OwnedTakeover {
+                    info: live_view::TakeoverInfo {
+                        id: Uuid::now_v7(),
+                        session_id: Uuid::now_v7(),
+                        target_id: Uuid::now_v7(),
+                        owner: "x".into(),
+                        state: ViewState::Active,
+                        control_epoch: 1,
+                        input_expires_in_ms: 0,
+                        reason: None,
+                    },
+                    actor: "peer:x".into(),
+                    request_id: Uuid::now_v7(),
+                    generation: 1,
+                    input_deadline: None,
+                });
+                j.completed = true;
+                j.audit_pending = n == 0;
+                st.releases.push(j);
+            }
+        }
+        let owed = hub.state.lock().releases[0].request_id;
+        let t = hub
+            .begin_takeover("peer:alice", &request(), Uuid::now_v7(), 1, true, false)
+            .unwrap();
+        hub.prepare_release(journal(&t)).unwrap();
+        let releases = hub.state.lock().releases.clone();
+        assert_eq!(releases.len(), 64);
+        assert!(
+            releases.iter().any(|j| j.request_id == owed),
+            "the entry with an owed audit row was dropped"
+        );
     }
     #[test]
     fn a_release_cancelled_by_a_local_override_can_never_finish() {

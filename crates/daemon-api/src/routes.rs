@@ -829,8 +829,20 @@ pub(crate) async fn put_control_state(
         && input.mode == crate::dto::ControlMode::Paused
         && s.hub().takeover().is_some()
     {
+        #[cfg(test)]
+        {
+            let hook = s.live_view().put_state_hook.lock().clone();
+            if let Some(hook) = hook {
+                hook();
+            }
+        }
         crate::live_view::override_local_pause(&s, &actor).await?;
-        return Ok(Json(control_state_dto(&s, Some(&actor))));
+        if s.hub().takeover().is_some() {
+            return Ok(Json(control_state_dto(&s, Some(&actor))));
+        }
+        // The takeover ended (a peer's release finished) between the check and
+        // the override: apply the pause the normal way, so it is not lost and
+        // the registration is refreshed.
     }
     s.hub()
         .try_apply_state(input.mode, input.release)

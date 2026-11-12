@@ -14,6 +14,15 @@ use std::time::Duration;
 use tokio::time::Instant;
 use uuid::Uuid;
 
+/// Aborts a task when dropped: a cancelled input request (the client went away
+/// before the inject timeout) must not leave its inject task detached.
+struct AbortOnDrop(tokio::task::AbortHandle);
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// How long a batch waits for the input executor before 429 `input_busy`.
 const INPUT_QUEUE_WAIT: Duration = Duration::from_secs(1);
 
@@ -130,6 +139,10 @@ impl Drop for BatchLifetime {
     fn drop(&mut self) {
         if self.armed {
             self.hub.interrupt(self.takeover, Reason::Disconnected);
+            // The request was cancelled mid-batch and its inject task aborted:
+            // keys of the partial batch may still be pressed, so a reset is
+            // owed until a retry confirms it.
+            self.hub.mark_reset_pending();
         }
     }
 }
@@ -403,6 +416,8 @@ pub(crate) async fn input(
             }
             result
         });
+        // Dropped (aborting the task) if this request is cancelled mid-inject.
+        let _abort_on_drop = AbortOnDrop(work.abort_handle());
         let applied_ok =
             if let Ok(joined) = tokio::time::timeout(Duration::from_secs(2), &mut work).await {
                 matches!(joined, Ok(Ok(())))
@@ -412,6 +427,9 @@ pub(crate) async fn input(
                 // just detach it. `pending_input` is held by a guard inside the
                 // task, so it stays set until the task has really ended.
                 work.abort();
+                // Let the cancellation finish before the key reset below, so
+                // that `release_pressed_inputs` does not overlap the dying inject.
+                let _ = tokio::time::timeout(Duration::from_millis(500), &mut work).await;
                 false
             };
         if !applied_ok {
