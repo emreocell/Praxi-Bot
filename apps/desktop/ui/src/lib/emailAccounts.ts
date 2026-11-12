@@ -4,7 +4,8 @@ import type {
   EmailAccountInput,
   EmailAccountPatch,
   EmailProbeStatus,
-  EmailSecurity
+  EmailSecurity,
+  EmailTestReport
 } from "../api/types.ts";
 import type { BotScope } from "./mcpApps.ts";
 
@@ -16,14 +17,22 @@ export type EmailApi = {
     name: string,
     patch: EmailAccountPatch
   ) => Promise<EmailAccount>;
-  deleteEmailAccount: (name: string) => Promise<void>;
-  testEmailAccount: (
-    name: string
-  ) => Promise<{ imap: EmailProbeStatus; smtp: EmailProbeStatus; ok: boolean }>;
-  testEmailDraft: (
-    input: EmailAccountInput
-  ) => Promise<{ imap: EmailProbeStatus; smtp: EmailProbeStatus; ok: boolean }>;
+  deleteEmailAccount: (
+    name: string,
+    opts?: { deleteInbox?: boolean }
+  ) => Promise<void>;
+  testEmailAccount: (name: string) => Promise<EmailTestReport>;
+  testEmailDraft: (input: EmailAccountInput) => Promise<EmailTestReport>;
 };
+
+/** Where the AgentMail pricing (and so the free-plan limits) is published. */
+export const AGENTMAIL_PRICING_URL = "https://agentmail.to/pricing";
+/** Where a user creates their own AgentMail account and API key. */
+export const AGENTMAIL_CONSOLE_URL = "https://console.agentmail.to";
+
+/** The IMAP/SMTP request body: the server fields are always present. */
+export type ImapSmtpInput = EmailAccountInput &
+  Required<Pick<EmailAccountInput, "address" | "imap" | "smtp">>;
 
 export type EmailPresetId = "gmail" | "outlook" | "yahoo" | "icloud" | "custom";
 
@@ -286,10 +295,11 @@ export function validateForm(
 }
 
 /** Body of `POST /v1/email/accounts` (and of a draft test). */
-export function toInput(form: EmailForm): EmailAccountInput {
+export function toInput(form: EmailForm): ImapSmtpInput {
   const bot = botFromScope(form.bot);
-  const input: EmailAccountInput = {
+  const input: ImapSmtpInput = {
     name: form.name.trim(),
+    provider: "imap_smtp",
     address: form.address.trim(),
     username: form.username.trim() || null,
     imap: { host: form.imapHost.trim(), port: Number(form.imapPort) },
@@ -360,4 +370,77 @@ export function accountBotName(
     return null;
   }
   return bots.find((b) => b.id === a.bot)?.name ?? deleted;
+}
+
+// ---- AgentMail ("give this bot an address") ---------------------------------
+
+/** The add flow's first choice. */
+export type AddKind = "own" | "agentmail";
+
+/** What the AgentMail form holds. The key is write-only. */
+export interface AgentmailForm {
+  /** The user's own AgentMail API key. Never filled from a stored account. */
+  apiKey: string;
+  /** Optional: the part before the @ of the new address. */
+  nameHint: string;
+  /** Which bot gets the address; "only this bot" needs a bot picked. */
+  bot: BotScope;
+}
+
+export function emptyAgentmailForm(): AgentmailForm {
+  return { apiKey: "", nameHint: "", bot: { mode: "some", ids: [] } };
+}
+
+export type AgentmailFormError = "apiKey" | "nameHint" | "bot";
+
+const HINT_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,31}$/;
+
+export function validateAgentmailForm(form: AgentmailForm): AgentmailFormError[] {
+  const errors: AgentmailFormError[] = [];
+  const key = form.apiKey.trim();
+  if (key.length < 8 || key.length > 512 || /\s/.test(key)) {
+    errors.push("apiKey");
+  }
+  const hint = form.nameHint.trim();
+  if (hint !== "" && !HINT_RE.test(hint)) {
+    errors.push("nameHint");
+  }
+  if (botFromScope(form.bot) === undefined) {
+    errors.push("bot");
+  }
+  return errors;
+}
+
+/** A local account name for a new AgentMail inbox that is not taken yet. */
+export function agentmailAccountName(hint: string, existing: string[]): string {
+  const slug = hint
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  const base = slug === "" ? "agentmail" : `agentmail-${slug}`;
+  let name = base;
+  for (let n = 2; existing.includes(name); n += 1) {
+    name = `${base}-${n}`;
+  }
+  return name;
+}
+
+/** Body of `POST /v1/email/accounts` for an AgentMail inbox. */
+export function toAgentmailInput(
+  form: AgentmailForm,
+  existing: string[]
+): EmailAccountInput {
+  const hint = form.nameHint.trim();
+  const input: EmailAccountInput = {
+    name: agentmailAccountName(hint, existing),
+    provider: "agentmail",
+    api_key: form.apiKey.trim(),
+    bot: botFromScope(form.bot) ?? null
+  };
+  if (hint !== "") {
+    input.name_hint = hint;
+  }
+  return input;
 }

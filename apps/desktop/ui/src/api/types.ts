@@ -251,5 +251,7 @@ export type EmailAccountInput = S["EmailAccountInput"];
 /** Body of `PUT /v1/email/accounts/{name}` (every field optional). */
 export type EmailAccountPatch = S["EmailAccountPatch"];
 export type EmailSecurity = S["EmailSecurity"];
+/** `imap_smtp` (own mailbox) or `agentmail` (an inbox created with the user's key). */
+export type EmailProviderKind = S["EmailProviderKind"];
 export type EmailProbeStatus = S["EmailProbeStatus"];
 export type EmailTestReport = S["EmailTestReport"];

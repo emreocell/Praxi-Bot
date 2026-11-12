@@ -980,12 +980,47 @@
         "tls": "TLS başarısız",
         "auth_failed": "Giriş reddedildi",
         "protocol": "Beklenmeyen yanıt",
-        "timeout": "Yanıt yok"
+        "timeout": "Yanıt yok",
+        "api": "AgentMail"
       },
       "toast": {
         "added": "{{name}} eklendi",
         "saved": "{{name}} kaydedildi",
         "deleted": "{{name}} silindi"
+      },
+      "choice": {
+        "own": "Kendi posta kutumu bağla",
+        "ownText": "Zaten sahip olduğun bir posta kutusunu (Gmail, Outlook, iCloud, kendi sunucun) IMAP ve SMTP ile kullan.",
+        "agentmail": "Bu bota bir adres ver (AgentMail)",
+        "agentmailText": "Kendi AgentMail hesabınla bir bot için ad@agentmail.to gibi yeni bir adres oluştur. Alan adı gerekmez."
+      },
+      "agentmail": {
+        "title": "Bota kendi adresini ver",
+        "ownAccount": "Kendi ücretsiz AgentMail hesabın gerekir. Praxi-Bot senin yerine anahtar tutmaz: hesabındaki API anahtarını yapıştır.",
+        "getKey": "AgentMail'i aç",
+        "limits": "Yazıldığı sırada ücretsiz plan: 3 gelen kutusu, ayda 3.000 e-posta, günde 100. Sınırlar değişebilir.",
+        "pricing": "Fiyat sayfasına bak",
+        "noColdOutreach": "Ortak agentmail.to alan adında soğuk tanıtım ve toplu e-posta yasaktır. Yalnızca senin ya da botunun gönderme nedeni olan postalar için kullan.",
+        "apiKey": "AgentMail API anahtarı",
+        "apiKeyHint": "İşletim sistemi anahtar deposunda saklanır, bir daha gösterilmez. Yalnızca AgentMail'e gönderilir.",
+        "bot": "Bu adresi hangi bot alacak",
+        "nameHint": "Adres adı (isteğe bağlı)",
+        "nameHintHelp": "@ işaretinden önceki kısım, örneğin atlas. Boş bırakırsan AgentMail seçer.",
+        "create": "Adres oluştur",
+        "creating": "Oluşturuluyor…",
+        "created": "Adres oluşturuldu",
+        "createdHint": "Bot, izin verilen araçlarına email_* ekledikten sonra e-posta araçlarıyla kullanabilir. Göndermeden önce yine sorulur.",
+        "copy": "Kopyala",
+        "copied": "Kopyalandı",
+        "done": "Tamam",
+        "viaApi": "AgentMail gelen kutusu",
+        "keyMissing": "Kayıtlı API anahtarı yok",
+        "alsoDelete": "AgentMail'deki gelen kutusunu da sil (geri alınamaz)",
+        "errors": {
+          "apiKey": "API anahtarını yapıştır: en az 8 karakter, boşluk yok.",
+          "nameHint": "Harf, rakam, nokta, tire veya alt çizgi kullan; harf ya da rakamla başla (en fazla 32).",
+          "bot": "Botu seç ya da herhangi bir bot seç."
+        }
       }
     }
   },
