@@ -92,7 +92,7 @@ pub struct LiveView {
     pending_input: Arc<std::sync::atomic::AtomicUsize>,
     /// Last written denial audit per `actor|event`, and how many were folded
     /// into it since (see [`audit`]).
-    denials: Mutex<BTreeMap<String, (Option<Instant>, BTreeMap<String, u64>)>>,
+    denials: Mutex<BTreeMap<String, DenialWindow>>,
 }
 impl LiveView {
     pub(crate) fn capture_targets(&self) -> std::collections::BTreeSet<Uuid> {
@@ -202,6 +202,9 @@ fn backend(_: ViewError) -> ApiError {
 fn parse<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, ApiError> {
     serde_json::from_slice(bytes).map_err(|_| ApiError::bad_request("invalid live-view request"))
 }
+/// When a denial was last written, and the denials folded in since, by reason.
+type DenialWindow = (Option<Instant>, BTreeMap<String, u64>);
+
 /// Denied attempts of one actor are audited at most once a minute per event;
 /// the next row says how many were folded into the silence before it.
 const DENIAL_AUDIT_WINDOW: Duration = Duration::from_secs(60);
