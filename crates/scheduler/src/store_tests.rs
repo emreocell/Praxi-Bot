@@ -517,3 +517,117 @@ fn migration_0003_keeps_occurrence_rows_from_the_previous_schema() {
     assert_eq!(store.unresolved_occurrence_count().unwrap(), 1);
     assert_eq!(store.get(old.id).unwrap().unwrap().revision, 4);
 }
+
+#[test]
+fn migration_0004_defaults_existing_rows_to_user_origin() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("schedules.db");
+    let old = recurring();
+    {
+        let conn = Connection::open(&path).unwrap();
+        for sql in [
+            include_str!("../migrations/0001_schedules.sql"),
+            include_str!("../migrations/0002_schedule_consistency.sql"),
+            include_str!("../migrations/0003_occurrence_recovery.sql"),
+        ] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 3).unwrap();
+        conn.execute(
+            "INSERT INTO schedules VALUES (?1, ?2, NULL, 'n', ?3, ?4, 1, 0, NULL, 1000, 'skip', 2)",
+            params![
+                old.id.to_string(),
+                old.bot_id.to_string(),
+                serde_json::to_string(&old.spec).unwrap(),
+                serde_json::to_string(&old.payload).unwrap()
+            ],
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        ScheduleStore::validate_and_migrate(&path).unwrap(),
+        SCHEMA_VERSION
+    );
+    let store = ScheduleStore::open(dir.path()).unwrap();
+    let migrated = store.get(old.id).unwrap().unwrap();
+    assert_eq!(migrated.origin, crate::ScheduleOrigin::User);
+    assert_eq!(migrated.revision, 2);
+}
+
+#[test]
+fn origin_round_trips_and_survives_edits() {
+    let store = ScheduleStore::open_in_memory().unwrap();
+    let mut s = recurring();
+    s.origin = crate::ScheduleOrigin::Bot;
+    store.insert(&s).unwrap();
+    assert_eq!(
+        store.get(s.id).unwrap().unwrap().origin,
+        crate::ScheduleOrigin::Bot
+    );
+    let mut edited = store.get(s.id).unwrap().unwrap();
+    edited.name = "renamed".into();
+    edited.origin = crate::ScheduleOrigin::User; // an edit cannot change it
+    store.update_definition_and_rearm(&edited, None, 5).unwrap();
+    let after = store.get(s.id).unwrap().unwrap();
+    assert_eq!(after.name, "renamed");
+    assert_eq!(after.origin, crate::ScheduleOrigin::Bot);
+    assert_eq!(
+        store.list_by_bot(s.bot_id).unwrap()[0].origin,
+        crate::ScheduleOrigin::Bot
+    );
+}
+
+#[test]
+fn set_origin_flips_ownership_and_bumps_the_revision() {
+    let store = ScheduleStore::open_in_memory().unwrap();
+    let mut s = recurring();
+    s.origin = crate::ScheduleOrigin::Bot;
+    store.insert(&s).unwrap();
+    let before = store.get(s.id).unwrap().unwrap().revision;
+    assert!(store.set_origin(s.id, crate::ScheduleOrigin::User).unwrap());
+    let after = store.get(s.id).unwrap().unwrap();
+    assert_eq!(after.origin, crate::ScheduleOrigin::User);
+    assert_eq!(after.revision, before + 1);
+    // Idempotent: nothing changes the second time.
+    assert!(!store.set_origin(s.id, crate::ScheduleOrigin::User).unwrap());
+    assert_eq!(store.get(s.id).unwrap().unwrap().revision, before + 1);
+}
+
+#[test]
+fn delete_exact_only_deletes_the_state_that_was_approved() {
+    let store = ScheduleStore::open_in_memory().unwrap();
+    let mut s = recurring();
+    s.origin = crate::ScheduleOrigin::Bot;
+    store.insert(&s).unwrap();
+    let cur = store.get(s.id).unwrap().unwrap();
+    // A user edit lands in between: revision moves, nothing is deleted.
+    let mut edited = cur.clone();
+    edited.name = "edited".into();
+    store.update_definition_and_rearm(&edited, None, 5).unwrap();
+    assert!(
+        !store
+            .delete_exact(s.id, cur.revision, crate::ScheduleOrigin::Bot)
+            .unwrap()
+    );
+    assert!(store.get(s.id).unwrap().is_some());
+    // Ownership moved to the user: not deleted either.
+    let now = store.get(s.id).unwrap().unwrap();
+    store.set_origin(s.id, crate::ScheduleOrigin::User).unwrap();
+    assert!(
+        !store
+            .delete_exact(s.id, now.revision, crate::ScheduleOrigin::Bot)
+            .unwrap()
+    );
+    let latest = store.get(s.id).unwrap().unwrap();
+    assert!(
+        !store
+            .delete_exact(s.id, latest.revision, crate::ScheduleOrigin::Bot)
+            .unwrap()
+    );
+    assert!(
+        store
+            .delete_exact(s.id, latest.revision, crate::ScheduleOrigin::User)
+            .unwrap()
+    );
+    assert!(store.get(s.id).unwrap().is_none());
+}

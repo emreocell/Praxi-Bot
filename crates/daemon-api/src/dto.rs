@@ -619,6 +619,9 @@ pub struct ScheduleDto {
     /// A webhook trigger is configured (`POST /v1/webhooks/{id}`); the secret
     /// is never returned.
     pub has_webhook: bool,
+    /// Who created it: `user`, or `bot` (a bot's schedule tools, after you
+    /// approved it). A bot may change only its own `bot` schedules.
+    pub origin: String,
 }
 
 /// Body of `POST /v1/schedules` and `PUT /v1/schedules/{id}`.

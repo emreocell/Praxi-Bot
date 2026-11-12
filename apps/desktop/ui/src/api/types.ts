@@ -115,6 +115,8 @@ export type DaemonEvent =
       tool_name: string;
       input: unknown;
       summary: string;
+      /** Structured facts for the approval card (see `lib/approvalDetails`). */
+      details?: unknown;
     }
   | {
       type: "tool_call_approved";

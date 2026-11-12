@@ -659,6 +659,7 @@ async fn approval_buttons_map_to_daemon_decisions() {
                 tool_name: "fs_delete".into(),
                 input: json!({ "path": "/tmp/a.txt" }),
                 summary: "Delete /tmp/a.txt".into(),
+                details: None,
             }),
         ))
         .unwrap();
@@ -1260,6 +1261,7 @@ async fn forged_approval_callbacks_are_rejected() {
             tool_name: "shell".into(),
             input: json!({}),
             summary: "rm".into(),
+            details: None,
         }),
     ))
     .unwrap();
@@ -2126,6 +2128,7 @@ async fn subagent_approvals_and_questions_are_shown_in_the_parent_chat() {
                 tool_name: "shell".into(),
                 input: json!({}),
                 summary: "child wants rm".into(),
+                details: None,
             }),
         ))
         .unwrap();
@@ -3147,4 +3150,285 @@ async fn priority_stop_does_not_start_older_messages_from_the_same_batch() {
             .collect::<Vec<_>>(),
         vec!["later new request"]
     );
+}
+
+async fn approval_messages(details: Option<serde_json::Value>) -> Vec<serde_json::Value> {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let bot = BotSummary {
+        id: BotId::new(),
+        name: "Mira".into(),
+    };
+    let daemon = Arc::new(FakeDaemon::new(vec![bot]));
+    let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+        .with_api_base_url(server.uri())
+        .with_paired_users([PAIRED_USER_ID]);
+    let channel = TelegramChannel::new(cfg, daemon.clone()).unwrap();
+    let run_id = RunId::new();
+    let (tx, rx) = mpsc::unbounded_channel::<Envelope>();
+    tx.send(Envelope::new(
+        0,
+        Event::ApprovalNeeded(ApprovalNeeded {
+            run_id,
+            call_id: ToolCallId::new(),
+            tool_name: "schedule_create".into(),
+            input: json!({}),
+            summary: "schedule_create {\"prompt\":\"cut at 300\"".into(),
+            details,
+        }),
+    ))
+    .unwrap();
+    daemon.queue_run_stream(
+        run_id,
+        Box::pin(futures::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|item| (item, rx))
+        })),
+    );
+    channel
+        .handle_update(
+            serde_json::from_value(text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, "go")).unwrap(),
+        )
+        .await
+        .unwrap();
+    let reqs = server.received_requests().await.unwrap();
+    sent_messages(&reqs)
+}
+
+fn schedule_card(prompt: &str) -> serde_json::Value {
+    json!({
+        "kind": "schedule", "action": "create", "name": "Standup",
+        "prompt": prompt, "schedule": "Every weekday at 10:30", "timezone": "Europe/Istanbul",
+        "next_runs": ["2026-11-13T10:30:00+03:00", "2026-11-16T10:30:00+03:00", "2026-11-17T10:30:00+03:00"],
+        "permission": {"level": "ask_first", "allow": [], "ask": ["fs"], "deny": []}
+    })
+}
+
+#[tokio::test]
+async fn schedule_approval_shows_everything_without_always_and_chunks_long_prompts() {
+    let prompt = format!("{}\nTAIL-MARKER", "long prompt line. ".repeat(400));
+    let msgs = approval_messages(Some(schedule_card(&prompt))).await;
+    assert!(msgs.len() >= 2, "a long prompt spans several messages");
+    let all: String = msgs.iter().map(|m| m["text"].as_str().unwrap()).collect();
+    for want in [
+        "Every weekday at 10:30 (Europe/Istanbul)",
+        "2026-11-17T10:30:00+03:00",
+        "permissions: ask_first",
+        "TAIL-MARKER",
+    ] {
+        assert!(all.contains(want), "{want} missing");
+    }
+    for m in &msgs[..msgs.len() - 1] {
+        assert!(
+            m.get("reply_markup").is_none(),
+            "buttons only on the last message"
+        );
+    }
+    let kb = &msgs[msgs.len() - 1]["reply_markup"]["inline_keyboard"][0];
+    let labels: Vec<&str> = kb
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(labels, ["Approve once", "Deny"], "no Always for a schedule");
+}
+
+#[tokio::test]
+async fn unrenderable_details_leave_approval_to_the_desktop_app() {
+    let msgs = approval_messages(Some(json!({"kind": "future-thing"}))).await;
+    assert_eq!(msgs.len(), 1);
+    assert!(msgs[0]["text"].as_str().unwrap().contains("desktop app"));
+    assert!(msgs[0].get("reply_markup").is_none(), "no approve button");
+}
+
+#[tokio::test]
+async fn plain_approvals_keep_their_three_buttons() {
+    let msgs = approval_messages(None).await;
+    assert_eq!(msgs.len(), 1);
+    assert_eq!(
+        msgs[0]["reply_markup"]["inline_keyboard"][0]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+}
+
+fn once_only_cb_args() -> (RunId, ToolCallId) {
+    (RunId::new(), ToolCallId::new())
+}
+
+#[tokio::test]
+async fn a_crafted_always_callback_for_a_schedule_approval_never_reaches_the_daemon() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let bot = BotSummary {
+        id: BotId::new(),
+        name: "Mira".into(),
+    };
+    let daemon = Arc::new(FakeDaemon::new(vec![bot]));
+    let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+        .with_api_base_url(server.uri())
+        .with_paired_users([PAIRED_USER_ID]);
+    let channel = TelegramChannel::new(cfg, daemon.clone()).unwrap();
+    let (run_id, call_id) = once_only_cb_args();
+    let (tx, rx) = mpsc::unbounded_channel::<Envelope>();
+    tx.send(Envelope::new(
+        0,
+        Event::ApprovalNeeded(ApprovalNeeded {
+            run_id,
+            call_id,
+            tool_name: "schedule_create".into(),
+            input: json!({}),
+            summary: "s".into(),
+            details: Some(schedule_card("short prompt")),
+        }),
+    ))
+    .unwrap();
+    daemon.queue_run_stream(
+        run_id,
+        Box::pin(futures::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|item| (item, rx))
+        })),
+    );
+    channel
+        .handle_update(
+            serde_json::from_value(text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, "go")).unwrap(),
+        )
+        .await
+        .unwrap();
+    // Crafted: the user (or an attacker with the callback format) sends "always" / "this chat".
+    for (i, action) in ["always", "this_chat", "always_category"]
+        .into_iter()
+        .enumerate()
+    {
+        let data = format_approval_callback(call_id, action);
+        let u: Update = serde_json::from_value(callback_update(
+            10 + i64::try_from(i).unwrap(),
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            &format!("cb-{i}"),
+            &data,
+        ))
+        .unwrap();
+        channel.handle_update(u).await.unwrap();
+    }
+    assert!(daemon.approvals.lock().is_empty(), "no decision was sent");
+    let reqs = server.received_requests().await.unwrap();
+    assert!(
+        callback_answers(&reqs)
+            .iter()
+            .any(|a| a.to_string().contains("only be approved once"))
+    );
+    // The real button still works, once.
+    let ok: Update = serde_json::from_value(callback_update(
+        20,
+        PAIRED_USER_ID,
+        TEST_CHAT_ID,
+        "cb-ok",
+        &format_approval_callback(call_id, "once"),
+    ))
+    .unwrap();
+    channel.handle_update(ok).await.unwrap();
+    assert_eq!(daemon.approvals.lock().len(), 1);
+}
+
+#[tokio::test]
+async fn a_failing_middle_chunk_leaves_no_button_and_points_to_the_desktop() {
+    let server = MockServer::start().await;
+    // The first message goes through, every later one fails.
+    let count = Arc::new(AtomicUsize::new(0));
+    let c = Arc::clone(&count);
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("sendMessage")))
+        .respond_with(move |req: &Request| {
+            let n = c.fetch_add(1, Ordering::SeqCst);
+            let body: Value = serde_json::from_slice(&req.body).unwrap_or_default();
+            if n == 0 || body["text"].as_str().is_some_and(|t| t.contains("could not be shown")) {
+                ResponseTemplate::new(200).set_body_json(json!({
+                    "ok": true,
+                    "result": {"message_id": 100 + n, "chat": {"id": TEST_CHAT_ID, "type": "private"}, "text": ""}
+                }))
+            } else {
+                ResponseTemplate::new(500).set_body_json(json!({"ok": false, "description": "boom"}))
+            }
+        })
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("answerCallbackQuery")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true, "result": true})))
+        .mount(&server)
+        .await;
+    let bot = BotSummary {
+        id: BotId::new(),
+        name: "Mira".into(),
+    };
+    let daemon = Arc::new(FakeDaemon::new(vec![bot]));
+    let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+        .with_api_base_url(server.uri())
+        .with_paired_users([PAIRED_USER_ID]);
+    let channel = TelegramChannel::new(cfg, daemon.clone()).unwrap();
+    let (run_id, call_id) = once_only_cb_args();
+    let long = format!("{}\nTAIL", "long prompt line. ".repeat(500));
+    let (tx, rx) = mpsc::unbounded_channel::<Envelope>();
+    tx.send(Envelope::new(
+        0,
+        Event::ApprovalNeeded(ApprovalNeeded {
+            run_id,
+            call_id,
+            tool_name: "schedule_create".into(),
+            input: json!({}),
+            summary: "s".into(),
+            details: Some(schedule_card(&long)),
+        }),
+    ))
+    .unwrap();
+    daemon.queue_run_stream(
+        run_id,
+        Box::pin(futures::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|item| (item, rx))
+        })),
+    );
+    let _ = channel
+        .handle_update(
+            serde_json::from_value(text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, "go")).unwrap(),
+        )
+        .await;
+    let reqs = server.received_requests().await.unwrap();
+    let msgs = sent_messages(&reqs);
+    assert!(
+        msgs.iter().all(|m| m.get("reply_markup").is_none()),
+        "no approve button may exist after a chunk failed"
+    );
+    assert!(
+        msgs.last().unwrap()["text"]
+            .as_str()
+            .unwrap()
+            .contains("desktop app")
+    );
+    // A press of the (never sent) button is refused.
+    let u: Update = serde_json::from_value(callback_update(
+        9,
+        PAIRED_USER_ID,
+        TEST_CHAT_ID,
+        "cb-x",
+        &format_approval_callback(call_id, "once"),
+    ))
+    .unwrap();
+    channel.handle_update(u).await.unwrap();
+    assert!(daemon.approvals.lock().is_empty());
+}
+
+#[tokio::test]
+async fn details_this_channel_would_mask_are_not_offered_for_approval_here() {
+    // The channel's own redactor knows the bot token; a prompt carrying it would be
+    // shown masked while the stored schedule keeps the raw text.
+    let card = schedule_card(&format!("send it to {TEST_BOT_TOKEN} please"));
+    let msgs = approval_messages(Some(card)).await;
+    assert_eq!(msgs.len(), 1);
+    let text = msgs[0]["text"].as_str().unwrap();
+    assert!(text.contains("desktop app"), "{text}");
+    assert!(!text.contains(TEST_BOT_TOKEN));
+    assert!(msgs[0].get("reply_markup").is_none(), "no approve button");
 }

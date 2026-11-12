@@ -424,6 +424,38 @@ pub enum Trigger {
     },
 }
 
+/// Who created a schedule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScheduleOrigin {
+    /// The user (UI, CLI or API). Bots may only read these.
+    #[default]
+    User,
+    /// A bot, through its schedule tools (after the user approved it).
+    Bot,
+}
+
+impl ScheduleOrigin {
+    /// Stable lowercase string stored in SQLite.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Bot => "bot",
+        }
+    }
+
+    /// Parse a stored origin string.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "user" => Some(Self::User),
+            "bot" => Some(Self::Bot),
+            _ => None,
+        }
+    }
+}
+
 /// A persisted schedule definition and its runtime state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Schedule {
@@ -453,6 +485,9 @@ pub struct Schedule {
     /// This is a persistence/concurrency detail, not part of the schedule DTO.
     #[serde(skip)]
     pub revision: i64,
+    /// Who created it (immutable after creation).
+    #[serde(default)]
+    pub origin: ScheduleOrigin,
     /// Occurrences that were reserved or dispatched but never confirmed
     /// because the process stopped (`missed` / `interrupted`). They are not
     /// replayed automatically (task 136); UIs can show them as "missed".
@@ -493,6 +528,7 @@ impl Schedule {
             next_run_at,
             misfire_policy,
             revision: 0,
+            origin: ScheduleOrigin::User,
             missed_occurrences: 0,
         })
     }

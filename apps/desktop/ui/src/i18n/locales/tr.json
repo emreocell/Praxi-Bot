@@ -290,7 +290,29 @@
       "thisChat": "Bu sohbet",
       "always": "Her zaman",
       "deny": "Reddet",
-      "reasonPlaceholder": "Reddetme gerekçesi (isteğe bağlı)"
+      "reasonPlaceholder": "Reddetme gerekçesi (isteğe bağlı)",
+      "schedule": {
+        "title": {
+          "create": "Yinelenen görev oluşturulsun mu?",
+          "update": "Yinelenen görev değiştirilsin mi?",
+          "resume": "Yinelenen görev sürdürülsün mü?",
+          "pause": "Yinelenen görev duraklatılsın mı?",
+          "delete": "Yinelenen görev silinsin mi?"
+        },
+        "prompt": "Her seferinde şu istemi çalıştırır ({{count}} karakter; tamamını okumak için kaydırın):",
+        "promptNew": "Yeni istem ({{count}} karakter, her seferinde çalışır):",
+        "was": "Şu an:",
+        "next": "Sonraki çalışmalar:",
+        "permission": "Her çalışma bu botun izinlerini kullanır ({{level}}).",
+        "allowed": "Sormadan izin verilenler: {{list}}.",
+        "level": {
+          "full": "her şeye izin var",
+          "ask_first": "işlemden önce sorar",
+          "mixed": "kısmen izinli",
+          "read_only": "salt okunur"
+        },
+        "note": "Bu onay yalnızca bu değişikliği kapsar; her seferinde sorulur."
+      }
     },
     "question": {
       "title": "Bot soruyor",
@@ -628,6 +650,8 @@
       "disabled": "Duraklatıldı",
       "finished": "Bitti"
     },
+    "originBot": "Bot oluşturdu",
+    "originBotHint": "Onayınızla bir bot oluşturdu. Botlar yalnızca kendi oluşturdukları zamanlamaları değiştirebilir.",
     "enabled": "Etkin",
     "bot": "Bot",
     "deletedBot": "Silinmiş bot",

@@ -185,6 +185,27 @@ fn short_id(id: &str) -> &str {
     id.get(..8).unwrap_or(id)
 }
 
+/// What the CLI prints for an approval. Details (a schedule) are shown in full;
+/// if they cannot be shown, the approval is left to the desktop app.
+fn approval_text(a: &protocol::event::ApprovalNeeded) -> String {
+    match &a.details {
+        None => format!(
+            "\n[approval needed] {}\n  approve with: bot approve {}",
+            a.summary, a.call_id
+        ),
+        Some(d) => match protocol::approval_text::describe_details(d) {
+            Some(full) => format!(
+                "\n[approval needed: {}]\n{full}  approve once with: bot approve {}",
+                a.tool_name, a.call_id
+            ),
+            None => format!(
+                "\n[approval needed: {}] this client cannot show what it would do; approve or deny it in the desktop app",
+                a.tool_name
+            ),
+        },
+    }
+}
+
 fn render(ev: &Event, out: &mut dyn Write) -> std::io::Result<()> {
     match ev {
         Event::MessageDelta(d) => write!(out, "{}", d.text),
@@ -193,10 +214,7 @@ fn render(ev: &Event, out: &mut dyn Write) -> std::io::Result<()> {
             Ok(())
         }
         Event::ApprovalNeeded(a) => {
-            eprintln!(
-                "\n[approval needed] {}\n  approve with: bot approve {}",
-                a.summary, a.call_id
-            );
+            eprintln!("{}", approval_text(a));
             Ok(())
         }
         Event::QuestionAsked(q) => {
@@ -565,6 +583,47 @@ mod tests {
 
     use super::*;
     use crate::client::ExitError;
+
+    fn needed(details: Option<serde_json::Value>) -> protocol::event::ApprovalNeeded {
+        protocol::event::ApprovalNeeded {
+            run_id: protocol::RunId::new(),
+            call_id: protocol::ToolCallId::new(),
+            tool_name: "schedule_create".into(),
+            input: serde_json::json!({}),
+            summary: "cut at 300 bytes".into(),
+            details,
+        }
+    }
+
+    #[test]
+    fn cli_shows_schedule_details_in_full_and_never_a_truncated_summary() {
+        let prompt = format!("{}END-OF-PROMPT", "x".repeat(2000));
+        let text = approval_text(&needed(Some(serde_json::json!({
+            "kind": "schedule", "action": "create", "name": "N", "prompt": prompt,
+            "schedule": "Every day at 09:00", "timezone": "UTC",
+            "next_runs": ["a", "b", "c"],
+            "permission": {"level": "full", "allow": ["fs"], "ask": [], "deny": []}
+        }))));
+        for want in [
+            "END-OF-PROMPT",
+            "Every day at 09:00 (UTC)",
+            "a; b; c",
+            "permissions: full",
+            "bot approve",
+        ] {
+            assert!(text.contains(want), "{want} missing");
+        }
+        assert!(!text.contains("cut at 300 bytes"));
+    }
+
+    #[test]
+    fn cli_refuses_to_approve_details_it_cannot_show() {
+        let text = approval_text(&needed(Some(serde_json::json!({"kind": "mystery"}))));
+        assert!(text.contains("desktop app"));
+        assert!(!text.contains("bot approve"));
+        // Plain approvals are unchanged.
+        assert!(approval_text(&needed(None)).contains("bot approve"));
+    }
 
     const TOKEN: &str = "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd";
     const PROFILE: &str = "[bot]\nid = \"t\"\nname = \"T\"\n[models]\nexecutor = \"fake/echo\"\n";
