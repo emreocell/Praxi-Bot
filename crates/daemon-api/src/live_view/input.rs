@@ -464,7 +464,9 @@ pub(crate) async fn input(
         if result.state == ViewState::Active {
             "input.batch_applied"
         } else {
-            "input.batch_rejected"
+            // Its own event name: the effect of a batch is never coalesced
+            // with (or hidden behind) denials of `input.batch_rejected`.
+            "input.batch_partial"
         },
         outcome_meta,
     )

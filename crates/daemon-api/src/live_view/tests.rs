@@ -3091,6 +3091,40 @@ async fn a_malformed_early_batch_is_audited_and_coalesced() {
     assert_eq!(rows.len(), 1, "audited once, the rest coalesced");
 }
 
+// ---- audit3 F4: the effect of a partial batch is never coalesced away
+#[tokio::test]
+async fn a_partial_injection_outcome_is_audited_even_after_a_denial() {
+    let t = Test::new();
+    let (id, owned, _body) = t.active(Some("alice")).await;
+    // Any earlier denial opens the 60 s coalescing window for its event name.
+    let (status, _) = t
+        .call(
+            Some("alice"),
+            Method::POST,
+            &input_path(id),
+            Some(json!({"unexpected": true})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    t.target.sink.fail_at.store(1, Ordering::SeqCst);
+    let _ = t
+        .call(
+            Some("alice"),
+            Method::POST,
+            &input_path(id),
+            Some(Test::batch(&owned, 1)),
+        )
+        .await;
+    let outcomes = t
+        .state
+        .storage()
+        .list_audit(t.state.user_id())
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.detail.get("applied_through").is_some())
+        .count();
+    assert_eq!(outcomes, 1, "the partial outcome row was coalesced away");
+}
 #[tokio::test(start_paused = true)]
 async fn an_inject_that_outlives_its_timeout_is_aborted_not_detached() {
     let t = Test::new();
