@@ -281,14 +281,14 @@ export function ApprovalCard({
           </p>
           <ScheduleApprovalBody d={schedule} />
           <div className={styles.approvalMeta}>
-            <span className={styles.toolName}>{tool.name}</span>
+            <span className={styles.approvalTool}>{tool.name}</span>
           </div>
         </>
       ) : (
         <>
           <p className={styles.approvalSummary}>{tool.summary ?? tool.name}</p>
           <div className={styles.approvalMeta}>
-            <span className={styles.toolName}>{tool.name}</span>
+            <span className={styles.approvalTool}>{tool.name}</span>
             <span className={styles.inputSummary}>
               {summarizeInput(tool.input, 140)}
             </span>
@@ -298,7 +298,7 @@ export function ApprovalCard({
       <div className={styles.actions}>
         <Button
           size="sm"
-          variant="primary"
+          variant="secondary"
           disabled={disabled}
           onClick={() => void decide("approve", "once")}
         >
@@ -309,7 +309,7 @@ export function ApprovalCard({
           <>
             <Button
               size="sm"
-              variant="secondary"
+              variant="ghost"
               disabled={disabled}
               onClick={() => void decide("approve", "this_chat")}
             >
@@ -317,7 +317,7 @@ export function ApprovalCard({
             </Button>
             <Button
               size="sm"
-              variant="secondary"
+              variant="ghost"
               disabled={disabled}
               onClick={() => void decide("approve", "always")}
             >

@@ -32,6 +32,7 @@ for (const file of ['dark', 'cobalt', 'raven', 'light']) {
       lowest = Math.min(lowest, check(t[`--color-${text}`], t[`--color-${surface}`], 4.5, `${text}/${surface}`));
     }
     check(t['--color-focus'], t[`--color-${surface}`], 3, `focus/${surface}`);
+    check(t['--color-border-strong'], t[`--color-${surface}`], 3, `control border/${surface}`);
   }
   check(t['--color-accent-contrast'], t['--color-accent'], 4.5, 'accent button');
   const hover = t['--color-accent-hover'].startsWith('#') ? t['--color-accent-hover'] : mix(t['--color-accent'], '#ffffff', .88);

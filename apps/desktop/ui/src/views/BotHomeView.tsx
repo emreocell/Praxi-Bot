@@ -1,7 +1,7 @@
 import { MessageSquare, PenLine, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Avatar, Button, Card } from "ui";
+import { BotAvatar, Button, Card } from "ui";
 import formStyles from "../components/Form.module.css";
 import { botView, draftFromBot } from "../lib/botProfile";
 import { useDaemon } from "../state/DaemonContext";
@@ -92,12 +92,7 @@ export function BotHomeView({
     <div className={styles.pane}>
       <div className={styles.container}>
         <Card padding="lg" accentColor={view.color} className={styles.hero}>
-          <Avatar
-            name={view.name}
-            src={view.avatar}
-            color={view.color}
-            size="lg"
-          />
+          <BotAvatar bot={view} size="lg" decorative />
           <div className={styles.heroText}>
             <h1 className={styles.title}>{view.name}</h1>
             <p className={styles.meta}>

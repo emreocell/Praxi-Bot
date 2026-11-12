@@ -37,3 +37,8 @@
   color: var(--color-warning);
   font-weight: var(--font-weight-semibold);
 }
+
+.root { margin: var(--space-1) var(--space-5); padding: var(--space-2) var(--space-3); background: var(--color-warning-subtle); border-radius: var(--radius-md); }
+
+.fakeOnly { position: absolute; top: var(--space-2); left: var(--space-4); z-index: 5; margin: var(--space-0); padding: var(--space-0); background: transparent; }
+.fakeOnly .tag { background-color: var(--color-surface-elevated); color: var(--color-text-muted); font-weight: var(--font-weight-medium); }

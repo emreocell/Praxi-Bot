@@ -1,7 +1,7 @@
 import { ArrowUpRight, CalendarDays, PenLine, Play, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Card } from "ui";
+import { BotAvatar, Button, Card } from "ui";
 import { ApiError } from "../api/client";
 import type { ParsedSchedule, Schedule } from "../api/types";
 import formStyles from "../components/Form.module.css";
@@ -221,7 +221,10 @@ export function SchedulesView({
                     <dl className={styles.meta}>
                       <div>
                         <dt>{t("schedules.bot")}</dt>
-                        <dd>{view?.name ?? t("schedules.deletedBot")}</dd>
+                        <dd className={styles.botCell}>
+                          {view ? <BotAvatar bot={view} size="xs" decorative /> : null}
+                          {view?.name ?? t("schedules.deletedBot")}
+                        </dd>
                       </div>
                       <div>
                         <dt>{t("schedules.when")}</dt>

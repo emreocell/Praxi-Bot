@@ -131,3 +131,14 @@
   color: var(--color-text-muted);
   text-align: center;
 }
+
+.trigger { border: none; border-radius: var(--radius-pill); min-height: var(--space-8); background: var(--color-surface-elevated); font-size: var(--font-size-ui); }
+.popover { width: calc(var(--size-widget-width) * 0.9); border-color: var(--color-border); border-radius: var(--radius-modal); top: calc(100% + var(--space-2)); }
+.scroll { max-height: calc(var(--size-widget-width) * 1.5); padding: var(--space-2); }
+.groupLabel { display: flex; align-items: center; gap: var(--space-2); text-transform: none; letter-spacing: 0; padding-top: var(--space-4); }
+.option { font-size: var(--font-size-ui); min-height: var(--space-10); padding-left: var(--space-10); }
+.optionActive { background: var(--color-surface-active); }
+
+.scroll { max-height: min(calc(var(--size-widget-width) * 1.8), 75vh); }
+.option { min-height: var(--space-8); padding-block: var(--space-1); }
+.groupLabel { padding-top: var(--space-3); }
