@@ -768,12 +768,7 @@ pub(crate) async fn takeover(
                 "explicit reacquisition/recovery required",
             ));
         }
-        if let Some(t) = live.registry.get(old.info.target_id) {
-            if let Some(sink) = t.input_sink() {
-                bounded(sink.release_pressed_inputs()).await?;
-                bounded(sink.set_takeover_active(false)).await?;
-            }
-        } else {
+        if live.registry.get(old.info.target_id).is_none() {
             return Err(ApiError::unavailable("old target reset cannot be verified"));
         }
     }
@@ -782,16 +777,13 @@ pub(crate) async fn takeover(
             flush_note(&s, &mut journal)?;
         }
     }
-    audit(
-        &s,
-        &actor,
-        if i.recover {
-            "takeover.recovered"
-        } else {
-            "takeover.requested"
-        },
-        serde_json::json!({"session_id":i.session_id,"target_id":target,"request_id":i.request_id,"recovery_reason":i.reason}),
-    )?;
+    // The hub decides first: a takeover it rejects leaves no audit row and
+    // touches no backend. Everything below that fails rolls the new takeover
+    // back (it is interrupted, so the bot stays paused, never half-taken).
+    let previous = s.hub().takeover().filter(|old| {
+        old.info.state == ViewState::Paused
+            || (old.info.state == ViewState::Active && old.info.input_expires_in_ms == 0)
+    });
     let owned = s
         .hub()
         .begin_takeover(
@@ -803,6 +795,38 @@ pub(crate) async fn takeover(
             actor.local,
         )
         .map_err(ApiError::conflict)?;
+    let setup: Result<(), (Reason, ApiError)> = async {
+        // Reset the old owner's sink before the new one may drive.
+        if let Some(old) = &previous
+            && let Some(sink) = live
+                .registry
+                .get(old.info.target_id)
+                .and_then(|t| t.input_sink())
+        {
+            bounded(sink.release_pressed_inputs())
+                .await
+                .map_err(|e| (Reason::ResetFailed, e))?;
+            bounded(sink.set_takeover_active(false))
+                .await
+                .map_err(|e| (Reason::ResetFailed, e))?;
+        }
+        audit(
+            &s,
+            &actor,
+            if i.recover {
+                "takeover.recovered"
+            } else {
+                "takeover.requested"
+            },
+            serde_json::json!({"session_id":i.session_id,"target_id":target,"request_id":i.request_id,"recovery_reason":i.reason}),
+        )
+        .map_err(|e| (Reason::AuditFailed, e))
+    }
+    .await;
+    if let Err((reason, error)) = setup {
+        let _ = interrupt(&s, &actor, &owned, reason).await;
+        return Err(error);
+    }
     let result = accepted(&owned);
     if owned.info.state == ViewState::Acquiring {
         let state = s.clone();
@@ -818,6 +842,16 @@ pub(crate) async fn takeover(
             }
             let live = state.live_view();
             let _executor = live.executor.lock().await;
+            // The wait for the executor can be long: act only if this exact
+            // takeover (id, epoch) is still the one being acquired. A local
+            // Stop, a recovery or a newer takeover must never be re-pinned.
+            if !state.hub().takeover().is_some_and(|now| {
+                now.info.id == owned.info.id
+                    && now.info.control_epoch == owned.info.control_epoch
+                    && now.info.state == ViewState::Acquiring
+            }) {
+                return;
+            }
             if live.session(&actor, owned.info.session_id).is_err() || !live.allowed(&actor, true) {
                 let _ = interrupt(&state, &actor, &owned, Reason::Expired).await;
                 return;
@@ -827,6 +861,11 @@ pub(crate) async fn takeover(
                 let sink = target.input_sink().ok_or_else(|| ApiError::unavailable("input unavailable"))?;
                 bounded(sink.release_pressed_inputs()).await?;
                 bounded(sink.set_takeover_active(true)).await?;
+                // Re-verified after the backend call: no `takeover.active` row
+                // for a takeover a Stop ended meanwhile (the caller resets the pin).
+                if !state.hub().takeover().is_some_and(|now| now.info.id == owned.info.id && now.info.control_epoch == owned.info.control_epoch && now.info.state == ViewState::Acquiring) {
+                    return Err(ApiError::conflict("the takeover ended while it was being activated"));
+                }
                 audit(&state,&actor,"takeover.active",serde_json::json!({"takeover_id":owned.info.id,"control_epoch":owned.info.control_epoch,"target_id":owned.info.target_id}))?;
                 state.hub().activate(owned.info.id,owned.info.control_epoch).map_err(ApiError::conflict)?;
                 if let Some(session) = live.sessions.lock().get_mut(&owned.info.session_id) { session.profile = EffectiveProfile::live(); session.next_seq = 1; session.duplicates.clear(); }

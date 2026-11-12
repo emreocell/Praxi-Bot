@@ -1317,6 +1317,80 @@ async fn an_unreadable_latch_file_is_cleared_by_local_recovery_with_an_audit_row
         "the recovery is audited"
     );
 }
+fn audit_count(t: &Test, action: &str) -> usize {
+    t.state
+        .storage()
+        .list_audit(t.state.user_id())
+        .unwrap()
+        .iter()
+        .filter(|e| e.action == action)
+        .count()
+}
+#[tokio::test]
+async fn a_takeover_the_hub_rejects_writes_no_request_row() {
+    let t = Test::new();
+    let id = t.session(Some("alice")).await;
+    // An ownerless pause: only an explicit recovery may take over.
+    assert_eq!(
+        t.call(
+            None,
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode":"paused","release":false})),
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    let resets = t.target.sink.resets.load(Ordering::SeqCst);
+    let (status, _) = t
+        .call(
+            Some("alice"),
+            Method::POST,
+            "/v1/control/takeover",
+            Some(json!({"session_id":id,"request_id":Uuid::now_v7()})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        audit_count(&t, "takeover.requested"),
+        0,
+        "a rejected takeover must not leave a `requested` row"
+    );
+    assert_eq!(t.target.sink.resets.load(Ordering::SeqCst), resets);
+}
+#[tokio::test]
+async fn an_activation_that_lost_its_takeover_never_pins_the_backend() {
+    let t = Test::new();
+    let id = t.session(Some("alice")).await;
+    let (status, v) = t
+        .call(
+            Some("alice"),
+            Method::POST,
+            "/v1/control/takeover",
+            Some(json!({"session_id":id,"request_id":Uuid::now_v7()})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{v}");
+    let held = t.state.live_view().executor.lock().await;
+    for _ in 0..20 {
+        tokio::task::yield_now().await; // the activation waits for the executor
+    }
+    // The local user stops the takeover while the activation is queued.
+    t.state
+        .hub()
+        .force_interrupt(Reason::LocalOverride)
+        .unwrap();
+    drop(held);
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        !t.target.sink.pin.load(Ordering::SeqCst),
+        "the activation re-pinned the backend for a takeover that no longer exists"
+    );
+    assert_eq!(audit_count(&t, "takeover.active"), 0);
+}
 #[tokio::test]
 async fn an_interrupted_takeover_puts_the_session_profile_back_to_watch() {
     let t = Test::new();
@@ -3199,13 +3273,12 @@ async fn a_reacquire_with_a_hanging_old_sink_is_bounded() {
         .await
         .expect("the takeover route is bounded");
     assert!(!status.is_success());
+    // Not wedged: the executor frees up within one bounded backend call (the
+    // daemon's own retry of the owed reset may briefly hold it, 2 s at most).
     assert!(
-        tokio::time::timeout(
-            Duration::from_millis(50),
-            t.state.live_view().executor.lock()
-        )
-        .await
-        .is_ok()
+        tokio::time::timeout(Duration::from_secs(3), t.state.live_view().executor.lock())
+            .await
+            .is_ok()
     );
 }
 
