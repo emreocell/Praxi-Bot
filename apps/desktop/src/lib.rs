@@ -828,6 +828,13 @@ fn setup_dev_menu(app: &tauri::App, control: ControlHandle) {
 /// Panics if the Tauri application fails to initialize or run.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Protect the desktop before it generates a per-launch daemon credential.
+    // The daemon independently applies its child no-new-privs policy.
+    process_guard::protect(process_guard::Policy {
+        linux_no_new_privs: false,
+        ..process_guard::Policy::default()
+    })
+    .expect("cannot protect desktop credential process");
     let control = ControlHandle::new(Duration::from_millis(DEFAULT_PRE_ACTION_HIGHLIGHT_MS));
     let control_for_setup = control.clone();
     let daemon_handle = Arc::new(DaemonHandle::default());

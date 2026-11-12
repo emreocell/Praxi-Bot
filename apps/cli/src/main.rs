@@ -667,6 +667,14 @@ fn run_doctor(cli: &Cli, c: &DoctorCmd, data_dir: &std::path::Path) -> Result<()
 fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result<()> {
     use std::sync::Arc;
 
+    // Before reading the bootstrap secret or creating worker threads: child
+    // processes must not get a chance to pre-open this credential holder.
+    let guard = process_guard::protect(process_guard::Policy::load(data_dir)?)?;
+    if !guard.memory_guard {
+        eprintln!(
+            "warning: process memory guard is disabled or unsupported; same-user children may read management credentials"
+        );
+    }
     let management_token = if matches!(
         command,
         Command::Serve {

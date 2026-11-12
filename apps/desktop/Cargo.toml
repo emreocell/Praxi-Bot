@@ -20,6 +20,7 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+process-guard = { path = "../../crates/process-guard", version = "0.1.0" }
 getrandom = "0.3"
 parking_lot.workspace = true
 serde.workspace = true

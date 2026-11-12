@@ -145,3 +145,46 @@ bu riskler bitmiş sayılmaz.
 - [Mandatory Integrity Control](https://learn.microsoft.com/en-us/windows/win32/secauthz/mandatory-integrity-control)
 - [Linux ptrace erişim denetimi](https://man7.org/linux/man-pages/man2/ptrace.2.html)
 - [Linux no_new_privs](https://docs.kernel.org/userspace-api/no_new_privs.html)
+
+## İkinci kilometre taşı: uyumlu süreç koruması (tam sandbox değil)
+
+Windows'ta rastgele bir komutu restricted token/AppContainer ile, bütün kullanıcı
+çalışma dizinlerine yazma ve CLI login dizinlerini kullanma davranışını koruyarak
+çalıştırdığımız iddia edilmiyor. Bunun yerine credential tutan **daemon ve
+masaüstü**, sır üretilmeden/okunmadan önce kendi process object DACL'ını daraltır.
+`OWNER RIGHTS` ACE, aynı kullanıcının örtük `WRITE_DAC` hakkıyla DACL'ı geri
+almasını engeller. Owner yalnız query-limited, synchronize, terminate ve
+READ_CONTROL alır; SYSTEM tam erişimi korur. Bellek okuma/yazma, handle çoğaltma,
+uzak thread/parent-process oluşturma ve DACL/owner değiştirme için yeni process
+handle açılması reddedilir. Mevcut trusted ebeveynin sidecar handle'ı geçerlidir.
+Sentez testte çocuk, koruma öncesi okuyabildiği parent process'e koruma sonrası
+VM_READ / DUP_HANDLE / WRITE_DAC ile erişemez; query-limited çalışır.
+
+Bu **restricted-token veya low-integrity çocuk izolasyonu değildir**. Önceden
+alınmış handle'lar iptal edilmez. Thread object DACL'ları bu katmanda
+korunmaz; thread-context/APC/code-injection saldırıları, DLL/modül arama yolu
+ve UI otomasyonu halen değerlendirilmelidir. SeDebugPrivilege/yönetici ve
+SYSTEM kapsam dışıdır. Aynı kullanıcının disk dosyalarını değiştirmesi sürer.
+Bu nedenle tam hedefin OS sandbox bölümü açık kalır.
+
+Linux'ta daemon ve masaüstü `PR_SET_DUMPABLE=0` uygular. Böylece sıradan aynı
+UID'nin ptrace/process_vm_readv ve erişim kontrollü /proc bellek/ortam yolları
+engellenir (CAP_SYS_PTRACE/root hariç). Daemon, worker thread'leri oluşmadan
+`no_new_privs` ayarlar; shell, embedded script'in çağırdığı shell, MCP stdio ve
+CLI-provider çocukları bunu miras alır. setuid/file capability ile yükseltme
+olmaz. Mevcut process group/job yaşam döngüsü korunur. bwrap/Landlock ve ayrı
+UID henüz uygulanmadı; hidepid aynı UID için güvenlik sınırı değildir.
+
+`isolation.toml` policy dosyasında `memory_guard = false` veya
+`linux_no_new_privs = false` uyumluluk için açıkça seçilebilir. Varsayılanlar
+true; bozuk/bilinmeyen alan startup'ı durdurur. `no_new_privs` sudo/setuid
+araçlarını ve bazı eski Chromium sandbox kurulumlarını bozabilir. Windows
+memory guard, debugger/crash-dump erişimini kısıtlar. Kapatılan memory guard
+başlangıçta açık uyarı verir; çalışan sürecin flag'i araç parametresi veya
+ortam değişkeniyle değiştirilemez. Aynı kullanıcının bu policy dosyasını
+sonraki restart için değiştirebilmesi ayrı disk bütünlüğü riskidir.
+
+Windows native subprocess testi çalıştırıldı. Linux için cross-target check
+çalıştırılır; runtime, paketlenmiş Tauri/WebView2 ve gerçek CLI sağlayıcıları
+ile uyumluluk doğrulaması PR birleşmeden önce gereklidir. Bu sonuçlar bir
+sandbox doğrulaması diye sunulamaz.

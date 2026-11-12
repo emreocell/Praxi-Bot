@@ -113,3 +113,25 @@ Please do not post exploit details in a public issue. The repository does not
 list a dedicated security contact yet (**Planned**); contact the maintainers
 privately through the channel you use to reach them, and keep the report
 confidential until it is fixed.
+
+## Process memory hardening and compatibility
+
+Before reading its launch credential, the daemon protects its process object.
+On Windows, an OWNER RIGHTS DACL blocks new same-user opens for process memory,
+handle duplication and ACL changes; ordinary query/wait/termination still work.
+The desktop applies the same guard before generating credentials. This does not
+protect thread objects, revoke already-open handles, or stop DLL/code injection,
+UI automation or direct configuration writes. It is not a restricted-token or
+AppContainer sandbox. Administrator/debug privileges remain outside this guard.
+
+On Linux, credential holders become non-dumpable. The daemon also sets
+`no_new_privs` before creating workers, so shell, MCP and CLI-engine descendants
+inherit it. Existing jobs/process groups still manage process lifetimes. There
+is no separate UID, bwrap or Landlock filesystem boundary yet.
+
+For compatibility, `<data dir>/isolation.toml` accepts `memory_guard = false`
+and/or `linux_no_new_privs = false`; both default to true and malformed policy
+fails startup. Disabling memory protection logs a warning. No-new-privs prevents
+sudo/setuid/file-capability elevation and may affect older browser sandboxes.
+Process memory guards can prevent debugger/crash-dump attachment. Linux runtime
+and packaged Tauri compatibility still require validation before release.
