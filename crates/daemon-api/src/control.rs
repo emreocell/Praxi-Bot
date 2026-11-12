@@ -113,6 +113,15 @@ impl Drop for PendingGuard<'_> {
     }
 }
 
+/// What other clients may see of an actor identity: a paired device is shown
+/// by a short fingerprint, never by its full key.
+pub(crate) fn display_label(actor: &str) -> String {
+    match actor.strip_prefix("peer:") {
+        Some(key) => format!("peer:{}", key.chars().take(8).collect::<String>()),
+        None => actor.to_owned(),
+    }
+}
+
 /// Returned to the model by observation tools while the human drives.
 const OBSERVATION_PAUSED: &str = "The user is controlling the screen right now (observation paused), so this read was not performed: you must not see what they type. Do not retry it; wait until they give control back.";
 

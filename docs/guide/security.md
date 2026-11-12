@@ -157,9 +157,13 @@ counts, target kind); a stored message with any other text or role is never
 delivered as a system message, and a state-bundle import turns such rows (and any
 unknown role) into the inert `imported_note` role, which is never sent to the
 model; history forwards only an allow-list of roles (user, assistant, the genuine
-control note) and ignores every other value. The daemon's own files (`bot.db` with its WAL/SHM/journal,
-`control-latch.json`, `policy.json`, the bearer token) are protected from the
-bot's file tools for reading and writing, and a shell command that names them
+control note) and ignores every other value. The daemon's own files (`bot.db`, `schedules.db`, `memory.db` with their
+WAL/SHM/journal, `control-latch.json`, `policy.json`, `host.toml`, `config.toml`,
+`mcp.toml`, `providers.toml`, `web.toml`, the Telegram state files, the
+`peer`, `bots`, `profiles` and `runs` folders and the bearer token) are protected
+from the bot's file tools for reading and writing, including names that differ
+only by a trailing dot or space or by a `:stream` suffix on Windows; skills and
+workflows stay writable because the bot authors them, and a shell command that names them
 always asks for approval. That last rule is damping only: one approved
 `shell_run` still runs as you and can reach those files and the loopback API
 (see below). Audit stores only

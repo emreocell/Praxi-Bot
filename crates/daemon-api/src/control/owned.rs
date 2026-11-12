@@ -316,11 +316,22 @@ impl ControlHub {
             t.info.state = ViewState::Paused;
             t.info.reason = None;
             t.input_deadline = None;
+            let owned = t.clone();
+            drop(st);
+            self.emit_state(&owned, "paused", None);
         }
     }
     /// Never resumes; the executor also resets keys best effort.
     pub fn interrupt(&self, id: Uuid, reason: Reason) {
         let mut st = self.state.lock();
+        // Idempotent: repeating the same interruption writes and announces nothing.
+        if st.owned.as_ref().is_some_and(|t| {
+            t.info.id == id
+                && t.info.state == ViewState::Paused
+                && t.info.reason.as_ref() == Some(&reason)
+        }) {
+            return;
+        }
         let invalidating = st
             .owned
             .as_ref()
@@ -387,7 +398,7 @@ impl ControlHub {
     fn emit_state(&self, t: &OwnedTakeover, state: &str, reason: Option<Reason>) {
         let _ = self.events.send(crate::dto::ControlStateChanged::new(
             state,
-            &t.actor,
+            &super::display_label(&t.actor),
             t.info.target_id,
             reason,
         ));

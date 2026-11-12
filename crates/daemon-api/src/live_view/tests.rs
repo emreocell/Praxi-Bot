@@ -1306,6 +1306,9 @@ async fn takeover_lifecycle_is_announced_without_ids_pixels_or_text() {
     assert_eq!(states, ["acquiring", "active"]);
     let (code, _) = t.release(Some("alice"), &owned, Uuid::now_v7()).await;
     assert_eq!(code, StatusCode::OK);
+    // Release first pauses input (announced), then clears the latch.
+    let paused_for_release = events.try_recv().unwrap();
+    assert_eq!(paused_for_release.state, "paused");
     let released = events.try_recv().unwrap();
     assert_eq!(released.state, "released");
     assert_eq!(released.owner, "peer:alice");
@@ -1386,4 +1389,318 @@ async fn an_open_stream_audits_at_most_one_checkpoint_per_minute() {
     );
     let all = t.state.storage().list_audit(t.state.user_id()).unwrap();
     assert!(all.iter().any(|e| e.action == "view.started"));
+}
+
+const LONG_KEY: &str = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+
+async fn call_as_phone(
+    t: &Test,
+    key: &str,
+    method: Method,
+    path: &str,
+    body: Option<Value>,
+) -> StatusCode {
+    let mut request = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("host", "localhost")
+        .header("authorization", format!("Bearer {TOKEN}"))
+        .header("content-type", "application/json")
+        .body(body.map_or_else(Body::empty, |b| Body::from(b.to_string())))
+        .unwrap();
+    request.extensions_mut().insert(crate::PeerIdentity {
+        key: key.into(),
+        role: crate::PeerRole::Phone,
+    });
+    crate::peer_router(t.state.clone())
+        .oneshot(request)
+        .await
+        .unwrap()
+        .status()
+}
+
+async fn grant(t: &Test, key: &str, view: bool, input: bool) {
+    let (status, _) = t
+        .call(
+            None,
+            Method::PUT,
+            &format!("/v1/view/privileges/{key}"),
+            Some(json!({"view":view,"input":input})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn a_local_override_is_terminal_for_peers_until_the_local_user_clears_it() {
+    let t = Test::new();
+    let (id, owned, _body) = t.active(Some("alice")).await;
+    let (status, _) = t
+        .call(None, Method::POST, "/v1/control/override", None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let reacquire = |session: Uuid, takeover: Uuid| json!({"session_id":session,"request_id":Uuid::now_v7(),"reacquire_takeover_id":takeover});
+    // The overridden peer lost its input grant: it needs a new one.
+    t.auto_grant.store(false, Ordering::SeqCst);
+    let (status, _) = t
+        .call(
+            Some("alice"),
+            Method::POST,
+            "/v1/control/takeover",
+            Some(reacquire(id, owned.id)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "input grant was revoked");
+    // Even with a fresh grant, the override stays terminal for every peer.
+    grant(&t, "alice", true, true).await;
+    let (status, _) = t
+        .call(
+            Some("alice"),
+            Method::POST,
+            "/v1/control/takeover",
+            Some(reacquire(id, owned.id)),
+        )
+        .await;
+    assert!(
+        !status.is_success(),
+        "reacquire after a local override: {status}"
+    );
+    // A second granted Desktop peer cannot recover it either.
+    grant(&t, "bob", true, true).await;
+    let bob_session = t.session(Some("bob")).await;
+    let (status, _) = t
+        .call(
+            Some("bob"),
+            Method::POST,
+            "/v1/control/takeover",
+            Some(json!({"session_id":bob_session,"request_id":Uuid::now_v7(),"recover":true,"reason":"owner_lost"})),
+        )
+        .await;
+    assert!(
+        !status.is_success(),
+        "peer recover after override: {status}"
+    );
+    let now = t.state.hub().takeover().unwrap();
+    assert_eq!(now.actor, "peer:alice");
+    assert_eq!(now.info.reason, Some(Reason::LocalOverride));
+    assert!(t.state.hub().latched().is_some());
+    // Only the local user can clear it.
+    let (status, v) = t
+        .call(None, Method::POST, "/v1/control/recover", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert!(t.state.hub().takeover().is_none() && t.state.hub().latched().is_none());
+}
+
+#[tokio::test]
+async fn repeated_app_pause_heartbeats_override_once() {
+    let t = Test::new();
+    let mut events = t.state.hub().subscribe_events();
+    let (_id, _owned, _body) = t.active(Some("alice")).await;
+    while events.try_recv().is_ok() {}
+    let audits = |t: &Test| {
+        t.state
+            .storage()
+            .list_audit(t.state.user_id())
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.action == "takeover.interrupted")
+            .count()
+    };
+    let resets = t.target.sink.resets.load(Ordering::SeqCst);
+    for _ in 0..6 {
+        let (status, _) = t
+            .call(
+                None,
+                Method::PUT,
+                "/v1/control/state",
+                Some(json!({"mode":"paused","release":false})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    assert_eq!(audits(&t), 1, "one audit row for six heartbeats");
+    let mut paused = 0;
+    while let Ok(e) = events.try_recv() {
+        paused += usize::from(e.state == "paused");
+    }
+    assert_eq!(paused, 1, "one event for six heartbeats");
+    assert_eq!(
+        t.target.sink.resets.load(Ordering::SeqCst) - resets,
+        1,
+        "one reset of pressed inputs"
+    );
+}
+
+#[tokio::test]
+async fn a_peer_needs_an_input_grant_to_release_or_change_the_users_latch() {
+    let t = Test::new();
+    t.auto_grant.store(false, Ordering::SeqCst);
+    let release = || (Method::POST, "/v1/control/release");
+    // The user's own plain pause.
+    t.state.hub().put_state(crate::dto::ControlMode::Paused);
+    for key in ["alice"] {
+        let (method, path) = release();
+        assert_eq!(
+            t.call(Some(key), method, path, None).await.0,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            t.call(
+                Some(key),
+                Method::PUT,
+                "/v1/control/state",
+                Some(json!({"mode":"idle","release":true}))
+            )
+            .await
+            .0,
+            StatusCode::FORBIDDEN
+        );
+    }
+    assert_eq!(
+        call_as_phone(&t, "phone", Method::POST, "/v1/control/release", None).await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        call_as_phone(
+            &t,
+            "phone",
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode":"idle","release":true}))
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    assert!(t.state.hub().latched().is_some(), "nobody released it");
+    // View alone is not enough.
+    grant(&t, "alice", true, false).await;
+    assert_eq!(
+        t.call(Some("alice"), Method::POST, "/v1/control/release", None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    // An explicit input grant lets a Desktop peer and a phone release it.
+    grant(&t, "alice", true, true).await;
+    grant(&t, "phone", true, true).await;
+    assert_eq!(
+        call_as_phone(&t, "phone", Method::POST, "/v1/control/release", None).await,
+        StatusCode::OK
+    );
+    assert!(t.state.hub().latched().is_none());
+    // The same holds for the app-set human_driving latch and the PUT path.
+    t.state
+        .hub()
+        .put_state(crate::dto::ControlMode::HumanDriving);
+    grant(&t, "alice", true, false).await;
+    assert_eq!(
+        t.call(
+            Some("alice"),
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode":"idle","release":true}))
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        t.call(
+            None,
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode":"idle","release":true}))
+        )
+        .await
+        .0,
+        StatusCode::OK,
+        "the local user always can"
+    );
+    assert!(t.state.hub().latched().is_none());
+}
+
+#[tokio::test]
+async fn a_local_override_latch_is_local_only_even_for_a_granted_peer() {
+    let t = Test::new();
+    let (_id, _owned, _body) = t.active(Some("alice")).await;
+    t.call(None, Method::POST, "/v1/control/override", None)
+        .await;
+    t.auto_grant.store(false, Ordering::SeqCst);
+    grant(&t, "bob", true, true).await;
+    for (method, path, body) in [
+        (Method::POST, "/v1/control/release", None),
+        (
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode":"idle","release":true})),
+        ),
+    ] {
+        let (status, _) = t.call(Some("bob"), method, path, body).await;
+        assert!(!status.is_success(), "{path}: {status}");
+    }
+    assert!(t.state.hub().latched().is_some());
+    assert_eq!(
+        t.state.hub().takeover().unwrap().info.reason,
+        Some(Reason::LocalOverride)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn denied_peer_requests_write_one_audit_row_a_minute_with_a_count() {
+    let t = Test::new();
+    t.auto_grant.store(false, Ordering::SeqCst);
+    let rows = |t: &Test| -> Vec<storage::AuditEntry> {
+        t.state
+            .storage()
+            .list_audit(t.state.user_id())
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.action == "view.denied")
+            .collect()
+    };
+    for _ in 0..50 {
+        let (status, _) = t
+            .call(Some("mallory"), Method::GET, "/v1/view/targets", None)
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+    assert_eq!(rows(&t).len(), 1, "50 denials, one row");
+    tokio::time::advance(Duration::from_secs(61)).await;
+    let _ = t
+        .call(Some("mallory"), Method::GET, "/v1/view/targets", None)
+        .await;
+    let after = rows(&t);
+    assert_eq!(after.len(), 2);
+    let folded = after[1].detail["suppressed_since_last"].as_u64().unwrap();
+    assert!(
+        folded >= 49,
+        "the second row carries the suppressed count: {:?}",
+        after[1]
+    );
+    // Another actor is counted separately.
+    let _ = t
+        .call(Some("eve"), Method::GET, "/v1/view/targets", None)
+        .await;
+    assert_eq!(rows(&t).len(), 3);
+}
+
+#[tokio::test]
+async fn the_event_stream_shows_a_short_label_never_the_full_device_key() {
+    let t = Test::new();
+    let mut events = t.state.hub().subscribe_events();
+    let (_id, _owned, _body) = t.active(Some(LONG_KEY)).await;
+    let mut seen = Vec::new();
+    while let Ok(e) = events.try_recv() {
+        seen.push(e);
+    }
+    assert!(!seen.is_empty());
+    for e in &seen {
+        assert_eq!(e.owner, "peer:abcdef01");
+        assert!(!serde_json::to_string(e).unwrap().contains(LONG_KEY));
+    }
+    // GET state: the owner sees its own full identity, others only the label.
+    let (_, other) = t.call(None, Method::GET, "/v1/control/state", None).await;
+    assert_eq!(other["takeover"]["owner"], json!("peer:abcdef01"));
+    assert!(!other.to_string().contains(LONG_KEY));
 }

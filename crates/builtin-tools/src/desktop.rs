@@ -951,6 +951,7 @@ impl DesktopTool {
                 {
                     sh.state.lock().map.remove(run_id);
                     let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    permit.observed();
                     return Ok(format!(
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
@@ -1052,6 +1053,7 @@ impl DesktopTool {
                 {
                     sh.state.lock().map.remove(run_id);
                     let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    permit.observed();
                     return Ok(format!(
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
@@ -1076,6 +1078,7 @@ impl DesktopTool {
                 {
                     sh.state.lock().map.remove(run_id);
                     let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    permit.observed();
                     return Ok(format!(
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
@@ -1109,6 +1112,7 @@ impl DesktopTool {
                 {
                     sh.state.lock().map.remove(run_id);
                     let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    permit.observed();
                     return Ok(format!(
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
@@ -1153,6 +1157,7 @@ impl DesktopTool {
                 {
                     sh.state.lock().map.remove(run_id);
                     let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    permit.observed();
                     return Ok(format!(
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
@@ -1203,6 +1208,7 @@ impl DesktopTool {
                 {
                     sh.state.lock().map.remove(run_id);
                     let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    permit.observed();
                     return Ok(format!(
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
@@ -1242,6 +1248,7 @@ impl DesktopTool {
                 {
                     sh.state.lock().map.remove(run_id);
                     let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    permit.observed();
                     return Ok(format!(
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));

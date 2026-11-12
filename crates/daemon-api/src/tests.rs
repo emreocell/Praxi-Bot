@@ -2518,6 +2518,17 @@ async fn latched_pause_survives_a_daemon_restart() {
 #[tokio::test]
 async fn peer_control_state_changes_are_audited_with_the_device_as_actor() {
     let t = setup();
+    // Releasing the user's latch needs an explicit per-device input grant.
+    t.state
+        .set_screen_privileges(
+            "peer:paired-key".into(),
+            crate::live_view::ScreenPrivileges {
+                view: true,
+                input: true,
+            },
+        )
+        .await
+        .unwrap();
     for (method, path, body) in [
         (
             Method::PUT,
@@ -2587,6 +2598,16 @@ async fn providers_lists_secret_free_cli_records_without_probing() {
 #[tokio::test]
 async fn peer_heartbeats_only_audit_mode_changes_and_explicit_release() {
     let t = setup();
+    t.state
+        .set_screen_privileges(
+            "peer:heartbeat-peer".into(),
+            crate::live_view::ScreenPrivileges {
+                view: true,
+                input: true,
+            },
+        )
+        .await
+        .unwrap();
     for (body, expected_rows) in [
         (json!({"mode":"paused"}), 2),
         (json!({"mode":"paused"}), 2),

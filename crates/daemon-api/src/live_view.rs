@@ -90,6 +90,9 @@ pub struct LiveView {
     executor: tokio::sync::Mutex<()>,
     rates: Mutex<BTreeMap<String, input::Rate>>,
     pending_input: Arc<std::sync::atomic::AtomicUsize>,
+    /// Last written denial audit per `actor|event`, and how many were folded
+    /// into it since (see [`audit`]).
+    denials: Mutex<BTreeMap<String, (Instant, u64)>>,
 }
 impl LiveView {
     pub(crate) fn capture_targets(&self) -> std::collections::BTreeSet<Uuid> {
@@ -199,13 +202,36 @@ fn backend(_: ViewError) -> ApiError {
 fn parse<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, ApiError> {
     serde_json::from_slice(bytes).map_err(|_| ApiError::bad_request("invalid live-view request"))
 }
+/// Denied attempts of one actor are audited at most once a minute per event;
+/// the next row says how many were folded into the silence before it.
+const DENIAL_AUDIT_WINDOW: Duration = Duration::from_secs(60);
+
 #[allow(clippy::needless_pass_by_value)] // Fixed, ephemeral metadata values are built at each call site.
 fn audit(
     s: &AppState,
     actor: &Actor,
     event: &str,
-    meta: serde_json::Value,
+    mut meta: serde_json::Value,
 ) -> Result<(), ApiError> {
+    if matches!(event, "view.denied" | "input.batch_rejected") {
+        let mut denials = s.live_view().denials.lock();
+        if denials.len() > 256 {
+            denials.clear();
+        }
+        let now = Instant::now();
+        let entry = denials
+            .entry(format!("{}|{event}", actor.key))
+            .or_insert((now, u64::MAX));
+        if entry.1 != u64::MAX && now.duration_since(entry.0) < DENIAL_AUDIT_WINDOW {
+            entry.1 += 1;
+            return Ok(());
+        }
+        let folded = if entry.1 == u64::MAX { 0 } else { entry.1 };
+        *entry = (now, 0);
+        if let Some(object) = meta.as_object_mut() {
+            object.insert("suppressed_since_last".into(), folded.into());
+        }
+    }
     s.storage()
         .append_audit(s.user_id(), None, &actor.key, event, &meta)
         .map(|_| ())
@@ -509,6 +535,24 @@ pub(crate) async fn takeover(
     if live.pending_input.load(std::sync::atomic::Ordering::SeqCst) != 0 {
         return Err(ApiError::conflict("previous input still draining"));
     }
+    // The local user's override outranks every paired device: neither the
+    // overridden peer (reacquire) nor another one (recover) may re-take the
+    // screen; only the local user clears it.
+    if !actor.local
+        && s.hub()
+            .takeover()
+            .is_some_and(|t| t.info.reason == Some(Reason::LocalOverride))
+    {
+        audit(
+            &s,
+            &actor,
+            "view.denied",
+            serde_json::json!({"target_id":target,"reason":"local_override"}),
+        )?;
+        return Err(ApiError::forbidden(
+            "the local user stopped the takeover; only the local user can clear it",
+        ));
+    }
     if !live.allowed(&actor, true)
         || !target_impl.info().capabilities.input
         || target_impl.input_sink().is_none()
@@ -610,6 +654,31 @@ pub(crate) async fn takeover(
     Ok((StatusCode::ACCEPTED, Json(result)))
 }
 
+/// Releasing or changing a latch the caller does not own: the local user, or a
+/// peer that currently holds an explicit per-device `input` grant. A latch left
+/// by a local override is local-only whatever the grants.
+pub(crate) fn require_latch_authority(s: &AppState, actor: &Actor) -> Result<(), ApiError> {
+    if actor.local {
+        return Ok(());
+    }
+    let overridden = s
+        .hub()
+        .takeover()
+        .is_some_and(|t| t.info.reason == Some(Reason::LocalOverride));
+    if overridden || !s.live_view().allowed(actor, true) {
+        audit(
+            s,
+            actor,
+            "view.denied",
+            serde_json::json!({"reason":"latch_authority"}),
+        )?;
+        return Err(ApiError::forbidden(
+            "changing the user's pause needs the local user or an input grant for this device",
+        ));
+    }
+    Ok(())
+}
+
 fn require_local(s: &AppState, actor: &Actor, what: &str) -> Result<(), ApiError> {
     if actor.local {
         return Ok(());
@@ -631,13 +700,39 @@ async fn override_takeover(
     actor: &Actor,
     reason: Reason,
 ) -> Result<Option<OwnedTakeover>, ApiError> {
+    // Idempotent: an app heartbeat every few seconds must not re-run the
+    // latch write, the event, the audit row and the key reset.
+    if s.hub()
+        .takeover()
+        .is_some_and(|t| t.info.state == ViewState::Paused && t.info.reason == Some(reason.clone()))
+    {
+        return Ok(None);
+    }
     let Some(old) = s.hub().force_interrupt(reason.clone()) else {
         return Ok(None);
     };
     let live = s.live_view();
     let _executor = live.executor.lock().await;
     let t = s.hub().takeover().unwrap_or(old.clone());
-    interrupt(s, actor, &t, reason).await?;
+    interrupt(s, actor, &t, reason.clone()).await?;
+    // A local override is terminal for the overridden device: it needs a new
+    // per-device input grant from the local user to take over again. (Set
+    // directly, not through `set_screen_privileges`, which would replace the
+    // recorded reason with `revoked`.)
+    if reason == Reason::LocalOverride && old.actor.starts_with("peer:") {
+        let keep_view = live
+            .privileges
+            .lock()
+            .get(&old.actor)
+            .is_none_or(|p| p.view);
+        live.set_privileges(
+            old.actor.clone(),
+            ScreenPrivileges {
+                view: keep_view,
+                input: false,
+            },
+        );
+    }
     Ok(Some(old))
 }
 

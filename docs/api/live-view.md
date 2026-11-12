@@ -50,12 +50,25 @@ Frame viewers do not register as overlay controllers.
 - `POST /v1/view/sessions/{id}/input` carries version, takeover/epoch, generation,
   geometry revision, first sequence number and typed events.
 - `POST /v1/control/override` (local user only) interrupts any takeover, whoever
-  owns it, resets pressed inputs and keeps the bot paused. `PUT /v1/control/state`
+  owns it, resets pressed inputs and keeps the bot paused. It is idempotent (an
+  app that re-sends `paused` every few seconds causes one latch write, one audit
+  row, one event and one key reset) and terminal for paired devices: the
+  overridden device loses its input grant, and neither it (`reacquire_takeover_id`)
+  nor any other device (`recover: true`) can take the screen again while the
+  latch carries the `local_override` reason. Only the local user clears it
+  (`recover`), and a new takeover then needs a fresh per-device grant. `PUT /v1/control/state`
   with `mode: paused` from the local user does the same while a takeover is owned.
 - `POST /v1/control/recover` (local user only) clears a takeover latch, including
   one restored after a restart, without a view session or a registered target.
   A latch that never had a takeover owner is released with the ordinary release.
-- `GET /v1/control/state` returns the takeover's owner, target and state to
+- Releasing or changing a latch the caller does not own (`POST /v1/control/release`
+  without a body, `PUT /v1/control/state` with `release: true` or a different
+  pause mode) needs the local user or a paired device that currently holds the
+  `input` grant; without it the answer is 403. A latch left by a local override
+  is local-only whatever the grants. A device may still report a mode and set a
+  first pause.
+- `GET /v1/control/state` returns the takeover's owner (a short label,
+  `peer:<first 8 characters>`, for paired devices other than the caller), target and state to
   everyone, but the takeover id, session id and epoch only to the owner (the
   others see nil ids and epoch 0).
 - `POST /v1/control/release` requires owner, takeover/epoch and `request_id` while
@@ -109,11 +122,17 @@ The adapter must call `CdpDriver::set_takeover_pin` for active takeover only.
 The global event stream (`GET /v1/events`, not replayed) carries
 `control_state_changed` (`state` acquiring/active/paused/released/recovered,
 `owner`, `target_id`, `reason`) for an indicator in a UI; it never carries ids,
-epochs, pixels, text or keys.
+epochs, pixels, text, keys or a full device key (`owner` is `local-ui:...` or the
+short label `peer:<first 8 characters of the key>`). Release first announces
+`paused` (input stopped), then `released`.
 
 While the latch is `human_driving`, observation tools are refused as well
 (browser snapshot/screenshot/tabs list/wait, desktop state/OCR/window list) with
-an "observation paused" result. Plain `paused` keeps today's read behaviour.
+an "observation paused" result. Plain `paused` (not human-driving) keeps today's
+read behaviour: reads still work. The gate covers only the built-in browser and
+desktop tools. It does NOT cover screenshot or read tools of MCP servers, nor
+`shell_run` (a shell command can capture the screen or read files); those run
+outside this gate, as do other independent processes.
 A bot action that waits for the latch gives up after 30 minutes with a clear
 message; the latch is not changed.
 
@@ -122,6 +141,9 @@ takes admission, later computer calls of that script inherit it, and a script
 that never touches the computer neither waits for a pause nor holds the computer
 slot. Managed Chromium does not idle-close while a run that used the computer is
 still active; its idle clock restarts when that run ends.
+
+Denied attempts (`view.denied`, `input.batch_rejected`) are audited at most once
+a minute per actor and event; the next row carries `suppressed_since_last`.
 
 Audit volume: session open/close, takeover acquire/release/interrupt/denied and
 input batches are audited; an open stream adds at most one `view.checkpoint` per

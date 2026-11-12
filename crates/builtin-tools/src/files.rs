@@ -3885,12 +3885,18 @@ mod tests {
                 .call(&c, json!({"path": &file}))
                 .await
                 .unwrap_err();
-            assert!(matches!(err, ToolError::PermissionDenied(_)), "{dir}: {err}");
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "{dir}: {err}"
+            );
             let err = get(&t, "fs_write")
                 .call(&c, json!({"path": &file, "content": "x"}))
                 .await
                 .unwrap_err();
-            assert!(matches!(err, ToolError::PermissionDenied(_)), "{dir}: {err}");
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "{dir}: {err}"
+            );
         }
         // Bot-authored by design (skills, workflows) or bot output: ordinary.
         for dir in ["skills", "workflows", "screenshots", "files"] {
@@ -3925,7 +3931,10 @@ mod tests {
                 "{name:?} must resolve to a protected name"
             );
         }
-        assert!(is_protected(&d.path().join("bots. ").join("a.toml"), d.path()));
+        assert!(is_protected(
+            &d.path().join("bots. ").join("a.toml"),
+            d.path()
+        ));
         assert!(!is_protected(&d.path().join("notes.txt."), d.path()));
     }
 
@@ -3939,7 +3948,10 @@ mod tests {
                 .call(&c, json!({"path": &file, "content": "forged"}))
                 .await
                 .unwrap_err();
-            assert!(matches!(err, ToolError::PermissionDenied(_)), "{name:?}: {err}");
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "{name:?}: {err}"
+            );
             assert!(!d.path().join("control-latch.json").exists());
             assert!(!d.path().join("policy.json").exists());
             assert!(!d.path().join("mcp.toml").exists());

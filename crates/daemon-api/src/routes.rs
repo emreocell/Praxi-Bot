@@ -724,6 +724,7 @@ pub(crate) fn control_state_dto(
         takeover: s.hub().takeover().map(|t| {
             let mut info = t.info;
             if viewer.is_none_or(|v| v.key != t.actor) {
+                info.owner = crate::control::display_label(&t.actor);
                 info.id = uuid::Uuid::nil();
                 info.session_id = uuid::Uuid::nil();
                 info.control_epoch = 0;
@@ -748,6 +749,7 @@ pub(crate) async fn release_control(
 ) -> Result<Json<ControlStateDto>, ApiError> {
     let mut dto;
     if body.is_empty() {
+        crate::live_view::require_latch_authority(&s, &actor)?;
         s.hub().try_release().map_err(ApiError::conflict)?;
         dto = control_state_dto(&s, Some(&actor));
     } else {
@@ -806,6 +808,16 @@ pub(crate) async fn put_control_state(
     axum::Extension(actor): axum::Extension<crate::live_view::Actor>,
     ApiJson(input): ApiJson<ControlStateInput>,
 ) -> Result<Json<ControlStateDto>, ApiError> {
+    // A peer may report a mode or set a first pause, but releasing or changing
+    // a latch it does not own needs the local user or an input grant.
+    let changes_latch = input.release
+        || (matches!(
+            input.mode,
+            crate::dto::ControlMode::Paused | crate::dto::ControlMode::HumanDriving
+        ) && s.hub().latched().is_some_and(|l| l != input.mode));
+    if changes_latch {
+        crate::live_view::require_latch_authority(&s, &actor)?;
+    }
     // The local app's Pause/Stop must work during anybody's takeover: it
     // overrides the takeover and keeps the pause. Paired peers cannot.
     if actor.local

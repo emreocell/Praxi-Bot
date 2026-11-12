@@ -62,7 +62,9 @@ pub trait DesktopControlGate: Send + Sync {
 #[derive(Clone, Default)]
 pub struct ActionPermit {
     inner: std::sync::Arc<PermitInner>,
-    reobserve: bool,
+    /// Shared by every clone of this permit (a script's later calls inherit
+    /// it): cleared when a fresh observation was really made.
+    reobserve: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 #[derive(Default)]
 struct PermitInner {
@@ -72,7 +74,7 @@ impl ActionPermit {
     #[must_use]
     pub fn new(reobserve: bool, completion: impl FnOnce() + Send + Sync + 'static) -> Self {
         Self {
-            reobserve,
+            reobserve: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(reobserve)),
             inner: std::sync::Arc::new(PermitInner {
                 completion: std::sync::Mutex::new(Some(Box::new(completion))),
             }),
@@ -80,7 +82,13 @@ impl ActionPermit {
     }
     #[must_use]
     pub fn needs_observation(&self) -> bool {
+        self.reobserve.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    /// A fresh observation was made for this admission: later actions under
+    /// the same permit (the rest of a script) are ordinary again.
+    pub fn observed(&self) {
         self.reobserve
+            .store(false, std::sync::atomic::Ordering::SeqCst);
     }
     /// Once dispatched, actual backend completion owns a clone of this permit.
     /// # Errors

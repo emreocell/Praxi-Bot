@@ -367,6 +367,67 @@ mod tests {
         assert_eq!(browser.calls.lock().len(), 2);
     }
 
+    /// The first admission waited out a pause (needs a fresh observation); the
+    /// later ones are ordinary.
+    struct ReobserveFirst(std::sync::atomic::AtomicUsize);
+    #[async_trait::async_trait]
+    impl DesktopControlGate for ReobserveFirst {
+        async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+            Ok(())
+        }
+        async fn admit_background_action(
+            &self,
+            _req: &ControlRequest,
+        ) -> Result<ActionPermit, String> {
+            let first = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0;
+            Ok(ActionPermit::new(first, || {}))
+        }
+        async fn admit_action(&self, req: &ControlRequest) -> Result<ActionPermit, String> {
+            self.admit_background_action(req).await
+        }
+    }
+
+    #[tokio::test]
+    async fn a_script_that_waited_through_a_pause_observes_once_and_then_acts() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::new();
+        let gate = Arc::new(ReobserveFirst(std::sync::atomic::AtomicUsize::new(0)));
+        let browser = Arc::new(browser::fake::FakeBrowser::default());
+        let mut config = BuiltinConfig::new(dir.path().into(), Arc::new(AllowAll));
+        config.browser = Some(browser.clone());
+        config.control = Some(gate.clone());
+        let _ = register_builtin_tools(&registry, config);
+        let out = registry
+            .get("script_run")
+            .unwrap()
+            .call(
+                &tool_registry::ToolContext::default(),
+                serde_json::json!({"code":"const a = await tools.call('browser_click',{ref:'e1'}); const b = await tools.call('browser_press',{key:'Enter'}); const c = await tools.call('browser_press',{key:'Tab'}); return [a, b, c];"}),
+            )
+            .await
+            .unwrap();
+        let tool_registry::ContentPart::Text { text } = &out.content[0] else {
+            panic!()
+        };
+        // One admission for the whole script.
+        assert_eq!(gate.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let calls = browser.calls.lock().clone();
+        // The first call was discarded for a fresh observation (no click was
+        // dispatched); the later ones were really performed.
+        assert!(!calls.iter().any(|c| c.starts_with("click")), "{calls:?}");
+        assert!(calls.iter().any(|c| c.starts_with("press")), "{calls:?}");
+        assert_eq!(
+            calls.iter().filter(|c| c.starts_with("press")).count(),
+            2,
+            "{calls:?} / {text}"
+        );
+        assert_eq!(
+            text.matches("previous action discarded").count(),
+            1,
+            "only the first call is discarded: {text}"
+        );
+    }
+
     #[tokio::test]
     async fn a_script_that_never_touches_the_computer_is_never_admitted() {
         let dir = tempfile::tempdir().unwrap();

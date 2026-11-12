@@ -974,7 +974,11 @@ impl BrowserTool {
                             .map_or(0, |g| g.observation_epoch()),
                         std::sync::atomic::Ordering::SeqCst,
                     );
-                    return d.snapshot(false).await.map(|s| format!("Human intervention completed; previous action discarded. Fresh observation:\n{s}")).map_err(exec_err);
+                    let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
                 }
                 permit
                     .protect(async move {
@@ -1036,7 +1040,11 @@ impl BrowserTool {
                             .map_or(0, |g| g.observation_epoch()),
                         std::sync::atomic::Ordering::SeqCst,
                     );
-                    return d.snapshot(false).await.map(|s| format!("Human intervention completed; previous action discarded. Fresh observation:\n{s}")).map_err(exec_err);
+                    let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
                 }
                 permit
                     .protect(async move {
@@ -1067,7 +1075,11 @@ impl BrowserTool {
                             .map_or(0, |g| g.observation_epoch()),
                         std::sync::atomic::Ordering::SeqCst,
                     );
-                    return d.snapshot(false).await.map(|s| format!("Human intervention completed; previous action discarded. Fresh observation:\n{s}")).map_err(exec_err);
+                    let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
                 }
                 permit
                     .protect(async move { d.fill(&i.r#ref, &i.text).await })
@@ -1095,7 +1107,11 @@ impl BrowserTool {
                             .map_or(0, |g| g.observation_epoch()),
                         std::sync::atomic::Ordering::SeqCst,
                     );
-                    return d.snapshot(false).await.map(|s| format!("Human intervention completed; previous action discarded. Fresh observation:\n{s}")).map_err(exec_err);
+                    let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
                 }
                 permit
                     .protect(async move { d.select(&i.r#ref, &i.value).await })
@@ -1123,7 +1139,11 @@ impl BrowserTool {
                             .map_or(0, |g| g.observation_epoch()),
                         std::sync::atomic::Ordering::SeqCst,
                     );
-                    return d.snapshot(false).await.map(|s| format!("Human intervention completed; previous action discarded. Fresh observation:\n{s}")).map_err(exec_err);
+                    let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
                 }
                 permit
                     .protect(async move { d.press(&i.key).await })
@@ -1153,7 +1173,11 @@ impl BrowserTool {
                             .map_or(0, |g| g.observation_epoch()),
                         std::sync::atomic::Ordering::SeqCst,
                     );
-                    return d.snapshot(false).await.map(|s| format!("Human intervention completed; previous action discarded. Fresh observation:\n{s}")).map_err(exec_err);
+                    let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
                 }
                 permit
                     .protect(async move { d.scroll(i.r#ref.as_deref(), i.dx, i.dy).await })
@@ -1200,7 +1224,11 @@ impl BrowserTool {
                             .map_or(0, |g| g.observation_epoch()),
                         std::sync::atomic::Ordering::SeqCst,
                     );
-                    return d.snapshot(false).await.map(|s| format!("Human intervention completed; previous action discarded. Fresh observation:\n{s}")).map_err(exec_err);
+                    let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
                 }
                 permit
                     .protect(async move { d.back_opts(i.dialog.as_deref()).await })
@@ -1233,7 +1261,11 @@ impl BrowserTool {
                                 .map_or(0, |g| g.observation_epoch()),
                             std::sync::atomic::Ordering::SeqCst,
                         );
-                        return d.snapshot(false).await.map(|s| format!("Human intervention completed; previous action discarded. Fresh observation:\n{s}")).map_err(exec_err);
+                        let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                        permit.observed();
+                        return Ok(format!(
+                            "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                        ));
                     }
                     permit
                         .protect(async move { d.tabs(i.switch_to).await })
@@ -1274,7 +1306,11 @@ impl BrowserTool {
                             .map_or(0, |g| g.observation_epoch()),
                         std::sync::atomic::Ordering::SeqCst,
                     );
-                    return d.snapshot(false).await.map(|s| format!("Human intervention completed; previous action discarded. Fresh observation:\n{s}")).map_err(exec_err);
+                    let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
                 }
                 permit
                     .protect(async move { d.eval(&i.js).await })
