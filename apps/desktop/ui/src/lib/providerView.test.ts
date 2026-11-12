@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ProvidersDto } from "../api/types.ts";
 import {
+  canTestProvider,
+  defaultModelRef,
   FALLBACK_CATALOG,
+  isCliProvider,
+  nonCliProviderIds,
   providerRoleDefaults,
   providersView
 } from "./providerView.ts";
@@ -94,4 +98,85 @@ test("providerRoleDefaults populates executor, planner, and classifier per prese
   const ollama = providerRoleDefaults("ollama");
   assert.equal(ollama.requiresKey, false);
   assert.equal(ollama.defaultBaseUrl, "http://localhost:11434/v1");
+});
+
+test("providersView excludes cli catalog entries from add-provider catalog while keeping them selectable", () => {
+  const withCli: ProvidersDto = {
+    ...dto,
+    active: ["cli:claude", "second"],
+    configured: [
+      ...dto.configured,
+      {
+        id: "cli:claude",
+        enabled: true,
+        is_default: false,
+        default_model: null,
+        has_key: false,
+        custom: false,
+        active: true,
+        models: [],
+        models_error: null
+      }
+    ],
+    catalog: [
+      ...dto.catalog,
+      {
+        id: "cli:claude",
+        kind: "cli",
+        base_url: "",
+        auth: "none",
+        key_env: null,
+        tools: true,
+        vision: false,
+        configured: true
+      }
+    ]
+  };
+  const v = providersView(withCli);
+  assert.deepEqual(v.catalog, ["aaa"]);
+  assert.ok(v.selectable.includes("cli:claude"));
+  assert.equal(isCliProvider("cli:claude", withCli), true);
+  assert.equal(isCliProvider("openai", withCli), false);
+  assert.ok(v.configured.some((r) => r.id === "cli:claude"));
+  assert.equal(canTestProvider("cli:claude", withCli), false);
+  assert.equal(canTestProvider("second", withCli), true);
+  assert.deepEqual(nonCliProviderIds(v.selectable, withCli), [
+    "aaa",
+    "ghost",
+    "second"
+  ]);
+  const dtoCustomCli: ProvidersDto = {
+    ...withCli,
+    catalog: [
+      ...withCli.catalog,
+      {
+        id: "claude-code-custom",
+        kind: "cli",
+        base_url: "",
+        auth: "none",
+        key_env: null,
+        tools: true,
+        vision: false,
+        configured: true
+      }
+    ]
+  };
+  assert.deepEqual(
+    nonCliProviderIds(["aaa", "claude-code-custom", "second"], dtoCustomCli),
+    ["aaa", "second"]
+  );
+  assert.equal(
+    defaultModelRef({ ...withCli, default_provider: "cli:claude" }),
+    "cli:claude/default"
+  );
+  assert.equal(
+    defaultModelRef({
+      ...withCli,
+      default_provider: "cli:claude",
+      configured: withCli.configured.map((c) =>
+        c.id === "cli:claude" ? { ...c, default_model: "claude-sonnet-4-5" } : c
+      )
+    }),
+    "cli:claude/claude-sonnet-4-5"
+  );
 });

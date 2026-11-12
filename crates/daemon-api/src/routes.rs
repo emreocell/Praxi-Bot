@@ -26,11 +26,11 @@ use crate::dto::{
     AcceptedResponse, AnswerQuestion, AnswerResponse, ApprovalDto, BotDto, BotInput, BotUsage,
     CatalogProviderDto, CategoryDecisionDto, ChatDto, ConfiguredProviderDto, ControlDecisionInput,
     ControlDecisionResponse, ControlStateDto, ControlStateInput, CreateChat, DecideApproval,
-    Decision, DecisionResponse, DeliveryKind, DetectedProviderDto, EffectivePolicyDto, GrantDto,
-    GrantTargetDto, Health, LatestCursor, MessageDto, Mode, ParseSchedule, ParsedSchedule,
-    PolicyDto, PolicyInput, ProvidersDto, ReloadResponse, RememberResponse, RevokeGrant, RunDto,
-    ScheduleChangeKind, ScheduleDto, ScheduleInput, Scope, SendMessage, SendResponse, UsageSummary,
-    UsageTotals,
+    Decision, DecisionResponse, DeliveryKind, DetectedProviderDto, EffectivePolicyDto,
+    EnableCliProviderInput, GrantDto, GrantTargetDto, Health, LatestCursor, MessageDto, Mode,
+    ParseSchedule, ParsedSchedule, PolicyDto, PolicyInput, ProvidersDto, ReloadResponse,
+    RememberResponse, RevokeGrant, RunDto, ScheduleChangeKind, ScheduleDto, ScheduleInput, Scope,
+    SendMessage, SendResponse, UsageSummary, UsageTotals,
 };
 use crate::error::{ApiError, ErrorBody};
 
@@ -1144,6 +1144,112 @@ pub(crate) async fn detect_providers(
     Ok(Json(detected.into_iter().map(Into::into).collect()))
 }
 
+fn persist_cli_enable(
+    s: &AppState,
+    spec: &cli_provider::CliEngineSpec,
+    engine: provider_catalog::config::CliEngine,
+) -> Result<ConfiguredProviderDto, ApiError> {
+    let provider_id = format!("cli:{}", spec.id);
+    let _guard = s.providers_lock();
+    let path = provider_catalog::config_path(&s.data_dir());
+    let _file_lock = provider_catalog::ProviderConfig::lock(&path).map_err(|e| match e {
+        provider_catalog::ConfigError::LockTimeout(_) => {
+            ApiError::unavailable(format!("providers.lock: {e}"))
+        }
+        other => ApiError::internal(format!("providers.lock: {other}")),
+    })?;
+    let mut cfg = provider_catalog::ProviderConfig::load(&path)
+        .map_err(|e| ApiError::internal(format!("providers.toml: {e}")))?;
+    let existing = cfg.get(&provider_id).cloned();
+    let mut settings = provider_catalog::ProviderSettings::new(&provider_id, now_ms());
+    settings.enabled = true;
+    if let Some(old) = existing {
+        settings.default_model = old.default_model;
+        settings.model_caps = old.model_caps;
+    }
+    settings.cli = Some(provider_catalog::config::CliSettings::Cli {
+        engine,
+        command: spec.command.to_owned(),
+    });
+    cfg.upsert(settings);
+    cfg.save(&path)
+        .map_err(|e| ApiError::internal(format!("providers.toml: {e}")))?;
+    let saved = cfg
+        .get(&provider_id)
+        .cloned()
+        .ok_or_else(|| ApiError::internal("enabled CLI provider missing after upsert"))?;
+    let is_default = cfg.effective_default().is_some_and(|d| d.id == provider_id);
+    s.storage()
+        .append_audit(
+            s.user_id(),
+            None,
+            "user",
+            "provider.cli_enable",
+            &serde_json::json!({ "id": &provider_id, "engine": spec.id }),
+        )
+        .map_err(ApiError::internal)?;
+    Ok(ConfiguredProviderDto {
+        id: provider_id,
+        enabled: saved.enabled,
+        is_default,
+        default_model: saved.default_model,
+        has_key: false,
+        custom: false,
+        active: saved.enabled,
+        models: Vec::new(),
+        models_error: None,
+    })
+}
+
+async fn reload_from_host(s: &AppState) -> Result<ReloadResponse, ApiError> {
+    let st = s.clone();
+    let built =
+        tokio::task::spawn_blocking(move || (st.provider_host().expect("checked above").reload)())
+            .await
+            .map_err(ApiError::internal)?;
+    let providers =
+        built.map_err(|m| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "reload_failed", m))?;
+    let out = ReloadResponse {
+        default_provider: (!providers.setup_required()).then(|| providers.default_id().to_owned()),
+        active: providers.ids(),
+    };
+    s.agent().set_providers(providers);
+    Ok(out)
+}
+
+/// Enable a detected coding CLI provider server-side (`providers.toml` + live reload).
+#[utoipa::path(post, path = "/v1/providers/cli/enable", tag = "providers",
+    security(("bearer" = [])),
+    request_body = EnableCliProviderInput,
+    responses((status = 200, body = ConfiguredProviderDto),
+              (status = 400, body = ErrorBody, description = "engine is not runnable or unknown")))]
+pub(crate) async fn enable_cli_provider(
+    State(s): State<AppState>,
+    ApiJson(body): ApiJson<EnableCliProviderInput>,
+) -> Result<Json<ConfiguredProviderDto>, ApiError> {
+    let Some(spec) = cli_provider::engine_spec(&body.id).filter(|spec| spec.runnable) else {
+        return Err(ApiError::bad_request(cli_provider::enable_refusal_message(
+            &body.id,
+        )));
+    };
+    let engine = match spec.id {
+        "claude" => provider_catalog::config::CliEngine::Claude,
+        _ => {
+            return Err(ApiError::bad_request(cli_provider::enable_refusal_message(
+                spec.id,
+            )));
+        }
+    };
+    let st = s.clone();
+    let dto = tokio::task::spawn_blocking(move || persist_cli_enable(&st, spec, engine))
+        .await
+        .map_err(ApiError::internal)??;
+    if s.provider_host().is_some() {
+        let _ = reload_from_host(&s).await?;
+    }
+    Ok(Json(dto))
+}
+
 /// Rebuild the loop's providers from `providers.toml` and the secret store, so
 /// a provider added with the CLI / app is usable without restarting the
 /// daemon.  Runs already streaming keep their provider.
@@ -1160,19 +1266,7 @@ pub(crate) async fn reload_providers(
             "this daemon was started without provider configuration (fake provider)",
         ));
     }
-    let st = s.clone();
-    let built =
-        tokio::task::spawn_blocking(move || (st.provider_host().expect("checked above").reload)())
-            .await
-            .map_err(ApiError::internal)?;
-    let providers =
-        built.map_err(|m| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "reload_failed", m))?;
-    let out = ReloadResponse {
-        default_provider: (!providers.setup_required()).then(|| providers.default_id().to_owned()),
-        active: providers.ids(),
-    };
-    s.agent().set_providers(providers);
-    Ok(Json(out))
+    Ok(Json(reload_from_host(&s).await?))
 }
 
 // -------------------------------------------------------------- schedules

@@ -3,6 +3,8 @@ import { MOCK_MCP_CATALOG } from "./mockCatalog.ts";
 import type {
   Bot,
   Chat,
+  ConfiguredProviderDto,
+  DetectedProviderDto,
   EmailAccount,
   EmailAccountInput,
   McpServer,
@@ -62,7 +64,7 @@ const CHATS: Chat[] = [
 ];
 
 const PROVIDERS: ProvidersDto = {
-  active: ["anthropic", "openai", "gemini", "ollama", "claude-code"],
+  active: ["anthropic", "openai", "gemini", "ollama"],
   default_provider: "anthropic",
   catalog: [
     {
@@ -108,7 +110,6 @@ const PROVIDERS: ProvidersDto = {
   ],
   configured: [
     { id: "openai", active: true, custom: false, default_model: "gpt-4.1", enabled: true, has_key: true, is_default: false, models: ["gpt-4.1", "o3"] },
-    { id: "claude-code", active: true, custom: false, default_model: "sonnet", enabled: true, has_key: true, is_default: false, models: ["sonnet", "opus"] },
     {
       id: "anthropic",
       active: true,
@@ -141,6 +142,77 @@ const PROVIDERS: ProvidersDto = {
     }
   ]
 };
+
+const DETECTED_PROVIDERS: DetectedProviderDto[] = [
+  {
+    id: "claude",
+    display_name: "Claude Code",
+    installed: true,
+    version: "2.1.42",
+    auth: "signed_in",
+    account_label: "emre@praxi.bot",
+    runnable: true,
+    detail: null,
+    message: null
+  },
+  {
+    id: "codex",
+    display_name: "Codex",
+    installed: true,
+    version: "0.104.0",
+    auth: "signed_in",
+    account_label: "chatgpt@praxi.bot",
+    runnable: false,
+    detail: "codex_unconfinable",
+    message:
+      "The installed Codex cannot disable unified_exec, so Praxi will not run it."
+  },
+  {
+    id: "cursor",
+    display_name: "Cursor",
+    installed: true,
+    version: "0.49.2",
+    auth: "signed_out",
+    account_label: null,
+    runnable: false,
+    detail: null,
+    message: null
+  },
+  {
+    id: "opencode",
+    display_name: "OpenCode",
+    installed: false,
+    version: null,
+    auth: "unknown",
+    account_label: null,
+    runnable: false,
+    detail: "not_on_path",
+    message: null
+  },
+  {
+    id: "gemini",
+    display_name: "Gemini CLI",
+    installed: false,
+    version: null,
+    auth: "unknown",
+    account_label: null,
+    runnable: false,
+    detail: "not_on_path",
+    message: null
+  },
+  {
+    id: "chatgpt-plan",
+    display_name: "ChatGPT plan",
+    installed: true,
+    version: "0.104.0",
+    auth: "unknown",
+    account_label: null,
+    runnable: false,
+    detail: "codex_unconfinable",
+    message:
+      "The installed Codex cannot disable unified_exec, so Praxi will not run it."
+  }
+];
 
 const USAGE: UsageSummary = {
   runs: 42,
@@ -205,6 +277,8 @@ function serverFromConfig(c: McpServerConfig, category = "other"): McpServer {
  */
 export class MockApiClient extends ApiClient {
   readonly servers: McpServer[];
+  readonly providersDto: ProvidersDto = structuredClone(PROVIDERS);
+  readonly detectedProvidersList: DetectedProviderDto[] = structuredClone(DETECTED_PROVIDERS);
   readonly bots = structuredClone(BOTS);
   readonly chats: Chat[] = structuredClone([...CHATS, ...BOTS.slice(1).map((b,i) => ({ id: `mock-chat-${i}`, chat_id: `mock-chat-${i}`, bot_id: b.id, title: previews[i+1], created_at_ms: NOW }))]);
   readonly messages = new Map<string, Message[]>();
@@ -341,9 +415,83 @@ export class MockApiClient extends ApiClient {
       case "GET /usage":
         return ok(USAGE);
       case "GET /providers":
-        return ok(PROVIDERS);
-      case "POST /providers":
-        return ok({ default_provider: "anthropic", active: PROVIDERS.active });
+        if (seg[1] === "detected") {
+          const screen =
+            typeof window !== "undefined"
+              ? new URLSearchParams(window.location.search).get("screen")
+              : null;
+          if (screen === "detected-empty") {
+            return ok(
+              this.detectedProvidersList.map((row) => ({
+                ...row,
+                installed: false,
+                version: null,
+                auth: "unknown",
+                account_label: null,
+                runnable: false,
+                detail: "not_on_path",
+                message: null
+              }))
+            );
+          }
+          return ok(structuredClone(this.detectedProvidersList));
+        }
+        return ok(structuredClone(this.providersDto));
+      case "POST /providers": {
+        if (seg[1] === "cli" && seg[2] === "enable") {
+          const body = (opts.body ?? {}) as { id?: string };
+          const id = body.id ?? "";
+          if (id !== "claude") {
+            throw new ApiError(
+              400,
+              "bad_request",
+              id === "codex" || id === "chatgpt-plan"
+                ? "The installed Codex cannot disable unified_exec, so Praxi will not run it."
+                : "This coding CLI is detected only and cannot be run in this version of Praxi."
+            );
+          }
+          const providerId = "cli:claude";
+          const existing = this.providersDto.configured.find(
+            (p) => p.id === providerId
+          );
+          const entry: ConfiguredProviderDto = {
+            id: providerId,
+            enabled: true,
+            is_default: existing?.is_default ?? false,
+            default_model: existing?.default_model ?? null,
+            has_key: false,
+            custom: false,
+            active: true,
+            models: existing?.models ?? [],
+            models_error: null
+          };
+          if (existing) {
+            Object.assign(existing, entry);
+          } else {
+            this.providersDto.configured.push(entry);
+          }
+          if (!this.providersDto.active.includes(providerId)) {
+            this.providersDto.active.push(providerId);
+          }
+          if (!this.providersDto.catalog.some((c) => c.id === providerId)) {
+            this.providersDto.catalog.push({
+              id: providerId,
+              kind: "cli",
+              base_url: "",
+              auth: "none",
+              key_env: null,
+              tools: true,
+              vision: false,
+              configured: true
+            });
+          }
+          return ok(structuredClone(entry));
+        }
+        return ok({
+          default_provider: this.providersDto.default_provider,
+          active: [...this.providersDto.active]
+        });
+      }
       case "GET /policy":
         return ok({
           preset: "approve-destructive",

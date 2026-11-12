@@ -5,7 +5,7 @@ use crate::{
     shared::{ModelOut, STEP_TOOLS, Shared, xe},
 };
 use async_trait::async_trait;
-use cli_provider::runtime::{CliEngine, Engine, ToolReply, Turn, TurnHost};
+use cli_provider::runtime::{CliEngine, CliError, Engine, ToolReply, Turn, TurnHost};
 use permission_engine::Decision;
 use protocol::{Event, ToolCallId, event::MessageDelta};
 use provider_catalog::{
@@ -206,7 +206,7 @@ impl TurnExecutor {
         }
         // MCP encodes names reversibly; permissions receive the original name.
         let tools = specs.to_vec();
-        let model = req.model.provider().map(|_| req.model.model().to_owned());
+        let model = cli_model_arg(&req.model).map_err(xe)?;
         let usage = tokio::time::timeout(
             self.sh.cfg.guards.model_timeout,
             runtime.run_turn(
@@ -222,7 +222,7 @@ impl TurnExecutor {
         )
         .await
         .map_err(|_| xe("CLI turn timed out"))?
-        .map_err(xe)?;
+        .map_err(|e| cli_exec_error(engine, &e))?;
         Ok(ModelOut {
             text: self.sh.redact(host.text.lock().clone()),
             model: req.model.0.clone(),
@@ -236,6 +236,79 @@ impl TurnExecutor {
             ..ModelOut::default()
         })
     }
+}
+
+fn cli_exec_error(engine: Engine, err: &CliError) -> ExecError {
+    let (name, cmd) = match engine {
+        Engine::Claude => ("Claude Code", "claude"),
+        Engine::Codex => ("Codex CLI", "codex"),
+    };
+    let code = err.code();
+    let msg = match err {
+        CliError::Cancelled => return ExecError(code.to_owned()),
+        CliError::NotInstalled => format!(
+            "{name} is not installed or needs an update. Install or update {name}, then sign in by running `{cmd}` in a terminal. ({code})"
+        ),
+        CliError::ShimRefused => format!(
+            "{name} could not be launched because a wrapper shim was refused. Install {name} natively or put the real `{cmd}` binary on PATH. ({code})"
+        ),
+        CliError::SignedOut => format!(
+            "{name} is signed out. Sign in by running `{cmd}` in a terminal, then try again. ({code})"
+        ),
+        CliError::Protocol => format!(
+            "{name} ended unexpectedly or returned an unreadable response. Sign in by running `{cmd}` in a terminal, or update the CLI and try again. ({code})"
+        ),
+        CliError::NativeToolsOpen => format!(
+            "{name} could not be started safely because required isolation flags are missing or unsupported. Update the CLI and try again. ({code})"
+        ),
+        CliError::Quota => format!(
+            "{name} subscription usage limit reached. Wait for your quota to reset or switch providers. ({code})"
+        ),
+        CliError::Io => format!(
+            "Could not communicate with {name}. Verify `{cmd}` runs in a terminal and try again. ({code})"
+        ),
+        CliError::BinaryChanged => format!(
+            "The {name} binary changed while starting the turn. Try sending your message again. ({code})"
+        ),
+        CliError::CodexUnconfinable => format!(
+            "The installed Codex cannot disable unified_exec, so Praxi will not run it. ({code})"
+        ),
+    };
+    ExecError(msg)
+}
+
+/// Validate a `--model` override destined for a subprocess CLI engine.
+///
+/// Rejects leading hyphens (flag injection), whitespace/control bytes, shell
+/// metacharacters, empty strings, and values longer than 128 bytes.
+pub(crate) fn validate_cli_model(model: &str) -> Result<(), String> {
+    if model.is_empty() || model.len() > 128 {
+        return Err(format!("invalid CLI model length: {model:?}"));
+    }
+    if model.starts_with('-') {
+        return Err(format!("invalid CLI model starting with '-': {model:?}"));
+    }
+    if !model
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'/' | b'-'))
+    {
+        return Err(format!(
+            "CLI model contains disallowed characters: {model:?}"
+        ));
+    }
+    Ok(())
+}
+
+fn cli_model_arg(model: &provider_catalog::ModelRef) -> Result<Option<String>, String> {
+    let Some(m) = model
+        .provider()
+        .map(|_| model.model())
+        .filter(|m| !m.is_empty() && *m != "default")
+    else {
+        return Ok(None);
+    };
+    validate_cli_model(m)?;
+    Ok(Some(m.to_owned()))
 }
 
 #[cfg(test)]
@@ -332,7 +405,74 @@ mod tests {
         assert_eq!(lp.wait(run).await.unwrap(), task_runtime::RunState::Failed);
         let events = storage::read_event_log(env.dir.path(), run).unwrap();
         assert!(format!("{events:?}").contains("not_installed"));
+        assert!(format!("{events:?}").contains("Install or update Claude Code"));
     }
+
+    #[test]
+    fn cli_exec_error_includes_actionable_guidance_and_stable_code() {
+        for (err, expected_code, expected_phrase) in [
+            (
+                CliError::NotInstalled,
+                "not_installed",
+                "Install or update Claude Code",
+            ),
+            (
+                CliError::ShimRefused,
+                "shim_refused",
+                "Install Claude Code natively",
+            ),
+            (
+                CliError::SignedOut,
+                "signed_out",
+                "Sign in by running `claude` in a terminal",
+            ),
+            (CliError::Protocol, "cli_protocol_error", "update the CLI"),
+        ] {
+            let out = cli_exec_error(Engine::Claude, &err);
+            assert!(out.0.contains(expected_code), "{err:?} -> {}", out.0);
+            assert!(out.0.contains(expected_phrase), "{err:?} -> {}", out.0);
+        }
+    }
+    #[test]
+    fn cli_model_arg_omits_default_placeholder() {
+        assert_eq!(
+            cli_model_arg(&provider_catalog::ModelRef("cli:claude".into())),
+            Ok(None)
+        );
+        assert_eq!(
+            cli_model_arg(&provider_catalog::ModelRef("cli:claude/default".into())),
+            Ok(None)
+        );
+        assert_eq!(
+            cli_model_arg(&provider_catalog::ModelRef("cli:claude/sonnet".into())),
+            Ok(Some("sonnet".into()))
+        );
+        assert_eq!(
+            cli_model_arg(&provider_catalog::ModelRef(
+                "cli:claude/claude-sonnet-4-5:latest".into()
+            )),
+            Ok(Some("claude-sonnet-4-5:latest".into()))
+        );
+    }
+
+    #[test]
+    fn cli_model_arg_rejects_flags_and_unsafe_chars() {
+        let too_long = format!("cli:claude/{}", "a".repeat(129));
+        for bad in [
+            "cli:claude/--dangerously-skip-permissions",
+            "cli:claude/-p",
+            "cli:claude/sonnet --flag",
+            "cli:claude/sonnet\n--evil",
+            "cli:claude/sonnet;id",
+            too_long.as_str(),
+        ] {
+            assert!(
+                cli_model_arg(&provider_catalog::ModelRef(bad.into())).is_err(),
+                "{bad} should be rejected"
+            );
+        }
+    }
+
     struct PanicHttp;
     #[async_trait]
     impl provider_catalog::ChatProvider for PanicHttp {

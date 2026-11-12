@@ -571,10 +571,21 @@ pub struct DetectedProviderDto {
     pub auth: CliAuthState,
     /// Account label (email or org name, max 160 chars, or null).
     pub account_label: Option<String>,
-    /// Whether this engine can currently run turns (always false in this task).
+    /// Whether this engine can currently run turns.
     pub runnable: bool,
-    /// Stable detail code (`not_on_path`, `timeout`, `auth_unparsed`, etc., or null).
+    /// Stable detail code (`not_on_path`, `timeout`, `auth_unparsed`, `codex_unconfinable`, etc., or null).
     pub detail: Option<String>,
+    /// User-readable refusal when detected but not runnable (e.g. Codex `unified_exec`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// Request body for `POST /v1/providers/cli/enable`.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EnableCliProviderInput {
+    /// Engine id (`claude` is currently runnable).
+    pub id: String,
 }
 
 impl From<cli_provider::DetectedCli> for DetectedProviderDto {
@@ -588,6 +599,7 @@ impl From<cli_provider::DetectedCli> for DetectedProviderDto {
             account_label: c.account_label,
             runnable: c.runnable,
             detail: c.detail,
+            message: c.message,
         }
     }
 }

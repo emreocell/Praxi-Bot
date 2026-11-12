@@ -2183,7 +2183,7 @@ mod tests {
             .call(&ctx, json!({"index": 1, "gen": 1}))
             .await;
         let shown = match &out {
-            Ok(o) => text(o).to_owned(),
+            Ok(o) => text(o).clone(),
             Err(e) => e.to_string(),
         };
         assert!(

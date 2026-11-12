@@ -64,13 +64,23 @@ pub fn providers_list(data_dir: &std::path::Path, out: &mut dyn FnMut(&str)) -> 
         } else {
             " "
         };
-        out(&format!(
-            "{mark} {:<20} model={:<24} key={} {}",
-            p.id,
-            p.default_model.as_deref().unwrap_or("-"),
-            p.key.as_ref().map_or("-", |k| k.name()),
-            if p.enabled { "" } else { "(disabled)" }
-        ));
+        let status = if p.enabled { "" } else { "(disabled)" };
+        if p.cli.is_some() {
+            out(&format!(
+                "{mark} {:<20} kind=cli model={:<24} {}",
+                p.id,
+                p.default_model.as_deref().unwrap_or("default"),
+                status,
+            ));
+        } else {
+            out(&format!(
+                "{mark} {:<20} model={:<24} key={} {}",
+                p.id,
+                p.default_model.as_deref().unwrap_or("-"),
+                p.key.as_ref().map_or("-", |k| k.name()),
+                status,
+            ));
+        }
     }
     Ok(())
 }
@@ -159,6 +169,7 @@ pub fn providers_default(
     out: &mut dyn FnMut(&str),
 ) -> Result<()> {
     let path = config_path(data_dir);
+    let _guard = ProviderConfig::lock(&path)?;
     let mut cfg = ProviderConfig::load(&path)?;
     cfg.set_default(id)?;
     if let Some(m) = model {
@@ -206,5 +217,23 @@ mod tests {
         assert!(lines[1].starts_with('*') && lines[1].contains("mm"));
         let mut sink = |_: &str| {};
         assert!(providers_default(d.path(), "zzz", None, &mut sink).is_err());
+    }
+
+    #[test]
+    fn providers_list_omits_key_for_cli_rows() {
+        let d = tempfile::tempdir().unwrap();
+        let path = config_path(d.path());
+        let mut cfg = ProviderConfig::default();
+        let mut cli = ProviderSettings::new("cli:claude", 1);
+        cli.cli = Some(provider_catalog::config::CliSettings::Cli {
+            engine: provider_catalog::config::CliEngine::Claude,
+            command: "claude".into(),
+        });
+        cfg.upsert(cli);
+        cfg.save(&path).unwrap();
+        let lines = collect(|o| providers_list(d.path(), o));
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("cli:claude"), "{}", lines[0]);
+        assert!(!lines[0].contains("key="), "{}", lines[0]);
     }
 }

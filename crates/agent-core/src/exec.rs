@@ -468,7 +468,13 @@ impl TurnExecutor {
             skills.as_deref(),
         )
         .map_err(xe)?;
-        let primary = ctx.profile.models.executor.clone();
+        let mut primary = ctx.profile.models.executor.clone();
+        if !primary.contains('/') && !primary.starts_with("cli:") {
+            let default_id = self.sh.providers.read().default_id().to_owned();
+            if default_id.starts_with("cli:") {
+                primary = format!("{default_id}/{primary}");
+            }
+        }
         let mut req = ChatRequest::new(ModelRef(primary.clone()), messages);
         req.tools = tool_defs(&specs);
         req.max_tokens = self.sh.cfg.max_tokens;

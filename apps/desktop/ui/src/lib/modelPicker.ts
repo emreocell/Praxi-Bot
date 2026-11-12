@@ -1,4 +1,5 @@
 import type { ProvidersDto } from "../api/types.ts";
+import { isCliProvider } from "./providerView.ts";
 import { matchesQuery } from "./searchText.ts";
 
 export interface ModelOption {
@@ -16,15 +17,22 @@ export interface ModelGroup {
 /**
  * Models offered by the picker, grouped by provider.  Only enabled providers
  * are listed; a provider's default model and the `current` ref are included
- * even when the provider reports no listing.  The default provider comes first.
+ * even when the provider reports no listing.  Enabled CLI providers expose a
+ * single `default` model unless `includeCli` is `false`.  The default provider comes first.
  */
 export function modelGroups(
   dto: ProvidersDto | null,
-  current?: string | null
+  current?: string | null,
+  options?: { includeCli?: boolean }
 ): ModelGroup[] {
+  const includeCli = options?.includeCli ?? true;
   const groups = new Map<string, Set<string>>();
   for (const p of dto?.configured ?? []) {
     if (!p.enabled) {
+      continue;
+    }
+    const cli = isCliProvider(p.id, dto);
+    if (cli && !includeCli) {
       continue;
     }
     const set = groups.get(p.id) ?? new Set<string>();
@@ -34,6 +42,9 @@ export function modelGroups(
     for (const m of p.models) {
       set.add(m);
     }
+    if (cli && set.size === 0) {
+      set.add("default");
+    }
     groups.set(p.id, set);
   }
   const cur = current?.trim();
@@ -41,7 +52,7 @@ export function modelGroups(
     const i = cur.indexOf("/");
     const provider = i < 0 ? "" : cur.slice(0, i);
     const model = i < 0 ? cur : cur.slice(i + 1);
-    if (provider) {
+    if (provider && (includeCli || !isCliProvider(provider, dto))) {
       const set = groups.get(provider) ?? new Set<string>();
       set.add(model);
       groups.set(provider, set);

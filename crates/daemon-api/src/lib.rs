@@ -169,6 +169,8 @@ struct Inner {
     schedules: parking_lot::Mutex<Option<Arc<ScheduleStore>>>,
     /// Serialises `PUT /v1/policy` (read-modify-write of memory + `policy.json`).
     policy_lock: parking_lot::Mutex<()>,
+    /// Serialises `providers.toml` read-modify-write operations (`POST /v1/providers/cli/enable`).
+    providers_lock: parking_lot::Mutex<()>,
     /// Why `policy.json` could not be loaded (locked deny-all mode), if so.
     policy_load_error: parking_lot::Mutex<Option<String>>,
     /// CLI provider detector (`GET /v1/providers/detected`).
@@ -293,6 +295,7 @@ impl AppState {
             secrets: OnceLock::new(),
             schedules: parking_lot::Mutex::new(None),
             policy_lock: parking_lot::Mutex::new(()),
+            providers_lock: parking_lot::Mutex::new(()),
             policy_load_error: parking_lot::Mutex::new(policy_load_error),
             detector: parking_lot::RwLock::new(Arc::new(cli_provider::Detector::new())),
             scheduler: OnceLock::new(),
@@ -460,6 +463,9 @@ impl AppState {
 
     pub(crate) fn provider_host(&self) -> Option<&ProviderHost> {
         self.0.provider_host.get()
+    }
+    pub(crate) fn providers_lock(&self) -> parking_lot::MutexGuard<'_, ()> {
+        self.0.providers_lock.lock()
     }
     pub(crate) fn detector(&self) -> Arc<cli_provider::Detector> {
         Arc::clone(&*self.0.detector.read())
@@ -666,6 +672,7 @@ fn api_routes() -> Router<AppState> {
         .route("/v1/policy", get(r::get_policy).put(r::put_policy))
         .route("/v1/providers", get(r::list_providers))
         .route("/v1/providers/detected", get(r::detect_providers))
+        .route("/v1/providers/cli/enable", post(r::enable_cli_provider))
         .route("/v1/providers/reload", post(r::reload_providers))
         .route(
             "/v1/schedules",

@@ -99,6 +99,8 @@
       "noModel": "model yok",
       "keyStored": "anahtar kayıtlı",
       "noKey": "anahtar yok",
+      "noKeyNeeded": "anahtar gerekmez",
+      "offline": "Daemon çevrimdışı — sağlayıcıları yönetmek için daemon'u başlatın.",
       "test": "Bağlantıyı sına",
       "makeDefault": "Varsayılan yap",
       "add": "Sağlayıcı ekle",
@@ -876,6 +878,25 @@
         "replace": "Anahtarı değiştir",
         "placeholder": "API anahtarını yapıştır",
         "saved": "{{provider}} anahtarı kaydedildi"
+      },
+      "detected": {
+        "title": "Algılanan hesaplar",
+        "description": "PATH üzerinde bulunan kodlama araçları. Praxi oturum dosyalarını okumadan CLI programını doğrudan çalıştırır.",
+        "termsNotice": "Sağlayıcınızın abonelik koşulları geçerlidir; etkinleştirmeden önce otomatik kullanıma izin verildiğini doğrulayın.",
+        "refresh": "Yenile",
+        "retry": "Yeniden dene",
+        "enable": "Etkinleştir",
+        "enabled": "Etkin",
+        "enabledToast": "{{name}} etkinleştirildi.",
+        "notInstalled": "Kurulu değil",
+        "signInHint": "Oturum açmak için terminalde {{command}} çalıştırın",
+        "codexUnconfinable": "Algılandı, ancak bu sürümde güvenli biçimde çalıştırılamıyor.",
+        "notRunnable": "Algılandı, bu sürümde çalıştırılamaz",
+        "detectError": "Kurulu kodlama araçları denetlenemedi.",
+        "offline": "Algılanan kodlama araçlarını görmek için daemon'a bağlanın.",
+        "authSignedIn": "Oturum açık",
+        "authSignedOut": "Oturum kapalı",
+        "authUnknown": "Bilinmiyor"
       }
     },
     "computer": {

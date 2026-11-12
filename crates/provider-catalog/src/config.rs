@@ -4,8 +4,12 @@
 //! provider was added. ADR-0016: the first provider added is the global
 //! default unless another one is chosen explicitly.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use secret_store::{SecretRef, SecretStore, resolve};
 use serde::{Deserialize, Serialize};
@@ -78,6 +82,17 @@ pub enum CliSettings {
 pub enum CliEngine {
     Claude,
     Codex,
+}
+
+impl CliEngine {
+    /// Wire identifier of this CLI engine (`"claude"`, `"codex"`).
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+        }
+    }
 }
 
 impl CliSettings {
@@ -206,12 +221,107 @@ pub enum ConfigError {
     /// Serialisation failure.
     #[error("cannot serialise providers.toml: {0}")]
     Serialize(#[from] toml::ser::Error),
+    /// Format-preserving TOML edit failure.
+    #[error("cannot edit providers.toml: {0}")]
+    Edit(#[from] toml_edit::TomlError),
     /// Unknown provider id.
     #[error("provider {0:?} is not configured")]
     Unknown(String),
+    /// Timed out waiting for the cross-process `providers.lock` advisory lock.
+    #[error(
+        "timed out waiting for providers.lock after {0:?}: another process may still be editing providers.toml"
+    )]
+    LockTimeout(Duration),
+}
+
+const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_secs(10);
+
+static PROCESS_LOCK: Mutex<()> = Mutex::new(());
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Advisory process + cross-process lock guard for `providers.toml`.
+///
+/// The sibling `.lock` file is intentionally left on disk while any handle may
+/// wait on it; releasing this guard unlocks the OS file handle before releasing
+/// the in-process mutex.
+pub struct ConfigLockGuard {
+    file: std::fs::File,
+    _process: std::sync::MutexGuard<'static, ()>,
+}
+
+impl Drop for ConfigLockGuard {
+    fn drop(&mut self) {
+        let _ = fs4::FileExt::unlock(&self.file);
+    }
 }
 
 impl ProviderConfig {
+    /// Acquire the in-process and cross-process advisory lock for `path` with a
+    /// bounded wait of 10 seconds.
+    ///
+    /// Callers performing a read-modify-write must hold this guard across
+    /// [`Self::load`], mutation, and [`Self::save`]. [`Self::save`] itself does
+    /// not lock so single-process callers never deadlock re-entrantly.
+    ///
+    /// # Errors
+    /// Directory creation, file open, lock timeout, or OS lock errors.
+    pub fn lock(path: &Path) -> Result<ConfigLockGuard, ConfigError> {
+        Self::lock_with_timeout(path, DEFAULT_LOCK_TIMEOUT)
+    }
+
+    /// Acquire the in-process and cross-process advisory lock for `path`,
+    /// failing closed with [`ConfigError::LockTimeout`] if `timeout` elapses
+    /// before the OS lock becomes available.
+    ///
+    /// # Errors
+    /// Directory creation, file open, lock timeout, or OS lock errors.
+    pub fn lock_with_timeout(
+        path: &Path,
+        timeout: Duration,
+    ) -> Result<ConfigLockGuard, ConfigError> {
+        let process = PROCESS_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(dir) = path.parent()
+            && !dir.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(dir)?;
+        }
+        let lock_path = path.with_extension("lock");
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).read(true).write(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(&lock_path)?;
+        let start = Instant::now();
+        let mut backoff = Duration::from_millis(5);
+        loop {
+            match fs4::FileExt::try_lock(&file) {
+                Ok(()) => {
+                    return Ok(ConfigLockGuard {
+                        file,
+                        _process: process,
+                    });
+                }
+                Err(fs4::TryLockError::WouldBlock) => {
+                    let elapsed = start.elapsed();
+                    let Some(remaining) = timeout.checked_sub(elapsed) else {
+                        return Err(ConfigError::LockTimeout(timeout));
+                    };
+                    if remaining.is_zero() {
+                        return Err(ConfigError::LockTimeout(timeout));
+                    }
+                    std::thread::sleep(backoff.min(remaining));
+                    backoff = (backoff * 2).min(Duration::from_millis(50));
+                }
+                Err(fs4::TryLockError::Error(err)) => return Err(err.into()),
+            }
+        }
+    }
+
     /// Load the config; a missing file yields an empty config.
     ///
     /// # Errors
@@ -228,19 +338,35 @@ impl ProviderConfig {
         }
     }
 
-    /// Atomically write the config.
+    /// Atomically write the config via a unique temp file while preserving
+    /// existing comments, key order, and unknown TOML sections.
     ///
     /// # Errors
-    /// I/O or serialisation errors.
+    /// I/O, validation, or serialisation errors.
     pub fn save(&self, path: &Path) -> Result<(), ConfigError> {
         self.validate_cli()?;
-        if let Some(dir) = path.parent() {
+        if let Some(dir) = path.parent()
+            && !dir.as_os_str().is_empty()
+        {
             std::fs::create_dir_all(dir)?;
         }
-        let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, toml::to_string_pretty(self)?)?;
-        std::fs::rename(&tmp, path)?;
-        Ok(())
+        let existing = match std::fs::read_to_string(path) {
+            Ok(s) => Some(s),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e.into()),
+        };
+        let rendered = self.render_preserving(existing.as_deref())?;
+        write_atomic(path, rendered.as_bytes())
+    }
+
+    fn render_preserving(&self, existing: Option<&str>) -> Result<String, ConfigError> {
+        let Some(raw) = existing else {
+            return Ok(toml::to_string_pretty(self)?);
+        };
+        let mut doc: toml_edit::Document = raw.parse()?;
+        sync_default_provider(&mut doc, self.default_provider.as_deref());
+        sync_provider_tables(&mut doc, &self.providers)?;
+        Ok(doc.to_string())
     }
 
     fn validate_cli(&self) -> Result<(), ConfigError> {
@@ -348,6 +474,143 @@ impl ProviderConfig {
         self.effective_default()
             .and_then(ProviderSettings::model_ref)
     }
+}
+
+#[derive(Serialize)]
+struct ProviderArrayRef<'a> {
+    provider: &'a [ProviderSettings],
+}
+
+fn sync_default_provider(doc: &mut toml_edit::Document, default_provider: Option<&str>) {
+    let Some(def) = default_provider else {
+        doc.remove("default_provider");
+        return;
+    };
+    if let Some(val) = doc
+        .get_mut("default_provider")
+        .and_then(toml_edit::Item::as_value_mut)
+    {
+        let mut next = toml_edit::Value::from(def);
+        *next.decor_mut() = val.decor().clone();
+        *val = next;
+    } else {
+        doc.insert("default_provider", toml_edit::value(def));
+    }
+}
+
+fn sync_provider_tables(
+    doc: &mut toml_edit::Document,
+    providers: &[ProviderSettings],
+) -> Result<(), ConfigError> {
+    if providers.is_empty() {
+        doc.remove("provider");
+        return Ok(());
+    }
+    let fresh_raw = toml::to_string_pretty(&ProviderArrayRef {
+        provider: providers,
+    })?;
+    let mut fresh_doc: toml_edit::Document = fresh_raw.parse()?;
+    let fresh_tables: Vec<toml_edit::Table> = match fresh_doc.remove("provider") {
+        Some(toml_edit::Item::ArrayOfTables(arr)) => arr.into_iter().collect(),
+        _ => Vec::new(),
+    };
+    let mut existing_by_id: HashMap<String, toml_edit::Table> = HashMap::new();
+    if let Some(arr) = doc
+        .get_mut("provider")
+        .and_then(toml_edit::Item::as_array_of_tables_mut)
+    {
+        for tbl in std::mem::take(arr) {
+            if let Some(id) = tbl.get("id").and_then(|v| v.as_str()).map(str::to_owned) {
+                existing_by_id.insert(id, tbl);
+            }
+        }
+    }
+    let mut next_arr = toml_edit::ArrayOfTables::new();
+    for (cfg, fresh_tbl) in providers.iter().zip(fresh_tables) {
+        if let Some(mut old_tbl) = existing_by_id.remove(&cfg.id) {
+            merge_table(&mut old_tbl, fresh_tbl);
+            next_arr.push(old_tbl);
+        } else {
+            next_arr.push(fresh_tbl);
+        }
+    }
+    if let Some(slot) = doc.get_mut("provider") {
+        *slot = toml_edit::Item::ArrayOfTables(next_arr);
+    } else {
+        doc.insert("provider", toml_edit::Item::ArrayOfTables(next_arr));
+    }
+    Ok(())
+}
+
+fn merge_table(target: &mut toml_edit::Table, fresh: toml_edit::Table) {
+    let stale: Vec<String> = target
+        .iter()
+        .filter(|(k, _)| !fresh.contains_key(k))
+        .map(|(k, _)| k.to_owned())
+        .collect();
+    for k in stale {
+        target.remove(&k);
+    }
+    for (k, fresh_item) in fresh {
+        if let Some(existing_item) = target.get_mut(&k) {
+            match (existing_item, fresh_item) {
+                (toml_edit::Item::Table(dst), toml_edit::Item::Table(src)) => {
+                    merge_table(dst, src);
+                }
+                (toml_edit::Item::Value(dst), toml_edit::Item::Value(mut src)) => {
+                    *src.decor_mut() = dst.decor().clone();
+                    *dst = src;
+                }
+                (dst, src) => *dst = src,
+            }
+        } else {
+            target.insert(&k, fresh_item);
+        }
+    }
+}
+
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ConfigError> {
+    let pid = std::process::id();
+    let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let base = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(CONFIG_FILE_NAME);
+    let tmp = path.with_file_name(format!(".{base}.{pid}.{seq}.tmp"));
+
+    #[cfg(unix)]
+    let existing_perms = match std::fs::metadata(path) {
+        Ok(meta) => Some(meta.permissions()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e.into()),
+    };
+
+    let res: std::io::Result<()> = (|| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&tmp)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = existing_perms.unwrap_or_else(|| std::fs::Permissions::from_mode(0o600));
+            file.set_permissions(perms)?;
+        }
+        file.write_all(bytes)?;
+        file.flush()?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&tmp, path)?;
+        Ok(())
+    })();
+    if res.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    Ok(res?)
 }
 
 /// Outcome of a successful connection test.
@@ -762,5 +1025,200 @@ mod cli_tests {
             ),
             Err(ProviderError::CliSession)
         ));
+    }
+
+    #[test]
+    fn save_preserves_comments_ordering_and_unknown_sections() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = config_path(dir.path());
+        let original = "\
+# Top comment for providers
+default_provider = \"openai\"
+
+# Legacy email config
+[email]
+host = \"imap.example.com\"
+port = 993
+
+[[provider]]
+# Keep this comment
+id = \"openai\"
+enabled = true
+added_at_ms = 10
+";
+        std::fs::write(&path, original).unwrap();
+        let mut cfg = ProviderConfig::load(&path).unwrap();
+        let mut cli = ProviderSettings::new("cli:claude", 20);
+        cli.cli = Some(CliSettings::Cli {
+            engine: CliEngine::Claude,
+            command: "claude".into(),
+        });
+        cfg.upsert(cli);
+        cfg.save(&path).unwrap();
+
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("# Top comment for providers"), "{saved}");
+        assert!(saved.contains("# Legacy email config"), "{saved}");
+        assert!(saved.contains("# Keep this comment"), "{saved}");
+        assert!(saved.contains("[email]"), "{saved}");
+        assert!(saved.contains("imap.example.com"), "{saved}");
+        assert!(saved.contains("cli:claude"), "{saved}");
+    }
+
+    #[test]
+    fn concurrent_locked_writers_never_lose_updates_or_leave_tmp() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = config_path(dir.path());
+        std::thread::scope(|s| {
+            for i in 0..8_i64 {
+                let path = path.clone();
+                s.spawn(move || {
+                    for j in 0..4_i64 {
+                        let _guard = ProviderConfig::lock(&path).unwrap();
+                        let mut cfg = ProviderConfig::load(&path).unwrap();
+                        let id = format!("p-{i}-{j}");
+                        cfg.upsert(ProviderSettings::new(id, i * 10 + j));
+                        cfg.save(&path).unwrap();
+                    }
+                });
+            }
+        });
+        let cfg = ProviderConfig::load(&path).unwrap();
+        assert_eq!(cfg.providers.len(), 32);
+        for entry in std::fs::read_dir(dir.path()).unwrap() {
+            let path = entry.unwrap().path();
+            assert!(
+                !path
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("tmp")),
+                "stray tmp file left behind: {}",
+                path.display()
+            );
+        }
+    }
+
+    fn maybe_run_lock_holder_child(test_name: &str) -> bool {
+        let Ok(dir) = std::env::var("PRAXI_LOCK_HOLD_DIR") else {
+            return false;
+        };
+        if std::env::var("PRAXI_LOCK_TEST_NAME").ok().as_deref() != Some(test_name) {
+            return false;
+        }
+        let path = config_path(Path::new(&dir));
+        let _guard = ProviderConfig::lock(&path).unwrap();
+        let ready = std::env::var("PRAXI_LOCK_READY_FILE").unwrap();
+        std::fs::write(&ready, "locked").unwrap();
+        let hold_ms: u64 = std::env::var("PRAXI_LOCK_HOLD_MS")
+            .unwrap()
+            .parse()
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(hold_ms));
+        true
+    }
+
+    fn spawn_lock_holder(
+        test_name: &str,
+        dir: &Path,
+        ready: &Path,
+        hold_ms: u64,
+    ) -> std::process::Child {
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", test_name, "--nocapture"])
+            .env("PRAXI_LOCK_TEST_NAME", test_name)
+            .env("PRAXI_LOCK_HOLD_DIR", dir)
+            .env("PRAXI_LOCK_READY_FILE", ready)
+            .env("PRAXI_LOCK_HOLD_MS", hold_ms.to_string())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !ready.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "lock holder child did not signal readiness"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        child
+    }
+
+    #[test]
+    fn cross_process_lock_waits_and_succeeds() {
+        const TEST: &str = "config::cli_tests::cross_process_lock_waits_and_succeeds";
+        if maybe_run_lock_holder_child(TEST) {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let ready = dir.path().join("ready");
+        let mut child = spawn_lock_holder(TEST, dir.path(), &ready, 300);
+
+        let path = config_path(dir.path());
+        let start = Instant::now();
+        let guard = ProviderConfig::lock_with_timeout(&path, Duration::from_secs(5)).unwrap();
+        let waited = start.elapsed();
+        assert!(
+            waited >= Duration::from_millis(150),
+            "expected parent to wait for child lock release, waited {waited:?}"
+        );
+        let mut cfg = ProviderConfig::load(&path).unwrap();
+        cfg.upsert(ProviderSettings::new("after-wait", 1));
+        cfg.save(&path).unwrap();
+        drop(guard);
+
+        let status = child.wait().unwrap();
+        assert!(status.success());
+        assert!(
+            ProviderConfig::load(&path)
+                .unwrap()
+                .get("after-wait")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn cross_process_lock_times_out_with_clear_error() {
+        const TEST: &str = "config::cli_tests::cross_process_lock_times_out_with_clear_error";
+        if maybe_run_lock_holder_child(TEST) {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let ready = dir.path().join("ready");
+        let mut child = spawn_lock_holder(TEST, dir.path(), &ready, 5_000);
+
+        let path = config_path(dir.path());
+        let Err(err) = ProviderConfig::lock_with_timeout(&path, Duration::from_millis(200)) else {
+            panic!("expected lock timeout while child holds providers.lock");
+        };
+        assert!(
+            matches!(err, ConfigError::LockTimeout(_)),
+            "unexpected error: {err}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("timed out") && msg.contains("providers.lock"),
+            "error message should be clear: {msg}"
+        );
+
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn newly_created_lock_and_toml_have_0600_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = config_path(dir.path());
+        let _guard = ProviderConfig::lock(&path).unwrap();
+        let cfg = ProviderConfig::default();
+        cfg.save(&path).unwrap();
+
+        let lock_mode = std::fs::metadata(path.with_extension("lock"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        let toml_mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(lock_mode, 0o600);
+        assert_eq!(toml_mode, 0o600);
     }
 }

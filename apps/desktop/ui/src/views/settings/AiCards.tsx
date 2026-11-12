@@ -8,12 +8,14 @@ import { ModelPicker } from "../../components/ModelPicker";
 import { SettingGroup, SettingRow } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
 import { modelGroups } from "../../lib/modelPicker";
+import { defaultModelRef } from "../../lib/providerView";
 import { setDefaultProvider } from "../../lib/providers";
 import { isTauriRuntime } from "../../overlay/events";
 import { useDaemon } from "../../state/DaemonContext";
 import { useProviders } from "../../state/useProviders";
 import styles from "../SettingsModal.module.css";
 import { ProvidersSection } from "../SettingsSections";
+import { DetectedAccountsBlock } from "./DetectedAccountsBlock";
 import type { CardDef } from "./types";
 
 /** Default provider + model: a searchable dropdown grouped by provider. */
@@ -26,11 +28,7 @@ function DefaultModelRow() {
   const mock = client?.baseUrl === MOCK_BASE_URL;
   const canChange = isTauriRuntime() || mock;
 
-  const current = useMemo(() => {
-    const id = dto?.default_provider;
-    const row = dto?.configured.find((p) => p.id === id);
-    return id && row?.default_model ? `${id}/${row.default_model}` : "";
-  }, [dto]);
+  const current = useMemo(() => defaultModelRef(dto), [dto]);
   const groups = useMemo(() => modelGroups(dto, current), [dto, current]);
 
   const pick = async (ref: string) => {
@@ -183,6 +181,15 @@ export function aiCards(t: TFunction): CardDef[] {
       description: t("settingsModal.ai.keys.description"),
       keywords: "api key secret anahtar sifre",
       node: <ApiKeysBlock />
+    },
+    {
+      id: "detectedAccounts",
+      section: "ai",
+      kind: "block",
+      title: t("settingsModal.ai.detected.title"),
+      description: t("settingsModal.ai.detected.description"),
+      keywords: "cli claude codex cursor gemini opencode chatgpt account hesap algilanan",
+      node: <DetectedAccountsBlock />
     },
     {
       id: "providers",

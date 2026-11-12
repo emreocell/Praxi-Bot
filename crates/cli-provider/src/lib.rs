@@ -7,4 +7,7 @@ pub mod detect;
 mod peer;
 pub mod runtime;
 
-pub use detect::{AuthState, DetectedCli, Detector, PathEnv};
+pub use detect::{
+    AuthState, CLI_ENGINES, CliEngineSpec, DetectedCli, Detector, PathEnv, enable_refusal_message,
+    engine_spec,
+};
