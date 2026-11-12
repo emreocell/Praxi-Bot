@@ -18,6 +18,36 @@ pub enum SmtpSecurity {
     StartTls,
 }
 
+/// What kind of mailbox an account is. Old `email.toml` files have no `kind`
+/// and load as [`AccountKind::ImapSmtp`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum AccountKind {
+    /// The user's own mailbox over IMAP and SMTP.
+    #[default]
+    #[serde(rename = "imap_smtp")]
+    ImapSmtp,
+    /// An `AgentMail` inbox reached over its REST API with the user's own key.
+    #[serde(rename = "agentmail")]
+    AgentMail,
+}
+
+impl AccountKind {
+    /// Whether this kind is the default (not written to `email.toml`).
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        *self == Self::ImapSmtp
+    }
+
+    /// The stable name used in the file and the API.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ImapSmtp => "imap_smtp",
+            Self::AgentMail => "agentmail",
+        }
+    }
+}
+
 /// IMAP server (always implicit TLS, usually port 993).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -41,6 +71,39 @@ pub struct SmtpSettings {
     /// Transport security (default implicit TLS).
     #[serde(default)]
     pub security: SmtpSecurity,
+}
+
+impl Default for ImapSettings {
+    /// "Not configured": what an API-backed account carries.
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            port: default_imap_port(),
+        }
+    }
+}
+
+impl Default for SmtpSettings {
+    /// "Not configured": what an API-backed account carries.
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            port: default_smtp_port(),
+            security: SmtpSecurity::default(),
+        }
+    }
+}
+
+impl ImapSettings {
+    pub(crate) fn is_unset(&self) -> bool {
+        self.host.is_empty()
+    }
+}
+
+impl SmtpSettings {
+    pub(crate) fn is_unset(&self) -> bool {
+        self.host.is_empty()
+    }
 }
 
 fn default_imap_port() -> u16 {
@@ -67,12 +130,21 @@ pub struct AccountConfig {
     /// Login name (defaults to `address` when empty).
     #[serde(default)]
     pub username: String,
-    /// Reference to the (app) password in the secret store.
+    /// Reference to the secret in the secret store: the (app) password of an
+    /// IMAP/SMTP account, the API key of an `AgentMail` account.
     pub password: SecretRef,
-    /// IMAP server.
+    /// IMAP server (unused by API-backed accounts).
+    #[serde(default, skip_serializing_if = "ImapSettings::is_unset")]
     pub imap: ImapSettings,
-    /// SMTP server.
+    /// SMTP server (unused by API-backed accounts).
+    #[serde(default, skip_serializing_if = "SmtpSettings::is_unset")]
     pub smtp: SmtpSettings,
+    /// Kind of mailbox; absent in older files = `imap_smtp`.
+    #[serde(default, skip_serializing_if = "AccountKind::is_default")]
+    pub kind: AccountKind,
+    /// The provider's id of the inbox (`AgentMail` accounts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inbox_id: Option<String>,
     /// Folder drafts are saved to.
     #[serde(default = "default_drafts")]
     pub drafts_folder: String,
@@ -199,13 +271,8 @@ impl AccountConfig {
     /// # Errors
     /// [`EmailError::Config`] for empty names/hosts or an invalid sender address.
     pub fn validate(&self) -> Result<(), EmailError> {
-        crate::imap::check_folder(&self.drafts_folder)
-            .map_err(|_| EmailError::Config("invalid drafts folder".into()))?;
         secret_store::validate_name(self.password.name())
             .map_err(|_| EmailError::Config("invalid password secret reference".into()))?;
-        if self.imap.port == 0 || self.smtp.port == 0 {
-            return Err(EmailError::Config("server port must be nonzero".into()));
-        }
         if self.login().len() > MAX_LOGIN_LEN || self.address.len() > MAX_LOGIN_LEN {
             return Err(EmailError::Config(
                 "address or login name is too long".into(),
@@ -217,14 +284,10 @@ impl AccountConfig {
         if self.name.trim().is_empty() {
             return Err(EmailError::Config("account name is empty".into()));
         }
-        if self.imap.host.trim().is_empty() || self.smtp.host.trim().is_empty() {
-            return Err(EmailError::Config(format!(
-                "account {}: imap/smtp host is empty",
-                self.name
-            )));
+        match self.kind {
+            AccountKind::ImapSmtp => self.validate_imap_smtp()?,
+            AccountKind::AgentMail => self.validate_agentmail()?,
         }
-        validate_host(&self.imap.host, "imap")?;
-        validate_host(&self.smtp.host, "smtp")?;
         if let Some(bot) = &self.bot
             && (bot.is_empty()
                 || bot.len() > MAX_BOT_ID_LEN
@@ -243,6 +306,39 @@ impl AccountConfig {
                 "account {}: invalid sender address",
                 self.name
             )));
+        }
+        Ok(())
+    }
+
+    fn validate_imap_smtp(&self) -> Result<(), EmailError> {
+        crate::imap::check_folder(&self.drafts_folder)
+            .map_err(|_| EmailError::Config("invalid drafts folder".into()))?;
+        if self.imap.port == 0 || self.smtp.port == 0 {
+            return Err(EmailError::Config("server port must be nonzero".into()));
+        }
+        if self.imap.host.trim().is_empty() || self.smtp.host.trim().is_empty() {
+            return Err(EmailError::Config(format!(
+                "account {}: imap/smtp host is empty",
+                self.name
+            )));
+        }
+        validate_host(&self.imap.host, "imap")?;
+        validate_host(&self.smtp.host, "smtp")?;
+        if self.inbox_id.is_some() {
+            return Err(EmailError::Config(
+                "an IMAP/SMTP account has no inbox id".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_agentmail(&self) -> Result<(), EmailError> {
+        let inbox = self.inbox_id.as_deref().unwrap_or_default();
+        crate::agentmail::check_id(inbox, "inbox id")?;
+        if !self.imap.is_unset() || !self.smtp.is_unset() {
+            return Err(EmailError::Config(
+                "an AgentMail account has no IMAP/SMTP servers".into(),
+            ));
         }
         Ok(())
     }

@@ -19,6 +19,10 @@ mail-builder = { version = "0.4", default-features = false }
 mail-send = { version = "0.5", default-features = false, features = ["ring", "tls12"] }
 mail-parser = "0.11"
 log = "0.4"
+reqwest.workspace = true
+url = "2"
+uuid.workspace = true
+web-tools = { path = "../web-tools", version = "0.1.0" }
 protocol.workspace = true
 secret-store.workspace = true
 serde.workspace = true
@@ -31,5 +35,7 @@ webpki-roots = "1"
 
 [dev-dependencies]
 toml = "0.8"
+tempfile.workspace = true
+wiremock.workspace = true
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring", "pem"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }

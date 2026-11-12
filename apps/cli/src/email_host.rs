@@ -405,6 +405,8 @@ impl EmailHost {
             timeout_secs: 30,
             bot: input.bot.clone(),
             allowed_senders: senders(&input.allowed_senders)?,
+            kind: connector_email::AccountKind::ImapSmtp,
+            inbox_id: None,
         };
         account.validate().map_err(invalid)?;
         Ok(account)

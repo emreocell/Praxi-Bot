@@ -14,12 +14,16 @@
 //! conversion), so non-ASCII folder names must be given in the server's
 //! encoding.
 
+pub mod agentmail;
 pub mod config;
 pub mod connector;
+mod cred;
 pub mod error;
 pub mod imap;
+pub mod imap_provider;
 pub mod message;
 pub mod probe;
+pub mod provider;
 pub mod smtp;
 mod tls;
 pub mod tools;
@@ -28,15 +32,21 @@ use std::sync::Arc;
 
 use tool_registry::{Tool, ToolRegistry};
 
+pub use agentmail::{AgentMailClient, AgentMailEndpoint, AgentMailProvider, ApiKey};
 pub use config::{
-    AccountConfig, ImapSettings, SmtpSecurity, SmtpSettings, normalize_sender,
+    AccountConfig, AccountKind, ImapSettings, SmtpSecurity, SmtpSettings, normalize_sender,
     validate_account_name, validate_host,
 };
 pub use connector::{EmailConnector, Scoped, SearchResult};
-pub use error::EmailError;
+pub use error::{EmailError, ProviderError};
+pub use imap_provider::ImapSmtpProvider;
 pub use imap::{FolderInfo, SearchQuery};
 pub use message::{AttachmentInfo, MessageDetail, MessageSummary};
 pub use probe::{ProbeReport, ProbeStatus, probe};
+pub use provider::{
+    AttachmentData, Capabilities, CreateInbox, Found, InboxInfo, MailboxProvider, NewMessages,
+    Receipt, SearchRequest,
+};
 pub use smtp::OutgoingMail;
 pub use tools::TOOL_NAMES;
 
