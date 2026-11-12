@@ -92,7 +92,7 @@ pub struct LiveView {
     pending_input: Arc<std::sync::atomic::AtomicUsize>,
     /// Last written denial audit per `actor|event`, and how many were folded
     /// into it since (see [`audit`]).
-    denials: Mutex<BTreeMap<String, (Instant, u64)>>,
+    denials: Mutex<BTreeMap<String, (Option<Instant>, BTreeMap<String, u64>)>>,
 }
 impl LiveView {
     pub(crate) fn capture_targets(&self) -> std::collections::BTreeSet<Uuid> {
@@ -214,6 +214,11 @@ fn audit(
     mut meta: serde_json::Value,
 ) -> Result<(), ApiError> {
     if matches!(event, "view.denied" | "input.batch_rejected") {
+        let reason = meta
+            .get("reason")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unspecified")
+            .to_owned();
         let mut denials = s.live_view().denials.lock();
         if denials.len() > 256 {
             denials.clear();
@@ -221,15 +226,28 @@ fn audit(
         let now = Instant::now();
         let entry = denials
             .entry(format!("{}|{event}", actor.key))
-            .or_insert((now, u64::MAX));
-        if entry.1 != u64::MAX && now.duration_since(entry.0) < DENIAL_AUDIT_WINDOW {
-            entry.1 += 1;
+            .or_insert_with(|| (None, BTreeMap::new()));
+        if entry
+            .0
+            .is_some_and(|at| now.duration_since(at) < DENIAL_AUDIT_WINDOW)
+        {
+            // Folded into the silence: keep a bounded count per reason.
+            let key = if entry.1.contains_key(&reason) || entry.1.len() < 16 {
+                reason
+            } else {
+                "other".to_owned()
+            };
+            *entry.1.entry(key).or_default() += 1;
             return Ok(());
         }
-        let folded = if entry.1 == u64::MAX { 0 } else { entry.1 };
-        *entry = (now, 0);
+        let folded = std::mem::take(&mut entry.1);
+        entry.0 = Some(now);
         if let Some(object) = meta.as_object_mut() {
-            object.insert("suppressed_since_last".into(), folded.into());
+            object.insert(
+                "suppressed_since_last".into(),
+                folded.values().sum::<u64>().into(),
+            );
+            object.insert("suppressed_by_reason".into(), serde_json::json!(folded));
         }
     }
     s.storage()
@@ -537,7 +555,9 @@ pub(crate) async fn takeover(
     }
     // The local user's override outranks every paired device: neither the
     // overridden peer (reacquire) nor another one (recover) may re-take the
-    // screen; only the local user clears it.
+    // screen, and a fresh grant alone never suffices: only the local user
+    // clears it (`recover` or release), after which a new takeover also needs
+    // the grant.
     if !actor.local
         && s.hub()
             .takeover()
@@ -614,7 +634,14 @@ pub(crate) async fn takeover(
     )?;
     let owned = s
         .hub()
-        .begin_takeover(&actor.key, &i, target, generation, actor.recovery)
+        .begin_takeover(
+            &actor.key,
+            &i,
+            target,
+            generation,
+            actor.recovery,
+            actor.local,
+        )
         .map_err(ApiError::conflict)?;
     let result = accepted(&owned);
     if owned.info.state == ViewState::Acquiring {
@@ -708,31 +735,32 @@ async fn override_takeover(
     {
         return Ok(None);
     }
-    let Some(old) = s.hub().force_interrupt(reason.clone()) else {
-        return Ok(None);
-    };
     let live = s.live_view();
-    let _executor = live.executor.lock().await;
-    let t = s.hub().takeover().unwrap_or(old.clone());
-    interrupt(s, actor, &t, reason.clone()).await?;
-    // A local override is terminal for the overridden device: it needs a new
-    // per-device input grant from the local user to take over again. (Set
-    // directly, not through `set_screen_privileges`, which would replace the
-    // recorded reason with `revoked`.)
-    if reason == Reason::LocalOverride && old.actor.starts_with("peer:") {
-        let keep_view = live
-            .privileges
-            .lock()
-            .get(&old.actor)
-            .is_none_or(|p| p.view);
+    // 1. Revoke the overridden device's input grant FIRST, so that nothing
+    // below (a failing audit write, a failing key reset) can leave it in
+    // place. Set directly, not through `set_screen_privileges`.
+    if reason == Reason::LocalOverride
+        && let Some(owner) = s.hub().takeover().map(|t| t.actor)
+        && owner.starts_with("peer:")
+    {
+        let keep_view = live.privileges.lock().get(&owner).is_none_or(|p| p.view);
         live.set_privileges(
-            old.actor.clone(),
+            owner,
             ScreenPrivileges {
                 view: keep_view,
                 input: false,
             },
         );
     }
+    // 2. Stop the takeover (the reason is sticky inside the hub).
+    let Some(old) = s.hub().force_interrupt(reason.clone()) else {
+        return Ok(None);
+    };
+    // 3. Reset pressed inputs and audit. Failures are reported, but the stop
+    // and the revoke above already happened.
+    let _executor = live.executor.lock().await;
+    let t = s.hub().takeover().unwrap_or(old.clone());
+    interrupt(s, actor, &t, reason).await?;
     Ok(Some(old))
 }
 

@@ -23,6 +23,7 @@ struct Sink {
     pin: AtomicBool,
     fail_at: AtomicUsize,
     hold: AtomicBool,
+    fail_reset: AtomicBool,
     entered: tokio::sync::Notify,
     proceed: tokio::sync::Notify,
 }
@@ -42,6 +43,9 @@ impl InputSink for Sink {
     }
     async fn release_pressed_inputs(&self) -> Result<(), ViewError> {
         self.resets.fetch_add(1, Ordering::SeqCst);
+        if self.fail_reset.load(Ordering::SeqCst) {
+            return Err(ViewError::Unavailable);
+        }
         Ok(())
     }
     async fn set_takeover_active(&self, active: bool) -> Result<(), ViewError> {
@@ -1703,4 +1707,235 @@ async fn the_event_stream_shows_a_short_label_never_the_full_device_key() {
     let (_, other) = t.call(None, Method::GET, "/v1/control/state", None).await;
     assert_eq!(other["takeover"]["owner"], json!("peer:abcdef01"));
     assert!(!other.to_string().contains(LONG_KEY));
+}
+
+fn alice_actor() -> Actor {
+    Actor {
+        key: "peer:alice".into(),
+        recovery: true,
+        local: false,
+    }
+}
+
+/// After a local override no paired device can re-take the screen, whatever
+/// later happens to the overridden device's session; only the local user
+/// clears it, and then a fresh takeover works again.
+async fn assert_override_stays_terminal(t: &Test, takeover: &TakeoverInfo) {
+    let reason = t.state.hub().takeover().unwrap().info.reason;
+    assert_eq!(reason, Some(Reason::LocalOverride), "reason is sticky");
+    assert!(t.state.hub().latched().is_some());
+    // A second granted Desktop peer cannot recover it.
+    grant(t, "bob", true, true).await;
+    let bob_session = t.session(Some("bob")).await;
+    let (status, _) = t
+        .call(
+            Some("bob"),
+            Method::POST,
+            "/v1/control/takeover",
+            Some(json!({"session_id":bob_session,"request_id":Uuid::now_v7(),"recover":true,"reason":"owner_lost"})),
+        )
+        .await;
+    assert!(!status.is_success(), "bob recover: {status}");
+    // The overridden device cannot reacquire even with a fresh grant.
+    grant(t, "alice", true, true).await;
+    let (status, _) = t
+        .call(
+            Some("alice"),
+            Method::POST,
+            "/v1/control/takeover",
+            Some(json!({"session_id":Uuid::now_v7(),"request_id":Uuid::now_v7(),"reacquire_takeover_id":takeover.id})),
+        )
+        .await;
+    assert!(!status.is_success(), "alice reacquire: {status}");
+    assert_eq!(
+        t.state.hub().takeover().unwrap().info.reason,
+        Some(Reason::LocalOverride)
+    );
+    // Local recover works, and a fresh takeover works afterwards.
+    let (status, v) = t
+        .call(None, Method::POST, "/v1/control/recover", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert!(t.state.hub().takeover().is_none() && t.state.hub().latched().is_none());
+    let (_id, fresh, _body) = t.active(Some("alice")).await;
+    assert_eq!(fresh.state, ViewState::Active);
+}
+
+async fn local_override(t: &Test) {
+    let (status, v) = t
+        .call(None, Method::POST, "/v1/control/override", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+}
+
+#[tokio::test]
+async fn a_local_override_survives_the_peer_session_expiring() {
+    let t = Test::new();
+    let (id, owned, _body) = t.active(Some("alice")).await;
+    local_override(&t).await;
+    // What the session reaper does ~30 s after the peer stops heartbeating.
+    end_session(&t.state, &alice_actor(), id, Reason::Expired)
+        .await
+        .unwrap();
+    assert_override_stays_terminal(&t, &owned).await;
+}
+
+#[tokio::test]
+async fn a_local_override_survives_the_peer_deleting_its_session() {
+    let t = Test::new();
+    let (id, owned, _body) = t.active(Some("alice")).await;
+    local_override(&t).await;
+    t.auto_grant.store(false, Ordering::SeqCst);
+    grant(&t, "alice", true, false).await;
+    let (status, _) = t
+        .call(
+            Some("alice"),
+            Method::DELETE,
+            &format!("/v1/view/sessions/{id}"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_override_stays_terminal(&t, &owned).await;
+}
+
+#[tokio::test]
+async fn a_local_override_survives_the_frame_stream_dropping() {
+    let t = Test::new();
+    let (_id, owned, body) = t.active(Some("alice")).await;
+    local_override(&t).await;
+    drop(body);
+    for _ in 0..40 {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_override_stays_terminal(&t, &owned).await;
+}
+
+#[tokio::test]
+async fn a_local_override_survives_a_privilege_revoke() {
+    let t = Test::new();
+    let (_id, owned, _body) = t.active(Some("alice")).await;
+    local_override(&t).await;
+    t.state
+        .set_screen_privileges(
+            "peer:alice".into(),
+            ScreenPrivileges {
+                view: false,
+                input: false,
+            },
+        )
+        .await
+        .unwrap();
+    assert_override_stays_terminal(&t, &owned).await;
+}
+
+#[tokio::test]
+async fn a_local_override_survives_a_failed_key_reset() {
+    let t = Test::new();
+    let (_id, owned, _body) = t.active(Some("alice")).await;
+    t.target.sink.fail_reset.store(true, Ordering::SeqCst);
+    local_override(&t).await;
+    t.target.sink.fail_reset.store(false, Ordering::SeqCst);
+    assert_override_stays_terminal(&t, &owned).await;
+}
+
+#[tokio::test]
+async fn an_audit_failure_during_override_still_revokes_the_peer_and_stays_terminal() {
+    let t = Test::new();
+    let (_id, owned, _body) = t.active(Some("alice")).await;
+    let db = rusqlite::Connection::open(t.dir.path().join("bot.db")).unwrap();
+    db.execute_batch("CREATE TRIGGER fail_live_audit BEFORE INSERT ON audit_log BEGIN SELECT RAISE(ABORT, 'injected audit failure'); END;").unwrap();
+    let (status, _) = t
+        .call(None, Method::POST, "/v1/control/override", None)
+        .await;
+    assert_ne!(status, StatusCode::OK, "the audit failure is reported");
+    // The stop took effect anyway: input is dead and the grant is gone.
+    assert_eq!(
+        t.state.hub().takeover().unwrap().info.reason,
+        Some(Reason::LocalOverride)
+    );
+    let live = t.state.live_view();
+    assert!(!live.allowed(&alice_actor(), true), "input grant revoked");
+    // The app's next heartbeat is the idempotent path and must not matter.
+    let _ = t
+        .call(
+            None,
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode":"paused","release":false})),
+        )
+        .await;
+    assert!(!live.allowed(&alice_actor(), true));
+    db.execute_batch("DROP TRIGGER fail_live_audit").unwrap();
+    assert_override_stays_terminal(&t, &owned).await;
+}
+
+#[tokio::test]
+async fn a_peer_without_a_grant_cannot_set_a_latch_or_overwrite_the_apps_mode() {
+    let t = Test::new();
+    t.auto_grant.store(false, Ordering::SeqCst);
+    t.state.hub().put_state(crate::dto::ControlMode::BotDriving);
+    for mode in ["paused", "human_driving", "idle", "bot_driving"] {
+        let (status, _) = t
+            .call(
+                Some("mallory"),
+                Method::PUT,
+                "/v1/control/state",
+                Some(json!({"mode":mode,"release":false})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{mode}");
+    }
+    assert!(t.state.hub().latched().is_none(), "no latch was created");
+    assert_eq!(
+        t.state.hub().reported_mode(),
+        Some(crate::dto::ControlMode::BotDriving),
+        "the app's mode was not overwritten"
+    );
+    grant(&t, "mallory", true, true).await;
+    let (status, _) = t
+        .call(
+            Some("mallory"),
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode":"paused","release":false})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test(start_paused = true)]
+async fn coalesced_denials_keep_a_count_per_reason() {
+    let t = Test::new();
+    t.auto_grant.store(false, Ordering::SeqCst);
+    for _ in 0..3 {
+        let _ = t
+            .call(Some("mallory"), Method::GET, "/v1/view/targets", None)
+            .await;
+        let _ = t
+            .call(
+                Some("mallory"),
+                Method::PUT,
+                "/v1/view/privileges/mallory",
+                Some(json!({"view":true,"input":true})),
+            )
+            .await;
+    }
+    tokio::time::advance(Duration::from_secs(61)).await;
+    let _ = t
+        .call(Some("mallory"), Method::GET, "/v1/view/targets", None)
+        .await;
+    let rows: Vec<_> = t
+        .state
+        .storage()
+        .list_audit(t.state.user_id())
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.action == "view.denied")
+        .collect();
+    let last = rows.last().unwrap();
+    let by_reason = &last.detail["suppressed_by_reason"];
+    assert!(by_reason["privilege"].as_u64().unwrap() >= 2, "{last:?}");
+    assert!(by_reason["local_only"].as_u64().unwrap() >= 2, "{last:?}");
+    assert!(last.detail["suppressed_since_last"].as_u64().unwrap() >= 4);
 }

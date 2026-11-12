@@ -55,7 +55,11 @@ Frame viewers do not register as overlay controllers.
   row, one event and one key reset) and terminal for paired devices: the
   overridden device loses its input grant, and neither it (`reacquire_takeover_id`)
   nor any other device (`recover: true`) can take the screen again while the
-  latch carries the `local_override` reason. Only the local user clears it
+  latch carries the `local_override` reason. The reason is sticky inside the
+  control hub: no later interruption (an expired or deleted peer session, a
+  dropped stream, a privilege revoke, a failed key reset) replaces it, and the
+  hub itself refuses a non-local takeover over it, so a fresh grant alone never
+  suffices. Only the local user clears it
   (`recover`), and a new takeover then needs a fresh per-device grant. `PUT /v1/control/state`
   with `mode: paused` from the local user does the same while a takeover is owned.
 - `POST /v1/control/recover` (local user only) clears a takeover latch, including
@@ -65,8 +69,9 @@ Frame viewers do not register as overlay controllers.
   without a body, `PUT /v1/control/state` with `release: true` or a different
   pause mode) needs the local user or a paired device that currently holds the
   `input` grant; without it the answer is 403. A latch left by a local override
-  is local-only whatever the grants. A device may still report a mode and set a
-  first pause.
+  is local-only whatever the grants. Every `PUT /v1/control/state` from a paired
+  device needs the `input` grant: without it a device can neither report a mode
+  (the registration belongs to the local app) nor set a latch.
 - `GET /v1/control/state` returns the takeover's owner (a short label,
   `peer:<first 8 characters>`, for paired devices other than the caller), target and state to
   everyone, but the takeover id, session id and epoch only to the owner (the
@@ -143,7 +148,8 @@ slot. Managed Chromium does not idle-close while a run that used the computer is
 still active; its idle clock restarts when that run ends.
 
 Denied attempts (`view.denied`, `input.batch_rejected`) are audited at most once
-a minute per actor and event; the next row carries `suppressed_since_last`.
+a minute per actor and event; the next row carries `suppressed_since_last` and `suppressed_by_reason` (a
+bounded count per reason, so different denial reasons are not lost).
 
 Audit volume: session open/close, takeover acquire/release/interrupt/denied and
 input batches are audited; an open stream adds at most one `view.checkpoint` per

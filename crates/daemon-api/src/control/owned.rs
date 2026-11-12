@@ -158,8 +158,21 @@ impl ControlHub {
         target: Uuid,
         generation: u64,
         privileged: bool,
+        local: bool,
     ) -> Result<OwnedTakeover, String> {
         let mut st = self.state.lock();
+        // Second line of defence behind the route: the local user's override
+        // outranks every paired device, whatever flags the caller sets.
+        if !local
+            && st
+                .owned
+                .as_ref()
+                .is_some_and(|old| old.info.reason == Some(Reason::LocalOverride))
+        {
+            return Err(
+                "the local user stopped the takeover; only the local user can clear it".into(),
+            );
+        }
         if let Some(old) = &st.owned {
             if old.request_id == req.request_id {
                 if old.actor == actor
@@ -312,7 +325,11 @@ impl ControlHub {
     }
     pub fn suspend_release(&self, id: Uuid) {
         let mut st = self.state.lock();
-        if let Some(t) = st.owned.as_mut().filter(|t| t.info.id == id) {
+        if let Some(t) = st
+            .owned
+            .as_mut()
+            .filter(|t| t.info.id == id && t.info.reason != Some(Reason::LocalOverride))
+        {
             t.info.state = ViewState::Paused;
             t.info.reason = None;
             t.input_deadline = None;
@@ -324,11 +341,16 @@ impl ControlHub {
     /// Never resumes; the executor also resets keys best effort.
     pub fn interrupt(&self, id: Uuid, reason: Reason) {
         let mut st = self.state.lock();
-        // Idempotent: repeating the same interruption writes and announces nothing.
+        // Idempotent, and a local override is sticky: while the takeover is
+        // paused by the local user, no later interruption (an expired or
+        // deleted peer session, a dropped stream, a revoke, a failed key
+        // reset...) may replace that reason. Only `clear_owned_latch`, a
+        // local-authorised new takeover or a daemon restart end it.
         if st.owned.as_ref().is_some_and(|t| {
             t.info.id == id
                 && t.info.state == ViewState::Paused
-                && t.info.reason.as_ref() == Some(&reason)
+                && (t.info.reason == Some(Reason::LocalOverride)
+                    || t.info.reason.as_ref() == Some(&reason))
         }) {
             return;
         }
@@ -658,7 +680,7 @@ mod tests {
         let hub = Arc::new(ControlHub::new(super::super::ControlConfig::default()));
         let permit = hub.clone().admit_action(action(), &|| {}).await.unwrap();
         let owned = hub
-            .begin_takeover("alice", &request(), Uuid::now_v7(), 1, true)
+            .begin_takeover("alice", &request(), Uuid::now_v7(), 1, true, true)
             .unwrap();
         let other = hub.clone();
         let pending = tokio::spawn(async move { other.admit_action(action(), &|| {}).await });
@@ -682,7 +704,7 @@ mod tests {
         let hub = Arc::new(ControlHub::new(super::super::ControlConfig::default()));
         let permit = hub.clone().admit_action(action(), &|| {}).await.unwrap();
         let t = hub
-            .begin_takeover("alice", &request(), Uuid::now_v7(), 1, true)
+            .begin_takeover("alice", &request(), Uuid::now_v7(), 1, true, true)
             .unwrap();
         assert!(hub.drain(t.info.id, t.info.control_epoch).await.is_err());
         assert_eq!(
@@ -700,7 +722,7 @@ mod tests {
             ..super::super::ControlConfig::default()
         }));
         let t = hub
-            .begin_takeover("alice", &request(), Uuid::now_v7(), 1, true)
+            .begin_takeover("alice", &request(), Uuid::now_v7(), 1, true, true)
             .unwrap();
         let other = hub.clone();
         let waiting = tokio::spawn(async move { other.admit_action(action(), &|| {}).await });
@@ -728,7 +750,7 @@ mod tests {
             tokio::spawn(async move { other.admit_action(req, &move || p.notify_one()).await });
         published.notified().await;
         let t = hub
-            .begin_takeover("alice", &request(), Uuid::now_v7(), 1, true)
+            .begin_takeover("alice", &request(), Uuid::now_v7(), 1, true, true)
             .unwrap();
         assert!(!hub.decide(id, crate::dto::ControlVerdict::Proceed, None));
         hub.drain(t.info.id, t.info.control_epoch).await.unwrap();
@@ -755,7 +777,7 @@ mod tests {
         worker.abort();
         let _ = worker.await;
         let t = hub
-            .begin_takeover("alice", &request(), Uuid::now_v7(), 1, true)
+            .begin_takeover("alice", &request(), Uuid::now_v7(), 1, true, true)
             .unwrap();
         assert_eq!(hub.state.lock().active_actions, 1);
         done.send(()).unwrap();
@@ -771,17 +793,17 @@ mod tests {
             assert!(hub.latched().is_some(), "ownerless latch fails closed");
             let mut req = request();
             assert!(
-                hub.begin_takeover("alice", &req, Uuid::now_v7(), 1, true)
+                hub.begin_takeover("alice", &req, Uuid::now_v7(), 1, true, true)
                     .is_err()
             );
             req.recover = true;
             req.reason = Some(live_view::RecoveryReason::DaemonRestart);
             assert!(
-                hub.begin_takeover("phone", &req, Uuid::now_v7(), 1, false)
+                hub.begin_takeover("phone", &req, Uuid::now_v7(), 1, false, false)
                     .is_err()
             );
             assert!(
-                hub.begin_takeover("alice", &req, Uuid::now_v7(), 1, true)
+                hub.begin_takeover("alice", &req, Uuid::now_v7(), 1, true, true)
                     .is_ok()
             );
         }
@@ -792,7 +814,7 @@ mod tests {
         let path = dir.path().join("control-latch.json");
         let hub = ControlHub::with_latch_file(super::super::ControlConfig::default(), path.clone());
         let t = hub
-            .begin_takeover("alice", &request(), Uuid::now_v7(), 1, true)
+            .begin_takeover("alice", &request(), Uuid::now_v7(), 1, true, true)
             .unwrap();
         hub.activate(t.info.id, t.info.control_epoch).unwrap();
         let mut j = journal(&t);
@@ -834,7 +856,7 @@ mod tests {
         let path = dir.path().join("control-latch.json");
         let hub = ControlHub::with_latch_file(super::super::ControlConfig::default(), path.clone());
         let t = hub
-            .begin_takeover("peer:phone", &request(), Uuid::now_v7(), 1, false)
+            .begin_takeover("peer:phone", &request(), Uuid::now_v7(), 1, false, false)
             .unwrap();
         hub.activate(t.info.id, t.info.control_epoch).unwrap();
         let restarted = ControlHub::with_latch_file(super::super::ControlConfig::default(), path);
@@ -848,7 +870,7 @@ mod tests {
     fn local_override_interrupts_any_owner_keeps_the_pause_and_never_resumes() {
         let hub = ControlHub::new(super::super::ControlConfig::default());
         let t = hub
-            .begin_takeover("peer:phone", &request(), Uuid::now_v7(), 1, false)
+            .begin_takeover("peer:phone", &request(), Uuid::now_v7(), 1, false, false)
             .unwrap();
         hub.activate(t.info.id, t.info.control_epoch).unwrap();
         let before = hub.takeover().unwrap().info.control_epoch;
@@ -863,12 +885,64 @@ mod tests {
         assert!(hub.activate(t.info.id, before).is_err());
     }
     #[test]
+    fn a_local_override_reason_is_sticky_and_the_hub_refuses_non_local_takeovers_over_it() {
+        let hub = ControlHub::new(super::super::ControlConfig::default());
+        let t = hub
+            .begin_takeover("peer:alice", &request(), Uuid::now_v7(), 1, true, false)
+            .unwrap();
+        hub.activate(t.info.id, t.info.control_epoch).unwrap();
+        hub.force_interrupt(Reason::LocalOverride).unwrap();
+        let epoch = hub.takeover().unwrap().info.control_epoch;
+        for reason in [
+            Reason::Expired,
+            Reason::Disconnected,
+            Reason::Revoked,
+            Reason::ResetFailed,
+            Reason::DrainTimeout,
+            Reason::AuditFailed,
+            Reason::PartialInjection,
+            Reason::RateLimited,
+            Reason::Unavailable,
+        ] {
+            hub.interrupt(t.info.id, reason);
+            let now = hub.takeover().unwrap();
+            assert_eq!(now.info.reason, Some(Reason::LocalOverride));
+            assert_eq!(now.info.state, ViewState::Paused);
+            assert_eq!(now.info.control_epoch, epoch);
+        }
+        hub.suspend_release(t.info.id);
+        assert_eq!(
+            hub.takeover().unwrap().info.reason,
+            Some(Reason::LocalOverride)
+        );
+        // No flag a non-local caller sets can take it over: not the same
+        // actor's reacquire, not a privileged peer's recover.
+        let mut again = request();
+        again.reacquire_takeover_id = Some(t.info.id);
+        assert!(
+            hub.begin_takeover("peer:alice", &again, Uuid::now_v7(), 1, true, false)
+                .is_err()
+        );
+        let mut recover = request();
+        recover.recover = true;
+        recover.reason = Some(live_view::RecoveryReason::DaemonRestart);
+        assert!(
+            hub.begin_takeover("peer:bob", &recover, Uuid::now_v7(), 1, true, false)
+                .is_err()
+        );
+        // A local-authorised path may.
+        assert!(
+            hub.begin_takeover("local-ui:me", &recover, Uuid::now_v7(), 1, true, true)
+                .is_ok()
+        );
+    }
+    #[test]
     fn write_failure_never_activates_or_releases_and_retries_restore_the_same_outbox() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("control-latch.json");
         let hub = ControlHub::with_latch_file(super::super::ControlConfig::default(), path.clone());
         let t = hub
-            .begin_takeover("alice", &request(), Uuid::now_v7(), 1, true)
+            .begin_takeover("alice", &request(), Uuid::now_v7(), 1, true, true)
             .unwrap();
         hub.activate(t.info.id, t.info.control_epoch).unwrap();
         let j = hub.prepare_release(journal(&t)).unwrap();
@@ -890,7 +964,7 @@ mod tests {
             dir.path().join("missing").join("latch"),
         );
         assert!(
-            bad.begin_takeover("alice", &request(), Uuid::now_v7(), 1, true)
+            bad.begin_takeover("alice", &request(), Uuid::now_v7(), 1, true, true)
                 .is_err()
         );
         assert!(bad.latched().is_some());
@@ -903,7 +977,7 @@ mod tests {
             let hub =
                 ControlHub::with_latch_file(super::super::ControlConfig::default(), path.clone());
             let t = hub
-                .begin_takeover("alice", &request(), Uuid::now_v7(), 1, true)
+                .begin_takeover("alice", &request(), Uuid::now_v7(), 1, true, true)
                 .unwrap();
             hub.activate(t.info.id, t.info.control_epoch).unwrap();
             let j = journal(&t);

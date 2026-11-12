@@ -817,16 +817,10 @@ pub(crate) async fn put_control_state(
     axum::Extension(actor): axum::Extension<crate::live_view::Actor>,
     ApiJson(input): ApiJson<ControlStateInput>,
 ) -> Result<Json<ControlStateDto>, ApiError> {
-    // A peer may report a mode or set a first pause, but releasing or changing
-    // a latch it does not own needs the local user or an input grant.
-    let changes_latch = input.release
-        || (matches!(
-            input.mode,
-            crate::dto::ControlMode::Paused | crate::dto::ControlMode::HumanDriving
-        ) && s.hub().latched().is_some_and(|l| l != input.mode));
-    if changes_latch {
-        crate::live_view::require_latch_authority(&s, &actor)?;
-    }
+    // The local app owns the controller registration and the latch. A paired
+    // device may touch either only with the local user's explicit input grant:
+    // without it, even reporting a mode or setting a first pause is refused.
+    crate::live_view::require_latch_authority(&s, &actor)?;
     // The local app's Pause/Stop must work during anybody's takeover: it
     // overrides the takeover and keeps the pause. Paired peers cannot.
     if actor.local
