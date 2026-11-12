@@ -1159,7 +1159,9 @@ async fn all_does_not_carry_agentmail_api_keys_unless_named() {
     database(dir.path(), false);
     let store = MemoryStore::new();
     store.set("provider/key", "k").unwrap();
-    store.set("email/bot-mail/api_key", "am_key_in_store").unwrap();
+    store
+        .set("email/bot-mail/api_key", "am_key_in_store")
+        .unwrap();
     // Not a managed account secret (extra path segment): still exported.
     store.set("email/a/b/api_key", "x").unwrap();
     let mut bytes = Vec::new();

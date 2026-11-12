@@ -118,7 +118,10 @@ impl MessageWire {
     }
 
     pub(super) fn detail(&self, max_body_chars: usize) -> Result<MessageDetail, EmailError> {
-        if self.size.is_some_and(|s| s > u64::from(MAX_MESSAGE_BYTES) * 4) {
+        if self
+            .size
+            .is_some_and(|s| s > u64::from(MAX_MESSAGE_BYTES) * 4)
+        {
             return Err(ProviderError::BadResponse.into());
         }
         let body = match (&self.text, &self.html) {

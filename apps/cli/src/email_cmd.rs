@@ -373,7 +373,11 @@ pub async fn rm_with(
     json_out: bool,
     out: &mut dyn Write,
 ) -> Result<()> {
-    let query = if delete_inbox { "?delete_inbox=true" } else { "" };
+    let query = if delete_inbox {
+        "?delete_inbox=true"
+    } else {
+        ""
+    };
     c.request(
         Method::DELETE,
         &format!("/v1/email/accounts/{}{query}", enc(name)),

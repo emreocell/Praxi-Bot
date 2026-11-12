@@ -115,7 +115,9 @@ impl ApiKey {
         if ok {
             Ok(Self(k.to_owned()))
         } else {
-            Err(EmailError::Input("the API key has an invalid format".into()))
+            Err(EmailError::Input(
+                "the API key has an invalid format".into(),
+            ))
         }
     }
 
@@ -397,9 +399,7 @@ impl MailboxProvider for AgentMailProvider {
         match q.unread {
             Some(true) => query.push(("labels", "unread".to_owned())),
             Some(false) => {
-                return Err(EmailError::unsupported(
-                    "searching for read-only messages",
-                ));
+                return Err(EmailError::unsupported("searching for read-only messages"));
             }
             None => {}
         }

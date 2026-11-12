@@ -92,7 +92,10 @@ async fn adding_an_agentmail_account_creates_the_inbox_and_keeps_the_key_in_the_
 
     let text = toml_of(&f);
     assert!(text.contains("kind = \"agentmail\""), "{text}");
-    assert!(text.contains("inbox_id = \"helper@agentmail.to\""), "{text}");
+    assert!(
+        text.contains("inbox_id = \"helper@agentmail.to\""),
+        "{text}"
+    );
     assert!(text.contains("email/bot-mail/api_key"), "{text}");
     assert!(!text.contains(KEY), "the key is never in email.toml");
     assert_eq!(secret(&f, "email/bot-mail/api_key").as_deref(), Some(KEY));
@@ -199,7 +202,10 @@ async fn removing_an_account_never_deletes_the_remote_inbox_unless_asked() {
     f.host.add(input("one", None)).await.unwrap();
     f.host.remove("one").await.unwrap();
     assert_eq!(deletes(&server).await, 0, "default: local only");
-    assert!(secret(&f, "email/one/api_key").is_none(), "the stored key is removed");
+    assert!(
+        secret(&f, "email/one/api_key").is_none(),
+        "the stored key is removed"
+    );
 
     f.host.add(input("two", None)).await.unwrap();
     f.host.remove_account("two", true).await.unwrap();
@@ -235,7 +241,11 @@ async fn a_failed_remote_delete_keeps_the_account_and_a_missing_inbox_counts_as_
 async fn the_remote_delete_flag_is_refused_for_imap_accounts() {
     let server = MockServer::start().await;
     let f = fixture(&server);
-    let port = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
     let imap: EmailAccountInput = serde_json::from_value(json!({
         "name": "mine", "address": "me@example.com",
         "imap": {"host": "127.0.0.1", "port": port},
@@ -260,7 +270,11 @@ async fn deleting_a_bot_removes_its_agentmail_accounts_and_keys_but_never_the_re
     assert_eq!(left, ["b-mail"]);
     assert!(secret(&f, "email/a-mail/api_key").is_none());
     assert!(secret(&f, "email/b-mail/api_key").is_some());
-    assert_eq!(deletes(&server).await, 0, "no data loss the user did not ask for");
+    assert_eq!(
+        deletes(&server).await,
+        0,
+        "no data loss the user did not ask for"
+    );
 }
 
 #[tokio::test]
@@ -309,14 +323,16 @@ async fn a_draft_test_uses_the_key_in_the_request_or_the_stored_one_of_the_same_
         f.host.test_draft(none.clone()).await.unwrap_err(),
         EmailControlError::Invalid(_)
     ));
-    let with_key: EmailAccountInput = serde_json::from_value(
-        json!({"name":"bot-mail","provider":"agentmail","api_key":NEW_KEY}),
-    )
-    .unwrap();
+    let with_key: EmailAccountInput =
+        serde_json::from_value(json!({"name":"bot-mail","provider":"agentmail","api_key":NEW_KEY}))
+            .unwrap();
     assert!(f.host.test_draft(with_key).await.unwrap().ok);
     f.host.add(input("bot-mail", None)).await.unwrap();
     assert!(f.host.test_draft(none).await.unwrap().ok, "stored key");
-    assert!(secret(&f, "email/bot-mail/api_key").as_deref() == Some(KEY), "nothing was stored by a test");
+    assert!(
+        secret(&f, "email/bot-mail/api_key").as_deref() == Some(KEY),
+        "nothing was stored by a test"
+    );
 }
 
 #[tokio::test]
@@ -341,32 +357,26 @@ async fn an_agentmail_account_only_takes_bot_senders_and_a_new_key_and_the_targe
     // Rebinding and a new key are fine; the key replaces the stored one.
     let dto = f
         .host
-        .update("bot-mail", json!({"bot": BOT_B, "allowed_senders": ["Ann@Example.com"], "api_key": NEW_KEY}))
+        .update(
+            "bot-mail",
+            json!({"bot": BOT_B, "allowed_senders": ["Ann@Example.com"], "api_key": NEW_KEY}),
+        )
         .await
         .unwrap();
     assert_eq!(dto.bot.as_deref(), Some(BOT_B));
     assert_eq!(dto.allowed_senders, ["ann@example.com"]);
-    assert_eq!(secret(&f, "email/bot-mail/api_key").as_deref(), Some(NEW_KEY));
+    assert_eq!(
+        secret(&f, "email/bot-mail/api_key").as_deref(),
+        Some(NEW_KEY)
+    );
     assert!(!toml_of(&f).contains(NEW_KEY));
 
     // An API key on an IMAP account is refused (and a password on this kind above).
-    let port = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
-    let imap: EmailAccountInput = serde_json::from_value(json!({
-        "name": "mine", "address": "me@example.com",
-        "imap": {"host": "127.0.0.1", "port": port},
-        "smtp": {"host": "127.0.0.1", "port": port}, "password": "pw-pw-pw-pw",
-    }))
-    .unwrap();
-    f.host.add(imap).await.unwrap();
-    let e = f.host.update("mine", json!({"api_key": NEW_KEY})).await.unwrap_err();
-    assert!(matches!(e, EmailControlError::Invalid(_)), "{e:?}");
-}
-
-#[tokio::test]
-async fn imap_accounts_still_require_the_password_again_when_the_target_changes() {
-    let server = MockServer::start().await;
-    let f = fixture(&server);
-    let port = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
     let imap: EmailAccountInput = serde_json::from_value(json!({
         "name": "mine", "address": "me@example.com",
         "imap": {"host": "127.0.0.1", "port": port},
@@ -376,13 +386,48 @@ async fn imap_accounts_still_require_the_password_again_when_the_target_changes(
     f.host.add(imap).await.unwrap();
     let e = f
         .host
-        .update("mine", json!({"imap": {"host": "imap.evil.example", "port": 993}}))
+        .update("mine", json!({"api_key": NEW_KEY}))
         .await
         .unwrap_err();
-    assert!(matches!(&e, EmailControlError::Invalid(m) if m.contains("password again")), "{e:?}");
+    assert!(matches!(e, EmailControlError::Invalid(_)), "{e:?}");
 }
 
-async fn call(f: &Fixture, bot: Option<&str>, name: &str, input: Value) -> Result<Value, ToolError> {
+#[tokio::test]
+async fn imap_accounts_still_require_the_password_again_when_the_target_changes() {
+    let server = MockServer::start().await;
+    let f = fixture(&server);
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let imap: EmailAccountInput = serde_json::from_value(json!({
+        "name": "mine", "address": "me@example.com",
+        "imap": {"host": "127.0.0.1", "port": port},
+        "smtp": {"host": "127.0.0.1", "port": port}, "password": "pw-pw-pw-pw",
+    }))
+    .unwrap();
+    f.host.add(imap).await.unwrap();
+    let e = f
+        .host
+        .update(
+            "mine",
+            json!({"imap": {"host": "imap.evil.example", "port": 993}}),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&e, EmailControlError::Invalid(m) if m.contains("password again")),
+        "{e:?}"
+    );
+}
+
+async fn call(
+    f: &Fixture,
+    bot: Option<&str>,
+    name: &str,
+    input: Value,
+) -> Result<Value, ToolError> {
     let tool = f.registry.get(name).unwrap();
     let ctx = ToolContext {
         bot_id: bot.map(str::to_owned),
@@ -408,11 +453,15 @@ async fn an_agentmail_account_is_isolated_to_its_bot_through_the_registered_tool
     f.host.add(input("bot-mail", Some(BOT_A))).await.unwrap();
     let tool = f.registry.get("email_search").unwrap();
     assert!(tool.visible_to(Some(BOT_A)) && !tool.visible_to(Some(BOT_B)));
-    let ok = call(&f, Some(BOT_A), "email_search", json!({})).await.unwrap();
+    let ok = call(&f, Some(BOT_A), "email_search", json!({}))
+        .await
+        .unwrap();
     assert_eq!(ok["returned"], 0);
     let before = server.received_requests().await.unwrap().len();
     for bot in [Some(BOT_B), None] {
-        let e = call(&f, bot, "email_search", json!({"account": "bot-mail"})).await.unwrap_err();
+        let e = call(&f, bot, "email_search", json!({"account": "bot-mail"}))
+            .await
+            .unwrap_err();
         assert!(format!("{e:?}").contains("unknown account"), "{e:?}");
     }
     assert_eq!(

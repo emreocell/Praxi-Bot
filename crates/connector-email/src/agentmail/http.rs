@@ -118,8 +118,10 @@ impl Resolve for GuardedResolver {
                 .filter(|a| policy.check_ip(&host, a.ip()).is_ok())
                 .collect();
             if allowed.is_empty() {
-                return Err(Box::new(PolicyViolation::new("host resolves to a blocked address"))
-                    as Box<dyn std::error::Error + Send + Sync>);
+                return Err(
+                    Box::new(PolicyViolation::new("host resolves to a blocked address"))
+                        as Box<dyn std::error::Error + Send + Sync>,
+                );
             }
             Ok(Box::new(allowed.into_iter()) as Addrs)
         })
@@ -223,7 +225,9 @@ impl AgentMailClient {
                 .extend_pairs(query.iter().map(|(k, v)| (*k, v.as_str())));
         }
         if !self.inner.endpoint.pinned(&url) {
-            return Err(EmailError::Config("request is not for the pinned host".into()));
+            return Err(EmailError::Config(
+                "request is not for the pinned host".into(),
+            ));
         }
         Ok(url)
     }
@@ -279,18 +283,18 @@ impl AgentMailClient {
                 None => Err(ProviderError::BadResponse.into()),
             };
         }
-        Err(map_status(
-            status.as_u16(),
-            retry_after,
-            parsed.as_ref(),
-        ))
+        Err(map_status(status.as_u16(), retry_after, parsed.as_ref()))
     }
 
     /// Download an attachment from the signed URL the API returned. No
     /// credentials are sent; redirects are refused; more than `max_bytes` is an
     /// error (decided from `Content-Length` before reading, and again while
     /// streaming).
-    pub(crate) async fn download(&self, url: &str, max_bytes: usize) -> Result<Vec<u8>, EmailError> {
+    pub(crate) async fn download(
+        &self,
+        url: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, EmailError> {
         let url = Url::parse(url).map_err(|_| EmailError::from(ProviderError::BadResponse))?;
         let local = self.inner.endpoint.loopback_http;
         let scheme_ok = url.scheme() == "https" || (local && self.inner.endpoint.pinned(&url));
@@ -362,7 +366,11 @@ fn error_code(body: Option<&Value>) -> Option<String> {
 }
 
 /// Map a failing HTTP status to a coarse error.
-pub(crate) fn map_status(status: u16, retry_after: Option<u64>, body: Option<&Value>) -> EmailError {
+pub(crate) fn map_status(
+    status: u16,
+    retry_after: Option<u64>,
+    body: Option<&Value>,
+) -> EmailError {
     let code = error_code(body);
     let limit = code.as_deref() == Some("limit_exceeded");
     match status {

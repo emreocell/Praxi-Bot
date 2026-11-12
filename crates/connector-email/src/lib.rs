@@ -39,8 +39,8 @@ pub use config::{
 };
 pub use connector::{EmailConnector, MAX_ATTACHMENT_BYTES, Scoped, SearchResult};
 pub use error::{EmailError, ProviderError};
-pub use imap_provider::ImapSmtpProvider;
 pub use imap::{FolderInfo, SearchQuery};
+pub use imap_provider::ImapSmtpProvider;
 pub use message::{AttachmentInfo, MessageDetail, MessageSummary};
 pub use probe::{ProbeReport, ProbeStatus, probe};
 pub use provider::{
@@ -68,10 +68,10 @@ pub fn register(registry: &ToolRegistry, connector: &Arc<EmailConnector>) -> usi
 #[cfg(test)]
 mod bot_tests;
 #[cfg(test)]
+mod kind_tests;
+#[cfg(test)]
 mod probe_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod testutil;
-#[cfg(test)]
-mod kind_tests;

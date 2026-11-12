@@ -493,7 +493,10 @@ function AgentmailFlow({
   const [errors, setErrors] = useState<AgentmailFormError[]>([]);
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<EmailAccount | null>(null);
-  const set = (patch: Partial<AgentmailForm>) => setForm((f) => ({ ...f, ...patch }));
+  const set = (patch: Partial<AgentmailForm>) => {
+    setForm((f) => ({ ...f, ...patch }));
+    setErrors([]);
+  };
   const err = (k: AgentmailFormError) =>
     errors.includes(k) ? t(`settingsModal.email.agentmail.errors.${k}`) : null;
 

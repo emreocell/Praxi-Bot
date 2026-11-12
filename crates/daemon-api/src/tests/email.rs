@@ -550,14 +550,18 @@ fn remote(fail_with: Option<EmailControlError>) -> (T, Arc<RemoteFake>) {
 #[tokio::test]
 async fn agentmail_create_needs_a_well_formed_write_only_api_key() {
     let (t, _) = remote(None);
-    let ok = json!({"name":"bot-mail","provider":"agentmail","api_key":API_KEY,"name_hint":"helper"});
+    let ok =
+        json!({"name":"bot-mail","provider":"agentmail","api_key":API_KEY,"name_hint":"helper"});
     let r = call(&t, Method::POST, "/v1/email/accounts", Some(ok)).await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
     let a = r.json();
     assert_eq!(a["provider"], "agentmail");
     assert_eq!(a["address"], "created@agentmail.to");
     assert_eq!(a["password_set"], true);
-    assert!(!String::from_utf8_lossy(&r.body).contains(API_KEY), "the key is never echoed");
+    assert!(
+        !String::from_utf8_lossy(&r.body).contains(API_KEY),
+        "the key is never echoed"
+    );
 
     let no_key = json!({"name":"bot-mail","provider":"agentmail"});
     let r = call(&t, Method::POST, "/v1/email/accounts", Some(no_key)).await;
@@ -593,7 +597,10 @@ async fn deleting_an_account_asks_for_the_remote_inbox_only_when_told_to() {
     assert_eq!(r.status, StatusCode::NO_CONTENT);
     assert_eq!(
         *fake.calls.lock(),
-        vec![("bot-mail".to_owned(), false), ("bot-mail".to_owned(), true)],
+        vec![
+            ("bot-mail".to_owned(), false),
+            ("bot-mail".to_owned(), true)
+        ],
         "the default never deletes remotely"
     );
 }

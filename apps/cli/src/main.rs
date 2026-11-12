@@ -1186,8 +1186,17 @@ mod tests {
     #[test]
     fn parses_the_agentmail_form_and_keeps_the_key_out_of_argv() {
         let ok = Cli::try_parse_from([
-            "bot", "email", "add", "--provider", "agentmail", "--name", "helper", "--bot",
-            "Atlas", "--api-key-env", "AGENTMAIL_KEY",
+            "bot",
+            "email",
+            "add",
+            "--provider",
+            "agentmail",
+            "--name",
+            "helper",
+            "--bot",
+            "Atlas",
+            "--api-key-env",
+            "AGENTMAIL_KEY",
         ])
         .unwrap()
         .command
@@ -1213,20 +1222,44 @@ mod tests {
         assert_eq!(api_key_env.as_deref(), Some("AGENTMAIL_KEY"));
         // Still a bot or --all-bots, never a default; never a key flag.
         assert!(
-            Cli::try_parse_from(["bot", "email", "add", "--provider", "agentmail", "--name", "h"])
-                .is_err()
-        );
-        assert!(
             Cli::try_parse_from([
-                "bot", "email", "add", "--provider", "agentmail", "--name", "h", "--all-bots",
-                "--api-key", "am_x"
+                "bot",
+                "email",
+                "add",
+                "--provider",
+                "agentmail",
+                "--name",
+                "h"
             ])
             .is_err()
         );
         assert!(
             Cli::try_parse_from([
-                "bot", "email", "add", "--provider", "agentmail", "--name", "h", "--all-bots",
-                "--provider", "nope"
+                "bot",
+                "email",
+                "add",
+                "--provider",
+                "agentmail",
+                "--name",
+                "h",
+                "--all-bots",
+                "--api-key",
+                "am_x"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "bot",
+                "email",
+                "add",
+                "--provider",
+                "agentmail",
+                "--name",
+                "h",
+                "--all-bots",
+                "--provider",
+                "nope"
             ])
             .is_err()
         );

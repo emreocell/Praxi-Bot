@@ -83,7 +83,11 @@ async fn add_list_test_and_rm_with_and_without_remote_deletion_never_print_the_k
         .await;
     Mock::given(method("GET"))
         .and(path("/v0/inboxes/helper@agentmail.to"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"inbox_id":"helper@agentmail.to","email":"helper@agentmail.to"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(
+                json!({"inbox_id":"helper@agentmail.to","email":"helper@agentmail.to"}),
+            ),
+        )
         .mount(&server)
         .await;
     Mock::given(method("DELETE"))
@@ -114,7 +118,10 @@ async fn add_list_test_and_rm_with_and_without_remote_deletion_never_print_the_k
     out.clear();
     list(&c, false, &mut out).await.unwrap();
     let said = String::from_utf8(out.clone()).unwrap();
-    assert!(said.contains("agentmail") && said.contains("key set"), "{said}");
+    assert!(
+        said.contains("agentmail") && said.contains("key set"),
+        "{said}"
+    );
     assert!(!said.contains(KEY));
 
     out.clear();
@@ -126,8 +133,12 @@ async fn add_list_test_and_rm_with_and_without_remote_deletion_never_print_the_k
     rm_with(&c, "helper", false, false, &mut out).await.unwrap();
     assert_eq!(deletes(&server).await, 0);
 
-    add_agentmail(&c, &a, KEY, false, &mut Vec::new()).await.unwrap();
-    rm_with(&c, "helper", true, false, &mut Vec::new()).await.unwrap();
+    add_agentmail(&c, &a, KEY, false, &mut Vec::new())
+        .await
+        .unwrap();
+    rm_with(&c, "helper", true, false, &mut Vec::new())
+        .await
+        .unwrap();
     assert_eq!(deletes(&server).await, 1, "only with --delete-inbox");
 }
 
@@ -146,7 +157,9 @@ async fn a_rejected_key_is_reported_without_echoing_it() {
         bot: None,
         allowed_senders: &[],
     };
-    let e = add_agentmail(&c, &a, KEY, false, &mut Vec::new()).await.unwrap_err();
+    let e = add_agentmail(&c, &a, KEY, false, &mut Vec::new())
+        .await
+        .unwrap_err();
     let text = e.to_string();
     assert!(text.contains("rejected the API key"), "{text}");
     assert!(!text.contains(KEY));

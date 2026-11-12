@@ -71,7 +71,10 @@ async fn create_inbox_posts_the_documented_body_with_the_users_key() {
             "domain": "mail.example.com",
             "client_id": "praxi-1",
         })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(inbox_json("my-research-bot@mail.example.com")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(inbox_json("my-research-bot@mail.example.com")),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -135,7 +138,10 @@ async fn create_inbox_retry_reuses_the_client_id_so_no_second_inbox_appears() {
     assert_eq!(reqs.len(), 2, "one failure, one retry");
     let bodies = request_bodies(&reqs);
     assert_eq!(bodies[0]["client_id"], "praxi-idem");
-    assert_eq!(bodies[0], bodies[1], "the retry is byte-for-byte the same request");
+    assert_eq!(
+        bodies[0], bodies[1],
+        "the retry is byte-for-byte the same request"
+    );
 }
 
 #[tokio::test]
@@ -277,16 +283,28 @@ async fn provider_errors_map_to_coarse_classes_without_the_providers_text() {
     let body = |code: &str| json!({"name":"E","code":code,"message":leak,"fix":leak});
 
     let e = failing(401, None, body("unknown_api_key")).await;
-    assert!(matches!(e, EmailError::Provider(ProviderError::Auth)), "{e}");
+    assert!(
+        matches!(e, EmailError::Provider(ProviderError::Auth)),
+        "{e}"
+    );
 
     let e = failing(403, None, body("missing_permission")).await;
-    assert!(matches!(e, EmailError::Provider(ProviderError::Forbidden)), "{e}");
+    assert!(
+        matches!(e, EmailError::Provider(ProviderError::Forbidden)),
+        "{e}"
+    );
 
     let e = failing(403, None, body("limit_exceeded")).await;
-    assert!(matches!(e, EmailError::Provider(ProviderError::Quota)), "{e}");
+    assert!(
+        matches!(e, EmailError::Provider(ProviderError::Quota)),
+        "{e}"
+    );
 
     let e = failing(409, None, body("limit_exceeded")).await;
-    assert!(matches!(e, EmailError::Provider(ProviderError::Quota)), "{e}");
+    assert!(
+        matches!(e, EmailError::Provider(ProviderError::Quota)),
+        "{e}"
+    );
 
     let e = failing(404, None, body("not_found")).await;
     assert!(matches!(e, EmailError::NotFound(_)), "{e}");
@@ -295,17 +313,25 @@ async fn provider_errors_map_to_coarse_classes_without_the_providers_text() {
     assert!(
         matches!(
             e,
-            EmailError::Provider(ProviderError::RateLimited { retry_after_secs: Some(7) })
+            EmailError::Provider(ProviderError::RateLimited {
+                retry_after_secs: Some(7)
+            })
         ),
         "{e}"
     );
     assert!(e.to_string().contains("retry after 7s"), "{e}");
 
     let e = failing(500, None, body("internal")).await;
-    assert!(matches!(e, EmailError::Provider(ProviderError::Transient)), "{e}");
+    assert!(
+        matches!(e, EmailError::Provider(ProviderError::Transient)),
+        "{e}"
+    );
 
     let e = failing(503, None, json!("not an object")).await;
-    assert!(matches!(e, EmailError::Provider(ProviderError::Transient)), "{e}");
+    assert!(
+        matches!(e, EmailError::Provider(ProviderError::Transient)),
+        "{e}"
+    );
 
     let e = failing(422, None, body("validation_error")).await;
     assert!(
@@ -316,14 +342,20 @@ async fn provider_errors_map_to_coarse_classes_without_the_providers_text() {
     // A hostile `code` is not echoed.
     let e = failing(422, None, body("Bad Code <script>")).await;
     assert!(
-        matches!(e, EmailError::Provider(ProviderError::Rejected { code: None })),
+        matches!(
+            e,
+            EmailError::Provider(ProviderError::Rejected { code: None })
+        ),
         "{e}"
     );
 
     for status in [401, 403, 404, 422, 429, 500] {
         let e = failing(status, Some("3"), body("x")).await;
         let text = format!("{e} {e:?}");
-        assert!(!text.contains("LEAKY") && !text.contains("am_secret") && !text.contains("/private"), "{text}");
+        assert!(
+            !text.contains("LEAKY") && !text.contains("am_secret") && !text.contains("/private"),
+            "{text}"
+        );
     }
 }
 
@@ -333,7 +365,9 @@ async fn retry_after_is_clamped() {
     assert!(
         matches!(
             e,
-            EmailError::Provider(ProviderError::RateLimited { retry_after_secs: Some(3600) })
+            EmailError::Provider(ProviderError::RateLimited {
+                retry_after_secs: Some(3600)
+            })
         ),
         "{e}"
     );
@@ -348,7 +382,10 @@ async fn an_oversized_response_body_is_rejected() {
         .mount(&server)
         .await;
     let e = bound(&server).list_new(None, 10).await.unwrap_err();
-    assert!(matches!(e, EmailError::Provider(ProviderError::BadResponse)), "{e}");
+    assert!(
+        matches!(e, EmailError::Provider(ProviderError::BadResponse)),
+        "{e}"
+    );
 }
 
 #[tokio::test]
@@ -361,12 +398,16 @@ async fn a_redirect_to_another_host_is_refused_and_never_followed() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .respond_with(
-            ResponseTemplate::new(302).insert_header("location", format!("{}/steal", elsewhere.uri())),
+            ResponseTemplate::new(302)
+                .insert_header("location", format!("{}/steal", elsewhere.uri())),
         )
         .mount(&server)
         .await;
     let e = bound(&server).list_new(None, 10).await.unwrap_err();
-    assert!(matches!(e, EmailError::Provider(ProviderError::Redirect)), "{e}");
+    assert!(
+        matches!(e, EmailError::Provider(ProviderError::Redirect)),
+        "{e}"
+    );
     assert!(
         elsewhere.received_requests().await.unwrap().is_empty(),
         "the redirect target must never be contacted (and never sees the key)"
@@ -406,7 +447,10 @@ async fn the_key_never_appears_in_urls_logs_errors_or_debug_output() {
     let log = capture();
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .respond_with(ResponseTemplate::new(401).set_body_json(json!({"code":"unknown_api_key","message":"bad key"})))
+        .respond_with(
+            ResponseTemplate::new(401)
+                .set_body_json(json!({"code":"unknown_api_key","message":"bad key"})),
+        )
         .mount(&server)
         .await;
     Mock::given(method("POST"))
@@ -419,26 +463,55 @@ async fn the_key_never_appears_in_urls_logs_errors_or_debug_output() {
     seen.push(format!("{e} {e:?}"));
     let e = p.get_message("INBOX", "m1", 100).await.unwrap_err();
     seen.push(format!("{e} {e:?}"));
-    let e = p.search(&SearchRequest { folder: "INBOX", query: &SearchQuery::default(), limit: 5 }).await.unwrap_err();
+    let e = p
+        .search(&SearchRequest {
+            folder: "INBOX",
+            query: &SearchQuery::default(),
+            limit: 5,
+        })
+        .await
+        .unwrap_err();
     seen.push(format!("{e} {e:?}"));
-    p.send(&OutgoingMail { to: vec!["ann@example.com".into()], subject: "s".into(), body: "b".into(), ..Default::default() }).await.ok();
+    p.send(&OutgoingMail {
+        to: vec!["ann@example.com".into()],
+        subject: "s".into(),
+        body: "b".into(),
+        ..Default::default()
+    })
+    .await
+    .ok();
     for r in server.received_requests().await.unwrap() {
         assert!(!r.url.to_string().contains(KEY), "key in URL {}", r.url);
-        let auth = r.headers.get("authorization").map(|v| v.to_str().unwrap().to_owned());
+        let auth = r
+            .headers
+            .get("authorization")
+            .map(|v| v.to_str().unwrap().to_owned());
         assert_eq!(auth.as_deref(), Some(format!("Bearer {KEY}").as_str()));
-        assert!(!String::from_utf8_lossy(&r.body).contains(KEY), "key in body");
+        assert!(
+            !String::from_utf8_lossy(&r.body).contains(KEY),
+            "key in body"
+        );
     }
     for s in &seen {
         assert!(!s.contains(KEY), "key leaked: {s}");
     }
     let logs = log.0.lock().unwrap().join("\n");
     assert!(!logs.contains(KEY), "key leaked into logs");
-    assert!(!logs.contains("Bearer"), "authorization header leaked into logs");
+    assert!(
+        !logs.contains("Bearer"),
+        "authorization header leaked into logs"
+    );
 }
 
 #[test]
 fn bad_key_shapes_are_rejected_without_echoing_them() {
-    for bad in ["", "short", "has space in it 12345", "line\nbreak12345", "ünïcode-key-12345"] {
+    for bad in [
+        "",
+        "short",
+        "has space in it 12345",
+        "line\nbreak12345",
+        "ünïcode-key-12345",
+    ] {
         let e = ApiKey::new(bad).unwrap_err();
         assert!(!e.to_string().contains(bad) || bad.is_empty(), "{e}");
     }
@@ -464,7 +537,10 @@ fn a_test_endpoint_can_only_be_plain_http_on_loopback() {
         "ftp://127.0.0.1",
         "not a url",
     ] {
-        assert!(AgentMailEndpoint::loopback_mock_for_tests(bad).is_err(), "{bad}");
+        assert!(
+            AgentMailEndpoint::loopback_mock_for_tests(bad).is_err(),
+            "{bad}"
+        );
     }
     assert!(AgentMailEndpoint::loopback_mock_for_tests("http://127.0.0.1:1234").is_ok());
     assert!(AgentMailEndpoint::loopback_mock_for_tests("http://localhost:1234").is_ok());
@@ -473,10 +549,23 @@ fn a_test_endpoint_can_only_be_plain_http_on_loopback() {
 #[test]
 fn private_and_metadata_addresses_are_blocked() {
     use std::net::IpAddr;
-    for ip in ["10.0.0.1", "192.168.1.1", "172.16.0.9", "127.0.0.1", "169.254.169.254", "::1", "fd00::1"] {
-        assert!(http::is_blocked_address(ip.parse::<IpAddr>().unwrap()), "{ip}");
+    for ip in [
+        "10.0.0.1",
+        "192.168.1.1",
+        "172.16.0.9",
+        "127.0.0.1",
+        "169.254.169.254",
+        "::1",
+        "fd00::1",
+    ] {
+        assert!(
+            http::is_blocked_address(ip.parse::<IpAddr>().unwrap()),
+            "{ip}"
+        );
     }
-    assert!(!http::is_blocked_address("8.8.8.8".parse::<IpAddr>().unwrap()));
+    assert!(!http::is_blocked_address(
+        "8.8.8.8".parse::<IpAddr>().unwrap()
+    ));
 }
 
 #[tokio::test]
@@ -490,7 +579,14 @@ async fn ids_that_could_escape_the_path_are_refused_before_any_request() {
             "{bad:?}: {e}"
         );
     }
-    assert!(AgentMailProvider::new(client(&server), ApiKey::new(KEY).unwrap(), Some(("../x".into(), "a@b.co".into()))).is_err());
+    assert!(
+        AgentMailProvider::new(
+            client(&server),
+            ApiKey::new(KEY).unwrap(),
+            Some(("../x".into(), "a@b.co".into()))
+        )
+        .is_err()
+    );
     assert!(server.received_requests().await.unwrap().is_empty());
 }
 
@@ -521,7 +617,11 @@ async fn list_new_returns_inbound_mail_oldest_first_with_a_cursor() {
         .await
         .unwrap();
     let ids: Vec<_> = r.messages.iter().map(|m| m.id.clone().unwrap()).collect();
-    assert_eq!(ids, ["m1", "m3"], "the sent message is not new inbound mail");
+    assert_eq!(
+        ids,
+        ["m1", "m3"],
+        "the sent message is not new inbound mail"
+    );
     assert!(r.messages[0].unread);
     assert!(!r.messages[1].unread);
     assert_eq!(r.messages[0].from, "Ann <ann@example.com>");
@@ -538,7 +638,10 @@ async fn list_new_without_a_cursor_keeps_the_cursor_when_nothing_is_new() {
     let r = bound(&server).list_new(Some("c0"), 10).await;
     // a cursor that is not a timestamp is refused before any request
     assert!(matches!(r, Err(EmailError::Input(_))), "{r:?}");
-    let r = bound(&server).list_new(Some("2026-11-12T09:00:00Z"), 10).await.unwrap();
+    let r = bound(&server)
+        .list_new(Some("2026-11-12T09:00:00Z"), 10)
+        .await
+        .unwrap();
     assert_eq!(r.messages.len(), 0);
     assert_eq!(r.next_cursor.as_deref(), Some("2026-11-12T09:00:00Z"));
 }
@@ -569,7 +672,11 @@ async fn search_maps_the_criteria_to_list_filters() {
         unread: Some(true),
     };
     let found = bound(&server)
-        .search(&SearchRequest { folder: "INBOX", query: &q, limit: 7 })
+        .search(&SearchRequest {
+            folder: "INBOX",
+            query: &q,
+            limit: 7,
+        })
         .await
         .unwrap();
     assert_eq!(found.messages.len(), 1);
@@ -580,9 +687,16 @@ async fn search_maps_the_criteria_to_list_filters() {
 #[tokio::test]
 async fn search_for_read_only_messages_is_not_supported() {
     let server = MockServer::start().await;
-    let q = SearchQuery { unread: Some(false), ..SearchQuery::default() };
+    let q = SearchQuery {
+        unread: Some(false),
+        ..SearchQuery::default()
+    };
     let e = bound(&server)
-        .search(&SearchRequest { folder: "INBOX", query: &q, limit: 5 })
+        .search(&SearchRequest {
+            folder: "INBOX",
+            query: &q,
+            limit: 5,
+        })
         .await
         .unwrap_err();
     assert!(matches!(e, EmailError::Unsupported(_)), "{e}");
@@ -618,15 +732,23 @@ async fn get_message_returns_text_and_attachment_metadata_capped() {
 async fn get_message_falls_back_to_html_as_text() {
     let server = MockServer::start().await;
     let mut m = msg_json("m2", "2026-11-12T09:30:00Z", "ann@example.com", &[]);
-    m["html"] = json!("<html><body><p>Merhaba <b>dunya</b></p><script>alert(1)</script></body></html>");
+    m["html"] =
+        json!("<html><body><p>Merhaba <b>dunya</b></p><script>alert(1)</script></body></html>");
     Mock::given(method("GET"))
         .and(path(format!("/v0/inboxes/{INBOX}/messages/m2")))
         .respond_with(ResponseTemplate::new(200).set_body_json(m))
         .mount(&server)
         .await;
-    let d = bound(&server).get_message("INBOX", "m2", 1000).await.unwrap();
+    let d = bound(&server)
+        .get_message("INBOX", "m2", 1000)
+        .await
+        .unwrap();
     assert!(d.body_text.contains("Merhaba"), "{}", d.body_text);
-    assert!(!d.body_text.contains("<p>") && !d.body_text.contains("alert"), "{}", d.body_text);
+    assert!(
+        !d.body_text.contains("<p>") && !d.body_text.contains("alert"),
+        "{}",
+        d.body_text
+    );
 }
 
 #[tokio::test]
@@ -634,8 +756,12 @@ async fn mark_read_swaps_the_unread_label() {
     let server = MockServer::start().await;
     Mock::given(method("PATCH"))
         .and(path(format!("/v0/inboxes/{INBOX}/messages/m1")))
-        .and(body_json(json!({"add_labels":["read"],"remove_labels":["unread"]})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"message_id":"m1","labels":["read"]})))
+        .and(body_json(
+            json!({"add_labels":["read"],"remove_labels":["unread"]}),
+        ))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"message_id":"m1","labels":["read"]})),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -648,7 +774,9 @@ async fn mark_read_swaps_the_unread_label() {
 async fn get_attachment_downloads_from_the_signed_url_without_credentials() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages/m1/attachments/att_1")))
+        .and(path(format!(
+            "/v0/inboxes/{INBOX}/messages/m1/attachments/att_1"
+        )))
         .and(header_exists("authorization"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "attachment_id": "att_1", "size": 5,
@@ -665,18 +793,26 @@ async fn get_attachment_downloads_from_the_signed_url_without_credentials() {
         .expect(1)
         .mount(&server)
         .await;
-    let a = bound(&server).get_attachment("m1", "att_1", 1024).await.unwrap();
+    let a = bound(&server)
+        .get_attachment("m1", "att_1", 1024)
+        .await
+        .unwrap();
     assert_eq!(a.bytes, b"hello");
     let reqs = server.received_requests().await.unwrap();
     let cdn = reqs.iter().find(|r| r.url.path() == "/cdn/att_1").unwrap();
-    assert!(cdn.headers.get("authorization").is_none(), "no credentials to the CDN");
+    assert!(
+        cdn.headers.get("authorization").is_none(),
+        "no credentials to the CDN"
+    );
 }
 
 #[tokio::test]
 async fn an_attachment_over_the_cap_is_refused_before_downloading() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages/m1/attachments/att_big")))
+        .and(path(format!(
+            "/v0/inboxes/{INBOX}/messages/m1/attachments/att_big"
+        )))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "attachment_id": "att_big", "size": 10_000_000,
             "download_url": format!("{}/cdn/big", server.uri()),
@@ -690,15 +826,23 @@ async fn an_attachment_over_the_cap_is_refused_before_downloading() {
         .expect(0)
         .mount(&server)
         .await;
-    let e = bound(&server).get_attachment("m1", "att_big", 1024).await.unwrap_err();
-    assert!(matches!(e, EmailError::Provider(ProviderError::BadResponse)), "{e}");
+    let e = bound(&server)
+        .get_attachment("m1", "att_big", 1024)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(e, EmailError::Provider(ProviderError::BadResponse)),
+        "{e}"
+    );
 }
 
 #[tokio::test]
 async fn a_download_larger_than_declared_is_cut_off_at_the_cap() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages/m1/attachments/liar")))
+        .and(path(format!(
+            "/v0/inboxes/{INBOX}/messages/m1/attachments/liar"
+        )))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "attachment_id": "liar", "size": 4,
             "download_url": format!("{}/cdn/liar", server.uri()),
@@ -711,8 +855,14 @@ async fn a_download_larger_than_declared_is_cut_off_at_the_cap() {
         .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![1u8; 4096]))
         .mount(&server)
         .await;
-    let e = bound(&server).get_attachment("m1", "liar", 1024).await.unwrap_err();
-    assert!(matches!(e, EmailError::Provider(ProviderError::BadResponse)), "{e}");
+    let e = bound(&server)
+        .get_attachment("m1", "liar", 1024)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(e, EmailError::Provider(ProviderError::BadResponse)),
+        "{e}"
+    );
 }
 
 #[tokio::test]
@@ -720,7 +870,9 @@ async fn a_non_https_or_redirecting_download_url_is_refused() {
     let server = MockServer::start().await;
     let elsewhere = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages/m1/attachments/plain")))
+        .and(path(format!(
+            "/v0/inboxes/{INBOX}/messages/m1/attachments/plain"
+        )))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "attachment_id": "plain", "size": 4,
             "download_url": format!("{}/file", elsewhere.uri()),
@@ -728,12 +880,20 @@ async fn a_non_https_or_redirecting_download_url_is_refused() {
         })))
         .mount(&server)
         .await;
-    let e = bound(&server).get_attachment("m1", "plain", 1024).await.unwrap_err();
-    assert!(matches!(e, EmailError::Provider(ProviderError::BadResponse)), "{e}");
+    let e = bound(&server)
+        .get_attachment("m1", "plain", 1024)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(e, EmailError::Provider(ProviderError::BadResponse)),
+        "{e}"
+    );
     assert!(elsewhere.received_requests().await.unwrap().is_empty());
 
     Mock::given(method("GET"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages/m1/attachments/redir")))
+        .and(path(format!(
+            "/v0/inboxes/{INBOX}/messages/m1/attachments/redir"
+        )))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "attachment_id": "redir", "size": 4,
             "download_url": format!("{}/cdn/redir", server.uri()),
@@ -743,11 +903,20 @@ async fn a_non_https_or_redirecting_download_url_is_refused() {
         .await;
     Mock::given(method("GET"))
         .and(path("/cdn/redir"))
-        .respond_with(ResponseTemplate::new(302).insert_header("location", format!("{}/file", elsewhere.uri())))
+        .respond_with(
+            ResponseTemplate::new(302)
+                .insert_header("location", format!("{}/file", elsewhere.uri())),
+        )
         .mount(&server)
         .await;
-    let e = bound(&server).get_attachment("m1", "redir", 1024).await.unwrap_err();
-    assert!(matches!(e, EmailError::Provider(ProviderError::Redirect)), "{e}");
+    let e = bound(&server)
+        .get_attachment("m1", "redir", 1024)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(e, EmailError::Provider(ProviderError::Redirect)),
+        "{e}"
+    );
     assert!(elsewhere.received_requests().await.unwrap().is_empty());
 }
 
@@ -763,7 +932,10 @@ async fn send_posts_the_message_with_an_idempotency_key() {
             "to": ["bob@example.com"], "cc": ["cy@example.com"],
             "subject": "Hi", "text": "Body"
         })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"message_id":"sent_1","thread_id":"th_1"})))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"message_id":"sent_1","thread_id":"th_1"})),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -789,10 +961,18 @@ async fn send_is_never_retried_automatically() {
         .mount(&server)
         .await;
     let e = bound(&server)
-        .send(&OutgoingMail { to: vec!["bob@example.com".into()], subject: "s".into(), body: "b".into(), ..Default::default() })
+        .send(&OutgoingMail {
+            to: vec!["bob@example.com".into()],
+            subject: "s".into(),
+            body: "b".into(),
+            ..Default::default()
+        })
         .await
         .unwrap_err();
-    assert!(matches!(e, EmailError::Provider(ProviderError::Transient)), "{e}");
+    assert!(
+        matches!(e, EmailError::Provider(ProviderError::Transient)),
+        "{e}"
+    );
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
 }
 
@@ -800,12 +980,22 @@ async fn send_is_never_retried_automatically() {
 async fn send_validates_recipients_before_the_request() {
     let server = MockServer::start().await;
     let e = bound(&server)
-        .send(&OutgoingMail { to: vec!["not an address".into()], subject: "s".into(), body: "b".into(), ..Default::default() })
+        .send(&OutgoingMail {
+            to: vec!["not an address".into()],
+            subject: "s".into(),
+            body: "b".into(),
+            ..Default::default()
+        })
         .await
         .unwrap_err();
     assert!(matches!(e, EmailError::Input(_)), "{e}");
     let e = bound(&server)
-        .send(&OutgoingMail { to: vec![], subject: "s".into(), body: "b".into(), ..Default::default() })
+        .send(&OutgoingMail {
+            to: vec![],
+            subject: "s".into(),
+            body: "b".into(),
+            ..Default::default()
+        })
         .await
         .unwrap_err();
     assert!(matches!(e, EmailError::Input(_)), "{e}");
@@ -819,12 +1009,21 @@ async fn reply_posts_to_the_reply_endpoint() {
         .and(path(format!("/v0/inboxes/{INBOX}/messages/m1/reply")))
         .and(header_exists("idempotency-key"))
         .and(body_json(json!({"text":"Thanks","reply_all":true})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"message_id":"r1","thread_id":"th_1"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"message_id":"r1","thread_id":"th_1"})),
+        )
         .expect(1)
         .mount(&server)
         .await;
     let r = bound(&server)
-        .reply("m1", &OutgoingMail { body: "Thanks".into(), ..Default::default() }, true)
+        .reply(
+            "m1",
+            &OutgoingMail {
+                body: "Thanks".into(),
+                ..Default::default()
+            },
+            true,
+        )
         .await
         .unwrap();
     assert_eq!(r.id, "r1");
@@ -842,7 +1041,10 @@ async fn unsupported_operations_say_so() {
     assert!(!caps.folders && !caps.drafts && !caps.push);
     let e = p.list_folders().await.unwrap_err();
     assert!(matches!(e, EmailError::Unsupported(_)), "{e}");
-    assert!(e.to_string().contains("not supported by this mailbox"), "{e}");
+    assert!(
+        e.to_string().contains("not supported by this mailbox"),
+        "{e}"
+    );
     let e = p.save_draft(&OutgoingMail::default()).await.unwrap_err();
     assert!(matches!(e, EmailError::Unsupported(_)), "{e}");
     assert!(server.received_requests().await.unwrap().is_empty());

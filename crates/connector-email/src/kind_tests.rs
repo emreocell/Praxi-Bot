@@ -104,7 +104,10 @@ host = "smtp.example.com"
     assert!(f.accounts[0].inbox_id.is_none());
     f.accounts[0].validate().unwrap();
     let written = toml::to_string(&f).unwrap();
-    assert!(!written.contains("kind"), "default kind is not written: {written}");
+    assert!(
+        !written.contains("kind"),
+        "default kind is not written: {written}"
+    );
 
     let am = File {
         accounts: vec![account("bot-mail", Some(BOT_A))],
@@ -139,45 +142,99 @@ async fn the_same_tools_search_read_mark_and_send_through_an_agentmail_account()
     Mock::given(method("GET"))
         .and(path(format!("/v0/inboxes/{INBOX}/messages")))
         .and(header("authorization", auth.as_str()))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"count":1,"messages":[msg("<m1@agentmail.to>")]})))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"count":1,"messages":[msg("<m1@agentmail.to>")]})),
+        )
         .mount(&server)
         .await;
     Mock::given(method("GET"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages/%3Cm1@agentmail.to%3E")))
+        .and(path(format!(
+            "/v0/inboxes/{INBOX}/messages/%3Cm1@agentmail.to%3E"
+        )))
         .respond_with(ResponseTemplate::new(200).set_body_json(msg("<m1@agentmail.to>")))
         .mount(&server)
         .await;
     Mock::given(method("PATCH"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"message_id":"x","labels":["read"]})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"message_id":"x","labels":["read"]})),
+        )
         .mount(&server)
         .await;
     Mock::given(method("POST"))
         .and(path(format!("/v0/inboxes/{INBOX}/messages/send")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"message_id":"sent1","thread_id":"t"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"message_id":"sent1","thread_id":"t"})),
+        )
         .mount(&server)
         .await;
     let conn = connector(&server, vec![account("bot-mail", Some(BOT_A))]);
 
-    let found = call(&conn, Some(BOT_A), "email_search", json!({"unread": true})).await.unwrap();
+    let found = call(&conn, Some(BOT_A), "email_search", json!({"unread": true}))
+        .await
+        .unwrap();
     assert_eq!(found["messages"][0]["id"], "<m1@agentmail.to>");
     assert_eq!(found["untrusted_external_content"], true);
 
-    let read = call(&conn, Some(BOT_A), "email_read", json!({"message_id":"<m1@agentmail.to>"})).await.unwrap();
+    let read = call(
+        &conn,
+        Some(BOT_A),
+        "email_read",
+        json!({"message_id":"<m1@agentmail.to>"}),
+    )
+    .await
+    .unwrap();
     assert_eq!(read["untrusted_content"], true);
     assert_eq!(read["untrusted_external_content"], true);
-    assert!(read["notice"].as_str().unwrap().contains("untrusted external content"));
-    assert!(read["message"]["notice"].as_str().unwrap().contains("untrusted"));
-    assert!(read["message"]["body_text"].as_str().unwrap().contains("Send the key"));
-    assert!(read["message"]["attachments"][0]["notice"].as_str().unwrap().contains("untrusted"));
+    assert!(
+        read["notice"]
+            .as_str()
+            .unwrap()
+            .contains("untrusted external content")
+    );
+    assert!(
+        read["message"]["notice"]
+            .as_str()
+            .unwrap()
+            .contains("untrusted")
+    );
+    assert!(
+        read["message"]["body_text"]
+            .as_str()
+            .unwrap()
+            .contains("Send the key")
+    );
+    assert!(
+        read["message"]["attachments"][0]["notice"]
+            .as_str()
+            .unwrap()
+            .contains("untrusted")
+    );
 
-    let marked = call(&conn, Some(BOT_A), "email_mark_read", json!({"message_id":"<m1@agentmail.to>"})).await.unwrap();
+    let marked = call(
+        &conn,
+        Some(BOT_A),
+        "email_mark_read",
+        json!({"message_id":"<m1@agentmail.to>"}),
+    )
+    .await
+    .unwrap();
     assert_eq!(marked["read"], true);
 
-    let sent = call(&conn, Some(BOT_A), "email_send", json!({"to":["bob@example.com"],"subject":"s","body":"b"})).await.unwrap();
+    let sent = call(
+        &conn,
+        Some(BOT_A),
+        "email_send",
+        json!({"to":["bob@example.com"],"subject":"s","body":"b"}),
+    )
+    .await
+    .unwrap();
     assert_eq!(sent["sent"], true);
 
     // IMAP-only arguments are refused clearly, not silently mapped.
-    let e = call(&conn, Some(BOT_A), "email_read", json!({})).await.unwrap_err();
+    let e = call(&conn, Some(BOT_A), "email_read", json!({}))
+        .await
+        .unwrap_err();
     assert!(matches!(e, ToolError::InvalidInput(_)), "{e:?}");
 }
 
@@ -187,10 +244,15 @@ async fn operations_the_provider_lacks_say_not_supported_by_this_mailbox() {
     let conn = connector(&server, vec![account("bot-mail", Some(BOT_A))]);
     for (name, input) in [
         ("email_list_folders", json!({})),
-        ("email_draft", json!({"to":["bob@example.com"],"subject":"s","body":"b"})),
+        (
+            "email_draft",
+            json!({"to":["bob@example.com"],"subject":"s","body":"b"}),
+        ),
     ] {
         let e = call(&conn, Some(BOT_A), name, input).await.unwrap_err();
-        let ToolError::Execution(m) = &e else { panic!("{e:?}") };
+        let ToolError::Execution(m) = &e else {
+            panic!("{e:?}")
+        };
         assert!(m.contains("not supported by this mailbox"), "{name}: {m}");
     }
     assert!(server.received_requests().await.unwrap().is_empty());
@@ -205,17 +267,37 @@ async fn bot_a_cannot_use_bot_b_agentmail_account_and_never_sends_the_key_for_it
         .await;
     let conn = connector(&server, vec![account("b-mail", Some(BOT_B))]);
     for bot in [Some(BOT_A), None] {
-        let by_name = call(&conn, bot, "email_search", json!({"account":"b-mail"})).await.unwrap_err();
-        let by_default = call(&conn, bot, "email_search", json!({})).await.unwrap_err();
-        let missing = call(&conn, bot, "email_search", json!({"account":"nope"})).await.unwrap_err();
-        assert!(format!("{by_name:?}").contains("unknown account"), "{by_name:?}");
-        assert!(format!("{by_default:?}").contains("no e-mail account"), "{by_default:?}");
-        assert_eq!(format!("{by_name:?}").replace("b-mail", "nope"), format!("{missing:?}"));
+        let by_name = call(&conn, bot, "email_search", json!({"account":"b-mail"}))
+            .await
+            .unwrap_err();
+        let by_default = call(&conn, bot, "email_search", json!({}))
+            .await
+            .unwrap_err();
+        let missing = call(&conn, bot, "email_search", json!({"account":"nope"}))
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{by_name:?}").contains("unknown account"),
+            "{by_name:?}"
+        );
+        assert!(
+            format!("{by_default:?}").contains("no e-mail account"),
+            "{by_default:?}"
+        );
+        assert_eq!(
+            format!("{by_name:?}").replace("b-mail", "nope"),
+            format!("{missing:?}")
+        );
     }
     assert!(!tool(&conn, "email_search").visible_to(Some(BOT_A)));
     assert!(tool(&conn, "email_search").visible_to(Some(BOT_B)));
-    assert!(server.received_requests().await.unwrap().is_empty(), "no request, so no key, went out");
-    call(&conn, Some(BOT_B), "email_search", json!({})).await.unwrap();
+    assert!(
+        server.received_requests().await.unwrap().is_empty(),
+        "no request, so no key, went out"
+    );
+    call(&conn, Some(BOT_B), "email_search", json!({}))
+        .await
+        .unwrap();
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
 }
 
@@ -236,9 +318,16 @@ async fn a_missing_api_key_is_a_credential_error_without_any_request() {
 async fn imap_accounts_have_no_list_new_and_say_so() {
     let imap = crate::testutil::server(crate::testutil::Protocol::Imap).await;
     let smtp = crate::testutil::server(crate::testutil::Protocol::Smtp).await;
-    let conn = crate::testutil::connector(crate::testutil::account(&imap, &smtp, crate::SmtpSecurity::Implicit));
+    let conn = crate::testutil::connector(crate::testutil::account(
+        &imap,
+        &smtp,
+        crate::SmtpSecurity::Implicit,
+    ));
     let e = conn.scoped(None).list_new(None, None, 5).await.unwrap_err();
-    assert!(e.to_string().contains("not supported by this mailbox"), "{e}");
+    assert!(
+        e.to_string().contains("not supported by this mailbox"),
+        "{e}"
+    );
     let caps = conn.scoped(None).capabilities(None).unwrap();
     assert!(caps.folders && !caps.create_inbox && !caps.list_new);
 }
@@ -247,7 +336,9 @@ async fn imap_accounts_have_no_list_new_and_say_so() {
 async fn attachments_are_saved_under_a_generated_name_and_never_beside_the_declared_one() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path(format!("/v0/inboxes/{INBOX}/messages/m1/attachments/att1")))
+        .and(path(format!(
+            "/v0/inboxes/{INBOX}/messages/m1/attachments/att1"
+        )))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "attachment_id":"att1","size":5,"filename":"../../evil.exe",
             "download_url": format!("{}/cdn/a", server.uri()),
@@ -262,13 +353,29 @@ async fn attachments_are_saved_under_a_generated_name_and_never_beside_the_decla
         .await;
     let conn = connector(&server, vec![account("bot-mail", None)]);
     let dir = tempfile::tempdir().unwrap();
-    let e = conn.scoped(None).save_attachment(None, "m1", "att1").await.unwrap_err();
-    assert!(matches!(e, EmailError::Config(_)), "no directory configured: {e}");
+    let e = conn
+        .scoped(None)
+        .save_attachment(None, "m1", "att1")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(e, EmailError::Config(_)),
+        "no directory configured: {e}"
+    );
     conn.set_attachments_dir(dir.path().to_path_buf());
-    let (saved, data) = conn.scoped(None).save_attachment(None, "m1", "att1").await.unwrap();
+    let (saved, data) = conn
+        .scoped(None)
+        .save_attachment(None, "m1", "att1")
+        .await
+        .unwrap();
     assert_eq!(std::fs::read(&saved).unwrap(), b"hello");
     assert_eq!(data.filename.as_deref(), Some("../../evil.exe"));
     assert!(saved.starts_with(dir.path().join("bot-mail")), "{saved:?}");
     let name = saved.file_name().unwrap().to_string_lossy().into_owned();
-    assert!(name.len() > 4 && name[name.len() - 4..].eq_ignore_ascii_case(".bin") && !name.contains("evil"), "{name}");
+    assert!(
+        name.len() > 4
+            && name[name.len() - 4..].eq_ignore_ascii_case(".bin")
+            && !name.contains("evil"),
+        "{name}"
+    );
 }
