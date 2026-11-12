@@ -120,7 +120,14 @@ impl BotPreset {
             // permission policy still asks.  Which bots may use which server is
             // the server's `bots` list.  Email is NOT here: the `email_*` read
             // tools are `Read` and run without a prompt (see `tool_allow` docs).
-            Self::General => v.extend(["fs_read", "fs_list", "fs_search", "web_*", "mcp:*", "schedule_*"]),
+            Self::General => v.extend([
+                "fs_read",
+                "fs_list",
+                "fs_search",
+                "web_*",
+                "mcp:*",
+                "schedule_*",
+            ]),
             Self::Browser => v.extend(["web_*", "browser_*"]),
             Self::Desktop => v.extend(["desktop_*", "fs_*", "checkpoint_*"]),
         }
