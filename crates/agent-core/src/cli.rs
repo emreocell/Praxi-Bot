@@ -100,6 +100,9 @@ impl TurnHost for Host {
             Decision::Deny => false,
             Decision::Ask { .. } => {
                 let honored_limits = decision.unsupported_limits().cloned();
+                let Ok(details) = self.sh.approval_details(&ctx, &r.name, &r.input).await else {
+                    return false;
+                };
                 let Ok(permit) = self
                     .sh
                     .request_approval(
@@ -109,6 +112,7 @@ impl TurnHost for Host {
                         spec.effect,
                         spec.category,
                         &r.input,
+                        details,
                     )
                     .await
                 else {

@@ -834,6 +834,19 @@ impl TurnExecutor {
                     .spec
                     .as_ref()
                     .map_or(tool_registry::Effect::Write, |s| s.effect);
+                // The tool may veto the call (invalid schedule, over a limit)
+                // before the user is bothered, and supplies the card's facts.
+                let details = match self
+                    .sh
+                    .approval_details(&ctx, &resolved.name, &resolved.input)
+                    .await
+                {
+                    Ok(d) => d,
+                    Err(msg) => {
+                        slots.push(err(msg));
+                        continue;
+                    }
+                };
                 match self
                     .sh
                     .request_approval(
@@ -843,6 +856,7 @@ impl TurnExecutor {
                         effect,
                         category,
                         &resolved.input,
+                        details,
                     )
                     .await
                 {

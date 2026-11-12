@@ -6414,7 +6414,8 @@
           "enabled",
           "created_at_ms",
           "misfire_policy",
-          "has_webhook"
+          "has_webhook",
+          "origin"
         ],
         "properties": {
           "bot_id": {
@@ -6471,6 +6472,10 @@
             ],
             "format": "int64",
             "description": "Next firing (`null` for a disabled or finished schedule)."
+          },
+          "origin": {
+            "type": "string",
+            "description": "Who created it: `user`, or `bot` (a bot's schedule tools, after you\napproved it). A bot may change only its own `bot` schedules."
           },
           "payload": {
             "description": "What it does: `{\"kind\": \"agent_prompt\", \"text\": \"...\"}`,\n`{\"kind\": \"workflow\", \"name\": \"...\", \"params\": {}}` or\n`{\"kind\": \"tool\", \"name\": \"...\", \"input\": {}}`."

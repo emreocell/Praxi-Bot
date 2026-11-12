@@ -147,6 +147,11 @@ impl From<LoopError> for ApiError {
             }
             LoopError::Router(m) => Self::conflict(m),
             LoopError::ShuttingDown => Self::unavailable("the daemon is shutting down"),
+            e @ LoopError::OnceOnly(_) => Self::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "approval_once_only",
+                e.to_string(),
+            ),
             LoopError::NoPendingApproval(c) => {
                 Self::not_found(format!("pending approval for call {c}"))
             }

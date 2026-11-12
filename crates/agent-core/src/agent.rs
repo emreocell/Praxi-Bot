@@ -525,6 +525,18 @@ impl AgentLoop {
     /// [`LoopError::NoPendingApproval`] if it is not waiting (already decided
     /// or lost in a restart).
     pub fn approve(&self, call_id: ToolCallId, scope: ApprovalScope, by: UserId) -> Result<()> {
+        // Server-side, for every channel: an approval that carries details (a
+        // schedule) or whose tool is always-ask is given once, never as a grant.
+        if scope != ApprovalScope::Once
+            && self
+                .sh
+                .pending
+                .lock()
+                .get(&call_id)
+                .is_some_and(|p| p.once_only)
+        {
+            return Err(LoopError::OnceOnly(call_id));
+        }
         self.take_pending(call_id)?
             .tx
             .send(Verdict::Approved { scope, by })

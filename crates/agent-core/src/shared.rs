@@ -52,6 +52,9 @@ pub enum LoopError {
     /// Resume would detach that task or drop the new one; retry once it finishes.
     #[error("run {0} is still finishing; retry resume")]
     StillFinishing(RunId),
+    /// This approval can only be given once (no "always" / "this chat").
+    #[error("approval for call {0} can only be given once, not as a standing grant")]
+    OnceOnly(ToolCallId),
     /// No approval is waiting under that call id (already decided, or lost in a restart).
     #[error("no pending approval for call {0}")]
     NoPendingApproval(ToolCallId),
@@ -366,6 +369,9 @@ pub(crate) enum Verdict {
 
 pub(crate) struct Pending {
     pub tx: oneshot::Sender<Verdict>,
+    /// The card carries tool details or the tool is always-ask: only a
+    /// one-time approval may be given for it, on every channel.
+    pub once_only: bool,
 }
 
 #[derive(Default)]
@@ -917,7 +923,7 @@ pub(crate) fn redact_event_checked(
 }
 
 /// Redact all strings of `v` in place; `true` if anything changed.
-fn redact_value(r: &SharedRedactor, v: &mut serde_json::Value) -> bool {
+pub(crate) fn redact_value(r: &SharedRedactor, v: &mut serde_json::Value) -> bool {
     match v {
         serde_json::Value::String(s) => {
             if r.contains_secret(s) {

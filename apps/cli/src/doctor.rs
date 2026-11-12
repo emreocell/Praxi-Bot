@@ -131,6 +131,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         ),
         check_mcp(env.data_dir),
         check_web(env),
+        check_schedule_tools(env.data_dir),
         check_disk(env.data_dir),
         check_telegram(env),
     ]
@@ -455,6 +456,26 @@ fn check_mcp(dir: &Path) -> Check {
     match TomlFileStore::new(&path).load() {
         Ok(s) => Check::ok(N, format!("{} server(s)", s.len())),
         Err(e) => Check::fail(N, e.to_string(), format!("fix {}", path.display())),
+    }
+}
+
+/// `schedule tools`: whether `schedule.toml` is usable. A broken one switches
+/// the bots' schedule tools off (they never fall back to looser defaults).
+fn check_schedule_tools(dir: &Path) -> Check {
+    const N: &str = "schedule tools";
+    match daemon_api::load_schedule_limits(dir) {
+        Ok(l) => Check::ok(
+            N,
+            format!(
+                "max {} per bot, minimum interval {} s",
+                l.max_per_bot, l.min_interval_secs
+            ),
+        ),
+        Err(e) => Check::fail(
+            N,
+            format!("{e}; schedule tools are disabled until it is fixed"),
+            format!("fix or delete {}", dir.join("schedule.toml").display()),
+        ),
     }
 }
 
@@ -1036,6 +1057,23 @@ id = "m1"
         let c = get(&checks, "web search");
         assert_eq!(c.status, Status::Warn);
         assert!(c.detail.contains("web.toml"), "{}", c.detail);
+    }
+
+    #[test]
+    fn doctor_reports_a_broken_schedule_toml_as_a_failure() {
+        let d = tempfile::tempdir().unwrap();
+        let (cat, store) = (catalog(), MemStore::default());
+        let c = get(
+            &run_checks(&env(d.path(), &cat, &store, free_port())),
+            "schedule tools",
+        )
+        .clone();
+        assert_eq!(c.status, Status::Ok, "{}", c.detail);
+        std::fs::write(d.path().join("schedule.toml"), "min_interval_secs = 0").unwrap();
+        let checks = run_checks(&env(d.path(), &cat, &store, free_port()));
+        let c = get(&checks, "schedule tools");
+        assert_eq!(c.status, Status::Fail);
+        assert!(c.detail.contains("disabled"), "{}", c.detail);
     }
 
     #[test]

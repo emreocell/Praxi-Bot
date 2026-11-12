@@ -32,6 +32,8 @@ export interface ToolItem {
   outputPreview?: string;
   /** Human-readable approval summary (when approval was needed). */
   summary?: string;
+  /** Structured approval facts supplied by the tool (e.g. a schedule). */
+  details?: unknown;
   /** The call went through an approval gate. */
   gated: boolean;
   error?: string;
@@ -319,6 +321,7 @@ function reduce(
           ...t,
           status: "awaiting_approval",
           summary: e.summary,
+          details: e.details,
           gated: true
         }))
       );
