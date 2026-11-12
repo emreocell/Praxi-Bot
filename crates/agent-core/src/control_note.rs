@@ -10,6 +10,10 @@
 /// Chat-message role of a control note.
 pub const ROLE: &str = "control_note";
 
+/// Inert role for imported rows that are not ordinary chat messages. History
+/// never forwards it to the model; a UI can show it as an imported note.
+pub const IMPORTED_ROLE: &str = "imported_note";
+
 const PREFIX: &str = "Human intervention completed; ";
 const SUFFIX: &str = ". Discard cached references and obtain a fresh observation.";
 const DECLARED: [&str; 3] = [

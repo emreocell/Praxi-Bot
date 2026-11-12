@@ -154,8 +154,10 @@ The continuation note a takeover leaves in the chat is the only message the
 model receives as a system message from stored history. It has its own role that
 only the daemon writes and exactly one fixed text shape (intervention type, event
 counts, target kind); a stored message with any other text or role is never
-delivered as a system message, and a state-bundle import downgrades such rows to
-ordinary user messages. The daemon's own files (`bot.db` with its WAL/SHM/journal,
+delivered as a system message, and a state-bundle import turns such rows (and any
+unknown role) into the inert `imported_note` role, which is never sent to the
+model; history forwards only an allow-list of roles (user, assistant, the genuine
+control note) and ignores every other value. The daemon's own files (`bot.db` with its WAL/SHM/journal,
 `control-latch.json`, `policy.json`, the bearer token) are protected from the
 bot's file tools for reading and writing, and a shell command that names them
 always asks for approval. That last rule is damping only: one approved
