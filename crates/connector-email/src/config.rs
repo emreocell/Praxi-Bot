@@ -82,6 +82,97 @@ pub struct AccountConfig {
     /// Per-operation timeout in seconds.
     #[serde(default = "default_timeout")]
     pub timeout_secs: u64,
+    /// Bot (storage UUID, the id `ToolContext::bot_id` carries) that owns this
+    /// account. A bound account is usable only by that bot; `None` keeps the
+    /// original behaviour (any bot that may use the e-mail tools).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot: Option<String>,
+    /// Senders whose mail may later start a run (stored and validated now, only
+    /// enforced by the inbound trigger). Entries are an address
+    /// (`ann@example.com`) or a whole domain (`@example.com`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_senders: Vec<String>,
+}
+
+/// Longest bot id accepted (a UUID is 36 characters).
+pub const MAX_BOT_ID_LEN: usize = 64;
+/// Most entries `allowed_senders` may hold.
+pub const MAX_ALLOWED_SENDERS: usize = 100;
+/// Longest account name.
+pub const MAX_ACCOUNT_NAME_LEN: usize = 64;
+
+/// Check a server host name: ASCII letters, digits, `-`, `_` and `.` (or an
+/// IPv6 literal), 1 to 253 bytes. No whitespace, control characters or URL
+/// syntax, so a form value can never smuggle in anything but a host.
+///
+/// # Errors
+/// [`EmailError::Config`] when the host is not acceptable.
+pub fn validate_host(host: &str, what: &str) -> Result<(), EmailError> {
+    if host.contains(':') {
+        // Only an IPv6 literal may contain a colon (never `host:port`).
+        return if host.parse::<std::net::Ipv6Addr>().is_ok() {
+            Ok(())
+        } else {
+            Err(EmailError::Config(format!("invalid {what} host name")))
+        };
+    }
+    let ok = !host.is_empty()
+        && host.len() <= 253
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+        && !host.starts_with(['.', '-'])
+        && !host.contains("..");
+    if ok {
+        Ok(())
+    } else {
+        Err(EmailError::Config(format!("invalid {what} host name")))
+    }
+}
+
+/// Check an account name used in URLs and secret names: 1 to 64 characters of
+/// `[A-Za-z0-9._-]`.
+///
+/// # Errors
+/// [`EmailError::Config`] when the name is not acceptable.
+pub fn validate_account_name(name: &str) -> Result<(), EmailError> {
+    let ok = !name.is_empty()
+        && name.len() <= MAX_ACCOUNT_NAME_LEN
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        && !name.starts_with('.');
+    if ok {
+        Ok(())
+    } else {
+        Err(EmailError::Config(
+            "account name must be 1-64 characters of letters, digits, '.', '_' or '-'".into(),
+        ))
+    }
+}
+
+/// Trim and lower-case one `allowed_senders` entry and check it is an address
+/// or an `@domain`.
+///
+/// # Errors
+/// [`EmailError::Config`] for anything else.
+pub fn normalize_sender(entry: &str) -> Result<String, EmailError> {
+    let bad = || EmailError::Config("allowed senders must be addresses or @domains".into());
+    let e = entry.trim().to_ascii_lowercase();
+    if e.is_empty() || e.len() > 254 || e.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err(bad());
+    }
+    if let Some(domain) = e.strip_prefix('@') {
+        if validate_host(domain, "sender domain").is_ok() && domain.contains('.') {
+            return Ok(e);
+        }
+        return Err(bad());
+    }
+    if e.parse::<email_address::EmailAddress>().is_ok() {
+        Ok(e)
+    } else {
+        Err(bad())
+    }
 }
 
 impl AccountConfig {
@@ -113,7 +204,7 @@ impl AccountConfig {
         if self.imap.port == 0 || self.smtp.port == 0 {
             return Err(EmailError::Config("server port must be nonzero".into()));
         }
-        if self.login().contains(['\r', '\n', '\0']) {
+        if self.login().chars().any(char::is_control) {
             return Err(EmailError::Config("invalid login name".into()));
         }
         if self.name.trim().is_empty() {
@@ -124,6 +215,21 @@ impl AccountConfig {
                 "account {}: imap/smtp host is empty",
                 self.name
             )));
+        }
+        validate_host(&self.imap.host, "imap")?;
+        validate_host(&self.smtp.host, "smtp")?;
+        if let Some(bot) = &self.bot
+            && (bot.is_empty()
+                || bot.len() > MAX_BOT_ID_LEN
+                || !bot.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+        {
+            return Err(EmailError::Config("invalid bot id".into()));
+        }
+        if self.allowed_senders.len() > MAX_ALLOWED_SENDERS {
+            return Err(EmailError::Config("too many allowed senders".into()));
+        }
+        for s in &self.allowed_senders {
+            normalize_sender(s)?;
         }
         if self.address.parse::<email_address::EmailAddress>().is_err() {
             return Err(EmailError::Config(format!(

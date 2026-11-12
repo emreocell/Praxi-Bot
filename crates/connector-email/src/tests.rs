@@ -396,6 +396,8 @@ async fn hung_secret_store_times_out() {
         drafts_folder: "Drafts".into(),
         extra_root_pem: None,
         timeout_secs: 1,
+        bot: None,
+        allowed_senders: Vec::new(),
     };
     let conn = EmailConnector::new(vec![config], store).unwrap();
     let err = conn.list_folders(None).await.unwrap_err();
