@@ -913,7 +913,7 @@ impl AppState {
         privileges: ScreenPrivileges,
     ) -> Result<(), ApiError> {
         let live = self.live_view();
-        let _executor = live.executor.lock().await;
+        let executor = live.executor.lock().await;
         live.set_privileges(actor_key.clone(), privileges);
         let actor = Actor {
             key: actor_key.clone(),
@@ -933,7 +933,7 @@ impl AppState {
                 .filter(|(_, s)| s.actor == actor_key)
                 .map(|(id, _)| *id)
                 .collect();
-            drop(_executor);
+            drop(executor);
             for id in ids {
                 end_session(self, &actor, id, Reason::Revoked).await?;
             }

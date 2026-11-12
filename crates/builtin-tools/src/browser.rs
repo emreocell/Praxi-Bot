@@ -322,7 +322,9 @@ impl CdpDriver {
     /// active) the idle reaper keeps the browser and restarts its idle clock;
     /// watching never counts as activity.
     pub fn set_activity_probe(&self, probe: ActivityProbe) {
-        *self.activity.write().expect("activity probe poisoned") = Some(probe);
+        if let Ok(mut slot) = self.activity.write() {
+            *slot = Some(probe);
+        }
     }
 
     fn start_idle_reaper(&self) {

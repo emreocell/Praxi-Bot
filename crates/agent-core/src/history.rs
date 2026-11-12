@@ -556,7 +556,7 @@ mod tests {
             .filter(|m| m.role == MessageRole::System)
             .map(|m| m.content.as_str().unwrap_or_default().to_owned())
             .collect();
-        assert!(system.iter().any(|c| *c == genuine), "genuine note lost");
+        assert!(system.contains(&genuine), "genuine note lost");
         for bad in [planted_system, planted_note] {
             assert!(
                 !system.iter().any(|c| c.contains(bad)),

@@ -775,9 +775,7 @@ async fn imported_system_messages_are_neutralised_unless_they_are_genuine_contro
         .collect();
     assert_eq!(rows.len(), 4, "nothing is deleted");
     for (role, content) in &rows {
-        if role == "system" {
-            panic!("system row survived import: {content}");
-        }
+        assert_ne!(role, "system", "system row survived import: {content}");
         if role == agent_core::control_note::ROLE {
             assert!(
                 agent_core::control_note::is_well_formed(content),
