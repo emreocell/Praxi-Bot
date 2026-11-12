@@ -432,35 +432,6 @@ pub fn load_email_accounts(data_dir: &Path) -> Vec<connector_email::AccountConfi
     Vec::new()
 }
 
-/// Register e-mail tools into `registry` if accounts are configured and `store` is available.
-pub fn register_email(
-    data_dir: &Path,
-    registry: &ToolRegistry,
-    store: Option<&Arc<dyn SecretStore>>,
-) -> usize {
-    let accounts = load_email_accounts(data_dir);
-    if accounts.is_empty() {
-        return 0;
-    }
-    let Some(store) = store else {
-        eprintln!("warning: email accounts configured but secret store is not available");
-        return 0;
-    };
-    match connector_email::EmailConnector::new(accounts, Arc::clone(store)) {
-        Ok(conn) => {
-            let conn = Arc::new(conn);
-            let added = connector_email::register(registry, &conn);
-            let count = conn.account_names().len();
-            eprintln!("email: {added} tool(s) registered ({count} account(s))");
-            added
-        }
-        Err(e) => {
-            eprintln!("warning: cannot initialize email connector: {e}");
-            0
-        }
-    }
-}
-
 /// Filename of the optional web tools configuration in `<data_dir>`.
 pub const WEB_FILE: &str = "web.toml";
 
@@ -788,7 +759,8 @@ pub fn serve(
     let agent = build_agent_with_redactor(&storage, providers, data_dir, desktop, redactor.clone());
     // Same registry the loop calls tools from: MCP servers, email and web tools register into it.
     let mcp_tools = agent.tool_registry();
-    register_email(data_dir, &mcp_tools, telegram_store.as_ref());
+    let email = crate::email_host::start_email(data_dir, &mcp_tools, telegram_store.as_ref())
+        .map(|(host, _)| host);
     register_web(data_dir, port, &mcp_tools, telegram_store.as_ref());
     let recovered = agent.recover()?;
     let mut cfg = DaemonConfig::new(api_token.clone());
@@ -836,6 +808,9 @@ pub fn serve(
             Some(mcp_redactor),
         );
         state.set_mcp(Arc::clone(&mcp) as Arc<dyn McpControl>);
+        if let Some(email) = email {
+            state.set_email(email as Arc<dyn daemon_api::EmailControl>);
+        }
         if let Some(store) = telegram_store.clone() {
             state.set_secret_store(store);
         }
@@ -920,6 +895,7 @@ pub fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::email_host::register_email;
     use provider_catalog::ProviderConfig;
     use secret_store::MemoryStore;
 
