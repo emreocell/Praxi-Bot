@@ -193,6 +193,15 @@ export function SchedulesView({
                         >
                           {t(`schedules.status.${status}`)}
                         </span>
+                        {s.origin === "bot" ? (
+                          <span
+                            className={styles.badge}
+                            data-testid="schedule-origin-bot"
+                            title={t("schedules.originBotHint")}
+                          >
+                            {t("schedules.originBot")}
+                          </span>
+                        ) : null}
                       </div>
                       <label className={styles.toggle}>
                         <input

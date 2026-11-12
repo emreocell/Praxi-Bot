@@ -27,6 +27,7 @@ function sched(over: Partial<Schedule> = {}): Schedule {
     name: "Morning",
     enabled: true,
     has_webhook: false,
+    origin: "user",
     created_at_ms: 1,
     misfire_policy: "skip",
     next_run_at_ms: 1000,

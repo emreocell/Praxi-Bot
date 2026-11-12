@@ -860,3 +860,131 @@ async fn schedule_mutations_are_announced_on_the_global_stream() {
     assert_eq!(kinds, ["created", "updated", "toggled", "deleted"]);
     assert!(changes.iter().all(|c| c.0 == sid));
 }
+
+// ------------------------------------------- bot-made schedules: ownership & approval
+
+#[tokio::test]
+async fn editing_a_bot_made_schedule_in_the_ui_hands_it_to_the_user() {
+    use crate::schedule_tools::DaemonScheduleHost;
+    let t = setup_with(Policy::approve_destructive());
+    let (bot, _chat) = make_chat(&t).await;
+    let created = create(&t, new_schedule(&bot, prompt("hi"))).await;
+    assert_eq!(
+        created["origin"], "user",
+        "API-made schedules are the user's"
+    );
+    let id = created["id"].as_str().unwrap().to_owned();
+    let tid = scheduler::TaskId(uuid::Uuid::parse_str(&id).unwrap());
+    let store = t.state.schedule_store().unwrap();
+    store
+        .set_origin(tid, scheduler::ScheduleOrigin::Bot)
+        .unwrap();
+    let listed = call(&t, Method::GET, &format!("/v1/schedules/{id}"), None)
+        .await
+        .json();
+    assert_eq!(listed["origin"], "bot", "the list can show a badge");
+    let rev = store.get(tid).unwrap().unwrap().revision;
+    // The user rewrites it in the UI.
+    let mut body = new_schedule(&bot, prompt("rewritten by the user"));
+    body["name"] = json!("user's version");
+    let r = call(&t, Method::PUT, &format!("/v1/schedules/{id}"), Some(body)).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["origin"], "user");
+    let after = store.get(tid).unwrap().unwrap();
+    assert_eq!(after.origin, scheduler::ScheduleOrigin::User);
+    assert!(after.revision > rev);
+    // So the bot can no longer change what the user wrote.
+    let (tx, _rx) = tokio::sync::broadcast::channel(4);
+    let host = DaemonScheduleHost::new(
+        store,
+        t.state.storage_arc(),
+        t.state.user_id(),
+        tx,
+        crate::ScheduleLimits::default(),
+    );
+    let me = builtin_tools::ScheduleCaller {
+        bot_id: bot.clone(),
+        run_id: String::new(),
+    };
+    let e = builtin_tools::ScheduleHost::preview(
+        &host,
+        &me,
+        &builtin_tools::ScheduleChange::Pause { id },
+    )
+    .unwrap_err();
+    assert!(e.contains("created by the user"), "{e}");
+}
+
+#[tokio::test]
+async fn a_schedule_approval_over_http_cannot_be_an_always_grant() {
+    let t = setup_with(Policy::approve_destructive());
+    t.state
+        .enable_schedule_tools(crate::ScheduleLimits {
+            timezone: Some("UTC".into()),
+            ..crate::ScheduleLimits::default()
+        })
+        .unwrap();
+    let (bot, chat) = make_chat(&t).await;
+    let msg = r#"call:schedule_create {"name":"Standup","prompt":"say hi","when":"every weekday at 10:30"}"#;
+    let run = super::send_msg(&t, &chat, msg, "queue").await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (call_id, _) = super::pending_call(&t).await;
+    // Crafted approvals asking for a standing grant are refused, server-side.
+    for scope in ["always", "always_category", "this_chat"] {
+        let r = call(
+            &t,
+            Method::POST,
+            &format!("/v1/approvals/{call_id}"),
+            Some(json!({"decision": "approve", "scope": scope})),
+        )
+        .await;
+        assert_eq!(
+            r.status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{scope}: {:?}",
+            r.json()
+        );
+        assert_eq!(r.json()["error"]["code"], "approval_once_only");
+    }
+    assert!(
+        t.state
+            .schedule_store()
+            .unwrap()
+            .list_by_bot(scheduler::BotId(uuid::Uuid::parse_str(&bot).unwrap()))
+            .unwrap()
+            .is_empty(),
+        "nothing was created by the refused approvals"
+    );
+    // The card carried the details; approving once creates exactly what it showed.
+    let ok = call(
+        &t,
+        Method::POST,
+        &format!("/v1/approvals/{call_id}"),
+        Some(json!({"decision": "approve", "scope": "once"})),
+    )
+    .await;
+    assert_eq!(ok.status, StatusCode::OK, "{:?}", ok.json());
+    super::wait_state(&t, &run, "succeeded").await;
+    let stored = t
+        .state
+        .schedule_store()
+        .unwrap()
+        .list_by_bot(scheduler::BotId(uuid::Uuid::parse_str(&bot).unwrap()))
+        .unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].origin, scheduler::ScheduleOrigin::Bot);
+    let grants = call(&t, Method::GET, &format!("/v1/bots/{bot}/grants"), None).await;
+    assert_eq!(
+        grants.json().as_array().map_or(0, Vec::len),
+        0,
+        "no grant exists"
+    );
+    let log = super::events(&t, &format!("?run_id={run}"), None).await;
+    let needed = log.iter().find(|f| f.1 == "approval_needed").unwrap();
+    let d = &needed.2["event"]["details"];
+    assert_eq!(d["kind"], "schedule");
+    assert_eq!(d["prompt"], "say hi");
+    assert_eq!(d["schedule"], "Every weekday at 10:30");
+}

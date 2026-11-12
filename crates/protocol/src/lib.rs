@@ -4,6 +4,7 @@
 //! all client interfaces.  Every public type derives `JsonSchema` so callers
 //! can generate and snapshot JSON Schema documents.
 
+pub mod approval_text;
 pub mod envelope;
 pub mod event;
 pub mod ids;
