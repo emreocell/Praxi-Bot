@@ -169,12 +169,16 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
     if (client instanceof MockApiClient) {
       setEventsConnected(true);
       const screen = new URLSearchParams(window.location.search).get("screen");
-      if (screen === "approval" || screen === "streaming") {
+      if (screen === "approval" || screen === "approval-schedule" || screen === "streaming") {
         const bot_id = "11111111-1111-4111-8111-111111111111";
         const chat_id = "33333333-3333-4333-8333-333333333333";
         const events: GlobalEnvelope["event"][] = [
           { type: "run_started", run_id: "mock-live", bot_id, chat_id },
           { type: "message_delta", run_id: "mock-live", text: screen === "approval" ? "Raporu hazırladım. Paylaşmadan önce eski taslakları temizlemem gerekiyor." : "Taslağı oluşturuyorum, önce kaynakları karşılaştırıyorum…" },
+          ...(screen === "approval-schedule" ? [
+            { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-sch", tool_name: "schedule_create", input: {} },
+            { type: "approval_needed", run_id: "mock-live", call_id: "mock-sch", tool_name: "schedule_create", input: {}, summary: "Create a schedule", details: { kind: "schedule", action: "create", name: "Pazartesi özeti", prompt: "Geçen haftanın GitHub ve takvim hareketlerinden kısa bir özet hazırla ve bana gönder.", prompt_chars: 76, previous: null, schedule: "Her pazartesi 09:00", timezone: "Europe/Istanbul", next_runs: ["2026-11-16T09:00:00+03:00", "2026-11-23T09:00:00+03:00"], permission: { level: "mixed", allow: ["github.*"], ask: ["email_send"], deny: [] } } }
+          ] as GlobalEnvelope["event"][] : []),
           ...(screen === "approval" ? [
             { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-rm", tool_name: "shell.run", input: { command: "rm -rf ./drafts/old" } },
             { type: "approval_needed", run_id: "mock-live", call_id: "mock-rm", tool_name: "shell.run", input: { command: "rm -rf ./drafts/old" }, summary: "drafts/old klasörünü ve içindeki 14 dosyayı sil" }

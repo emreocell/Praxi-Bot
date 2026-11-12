@@ -76,9 +76,9 @@
   flex: none;
   align-items: center;
   justify-content: center;
-  width: var(--size-control-md);
-  height: var(--size-control-md);
-  border-radius: var(--radius-md);
+  width: var(--space-12);
+  height: var(--space-12);
+  border-radius: 26%;
   background-color: var(--color-surface-elevated);
   color: var(--color-accent-text);
 }
