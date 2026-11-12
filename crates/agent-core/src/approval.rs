@@ -21,6 +21,28 @@ use crate::AUDIT_GRANT_ALWAYS;
 use crate::history::truncate_utf8;
 use crate::shared::{ApprovalScope, Grant, GrantTarget, Pending, RunCtx, Shared, Verdict};
 
+/// Tells the tool when an approval it prepared ends without running (drop =
+/// denied, cancelled, timed out); disarmed once the user approved.
+struct ClosedGuard {
+    tool: Option<Arc<dyn tool_registry::Tool>>,
+    ctx: tool_registry::ToolContext,
+    input: Value,
+}
+
+impl ClosedGuard {
+    fn disarm(&mut self) {
+        self.tool = None;
+    }
+}
+
+impl Drop for ClosedGuard {
+    fn drop(&mut self) {
+        if let Some(t) = self.tool.take() {
+            t.approval_closed(&self.ctx, &self.input);
+        }
+    }
+}
+
 struct PendingGuard {
     sh: Arc<Shared>,
     id: ToolCallId,
@@ -158,6 +180,18 @@ impl Shared {
         self.tools.get(name).is_some_and(|t| t.always_ask())
     }
 
+    fn closed_guard(&self, ctx: &RunCtx, name: &str, input: &Value) -> ClosedGuard {
+        ClosedGuard {
+            tool: self.tools.get(name),
+            ctx: tool_registry::ToolContext {
+                run_id: ctx.run_id.to_string(),
+                bot_id: Some(ctx.bot_id.to_string()),
+                ..tool_registry::ToolContext::default()
+            },
+            input: input.clone(),
+        }
+    }
+
     /// What the tool wants the approval card to show for this call, plus the
     /// bot's permission picture (it applies to every future firing).
     ///
@@ -181,6 +215,19 @@ impl Shared {
             .approval_details(&tctx, input)
             .await
             .map_err(|e| e.to_string())?;
+        // The card is redacted on its way to the user while the tool stores
+        // the raw text: if redaction would change anything the user would
+        // approve something other than what is stored, so refuse.
+        if let Some(d) = &details {
+            let raw = d.to_string();
+            if self.redact(raw.clone()) != raw {
+                tool.approval_closed(&tctx, input);
+                return Err(
+                    "the request contains text that looks like a secret (a key or token), which cannot be shown for approval; remove it and ask again"
+                        .into(),
+                );
+            }
+        }
         Ok(details.map(|mut v| {
             if let Some(o) = v.as_object_mut() {
                 o.insert("permission".into(), self.scheduled_permission(ctx));
@@ -313,9 +360,12 @@ impl Shared {
         ctx: &RunCtx,
         call_id: ToolCallId,
         summary: &str,
+        once_only: bool,
     ) -> (Uuid, PendingGuard, oneshot::Receiver<Verdict>) {
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().insert(call_id, Pending { tx });
+        self.pending
+            .lock()
+            .insert(call_id, Pending { tx, once_only });
         *self.parked.lock().entry(ctx.run_id).or_insert(0) += 1;
         let guard = PendingGuard {
             sh: Arc::clone(self),
@@ -384,9 +434,19 @@ impl Shared {
         input: &Value,
         details: Option<Value>,
     ) -> Result<ExecPermit, Option<String>> {
+        // An always-ask tool must show the user what it does: refuse to ask
+        // without details rather than fall back to the generic card.
+        if self.always_ask(name) && details.is_none() {
+            return Err(Some(
+                "internal error: this tool needs approval details to be asked about; it was not run"
+                    .into(),
+            ));
+        }
+        let once_only = details.is_some() || self.always_ask(name);
+        let mut closed = self.closed_guard(ctx, name, input);
         let args = input.to_string();
         let summary = self.redact(format!("{name} {}", truncate_utf8(&args, 300)));
-        let (approval_id, mut guard, rx) = self.park(ctx, call_id, &summary);
+        let (approval_id, mut guard, rx) = self.park(ctx, call_id, &summary, once_only);
         let parked_at = policy_revision(self);
         self.remember_parked(call_id, ctx, name, effect, category, input);
         self.emit(
@@ -425,6 +485,7 @@ impl Shared {
                         return Err(Some("denied by policy".into()));
                     }
                 }
+                closed.disarm();
                 Ok(ExecPermit {
                     sh: Arc::clone(self),
                     ctx: Arc::clone(ctx),
@@ -545,7 +606,7 @@ impl Shared {
     ) -> Result<String, Option<String>> {
         let question = self.redact(question.to_owned());
         let summary = format!("question: {}", truncate_utf8(&question, 300));
-        let (approval_id, mut guard, rx) = self.park(ctx, call_id, &summary);
+        let (approval_id, mut guard, rx) = self.park(ctx, call_id, &summary, false);
         self.emit(
             ctx,
             Event::QuestionAsked(QuestionAsked {

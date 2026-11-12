@@ -322,6 +322,9 @@ struct Inner {
     /// Approval requests this bridge sent: `call_id` -> Telegram chat that received the buttons.
     /// A callback is only honoured for an entry issued to the pressing chat (anti-forgery).
     pending_approvals: Mutex<HashMap<ToolCallId, i64>>,
+    /// Approvals that carry details: only "approve once" may be pressed for
+    /// them, whatever callback data arrives (the daemon refuses a grant too).
+    once_only_approvals: Mutex<HashSet<ToolCallId>>,
     /// Key identifying the bot the persisted polling offset belongs to.
     offset_key: String,
     cancel: CancellationToken,
@@ -482,6 +485,7 @@ impl TelegramChannel {
             #[cfg(test)]
             clock_offset_ms: std::sync::atomic::AtomicI64::new(0),
             pending_approvals: Mutex::new(HashMap::new()),
+            once_only_approvals: Mutex::new(HashSet::new()),
             offset_key,
             cancel: CancellationToken::new(),
             wake: Notify::new(),
@@ -912,6 +916,13 @@ impl TelegramChannel {
                 }
                 pending.insert(a.call_id, chat_id);
             }
+            if a.details.is_some() {
+                let mut once = self.inner.once_only_approvals.lock();
+                if once.len() >= MAX_PENDING_PROMPTS {
+                    once.clear();
+                }
+                once.insert(a.call_id);
+            }
             let mut row = vec![InlineButton::new(
                 "Approve once",
                 format_approval_callback(a.call_id, "once"),
@@ -933,11 +944,33 @@ impl TelegramChannel {
         };
         // Redact first, then split, so a secret cannot straddle two
         // messages; the buttons go on the last message only.
+        // Telegram counts UTF-16 units.
         let chunks = protocol::approval_text::chunk_text(&self.redact(&body), 3500);
         let last = chunks.len() - 1;
         for (i, chunk) in chunks.iter().enumerate() {
             let m = if i == last { markup.as_ref() } else { None };
-            self.send_redacted(chat_id, chunk, m).await?;
+            if let Err(e) = self.send_redacted(chat_id, chunk, m).await {
+                // Never leave a button that approves something the user did
+                // not get to read in full: forget this approval here (it stays
+                // answerable from the desktop app) and say so.
+                self.inner.pending_approvals.lock().remove(&a.call_id);
+                self.inner.once_only_approvals.lock().remove(&a.call_id);
+                eprintln!(
+                    "telegram: approval {} for {} not offered here: message {} of {} failed: {e}",
+                    a.call_id,
+                    a.tool_name,
+                    i + 1,
+                    chunks.len()
+                );
+                let _ = self
+                    .send_redacted(
+                        chat_id,
+                        "Approval could not be shown completely here. Approve or deny it in the desktop app.",
+                        None,
+                    )
+                    .await;
+                return Ok(());
+            }
         }
         Ok(())
     }
@@ -1573,6 +1606,18 @@ impl TelegramChannel {
                     .await?;
                 return Ok(());
             }
+            // A card with details is approved once, never as a standing grant.
+            let once_only = self.inner.once_only_approvals.lock().contains(&call_id);
+            if once_only
+                && decision == ApprovalDecision::Approve
+                && scope != crate::daemon_client::ApprovalScope::Once
+            {
+                self.inner
+                    .bot_api
+                    .answer_callback_query(query_id, Some("This can only be approved once"))
+                    .await?;
+                return Ok(());
+            }
             if let Err(e) = self
                 .inner
                 .api_client
@@ -1585,6 +1630,7 @@ impl TelegramChannel {
             }
             self.inner.inbox.delivered(update_id, None)?;
             self.inner.pending_approvals.lock().remove(&call_id);
+            self.inner.once_only_approvals.lock().remove(&call_id);
             let ack = match decision {
                 ApprovalDecision::Approve => "Approved",
                 ApprovalDecision::Deny => "Denied",

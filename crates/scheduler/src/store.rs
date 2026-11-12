@@ -413,6 +413,23 @@ impl ScheduleStore {
         Ok(changed > 0)
     }
 
+    /// Change who owns a schedule (e.g. the user rewrote a bot-made one, so
+    /// the bot may no longer change it). A definition change: bumps the
+    /// revision, so any approval prepared against the old state goes stale.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn set_origin(&self, id: TaskId, origin: ScheduleOrigin) -> Result<bool> {
+        let changed = self.conn().execute(
+            "UPDATE schedules SET origin = ?2, revision = revision + 1 WHERE id = ?1 AND origin <> ?2",
+            params![id.to_string(), origin.as_str()],
+        )?;
+        if changed > 0 {
+            self.notify();
+        }
+        Ok(changed > 0)
+    }
+
     /// Persist legacy timer progress. This does not make execution durable:
     /// a crash before the executor creates a run can still lose the firing.
     /// The timer engine uses transactional occurrence reservations instead.

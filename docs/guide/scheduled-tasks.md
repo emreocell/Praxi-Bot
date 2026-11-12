@@ -100,10 +100,22 @@ denies). The card shows the exact prompt, the timing, the next three firing time
 in your timezone and what the bot may do unattended (for an update, old and new
 side by side). What you approve is exactly what is stored: a time like "in 2 hours"
 is fixed when the card is shown, and if the schedule changed meanwhile the change is
-refused. Prompts are limited to 4,000 characters and names to 80, without control
-or text-direction characters. "Always allow" and "this chat" grants never apply to
-these three. Pause and delete follow the normal rules. Telegram and the CLI show the
-full details too; if a client cannot, approve in the desktop app.
+refused. Prompts are limited to 4,000 characters and names to 80. Control
+characters, text-direction overrides and invisible characters (zero-width,
+soft hyphen, line/paragraph separators, variation selectors, tag characters) are
+rejected, so no hidden text can ride along in a prompt that runs unattended.
+**Look-alike letters (homoglyphs) are not filtered**: read the prompt on the card.
+"Always allow" and "this chat" grants never apply to these three, and the daemon
+refuses such a request from any client (desktop, HTTP, Telegram, CLI). A request
+that contains something that looks like a secret (a key or token) is refused, since
+the card would mask text the schedule would keep. Telegram and the CLI show the
+full details too (the prompt quoted between begin/end lines, followed by a summary
+line the daemon writes); if a client cannot show them, approve in the desktop app.
+
+Pause and delete of a schedule a bot created follow the normal approval rules.
+When you edit a bot-made schedule in the app, it becomes yours: from then on the
+bot can read it but no longer change it. A bot can still pause or delete the ones
+it made and you have not rewritten.
 
 Limits (in `<data dir>/schedule.toml`, all optional):
 
@@ -118,5 +130,8 @@ broken or has a nonsensical value, the schedule tools are switched off (they nev
 fall back to the defaults) and `bot doctor` reports it.
 
 Every create, update, pause, resume and delete by a bot is written to the audit
-log with the bot id and run id.
+log with the bot id and run id (updates also record the old prompt's length and
+SHA-256). The entry is written before the change; if the change then fails, a
+`schedule.failed` entry follows, and if the audit write itself fails nothing is
+changed.
 

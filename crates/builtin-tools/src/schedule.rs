@@ -179,6 +179,10 @@ pub trait ScheduleHost: Send + Sync {
         change: &ScheduleChange,
     ) -> Result<SchedulePreview, String>;
 
+    /// Forget what [`Self::preview`] froze for `change`: its approval ended
+    /// without the call running (denied, cancelled, timed out).
+    fn discard(&self, caller: &ScheduleCaller, change: &ScheduleChange);
+
     /// Create a schedule (armed). Audited.
     ///
     /// # Errors
@@ -377,6 +381,12 @@ impl Tool for ScheduleTool {
         matches!(self.op, Op::Create | Op::Update | Op::Resume)
     }
 
+    fn approval_closed(&self, ctx: &ToolContext, input: &Value) {
+        if let (Ok(who), Ok(Some(change))) = (caller(ctx), self.change(input)) {
+            self.host.discard(&who, &change);
+        }
+    }
+
     async fn approval_details(
         &self,
         ctx: &ToolContext,
@@ -506,6 +516,11 @@ mod tests {
                 next_runs: vec!["a".into(), "b".into(), "c".into()],
                 previous: None,
             })
+        }
+        fn discard(&self, c: &ScheduleCaller, ch: &ScheduleChange) {
+            self.calls
+                .lock()
+                .push(format!("discard {} {ch:?}", c.bot_id));
         }
         fn create(&self, c: &ScheduleCaller, _: &ScheduleRequest) -> Result<ScheduleView, String> {
             self.calls
@@ -660,6 +675,23 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn a_closed_approval_discards_what_the_host_froze() {
+        let host = Arc::new(Fake::default());
+        let t = tool(&host, "schedule_create");
+        t.approval_closed(
+            &ctx(Some("bot-a")),
+            &json!({"name":"n","prompt":"p","when":"daily"}),
+        );
+        let log = host.calls.lock().clone();
+        assert_eq!(log.len(), 1);
+        assert!(log[0].starts_with("discard bot-a Create"), "{log:?}");
+        // No bot, or a tool without a card: nothing to discard.
+        t.approval_closed(&ctx(None), &json!({"name":"n","prompt":"p"}));
+        tool(&host, "schedule_list").approval_closed(&ctx(Some("bot-a")), &json!({}));
+        assert_eq!(host.calls.lock().len(), 1);
     }
 
     #[tokio::test]

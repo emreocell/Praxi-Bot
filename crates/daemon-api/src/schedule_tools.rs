@@ -9,7 +9,7 @@
 //! * Limits and the default timezone come from `<data dir>/schedule.toml`
 //!   ([`load_schedule_limits`]); a bad file disables the tools (fail closed).
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -27,6 +27,7 @@ use scheduler::{
 };
 use serde::Deserialize;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use storage::{Storage, now_ms};
 use tokio::sync::broadcast;
 use uuid::Uuid;
@@ -48,6 +49,12 @@ pub const MIN_INTERVAL_CEILING_SECS: u64 = 7 * 86_400;
 pub const MAX_PROMPT_CHARS: usize = 4_000;
 /// Longest schedule name, in characters.
 pub const MAX_NAME_CHARS: usize = 80;
+/// Longest raw `when` / `cron` / `tz` argument, in characters.
+pub const MAX_WHEN_CHARS: usize = 200;
+/// See [`MAX_WHEN_CHARS`].
+pub const MAX_CRON_CHARS: usize = 120;
+/// See [`MAX_WHEN_CHARS`].
+pub const MAX_TZ_CHARS: usize = 64;
 
 /// Limits for schedules a bot creates (schedules made in the UI are not
 /// limited by the interval, but they count toward the per-bot maximum).
@@ -131,6 +138,8 @@ pub fn load_schedule_limits(data_dir: &Path) -> Result<ScheduleLimits, String> {
 /// A change resolved at preview time, applied as-is later.
 struct Frozen {
     key: String,
+    /// `bot|run` that previewed it (per-owner cap).
+    owner: String,
     made_ms: i64,
     name: String,
     prompt: String,
@@ -140,8 +149,10 @@ struct Frozen {
     target: Option<(TaskId, i64)>,
 }
 
-/// Frozen changes kept at most this long / this many.
+/// Frozen changes are valid this long; at most this many per `bot|run`, and
+/// this many overall (a run cannot push out another run's pending approval).
 const FROZEN_TTL_MS: i64 = 6 * 3_600_000;
+const FROZEN_PER_OWNER: usize = 16;
 const FROZEN_MAX: usize = 256;
 
 type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
@@ -292,9 +303,36 @@ fn human_secs(s: u64) -> String {
     }
 }
 
-/// Characters that can disguise text: Unicode bidi overrides / isolates / marks.
-fn is_bidi(c: char) -> bool {
-    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}' | '\u{061C}')
+/// Characters that hide or disguise text. The stored prompt is run unattended
+/// as an instruction, so nothing invisible may ride along: Unicode category
+/// Cf (format: zero-width, bidi, soft hyphen, BOM, tag characters ...), Zl, Zp
+/// and variation selectors, plus the combining grapheme joiner. Homoglyphs
+/// (look-alike letters) are NOT filtered.
+fn is_hidden(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{034F}'
+            | '\u{0600}'..='\u{0605}'
+            | '\u{061C}'
+            | '\u{06DD}'
+            | '\u{070F}'
+            | '\u{08E2}'
+            | '\u{180B}'..='\u{180F}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{2028}'..='\u{202E}'
+            | '\u{2060}'..='\u{206F}'
+            | '\u{FE00}'..='\u{FE0F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{110BD}'
+            | '\u{110CD}'
+            | '\u{13430}'..='\u{1343F}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0000}'..='\u{E007F}'
+            | '\u{E0100}'..='\u{E01EF}'
+    )
 }
 
 /// Trim and check a free-text field: not empty, at most `max` characters,
@@ -310,9 +348,9 @@ fn clean_text(field: &str, raw: &str, max: usize, allow_newlines: bool) -> Resul
     }
     for c in t.chars() {
         let bad_control = c.is_control() && !(allow_newlines && (c == '\n' || c == '\t'));
-        if bad_control || is_bidi(c) {
+        if bad_control || is_hidden(c) {
             return Err(format!(
-                "`{field}` contains a control or direction-override character (U+{:04X}); remove it",
+                "`{field}` contains a control, invisible or direction-override character (U+{:04X}); remove it",
                 u32::from(c)
             ));
         }
@@ -320,14 +358,15 @@ fn clean_text(field: &str, raw: &str, max: usize, allow_newlines: bool) -> Resul
     Ok(t.to_owned())
 }
 
-/// FNV-1a 64-bit hash, hex: a stable fingerprint of old values for audit.
-fn fnv1a(text: &str) -> String {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in text.bytes() {
-        h ^= u64::from(b);
-        h = h.wrapping_mul(0x0100_0000_01b3);
-    }
-    format!("{h:016x}")
+/// SHA-256 of `text`, hex: a fingerprint of prompts for the audit log.
+pub(crate) fn sha256_hex(text: &str) -> String {
+    use std::fmt::Write as _;
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .fold(String::new(), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
 }
 
 impl DaemonScheduleHost {
@@ -452,6 +491,18 @@ impl DaemonScheduleHost {
 
     /// `when` / `cron` / `tz` of `req` as a validated spec.
     fn spec_of(&self, req: &ScheduleRequest, now: i64) -> Result<(ScheduleSpec, Tz), String> {
+        for (field, v, max) in [
+            ("when", &req.when, MAX_WHEN_CHARS),
+            ("cron", &req.cron, MAX_CRON_CHARS),
+            ("tz", &req.tz, MAX_TZ_CHARS),
+        ] {
+            if let Some(v) = v {
+                let n = v.chars().count();
+                if n > max {
+                    return Err(format!("`{field}` is {n} characters; the limit is {max}"));
+                }
+            }
+        }
         let tz = match req.tz.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
             Some(n) => Tz::from_str(n).map_err(|_| {
                 format!("unknown timezone {n:?} (use an IANA name such as \"Europe/Istanbul\")")
@@ -504,6 +555,10 @@ impl DaemonScheduleHost {
         Ok(())
     }
 
+    fn owner(caller: &ScheduleCaller) -> String {
+        format!("{}|{}", caller.bot_id, caller.run_id)
+    }
+
     fn key(caller: &ScheduleCaller, change: &ScheduleChange) -> String {
         format!(
             "{}|{}|{}",
@@ -513,21 +568,47 @@ impl DaemonScheduleHost {
         )
     }
 
+    /// Remember `f`. A new preview of the same call REPLACES the older one (a
+    /// denied or abandoned approval leaves nothing that could be applied for
+    /// the next card); one run cannot evict another run's pending entry.
     fn freeze(&self, f: Frozen) {
         let now = self.now();
         let mut q = self.frozen.lock();
-        q.retain(|x| now - x.made_ms < FROZEN_TTL_MS);
+        q.retain(|x| now - x.made_ms < FROZEN_TTL_MS && x.key != f.key);
+        // Own oldest first.
+        while q.iter().filter(|x| x.owner == f.owner).count() >= FROZEN_PER_OWNER {
+            if let Some(i) = q.iter().position(|x| x.owner == f.owner) {
+                q.remove(i);
+            }
+        }
+        // Overall cap: shed the oldest entry of whoever holds the most.
         while q.len() >= FROZEN_MAX {
-            q.pop_front();
+            let mut counts: HashMap<&str, usize> = HashMap::new();
+            for x in q.iter() {
+                *counts.entry(x.owner.as_str()).or_default() += 1;
+            }
+            let Some(biggest) = counts
+                .into_iter()
+                .max_by_key(|(_, n)| *n)
+                .map(|(o, _)| o.to_owned())
+            else {
+                break;
+            };
+            if let Some(i) = q.iter().position(|x| x.owner == biggest) {
+                q.remove(i);
+            }
         }
         q.push_back(f);
     }
 
-    /// The oldest frozen change for exactly this call, removed.
+    /// The current frozen change for exactly this call, removed; `None` when
+    /// there is none or it is past its time-to-live.
     fn take(&self, key: &str) -> Option<Frozen> {
+        let now = self.now();
         let mut q = self.frozen.lock();
         let i = q.iter().position(|f| f.key == key)?;
-        q.remove(i)
+        let f = q.remove(i)?;
+        (now - f.made_ms < FROZEN_TTL_MS).then_some(f)
     }
 
     /// Resolve `change` against the current state (no side effects).
@@ -553,6 +634,7 @@ impl DaemonScheduleHost {
                 let (spec, tz) = self.spec_of(req, now)?;
                 Ok(Frozen {
                     key,
+                    owner: Self::owner(caller),
                     made_ms: now,
                     name,
                     prompt,
@@ -589,6 +671,7 @@ impl DaemonScheduleHost {
                 };
                 Ok(Frozen {
                     key,
+                    owner: Self::owner(caller),
                     made_ms: now,
                     name,
                     prompt,
@@ -605,19 +688,20 @@ impl DaemonScheduleHost {
                     // The limit applies when re-arming too.
                     self.check_interval(&cur.spec, now)?;
                 }
-                Ok(self.same_as(key, &cur, now))
+                Ok(self.same_as(key, Self::owner(caller), &cur, now))
             }
             ScheduleChange::Delete { id } => {
                 let cur = self.own_editable(caller, id)?;
-                Ok(self.same_as(key, &cur, now))
+                Ok(self.same_as(key, Self::owner(caller), &cur, now))
             }
         }
     }
 
     /// A frozen change that keeps the stored definition as it is.
-    fn same_as(&self, key: String, cur: &Schedule, now: i64) -> Frozen {
+    fn same_as(&self, key: String, owner: String, cur: &Schedule, now: i64) -> Frozen {
         Frozen {
             key,
+            owner,
             made_ms: now,
             name: cur.name.clone(),
             prompt: prompt_of(&cur.payload),
@@ -719,12 +803,12 @@ impl DaemonScheduleHost {
             "change": change,
             "schedule": describe(&s.spec, tz),
             "prompt_chars": prompt_of(&s.payload).chars().count(),
-            "prompt_fnv1a64": fnv1a(&prompt_of(&s.payload)),
+            "prompt_sha256": sha256_hex(&prompt_of(&s.payload)),
         });
         if let (Some(old), Some(o)) = (old, detail.as_object_mut()) {
             let p = prompt_of(&old.payload);
             o.insert("old_prompt_chars".into(), json!(p.chars().count()));
-            o.insert("old_prompt_fnv1a64".into(), json!(fnv1a(&p)));
+            o.insert("old_prompt_sha256".into(), json!(sha256_hex(&p)));
             o.insert(
                 "old_name".into(),
                 json!(old.name.chars().take(MAX_NAME_CHARS).collect::<String>()),
@@ -738,6 +822,37 @@ impl DaemonScheduleHost {
             .append_audit(self.user_id, run, "bot", action, &detail)
             .map(|_| ())
             .map_err(|e| format!("the audit log could not be written, so nothing was changed: {e}"))
+    }
+
+    /// The audit entry written before a change turned out to be wrong (the
+    /// change failed): say so, so the log never claims something that did not
+    /// happen. The audit and schedule stores are different databases, so this
+    /// follow-up entry replaces a shared transaction.
+    pub(crate) fn audit_failed(
+        &self,
+        caller: &ScheduleCaller,
+        action: &str,
+        change: &str,
+        s: &Schedule,
+        error: &str,
+    ) {
+        let run = Uuid::parse_str(&caller.run_id).ok().map(RunId);
+        let detail = json!({
+            "bot_id": caller.bot_id,
+            "run_id": caller.run_id,
+            "schedule_id": s.id.0.to_string(),
+            "attempted": action,
+            "change": change,
+            "error": error.chars().take(300).collect::<String>(),
+        });
+        if let Err(e) =
+            self.storage
+                .append_audit(self.user_id, run, "bot", "schedule.failed", &detail)
+        {
+            eprintln!(
+                "daemon-api: ERROR: could not record that schedule change {change} failed ({error}): {e}"
+            );
+        }
     }
 
     /// The chat of the calling run (the schedule posts there).
@@ -760,7 +875,7 @@ impl DaemonScheduleHost {
             Some(f) => Ok(f),
             None if may_resolve_now => self.resolve(caller, change),
             None => {
-                Err("this change was not previewed for approval, so it was not applied".to_owned())
+                Err("this change was not previewed for approval (or the approval is too old), so it was not applied".to_owned())
             }
         }
     }
@@ -815,9 +930,16 @@ impl DaemonScheduleHost {
             ));
         }
         self.audit(caller, "schedule.update", label, &next, Some(&cur))?;
-        let ok = self.store.update_definition(&next).map_err(err)?;
-        if !ok {
-            return Err("that schedule changed or was deleted while it was being applied; nothing was applied".into());
+        let applied = self.store.update_definition(&next).map_err(err).and_then(|ok| {
+            if ok {
+                Ok(())
+            } else {
+                Err("that schedule changed or was deleted while it was being applied; nothing was applied".to_owned())
+            }
+        });
+        if let Err(e) = applied {
+            self.audit_failed(caller, "schedule.update", label, &next, &e);
+            return Err(e);
         }
         let after = self
             .store
@@ -870,6 +992,11 @@ impl ScheduleHost for DaemonScheduleHost {
         Ok(p)
     }
 
+    fn discard(&self, caller: &ScheduleCaller, change: &ScheduleChange) {
+        let key = Self::key(caller, change);
+        self.frozen.lock().retain(|f| f.key != key);
+    }
+
     fn create(
         &self,
         caller: &ScheduleCaller,
@@ -900,7 +1027,10 @@ impl ScheduleHost for DaemonScheduleHost {
         .map_err(err)?;
         sc.origin = ScheduleOrigin::Bot;
         self.audit(caller, "schedule.create", "created", &sc, None)?;
-        self.store.insert(&sc).map_err(err)?;
+        if let Err(e) = self.store.insert(&sc).map_err(err) {
+            self.audit_failed(caller, "schedule.create", "created", &sc, &e);
+            return Err(e);
+        }
         self.notify(sc.id, ScheduleChangeKind::Created);
         Ok(self.view(&sc))
     }
@@ -943,8 +1073,12 @@ impl ScheduleHost for DaemonScheduleHost {
         let cur = self.current_matches(caller, &f)?;
         let view = self.view(&cur);
         self.audit(caller, "schedule.delete", "deleted", &cur, None)?;
-        self.store.remove_trigger(cur.id).map_err(err)?;
-        self.store.delete(cur.id).map_err(err)?;
+        // One statement: the webhook trigger goes with the schedule (cascade),
+        // so nothing is removed unless the whole delete succeeds.
+        if let Err(e) = self.store.delete(cur.id).map_err(err) {
+            self.audit_failed(caller, "schedule.delete", "deleted", &cur, &e);
+            return Err(e);
+        }
         self.notify(cur.id, ScheduleChangeKind::Deleted);
         Ok(view)
     }

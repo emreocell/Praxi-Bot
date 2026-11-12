@@ -4467,6 +4467,10 @@ struct AskTool {
     spec: ToolSpec,
     count: Arc<AtomicUsize>,
     veto: Option<&'static str>,
+    /// Times `approval_closed` ran (approval ended without the call running).
+    closed: Arc<AtomicUsize>,
+    /// Offer details at all (an always-ask tool that does not is refused).
+    with_details: bool,
 }
 
 fn ask_tool(veto: Option<&'static str>) -> Arc<AskTool> {
@@ -4481,6 +4485,8 @@ fn ask_tool(veto: Option<&'static str>) -> Arc<AskTool> {
         },
         count: Arc::new(AtomicUsize::new(0)),
         veto,
+        closed: Arc::new(AtomicUsize::new(0)),
+        with_details: true,
     })
 }
 
@@ -4500,12 +4506,18 @@ impl Tool for AskTool {
         if let Some(msg) = self.veto {
             return Err(ToolError::Execution(msg.into()));
         }
+        if !self.with_details {
+            return Ok(None);
+        }
         Ok(Some(json!({
             "kind": "schedule",
             "prompt": input["prompt"],
             "bot_id": ctx.bot_id,
             "next_runs": ["a", "b", "c"],
         })))
+    }
+    fn approval_closed(&self, _: &ToolContext, _: &Value) {
+        self.closed.fetch_add(1, Ordering::SeqCst);
     }
     async fn call(&self, _: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
         self.count.fetch_add(1, Ordering::SeqCst);
@@ -4603,7 +4615,9 @@ async fn approving_an_always_ask_tool_with_always_mints_no_grant() {
         else {
             unreachable!()
         };
-        lp.approve(a.call_id, scope, env.user).unwrap();
+        assert!(lp.approve(a.call_id, scope, env.user).is_err());
+        lp.approve(a.call_id, ApprovalScope::Once, env.user)
+            .unwrap();
     }
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
     assert_eq!(
@@ -4682,5 +4696,162 @@ async fn a_vetoed_call_never_reaches_the_user() {
             !matches!(item.envelope.event, Event::ApprovalNeeded(_)),
             "no approval card for a vetoed call"
         );
+    }
+}
+
+#[tokio::test]
+async fn an_always_ask_approval_cannot_be_given_as_always_on_any_channel() {
+    let env = setup();
+    let tool = ask_tool(None);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "sched_make", json!({"prompt": "p"}))]),
+        text("done"),
+    ]);
+    let lp = ask_loop(&env, &fake, &tool, Policy::approve_destructive());
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    for scope in [
+        ApprovalScope::Always,
+        ApprovalScope::AlwaysCategory,
+        ApprovalScope::ThisChat,
+    ] {
+        let e = lp.approve(a.call_id, scope, env.user).unwrap_err();
+        assert!(matches!(e, crate::LoopError::OnceOnly(_)), "{scope:?}: {e}");
+    }
+    assert_eq!(tool.count.load(Ordering::SeqCst), 0, "still waiting");
+    // The refusal did not consume the approval: once still works.
+    lp.approve(a.call_id, ApprovalScope::Once, env.user)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(tool.count.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        tool.closed.load(Ordering::SeqCst),
+        0,
+        "approved: not closed"
+    );
+}
+
+#[tokio::test]
+async fn a_plain_approval_can_still_be_given_as_always() {
+    let env = setup();
+    let w = Arc::new(tool("fs_write", Effect::Write, "ok"));
+    let fake = Fake::new(vec![calls(&[("c1", "fs_write", json!({}))]), text("done")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&w)],
+        profile(""),
+        cfg(Policy::approve_destructive()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    lp.approve(a.call_id, ApprovalScope::Always, env.user)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+}
+
+#[tokio::test]
+async fn an_always_ask_tool_without_details_is_refused_not_asked() {
+    let env = setup();
+    let mut t = ask_tool(None);
+    Arc::get_mut(&mut t).unwrap().with_details = false;
+    let fake = Fake::new(vec![
+        calls(&[("c1", "sched_make", json!({"prompt": "p"}))]),
+        text("ok"),
+    ]);
+    let lp = ask_loop(&env, &fake, &t, Policy::approve_destructive());
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(t.count.load(Ordering::SeqCst), 0);
+    while let Ok(item) = rx.try_recv() {
+        assert!(!matches!(item.envelope.event, Event::ApprovalNeeded(_)));
+    }
+    assert!(
+        tool_messages(&fake.request(1))
+            .join("\n")
+            .contains("approval details")
+    );
+}
+
+#[tokio::test]
+async fn denying_or_cancelling_an_approval_tells_the_tool_to_drop_its_preview() {
+    let env = setup();
+    let t = ask_tool(None);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "sched_make", json!({"prompt": "p"}))]),
+        text("ok"),
+    ]);
+    let lp = ask_loop(&env, &fake, &t, Policy::approve_destructive());
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    lp.deny(a.call_id, env.user, None).unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(t.closed.load(Ordering::SeqCst), 1);
+    assert_eq!(t.count.load(Ordering::SeqCst), 0);
+    // A cancelled run closes it too.
+    let t2 = ask_tool(None);
+    let fake2 = Fake::new(vec![calls(&[("c1", "sched_make", json!({"prompt": "p"}))])]);
+    let lp2 = ask_loop(&env, &fake2, &t2, Policy::approve_destructive());
+    let mut rx2 = lp2.subscribe();
+    let run2 = lp2.run_turn(env.chat, "go").unwrap();
+    until(&mut rx2, |e| matches!(e, Event::ApprovalNeeded(_))).await;
+    lp2.cancel(run2).unwrap();
+    for _ in 0..200 {
+        if t2.closed.load(Ordering::SeqCst) == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(t2.closed.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn details_that_redaction_would_change_are_refused_before_asking() {
+    let env = setup();
+    let t = ask_tool(None);
+    let secret = "sk-abcdefghijklmnopqrstuvwxyz0123";
+    let fake = Fake::new(vec![
+        calls(&[(
+            "c1",
+            "sched_make",
+            json!({"prompt": format!("use key {secret}")}),
+        )]),
+        text("ok"),
+    ]);
+    let mut config = cfg(Policy::approve_destructive());
+    config.redactor = Some(secret_store::Redactor::new().into());
+    let registry = ToolRegistry::new();
+    registry.register(Arc::clone(&t) as Arc<dyn Tool>);
+    let lp = AgentLoop::new(
+        Arc::clone(&env.storage),
+        registry,
+        Providers::single(Arc::clone(&fake) as Arc<dyn ChatProvider>),
+        config,
+    );
+    lp.add_profile(env.bot, profile(""));
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(t.count.load(Ordering::SeqCst), 0);
+    assert_eq!(t.closed.load(Ordering::SeqCst), 1, "preview dropped");
+    let msg = tool_messages(&fake.request(1)).join("\n");
+    assert!(msg.contains("looks like a secret"), "{msg}");
+    assert!(!msg.contains(secret));
+    while let Ok(item) = rx.try_recv() {
+        assert!(!matches!(item.envelope.event, Event::ApprovalNeeded(_)));
     }
 }

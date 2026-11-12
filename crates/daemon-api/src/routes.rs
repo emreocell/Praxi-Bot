@@ -1273,6 +1273,12 @@ pub(crate) async fn update_schedule(
     sc.misfire_policy = p.policy;
     sc.spec = p.spec;
     let store = s.schedule_store()?;
+    // The user is rewriting it: a bot-made schedule becomes the user's, so the
+    // bot can no longer change what the user wrote (this also bumps the
+    // revision, which stales any approval a bot had prepared for it).
+    if sc.origin == scheduler::ScheduleOrigin::Bot {
+        store.set_origin(sc.id, scheduler::ScheduleOrigin::User)?;
+    }
     // Run progress may have changed after schedule_of_user. The store reads
     // it again and computes any re-arm under the same write transaction.
     let (sc, was_enabled) = persist_schedule_edit(&store, &sc, input.enabled, now_ms())?;

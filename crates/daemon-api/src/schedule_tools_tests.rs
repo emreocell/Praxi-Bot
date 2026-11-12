@@ -23,6 +23,7 @@ use tool_registry::{ToolContext, ToolRegistry};
 
 use crate::dto::{ScheduleChangeKind, ScheduleChanged};
 use crate::fake::FakeProvider;
+use crate::schedule_tools::sha256_hex as sha;
 use crate::schedule_tools::{DaemonScheduleHost, ScheduleLimits, load_schedule_limits, upcoming};
 use crate::{AppState, DaemonConfig};
 
@@ -851,12 +852,27 @@ fn names_and_prompts_are_capped_and_stripped_of_control_and_bidi_characters() {
         "a\u{202E}b",
         "a\u{2066}b",
         "a\u{200F}b",
+        // Invisible text in an instruction channel.
+        "a\u{200B}b",
+        "a\u{200C}b",
+        "a\u{200D}b",
+        "a\u{2060}b",
+        "a\u{FEFF}b",
+        "a\u{00AD}b",
+        "a\u{2028}b",
+        "a\u{2029}b",
+        "a\u{FE0F}b",
+        "a\u{E0100}b",
+        "a\u{E0041}b", // a Unicode tag character
+        "a\u{034F}b",
     ] {
         let e = ok("n", bad).unwrap_err();
-        assert!(e.contains("control or direction-override"), "{bad:?}: {e}");
+        assert!(e.contains("direction-override"), "{bad:?}: {e}");
         let e = ok(bad, "p").unwrap_err();
-        assert!(e.contains("control or direction-override"), "{bad:?}: {e}");
+        assert!(e.contains("direction-override"), "{bad:?}: {e}");
     }
+    // Ordinary non-ASCII text is fine (homoglyphs are not filtered).
+    assert!(ok("Günlük özet ☕", "Özetle: é ü ğ — ok").is_ok());
     assert!(ok("n", "   ").unwrap_err().contains("must not be empty"));
     assert!(ok("a\nb", "p").is_err(), "no newline in a name");
     // Updates are checked the same way.
@@ -911,7 +927,18 @@ fn every_create_update_pause_delete_is_audited_with_bot_run_and_old_values() {
     let upd = &log[1].detail;
     assert_eq!(upd["old_prompt_chars"], "do the thing".len());
     assert_eq!(upd["prompt_chars"], "a new prompt".len());
-    assert_ne!(upd["old_prompt_fnv1a64"], upd["prompt_fnv1a64"]);
+    assert_ne!(upd["old_prompt_sha256"], upd["prompt_sha256"]);
+    // The known SHA-256 test vector, so this is not checking the function against itself.
+    assert_eq!(
+        sha("abc"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+    assert_eq!(
+        upd["old_prompt_sha256"],
+        sha("do the thing"),
+        "SHA-256 of the old prompt"
+    );
+    assert_eq!(upd["prompt_sha256"], sha("a new prompt"));
     assert_eq!(upd["old_schedule"], "Every day at 09:00");
 }
 
@@ -927,6 +954,9 @@ fn a_failed_audit_write_fails_the_operation_before_anything_is_committed() {
     // An existing bot schedule is neither edited, paused nor deleted.
     let sc = f.insert(f.a, ScheduleOrigin::Bot, user_every_hour(), text("keep"));
     let id = sc.id.0.to_string();
+    f.store
+        .set_trigger(sc.id, &scheduler::Trigger::Webhook { secret: "s".into() })
+        .unwrap();
     assert!(
         f.edit(
             &f.caller_a(),
@@ -941,6 +971,42 @@ fn a_failed_audit_write_fails_the_operation_before_anything_is_committed() {
     assert!(after.enabled);
     assert!(matches!(after.payload, Payload::AgentPrompt { ref text } if text == "keep"));
     assert_eq!(after.revision, sc.revision);
+    assert!(
+        f.store.get_trigger(sc.id).unwrap().is_some(),
+        "a refused delete removes nothing, the webhook trigger included"
+    );
+}
+
+#[test]
+fn a_successful_delete_takes_the_webhook_trigger_with_it() {
+    let f = fx(limits(20, 300));
+    let v = f.make(&f.caller_a(), &when("n", "daily")).unwrap();
+    let id = scheduler::TaskId(uuid::Uuid::parse_str(&v.id).unwrap());
+    f.store
+        .set_trigger(id, &scheduler::Trigger::Webhook { secret: "s".into() })
+        .unwrap();
+    f.remove(&f.caller_a(), &v.id).unwrap();
+    assert!(f.store.get(id).unwrap().is_none());
+    assert!(f.store.get_trigger(id).unwrap().is_none());
+}
+
+#[test]
+fn a_change_that_fails_after_the_audit_entry_leaves_a_failed_entry() {
+    let f = fx(limits(20, 300));
+    let sc = f.insert(f.a, ScheduleOrigin::Bot, user_every_hour(), text("p"));
+    f.host.audit_failed(
+        &f.caller_a(),
+        "schedule.update",
+        "updated",
+        &sc,
+        "disk full",
+    );
+    let log = f.storage.list_audit(f.user).unwrap();
+    let e = log.iter().find(|e| e.action == "schedule.failed").unwrap();
+    assert_eq!(e.detail["attempted"], "schedule.update");
+    assert_eq!(e.detail["error"], "disk full");
+    assert_eq!(e.detail["schedule_id"], sc.id.0.to_string());
+    assert_eq!(e.actor, "bot");
 }
 
 #[test]
@@ -1104,4 +1170,219 @@ async fn enabling_registers_six_always_ask_tools_that_run_as_the_calling_bot() {
     assert_eq!(stored[0].origin, ScheduleOrigin::Bot);
     assert_eq!(events.try_recv().unwrap().kind, ScheduleChangeKind::Created);
     assert_eq!(state.enable_schedule_tools(limits(20, 300)).unwrap(), 0);
+}
+
+// ---------------------------------------------------------------- frozen store: bound to the approval
+
+#[test]
+fn a_denied_preview_is_replaced_so_the_next_card_is_what_gets_stored() {
+    let start = utc_ms(2026, 11, 12, 12, 0);
+    let f = fx_at(limits(20, 300), start, true);
+    let r = when("Once", "in 2 hours");
+    let ch = ScheduleChange::Create(r.clone());
+    // T0: card shown (T0+2h), user denies.
+    f.host.preview(&f.caller_a(), &ch).unwrap();
+    f.host.discard(&f.caller_a(), &ch);
+    f.advance(30 * 60_000);
+    // T0+30m: the same call again; the card shows T0+2h30m, user approves.
+    let p = f.host.preview(&f.caller_a(), &ch).unwrap();
+    assert!(
+        p.next_runs[0].starts_with("2026-11-12T17:30:00+03:00"),
+        "{:?}",
+        p.next_runs
+    );
+    f.advance(60_000);
+    let v = f.host.create(&f.caller_a(), &r).unwrap();
+    assert_eq!(
+        v.next_runs, p.next_runs,
+        "stored what the second card showed"
+    );
+    let sc = f.store.list_by_bot(f.a).unwrap().remove(0);
+    assert_eq!(
+        sc.spec,
+        ScheduleSpec::At {
+            unix_ms: start + 150 * 60_000
+        }
+    );
+}
+
+#[test]
+fn an_abandoned_preview_is_replaced_by_the_next_one_even_without_a_discard() {
+    let start = utc_ms(2026, 11, 12, 12, 0);
+    let f = fx_at(limits(20, 300), start, true);
+    let r = when("Once", "in 2 hours");
+    let ch = ScheduleChange::Create(r.clone());
+    f.host.preview(&f.caller_a(), &ch).unwrap(); // card nobody answered
+    f.advance(45 * 60_000);
+    f.host.preview(&f.caller_a(), &ch).unwrap(); // the card that was approved
+    f.host.create(&f.caller_a(), &r).unwrap();
+    let sc = f.store.list_by_bot(f.a).unwrap().remove(0);
+    assert_eq!(
+        sc.spec,
+        ScheduleSpec::At {
+            unix_ms: start + 165 * 60_000
+        }
+    );
+    // One preview, one apply: the entry is gone now.
+    assert!(
+        f.host
+            .create(&f.caller_a(), &r)
+            .unwrap_err()
+            .contains("not previewed")
+    );
+}
+
+#[test]
+fn a_stale_preview_past_its_time_to_live_is_refused() {
+    let f = fx(limits(20, 300));
+    let r = when("n", "daily");
+    f.host
+        .preview(&f.caller_a(), &ScheduleChange::Create(r.clone()))
+        .unwrap();
+    f.advance(7 * 3_600_000);
+    let e = f.host.create(&f.caller_a(), &r).unwrap_err();
+    assert!(e.contains("not previewed") && e.contains("too old"), "{e}");
+    assert!(f.store.list_by_bot(f.a).unwrap().is_empty());
+    // And a stale entry never turns into a spurious "changed" for an edit.
+    let v = f.make(&f.caller_a(), &when("m", "daily")).unwrap();
+    let p = patch(|r| r.prompt = Some("x".into()));
+    f.host
+        .preview(
+            &f.caller_a(),
+            &ScheduleChange::Update {
+                id: v.id.clone(),
+                req: p.clone(),
+            },
+        )
+        .unwrap();
+    f.advance(7 * 3_600_000);
+    assert!(
+        f.host
+            .update(&f.caller_a(), &v.id, &p)
+            .unwrap_err()
+            .contains("too old")
+    );
+}
+
+#[test]
+fn preview_spam_from_one_run_cannot_evict_another_runs_pending_entry() {
+    let f = fx(limits(20, 300));
+    let run_b = ScheduleCaller {
+        bot_id: f.a.to_string(),
+        run_id: "run-b".into(),
+    };
+    let rb = when("B's", "daily");
+    f.host
+        .preview(&run_b, &ScheduleChange::Create(rb.clone()))
+        .unwrap();
+    // 20 other runs each spam 40 distinct previews (more than the overall cap in total).
+    for run in 0..20 {
+        let c = ScheduleCaller {
+            bot_id: f.a.to_string(),
+            run_id: format!("spam-{run}"),
+        };
+        for i in 0..40 {
+            f.host
+                .preview(&c, &ScheduleChange::Create(when(&format!("s{i}"), "daily")))
+                .unwrap();
+        }
+    }
+    f.host.create(&run_b, &rb).unwrap();
+    assert_eq!(f.store.list_by_bot(f.a).unwrap().len(), 1);
+    // The spammer's own oldest entries went first.
+    let c0 = ScheduleCaller {
+        bot_id: f.a.to_string(),
+        run_id: "spam-0".into(),
+    };
+    assert!(
+        f.host
+            .create(&c0, &when("s0", "daily"))
+            .unwrap_err()
+            .contains("not previewed")
+    );
+}
+
+#[test]
+fn overlong_when_cron_and_tz_are_refused_before_parsing() {
+    let f = fx(limits(20, 300));
+    let c = f.caller_a();
+    let try_it = |r: ScheduleRequest| f.host.preview(&c, &ScheduleChange::Create(r));
+    let mut r = req("n", "p");
+    r.when = Some("every day ".repeat(30));
+    assert!(
+        try_it(r)
+            .unwrap_err()
+            .contains("`when` is 300 characters; the limit is 200")
+    );
+    let mut r = req("n", "p");
+    r.cron = Some("*/5 ".repeat(40));
+    assert!(try_it(r).unwrap_err().contains("`cron`"));
+    let mut r = when("n", "daily");
+    r.tz = Some("Europe/".to_owned() + &"x".repeat(80));
+    assert!(try_it(r).unwrap_err().contains("`tz`"));
+}
+
+// ---------------------------------------------------------------- registry-wide guard
+
+#[tokio::test]
+async fn every_mutating_schedule_tool_has_the_expected_approval_behaviour() {
+    let f = fx(limits(20, 300));
+    let host: Arc<dyn ScheduleHost> = Arc::new(f.host);
+    let tools = builtin_tools::schedule::tools(&host);
+    let names: Vec<String> = tools.iter().map(|t| t.spec().name.clone()).collect();
+    assert_eq!(names, SCHEDULE_TOOL_NAMES);
+    let caller = ScheduleCaller {
+        bot_id: f.a.to_string(),
+        run_id: f.run_a.to_string(),
+    };
+    let ctx = ToolContext {
+        run_id: caller.run_id.clone(),
+        bot_id: Some(caller.bot_id.clone()),
+        ..ToolContext::default()
+    };
+    let existing = host
+        .preview(&caller, &ScheduleChange::Create(when("n", "daily")))
+        .unwrap();
+    assert_eq!(existing.action, "create");
+    host.create(&caller, &when("n", "daily")).unwrap();
+    let id = host.list(&caller).unwrap()[0].id.clone();
+    for t in &tools {
+        let name = t.spec().name.as_str();
+        if name == "schedule_list" {
+            assert_eq!(t.spec().effect, tool_registry::Effect::Read);
+            assert!(!t.always_ask());
+            continue;
+        }
+        assert_eq!(t.spec().effect, tool_registry::Effect::Write, "{name}");
+        assert_ne!(
+            t.spec().category,
+            protocol::PermissionCategory::Meta,
+            "{name}"
+        );
+        let (input, action, gated) = match name {
+            "schedule_create" => (
+                json!({"name":"x","prompt":"p","when":"daily"}),
+                "create",
+                true,
+            ),
+            "schedule_update" => (json!({"id": id, "prompt":"q"}), "update", true),
+            "schedule_resume" => (json!({"id": id}), "resume", true),
+            "schedule_pause" => (json!({"id": id}), "pause", false),
+            "schedule_delete" => (json!({"id": id}), "delete", false),
+            other => panic!("unexpected schedule tool {other}"),
+        };
+        assert_eq!(t.always_ask(), gated, "{name}");
+        let d = t
+            .approval_details(&ctx, &input)
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("{name} must provide approval details"));
+        assert_eq!(d["kind"], "schedule", "{name}");
+        assert_eq!(d["action"], action, "{name}");
+        assert!(
+            d["schedule"].as_str().is_some_and(|s| !s.is_empty()),
+            "{name}"
+        );
+        t.approval_closed(&ctx, &input); // never panics, drops the frozen entry
+    }
 }

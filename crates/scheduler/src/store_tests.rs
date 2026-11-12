@@ -576,3 +576,19 @@ fn origin_round_trips_and_survives_edits() {
         crate::ScheduleOrigin::Bot
     );
 }
+
+#[test]
+fn set_origin_flips_ownership_and_bumps_the_revision() {
+    let store = ScheduleStore::open_in_memory().unwrap();
+    let mut s = recurring();
+    s.origin = crate::ScheduleOrigin::Bot;
+    store.insert(&s).unwrap();
+    let before = store.get(s.id).unwrap().unwrap().revision;
+    assert!(store.set_origin(s.id, crate::ScheduleOrigin::User).unwrap());
+    let after = store.get(s.id).unwrap().unwrap();
+    assert_eq!(after.origin, crate::ScheduleOrigin::User);
+    assert_eq!(after.revision, before + 1);
+    // Idempotent: nothing changes the second time.
+    assert!(!store.set_origin(s.id, crate::ScheduleOrigin::User).unwrap());
+    assert_eq!(store.get(s.id).unwrap().unwrap().revision, before + 1);
+}
