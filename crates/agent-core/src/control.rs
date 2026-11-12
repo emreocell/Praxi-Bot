@@ -53,6 +53,10 @@ pub trait ControlGate: Send + Sync {
     fn observation_refused(&self) -> Option<String> {
         None
     }
+    /// While a pause, a human takeover or a local override is in force.
+    fn latch_refusal(&self) -> Option<String> {
+        None
+    }
     fn is_paused(&self) -> bool {
         false
     }
@@ -111,6 +115,13 @@ impl DesktopControlGate for LoopControl {
             .upgrade()
             .and_then(|sh| sh.control.read().clone())
             .and_then(|gate| gate.observation_refused())
+    }
+
+    fn latch_refusal(&self) -> Option<String> {
+        self.sh
+            .upgrade()
+            .and_then(|sh| sh.control.read().clone())
+            .and_then(|gate| gate.latch_refusal())
     }
 
     async fn before_action(&self, req: &ToolRequest) -> Result<(), String> {

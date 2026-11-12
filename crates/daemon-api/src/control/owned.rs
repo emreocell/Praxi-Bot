@@ -1229,6 +1229,26 @@ mod tests {
         );
     }
     #[test]
+    fn the_hub_refuses_cached_permits_while_paused_driving_or_overridden() {
+        let hub = ControlHub::new(super::super::ControlConfig::default());
+        assert_eq!(hub.latch_refusal(), None);
+        hub.put_state(ControlMode::Paused);
+        assert!(hub.latch_refusal().unwrap().contains("paused"));
+        assert!(hub.release().is_some());
+        hub.put_state(ControlMode::HumanDriving);
+        assert!(hub.latch_refusal().unwrap().contains("taken control"));
+        hub.release();
+        let t = hub
+            .begin_takeover("peer:alice", &request(), Uuid::now_v7(), 1, true, false)
+            .unwrap();
+        hub.activate(t.info.id, t.info.control_epoch).unwrap();
+        assert!(hub.latch_refusal().is_some(), "an active takeover");
+        hub.force_interrupt(Reason::LocalOverride).unwrap();
+        assert!(hub.latch_refusal().is_some(), "a local override");
+        hub.clear_owned_latch().unwrap();
+        assert_eq!(hub.latch_refusal(), None);
+    }
+    #[test]
     fn a_release_cancelled_by_a_local_override_can_never_finish() {
         let hub = ControlHub::new(super::super::ControlConfig::default());
         let t = hub

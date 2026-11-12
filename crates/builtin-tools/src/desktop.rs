@@ -362,6 +362,17 @@ impl Shared {
         })
     }
 
+    /// A fresh observation is never taken while a pause, a human takeover or a
+    /// local override is in force: the model must not read the screen then.
+    fn refuse_observation_while_latched(&self) -> Result<(), ToolError> {
+        if let Some(gate) = &self.control
+            && let Some(message) = gate.latch_refusal().or_else(|| gate.observation_refused())
+        {
+            return Err(exec_err(message));
+        }
+        Ok(())
+    }
+
     /// Ask the control gate (if any) whether this mutating action may run.
     async fn gate(
         &self,
@@ -380,7 +391,7 @@ impl Shared {
                 label,
                 action: action.to_owned(),
             };
-            crate::control::admit_or_inherit(|| gate.admit_action(&request))
+            crate::control::admit_or_inherit(gate.as_ref(), || gate.admit_action(&request))
                 .await
                 .map_err(exec_err)
         }
@@ -950,6 +961,7 @@ impl DesktopTool {
                     })
                 {
                     sh.state.lock().map.remove(run_id);
+                    sh.refuse_observation_while_latched()?;
                     let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
                     permit.observed();
                     return Ok(format!(
@@ -1052,6 +1064,7 @@ impl DesktopTool {
                     })
                 {
                     sh.state.lock().map.remove(run_id);
+                    sh.refuse_observation_while_latched()?;
                     let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
                     permit.observed();
                     return Ok(format!(
@@ -1077,6 +1090,7 @@ impl DesktopTool {
                     })
                 {
                     sh.state.lock().map.remove(run_id);
+                    sh.refuse_observation_while_latched()?;
                     let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
                     permit.observed();
                     return Ok(format!(
@@ -1111,6 +1125,7 @@ impl DesktopTool {
                     })
                 {
                     sh.state.lock().map.remove(run_id);
+                    sh.refuse_observation_while_latched()?;
                     let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
                     permit.observed();
                     return Ok(format!(
@@ -1156,6 +1171,7 @@ impl DesktopTool {
                     })
                 {
                     sh.state.lock().map.remove(run_id);
+                    sh.refuse_observation_while_latched()?;
                     let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
                     permit.observed();
                     return Ok(format!(
@@ -1207,6 +1223,7 @@ impl DesktopTool {
                     })
                 {
                     sh.state.lock().map.remove(run_id);
+                    sh.refuse_observation_while_latched()?;
                     let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
                     permit.observed();
                     return Ok(format!(
@@ -1247,6 +1264,7 @@ impl DesktopTool {
                     })
                 {
                     sh.state.lock().map.remove(run_id);
+                    sh.refuse_observation_while_latched()?;
                     let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
                     permit.observed();
                     return Ok(format!(
@@ -2019,6 +2037,69 @@ mod tests {
             .call(&ctx, json!({}))
             .await
             .unwrap();
+    }
+
+    /// Latches on demand (a Stop / takeover landing mid-script).
+    #[derive(Default)]
+    struct StopGate {
+        stopped: std::sync::atomic::AtomicBool,
+    }
+    #[async_trait]
+    impl DesktopControlGate for StopGate {
+        fn latch_refusal(&self) -> Option<String> {
+            self.stopped
+                .load(std::sync::atomic::Ordering::SeqCst)
+                .then(|| "The user stopped the bot; do not retry.".to_owned())
+        }
+        async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+            match self.latch_refusal() {
+                Some(m) => Err(m),
+                None => Ok(()),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_script_cannot_launch_or_act_after_a_stop_with_a_cached_permit() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let d = tempfile::tempdir().unwrap();
+        let gate = Arc::new(StopGate::default());
+        let t = tools(fake.clone(), None, d.path(), settings(), Some(gate.clone()));
+        let ctx = ToolContext {
+            run_id: "script-run".into(),
+            ..ToolContext::default()
+        };
+        let action: crate::control::ScriptAction = Arc::default();
+        // The script's first computer action admits and caches the permit.
+        crate::control::scope_action(Arc::clone(&action), async {
+            get(&t, "desktop_get_state")
+                .call(&ctx, json!({}))
+                .await
+                .unwrap();
+            get(&t, "desktop_click")
+                .call(&ctx, json!({"index": 2, "gen": 1}))
+                .await
+                .unwrap();
+        })
+        .await;
+        assert_eq!(fake.actions.lock().len(), 1);
+        gate.stopped
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let actions = fake.actions.lock().len();
+        for (name, input) in [
+            ("desktop_launch", json!({"executable": "notepad.exe"})),
+            ("desktop_click", json!({"index": 2, "gen": 2})),
+            ("desktop_key", json!({"keys": "ctrl+s"})),
+        ] {
+            let err = crate::control::scope_action(Arc::clone(&action), async {
+                get(&t, name).call(&ctx, input).await
+            })
+            .await
+            .unwrap_err();
+            assert!(err.to_string().contains("stopped the bot"), "{name}: {err}");
+        }
+        assert_eq!(fake.actions.lock().len(), actions, "nothing was dispatched");
+        assert!(fake.launched_at.lock().is_none(), "nothing was launched");
     }
 
     #[tokio::test]

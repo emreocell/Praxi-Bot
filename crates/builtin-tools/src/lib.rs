@@ -433,6 +433,248 @@ mod tests {
         );
     }
 
+    /// A gate whose latch the test flips while a script runs: the Stop /
+    /// takeover that lands mid-script.
+    #[derive(Default)]
+    struct LatchGate {
+        admissions: std::sync::atomic::AtomicUsize,
+        /// Latched (paused / human driving / local override) with this message.
+        latched: std::sync::Mutex<Option<String>>,
+        /// Observation tools are refused as well (the human drives).
+        driving: std::sync::atomic::AtomicBool,
+        epoch: std::sync::atomic::AtomicU64,
+        /// Hand out permits that already need a fresh observation.
+        reobserve: bool,
+    }
+    #[async_trait::async_trait]
+    impl DesktopControlGate for LatchGate {
+        fn observation_epoch(&self) -> u64 {
+            self.epoch.load(std::sync::atomic::Ordering::SeqCst)
+        }
+        fn latch_refusal(&self) -> Option<String> {
+            self.latched.lock().unwrap().clone()
+        }
+        fn observation_refused(&self) -> Option<String> {
+            self.driving
+                .load(std::sync::atomic::Ordering::SeqCst)
+                .then(|| "the user is controlling (observation paused)".to_owned())
+        }
+        async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+            Ok(())
+        }
+        async fn admit_background_action(
+            &self,
+            _req: &ControlRequest,
+        ) -> Result<ActionPermit, String> {
+            if let Some(message) = self.latch_refusal() {
+                return Err(message);
+            }
+            self.admissions
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(ActionPermit::new(self.reobserve, || {}))
+        }
+        async fn admit_action(&self, req: &ControlRequest) -> Result<ActionPermit, String> {
+            self.admit_background_action(req).await
+        }
+    }
+
+    /// A test tool the script calls to make the Stop / takeover land between
+    /// two of its computer actions.
+    struct FlipTool {
+        gate: Arc<LatchGate>,
+        message: String,
+        spec: tool_registry::ToolSpec,
+    }
+    #[async_trait::async_trait]
+    impl tool_registry::Tool for FlipTool {
+        fn spec(&self) -> &tool_registry::ToolSpec {
+            &self.spec
+        }
+        async fn call(
+            &self,
+            _ctx: &tool_registry::ToolContext,
+            _input: serde_json::Value,
+        ) -> Result<tool_registry::ToolOutput, tool_registry::ToolError> {
+            *self.gate.latched.lock().unwrap() = Some(self.message.clone());
+            self.gate
+                .driving
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            self.gate
+                .epoch
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(tool_registry::ToolOutput::text("latched"))
+        }
+    }
+
+    async fn run_script(gate: Arc<LatchGate>, code: &str) -> (String, Vec<String>) {
+        run_script_with(gate, "The user stopped the bot; do not retry.", code).await
+    }
+
+    async fn run_script_with(
+        gate: Arc<LatchGate>,
+        message: &str,
+        code: &str,
+    ) -> (String, Vec<String>) {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::new();
+        let browser = Arc::new(browser::fake::FakeBrowser::default());
+        let mut config = BuiltinConfig::new(dir.path().into(), Arc::new(AllowAll));
+        config.browser = Some(browser.clone());
+        config.control = Some(gate.clone());
+        let _ = register_builtin_tools(&registry, config);
+        registry.register(Arc::new(FlipTool {
+            gate,
+            message: message.to_owned(),
+            spec: tool_registry::ToolSpec {
+                name: "latch_now".into(),
+                description: "test".into(),
+                input_schema: serde_json::json!({"type":"object"}),
+                effect: tool_registry::Effect::Read,
+                category: permission_engine::PermissionCategory::Meta,
+                platforms: vec![tool_registry::Platform::All],
+            },
+        }));
+        // A refusal either is caught by the script or ends it with the gate's
+        // message; both show up as text here.
+        let text = match registry
+            .get("script_run")
+            .unwrap()
+            .call(
+                &tool_registry::ToolContext::default(),
+                serde_json::json!({ "code": code }),
+            )
+            .await
+        {
+            Ok(out) => {
+                let tool_registry::ContentPart::Text { text } = &out.content[0] else {
+                    panic!()
+                };
+                text.clone()
+            }
+            Err(e) => format!("script failed: {e}"),
+        };
+        let calls = browser.calls.lock().clone();
+        (text, calls)
+    }
+
+    #[tokio::test]
+    async fn a_stop_that_lands_mid_script_refuses_the_next_computer_action() {
+        let gate = Arc::new(LatchGate::default());
+        let (text, calls) = run_script(
+            gate,
+            "await tools.call('browser_click',{ref:'e1'}); await tools.call('latch_now',{}); try { await tools.call('browser_press',{key:'Enter'}); return 'ran'; } catch (e) { return 'refused: ' + e; }",
+        )
+        .await;
+        assert!(text.contains("stopped the bot"), "{text}");
+        assert!(
+            calls.iter().all(|c| !c.starts_with("press")),
+            "the cached permit let an action through after the Stop: {calls:?}"
+        );
+        assert!(
+            calls.iter().any(|c| c.starts_with("click")),
+            "the first action did run: {calls:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_human_takeover_mid_script_refuses_observation_and_actions() {
+        let gate = Arc::new(LatchGate::default());
+        let (text, calls) = run_script_with(
+            gate,
+            "The user has taken control; do not retry.",
+            "await tools.call('browser_click',{ref:'e1'}); await tools.call('latch_now',{}); const out = []; for (const [name, args] of [['browser_snapshot',{}],['browser_screenshot',{}],['browser_press',{key:'Enter'}],['browser_fill',{ref:'e1',text:'secret'}]]) { try { await tools.call(name,args); out.push(name + ': ran'); } catch (e) { out.push(name + ': refused'); } } return out.join('|');",
+        )
+        .await;
+        assert!(!text.contains(": ran"), "{text}");
+        assert_eq!(
+            calls.len(),
+            1,
+            "only the first click reached the browser: {calls:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_fresh_observation_is_refused_while_the_latch_is_set() {
+        // The permit needs a fresh observation (the bot waited through a pause),
+        // but the human is driving again: no snapshot may be taken.
+        let gate = Arc::new(LatchGate {
+            reobserve: true,
+            ..LatchGate::default()
+        });
+        gate.driving
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let (text, calls) = run_script(
+            gate,
+            "try { await tools.call('browser_click',{ref:'e1'}); return 'ran'; } catch (e) { return 'refused: ' + e; }",
+        )
+        .await;
+        assert!(!text.contains("ran"), "{text}");
+        assert!(
+            calls.is_empty(),
+            "a snapshot was captured while the user drives: {calls:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_epoch_change_without_a_latch_costs_one_observation_then_the_script_goes_on() {
+        let gate = Arc::new(LatchGate::default());
+        let epoch = Arc::clone(&gate);
+        let (text, calls) = run_script(
+            gate,
+            "await tools.call('browser_click',{ref:'e1'}); await tools.call('browser_press',{key:'Enter'}); const b = await tools.call('browser_press',{key:'Tab'}); return b;",
+        )
+        .await;
+        let _ = (&text, &epoch);
+        // No epoch change here: every call is ordinary.
+        assert_eq!(calls.len(), 3, "{calls:?}");
+    }
+
+    #[tokio::test]
+    async fn a_script_that_waited_through_an_epoch_change_observes_once_per_change() {
+        struct Bump(Arc<LatchGate>);
+        let gate = Arc::new(LatchGate::default());
+        // Bump the epoch between the first and the second call (a pause came and went).
+        let bump = Bump(Arc::clone(&gate));
+        let dir = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::new();
+        let browser = Arc::new(browser::fake::FakeBrowser::default());
+        let mut config = BuiltinConfig::new(dir.path().into(), Arc::new(AllowAll));
+        config.browser = Some(browser.clone());
+        config.control = Some(gate.clone());
+        let _ = register_builtin_tools(&registry, config);
+        let tool = registry.get("browser_click").unwrap();
+        let ctx = tool_registry::ToolContext::default();
+        // Direct calls scoped like a script: one shared admission.
+        let action: control::ScriptAction = Arc::default();
+        let first = control::scope_action(Arc::clone(&action), async {
+            tool.call(&ctx, serde_json::json!({"ref":"e1"})).await
+        })
+        .await
+        .unwrap();
+        let _ = first;
+        bump.0
+            .epoch
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let second = control::scope_action(Arc::clone(&action), async {
+            tool.call(&ctx, serde_json::json!({"ref":"e1"})).await
+        })
+        .await
+        .unwrap();
+        let tool_registry::ContentPart::Text { text } = &second.content[0] else {
+            panic!()
+        };
+        assert!(text.contains("previous action discarded"), "{text}");
+        let third = control::scope_action(Arc::clone(&action), async {
+            tool.call(&ctx, serde_json::json!({"ref":"e1"})).await
+        })
+        .await
+        .unwrap();
+        let tool_registry::ContentPart::Text { text } = &third.content[0] else {
+            panic!()
+        };
+        assert!(!text.contains("previous action discarded"), "{text}");
+    }
+
     #[tokio::test]
     async fn a_script_that_never_touches_the_computer_is_never_admitted() {
         let dir = tempfile::tempdir().unwrap();

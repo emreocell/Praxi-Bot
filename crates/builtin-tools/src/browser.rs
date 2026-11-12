@@ -955,7 +955,7 @@ impl BrowserTool {
             label,
             action: action.to_owned(),
         };
-        crate::control::admit_or_inherit(|| async {
+        crate::control::admit_or_inherit(gate.as_ref(), || async {
             if self.shared.driver.on_desktop() {
                 gate.admit_action(&request).await
             } else {
@@ -964,6 +964,17 @@ impl BrowserTool {
         })
         .await
         .map_err(exec_err)
+    }
+
+    /// A fresh observation is never taken while a pause, a human takeover or a
+    /// local override is in force: the model must not read the page then.
+    fn refuse_observation_while_latched(&self) -> Result<(), ToolError> {
+        if let Some(gate) = &self.shared.control
+            && let Some(message) = gate.latch_refusal().or_else(|| gate.observation_refused())
+        {
+            return Err(exec_err(message));
+        }
+        Ok(())
     }
 
     async fn run(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
@@ -1005,6 +1016,7 @@ impl BrowserTool {
                             .map_or(0, |g| g.observation_epoch()),
                         std::sync::atomic::Ordering::SeqCst,
                     );
+                    self.refuse_observation_while_latched()?;
                     let fresh = d.snapshot(false).await.map_err(exec_err)?;
                     permit.observed();
                     return Ok(format!(
@@ -1071,6 +1083,7 @@ impl BrowserTool {
                             .map_or(0, |g| g.observation_epoch()),
                         std::sync::atomic::Ordering::SeqCst,
                     );
+                    self.refuse_observation_while_latched()?;
                     let fresh = d.snapshot(false).await.map_err(exec_err)?;
                     permit.observed();
                     return Ok(format!(
@@ -1106,6 +1119,7 @@ impl BrowserTool {
                             .map_or(0, |g| g.observation_epoch()),
                         std::sync::atomic::Ordering::SeqCst,
                     );
+                    self.refuse_observation_while_latched()?;
                     let fresh = d.snapshot(false).await.map_err(exec_err)?;
                     permit.observed();
                     return Ok(format!(
@@ -1138,6 +1152,7 @@ impl BrowserTool {
                             .map_or(0, |g| g.observation_epoch()),
                         std::sync::atomic::Ordering::SeqCst,
                     );
+                    self.refuse_observation_while_latched()?;
                     let fresh = d.snapshot(false).await.map_err(exec_err)?;
                     permit.observed();
                     return Ok(format!(
@@ -1170,6 +1185,7 @@ impl BrowserTool {
                             .map_or(0, |g| g.observation_epoch()),
                         std::sync::atomic::Ordering::SeqCst,
                     );
+                    self.refuse_observation_while_latched()?;
                     let fresh = d.snapshot(false).await.map_err(exec_err)?;
                     permit.observed();
                     return Ok(format!(
@@ -1204,6 +1220,7 @@ impl BrowserTool {
                             .map_or(0, |g| g.observation_epoch()),
                         std::sync::atomic::Ordering::SeqCst,
                     );
+                    self.refuse_observation_while_latched()?;
                     let fresh = d.snapshot(false).await.map_err(exec_err)?;
                     permit.observed();
                     return Ok(format!(
@@ -1255,6 +1272,7 @@ impl BrowserTool {
                             .map_or(0, |g| g.observation_epoch()),
                         std::sync::atomic::Ordering::SeqCst,
                     );
+                    self.refuse_observation_while_latched()?;
                     let fresh = d.snapshot(false).await.map_err(exec_err)?;
                     permit.observed();
                     return Ok(format!(
@@ -1292,6 +1310,7 @@ impl BrowserTool {
                                 .map_or(0, |g| g.observation_epoch()),
                             std::sync::atomic::Ordering::SeqCst,
                         );
+                        self.refuse_observation_while_latched()?;
                         let fresh = d.snapshot(false).await.map_err(exec_err)?;
                         permit.observed();
                         return Ok(format!(
@@ -1337,6 +1356,7 @@ impl BrowserTool {
                             .map_or(0, |g| g.observation_epoch()),
                         std::sync::atomic::Ordering::SeqCst,
                     );
+                    self.refuse_observation_while_latched()?;
                     let fresh = d.snapshot(false).await.map_err(exec_err)?;
                     permit.observed();
                     return Ok(format!(

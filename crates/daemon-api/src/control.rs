@@ -351,6 +351,11 @@ impl ControlGate for ControlHub {
     fn observation_epoch(&self) -> u64 {
         self.state.lock().epoch
     }
+    fn latch_refusal(&self) -> Option<String> {
+        self.latched()
+            .and_then(refused_while)
+            .map(std::borrow::ToOwned::to_owned)
+    }
     fn observation_refused(&self) -> Option<String> {
         (self.latched() == Some(ControlMode::HumanDriving)).then(|| OBSERVATION_PAUSED.to_owned())
     }

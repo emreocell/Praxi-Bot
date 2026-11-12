@@ -44,6 +44,12 @@ pub trait DesktopControlGate: Send + Sync {
     fn observation_refused(&self) -> Option<String> {
         None
     }
+    /// While a pause, a human takeover or a local override is in force:
+    /// `Some(message)`. A permit cached by a running script is re-checked
+    /// against this on every use; it never outlives the latch.
+    fn latch_refusal(&self) -> Option<String> {
+        None
+    }
     /// Lifetime admission: held through action, settling and observation, including failures.
     async fn admit_action(&self, req: &ControlRequest) -> Result<ActionPermit, String> {
         self.before_action(req).await?;
@@ -65,6 +71,8 @@ pub struct ActionPermit {
     /// Shared by every clone of this permit (a script's later calls inherit
     /// it): cleared when a fresh observation was really made.
     reobserve: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The observation epoch this admission (or its last re-validation) saw.
+    epoch: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 #[derive(Default)]
 struct PermitInner {
@@ -74,6 +82,7 @@ impl ActionPermit {
     #[must_use]
     pub fn new(reobserve: bool, completion: impl FnOnce() + Send + Sync + 'static) -> Self {
         Self {
+            epoch: std::sync::Arc::default(),
             reobserve: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(reobserve)),
             inner: std::sync::Arc::new(PermitInner {
                 completion: std::sync::Mutex::new(Some(Box::new(completion))),
@@ -89,6 +98,21 @@ impl ActionPermit {
     pub fn observed(&self) {
         self.reobserve
             .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+    /// The observation epoch this permit was last validated against.
+    #[must_use]
+    pub fn epoch(&self) -> u64 {
+        self.epoch.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    /// Record the epoch this permit was validated against.
+    pub fn set_epoch(&self, epoch: u64) {
+        self.epoch.store(epoch, std::sync::atomic::Ordering::SeqCst);
+    }
+    /// The world changed since this permit was admitted: the next action must
+    /// start from a fresh observation.
+    pub fn require_observation(&self) {
+        self.reobserve
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
     /// Once dispatched, actual backend completion owns a clone of this permit.
     /// # Errors
@@ -126,15 +150,45 @@ tokio::task_local! { static SCRIPT_ACTION: ScriptAction; }
 
 /// Admit with `admit`, or inherit the enclosing script's admission (taking it
 /// with `admit` the first time).
-pub(crate) async fn admit_or_inherit<F, Fut>(admit: F) -> Result<ActionPermit, String>
+///
+/// A cached permit is never trusted blindly: on every reuse it is re-validated
+/// against the gate, an O(1) read of the hub's shared state. While a pause, a
+/// human takeover or a local override is in force the reuse fails closed with
+/// the gate's message (it must not wait: the held permit would block the
+/// takeover's drain); if the observation epoch moved since the permit was last
+/// validated, the next action is made to start from a fresh observation.
+pub(crate) async fn admit_or_inherit<F, Fut>(
+    gate: &dyn DesktopControlGate,
+    admit: F,
+) -> Result<ActionPermit, String>
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<ActionPermit, String>>,
 {
-    match SCRIPT_ACTION.try_with(Clone::clone) {
-        Ok(cell) => cell.get_or_try_init(admit).await.cloned(),
-        Err(_) => admit().await,
+    let Ok(cell) = SCRIPT_ACTION.try_with(Clone::clone) else {
+        return admit().await;
+    };
+    if let Some(permit) = cell.get() {
+        if let Some(message) = gate.latch_refusal() {
+            return Err(message);
+        }
+        let now = gate.observation_epoch();
+        if permit.epoch() != now {
+            permit.require_observation();
+            permit.set_epoch(now);
+        }
+        return Ok(permit.clone());
     }
+    // Read before admitting: an epoch change during the admission only makes
+    // the permit re-observe once more (the safe direction).
+    let epoch = gate.observation_epoch();
+    cell.get_or_try_init(|| async {
+        let permit = admit().await?;
+        permit.set_epoch(epoch);
+        Ok(permit)
+    })
+    .await
+    .cloned()
 }
 pub(crate) async fn scope_action<F: std::future::Future>(
     action: ScriptAction,
