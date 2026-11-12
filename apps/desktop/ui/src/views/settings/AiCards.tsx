@@ -14,6 +14,7 @@ import { useDaemon } from "../../state/DaemonContext";
 import { useProviders } from "../../state/useProviders";
 import styles from "../SettingsModal.module.css";
 import { ProvidersSection } from "../SettingsSections";
+import { DetectedAccountsBlock } from "./DetectedAccountsBlock";
 import type { CardDef } from "./types";
 
 /** Default provider + model: a searchable dropdown grouped by provider. */
@@ -183,6 +184,15 @@ export function aiCards(t: TFunction): CardDef[] {
       description: t("settingsModal.ai.keys.description"),
       keywords: "api key secret anahtar sifre",
       node: <ApiKeysBlock />
+    },
+    {
+      id: "detectedAccounts",
+      section: "ai",
+      kind: "block",
+      title: t("settingsModal.ai.detected.title"),
+      description: t("settingsModal.ai.detected.description"),
+      keywords: "cli claude codex cursor gemini opencode chatgpt account hesap algilanan",
+      node: <DetectedAccountsBlock />
     },
     {
       id: "providers",

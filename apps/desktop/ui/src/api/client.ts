@@ -5,10 +5,12 @@ import type {
   Bot,
   BotInput,
   Chat,
+  ConfiguredProviderDto,
   ControlModeName,
   ControlStateDto,
   ControlVerdict,
   Decision,
+  DetectedProviderDto,
   ErrorBody,
   Grant,
   GrantTarget,
@@ -255,6 +257,16 @@ export class ApiClient {
 
   providers(): Promise<ProvidersDto> {
     return this.request("GET", "/providers");
+  }
+  detectedProviders(refresh = false): Promise<DetectedProviderDto[]> {
+    return this.request("GET", "/providers/detected", {
+      query: refresh ? { refresh: "1" } : undefined
+    });
+  }
+  enableCliProvider(id: string): Promise<ConfiguredProviderDto> {
+    return this.request("POST", "/providers/cli/enable", {
+      body: { id }
+    });
   }
   // ---- MCP servers & secrets -------------------------------------------
 

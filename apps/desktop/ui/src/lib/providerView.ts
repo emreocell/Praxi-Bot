@@ -127,6 +127,17 @@ export interface ProvidersView {
   defaultProvider: string | null;
 }
 
+/** True when `id` is a CLI-backed provider (no API key or HTTP endpoint). */
+export function isCliProvider(
+  id: string,
+  dto?: ProvidersDto | null
+): boolean {
+  if (id.startsWith("cli:")) {
+    return true;
+  }
+  return dto?.catalog.some((c) => c.id === id && c.kind === "cli") ?? false;
+}
+
 /** Reshape `GET /v1/providers` for the UI (pure). */
 export function providersView(dto: ProvidersDto | null): ProvidersView {
   if (!dto) {
@@ -147,9 +158,10 @@ export function providersView(dto: ProvidersDto | null): ProvidersView {
     models: p.models,
     modelsError: p.models_error ?? null
   }));
+  const nonCliCatalog = dto.catalog.filter((c) => c.kind !== "cli");
   const catalog =
     dto.catalog.length > 0
-      ? dto.catalog.map((c) => c.id)
+      ? nonCliCatalog.map((c) => c.id)
       : [...FALLBACK_CATALOG];
   const selectable = [
     ...new Set([...dto.active, ...configured.map((p) => p.id), ...catalog])

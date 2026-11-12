@@ -1927,6 +1927,52 @@
         ]
       }
     },
+    "/v1/providers/cli/enable": {
+      "post": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Enable a detected coding CLI provider server-side (`providers.toml` + live reload).",
+        "operationId": "enable_cli_provider",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnableCliProviderInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfiguredProviderDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "engine is not runnable or unknown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/providers/detected": {
       "get": {
         "tags": [
@@ -3486,7 +3532,7 @@
               "string",
               "null"
             ],
-            "description": "Stable detail code (`not_on_path`, `timeout`, `auth_unparsed`, etc., or null)."
+            "description": "Stable detail code (`not_on_path`, `timeout`, `auth_unparsed`, `codex_unconfinable`, etc., or null)."
           },
           "display_name": {
             "type": "string",
@@ -3500,9 +3546,16 @@
             "type": "boolean",
             "description": "Whether the CLI binary was found on PATH and `--version` succeeded."
           },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "User-readable refusal when detected but not runnable (e.g. Codex `unified_exec`)."
+          },
           "runnable": {
             "type": "boolean",
-            "description": "Whether this engine can currently run turns (always false in this task)."
+            "description": "Whether this engine can currently run turns."
           },
           "version": {
             "type": [
@@ -3826,6 +3879,20 @@
             "description": "SMTP (sending mail); authentication only, nothing is sent."
           }
         }
+      },
+      "EnableCliProviderInput": {
+        "type": "object",
+        "description": "Request body for `POST /v1/providers/cli/enable`.",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Engine id (`claude` is currently runnable)."
+          }
+        },
+        "additionalProperties": false
       },
       "ErrorBody": {
         "type": "object",

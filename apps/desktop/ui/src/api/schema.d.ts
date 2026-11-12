@@ -591,6 +591,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/providers/cli/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enable a detected coding CLI provider server-side (`providers.toml` + live reload). */
+        post: operations["enable_cli_provider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/providers/detected": {
         parameters: {
             query?: never;
@@ -1164,7 +1181,7 @@ export interface components {
             account_label?: string | null;
             /** @description Authentication status (`signed_in`, `signed_out`, `unknown`). */
             auth: components["schemas"]["CliAuthState"];
-            /** @description Stable detail code (`not_on_path`, `timeout`, `auth_unparsed`, etc., or null). */
+            /** @description Stable detail code (`not_on_path`, `timeout`, `auth_unparsed`, `codex_unconfinable`, etc., or null). */
             detail?: string | null;
             /** @description Display name. */
             display_name: string;
@@ -1172,7 +1189,9 @@ export interface components {
             id: string;
             /** @description Whether the CLI binary was found on PATH and `--version` succeeded. */
             installed: boolean;
-            /** @description Whether this engine can currently run turns (always false in this task). */
+            /** @description User-readable refusal when detected but not runnable (e.g. Codex `unified_exec`). */
+            message?: string | null;
+            /** @description Whether this engine can currently run turns. */
             runnable: boolean;
             /** @description CLI version (first line, trimmed, max 80 chars, or null). */
             version?: string | null;
@@ -1316,6 +1335,11 @@ export interface components {
             ok: boolean;
             /** @description SMTP (sending mail); authentication only, nothing is sent. */
             smtp: components["schemas"]["EmailProbeStatus"];
+        };
+        /** @description Request body for `POST /v1/providers/cli/enable`. */
+        EnableCliProviderInput: {
+            /** @description Engine id (`claude` is currently runnable). */
+            id: string;
         };
         /** @description JSON body of an error response. */
         ErrorBody: {
@@ -3370,6 +3394,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProvidersDto"];
+                };
+            };
+        };
+    };
+    enable_cli_provider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnableCliProviderInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfiguredProviderDto"];
+                };
+            };
+            /** @description engine is not runnable or unknown */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };

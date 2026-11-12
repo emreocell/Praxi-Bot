@@ -99,6 +99,8 @@
       "noModel": "no model",
       "keyStored": "key stored",
       "noKey": "no key",
+      "noKeyNeeded": "no key needed",
+      "offline": "Daemon offline — start the daemon to manage providers.",
       "test": "Test connection",
       "makeDefault": "Make default",
       "add": "Add a provider",
@@ -876,6 +878,25 @@
         "replace": "Replace key",
         "placeholder": "Paste API key",
         "saved": "Saved key for {{provider}}"
+      },
+      "detected": {
+        "title": "Detected accounts",
+        "description": "Coding CLIs found on your PATH. Praxi invokes the CLI binary without reading login files.",
+        "termsNotice": "Your vendor plan terms apply; verify automated CLI use is permitted before enabling.",
+        "refresh": "Refresh",
+        "retry": "Retry",
+        "enable": "Enable",
+        "enabled": "Enabled",
+        "enabledToast": "{{name}} enabled.",
+        "notInstalled": "Not installed",
+        "signInHint": "Run {{command}} in terminal",
+        "codexUnconfinable": "Detected, but cannot be run safely in this version.",
+        "notRunnable": "Detected, not runnable in this version",
+        "detectError": "Could not check installed coding tools.",
+        "offline": "Connect to the daemon to inspect detected coding tools.",
+        "authSignedIn": "Signed in",
+        "authSignedOut": "Signed out",
+        "authUnknown": "Unknown"
       }
     },
     "computer": {

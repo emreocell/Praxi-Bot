@@ -2621,3 +2621,176 @@ async fn sse_gap_count_is_on_the_authenticated_status_not_on_health() {
         crate::DEFAULT_MAX_SSE_SUBSCRIBERS
     );
 }
+
+#[tokio::test]
+async fn providers_cli_enable_requires_auth_and_loopback_guards() {
+    let t = setup();
+    let r = send(
+        &t.app,
+        Method::POST,
+        "/v1/providers/cli/enable",
+        Some(json!({ "id": "claude" })),
+        &[],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+
+    let (k, v) = auth();
+    let bad_host = send(
+        &t.app,
+        Method::POST,
+        "/v1/providers/cli/enable",
+        Some(json!({ "id": "claude" })),
+        &[(k, v.as_str()), ("host", "evil.example:47821")],
+    )
+    .await;
+    assert_eq!(bad_host.status, StatusCode::FORBIDDEN);
+
+    let bad_origin = send(
+        &t.app,
+        Method::POST,
+        "/v1/providers/cli/enable",
+        Some(json!({ "id": "claude" })),
+        &[(k, v.as_str()), ("origin", "https://evil.example")],
+    )
+    .await;
+    assert_eq!(bad_origin.status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn providers_cli_enable_claude_writes_config_idempotently_reloads_and_audits() {
+    let t = setup();
+    let reload_hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let hits_clone = reload_hits.clone();
+    t.state.set_provider_host(crate::ProviderHost {
+        catalog: provider_catalog::Catalog::default(),
+        reload: Box::new(move || {
+            hits_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(agent_core::Providers::unconfigured())
+        }),
+    });
+
+    let first = call(
+        &t,
+        Method::POST,
+        "/v1/providers/cli/enable",
+        Some(json!({ "id": "claude" })),
+    )
+    .await;
+    assert_eq!(first.status, StatusCode::OK, "{:?}", first.json());
+    assert_eq!(first.json()["id"], "cli:claude");
+    assert_eq!(first.json()["enabled"], true);
+    assert_eq!(first.json()["has_key"], false);
+    assert_eq!(first.json()["active"], true);
+    assert_eq!(reload_hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    let cfg_path = provider_catalog::config_path(t.state.storage().data_dir());
+    let toml_text = std::fs::read_to_string(&cfg_path).unwrap();
+    assert!(toml_text.contains("id = \"cli:claude\""), "{toml_text}");
+    assert!(toml_text.contains("kind = \"cli\""), "{toml_text}");
+    assert!(toml_text.contains("engine = \"claude\""), "{toml_text}");
+    assert!(toml_text.contains("command = \"claude\""), "{toml_text}");
+    assert!(!toml_text.contains("key ="), "{toml_text}");
+
+    // Second enable is idempotent: does not duplicate cli:claude in providers.toml.
+    let second = call(
+        &t,
+        Method::POST,
+        "/v1/providers/cli/enable",
+        Some(json!({ "id": "claude" })),
+    )
+    .await;
+    assert_eq!(second.status, StatusCode::OK, "{:?}", second.json());
+    let cfg = provider_catalog::ProviderConfig::load(&cfg_path).unwrap();
+    assert_eq!(
+        cfg.providers
+            .iter()
+            .filter(|p| p.id == "cli:claude")
+            .count(),
+        1
+    );
+
+    let listed = call(&t, Method::GET, "/v1/providers", None).await;
+    assert_eq!(listed.status, StatusCode::OK);
+    let body = listed.json();
+    assert_eq!(body["configured"][0]["id"], "cli:claude");
+    assert_eq!(body["configured"][0]["has_key"], false);
+    assert_eq!(body["configured"][0]["active"], true);
+
+    let user = t.state.storage().list_users().unwrap().remove(0);
+    let audit = t.state.storage().list_audit(user.id).unwrap();
+    assert!(
+        audit.iter().any(|row| row.action == "provider.cli_enable"),
+        "expected provider.cli_enable in audit: {audit:?}"
+    );
+}
+
+#[tokio::test]
+async fn providers_cli_enable_refuses_non_runnable_unknown_and_extra_fields() {
+    let t = setup();
+    let cfg_path = provider_catalog::config_path(t.state.storage().data_dir());
+
+    for id in [
+        "codex",
+        "chatgpt-plan",
+        "cursor",
+        "opencode",
+        "gemini",
+        "unknown",
+    ] {
+        let r = call(
+            &t,
+            Method::POST,
+            "/v1/providers/cli/enable",
+            Some(json!({ "id": id })),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "id={id}: {:?}", r.json());
+        let msg = r.json()["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        assert_ne!(msg, "", "empty refusal message for {id}");
+        if id == "codex" || id == "chatgpt-plan" {
+            assert!(msg.contains("unified_exec"), "id={id}: {msg}");
+        }
+    }
+
+    let extra = call(
+        &t,
+        Method::POST,
+        "/v1/providers/cli/enable",
+        Some(json!({ "id": "claude", "command": "/tmp/evil", "args": ["--x"] })),
+    )
+    .await;
+    assert!(
+        extra.status.is_client_error(),
+        "extra fields must be rejected: {:?}",
+        extra.status
+    );
+    assert!(
+        !cfg_path.exists(),
+        "no providers.toml should be written when all enables were refused"
+    );
+}
+
+#[test]
+fn detected_provider_dto_forwards_runnable_and_message() {
+    let cli = cli_provider::DetectedCli {
+        id: "codex".into(),
+        display_name: "Codex".into(),
+        installed: true,
+        version: Some("0.98.0".into()),
+        auth: cli_provider::AuthState::SignedIn,
+        account_label: None,
+        runnable: false,
+        detail: Some(cli_provider::detect::CODEX_UNCONFINABLE_DETAIL.into()),
+        message: Some(cli_provider::detect::CODEX_UNCONFINABLE_MESSAGE.into()),
+    };
+    let dto: crate::dto::DetectedProviderDto = cli.into();
+    assert!(!dto.runnable);
+    assert_eq!(
+        dto.message.as_deref(),
+        Some(cli_provider::detect::CODEX_UNCONFINABLE_MESSAGE)
+    );
+}

@@ -23,7 +23,7 @@ import { BrandIcon } from "../components/BrandIcon";
 import { brandIcon } from "../lib/brandIcons";
 import { botHasAccess, changedApps, saveBotAndApps } from "../lib/mcpApps";
 import { FAKE_PROVIDER_ID } from "../lib/providers";
-import { type ProvidersView, providersView } from "../lib/providerView";
+import { isCliProvider, type ProvidersView, providersView } from "../lib/providerView";
 import { useDaemon } from "../state/DaemonContext";
 import styles from "./BotFormView.module.css";
 
@@ -45,6 +45,7 @@ function ModelField({
   const { t } = useTranslation();
   const known = providers.includes(value.provider) || value.provider === "";
   const options = known ? providers : [value.provider, ...providers];
+  const cli = isCliProvider(value.provider);
   return (
     <div className={formStyles.field}>
       <span className={formStyles.label}>
@@ -56,7 +57,13 @@ function ModelField({
           className={formStyles.select}
           value={value.provider}
           aria-label={`${label}: ${t("botForm.provider")}`}
-          onChange={(e) => onChange({ ...value, provider: e.target.value })}
+          onChange={(e) => {
+            const next = e.target.value;
+            onChange({
+              provider: next,
+              model: isCliProvider(next) ? "default" : cli ? "" : value.model
+            });
+          }}
         >
           <option value="">{t("botForm.defaultProvider")}</option>
           {options.map((p) => (
@@ -65,13 +72,24 @@ function ModelField({
             </option>
           ))}
         </select>
-        <input
-          className={`${formStyles.input} ${formStyles.grow}`}
-          value={value.model}
-          placeholder={t("botForm.modelPlaceholder")}
-          aria-label={`${label}: ${t("botForm.model")}`}
-          onChange={(e) => onChange({ ...value, model: e.target.value })}
-        />
+        {cli ? (
+          <select
+            className={`${formStyles.select} ${formStyles.grow}`}
+            value={value.model || "default"}
+            aria-label={`${label}: ${t("botForm.model")}`}
+            onChange={(e) => onChange({ ...value, model: e.target.value })}
+          >
+            <option value="default">default</option>
+          </select>
+        ) : (
+          <input
+            className={`${formStyles.input} ${formStyles.grow}`}
+            value={value.model}
+            placeholder={t("botForm.modelPlaceholder")}
+            aria-label={`${label}: ${t("botForm.model")}`}
+            onChange={(e) => onChange({ ...value, model: e.target.value })}
+          />
+        )}
       </div>
     </div>
   );
@@ -162,6 +180,11 @@ export function BotFormView({
     }
     return [...ids];
   }, [providerList, conn?.fake_provider]);
+
+  const classifierProviders = useMemo(
+    () => providerIds.filter((p) => !isCliProvider(p)),
+    [providerIds]
+  );
 
   const patch = (p: Partial<BotDraft>) => setDraft((d) => ({ ...d, ...p }));
 
@@ -391,7 +414,7 @@ export function BotFormView({
           <ModelField
             label={t("botForm.role.classifier")}
             value={draft.classifier}
-            providers={providerIds}
+            providers={classifierProviders}
             onChange={(classifier) => patch({ classifier })}
           />
           <div className={formStyles.field}>

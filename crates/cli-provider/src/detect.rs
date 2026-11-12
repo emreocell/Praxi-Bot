@@ -19,6 +19,80 @@ pub const CODEX_UNCONFINABLE_DETAIL: &str = "codex_unconfinable";
 /// Shown with [`CODEX_UNCONFINABLE_DETAIL`]. Praxi does not spawn that CLI.
 pub const CODEX_UNCONFINABLE_MESSAGE: &str =
     "The installed Codex cannot disable unified_exec, so Praxi will not run it.";
+/// Shown when enabling a known CLI engine other than Claude/Codex.
+pub const UNRUNNABLE_CLI_MESSAGE: &str =
+    "This coding CLI is detected only and cannot be run in this version of Praxi.";
+/// Shown when enabling an unrecognized CLI engine id.
+pub const UNKNOWN_CLI_MESSAGE: &str = "Unknown coding CLI provider id.";
+
+/// Fixed catalogue specification for a supported coding CLI engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CliEngineSpec {
+    /// Engine identifier (`claude`, `codex`, `cursor`, `opencode`, `gemini`, `chatgpt-plan`).
+    pub id: &'static str,
+    /// Display name shown in the UI.
+    pub display_name: &'static str,
+    /// Fixed server-side `argv0` executable name (never supplied by clients).
+    pub command: &'static str,
+    /// Whether Praxi can currently enable and run turns on this engine.
+    pub runnable: bool,
+}
+
+/// Single source of truth for CLI engines and whether they are runnable in this version.
+pub const CLI_ENGINES: &[CliEngineSpec] = &[
+    CliEngineSpec {
+        id: "claude",
+        display_name: "Claude Code",
+        command: "claude",
+        runnable: true,
+    },
+    CliEngineSpec {
+        id: "codex",
+        display_name: "Codex",
+        command: "codex",
+        runnable: false,
+    },
+    CliEngineSpec {
+        id: "cursor",
+        display_name: "Cursor",
+        command: "cursor-agent",
+        runnable: false,
+    },
+    CliEngineSpec {
+        id: "opencode",
+        display_name: "OpenCode",
+        command: "opencode",
+        runnable: false,
+    },
+    CliEngineSpec {
+        id: "gemini",
+        display_name: "Gemini CLI",
+        command: "gemini",
+        runnable: false,
+    },
+    CliEngineSpec {
+        id: "chatgpt-plan",
+        display_name: "ChatGPT plan",
+        command: "codex",
+        runnable: false,
+    },
+];
+
+/// Look up the fixed specification for a coding CLI engine id.
+#[must_use]
+pub fn engine_spec(id: &str) -> Option<&'static CliEngineSpec> {
+    CLI_ENGINES.iter().find(|spec| spec.id == id)
+}
+
+/// Stable user-readable refusal message when an engine cannot be enabled/run.
+#[must_use]
+pub fn enable_refusal_message(id: &str) -> &'static str {
+    match id {
+        "codex" | "chatgpt-plan" => CODEX_UNCONFINABLE_MESSAGE,
+        _ if engine_spec(id).is_some() => UNRUNNABLE_CLI_MESSAGE,
+        _ => UNKNOWN_CLI_MESSAGE,
+    }
+}
 
 /// Authentication status reported by a CLI provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -958,16 +1032,19 @@ impl Detector {
             self.probe_gemini(),
         );
 
-        let chatgpt_plan = DetectedCli {
-            id: "chatgpt-plan".to_owned(),
-            display_name: "ChatGPT plan".to_owned(),
-            installed: codex.installed,
-            version: codex.version.clone(),
-            auth: AuthState::Unknown,
-            account_label: None,
-            runnable: false,
-            detail: codex.detail.clone(),
-            message: codex.message.clone(),
+        let chatgpt_plan = {
+            let spec = engine_spec("chatgpt-plan").expect("chatgpt-plan in CLI_ENGINES");
+            DetectedCli {
+                id: spec.id.to_owned(),
+                display_name: spec.display_name.to_owned(),
+                installed: codex.installed,
+                version: codex.version.clone(),
+                auth: AuthState::Unknown,
+                account_label: None,
+                runnable: spec.runnable,
+                detail: codex.detail.clone(),
+                message: codex.message.clone(),
+            }
         };
 
         vec![claude, codex, cursor, opencode, gemini, chatgpt_plan]
@@ -1020,6 +1097,7 @@ impl Detector {
             Ok((status, stdout, _stderr)) => {
                 if status.success() {
                     let version = parse_version_string(&stdout);
+                    let runnable = engine_spec(id).is_some_and(|spec| spec.runnable);
                     (
                         DetectedCli {
                             id: id.to_owned(),
@@ -1028,7 +1106,7 @@ impl Detector {
                             version,
                             auth: AuthState::Unknown,
                             account_label: None,
-                            runnable: id == "claude",
+                            runnable,
                             detail: None,
                             message: None,
                         },

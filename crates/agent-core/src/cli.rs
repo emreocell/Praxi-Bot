@@ -206,7 +206,7 @@ impl TurnExecutor {
         }
         // MCP encodes names reversibly; permissions receive the original name.
         let tools = specs.to_vec();
-        let model = req.model.provider().map(|_| req.model.model().to_owned());
+        let model = cli_model_arg(&req.model);
         let usage = tokio::time::timeout(
             self.sh.cfg.guards.model_timeout,
             runtime.run_turn(
@@ -236,6 +236,14 @@ impl TurnExecutor {
             ..ModelOut::default()
         })
     }
+}
+
+fn cli_model_arg(model: &provider_catalog::ModelRef) -> Option<String> {
+    model
+        .provider()
+        .map(|_| model.model())
+        .filter(|m| !m.is_empty() && *m != "default")
+        .map(str::to_owned)
 }
 
 #[cfg(test)]
@@ -333,6 +341,22 @@ mod tests {
         let events = storage::read_event_log(env.dir.path(), run).unwrap();
         assert!(format!("{events:?}").contains("not_installed"));
     }
+    #[test]
+    fn cli_model_arg_omits_default_placeholder() {
+        assert_eq!(
+            cli_model_arg(&provider_catalog::ModelRef("cli:claude".into())),
+            None
+        );
+        assert_eq!(
+            cli_model_arg(&provider_catalog::ModelRef("cli:claude/default".into())),
+            None
+        );
+        assert_eq!(
+            cli_model_arg(&provider_catalog::ModelRef("cli:claude/sonnet".into())),
+            Some("sonnet".into())
+        );
+    }
+
     struct PanicHttp;
     #[async_trait]
     impl provider_catalog::ChatProvider for PanicHttp {

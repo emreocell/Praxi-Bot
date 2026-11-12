@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, Button, Card } from "ui";
+import { MOCK_BASE_URL } from "../api/mockMode";
 import {
   type Bot,
   type GrantTarget,
@@ -11,8 +12,9 @@ import { isTauriRuntime } from "../overlay/events";
 import formStyles from "../components/Form.module.css";
 import { botView } from "../lib/botProfile";
 import { addProvider, setDefaultProvider, testProvider } from "../lib/providers";
-import { type ProviderRow, providersView } from "../lib/providerView";
+import { isCliProvider, providersView } from "../lib/providerView";
 import { useDaemon } from "../state/DaemonContext";
+import { notifyProvidersChanged, useProviders } from "../state/useProviders";
 import styles from "./SettingsSections.module.css";
 
 const CUSTOM = "__custom__";
@@ -33,9 +35,11 @@ export function ProvidersSection() {
   const { t } = useTranslation();
   const { client, conn, restartDaemon } = useDaemon();
   const native = isTauriRuntime();
-  const [list, setList] = useState<ProviderRow[]>([]);
-  const [catalog, setCatalog] = useState<string[]>(() => providersView(null).catalog);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const canView = native || client?.baseUrl === MOCK_BASE_URL;
+  const { dto, error: loadError, reload } = useProviders();
+  const view = useMemo(() => providersView(dto), [dto]);
+  const list = view.configured;
+  const catalog = view.catalog;
   const [choice, setChoice] = useState<string>(() => providersView(null).catalog[0]);
   const [customId, setCustomId] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -45,24 +49,9 @@ export function ProvidersSection() {
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [needsRestart, setNeedsRestart] = useState(false);
 
-  const reload = useCallback(async () => {
-    if (!client) {
-      return;
-    }
-    try {
-      const view = providersView(await client.providers());
-      setList(view.configured);
-      setCatalog(view.catalog);
-      setChoice((c) => (c === CUSTOM || view.catalog.includes(c) ? c : view.catalog[0]));
-      setLoadError(null);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : String(e));
-    }
-  }, [client]);
-
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    setChoice((c) => (c === CUSTOM || catalog.includes(c) ? c : (catalog[0] ?? CUSTOM)));
+  }, [catalog]);
 
   const run = async (fn: () => Promise<Outcome>, changes: boolean) => {
     setBusy(true);
@@ -87,12 +76,13 @@ export function ProvidersSection() {
     } finally {
       setBusy(false);
       await reload();
+      notifyProvidersChanged();
     }
   };
 
   const isCustom = choice === CUSTOM;
   const id = isCustom ? customId.trim() : choice;
-  const canAdd = id !== "" && (!isCustom || baseUrl.trim() !== "") && !busy;
+  const canAdd = native && id !== "" && (!isCustom || baseUrl.trim() !== "") && !busy;
 
   return (
     <Card padding="md" className={styles.card}>
@@ -100,7 +90,7 @@ export function ProvidersSection() {
         <h2 className={styles.heading}>{t("settings.providers.title")}</h2>
         <p className={formStyles.hint}>{t("settings.providers.description")}</p>
       </div>
-      {!native ? (
+      {!canView ? (
         <p className={formStyles.hint}>{t("settings.providers.nativeOnly")}</p>
       ) : (
         <>
@@ -130,41 +120,46 @@ export function ProvidersSection() {
                     ) : null}
                   </span>
                   <span className={styles.rowMeta}>
-                    {p.model || t("settings.providers.noModel")} ·{" "}
-                    {p.hasKey
-                      ? t("settings.providers.keyStored")
-                      : t("settings.providers.noKey")}
+                    {isCliProvider(p.id, dto)
+                      ? `${p.model || "default"} · ${t("settings.providers.noKeyNeeded")}`
+                      : `${p.model || t("settings.providers.noModel")} · ${
+                          p.hasKey
+                            ? t("settings.providers.keyStored")
+                            : t("settings.providers.noKey")
+                        }`}
                     {p.models.length > 0
                       ? ` · ${t("settings.providers.modelCount", { count: p.models.length })}`
                       : ""}
                   </span>
-                  <span className={styles.rowActions}>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={busy}
-                      onClick={() =>
-                        void run(async () => outcomeOf(await testProvider(p.id)), false)
-                      }
-                    >
-                      {t("settings.providers.test")}
-                    </Button>
-                    {!p.isDefault ? (
+                  {native ? (
+                    <span className={styles.rowActions}>
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() =>
-                          void run(
-                            async () => outcomeOf(await setDefaultProvider(p.id)),
-                            true
-                          )
+                          void run(async () => outcomeOf(await testProvider(p.id)), false)
                         }
                       >
-                        {t("settings.providers.makeDefault")}
+                        {t("settings.providers.test")}
                       </Button>
-                    ) : null}
-                  </span>
+                      {!p.isDefault ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() =>
+                            void run(
+                              async () => outcomeOf(await setDefaultProvider(p.id)),
+                              true
+                            )
+                          }
+                        >
+                          {t("settings.providers.makeDefault")}
+                        </Button>
+                      ) : null}
+                    </span>
+                  ) : null}
                 </li>
               ))}
             </ul>

@@ -50,3 +50,58 @@ test("search folding handles Turkish letters and diacritics", () => {
   assert.ok(!matchesQuery("tema xyz", "Tema"));
   assert.ok(matchesQuery("", "anything"));
 });
+
+test("modelGroups includes enabled CLI providers with single default model and excludeCli filters them out", () => {
+  const withCli = {
+    active: ["cli:claude", "gemini"],
+    default_provider: "gemini",
+    configured: [
+      {
+        id: "gemini",
+        active: true,
+        custom: false,
+        default_model: "flash",
+        enabled: true,
+        has_key: true,
+        is_default: true,
+        models: []
+      },
+      {
+        id: "cli:claude",
+        active: true,
+        custom: false,
+        default_model: null,
+        enabled: true,
+        has_key: false,
+        is_default: false,
+        models: []
+      }
+    ],
+    catalog: [
+      {
+        id: "cli:claude",
+        kind: "cli",
+        base_url: "",
+        auth: "none",
+        key_env: null,
+        tools: true,
+        vision: false,
+        configured: true
+      }
+    ]
+  } as unknown as ProvidersDto;
+
+  const execGroups = modelGroups(withCli);
+  const cliGroup = execGroups.find((g) => g.provider === "cli:claude");
+  assert.ok(cliGroup, "cli:claude should be present in executor groups");
+  assert.deepEqual(
+    cliGroup.models.map((m) => m.ref),
+    ["cli:claude/default"]
+  );
+
+  const classifierGroups = modelGroups(withCli, null, { includeCli: false });
+  assert.equal(
+    classifierGroups.some((g) => g.provider === "cli:claude"),
+    false
+  );
+});
