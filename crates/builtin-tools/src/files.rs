@@ -846,28 +846,80 @@ fn under_data_sensitive(path: &Path, data_dir: &Path) -> bool {
     if p.len() <= d.len() || p[..d.len()] != d[..] {
         return false;
     }
-    let rel = &p[d.len()..];
+    // Windows resolves a trailing dot or space and `:stream` / `::$DATA` to the
+    // same file, so names are compared canonically (on every platform: a
+    // lexical match is cheap and conservative).
+    let rel: Vec<String> = p[d.len()..]
+        .iter()
+        .map(|part| canonical_name(part))
+        .collect();
     let Some(base) = rel.last().map(String::as_str) else {
         return false;
     };
-    // Only directly under the data dir: these names are ordinary elsewhere.
+    // Directly under the data dir only: these names are ordinary elsewhere.
     base == "devices.json"
         || base == "peer-node"
         || rel.iter().any(|s| s == "vault" || s == "secrets")
+        || rel
+            .first()
+            .is_some_and(|first| DAEMON_STATE_DIRS.contains(&first.as_str()))
         || (rel.len() == 1 && daemon_state_name(base))
 }
 
-/// The daemon's own state: the SQLite store (and WAL/SHM/journal siblings),
-/// the control latch and its atomic-write temp files, and the policy file.
-/// A bot able to write them could forge approvals, audit rows or a takeover
-/// release; reading them leaks chats and the latch.
+/// Compare-form of one path component: no `:stream` suffix, no trailing dots or
+/// spaces, lower case.
+fn canonical_name(part: &str) -> String {
+    let base = part.split(':').next().unwrap_or(part);
+    base.trim_end_matches([' ', '.']).to_ascii_lowercase()
+}
+
+/// Directories under the data dir whose contents grant authority or are the
+/// daemon's own records, so the bot's file tools never touch them:
+/// `peer` (pairing keys and device list), `bots` and `profiles` (bot profiles
+/// and their policies), `runs` (the event logs the UI and replay trust).
+/// Deliberately NOT protected, with the reason: `skills` and `workflows`
+/// (the bot authors them on purpose), `checkpoints` (the file tools' own undo
+/// store), `files`, `spill` and `screenshots` (bot output), logs (no authority).
+const DAEMON_STATE_DIRS: [&str; 4] = ["peer", "bots", "profiles", "runs"];
+
+/// The daemon's own state files directly under the data dir, each one a file
+/// that grants authority or forges history if tampered with:
+/// - `bot.db`, `schedules.db`, `memory.db` (+ `-wal`/`-shm`/`-journal`):
+///   chats, approvals, audit, schedules that run unattended, memory.
+/// - `control-latch.json` (the takeover latch and its release journal) and
+///   `policy.json` (the global permission policy).
+/// - `host.toml` (leader/epoch), `config.toml` (peer networking), `mcp.toml`
+///   (servers the daemon launches), `providers.toml` (where model traffic
+///   goes), `web.toml` (web tool limits).
+/// - `telegram_state.json` and `telegram-inbox.jsonl` (which chats may command
+///   the bot, and what they sent).
+/// - the atomic-write temp files (`.tmp*`) of any of them.
+///
+/// Deliberately NOT listed: `skills.lock.json` / `skills-usage.json` (counters
+/// and a lockfile for bot-writable skills; no authority) and logs.
 fn daemon_state_name(base: &str) -> bool {
-    const STATE: [&str; 3] = ["bot.db", "control-latch.json", "policy.json"];
-    STATE.iter().any(|s| {
+    const DATABASES: [&str; 3] = ["bot.db", "schedules.db", "memory.db"];
+    const FILES: [&str; 9] = [
+        "control-latch.json",
+        "policy.json",
+        "host.toml",
+        "config.toml",
+        "mcp.toml",
+        "providers.toml",
+        "web.toml",
+        "telegram_state.json",
+        "telegram-inbox.jsonl",
+    ];
+    DATABASES.iter().any(|s| {
         base == *s
             || base
                 .strip_prefix(s)
-                .is_some_and(|rest| matches!(rest, "-wal" | "-shm" | "-journal" | ".tmp" | ".bak"))
+                .is_some_and(|rest| matches!(rest, "-wal" | "-shm" | "-journal"))
+    }) || FILES.iter().any(|s| {
+        base == *s
+            || base
+                .strip_prefix(s)
+                .is_some_and(|rest| matches!(rest, ".tmp" | ".bak"))
     }) || base.starts_with(".tmp")
 }
 
@@ -3776,6 +3828,18 @@ mod tests {
             "policy.json",
             "policy.json.tmp",
             ".tmpAbC123",
+            "schedules.db",
+            "schedules.db-wal",
+            "memory.db",
+            "memory.db-shm",
+            "memory.db-journal",
+            "host.toml",
+            "config.toml",
+            "mcp.toml",
+            "providers.toml",
+            "web.toml",
+            "telegram_state.json",
+            "telegram-inbox.jsonl",
         ] {
             let file = d.path().join(name);
             fs::write(&file, secret).unwrap();
@@ -3807,6 +3871,79 @@ mod tests {
                 .await
                 .is_ok()
         );
+    }
+
+    #[tokio::test]
+    async fn daemon_state_directories_are_protected_but_bot_authored_ones_are_not() {
+        let (d, _w, t) = setup();
+        let c = ctx();
+        for dir in ["peer", "bots", "profiles", "runs"] {
+            let file = d.path().join(dir).join("x.toml");
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(&file, "secret").unwrap();
+            let err = get(&t, "fs_read")
+                .call(&c, json!({"path": &file}))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, ToolError::PermissionDenied(_)), "{dir}: {err}");
+            let err = get(&t, "fs_write")
+                .call(&c, json!({"path": &file, "content": "x"}))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, ToolError::PermissionDenied(_)), "{dir}: {err}");
+        }
+        // Bot-authored by design (skills, workflows) or bot output: ordinary.
+        for dir in ["skills", "workflows", "screenshots", "files"] {
+            let file = d.path().join(dir).join("note.txt");
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(&file, "ok").unwrap();
+            assert!(
+                get(&t, "fs_read")
+                    .call(&c, json!({"path": &file}))
+                    .await
+                    .is_ok(),
+                "{dir} must stay usable"
+            );
+        }
+    }
+
+    #[test]
+    fn trailing_dots_spaces_and_streams_cannot_name_a_protected_file() {
+        let d = tempfile::tempdir().unwrap();
+        for name in [
+            "control-latch.json.",
+            "control-latch.json ",
+            "control-latch.json. .",
+            "CONTROL-LATCH.JSON",
+            "bot.db::$DATA",
+            "policy.json:stream",
+            "schedules.db-wal.",
+            "host.toml ",
+        ] {
+            assert!(
+                is_protected(&d.path().join(name), d.path()),
+                "{name:?} must resolve to a protected name"
+            );
+        }
+        assert!(is_protected(&d.path().join("bots. ").join("a.toml"), d.path()));
+        assert!(!is_protected(&d.path().join("notes.txt."), d.path()));
+    }
+
+    #[tokio::test]
+    async fn a_not_yet_existing_protected_name_with_a_trailing_dot_cannot_be_created() {
+        let (d, _w, t) = setup();
+        let c = ctx();
+        for name in ["control-latch.json.", "policy.json ", "mcp.toml."] {
+            let file = d.path().join(name);
+            let err = get(&t, "fs_write")
+                .call(&c, json!({"path": &file, "content": "forged"}))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, ToolError::PermissionDenied(_)), "{name:?}: {err}");
+            assert!(!d.path().join("control-latch.json").exists());
+            assert!(!d.path().join("policy.json").exists());
+            assert!(!d.path().join("mcp.toml").exists());
+        }
     }
 
     #[tokio::test]
