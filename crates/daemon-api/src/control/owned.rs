@@ -56,6 +56,7 @@ pub struct ReleaseJournal {
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(clippy::struct_excessive_bools)] // The persisted latch flags are independent.
 struct Disk {
     v: u8,
     latched: Option<ControlMode>,

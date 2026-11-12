@@ -187,6 +187,8 @@ that never touches the computer neither waits for a pause nor holds the computer
 slot. Managed Chromium does not idle-close while a run that used the computer is
 still active; its idle clock restarts when that run ends.
 
+The outcome of a batch that stopped part-way (a Stop, a geometry change) is audited as `input.batch_partial` with `applied_through`; it is never coalesced. A pause or `human_driving` set by the local app itself is local-only to clear (a paired device with an input grant cannot release it or take it over); one set by a paired device, or left by a restart, can still be cleared by a device with an explicit input grant. A takeover that stays `Acquiring` for 20 s is paused as `expired`.
+
 Denied attempts (`view.denied`, `input.batch_rejected`) are audited at most once
 a minute per actor and event; the next row carries `suppressed_since_last` and `suppressed_by_reason` (a
 bounded count per reason, so different denial reasons are not lost).
