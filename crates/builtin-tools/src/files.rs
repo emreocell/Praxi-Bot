@@ -726,7 +726,9 @@ fn follow_link(
     let combined = join_link(parent, Path::new(&stripped), rest)?;
     if rest.is_empty() && !follows_final(ctx.follow) {
         let verify = ResolveCtx {
-            follow: Follow::Content,
+            // Removing or preserving a link does not require its referent to
+            // exist. Still classify its local target and every ancestor.
+            follow: Follow::Write,
             depth: ctx.depth + 1,
             ..*ctx
         };
@@ -1164,7 +1166,13 @@ fn normalize_final(path: &Path) -> Result<PathBuf, ToolError> {
 fn canonical_data_dir(data_dir: &Path) -> PathBuf {
     let lexical =
         lexical_absolute(&data_dir.to_string_lossy()).unwrap_or_else(|_| data_dir.to_path_buf());
-    final_identity(&lexical).unwrap_or(lexical)
+    // Widen the existing ancestor as well as an existing final directory.
+    // The data directory can be created only after tools are constructed.
+    let widened = widen_path(&lexical).unwrap_or(lexical);
+    // `widen_path` stops at a reparse point, so a data directory that is
+    // itself a junction keeps its (possibly 8.3) final name. Name that
+    // junction object, not its target.
+    final_identity(&widened).unwrap_or(widened)
 }
 
 /// Identity of a path already observed with `symlink_metadata`.
@@ -1376,18 +1384,7 @@ pub(crate) fn vet_checkpoint_node(path: &Path) -> io::Result<CheckpointNode> {
         Ok(meta) if cloud_placeholder(&resolved, &meta) => {
             // A cloud placeholder is a file. `read_link` fails on its reparse
             // tag and must not abort the parent checkpoint.
-            match identity_existing(&resolved) {
-                Ok(opened) => {
-                    if !in_checkpoint_store(&lexical, &policy.data_dir)
-                        && !policy.roots.is_empty()
-                        && !roots_contain(&policy.roots, &opened)
-                    {
-                        return Err(deny_io(ROOT_MSG));
-                    }
-                    Ok(finish_node(&policy, &[&lexical, &resolved, &opened]))
-                }
-                Err(_) => Ok(finish_node(&policy, &[&lexical, &resolved])),
-            }
+            finish_cloud_node(&policy, &lexical, &resolved, identity_existing(&resolved))
         }
         Ok(meta) if meta.file_type().is_symlink() || reparse_unsafe(&meta) => {
             let target = fs::read_link(&resolved)?;
@@ -1413,6 +1410,22 @@ pub(crate) fn vet_checkpoint_node(path: &Path) -> io::Result<CheckpointNode> {
         }
         Err(e) => Err(e),
     }
+}
+
+fn finish_cloud_node(
+    policy: &CpPolicy,
+    lexical: &Path,
+    resolved: &Path,
+    identity: Result<PathBuf, ToolError>,
+) -> io::Result<CheckpointNode> {
+    let opened = identity.map_err(tool_to_io)?;
+    if !in_checkpoint_store(lexical, &policy.data_dir)
+        && !policy.roots.is_empty()
+        && !roots_contain(&policy.roots, &opened)
+    {
+        return Err(deny_io(ROOT_MSG));
+    }
+    Ok(finish_node(policy, &[lexical, resolved, &opened]))
 }
 
 fn finish_node(policy: &CpPolicy, paths: &[&Path]) -> CheckpointNode {
@@ -1664,6 +1677,50 @@ pub(crate) fn remove_tree_skip_protected(
     fs::remove_file(path)
 }
 
+/// Authorize only generated adjacent temporary names for an already-vetted
+/// destination. Exact credential grants are translated to those temporary
+/// names for the duration of this checkpoint gate; no user-supplied path is
+/// added and the original protection check always runs first.
+pub(crate) fn vet_checkpoint_temporary(temporary: &Path, original: &Path) -> io::Result<()> {
+    vet_checkpoint_write(original)?;
+    let original = widen_path(original).map_err(tool_to_io)?;
+    let original_parts = norm_parts(&original);
+    CP_GATE.with(|slot| {
+        if let Some(gate) = slot.borrow_mut().as_mut() {
+            let translated: Vec<_> = gate
+                .grants
+                .iter()
+                .filter_map(|grant| {
+                    let grant = widen_path(grant).ok()?;
+                    let parts = norm_parts(&grant);
+                    if !parts.starts_with(&original_parts) {
+                        return None;
+                    }
+                    let mut translated = temporary.to_path_buf();
+                    for component in grant.components().skip(original_parts.len()) {
+                        translated.push(component);
+                    }
+                    Some(translated)
+                })
+                .collect();
+            gate.grants.extend(translated);
+        }
+    });
+    vet_checkpoint_write(temporary)
+}
+
+/// Whether an existing directory contains entries a restore must leave in place.
+pub(crate) fn checkpoint_has_protected_descendant(path: &Path) -> io::Result<bool> {
+    let policy = checkpoint_policy();
+    has_protected_descendant(path, &policy.data_dir, &policy.grants)
+}
+
+/// Protection lookup for one entry, without reading its content.
+pub(crate) fn checkpoint_entry_is_protected(path: &Path) -> io::Result<bool> {
+    let policy = checkpoint_policy();
+    entry_is_protected(path, &policy.data_dir, &policy.grants)
+}
+
 /// [`remove_tree_skip_protected`] using the checkpoint gate installed for restore.
 pub(crate) fn remove_checkpoint_target(path: &Path) -> io::Result<()> {
     let policy = checkpoint_policy();
@@ -1690,54 +1747,261 @@ fn has_protected_descendant(path: &Path, data_dir: &Path, grants: &[PathBuf]) ->
     Ok(false)
 }
 
-fn relocate_skip_protected(
-    from: &Path,
-    to: &Path,
-    data_dir: &Path,
-    grants: &[PathBuf],
-) -> io::Result<()> {
-    if entry_is_protected(from, data_dir, grants)? {
-        return Ok(());
-    }
-    let meta = match fs::symlink_metadata(from) {
-        Ok(meta) => meta,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e),
-    };
-    if meta.is_dir() && !is_link_meta(&meta) && has_protected_descendant(from, data_dir, grants)? {
-        fs::create_dir_all(to)?;
-        for entry in fs::read_dir(from)? {
-            let entry = entry?;
-            relocate_skip_protected(&entry.path(), &to.join(entry.file_name()), data_dir, grants)?;
+fn hidden_move_path(path: &Path, label: &str) -> io::Result<PathBuf> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::other("move target has no parent"))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::other("move target has no name"))?;
+    Ok(parent.join(crate::checkpoint::temp_name(".", name, label)))
+}
+
+fn cross_device(err: &io::Error) -> bool {
+    #[cfg(windows)]
+    const CROSS_DEVICE: i32 = 17; // ERROR_NOT_SAME_DEVICE
+    #[cfg(not(windows))]
+    const CROSS_DEVICE: i32 = 18; // EXDEV (supported Unix platforms)
+    err.kind() == io::ErrorKind::CrossesDevices || err.raw_os_error() == Some(CROSS_DEVICE)
+}
+
+struct MoveTransaction<'a, F> {
+    sh: &'a Shared,
+    rename: F,
+    overwrite: bool,
+    renames: Vec<(PathBuf, PathBuf)>,
+    discard: Vec<PathBuf>,
+    stages: Vec<PathBuf>,
+    created_dirs: Vec<PathBuf>,
+    source_dirs: Vec<PathBuf>,
+}
+
+impl<'a, F: Fn(&Path, &Path) -> io::Result<()>> MoveTransaction<'a, F> {
+    fn new(sh: &'a Shared, rename: F, overwrite: bool) -> Self {
+        Self {
+            sh,
+            rename,
+            overwrite,
+            renames: Vec::new(),
+            discard: Vec::new(),
+            stages: Vec::new(),
+            created_dirs: Vec::new(),
+            source_dirs: Vec::new(),
         }
-        if fs::read_dir(from)?.next().is_none() {
-            fs::remove_dir(from)?;
+    }
+
+    fn rename_recorded(&mut self, from: &Path, to: &Path) -> io::Result<()> {
+        (self.rename)(from, to)?;
+        self.renames.push((from.to_path_buf(), to.to_path_buf()));
+        Ok(())
+    }
+
+    fn ensure_dir(&mut self, dir: &Path) -> io::Result<()> {
+        let mut missing = Vec::new();
+        let mut cursor = dir;
+        loop {
+            match fs::symlink_metadata(cursor) {
+                Ok(meta) if meta.is_dir() && !is_link_meta(&meta) => break,
+                Ok(_) => return Err(io::Error::other("move parent is not a plain directory")),
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                    missing.push(cursor.to_path_buf());
+                    cursor = cursor
+                        .parent()
+                        .ok_or_else(|| io::Error::other("missing move parent"))?;
+                }
+                Err(err) => return Err(err),
+            }
         }
-        return Ok(());
+        for path in missing.into_iter().rev() {
+            fs::create_dir(&path)?;
+            self.created_dirs.push(path);
+        }
+        Ok(())
     }
-    if let Some(parent) = to.parent().filter(|p| !p.as_os_str().is_empty()) {
-        fs::create_dir_all(parent)?;
-    }
-    if fs::symlink_metadata(to).is_ok() {
-        remove_tree_skip_protected(to, data_dir, grants)?;
-    }
-    if fs::symlink_metadata(to).is_ok() {
-        if !meta.is_dir() || is_link_meta(&meta) {
+
+    fn save_destination(&mut self, to: &Path) -> io::Result<()> {
+        match fs::symlink_metadata(to) {
+            Ok(_) => {}
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(err) => return Err(err),
+        }
+        if !self.overwrite {
+            // Enforced where the destination is displaced: it can appear
+            // after the preflight, while the checkpoint is being taken.
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
-                "destination still contains a protected file",
+                format!(
+                    "{} already exists; set overwrite to replace it",
+                    to.display()
+                ),
             ));
         }
-        for entry in fs::read_dir(from)? {
-            let entry = entry?;
-            relocate_skip_protected(&entry.path(), &to.join(entry.file_name()), data_dir, grants)?;
+        if entry_is_protected(to, &self.sh.data_dir, &self.sh.grants)? {
+            return Err(deny_io("destination contains a protected file"));
         }
-        if fs::read_dir(from)?.next().is_none() {
-            fs::remove_dir(from)?;
+        if has_protected_descendant(to, &self.sh.data_dir, &self.sh.grants)? {
+            let mut children = fs::read_dir(to)?.collect::<io::Result<Vec<_>>>()?;
+            children.sort_by_key(fs::DirEntry::file_name);
+            for child in children {
+                let path = child.path();
+                if !entry_is_protected(&path, &self.sh.data_dir, &self.sh.grants)? {
+                    self.save_destination(&path)?;
+                }
+            }
+        } else {
+            let hidden = hidden_move_path(to, "move-old")?;
+            vet_checkpoint_temporary(&hidden, to)?;
+            self.rename_recorded(to, &hidden)?;
+            self.discard.push(hidden);
         }
-        return Ok(());
+        Ok(())
     }
-    fs::rename(from, to)
+
+    fn move_path(&mut self, from: &Path, to: &Path) -> io::Result<()> {
+        if entry_is_protected(from, &self.sh.data_dir, &self.sh.grants)? {
+            return Ok(());
+        }
+        let meta = fs::symlink_metadata(from)?;
+        let protected_source = has_protected_descendant(from, &self.sh.data_dir, &self.sh.grants)?;
+        let protected_target = has_protected_descendant(to, &self.sh.data_dir, &self.sh.grants)?;
+        if protected_source || protected_target {
+            if !meta.is_dir() || is_link_meta(&meta) {
+                return Err(deny_io("destination still contains a protected file"));
+            }
+            if !is_dir_nofollow(to) {
+                self.save_destination(to)?;
+                self.ensure_dir(to)?;
+            }
+            // Overwrite removes old mutable names that the source will not
+            // replace, while credentials remain at their original paths.
+            let mut destinations = fs::read_dir(to)?.collect::<io::Result<Vec<_>>>()?;
+            destinations.sort_by_key(fs::DirEntry::file_name);
+            for entry in destinations {
+                if fs::symlink_metadata(from.join(entry.file_name())).is_err()
+                    && !entry_is_protected(&entry.path(), &self.sh.data_dir, &self.sh.grants)?
+                {
+                    self.save_destination(&entry.path())?;
+                }
+            }
+            let mut entries = fs::read_dir(from)?.collect::<io::Result<Vec<_>>>()?;
+            entries.sort_by_key(fs::DirEntry::file_name);
+            for entry in entries {
+                self.move_path(&entry.path(), &to.join(entry.file_name()))?;
+            }
+            self.source_dirs.push(from.to_path_buf());
+            return Ok(());
+        }
+        let parent = to
+            .parent()
+            .ok_or_else(|| io::Error::other("move target has no parent"))?;
+        self.ensure_dir(parent)?;
+        self.save_destination(to)?;
+        match self.rename_recorded(from, to) {
+            Ok(()) => Ok(()),
+            Err(err) if cross_device(&err) => {
+                let stage = hidden_move_path(to, "move-stage")?;
+                vet_checkpoint_temporary(&stage, to)?;
+                self.stages.push(stage.clone());
+                crate::checkpoint::copy_move_payload(from, &stage)?;
+                // Preserve the complete source on its own filesystem until
+                // destination publication succeeds. Never recursively delete
+                // the only surviving copy as part of an uncommitted move.
+                let source_old = hidden_move_path(from, "move-source")?;
+                vet_checkpoint_temporary(&source_old, from)?;
+                self.rename_recorded(from, &source_old)?;
+                self.discard.push(source_old);
+                self.rename_recorded(&stage, to)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    fn rollback(&mut self) -> Vec<String> {
+        let mut problems = Vec::new();
+        for (from, to) in self.renames.iter().rev() {
+            // Empty replacement directories must disappear before an old
+            // file/directory can be renamed back on Windows as well as Unix.
+            for dir in self
+                .created_dirs
+                .iter()
+                .rev()
+                .filter(|dir| dir.starts_with(from))
+            {
+                let _ = fs::remove_dir(dir);
+            }
+            // An unrelated writer creating the old name must not be
+            // overwritten by recovery; keep the saved bytes and report it.
+            if fs::symlink_metadata(from).is_ok() {
+                problems.push(format!(
+                    "{} is occupied; previous bytes retained at {}",
+                    from.display(),
+                    to.display()
+                ));
+                continue;
+            }
+            // The injected operation hook does not affect recovery.
+            if let Err(err) = fs::rename(to, from) {
+                problems.push(format!(
+                    "{} retained at {}: {err}",
+                    from.display(),
+                    to.display()
+                ));
+            }
+        }
+        for stage in &self.stages {
+            let _ = crate::checkpoint::remove_staged(stage);
+        }
+        for dir in self.created_dirs.iter().rev() {
+            let _ = fs::remove_dir(dir);
+        }
+        problems
+    }
+
+    fn finish(self) -> Vec<String> {
+        let mut warnings = Vec::new();
+        for path in self.discard {
+            if let Err(err) = remove_checkpoint_target(&path) {
+                warnings.push(format!(
+                    "previous bytes retained at {}: {err}",
+                    path.display()
+                ));
+            }
+        }
+        for dir in self.source_dirs {
+            if fs::read_dir(&dir).is_ok_and(|mut entries| entries.next().is_none())
+                && let Err(err) = fs::remove_dir(&dir)
+            {
+                warnings.push(format!(
+                    "empty source directory retained at {}: {err}",
+                    dir.display()
+                ));
+            }
+        }
+        warnings
+    }
+}
+
+fn relocate_safely(
+    sh: &Shared,
+    from: &Path,
+    to: &Path,
+    rename: impl Fn(&Path, &Path) -> io::Result<()>,
+    overwrite: bool,
+) -> io::Result<Vec<String>> {
+    with_checkpoint_gate(sh, || {
+        let mut tx = MoveTransaction::new(sh, rename, overwrite);
+        if let Err(err) = tx.move_path(from, to) {
+            let rollback = tx.rollback();
+            if rollback.is_empty() {
+                return Err(err);
+            }
+            return Err(io::Error::new(
+                err.kind(),
+                format!("{err}; rollback incomplete: {}", rollback.join("; ")),
+            ));
+        }
+        Ok(tx.finish())
+    })
 }
 
 fn read_text(path: &Path) -> Result<String, ToolError> {
@@ -2040,24 +2304,65 @@ fn do_search(sh: &Shared, i: &SearchIn) -> Result<String, ToolError> {
 }
 
 impl Shared {
-    fn checkpoint(&self, run: &str, op: &str, paths: &[&Path]) -> Result<String, ToolError> {
+    fn checkpoint(
+        &self,
+        run: &str,
+        op: &str,
+        paths: &[(&Path, &Path)],
+    ) -> Result<(String, String), ToolError> {
         with_checkpoint_gate(self, || {
-            self.checkpoints
-                .create(run, op, paths)
-                .map_err(|e| io_to_tool(&e, "checkpoint failed, nothing changed"))
+            let id = self
+                .checkpoints
+                .create_for_tool(run, op, paths)
+                .map_err(|err| io_to_tool(&err, "checkpoint failed, nothing changed"))?;
+            let skipped = self
+                .checkpoints
+                .skipped(&id)
+                .map_err(|err| io_to_tool(&err, "read checkpoint result, nothing changed"))?;
+            if !skipped.is_empty() {
+                // The undo checkpoint would be incomplete, so the operation
+                // would destroy bytes that cannot be brought back.
+                self.checkpoints.discard(&id);
+                return Err(exec_err(format!(
+                    "{op} was not run and nothing changed: {} item(s) cannot be restored if it proceeds because they could not be saved in an undo checkpoint: {}",
+                    skipped.len(),
+                    skipped.join("; ")
+                )));
+            }
+            let mut note = String::new();
+            let mut seen = Vec::new();
+            for (_, effective) in paths {
+                let mut dirs = Vec::new();
+                if let Some(parent) = effective.parent() {
+                    dirs.push(parent.to_path_buf());
+                }
+                if is_dir_nofollow(effective) {
+                    dirs.push(effective.to_path_buf());
+                }
+                for dir in dirs {
+                    if seen.contains(&dir) {
+                        continue;
+                    }
+                    for line in crate::checkpoint::leftover_notes(&dir) {
+                        let _ = write!(note, "\nwarning: {line}");
+                    }
+                    seen.push(dir);
+                }
+            }
+            Ok((id, note))
         })
     }
 }
 
 fn do_write(sh: &Shared, run: &str, i: &WriteIn) -> Result<String, ToolError> {
     let p = validate_path(sh, &i.path, Follow::Write)?;
-    let cp = sh.checkpoint(run, "fs_write", &[&p])?;
+    let (cp, note) = sh.checkpoint(run, "fs_write", &[(Path::new(&i.path), &p)])?;
     if let Some(parent) = p.parent().filter(|d| !d.as_os_str().is_empty()) {
         fs::create_dir_all(parent).map_err(|e| exec_err(format!("create dirs: {e}")))?;
     }
     fs::write(&p, i.content.as_bytes()).map_err(|e| exec_err(format!("write {}: {e}", i.path)))?;
     Ok(format!(
-        "wrote {} bytes to {} (checkpoint {cp})",
+        "wrote {} bytes to {} (checkpoint {cp}){note}",
         i.content.len(),
         i.path
     ))
@@ -2078,32 +2383,86 @@ fn do_edit(sh: &Shared, run: &str, i: &EditIn) -> Result<String, ToolError> {
             "old text matches {n} times; add more context or set replace_all"
         )));
     }
-    let cp = sh.checkpoint(run, "fs_edit", &[&p])?;
+    let (cp, note) = sh.checkpoint(run, "fs_edit", &[(Path::new(&i.path), &p)])?;
     let updated = text.replace(&i.old, &i.new);
     fs::write(&p, updated).map_err(|e| exec_err(format!("write {}: {e}", i.path)))?;
     Ok(format!(
-        "replaced {n} occurrence(s) in {} (checkpoint {cp})",
+        "replaced {n} occurrence(s) in {} (checkpoint {cp}){note}",
         i.path
     ))
 }
 
+fn move_error(err: &ToolError, cp: &str, recovery: &str) -> ToolError {
+    let message = format!("{err} (checkpoint {cp})\n{recovery}");
+    match err {
+        ToolError::PermissionDenied(_) => ToolError::PermissionDenied(message),
+        ToolError::InvalidInput(_) => ToolError::InvalidInput(message),
+        _ => exec_err(message),
+    }
+}
+
 fn do_move(sh: &Shared, run: &str, i: &MoveIn) -> Result<String, ToolError> {
-    let from = validate_path(sh, &i.from, Follow::Entry)?;
-    let to = validate_path(sh, &i.to, Follow::Place)?;
-    if fs::symlink_metadata(&from).is_err() {
-        return Err(exec_err(format!("{} does not exist", i.from)));
-    }
-    let dest_meta = fs::symlink_metadata(&to).ok();
-    if dest_meta.is_some() && !i.overwrite {
-        return Err(exec_err(format!(
-            "{} already exists; set overwrite to replace it",
-            i.to
-        )));
-    }
-    let cp = sh.checkpoint(run, "fs_move", &[&from, &to])?;
-    relocate_skip_protected(&from, &to, &sh.data_dir, &sh.grants)
-        .map_err(|e| io_to_tool(&e, "move failed"))?;
-    Ok(format!("moved {} to {} (checkpoint {cp})", i.from, i.to))
+    do_move_with(sh, run, i, |from, to| fs::rename(from, to))
+}
+
+fn do_move_with(
+    sh: &Shared,
+    run: &str,
+    i: &MoveIn,
+    rename: impl Fn(&Path, &Path) -> io::Result<()>,
+) -> Result<String, ToolError> {
+    let mut saved = None;
+    let result = (|| {
+        let from = validate_path(sh, &i.from, Follow::Entry)?;
+        let to = validate_path(sh, &i.to, Follow::Place)?;
+        // Cheap preflight first: a rejected move must not copy the
+        // destination into a checkpoint or leave an empty receipt behind.
+        if fs::symlink_metadata(&from).is_err() {
+            return Err(exec_err(format!("{} does not exist", i.from)));
+        }
+        if fs::symlink_metadata(&to).is_ok() && !i.overwrite {
+            return Err(exec_err(format!(
+                "{} already exists; set overwrite to replace it",
+                i.to
+            )));
+        }
+        let (cp, note) = sh.checkpoint(
+            run,
+            "fs_move",
+            &[(Path::new(&i.from), &from), (Path::new(&i.to), &to)],
+        )?;
+        saved = Some(cp.clone());
+        let source = norm_parts(&from);
+        let target = norm_parts(&to);
+        if source == target
+            || (is_dir_nofollow(&from) && target.starts_with(&source))
+            || (is_dir_nofollow(&to) && source.starts_with(&target))
+        {
+            return Err(exec_err(
+                "move source and destination are the same path or overlapping directories",
+            ));
+        }
+        let warnings = relocate_safely(sh, &from, &to, rename, i.overwrite)
+            .map_err(|err| io_to_tool(&err, "move failed"))?;
+        let mut result = format!("moved {} to {} (checkpoint {cp}){note}", i.from, i.to);
+        for warning in warnings {
+            let _ = write!(result, "\nwarning: {warning}");
+        }
+        Ok(result)
+    })();
+    result.map_err(|err| {
+        // No checkpoint means the move was rejected before anything was read
+        // or changed; the error stands on its own.
+        let Some(cp) = saved else {
+            return err;
+        };
+        let recovery = if err.to_string().contains("rollback incomplete") {
+            "restore with checkpoint_restore; retained backup paths are listed above"
+        } else {
+            "nothing was lost; restore with checkpoint_restore if needed"
+        };
+        move_error(&err, &cp, recovery)
+    })
 }
 
 fn do_delete(sh: &Shared, run: &str, i: &DeleteIn) -> Result<String, ToolError> {
@@ -2115,10 +2474,10 @@ fn do_delete(sh: &Shared, run: &str, i: &DeleteIn) -> Result<String, ToolError> 
             i.path
         )));
     }
-    let cp = sh.checkpoint(run, "fs_delete", &[&p])?;
+    let (cp, note) = sh.checkpoint(run, "fs_delete", &[(Path::new(&i.path), &p)])?;
     remove_tree_skip_protected(&p, &sh.data_dir, &sh.grants)
         .map_err(|e| io_to_tool(&e, "delete failed"))?;
-    Ok(format!("deleted {} (checkpoint {cp})", i.path))
+    Ok(format!("deleted {} (checkpoint {cp}){note}", i.path))
 }
 
 fn do_cp_list(sh: &Shared, run: &str) -> Result<String, ToolError> {
@@ -2133,6 +2492,9 @@ fn do_cp_list(sh: &Shared, run: &str) -> Result<String, ToolError> {
     for c in list {
         let paths: Vec<&str> = c.entries.iter().map(|e| e.path.as_str()).collect();
         let _ = writeln!(out, "{} {} {}", c.id, c.op, paths.join(", "));
+        for skipped in &c.skipped {
+            let _ = writeln!(out, "warning: checkpoint is partial: {skipped}");
+        }
     }
     Ok(out)
 }
@@ -2254,6 +2616,779 @@ mod tests {
 
     fn p(dir: &tempfile::TempDir, name: &str) -> String {
         dir.path().join(name).display().to_string()
+    }
+
+    fn link_for_checkpoint_test(target: &Path, link: &Path, directory: bool) -> bool {
+        #[cfg(unix)]
+        let result = {
+            let _ = directory;
+            std::os::unix::fs::symlink(target, link)
+        };
+        #[cfg(windows)]
+        let result = if directory {
+            std::os::windows::fs::symlink_dir(target, link)
+        } else {
+            std::os::windows::fs::symlink_file(target, link)
+        };
+        match result {
+            Ok(()) => true,
+            Err(err)
+                if cfg!(windows)
+                    && (err.kind() == io::ErrorKind::PermissionDenied
+                        || err.raw_os_error() == Some(1314)) =>
+            {
+                eprintln!(
+                    "skipping symlink regression: Windows symlink privilege unavailable: {err}"
+                );
+                false
+            }
+            Err(err) => panic!("could not create local symlink fixture: {err}"),
+        }
+    }
+
+    #[test]
+    fn editing_through_file_symlink_preserves_input_and_restores_referent() {
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let source = work.path().join("actual.txt");
+        let link = work.path().join("alias.txt");
+        fs::write(&source, "original bytes").unwrap();
+        if !link_for_checkpoint_test(&source, &link, false) {
+            return;
+        }
+        #[cfg(unix)]
+        let before_inode = {
+            use std::os::unix::fs::MetadataExt;
+            fs::symlink_metadata(&link).unwrap().ino()
+        };
+        do_edit(
+            &sh,
+            "r",
+            &EditIn {
+                path: link.display().to_string(),
+                old: "original".into(),
+                new: "changed".into(),
+                replace_all: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(fs::read_to_string(&source).unwrap(), "changed bytes");
+        let cp = sh.checkpoints.list("r").unwrap().remove(0);
+        assert!(
+            cp.entries
+                .iter()
+                .any(|entry| entry.via_link_of.as_deref() == Some(link.to_string_lossy().as_ref()))
+        );
+        assert!(
+            cp.entries.len() >= 2,
+            "referent and link topology must both be captured"
+        );
+        do_cp_restore(&sh, &cp.id).unwrap();
+        assert_eq!(fs::read_to_string(&source).unwrap(), "original bytes");
+        assert_eq!(fs::read_link(&link).unwrap(), source);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(
+                fs::symlink_metadata(&link).unwrap().ino(),
+                before_inode,
+                "unchanged link was recreated"
+            );
+        }
+        // If the link object was subsequently redirected, restoring this
+        // checkpoint must restore its topology as well as the referent bytes.
+        let unrelated = work.path().join("unrelated.txt");
+        fs::write(&unrelated, "leave alone").unwrap();
+        fs::remove_file(&link).unwrap();
+        assert!(link_for_checkpoint_test(&unrelated, &link, false));
+        fs::write(&source, "changed again").unwrap();
+        do_cp_restore(&sh, &cp.id).unwrap();
+        assert_eq!(fs::read_to_string(&source).unwrap(), "original bytes");
+        assert_eq!(fs::read_link(&link).unwrap(), source);
+        assert_eq!(fs::read_to_string(&unrelated).unwrap(), "leave alone");
+    }
+
+    #[test]
+    fn write_through_symlinked_parent_and_dangling_file_is_undoable() {
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let real = work.path().join("real");
+        let alias = work.path().join("alias");
+        fs::create_dir(&real).unwrap();
+        fs::write(real.join("file.txt"), "before").unwrap();
+        if !link_for_checkpoint_test(&real, &alias, true) {
+            return;
+        }
+        let input = alias.join("file.txt");
+        do_write(
+            &sh,
+            "parent",
+            &WriteIn {
+                path: input.display().to_string(),
+                content: "after".into(),
+            },
+        )
+        .unwrap();
+        let cp = sh.checkpoints.list("parent").unwrap().remove(0);
+        assert!(cp.entries.iter().any(|entry| entry.via_link_of.as_deref() == Some(input.to_string_lossy().as_ref())));
+        do_cp_restore(&sh, &cp.id).unwrap();
+        assert_eq!(fs::read_to_string(real.join("file.txt")).unwrap(), "before");
+        assert_eq!(fs::read_link(&alias).unwrap(), real);
+
+        let missing = real.join("not-created.txt");
+        let dangling = work.path().join("dangling.txt");
+        if !link_for_checkpoint_test(&missing, &dangling, false) {
+            return;
+        }
+        do_write(
+            &sh,
+            "dangling",
+            &WriteIn {
+                path: dangling.display().to_string(),
+                content: "created".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(fs::read_to_string(&missing).unwrap(), "created");
+        let cp = sh.checkpoints.list("dangling").unwrap().remove(0);
+        do_cp_restore(&sh, &cp.id).unwrap();
+        assert!(!missing.exists());
+        assert_eq!(fs::read_link(&dangling).unwrap(), missing);
+        do_delete(
+            &sh,
+            "unlink",
+            &DeleteIn {
+                path: dangling.display().to_string(),
+                recursive: false,
+            },
+        )
+        .unwrap();
+        assert!(fs::symlink_metadata(&dangling).is_err());
+        let cp = sh.checkpoints.list("unlink").unwrap().remove(0);
+        do_cp_restore(&sh, &cp.id).unwrap();
+        assert_eq!(fs::read_link(&dangling).unwrap(), missing);
+        assert!(!missing.exists());
+    }
+
+    #[test]
+    fn restore_keeps_protected_descendants_and_exact_credential_grants() {
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let dir = work.path().join("project");
+        fs::create_dir(&dir).unwrap();
+        let file = dir.join("ordinary.txt");
+        let secret = dir.join(".env");
+        fs::write(&file, "before").unwrap();
+        fs::write(&secret, "PROTECTED_ORIGINAL").unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let (id, _) = sh.checkpoint("r", "delete", &[(&dir, &dir)]).unwrap();
+        fs::write(&file, "after").unwrap();
+        do_cp_restore(&sh, &id).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "before");
+        assert_eq!(fs::read_to_string(&secret).unwrap(), "PROTECTED_ORIGINAL");
+        assert!(!tree_has(
+            &data.path().join("checkpoints"),
+            "PROTECTED_ORIGINAL"
+        ));
+
+        let granted = shared_with(data.path(), vec![secret.clone()]);
+        do_write(
+            &granted,
+            "grant",
+            &WriteIn {
+                path: secret.display().to_string(),
+                content: "changed".into(),
+            },
+        )
+        .unwrap();
+        let cp = granted.checkpoints.list("grant").unwrap().remove(0);
+        do_cp_restore(&granted, &cp.id).unwrap();
+        assert_eq!(fs::read_to_string(&secret).unwrap(), "PROTECTED_ORIGINAL");
+    }
+
+    fn move_input(from: &Path, to: &Path) -> MoveIn {
+        MoveIn {
+            from: from.display().to_string(),
+            to: to.display().to_string(),
+            overwrite: true,
+        }
+    }
+
+    #[test]
+    fn overlapping_moves_fail_with_checkpoint_and_intact_bytes() {
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let dir = work.path().join("tree");
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        let file = dir.join("file.txt");
+        fs::write(&file, "keep").unwrap();
+        for (from, to) in [
+            (&file, &file),
+            (&dir, &dir.join("inside")),
+            (&dir.join("sub"), &dir),
+        ] {
+            let err = do_move(&sh, "move", &move_input(from, to)).unwrap_err();
+            assert!(err.to_string().contains("(checkpoint cp-"), "{err}");
+            assert!(err.to_string().contains("nothing was lost"), "{err}");
+            assert_eq!(fs::read_to_string(&file).unwrap(), "keep");
+            assert!(dir.join("sub").is_dir());
+        }
+        assert_eq!(sh.checkpoints.list("move").unwrap().len(), 3);
+    }
+
+    #[test]
+    fn failed_overwrite_move_restores_destination_and_reports_checkpoint() {
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let from = work.path().join("source.txt");
+        let to = work.path().join("destination.txt");
+        fs::write(&from, "source bytes").unwrap();
+        fs::write(&to, "destination bytes").unwrap();
+        let err = do_move_with(
+            &sh,
+            "move",
+            &move_input(&from, &to),
+            |source, destination| {
+                if grant_matches(source, &from) && grant_matches(destination, &to) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "read-only destination",
+                    ));
+                }
+                fs::rename(source, destination)
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("(checkpoint cp-"), "{err}");
+        assert!(err.to_string().contains("nothing was lost"), "{err}");
+        assert_eq!(fs::read_to_string(&from).unwrap(), "source bytes");
+        assert_eq!(fs::read_to_string(&to).unwrap(), "destination bytes");
+        assert_eq!(fs::read_dir(work.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn cross_volume_move_stages_and_rolls_back_failed_publication() {
+        for fail_publish in [false, true] {
+            let data = tempfile::tempdir().unwrap();
+            let work = tempfile::tempdir().unwrap();
+            let sh = shared_with(data.path(), Vec::new());
+            let from = work.path().join("source.txt");
+            let to = work.path().join("destination.txt");
+            fs::write(&from, "source bytes").unwrap();
+            fs::write(&to, "destination bytes").unwrap();
+            let result = do_move_with(
+                &sh,
+                "move",
+                &move_input(&from, &to),
+                |source, destination| {
+                    if grant_matches(source, &from) && grant_matches(destination, &to) {
+                        return Err(io::Error::new(
+                            io::ErrorKind::CrossesDevices,
+                            "test cross-volume",
+                        ));
+                    }
+                    if fail_publish
+                        && source.file_name().is_some_and(|name| {
+                            name.to_string_lossy().contains(".praxi-move-stage-")
+                        })
+                    {
+                        return Err(io::Error::new(
+                            io::ErrorKind::PermissionDenied,
+                            "injected publication failure",
+                        ));
+                    }
+                    fs::rename(source, destination)
+                },
+            );
+            if fail_publish {
+                let err = result.unwrap_err();
+                assert!(err.to_string().contains("(checkpoint cp-"), "{err}");
+                assert_eq!(fs::read_to_string(&from).unwrap(), "source bytes");
+                assert_eq!(fs::read_to_string(&to).unwrap(), "destination bytes");
+                assert_eq!(fs::read_dir(work.path()).unwrap().count(), 2);
+            } else {
+                result.unwrap();
+                assert!(!from.exists());
+                assert_eq!(fs::read_to_string(&to).unwrap(), "source bytes");
+                assert_eq!(fs::read_dir(work.path()).unwrap().count(), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn protected_directory_move_rolls_back_previous_children_and_replaced_file() {
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let from = work.path().join("source");
+        let to = work.path().join("destination");
+        fs::create_dir(&from).unwrap();
+        fs::write(from.join(".env"), "SECRET_STAYS").unwrap();
+        fs::write(from.join("a.txt"), "first").unwrap();
+        fs::write(from.join("b.txt"), "second").unwrap();
+        fs::write(&to, "old destination file").unwrap();
+        let err = do_move_with(
+            &sh,
+            "move",
+            &move_input(&from, &to),
+            |source, destination| {
+                if source.file_name().is_some_and(|name| name == "b.txt") {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "second move failed",
+                    ));
+                }
+                fs::rename(source, destination)
+            },
+        )
+        .unwrap_err();
+        assert!(!err.to_string().contains("rollback incomplete"), "{err}");
+        assert_eq!(fs::read_to_string(&to).unwrap(), "old destination file");
+        assert_eq!(fs::read_to_string(from.join("a.txt")).unwrap(), "first");
+        assert_eq!(fs::read_to_string(from.join("b.txt")).unwrap(), "second");
+        assert_eq!(
+            fs::read_to_string(from.join(".env")).unwrap(),
+            "SECRET_STAYS"
+        );
+        assert!(!tree_has(&data.path().join("checkpoints"), "SECRET_STAYS"));
+        assert_eq!(fs::read_dir(work.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn protected_destination_walk_never_revisits_its_own_backup_names() {
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let from = work.path().join("source");
+        let to = work.path().join("destination");
+        fs::create_dir(&from).unwrap();
+        fs::create_dir_all(to.join("nested")).unwrap();
+        fs::write(from.join("new.txt"), "new").unwrap();
+        fs::write(to.join(".env"), "outer secret").unwrap();
+        fs::write(to.join("nested/.env"), "inner secret").unwrap();
+        // Enough entries to require several directory-iterator batches. The
+        // journal creates adjacent names while clearing these old children.
+        for index in 0..1200 {
+            fs::write(to.join(format!("old-{index}")), "x").unwrap();
+            fs::write(to.join("nested").join(format!("old-{index}")), "x").unwrap();
+        }
+        let renames = std::cell::Cell::new(0);
+        do_move_with(
+            &sh,
+            "move",
+            &move_input(&from, &to),
+            |source, destination| {
+                assert!(
+                    !source
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .contains(".praxi-move-old-"),
+                    "a generated backup was revisited as a source: {}",
+                    source.display()
+                );
+                renames.set(renames.get() + 1);
+                fs::rename(source, destination)
+            },
+        )
+        .unwrap();
+        assert_eq!(renames.get(), 2401);
+        assert_eq!(fs::read_to_string(to.join("new.txt")).unwrap(), "new");
+        assert_eq!(fs::read_to_string(to.join(".env")).unwrap(), "outer secret");
+        assert_eq!(
+            fs::read_to_string(to.join("nested/.env")).unwrap(),
+            "inner secret"
+        );
+        assert_eq!(fs::read_dir(&to).unwrap().count(), 3);
+        assert_eq!(fs::read_dir(to.join("nested")).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn partial_checkpoint_stops_delete_move_and_write_and_names_skipped_paths() {
+        // Card 181 item 1: never run a destructive operation whose undo
+        // checkpoint is known to be incomplete.
+        let _reset = crate::checkpoint::test_hooks::Reset;
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let proj = work.path().join("proj");
+        fs::create_dir(&proj).unwrap();
+        for index in 0..20 {
+            fs::write(proj.join(format!("file-{index}.txt")), "keep").unwrap();
+        }
+        fs::write(proj.join("offline.dat"), "cloud only").unwrap();
+        crate::checkpoint::test_hooks::FORCE_SKIP
+            .with(|slot| *slot.borrow_mut() = Some("offline".into()));
+
+        let err = do_delete(
+            &sh,
+            "partial",
+            &DeleteIn {
+                path: proj.display().to_string(),
+                recursive: true,
+            },
+        )
+        .unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("offline.dat"), "{text}");
+        assert!(text.contains("cannot be restored"), "{text}");
+        assert_eq!(fs::read_dir(&proj).unwrap().count(), 21);
+
+        let dest = work.path().join("dest");
+        let err = do_move(&sh, "partial", &move_input(&proj, &dest)).unwrap_err();
+        assert!(err.to_string().contains("offline.dat"), "{err}");
+        assert!(!dest.exists());
+        assert_eq!(fs::read_dir(&proj).unwrap().count(), 21);
+
+        let err = do_write(
+            &sh,
+            "partial",
+            &WriteIn {
+                path: proj.join("offline.dat").display().to_string(),
+                content: "new".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("offline.dat"), "{err}");
+        assert_eq!(
+            fs::read_to_string(proj.join("offline.dat")).unwrap(),
+            "cloud only"
+        );
+
+        // Without the unreadable entry the same operations proceed.
+        crate::checkpoint::test_hooks::FORCE_SKIP.with(|slot| *slot.borrow_mut() = None);
+        do_delete(
+            &sh,
+            "partial",
+            &DeleteIn {
+                path: proj.display().to_string(),
+                recursive: true,
+            },
+        )
+        .unwrap();
+        assert!(!proj.exists());
+    }
+
+    #[test]
+    fn rejected_moves_create_no_checkpoint_and_keep_the_missing_source_message() {
+        // Card 181 item 5.
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let from = work.path().join("source.txt");
+        let to = work.path().join("destination.txt");
+        fs::write(&from, "source").unwrap();
+        fs::write(&to, "destination").unwrap();
+
+        let err = do_move(
+            &sh,
+            "reject",
+            &MoveIn {
+                from: from.display().to_string(),
+                to: to.display().to_string(),
+                overwrite: false,
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("already exists"), "{err}");
+        assert_eq!(fs::read_to_string(&to).unwrap(), "destination");
+
+        let missing = work.path().join("missing.txt");
+        let err = do_move(
+            &sh,
+            "reject",
+            &move_input(&missing, &work.path().join("elsewhere.txt")),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("does not exist"), "{err}");
+
+        let secret = work.path().join(".env");
+        let err = do_move(&sh, "reject", &move_input(&from, &secret)).unwrap_err();
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+        assert_eq!(fs::read_to_string(&from).unwrap(), "source");
+
+        assert!(
+            sh.checkpoints.list("reject").unwrap().is_empty(),
+            "a rejected move left a checkpoint: {:?}",
+            sh.checkpoints.list("reject").unwrap()
+        );
+        assert!(!tree_has(&data.path().join("checkpoints"), "destination"));
+    }
+
+    #[test]
+    fn interrupted_swap_leftovers_are_reported_by_the_next_destructive_tool() {
+        // Card 181 item 3: a crash between the two renames leaves the data
+        // beside a missing target. The next checkpoint must point at it.
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let restore_old = work
+            .path()
+            .join("report.txt.praxi-restore-old-0190aaaabbbbccccddddeeeeffff0011");
+        let move_old = work
+            .path()
+            .join(".notes.txt.praxi-move-old-0190aaaabbbbccccddddeeeeffff0022");
+        fs::write(&restore_old, "precious report").unwrap();
+        fs::write(&move_old, "precious notes").unwrap();
+        let other = work.path().join("other.txt");
+        fs::write(&other, "x").unwrap();
+        let out = do_write(
+            &sh,
+            "leftover",
+            &WriteIn {
+                path: other.display().to_string(),
+                content: "y".into(),
+            },
+        )
+        .unwrap();
+        assert!(out.contains("praxi-restore-old-0190aaaa"), "{out}");
+        assert!(out.contains("praxi-move-old-0190aaaa"), "{out}");
+        assert!(out.contains("report.txt"), "{out}");
+        assert!(out.contains("notes.txt"), "{out}");
+        assert!(out.contains("rename"), "{out}");
+        assert_eq!(fs::read_to_string(&restore_old).unwrap(), "precious report");
+        assert_eq!(fs::read_to_string(&move_old).unwrap(), "precious notes");
+    }
+
+    #[test]
+    fn cross_volume_move_keeps_a_nested_protected_link_object() {
+        // Card 181 item 7: confirm the source tree is not removed together
+        // with a link the checkpoint walk treats as protected.
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let from = work.path().join("source");
+        let to = work.path().join("destination");
+        fs::create_dir(&from).unwrap();
+        fs::write(from.join("plain.txt"), "plain").unwrap();
+        let referent = work.path().join("referent");
+        fs::create_dir(&referent).unwrap();
+        fs::write(referent.join("inside.txt"), "linked").unwrap();
+        let link = from.join(".env");
+        // A junction needs no privilege on Windows; a symlink does.
+        #[cfg(windows)]
+        let made = std::process::Command::new("cmd")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&link)
+            .arg(&referent)
+            .output()
+            .is_ok_and(|out| out.status.success());
+        #[cfg(not(windows))]
+        let made = link_for_checkpoint_test(&referent, &link, true);
+        if !made {
+            eprintln!("skipping link move regression: could not create a link");
+            return;
+        }
+        let result = do_move_with(
+            &sh,
+            "link-move",
+            &move_input(&from, &to),
+            |source, destination| {
+                if grant_matches(source, &from) && grant_matches(destination, &to) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::CrossesDevices,
+                        "test cross-volume",
+                    ));
+                }
+                fs::rename(source, destination)
+            },
+        );
+        let survives =
+            fs::symlink_metadata(&link).is_ok() || fs::symlink_metadata(to.join(".env")).is_ok();
+        assert!(
+            survives,
+            "protected link object vanished (move result: {result:?})"
+        );
+        assert_eq!(
+            fs::read_to_string(referent.join("inside.txt")).unwrap(),
+            "linked"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn junction_data_dir_keeps_its_long_final_name() {
+        // Card 181 item 9: the data directory itself can be a junction whose
+        // own name has an 8.3 alias.
+        let base = tempfile::tempdir().unwrap();
+        let real = base.path().join("real-data-target-directory");
+        fs::create_dir(&real).unwrap();
+        let junction = base.path().join("praxi-data-junction-directory");
+        let made = std::process::Command::new("cmd")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&real)
+            .output()
+            .is_ok_and(|out| out.status.success());
+        if !made {
+            eprintln!("skipping junction regression: mklink /J failed");
+            return;
+        }
+        let long = normalize_final(&win_fs::final_path_nofollow(&junction).unwrap()).unwrap();
+        let short = win_fs::short_path(&junction).unwrap();
+        if !short.to_string_lossy().contains('~') {
+            eprintln!("skipping 8.3 regression: volume does not generate short names");
+            return;
+        }
+        assert!(
+            same_path(&canonical_data_dir(&short), &long),
+            "{} vs {}",
+            canonical_data_dir(&short).display(),
+            long.display()
+        );
+    }
+
+    #[test]
+    fn destination_created_after_preflight_is_not_displaced_without_overwrite() {
+        // Review of 34e5879: `overwrite` must hold at the point of mutation,
+        // not only in the preflight that runs before a slow checkpoint.
+        let _reset = crate::checkpoint::test_hooks::Reset;
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let from = work.path().join("source.txt");
+        let to = work.path().join("destination.txt");
+        fs::write(&from, "source bytes").unwrap();
+        let late = to.clone();
+        crate::checkpoint::test_hooks::BEFORE_FILE_COPY.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move |_| {
+                if !late.exists() {
+                    fs::write(&late, "late arrival").unwrap();
+                }
+            }));
+        });
+        let err = do_move(
+            &sh,
+            "late",
+            &MoveIn {
+                from: from.display().to_string(),
+                to: to.display().to_string(),
+                overwrite: false,
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("already exists"), "{err}");
+        assert_eq!(fs::read_to_string(&from).unwrap(), "source bytes");
+        assert_eq!(fs::read_to_string(&to).unwrap(), "late arrival");
+        assert_eq!(fs::read_dir(work.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn blocked_operation_leaves_no_checkpoint_behind() {
+        let _reset = crate::checkpoint::test_hooks::Reset;
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        let proj = work.path().join("proj");
+        fs::create_dir(&proj).unwrap();
+        fs::write(proj.join("keep.txt"), "keep").unwrap();
+        fs::write(proj.join("offline.dat"), "cloud only").unwrap();
+        crate::checkpoint::test_hooks::FORCE_SKIP
+            .with(|slot| *slot.borrow_mut() = Some("offline".into()));
+        for _ in 0..2 {
+            do_delete(
+                &sh,
+                "blocked",
+                &DeleteIn {
+                    path: proj.display().to_string(),
+                    recursive: true,
+                },
+            )
+            .unwrap_err();
+        }
+        assert_eq!(sh.checkpoints.list("blocked").unwrap().len(), 0);
+        let run_dir = data.path().join("checkpoints").join("blocked");
+        let left = fs::read_dir(&run_dir).map_or(0, Iterator::count);
+        assert_eq!(left, 0, "blocked operations left checkpoint directories");
+        assert_eq!(fs::read_to_string(proj.join("keep.txt")).unwrap(), "keep");
+    }
+
+    #[test]
+    fn protected_files_do_not_count_as_skipped_for_delete_and_move() {
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let sh = shared_with(data.path(), Vec::new());
+        for (name, moving) in [("del", false), ("mov", true)] {
+            let proj = work.path().join(name);
+            fs::create_dir(&proj).unwrap();
+            fs::write(proj.join(".env"), "SECRET").unwrap();
+            fs::write(proj.join("a.txt"), "a").unwrap();
+            fs::write(proj.join("b.txt"), "b").unwrap();
+            if moving {
+                let dest = work.path().join("moved");
+                do_move(&sh, name, &move_input(&proj, &dest)).unwrap();
+                assert_eq!(fs::read_to_string(dest.join("a.txt")).unwrap(), "a");
+            } else {
+                do_delete(
+                    &sh,
+                    name,
+                    &DeleteIn {
+                        path: proj.display().to_string(),
+                        recursive: true,
+                    },
+                )
+                .unwrap();
+                assert!(!proj.join("a.txt").exists());
+            }
+            assert_eq!(fs::read_to_string(proj.join(".env")).unwrap(), "SECRET");
+            let cps = sh.checkpoints.list(name).unwrap();
+            assert_eq!(cps.len(), 1);
+            assert!(cps[0].skipped.is_empty(), "{:?}", cps[0].skipped);
+        }
+    }
+
+    #[test]
+    fn cloud_identity_failure_is_denied_instead_of_using_lexical_name() {
+        let work = tempfile::tempdir().unwrap();
+        let policy = CpPolicy {
+            data_dir: work.path().join("data"),
+            roots: Vec::new(),
+            grants: Vec::new(),
+            roots_unresolved: false,
+        };
+        let alias = work.path().join("ENV~1");
+        let err =
+            finish_cloud_node(&policy, &alias, &alias, Err(denied("identity denied"))).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+        assert!(err.to_string().contains("identity denied"));
+        assert_eq!(
+            finish_cloud_node(&policy, &alias, &alias, Ok(work.path().join(".env"))).unwrap(),
+            CheckpointNode::SkipProtected
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn missing_data_directory_under_short_ancestor_is_normalized_before_first_use() {
+        let work = tempfile::tempdir().unwrap();
+        let parent = work.path().join("Long Praxi Data Directory Parent");
+        fs::create_dir(&parent).unwrap();
+        let long_parent = normalize_final(&fs::canonicalize(&parent).unwrap()).unwrap();
+        let short_parent = win_fs::short_path(&parent).unwrap();
+        if !short_parent.to_string_lossy().contains('~') {
+            eprintln!("skipping 8.3 regression: volume does not generate short names");
+            return;
+        }
+        let missing = short_parent.join("not-yet-created").join("nested");
+        let expected = long_parent.join("not-yet-created").join("nested");
+        assert!(same_path(&canonical_data_dir(&missing), &expected));
+        let t = tools(&missing);
+        fs::create_dir_all(expected.join("vault")).unwrap();
+        for path in [
+            expected.join("devices.json"),
+            expected.join("vault/note.txt"),
+        ] {
+            fs::write(&path, "secret").unwrap();
+            let err = get(&t, "fs_read")
+                .call(&ctx(), json!({"path": path}))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+        }
     }
 
     #[tokio::test]
@@ -2892,7 +4027,12 @@ mod tests {
                 existed: true,
                 is_dir: false,
                 backup: Some("files/0".into()),
+                size: None,
+                sha256: None,
+                via_link_of: None,
             }],
+            skipped: Vec::new(),
+            links_sha256: None,
         };
         fs::write(dir.join("manifest.json"), serde_json::to_vec(&cp).unwrap()).unwrap();
         id
@@ -3029,7 +4169,12 @@ mod tests {
                 existed: true,
                 is_dir: false,
                 backup: Some("files/0".into()),
+                size: None,
+                sha256: None,
+                via_link_of: None,
             }],
+            skipped: Vec::new(),
+            links_sha256: None,
         };
         fs::write(dir.join("manifest.json"), serde_json::to_vec(&cp).unwrap()).unwrap();
         id
@@ -3098,7 +4243,12 @@ mod tests {
                 existed: true,
                 is_dir: true,
                 backup: Some("files/0".into()),
+                size: None,
+                sha256: None,
+                via_link_of: None,
             }],
+            skipped: Vec::new(),
+            links_sha256: None,
         };
         fs::write(
             cp_dir.join("manifest.json"),
@@ -3196,7 +4346,12 @@ mod tests {
                 existed: true,
                 is_dir: false,
                 backup: Some(backup.into()),
+                size: None,
+                sha256: None,
+                via_link_of: None,
             }],
+            skipped: Vec::new(),
+            links_sha256: None,
         };
         fs::write(dir.join("manifest.json"), serde_json::to_vec(&cp).unwrap()).unwrap();
         if let Some(rel) = link_rel {
@@ -3306,7 +4461,7 @@ mod tests {
 
     #[cfg(windows)]
     #[tokio::test]
-    async fn cloud_placeholder_does_not_abort_directory_delete_or_move() {
+    async fn unsavable_cloud_placeholder_stops_directory_delete_and_move_before_any_change() {
         let (_d, w, t) = setup();
         let c = ctx();
         let dir = w.path().join("proj");
@@ -3327,14 +4482,16 @@ mod tests {
             matches!(err, ToolError::PermissionDenied(_)),
             "read of a cloud placeholder was allowed: {err}"
         );
-        get(&t, "fs_delete")
+        // Card 181 item 1: a placeholder that cannot be saved in the undo
+        // checkpoint stops the delete instead of leaving 1 file restorable
+        // only by hand. Nothing is changed.
+        let err = get(&t, "fs_delete")
             .call(&c, json!({"path": &dir, "recursive": true}))
             .await
-            .unwrap();
-        assert!(
-            !dir.join("keep.txt").exists(),
-            "directory delete aborted on the cloud placeholder"
-        );
+            .unwrap_err();
+        assert!(err.to_string().contains("online-only.txt"), "{err}");
+        assert!(err.to_string().contains("cannot be restored"), "{err}");
+        assert_eq!(fs::read_to_string(dir.join("keep.txt")).unwrap(), "keep");
 
         let src = w.path().join("proj-move");
         fs::create_dir_all(&src).unwrap();
@@ -3343,11 +4500,13 @@ mod tests {
         fs::write(&moved_placeholder, b"").unwrap();
         win_fs::mark_cloud_placeholder(&moved_placeholder).expect("cloud reparse tag");
         let dest = w.path().join("proj-dest");
-        get(&t, "fs_move")
+        let err = get(&t, "fs_move")
             .call(&c, json!({"from": &src, "to": &dest}))
             .await
-            .unwrap();
-        assert_eq!(fs::read_to_string(dest.join("keep.txt")).unwrap(), "keep");
+            .unwrap_err();
+        assert!(err.to_string().contains("online-only.txt"), "{err}");
+        assert!(!dest.exists());
+        assert_eq!(fs::read_to_string(src.join("keep.txt")).unwrap(), "keep");
     }
 
     #[cfg(unix)]
