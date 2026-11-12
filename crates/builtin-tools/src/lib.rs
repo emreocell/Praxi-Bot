@@ -709,6 +709,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_reobservation_instead_of_an_action_never_shows_a_page_taken_during_a_takeover() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::new();
+        let gate = Arc::new(LatchGate {
+            reobserve: true,
+            ..LatchGate::default()
+        });
+        let browser = Arc::new(browser::fake::FakeBrowser::default());
+        let flip = Arc::clone(&gate);
+        *browser.hook.lock() = Some(Arc::new(move |_| {
+            flip.driving
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            flip.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }));
+        let mut config = BuiltinConfig::new(dir.path().into(), Arc::new(AllowAll));
+        config.browser = Some(browser.clone());
+        config.control = Some(gate);
+        let _ = register_builtin_tools(&registry, config);
+        let out = registry
+            .get("browser_click")
+            .unwrap()
+            .call(
+                &tool_registry::ToolContext::default(),
+                serde_json::json!({"ref":"e1"}),
+            )
+            .await;
+        let shown = match &out {
+            Ok(o) => match &o.content[0] {
+                tool_registry::ContentPart::Text { text } => text.clone(),
+                _ => String::new(),
+            },
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            !shown.contains("Fresh observation") && !shown.contains("snapshot"),
+            "a page captured while the user took over reached the model: {shown}"
+        );
+    }
+
+    #[tokio::test]
     async fn a_script_that_never_touches_the_computer_is_never_admitted() {
         let dir = tempfile::tempdir().unwrap();
         let registry = ToolRegistry::new();

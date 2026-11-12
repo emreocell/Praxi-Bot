@@ -932,11 +932,16 @@ impl DesktopTool {
         let gate = self.shared.control.clone();
         let epoch = gate.as_ref().map(|g| g.observation_epoch());
         let text = self.run_inner(run_id, input).await?;
-        if observing
-            && let (Some(gate), Some(epoch)) = (gate, epoch)
+        if let (Some(gate), Some(epoch)) = (gate, epoch)
             && (gate.observation_epoch() != epoch || gate.observation_refused().is_some())
         {
-            return Err(exec_err(crate::control::OBSERVATION_DISCARDED));
+            // An action's own result carries a fresh observation (the refresh
+            // after it, or the re-observation that replaced it): withheld too.
+            return if observing {
+                Err(exec_err(crate::control::OBSERVATION_DISCARDED))
+            } else {
+                Ok(crate::control::OBSERVATION_WITHHELD.to_owned())
+            };
         }
         Ok(text)
     }
@@ -1388,6 +1393,10 @@ pub(crate) mod fake {
     #[async_trait]
     impl DesktopBackend for FakeDesktop {
         async fn snapshot(&self, scope: Option<u64>) -> Result<Snapshot, DesktopError> {
+            let hook = self.hook.lock().clone();
+            if let Some(hook) = hook {
+                hook("snapshot");
+            }
             self.scopes.lock().push(scope);
             let win = scope.unwrap_or(77);
             let mut g = self.generation.lock();
@@ -1429,6 +1438,10 @@ pub(crate) mod fake {
         }
 
         async fn act(&self, action: Action) -> Result<ActionResult, DesktopError> {
+            let hook = self.hook.lock().clone();
+            if let Some(hook) = hook {
+                hook("act");
+            }
             let current = *self.generation.lock();
             let lenient = self.lenient_gen;
             let stale = |t: &Target| match t {
@@ -2144,6 +2157,36 @@ mod tests {
                 .unwrap_err();
             assert!(err.to_string().contains("discarded"), "{name}: {err}");
         }
+    }
+
+    #[tokio::test]
+    async fn the_refresh_after_an_action_never_shows_a_screen_taken_during_a_takeover() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let gate = Arc::new(ObsGate::default());
+        let d = tempfile::tempdir().unwrap();
+        let t = tools(fake.clone(), None, d.path(), settings(), Some(gate.clone()));
+        let ctx = ToolContext::default();
+        get(&t, "desktop_get_state")
+            .call(&ctx, json!({}))
+            .await
+            .unwrap();
+        let flip = Arc::clone(&gate);
+        *fake.hook.lock() = Some(Arc::new(move |what| {
+            if what == "act" {
+                flip.human_takes_over();
+            }
+        }));
+        let out = get(&t, "desktop_click")
+            .call(&ctx, json!({"index": 1, "gen": 1}))
+            .await;
+        let shown = match &out {
+            Ok(o) => text(o).to_owned(),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            !shown.contains("gen="),
+            "a screen captured while the user took over reached the model: {shown}"
+        );
     }
 
     #[tokio::test]

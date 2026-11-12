@@ -82,6 +82,10 @@ pub struct ActionPermit {
 /// See [`ActionPermit::with_validator`].
 pub type PermitValidator = std::sync::Arc<dyn Fn(u64) -> Option<String> + Send + Sync>;
 
+/// What a tool that acted (or re-observed instead of acting) returns when
+/// control changed while it ran: its screen content is withheld.
+pub const OBSERVATION_WITHHELD: &str = "Control changed while this call ran (the user took control or the control state changed), so what it saw is withheld; the action may or may not have been performed. Do not retry it; wait until the user gives control back, then observe again.";
+
 /// Returned to the model when an observation straddled a change of control.
 pub const OBSERVATION_DISCARDED: &str = "This observation was discarded: the user took control (or the control state changed) while it was being taken, so you must not see it. Do not retry it; wait until they give control back.";
 #[derive(Default)]
