@@ -82,11 +82,11 @@ pub fn detect_browser() -> bool {
                 .any(|n| dir.join(n).exists() || dir.join(format!("{n}.exe")).exists())
         })
     });
-    if on_path {
-        return true;
-    }
     #[cfg(windows)]
     {
+        if on_path {
+            return true;
+        }
         let roots = ["ProgramFiles", "ProgramFiles(x86)", "LocalAppData"];
         let rels = [
             r"Google\Chrome\Application\chrome.exe",
@@ -99,7 +99,7 @@ pub fn detect_browser() -> bool {
         })
     }
     #[cfg(not(windows))]
-    false
+    on_path
 }
 
 // ── Wire helpers ──────────────────────────────────────────────────────────────
