@@ -858,7 +858,7 @@ pub(crate) async fn put_control_state(
                     ApiError::conflict(e)
                 });
             }
-            Ok(_) => return Ok(Json(control_state_dto(&s, Some(&actor)))),
+            Ok(()) => return Ok(Json(control_state_dto(&s, Some(&actor)))),
         }
     }
     Err(ApiError::conflict("owned takeover controls the latch"))

@@ -299,13 +299,11 @@ impl ControlHub {
         if st.owned.is_none() {
             st.affected_runs = st.active_runs.keys().copied().collect();
         }
-        st.epoch = match st.epoch.checked_add(1) {
-            Some(epoch) => epoch,
-            None => {
-                st.pending = snapshot.5;
-                return Err("epoch exhausted".into());
-            }
+        let Some(next_epoch) = st.epoch.checked_add(1) else {
+            st.pending = snapshot.5;
+            return Err("epoch exhausted".into());
         };
+        st.epoch = next_epoch;
         let owned = OwnedTakeover {
             info: TakeoverInfo {
                 id: Uuid::now_v7(),

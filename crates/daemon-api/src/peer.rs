@@ -66,6 +66,12 @@ fn normalize_deny_path(path: &str) -> String {
     out
 }
 
+/// `POST /v1/control/{request_id}` answers an overlay question: local only.
+fn answers_overlay_question(path: &str) -> bool {
+    path.strip_prefix("/v1/control/")
+        .is_some_and(|rest| uuid::Uuid::parse_str(rest).is_ok())
+}
+
 async fn guard(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     let Some(peer) = req.extensions().get::<PeerIdentity>().cloned() else {
         return ApiError::forbidden("paired peer identity required").into_response();
@@ -90,12 +96,7 @@ async fn guard(State(state): State<AppState>, mut req: Request, next: Next) -> R
     if denied {
         return ApiError::forbidden("peer role does not allow this operation").into_response();
     }
-    // `POST /v1/control/{request_id}` answers an overlay question: local only.
-    if req.method() == Method::POST
-        && check_path
-            .strip_prefix("/v1/control/")
-            .is_some_and(|rest| uuid::Uuid::parse_str(rest).is_ok())
-    {
+    if req.method() == Method::POST && answers_overlay_question(&check_path) {
         return ApiError::forbidden("only the local user answers overlay questions")
             .into_response();
     }
