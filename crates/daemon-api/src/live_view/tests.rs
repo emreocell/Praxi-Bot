@@ -31,6 +31,8 @@ struct Sink {
     /// `inject` never returns; counts how often such a call was dropped.
     hang_inject: AtomicBool,
     inject_dropped: AtomicUsize,
+    /// How often `set_takeover_active(true)` was called.
+    activations: AtomicUsize,
     /// Fail `set_takeover_active(false)` (a release that dies half way).
     fail_active: AtomicBool,
     entered: tokio::sync::Notify,
@@ -76,6 +78,9 @@ impl InputSink for Sink {
         }
         if !active && self.fail_active.load(Ordering::SeqCst) {
             return Err(ViewError::Unavailable);
+        }
+        if active {
+            self.activations.fetch_add(1, Ordering::SeqCst);
         }
         self.pin.store(active, Ordering::SeqCst);
         Ok(())
@@ -1425,6 +1430,11 @@ async fn an_activation_that_lost_its_takeover_never_pins_the_backend() {
         "the activation re-pinned the backend for a takeover that no longer exists"
     );
     assert_eq!(audit_count(&t, "takeover.active"), 0);
+    assert_eq!(
+        t.target.sink.activations.load(Ordering::SeqCst),
+        0,
+        "the backend was told to pin for a takeover that no longer existed"
+    );
 }
 #[tokio::test]
 async fn an_interrupted_takeover_puts_the_session_profile_back_to_watch() {
