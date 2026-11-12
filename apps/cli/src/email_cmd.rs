@@ -181,6 +181,86 @@ pub fn add_body(a: &EmailAdd<'_>, password: &str) -> Result<Value> {
     }))
 }
 
+/// A usage error (exit 6).
+#[must_use]
+pub fn rejected(msg: &str) -> Box<dyn std::error::Error> {
+    fail(exit::REJECTED, msg.to_owned())
+}
+
+/// Arguments of `bot email add --provider agentmail`.
+#[derive(Clone, Copy)]
+pub struct AgentmailAdd<'a> {
+    /// Account name.
+    pub name: &'a str,
+    /// Hint for the local part of the new address.
+    pub name_hint: &'a str,
+    /// Custom verified domain.
+    pub domain: Option<&'a str>,
+    /// Bot (id or name); `None` is "every bot" (needs `--all-bots`).
+    pub bot: Option<&'a str>,
+    /// Senders whose mail may start a run later.
+    pub allowed_senders: &'a [String],
+}
+
+/// The request body of an AgentMail add; the API key is added by the caller.
+#[must_use]
+pub fn add_agentmail_body(a: &AgentmailAdd<'_>, api_key: &str) -> Value {
+    json!({
+        "name": a.name,
+        "provider": "agentmail",
+        "name_hint": a.name_hint,
+        "domain": a.domain,
+        "bot": a.bot,
+        "allowed_senders": a.allowed_senders,
+        "api_key": api_key,
+    })
+}
+
+/// `bot email add --provider agentmail`: creates the inbox at AgentMail with
+/// the user's own key and prints the new address.
+///
+/// # Errors
+/// Provider refusal (the daemon answers 502), invalid account (exit 6), name
+/// taken (exit 6), unknown bot (exit 5).
+pub async fn add_agentmail(
+    c: &Client,
+    a: &AgentmailAdd<'_>,
+    api_key: &str,
+    json_out: bool,
+    out: &mut dyn Write,
+) -> Result<()> {
+    let id: String;
+    let resolved: AgentmailAdd<'_>;
+    let a = if let Some(wanted) = a.bot {
+        id = resolve_bot(c, wanted).await?;
+        resolved = AgentmailAdd {
+            bot: Some(&id),
+            ..*a
+        };
+        &resolved
+    } else {
+        a
+    };
+    let created = c
+        .request(
+            Method::POST,
+            "/v1/email/accounts",
+            Some(add_agentmail_body(a, api_key)),
+        )
+        .await?;
+    if json_out {
+        return print_json(out, &created);
+    }
+    writeln!(
+        out,
+        "created {} at AgentMail as {}; check it with `bot email test {}`",
+        created["name"].as_str().unwrap_or("?"),
+        created["address"].as_str().unwrap_or("?"),
+        created["name"].as_str().unwrap_or("?"),
+    )?;
+    Ok(())
+}
+
 /// `bot email list`.
 ///
 /// # Errors
@@ -198,6 +278,21 @@ pub async fn list(c: &Client, json_out: bool, out: &mut dyn Write) -> Result<()>
         )?;
     }
     for a in items {
+        if a["provider"] == "agentmail" {
+            writeln!(
+                out,
+                "{}  {}  agentmail  bot {}  key {}",
+                a["name"].as_str().unwrap_or("?"),
+                a["address"].as_str().unwrap_or("?"),
+                a["bot"].as_str().unwrap_or("all"),
+                if a["password_set"] == true {
+                    "set"
+                } else {
+                    "MISSING"
+                },
+            )?;
+            continue;
+        }
         writeln!(
             out,
             "{}  {}  imap {}:{}  smtp {}:{}  bot {}  password {}",
@@ -262,10 +357,26 @@ pub async fn add(
 ///
 /// # Errors
 /// Unknown account (exit 5).
+#[cfg(test)]
 pub async fn rm(c: &Client, name: &str, json_out: bool, out: &mut dyn Write) -> Result<()> {
+    rm_with(c, name, false, json_out, out).await
+}
+
+/// `bot email rm <name> [--delete-inbox]`.
+///
+/// # Errors
+/// Unknown account (exit 5); the provider refusing a remote delete.
+pub async fn rm_with(
+    c: &Client,
+    name: &str,
+    delete_inbox: bool,
+    json_out: bool,
+    out: &mut dyn Write,
+) -> Result<()> {
+    let query = if delete_inbox { "?delete_inbox=true" } else { "" };
     c.request(
         Method::DELETE,
-        &format!("/v1/email/accounts/{}", enc(name)),
+        &format!("/v1/email/accounts/{}{query}", enc(name)),
         None,
     )
     .await?;
@@ -291,6 +402,8 @@ pub async fn test(c: &Client, name: &str, json_out: bool, out: &mut dyn Write) -
         .await?;
     if json_out {
         print_json(out, &r)?;
+    } else if let Some(api) = r["api"].as_str() {
+        writeln!(out, "api: {api}")?;
     } else {
         writeln!(
             out,
@@ -309,3 +422,7 @@ pub async fn test(c: &Client, name: &str, json_out: bool, out: &mut dyn Write) -
 #[cfg(test)]
 #[path = "email_cmd_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "email_cmd_agentmail_tests.rs"]
+mod agentmail_tests;
