@@ -46,6 +46,25 @@ impl Policy {
     }
 }
 
+/// Prevent inheritance of the consumed bootstrap channel. Call before tools.
+///
+/// # Errors
+/// The OS cannot seal the handle/descriptor; do not continue startup.
+pub fn seal_bootstrap_stdin() -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        windows::seal_stdin()
+    }
+    #[cfg(unix)]
+    {
+        rustix::io::fcntl_setfd(std::io::stdin(), rustix::io::FdFlags::CLOEXEC).map_err(Into::into)
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        Err(io::Error::other("bootstrap sealing unsupported"))
+    }
+}
+
 /// Observed startup state of this process, not a claim about external daemons.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Status {

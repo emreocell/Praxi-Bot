@@ -19,6 +19,17 @@ pub struct Health {
     pub uptime_secs: u64,
 }
 
+/// Observed daemon isolation state; never contains credentials.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct IsolationStatus {
+    pub privilege_split: bool,
+    pub children_scrubbed: bool,
+    pub memory_guard: bool,
+    pub no_new_privs: bool,
+    /// Praxi does not yet provide a full restricted-token/namespace sandbox.
+    pub os_sandbox: bool,
+}
+
 /// A bot.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct BotDto {

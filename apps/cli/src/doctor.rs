@@ -125,6 +125,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         check_providers(env),
         check_catalog(env),
         check_daemon(env.data_dir, env.port),
+        check_isolation(env.data_dir, env.port),
         env.browser_error.as_ref().map_or_else(
             || check_browser(env.browser.as_deref()),
             |e| Check::fail("browser", e, "install a non-snap browser or set BOT_BROWSER_PATH; use `sudo praxi doctor` for service-context validation"),
@@ -370,6 +371,111 @@ fn check_daemon(dir: &Path, port: u16) -> Check {
             format!("port {port} is in use but does not answer like the daemon"),
             "stop the other program or use --port / BOT_PORT",
         ),
+    }
+}
+
+fn check_isolation(dir: &Path, port: u16) -> Check {
+    let fetch = || -> Option<Value> {
+        let token = daemon_api::read_token(dir).ok()?;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok()?;
+        rt.block_on(async {
+            let response = reqwest::Client::new()
+                .get(format!("http://127.0.0.1:{port}/v1/isolation"))
+                .bearer_auth(token)
+                .timeout(Duration::from_millis(500))
+                .send()
+                .await
+                .ok()?;
+            if !response.status().is_success() {
+                return None;
+            }
+            response.json().await.ok()
+        })
+    };
+    isolation_report(fetch().as_ref())
+}
+
+fn isolation_report(report: Option<&Value>) -> Check {
+    const NAME: &str = "isolation";
+    if report.and_then(|v| v["privilege_split"].as_bool()) == Some(false) {
+        return Check::fail(
+            NAME,
+            "privilege split inactive",
+            "update and restart the daemon from the desktop app",
+        );
+    }
+    let Some(report) = report else {
+        return Check::warn(
+            NAME,
+            "unverified: no authenticated daemon isolation report",
+            "start the updated daemon; a token file alone does not prove isolation",
+        );
+    };
+    let fields: Option<Vec<bool>> = [
+        "privilege_split",
+        "children_scrubbed",
+        "memory_guard",
+        "no_new_privs",
+        "os_sandbox",
+    ]
+    .iter()
+    .map(|key| report[key].as_bool())
+    .collect();
+    let Some(fields) = fields else {
+        return Check::warn(
+            NAME,
+            "unverified: daemon isolation report is incomplete",
+            "update the daemon; do not infer protection from its version",
+        );
+    };
+    let detail = format!(
+        "split active; children {}; memory guard {}; no-new-privs {}; OS sandbox {}",
+        if fields[1] {
+            "scrubbed"
+        } else {
+            "scrubbing unverified"
+        },
+        if fields[2] { "active" } else { "inactive" },
+        if fields[3] { "active" } else { "inactive" },
+        if fields[4] { "active" } else { "not active" }
+    );
+    if fields[1] && fields[2] && fields[4] {
+        Check::ok(NAME, detail)
+    } else {
+        Check::warn(
+            NAME,
+            detail,
+            "arbitrary same-user programs can still tamper with files or inject code; see security guide ADR-0030",
+        )
+    }
+}
+
+#[cfg(test)]
+mod isolation_tests {
+    use super::*;
+
+    #[test]
+    fn doctor_does_not_infer_isolation_from_version_or_missing_fields() {
+        for report in [
+            None,
+            Some(json!({"version":"new"})),
+            Some(json!({"privilege_split":true})),
+        ] {
+            let check = isolation_report(report.as_ref());
+            assert_eq!(check.status, Status::Warn);
+            assert!(check.detail.contains("unverified"));
+        }
+        let report = json!({"privilege_split":true,"children_scrubbed":true,"memory_guard":true,"no_new_privs":false,"os_sandbox":false});
+        let check = isolation_report(Some(&report));
+        assert_eq!(check.status, Status::Warn);
+        assert!(check.detail.contains("split active"));
+        assert!(check.detail.contains("children scrubbed"));
+        assert!(check.detail.contains("sandbox not active"));
+        let report = json!({"privilege_split":false});
+        assert_eq!(isolation_report(Some(&report)).status, Status::Fail);
     }
 }
 

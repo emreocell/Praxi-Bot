@@ -248,6 +248,20 @@ pub(crate) async fn health(State(s): State<AppState>) -> Json<Health> {
     })
 }
 
+/// Isolation observations, accessible with the low-privilege CLI bearer.
+#[utoipa::path(get, path = "/v1/isolation", tag = "meta", security(("bearer" = [])),
+    responses((status = 200, body = crate::dto::IsolationStatus)))]
+pub(crate) async fn isolation(State(s): State<AppState>) -> Json<crate::dto::IsolationStatus> {
+    let observed = process_guard::status();
+    Json(crate::dto::IsolationStatus {
+        privilege_split: true,
+        children_scrubbed: s.children_scrubbed(),
+        memory_guard: observed.memory_guard,
+        no_new_privs: observed.no_new_privs,
+        os_sandbox: false,
+    })
+}
+
 // ------------------------------------------------------------------ bots
 
 /// List bots.

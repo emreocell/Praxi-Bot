@@ -791,6 +791,7 @@ pub fn serve(
     let recovered = agent.recover()?;
     let mut cfg = DaemonConfig::new(api_token.clone());
     cfg.management_token = Some(management_token.clone());
+    cfg.children_scrubbed = true;
     cfg.shutdown_grace = grace;
     // Extra browser origins (e.g. the desktop app's dev server), comma separated.
     if let Ok(extra) = std::env::var(ALLOWED_ORIGINS_ENV) {

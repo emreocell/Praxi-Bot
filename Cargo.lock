@@ -1740,6 +1740,7 @@ dependencies = [
  "parking_lot",
  "percent-encoding",
  "permission-engine",
+ "process-guard",
  "protocol",
  "provider-catalog",
  "rusqlite",
@@ -1759,7 +1760,6 @@ dependencies = [
  "tower",
  "utoipa",
  "uuid",
- "windows 0.62.2",
  "workflow-replay",
 ]
 

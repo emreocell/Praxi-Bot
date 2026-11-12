@@ -20,8 +20,6 @@ mod email_routes;
 pub mod error;
 #[cfg(any(test, feature = "fake-provider"))]
 pub mod fake;
-#[cfg(windows)]
-mod launch_channel;
 pub mod mcp;
 mod mcp_routes;
 pub mod openapi;
@@ -82,6 +80,8 @@ pub struct DaemonConfig {
     pub token: String,
     /// Per-launch, memory-only management bearer. Never load this from the token file.
     pub management_token: Option<String>,
+    /// The embedder verified its shell/MCP/CLI child environment wiring.
+    pub children_scrubbed: bool,
     /// Browser origins that may call the API (exact match).
     pub allowed_origins: Vec<String>,
     /// How long [`serve`] lets running tool steps finish on shutdown before
@@ -116,6 +116,7 @@ impl DaemonConfig {
         Self {
             token: token.into(),
             management_token: None,
+            children_scrubbed: false,
             allowed_origins: DEFAULT_ALLOWED_ORIGINS
                 .iter()
                 .map(ToString::to_string)
@@ -456,6 +457,9 @@ impl AppState {
     pub(crate) fn management_token(&self) -> Option<&str> {
         self.0.cfg.management_token.as_deref()
     }
+    pub(crate) fn children_scrubbed(&self) -> bool {
+        self.0.cfg.children_scrubbed
+    }
     pub(crate) fn origin_allowed(&self, origin: &str) -> bool {
         self.0.cfg.allowed_origins.iter().any(|o| o == origin)
     }
@@ -557,6 +561,7 @@ macro_rules! classified_routes {
 
 classified_routes! {
     "/v1/health" => [GET: Public => r::health],
+    "/v1/isolation" => [GET: Cli => r::isolation],
     "/v1/openapi.json" => [GET: Cli => openapi::serve_openapi],
     "/v1/bots" => [GET: Cli => r::list_bots, POST: Management => r::create_bot],
     "/v1/bots/{id}/grants" => [GET: Cli => r::list_grants, DELETE: Management => r::revoke_grant],

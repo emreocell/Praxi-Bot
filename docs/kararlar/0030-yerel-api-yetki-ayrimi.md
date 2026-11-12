@@ -188,3 +188,29 @@ Windows native subprocess testi çalıştırıldı. Linux için cross-target che
 çalıştırılır; runtime, paketlenmiş Tauri/WebView2 ve gerçek CLI sağlayıcıları
 ile uyumluluk doğrulaması PR birleşmeden önce gereklidir. Bu sonuçlar bir
 sandbox doğrulaması diye sunulamaz.
+
+## Üçüncü kilometre taşı: dosya araçları ve tanılama
+
+PR #30'un `under_data_sensitive` / `daemon_state_name` uygulaması ve testleri
+bu dala aynı yapıda geri taşınır; ikinci bir credential-name tablosu kurulmaz.
+Tek ek korunan ad `isolation.toml` olur. Kontrol/politika, bot/memory/schedule
+SQLite dosyaları ve yan dosyaları, provider/email/MCP/web/host yapılandırması,
+peer anahtarları, vault/secrets ve daemon kayıt dizinleri aynı çözümleyiciden
+geçer. Windows trailing dot/space ve ADS adları kanonikleştirilir. Aynı adlı
+normal proje dosyaları veri dizini dışında engellenmez. Mevcut açık/exact
+credential grant davranışı ve hard-link sınırı korunur; shell için sandbox
+olduğu iddia edilmez.
+
+Kimlik doğrulamalı düşük yetkili `GET /v1/isolation`, sır içermeyen gözlemleri
+döndürür: privilege split, embedder'ın doğruladığı child-env wiring'i,
+süreç memory guard'ı, no-new-privs ve Praxi-managed OS sandbox durumu.
+Embedder child-env durumunu açıkça bildirmedikçe true sayılmaz. Tam child
+sandbox henüz uygulanmadığından `os_sandbox` false kalır. `bot doctor`
+sürüme veya token dosyasının varlığına bakıp izolasyon var demez; çalışan
+daemon'dan bu raporu alır. Eski/erişilemeyen daemon veya eksik alanlar
+“unverified” olarak gösterilir; split kapalıysa fail, yalnız kısmi koruma
+varsa sınırı belirten warn üretilir.
+
+Native handle bayrakları ve process DACL API'leri tek küçük `process-guard`
+Windows modülünde toplanır. Bootstrap inheritance testi aynı içerikle oraya
+taşınır; başka crate'te yeni unsafe kod tutulmaz.

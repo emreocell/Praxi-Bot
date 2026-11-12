@@ -135,3 +135,18 @@ fails startup. Disabling memory protection logs a warning. No-new-privs prevents
 sudo/setuid/file-capability elevation and may affect older browser sandboxes.
 Process memory guards can prevent debugger/crash-dump attachment. Linux runtime
 and packaged Tauri compatibility still require validation before release.
+
+## Checking the running daemon
+
+`bot doctor` reads the authenticated `/v1/isolation` report with the low-privilege
+token. It reports the privilege split, child environment scrubbing, observed
+process memory protection, inherited no-new-privs, and the absence of a full
+Praxi child sandbox separately. Missing fields or an unavailable/older daemon
+are shown as unverified. A token file or a recent version alone proves nothing.
+
+File tools share PR #30's data-directory protection helper for authority-bearing
+state/configuration, database sidecars and private directories. `isolation.toml`
+is added to that same list. This includes canonical Windows trailing-dot/space
+and alternate-stream names. Normal project files outside the daemon data
+directory retain their usual behavior. These checks do not restrict arbitrary
+shell programs or defend against hard-link aliases created outside the tools.

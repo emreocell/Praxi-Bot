@@ -4,8 +4,11 @@
 #![allow(unsafe_code)]
 
 use std::io;
+use std::os::windows::io::{AsHandle, AsRawHandle};
 use windows::Win32::{
-    Foundation::{HLOCAL, LocalFree},
+    Foundation::{
+        HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS, HLOCAL, LocalFree, SetHandleInformation,
+    },
     Security::{
         Authorization::{
             ConvertStringSecurityDescriptorToSecurityDescriptorW, SE_KERNEL_OBJECT, SetSecurityInfo,
@@ -27,6 +30,17 @@ impl Drop for Descriptor {
             let _ = LocalFree(Some(HLOCAL(self.0.0)));
         }
     }
+}
+
+pub(super) fn seal_stdin() -> io::Result<()> {
+    seal_handle(HANDLE(std::io::stdin().as_handle().as_raw_handle()))
+}
+
+fn seal_handle(handle: HANDLE) -> io::Result<()> {
+    // SAFETY: caller holds this live stdin/pipe handle. Clear inheritance
+    // only: never close it or read from it here.
+    unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS::default()) }
+        .map_err(io::Error::other)
 }
 
 pub(super) fn protect() -> io::Result<()> {
@@ -80,12 +94,26 @@ pub(super) fn protect() -> io::Result<()> {
 mod tests {
     use super::*;
     use windows::Win32::{
-        Foundation::{CloseHandle, WIN32_ERROR},
+        Foundation::{CloseHandle, GetHandleInformation, WIN32_ERROR},
         System::Threading::{
             OpenProcess, PROCESS_ACCESS_RIGHTS, PROCESS_DUP_HANDLE,
             PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
         },
     };
+
+    #[test]
+    fn bootstrap_handle_is_explicitly_non_inheritable() {
+        let (reader, _writer) = std::io::pipe().unwrap();
+        let handle = HANDLE(reader.as_handle().as_raw_handle());
+        // SAFETY: reader owns the pipe throughout; only metadata is changed.
+        unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT.0, HANDLE_FLAG_INHERIT) }
+            .unwrap();
+        seal_handle(handle).unwrap();
+        let mut flags = 0;
+        // SAFETY: same owned handle and a writable u32.
+        unsafe { GetHandleInformation(handle, &raw mut flags) }.unwrap();
+        assert_eq!(flags & HANDLE_FLAG_INHERIT.0, 0);
+    }
 
     fn can_open(pid: u32, access: PROCESS_ACCESS_RIGHTS) -> bool {
         // SAFETY: only opens a synthetic test process; successful handles are

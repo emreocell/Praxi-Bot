@@ -72,10 +72,7 @@ pub fn read_launch_token(reader: &mut impl std::io::Read) -> std::io::Result<Str
 /// Invalid input or inability to prevent descriptor inheritance. Startup fails.
 pub fn bootstrap_from_stdin() -> std::io::Result<String> {
     let token = read_launch_token(&mut std::io::stdin().lock())?;
-    #[cfg(windows)]
-    crate::launch_channel::seal_stdin()?;
-    #[cfg(unix)]
-    rustix::io::fcntl_setfd(std::io::stdin(), rustix::io::FdFlags::CLOEXEC)?;
+    process_guard::seal_bootstrap_stdin()?;
     Ok(token)
 }
 

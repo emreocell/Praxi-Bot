@@ -17,8 +17,8 @@ toml.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading"] }
 
-[target.'cfg(target_os = "linux")'.dependencies]
-rustix = { version = "1", default-features = false, features = ["process", "thread", "std"] }
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["fs", "process", "thread", "std"] }
 
 [dev-dependencies]
 tempfile.workspace = true

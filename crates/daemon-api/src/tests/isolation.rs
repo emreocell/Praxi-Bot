@@ -1,5 +1,27 @@
 use super::*;
 
+#[tokio::test]
+async fn isolation_status_reports_observations_without_claiming_a_sandbox() {
+    let t = setup();
+    let report = send(
+        &t.app,
+        Method::GET,
+        "/v1/isolation",
+        None,
+        &[("authorization", &format!("Bearer {LOW_TOKEN}"))],
+    )
+    .await;
+    assert_eq!(report.status, StatusCode::OK);
+    let report = report.json();
+    assert_eq!(report["privilege_split"], true);
+    // Embedders do not get to assert production child wiring by default.
+    assert_eq!(report["children_scrubbed"], false);
+    assert_eq!(report["memory_guard"], false);
+    assert_eq!(report["os_sandbox"], false);
+    assert!(!report.to_string().contains(TOKEN));
+    assert!(!report.to_string().contains(LOW_TOKEN));
+}
+
 #[test]
 fn route_registry_covers_openapi_exactly() {
     use std::collections::BTreeSet;

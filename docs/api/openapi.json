@@ -1483,6 +1483,35 @@
         }
       }
     },
+    "/v1/isolation": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Isolation observations, accessible with the low-privilege CLI bearer.",
+        "operationId": "isolation",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IsolationStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "management": []
+          }
+        ]
+      }
+    },
     "/v1/mcp/catalog": {
       "get": {
         "tags": [
@@ -4054,6 +4083,35 @@
           "version": {
             "type": "string",
             "description": "Daemon crate version."
+          }
+        }
+      },
+      "IsolationStatus": {
+        "type": "object",
+        "description": "Observed daemon isolation state; never contains credentials.",
+        "required": [
+          "privilege_split",
+          "children_scrubbed",
+          "memory_guard",
+          "no_new_privs",
+          "os_sandbox"
+        ],
+        "properties": {
+          "children_scrubbed": {
+            "type": "boolean"
+          },
+          "memory_guard": {
+            "type": "boolean"
+          },
+          "no_new_privs": {
+            "type": "boolean"
+          },
+          "os_sandbox": {
+            "type": "boolean",
+            "description": "Praxi does not yet provide a full restricted-token/namespace sandbox."
+          },
+          "privilege_split": {
+            "type": "boolean"
           }
         }
       },
