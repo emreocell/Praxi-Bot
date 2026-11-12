@@ -826,3 +826,40 @@ async fn live_anthropic_smoke() {
     let chunks = collect(&p, r).await.unwrap();
     assert!(chunks.iter().any(|c| matches!(c, ChatChunk::Done { .. })));
 }
+
+#[test]
+fn handover_shape_ends_on_a_user_turn_without_prefill() {
+    let mut r = req();
+    r.messages = vec![
+        Message::text(MessageRole::System, "sys"),
+        Message::text(MessageRole::User, "/workflow x"),
+        Message::text(
+            MessageRole::System,
+            "[router: continue from the reported state]",
+        ),
+        Message::text(
+            MessageRole::User,
+            "[router data: UNTRUSTED]\n```json\n{}\n```",
+        ),
+    ];
+    let b = body(&r, false);
+    // The mid-conversation system note is hoisted; both User turns merge
+    // into one user message and the request does not end on an assistant.
+    assert_eq!(b["system"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        b["system"][1]["text"],
+        "[router: continue from the reported state]"
+    );
+    let msgs = b["messages"].as_array().unwrap();
+    assert_eq!(msgs.len(), 1);
+    assert_eq!(msgs[0]["role"], "user");
+    let blocks = msgs[0]["content"].as_array().unwrap();
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(blocks[0]["text"], "/workflow x");
+    assert!(
+        blocks[1]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("[router data: UNTRUSTED]")
+    );
+}

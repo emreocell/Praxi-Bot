@@ -145,6 +145,8 @@ pub(crate) struct TestTool {
     /// When set, behaves like `builtin_tools::finish_text`: writes `output` to
     /// this file and returns `max_inline_bytes - 100` of it plus a `SpillRef`.
     pub(crate) self_spill: Option<PathBuf>,
+    /// `Some(ids)`: only these bots may see the tool (like an MCP server's `bots`).
+    pub(crate) bots: Option<Vec<String>>,
 }
 
 pub(crate) fn tool(name: &str, effect: Effect, output: &str) -> TestTool {
@@ -162,6 +164,7 @@ pub(crate) fn tool(name: &str, effect: Effect, output: &str) -> TestTool {
         barrier: None,
         output: output.to_owned(),
         self_spill: None,
+        bots: None,
     }
 }
 
@@ -169,6 +172,11 @@ pub(crate) fn tool(name: &str, effect: Effect, output: &str) -> TestTool {
 impl Tool for TestTool {
     fn spec(&self) -> &ToolSpec {
         &self.spec
+    }
+    fn visible_to(&self, bot_id: Option<&str>) -> bool {
+        self.bots
+            .as_ref()
+            .is_none_or(|l| bot_id.is_some_and(|b| l.iter().any(|x| x == b)))
     }
     async fn call(&self, ctx: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
         self.count.fetch_add(1, Ordering::SeqCst);
@@ -538,6 +546,160 @@ async fn policy_deny_never_asks() {
     assert_eq!(w.count.load(Ordering::SeqCst), 0);
     assert!(tool_messages(&fake.request(1))[0].contains("Permission denied"));
     assert_eq!(env.storage.list_approvals(run).unwrap().len(), 0);
+}
+
+/// A loop whose registry holds the real web tools. No network is touched: no
+/// search backend is configured and the default SSRF policy refuses every URL
+/// used below before connecting.
+fn web_loop(env: &Env, fake: &Arc<Fake>, profile: BotProfile, config: LoopConfig) -> AgentLoop {
+    let registry = ToolRegistry::new();
+    let mut web = builtin_tools::web_tools::WebToolsConfig::default();
+    web.search.duckduckgo = false;
+    builtin_tools::register_web_tools(&registry, web).unwrap();
+    let lp = AgentLoop::new(
+        Arc::clone(&env.storage),
+        registry,
+        Providers::single(Arc::clone(fake) as Arc<dyn ChatProvider>),
+        config,
+    );
+    lp.add_profile(env.bot, profile);
+    lp
+}
+
+#[tokio::test]
+async fn web_search_runs_without_approval_under_the_default_policy() {
+    let env = setup();
+    let fake = Fake::new(vec![
+        calls(&[("c1", "web_search", json!({"query": "x"}))]),
+        text("done"),
+    ]);
+    let lp = web_loop(&env, &fake, profile(""), cfg(Policy::approve_destructive()));
+    let run = lp.run_turn(env.chat, "search").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(env.storage.list_approvals(run).unwrap().len(), 0);
+    // It ran (and failed offline: no backend), it was not parked.
+    assert!(tool_messages(&fake.request(1))[0].contains("no search backend"));
+}
+
+#[tokio::test]
+async fn web_fetch_asks_by_default_and_a_tool_grant_removes_the_prompt() {
+    let env = setup();
+    let url = json!({"url": "http://127.0.0.1:9/"});
+    for name in ["web_extract", "web_feed", "web_sitemap", "web_metadata"] {
+        let fake = Fake::new(vec![calls(&[("c1", name, url.clone())]), text("done")]);
+        let lp = web_loop(&env, &fake, profile(""), cfg(Policy::approve_destructive()));
+        let mut rx = lp.subscribe();
+        let run = lp.run_turn(env.chat, "read it").unwrap();
+        let Event::ApprovalNeeded(a) =
+            until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+        else {
+            unreachable!()
+        };
+        assert_eq!(a.tool_name, name);
+        lp.approve(a.call_id, ApprovalScope::Once, env.user)
+            .unwrap();
+        assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+        // Approved, so it ran; the SSRF policy still refuses the target.
+        assert!(tool_messages(&fake.request(1))[0].contains("blocked"));
+    }
+
+    // "Always allow this tool" for web_extract: the next call does not ask.
+    let fake = Fake::new(vec![
+        calls(&[("c1", "web_extract", url.clone())]),
+        text("one"),
+        calls(&[("c2", "web_extract", url.clone())]),
+        text("two"),
+    ]);
+    let lp = web_loop(&env, &fake, profile(""), cfg(Policy::approve_destructive()));
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "first").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    lp.approve(a.call_id, ApprovalScope::Always, env.user)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let run2 = lp.run_turn(env.chat, "second").unwrap();
+    assert_eq!(lp.wait(run2).await.unwrap(), RunState::Succeeded);
+    assert_eq!(
+        env.storage.list_approvals(run2).unwrap().len(),
+        0,
+        "a tool-level grant removes the prompt"
+    );
+    assert!(tool_messages(&fake.request(3))[0].contains("blocked"));
+}
+
+#[tokio::test]
+async fn browser_deny_still_denies_web_tools_and_write_browser_tools_still_ask() {
+    let env = setup();
+    let mut deny = Policy::approve_destructive();
+    deny.categories
+        .insert(PermissionCategory::Browser, Rule::new(Level::Deny));
+    let fake = Fake::new(vec![
+        calls(&[
+            ("c1", "web_extract", json!({"url": "http://127.0.0.1:9/"})),
+            ("c2", "web_search", json!({"query": "x"})),
+            ("c3", "web_feed", json!({"url": "http://127.0.0.1:9/"})),
+            ("c4", "web_sitemap", json!({"url": "http://127.0.0.1:9/"})),
+            ("c5", "web_metadata", json!({"url": "http://127.0.0.1:9/"})),
+        ]),
+        text("stopped"),
+    ]);
+    let lp = web_loop(&env, &fake, profile(""), cfg(deny));
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let msgs = tool_messages(&fake.request(1));
+    assert_eq!(msgs.len(), 5);
+    for m in &msgs {
+        assert!(m.contains("Permission denied"), "{m}");
+    }
+
+    // A mutating browser tool is unchanged: it still parks for approval.
+    let click = {
+        let mut t = tool("browser_click", Effect::Write, "clicked");
+        t.spec.category = PermissionCategory::Browser;
+        Arc::new(t)
+    };
+    let fake = Fake::new(vec![
+        calls(&[("c1", "browser_click", json!({}))]),
+        text("fine"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&click)],
+        profile(""),
+        cfg(Policy::approve_destructive()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "click").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(a.tool_name, "browser_click");
+    assert_eq!(click.count.load(Ordering::SeqCst), 0);
+    lp.cancel(run).unwrap();
+}
+
+#[test]
+fn a_tool_allow_list_without_web_hides_the_web_tools() {
+    let hidden = profile(
+        "[tools]
+allow = [\"fs_*\"]
+",
+    );
+    let shown = profile(
+        "[tools]
+allow = [\"fs_*\", \"web_*\"]
+",
+    );
+    for name in builtin_tools::web_tools::TOOL_NAMES {
+        assert!(!hidden.tool_visible(name), "{name}");
+        assert!(shown.tool_visible(name), "{name}");
+    }
 }
 
 #[tokio::test]
@@ -2306,7 +2468,7 @@ async fn k2_tool_candidates_carry_schema_parameters() {
         profile(""),
         cfg(Policy::full()),
     );
-    let cands = lp.sh.router_candidates(&profile(""));
+    let cands = lp.sh.router_candidates(&profile(""), env.bot);
     let c = cands.iter().find(|c| c.name == "n.send").unwrap();
     let json = serde_json::to_value(c).unwrap();
     let params = json["params"].as_array().unwrap();
@@ -2840,6 +3002,184 @@ async fn find_tool_and_get_tool_details_only_see_tools_visible_to_the_bot() {
     let details = &tool_messages(&fake.request(2))[1];
     assert!(details.contains("unknown tool"), "{details}");
     assert!(!details.contains("input_schema"), "{details}");
+}
+
+#[tokio::test]
+async fn bot_scoped_tools_are_hidden_from_other_bots_in_every_model_surface() {
+    let env = setup();
+    let mut scoped = tool("mcp:srv/secret", Effect::Read, "s");
+    scoped.bots = Some(vec!["some-other-bot".into()]);
+    let scoped = Arc::new(scoped);
+    let mut open = tool("mcp:open/ok", Effect::Read, "ok");
+    open.bots = None;
+    let open = Arc::new(open);
+    let mut listed = tool("mcp:mine/ok", Effect::Read, "ok");
+    listed.bots = Some(vec![env.bot.to_string()]);
+    let listed = Arc::new(listed);
+    let mut empty = tool("mcp:nobody/ok", Effect::Read, "ok");
+    empty.bots = Some(Vec::new());
+    let empty = Arc::new(empty);
+    let natives: Vec<Arc<TestTool>> = (0..4)
+        .map(|i| Arc::new(tool(&format!("t.extra{i}"), Effect::Read, "x")))
+        .collect();
+    let mut all = vec![&scoped, &open, &listed, &empty];
+    all.extend(natives.iter());
+    let fake = Fake::new(vec![
+        calls(&[("c1", "find_tool", json!({"query": "mcp tool", "k": 25}))]),
+        calls(&[("c2", "get_tool_details", json!({"name": "mcp:srv/secret"}))]),
+        calls(&[(
+            "c3",
+            "use_tool",
+            json!({"name": "mcp:srv/secret", "input": {}}),
+        )]),
+        text("done"),
+    ]);
+    let mut config = cfg(Policy::full());
+    config.discovery_threshold = 3;
+    let lp = make_loop(&env.storage, env.bot, &fake, &all, profile(""), config);
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+
+    let found = &tool_messages(&fake.request(1))[0];
+    assert!(found.contains("mcp:open/ok"), "{found}");
+    assert!(found.contains("mcp:mine/ok"), "{found}");
+    assert!(!found.contains("mcp:srv/secret"), "leaked: {found}");
+    assert!(
+        !found.contains("mcp:nobody/ok"),
+        "empty list = no bot: {found}"
+    );
+    let details = &tool_messages(&fake.request(2))[1];
+    assert!(details.contains("unknown tool"), "{details}");
+    let used = &tool_messages(&fake.request(3))[2];
+    assert!(used.contains("unknown tool"), "{used}");
+    assert_eq!(scoped.count.load(Ordering::SeqCst), 0);
+
+    // The router classifier never sees names / descriptions of tools this bot
+    // may not use; a spec the registry does not know is not visible at all.
+    let cands: Vec<String> = lp
+        .sh
+        .router_candidates(&profile(""), env.bot)
+        .into_iter()
+        .map(|c| c.name)
+        .collect();
+    assert!(cands.contains(&"mcp:mine/ok".to_owned()), "{cands:?}");
+    assert!(cands.contains(&"mcp:open/ok".to_owned()), "{cands:?}");
+    assert!(!cands.contains(&"mcp:srv/secret".to_owned()), "{cands:?}");
+    assert!(!cands.contains(&"mcp:nobody/ok".to_owned()), "{cands:?}");
+    let ghost = tool("mcp:ghost/x", Effect::Read, "g").spec;
+    assert!(!lp.sh.spec_visible(&profile(""), env.bot, &ghost));
+}
+
+#[tokio::test]
+async fn bot_scoped_tool_is_not_listed_directly_below_the_discovery_threshold() {
+    let env = setup();
+    let mut scoped = tool("n_secret", Effect::Read, "s");
+    scoped.bots = Some(vec!["some-other-bot".into()]);
+    let scoped = Arc::new(scoped);
+    let mut mine = tool("n_mine", Effect::Read, "m");
+    mine.bots = Some(vec![env.bot.to_string()]);
+    let mine = Arc::new(mine);
+    let fake = Fake::new(vec![calls(&[("c1", "n_secret", json!({}))]), text("done")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[&scoped, &mine],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let names = req_tool_names(&fake.request(0));
+    assert!(names.iter().any(|n| n.contains("mine")), "{names:?}");
+    assert!(!names.iter().any(|n| n.contains("secret")), "{names:?}");
+    assert!(tool_messages(&fake.request(1))[0].contains("unknown tool"));
+    assert_eq!(scoped.count.load(Ordering::SeqCst), 0);
+}
+
+/// `mcp:*` (the wizard's General preset) makes MCP tools *reachable*, not
+/// *prompt-free*: an MCP tool still raises an approval by default.  (The
+/// preset list itself is guarded by `apps/cli` tests.)
+#[tokio::test]
+async fn mcp_glob_exposes_mcp_tools_but_they_still_ask() {
+    let env = setup();
+    let mut mcp = tool("mcp:srv/do_it", Effect::Destructive, "mcp done");
+    mcp.spec.category = PermissionCategory::Accounts;
+    let mcp = Arc::new(mcp);
+    let read = Arc::new(tool("fs_read", Effect::Read, "x"));
+    let fake = Fake::new(vec![
+        calls(&[(
+            "c1",
+            "use_tool",
+            json!({"name": "mcp:srv/do_it", "input": {}}),
+        )]),
+        text("done"),
+    ]);
+    let prof = profile(
+        "[tools]
+allow = [\"ask_user\", \"find_tool\", \"get_tool_details\", \"use_tool\", \"fs_read\", \"mcp:*\"]
+",
+    );
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[&mcp, &read],
+        prof,
+        cfg(Policy::approve_destructive()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(a.tool_name, "mcp:srv/do_it");
+    assert_eq!(mcp.count.load(Ordering::SeqCst), 0);
+    lp.approve(a.call_id, ApprovalScope::Once, env.user)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(mcp.count.load(Ordering::SeqCst), 1);
+}
+
+/// The fail-closed `spec_visible` must not hide anything an ordinary bot may
+/// use: with the whole built-in set registered, the bot sees exactly the
+/// registry's tools (platform permitting), the discovery meta-tools included.
+#[tokio::test]
+async fn fail_closed_visibility_hides_no_registered_tool_from_an_ordinary_bot() {
+    let env = setup();
+    let fake = Fake::new(vec![text("x")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(""),
+        cfg(Policy::full()),
+    )
+    .with_builtin_tools(builtin_cfg(&env, Arc::new(NoGate)));
+    let registered: std::collections::BTreeSet<String> = lp
+        .sh
+        .tools
+        .list()
+        .into_iter()
+        .filter(|s| crate::shared::platform_ok(&s.platforms))
+        .map(|s| s.name)
+        .collect();
+    assert!(registered.len() > 20, "{registered:?}");
+    let visible: std::collections::BTreeSet<String> = lp
+        .sh
+        .visible_specs(&profile(""), env.bot)
+        .into_iter()
+        .map(|s| s.name)
+        .collect();
+    assert_eq!(visible, registered);
+    // And through the model-facing surface: nothing it offers is unregistered.
+    let offered = lp.sh.model_specs(&profile(""), env.bot, &[]);
+    assert!(!offered.is_empty());
+    for spec in offered {
+        assert!(registered.contains(&spec.name), "{}", spec.name);
+    }
 }
 
 // ---------- global event order ----------
@@ -3498,6 +3838,50 @@ async fn a_refusing_control_gate_fails_the_tool_call_with_its_message() {
     let run = lp.run_turn(env.chat, "go").unwrap();
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
     assert!(tool_messages(&fake.request(1))[0].contains("taken control"));
+}
+
+fn desk_req(run_id: String) -> builtin_tools::ControlRequest {
+    builtin_tools::ControlRequest {
+        run_id,
+        rect: None,
+        label: "Save".into(),
+        action: "click".into(),
+    }
+}
+
+#[tokio::test]
+async fn control_bridge_fails_closed_for_unknown_runs_and_a_dropped_loop() {
+    use builtin_tools::DesktopControlGate as _;
+    let env = setup();
+    let fake = Fake::new(vec![]);
+    let lp = gate_loop(&env, &fake);
+    lp.set_control_gate(Arc::new(TestGate {
+        refuse: false,
+        seen: Mutex::new(Vec::new()),
+    }));
+    let bridge = crate::control::LoopControl {
+        sh: Arc::downgrade(&lp.sh),
+    };
+    // Unknown (never live) run id and an unparsable id both refuse.
+    let err = bridge
+        .before_action(&desk_req(uuid::Uuid::now_v7().to_string()))
+        .await
+        .unwrap_err();
+    assert!(err.contains("not active"), "{err}");
+    assert!(
+        bridge
+            .before_action(&desk_req("nope".into()))
+            .await
+            .is_err()
+    );
+    // Dropped loop refuses too.
+    drop(lp);
+    assert!(
+        bridge
+            .before_action(&desk_req(uuid::Uuid::now_v7().to_string()))
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]

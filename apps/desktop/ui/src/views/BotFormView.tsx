@@ -2,6 +2,8 @@ import { type ChangeEvent, type CSSProperties, useEffect, useMemo, useRef, useSt
 import { useTranslation } from "react-i18next";
 import { Avatar, Button, Card } from "ui";
 import {
+  type Bot,
+  type McpServer,
   PERMISSION_CATEGORIES,
   type PermissionCategoryName,
   type PermissionLevel
@@ -17,6 +19,8 @@ import {
   PRESET_CHOICES,
   type PresetChoice
 } from "../lib/botProfile";
+import { AppTile } from "../components/AppTile";
+import { botHasAccess, changedApps, saveBotAndApps } from "../lib/mcpApps";
 import { FAKE_PROVIDER_ID } from "../lib/providers";
 import { type ProvidersView, providersView } from "../lib/providerView";
 import { useDaemon } from "../state/DaemonContext";
@@ -85,6 +89,16 @@ export function BotFormView({
   const { t } = useTranslation();
   const { client, bots, conn, refreshBots } = useDaemon();
   const existing = bots.find((b) => b.id === botId);
+  // Apps: one source of truth, the server's `bots` list (bot UUIDs).  `null`
+  // until loaded; `allowed` is this bot's ticked servers by name.
+  const [servers, setServers] = useState<McpServer[] | null>(null);
+  const [allowed, setAllowed] = useState<Record<string, boolean>>({});
+  // Snapshot of the ticks when the form loaded: only ticks the user changed
+  // since are written back, never a difference caused by someone else.
+  const [initialApps, setInitialApps] = useState<Record<string, boolean>>({});
+  // The bot this form created: a retry after a partial failure must update
+  // THIS bot (kept whole, so it does not depend on the bot list refreshing).
+  const [createdBot, setCreatedBot] = useState<Bot | null>(null);
   const [draft, setDraft] = useState<BotDraft>(() => draftFromBot(existing));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -111,6 +125,34 @@ export function BotFormView({
       cancelled = true;
     };
   }, [client]);
+
+  useEffect(() => {
+    if (!client) {
+      return undefined;
+    }
+    let cancelled = false;
+    client
+      .listMcpServers()
+      .then((list) => {
+        if (!cancelled) {
+          const snapshot = Object.fromEntries(
+            list.map((s) => [s.name, botHasAccess(s, existing?.id)])
+          );
+          setServers(list);
+          setAllowed(snapshot);
+          setInitialApps(snapshot);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setServers([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+    // The list is loaded once per form; ticks are local until Save.
+  }, [client, existing?.id]);
 
   const providerIds = useMemo(() => {
     const ids = new Set<string>(providerList.selectable);
@@ -150,13 +192,66 @@ export function BotFormView({
     setSaving(true);
     setError(null);
     try {
-      const config = configFromDraft(draft, existing);
+      const target = existing ?? createdBot ?? undefined;
+      const config = configFromDraft(draft, target);
       const input = { name: draft.name.trim(), config };
-      const saved = existing
-        ? await client.updateBot(existing.id, input)
-        : await client.createBot(input);
-      await refreshBots();
-      onDone(saved.id);
+      const { bot, failed, notApplied } = await saveBotAndApps(
+        client,
+        target,
+        input,
+        initialApps,
+        allowed,
+        bots.map((b) => b.id)
+      );
+      if (!target) {
+        setCreatedBot(bot);
+      }
+      await refreshBots().catch(() => {});
+      if (failed.length > 0 || notApplied.length > 0) {
+        // The bot itself is saved, its app access is not (or not as chosen):
+        // show what the servers really say now and stay on the form.
+        const fresh = await client.listMcpServers().catch(() => null);
+        const problem = new Set([...failed, ...notApplied]);
+        const actual = (name: string): boolean | undefined => {
+          const srv = fresh?.find((x) => x.name === name);
+          return srv ? botHasAccess(srv, bot.id) : undefined;
+        };
+        if (fresh) {
+          setServers(fresh);
+        }
+        setAllowed((prev) => {
+          const next = { ...prev };
+          for (const name of notApplied) {
+            next[name] = actual(name) ?? prev[name];
+          }
+          return next;
+        });
+        setInitialApps((prev) => {
+          const next = { ...prev };
+          for (const name of changedApps(prev, allowed)) {
+            if (notApplied.includes(name)) {
+              next[name] = actual(name) ?? prev[name];
+            } else if (!problem.has(name)) {
+              next[name] = allowed[name];
+            }
+          }
+          return next;
+        });
+        setError(
+          [
+            failed.length > 0
+              ? t("botForm.apps.partialFail", { names: failed.join(", ") })
+              : "",
+            notApplied.length > 0
+              ? t("botForm.apps.notApplied", { names: notApplied.join(", ") })
+              : ""
+          ]
+            .filter(Boolean)
+            .join(" ")
+        );
+        return;
+      }
+      onDone(bot.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -385,6 +480,36 @@ export function BotFormView({
               ))}
             </div>
           ) : null}
+        </Card>
+
+        <Card padding="md" className={styles.section}>
+          <h2 className={styles.heading}>{t("botForm.apps.title")}</h2>
+          {servers !== null && servers.length === 0 ? (
+            <p className={formStyles.hint}>{t("botForm.apps.none")}</p>
+          ) : (
+            <>
+              <p className={formStyles.hint}>{t("botForm.apps.hint")}</p>
+              <ul className={styles.appList} data-testid="bot-apps">
+                {(servers ?? []).map((s) => (
+                  <li key={s.name}>
+                    <label className={styles.appItem}>
+                      <input
+                        type="checkbox"
+                        className={styles.appCheck}
+                        checked={allowed[s.name] ?? false}
+                        data-testid={`bot-app-${s.name}`}
+                        onChange={(e) =>
+                          setAllowed((a) => ({ ...a, [s.name]: e.target.checked }))
+                        }
+                      />
+                      <AppTile name={s.name} small />
+                      <span className={styles.appName}>{s.name}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </Card>
 
         <Card padding="md" className={styles.section}>

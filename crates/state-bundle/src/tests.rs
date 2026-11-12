@@ -12,7 +12,7 @@ use secret_store::{MemoryStore, SecretError, SecretValue};
 
 use super::*;
 
-fn database(dir: &Path, populated: bool) {
+pub(super) fn database(dir: &Path, populated: bool) {
     drop(storage::Storage::open(dir).unwrap());
     if populated {
         Connection::open(dir.join("bot.db")).unwrap().execute_batch(
@@ -23,7 +23,7 @@ fn database(dir: &Path, populated: bool) {
     }
 }
 
-async fn bundle(dir: &Path) -> Vec<u8> {
+pub(super) async fn bundle(dir: &Path) -> Vec<u8> {
     let mut out = Vec::new();
     export(dir, &MemoryStore::new(), ExportOptions::default(), &mut out)
         .await
@@ -31,7 +31,7 @@ async fn bundle(dir: &Path) -> Vec<u8> {
     out
 }
 
-fn unpack(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
+pub(super) fn unpack(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
     tar::Archive::new(bytes)
         .entries()
         .unwrap()
@@ -45,7 +45,7 @@ fn unpack(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
         .collect()
 }
 
-fn pack(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
+pub(super) fn pack(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
     let mut builder = tar::Builder::new(Vec::new());
     for (path, bytes) in entries {
         let mut header = tar::Header::new_ustar();
@@ -59,7 +59,7 @@ fn pack(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
     builder.into_inner().unwrap()
 }
 
-fn alter_manifest(bytes: &[u8], change: impl FnOnce(&mut Manifest)) -> Vec<u8> {
+pub(super) fn alter_manifest(bytes: &[u8], change: impl FnOnce(&mut Manifest)) -> Vec<u8> {
     let mut entries = unpack(bytes);
     let last = entries.last_mut().unwrap();
     assert_eq!(last.0, "manifest.json");
@@ -69,7 +69,7 @@ fn alter_manifest(bytes: &[u8], change: impl FnOnce(&mut Manifest)) -> Vec<u8> {
     pack(&entries)
 }
 
-fn replace_database_payload(bytes: &[u8], name: &str, payload: Vec<u8>) -> Vec<u8> {
+pub(super) fn replace_payload(bytes: &[u8], name: &str, payload: Vec<u8>) -> Vec<u8> {
     use sha2::{Digest, Sha256};
 
     let mut entries = unpack(bytes);
@@ -96,7 +96,7 @@ async fn corrupt_secondary_database_preserves_destination() {
         .execute_batch("CREATE TABLE old_source(value TEXT)")
         .unwrap();
     drop(schedule);
-    let bytes = replace_database_payload(
+    let bytes = replace_payload(
         &bundle(source.path()).await,
         "schedules.db",
         b"not a SQLite database, with a correct archive checksum".to_vec(),
@@ -148,7 +148,7 @@ async fn corrupt_secondary_database_preserves_destination() {
     }));
 }
 
-async fn rejected(bytes: &[u8], opts: ImportOptions) -> ImportError {
+pub(super) async fn rejected(bytes: &[u8], opts: ImportOptions) -> ImportError {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("api-token"), "identity").unwrap();
     let result = import(dir.path(), &MemoryStore::new(), bytes, opts)
@@ -292,10 +292,41 @@ async fn exclusions_are_central_and_apply_at_every_depth() {
     }
     for (path, _) in unpack(&bundle(dir.path()).await) {
         assert!(
-            path == "bot.db" || path == "manifest.json",
+            matches!(path.as_str(), "bot.db" | "policy.json" | "manifest.json"),
             "unexpected {path}"
         );
     }
+}
+
+#[tokio::test]
+async fn skill_lock_and_publication_staging_files_are_not_bundled() {
+    let dir = tempfile::tempdir().unwrap();
+    database(dir.path(), false);
+    for (path, value) in [
+        ("skills/demo/SKILL.md", "skill"),
+        ("skills/.praxi-skills.lock", ""),
+        ("skills/.praxi-publish-abc123/SKILL.md", "half published"),
+        ("skills/.praxi-publish-old-abc123/skill/SKILL.md", "backup"),
+        ("skills/demo/.praxi-write-abc123", "half written"),
+        ("bots/a/skills/.praxi-skills.lock", ""),
+        ("bots/a/skills/x/.praxi-write-abc123", "half written"),
+    ] {
+        let path = dir.path().join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, value).unwrap();
+    }
+    let paths: Vec<String> = unpack(&bundle(dir.path()).await)
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect();
+    assert!(
+        paths.contains(&"skills/demo/SKILL.md".to_owned()),
+        "{paths:?}"
+    );
+    assert!(
+        paths.iter().all(|path| !path.contains(".praxi-")),
+        "{paths:?}"
+    );
 }
 
 #[tokio::test]
@@ -362,13 +393,27 @@ async fn secondary_future_schemas_name_the_database() {
     for db in ["memory.db", "schedules.db"] {
         let source = tempfile::tempdir().unwrap();
         database(source.path(), false);
+        if db == "schedules.db" {
+            drop(scheduler::ScheduleStore::open(source.path()).unwrap());
+        } else {
+            drop(
+                memory_store::MemoryStore::open(
+                    source.path(),
+                    Arc::new(memory_store::HashEmbedder::new(8)),
+                )
+                .unwrap(),
+            );
+        }
         let conn = Connection::open(source.path().join(db)).unwrap();
+        let supported: u32 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
         conn.execute_batch("CREATE TABLE future_table(value TEXT); PRAGMA user_version=999;")
             .unwrap();
         drop(conn);
         let error = rejected(&bundle(source.path()).await, ImportOptions::default()).await;
         assert!(
-            matches!(error, ImportError::IncompatibleSchema { db: name, found: 999, supported: 1 } if name == db)
+            matches!(error, ImportError::IncompatibleSchema { db: name, found: 999, supported: actual } if name == db && actual == supported)
         );
     }
 }
@@ -503,7 +548,7 @@ async fn database_manifest_mismatches_are_rejected() {
 }
 
 #[tokio::test]
-async fn old_manifest_without_database_schemas_imports() {
+async fn manifest_without_optional_database_schemas_imports() {
     let source = tempfile::tempdir().unwrap();
     database(source.path(), false);
     drop(scheduler::ScheduleStore::open(source.path()).unwrap());
@@ -686,7 +731,7 @@ async fn future_versions_schema_disagreement_and_missing_records_rejected() {
     database(dir.path(), false);
     let bytes = bundle(dir.path()).await;
     for change in [
-        |m: &mut Manifest| m.format_version = 2,
+        |m: &mut Manifest| m.format_version = FORMAT_VERSION + 1,
         |m: &mut Manifest| m.schema_version = 999,
         |m: &mut Manifest| m.schema_version = 1,
         |m: &mut Manifest| m.files.clear(),
@@ -718,6 +763,28 @@ async fn duplicates_unlisted_files_and_entries_after_manifest_rejected() {
             rejected(&pack(&malformed), ImportOptions::default()).await,
             ImportError::Invalid(_)
         ));
+    }
+}
+
+#[tokio::test]
+async fn sqlite_sidecar_entries_are_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    database(dir.path(), false);
+    let entries = unpack(&bundle(dir.path()).await);
+    for sidecar in [
+        "bot.db-wal",
+        "bot.db-shm",
+        "bot.db-journal",
+        "schedules.db-wal",
+        "memory.db-shm",
+    ] {
+        let mut malformed = entries.clone();
+        malformed.insert(0, (sidecar.into(), b"crafted".to_vec()));
+        let error = rejected(&pack(&malformed), ImportOptions::default()).await;
+        assert!(
+            matches!(&error, ImportError::Invalid(msg) if msg.contains("allowlist")),
+            "{sidecar}: {error:?}"
+        );
     }
 }
 
@@ -996,7 +1063,14 @@ fn swap_failure_restores_renamed_roots_and_secrets() {
     store.set("a", "old").unwrap();
     let secrets = BTreeMap::from([("a".into(), Zeroizing::new("new".into()))]);
     assert!(matches!(
-        install::commit(target.path(), &staging.0, &store, &secrets),
+        install::commit(
+            target.path(),
+            &staging.0,
+            &store,
+            &secrets,
+            &permission_engine::Policy::approve_destructive(),
+            true,
+        ),
         Err(ImportError::Io(_))
     ));
     assert_eq!(
@@ -1018,7 +1092,17 @@ fn swap_failure_restores_renamed_roots_and_secrets() {
     let store = MemoryStore::new();
     store.set("a", "old").unwrap();
     let secrets = BTreeMap::from([("a".into(), Zeroizing::new("new".into()))]);
-    assert!(install::commit(target.path(), &staging.0, &store, &secrets).is_err());
+    assert!(
+        install::commit(
+            target.path(),
+            &staging.0,
+            &store,
+            &secrets,
+            &permission_engine::Policy::approve_destructive(),
+            true,
+        )
+        .is_err()
+    );
     assert_eq!(
         fs::read_to_string(target.path().join("bots/original")).unwrap(),
         "old profile"

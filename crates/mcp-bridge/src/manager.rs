@@ -3,6 +3,7 @@
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
+use crate::diagnostics::ExternalRedactor;
 use parking_lot::Mutex;
 use rmcp::{
     model::{CallToolRequestParams, CallToolResult, JsonObject},
@@ -13,9 +14,12 @@ use tool_registry::{Tool, ToolRegistry};
 
 use crate::{
     config::{McpServerConfig, ToolFilter},
+    diagnostics::StderrLog,
+    discovery::discover,
     error::{McpError, Result},
+    session::Session,
     tool::{McpToolAdapter, qualified_name},
-    transport::{Session, StderrLog, open, resolve_secrets},
+    transport::{open, resolve_secrets},
 };
 
 /// Exponential reconnect backoff: `initial`, `2*initial`, ... capped at `max`.
@@ -58,7 +62,8 @@ pub struct McpPolicy {
     pub quarantine_after: u32,
     /// Reconnect backoff.
     pub backoff: Backoff,
-    /// Bound for spawn + MCP handshake.
+    /// Bound for spawn + MCP handshake, and separately for the entire
+    /// tools/list discovery (32 pages, 1024 tools, 4 MiB of schemas/metadata).
     pub connect_timeout: Duration,
     /// Bound for one tool call.
     pub call_timeout: Duration,
@@ -104,6 +109,8 @@ pub struct ServerSnapshot {
 }
 
 struct State {
+    generation: u64,
+    retired: bool,
     status: ServerStatus,
     failures: u32,
     tools: Vec<String>,
@@ -117,13 +124,25 @@ pub(crate) struct Server {
     registry: ToolRegistry,
     policy: McpPolicy,
     secrets: Option<Arc<dyn SecretStore>>,
+    redactor: Option<ExternalRedactor>,
     stderr: Arc<StderrLog>,
     /// The session; the async mutex also serialises (re)connects.
     session: tokio::sync::Mutex<Option<Arc<Session>>>,
     state: Mutex<State>,
+    /// Discovery and explicit reconnects serialize only for this server.
+    operation: tokio::sync::Mutex<()>,
+    retired: tokio::sync::watch::Sender<bool>,
+    /// Live copy of `config.bots`: adapters read this, so a `bots` change
+    /// takes effect on the next call without restarting the server.
+    bots: Mutex<Option<Vec<String>>>,
 }
 
 impl Server {
+    /// The bots allowed right now (`None` = all, `Some([])` = none).
+    pub(crate) fn bots(&self) -> Option<Vec<String>> {
+        self.bots.lock().clone()
+    }
+
     pub(crate) fn id(&self) -> &str {
         &self.config.id
     }
@@ -137,17 +156,41 @@ impl Server {
     }
 
     fn check_usable(&self) -> Result<()> {
-        match self.state.lock().status {
+        let st = self.state.lock();
+        if st.retired {
+            return Err(McpError::UnknownServer(self.id().to_owned()));
+        }
+        match st.status {
             ServerStatus::Quarantined => Err(McpError::Quarantined(self.config.id.clone())),
             ServerStatus::Disabled => Err(McpError::Disabled(self.config.id.clone())),
             ServerStatus::Disconnected | ServerStatus::Connected => Ok(()),
         }
     }
 
+    async fn until_retired<T>(
+        &self,
+        work: impl std::future::Future<Output = Result<T>>,
+    ) -> Result<T> {
+        let mut retired = self.retired.subscribe();
+        tokio::select! {
+            biased;
+            () = async {
+                let already_retired = *retired.borrow_and_update();
+                if !already_retired {
+                    let _ = retired.changed().await;
+                }
+            } => Err(McpError::UnknownServer(self.id().to_owned())),
+            result = work => result,
+        }
+    }
+
     /// Count a failure; quarantine (and hide the tools) when the threshold is hit.
     fn record_failure(&self, error: &McpError) {
         let mut st = self.state.lock();
-        st.failures += 1;
+        if st.retired {
+            return;
+        }
+        st.failures = st.failures.saturating_add(1);
         st.last_error = Some(error.to_string());
         if st.status == ServerStatus::Connected {
             st.status = ServerStatus::Disconnected;
@@ -161,10 +204,32 @@ impl Server {
         }
     }
 
-    fn record_success(&self) {
-        let mut st = self.state.lock();
-        st.failures = 0;
-        st.last_error = None;
+    async fn record_session_success(&self, session: &Arc<Session>) {
+        let slot = self.session.lock().await;
+        if slot
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, session))
+        {
+            let mut st = self.state.lock();
+            if !st.retired {
+                st.failures = 0;
+                st.last_error = None;
+            }
+        }
+    }
+
+    /// An old in-flight call must not clear or quarantine a replacement session.
+    async fn fail_session(&self, session: &Arc<Session>, error: &McpError) {
+        let mut slot = self.session.lock().await;
+        if slot
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, session))
+        {
+            if let Some(old) = slot.take() {
+                old.request_close();
+            }
+            self.record_failure(error);
+        }
     }
 
     /// Return a live session, (re)connecting with backoff if needed.
@@ -172,16 +237,24 @@ impl Server {
     /// lazy reconnect on the call path (otherwise a server that connects fine
     /// but crashes on every call would never reach the threshold).
     async fn ensure_connected(&self, reset_on_success: bool) -> Result<Arc<Session>> {
+        self.until_retired(self.connect_session(reset_on_success))
+            .await
+    }
+
+    async fn connect_session(&self, reset_on_success: bool) -> Result<Arc<Session>> {
         let mut slot = self.session.lock().await;
+        self.check_usable()?;
         if let Some(s) = slot.as_ref() {
             if Self::is_alive(s) {
                 return Ok(Arc::clone(s));
             }
-            *slot = None;
+            if let Some(old) = slot.take() {
+                old.request_close();
+            }
         }
         self.check_usable()?;
         // Secrets are resolved fresh on every connect cycle and only held for
-        // the duration of the attempts.  A missing secret means nothing is
+        // the attempts and the connection's diagnostic redactor. A missing secret means nothing is
         // spawned and nothing is retried.
         let secrets = match resolve_secrets(&self.config, self.secrets.as_deref()) {
             Ok(s) => s,
@@ -198,20 +271,23 @@ impl Server {
                 &secrets,
                 &self.stderr,
                 self.policy.connect_timeout,
+                self.redactor.clone(),
             )
             .await
             {
                 Ok(session) => {
                     let session = Arc::new(session);
+                    let mut st = self.state.lock();
+                    if st.retired {
+                        return Err(McpError::UnknownServer(self.id().to_owned()));
+                    }
                     *slot = Some(Arc::clone(&session));
-                    {
-                        let mut st = self.state.lock();
-                        if st.status == ServerStatus::Disconnected {
-                            st.status = ServerStatus::Connected;
-                        }
+                    if st.status == ServerStatus::Disconnected {
+                        st.status = ServerStatus::Connected;
                     }
                     if reset_on_success {
-                        self.record_success();
+                        st.failures = 0;
+                        st.last_error = None;
                     }
                     return Ok(session);
                 }
@@ -235,7 +311,9 @@ impl Server {
     }
 
     async fn drop_session(&self) {
-        *self.session.lock().await = None;
+        if let Some(old) = self.session.lock().await.take() {
+            old.request_close();
+        }
     }
 
     /// Cancel the session and wait until its stdio child (and, via the process
@@ -253,6 +331,15 @@ impl Server {
         remote_name: &str,
         arguments: Option<JsonObject>,
     ) -> Result<CallToolResult> {
+        self.until_retired(self.call_inner(remote_name, arguments))
+            .await
+    }
+
+    async fn call_inner(
+        &self,
+        remote_name: &str,
+        arguments: Option<JsonObject>,
+    ) -> Result<CallToolResult> {
         self.check_usable()?;
         let session = self.ensure_connected(false).await?;
         let mut params = CallToolRequestParams::new(remote_name.to_owned());
@@ -262,16 +349,16 @@ impl Server {
             tokio::time::timeout(self.policy.call_timeout, session.peer().call_tool(params)).await;
         let failure = match outcome {
             Ok(Ok(result)) => {
-                self.record_success();
+                self.record_session_success(&session).await;
                 return Ok(result);
             }
             // The server answered with a JSON-RPC error: it is alive.
             Ok(Err(ServiceError::McpError(e))) => {
-                self.record_success();
-                return Err(McpError::Transport {
+                self.record_session_success(&session).await;
+                return Err(session.redactor.error(McpError::Transport {
                     server: id,
                     message: e.to_string(),
-                });
+                }));
             }
             Ok(Err(e)) => McpError::Transport {
                 server: id,
@@ -282,27 +369,75 @@ impl Server {
                 seconds: self.policy.call_timeout.as_secs().max(1),
             },
         };
-        self.drop_session().await;
-        self.record_failure(&failure);
+        let failure = session.redactor.error(failure);
+        self.fail_session(&session, &failure).await;
         Err(failure)
     }
 
     /// Connect, list the tools and (re)register the permitted ones.
     async fn sync_tools(self: &Arc<Self>) -> Result<usize> {
+        self.until_retired(async {
+            let _operation = self.operation.lock().await;
+            self.sync_tools_locked().await
+        })
+        .await
+    }
+
+    async fn reenable(self: &Arc<Self>) -> Result<usize> {
+        self.until_retired(async {
+            let _operation = self.operation.lock().await;
+            {
+                let mut st = self.state.lock();
+                if st.retired {
+                    return Err(McpError::UnknownServer(self.id().to_owned()));
+                }
+                if st.status == ServerStatus::Disabled {
+                    return Err(McpError::Disabled(self.id().to_owned()));
+                }
+                st.status = ServerStatus::Disconnected;
+                st.failures = 0;
+                st.last_error = None;
+            }
+            self.drop_session().await;
+            self.sync_tools_locked().await
+        })
+        .await
+    }
+
+    async fn sync_tools_locked(self: &Arc<Self>) -> Result<usize> {
+        self.check_usable()?;
+        let generation = {
+            let mut st = self.state.lock();
+            st.generation = st.generation.wrapping_add(1);
+            st.generation
+        };
         let session = self.ensure_connected(true).await?;
-        let listed = match session.peer().list_all_tools().await {
-            Ok(t) => t,
-            Err(e) => {
-                let err = McpError::Transport {
-                    server: self.config.id.clone(),
-                    message: format!("tools/list: {e}"),
-                };
-                self.drop_session().await;
-                self.record_failure(&err);
-                return Err(err);
+        let listed = match discover(&session, self.id(), self.policy.connect_timeout).await {
+            Ok(tools) => tools,
+            Err(error) => {
+                self.fail_session(&session, &error).await;
+                return Err(error);
             }
         };
+        // Lock in the same order as connect/failure handling. A concurrent
+        // call can replace the session without starting another discovery.
+        let slot = self.session.lock().await;
         let mut st = self.state.lock();
+        if st.retired || st.generation != generation {
+            return Err(McpError::UnknownServer(self.id().to_owned()));
+        }
+        if !slot
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, &session))
+        {
+            return Err(McpError::Transport {
+                server: self.id().to_owned(),
+                message: "tools/list session was replaced before registration".to_owned(),
+            });
+        }
+        if st.status == ServerStatus::Quarantined {
+            return Err(McpError::Quarantined(self.id().to_owned()));
+        }
         for name in st.tools.drain(..) {
             self.registry.unregister(&name);
         }
@@ -315,7 +450,7 @@ impl Server {
             if self.registry.register(adapter) {
                 st.tools.push(name);
             } else {
-                tracing::warn!(tool = %name, "MCP tool name already registered; skipped");
+                tracing::warn!(tool = %session.redactor.scrub(&name), "MCP tool name already registered; skipped");
             }
         }
         st.status = ServerStatus::Connected;
@@ -324,8 +459,12 @@ impl Server {
         Ok(st.tools.len())
     }
 
-    fn unregister_all(&self) {
+    fn retire(&self) {
         let mut st = self.state.lock();
+        st.retired = true;
+        st.generation = st.generation.wrapping_add(1);
+        st.status = ServerStatus::Disconnected;
+        self.retired.send_replace(true);
         for name in st.tools.drain(..) {
             self.registry.unregister(&name);
         }
@@ -343,32 +482,48 @@ impl Server {
     }
 }
 
-/// How long [`McpManager::shutdown`] waits for one session to finish closing
-/// (the transport itself also bounds the child wait).
-const SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(8);
-
-/// Cancel `session` and wait for its service task, which closes the transport
-/// and reaps the child. In-flight callers are given a moment to drop their
-/// clones so the task can be awaited rather than aborted.
+/// Signal the session's runtime owner and wait for its bounded cleanup.
+/// In-flight callers may retain their peer handles without delaying shutdown.
 async fn close_session(session: Arc<Session>) {
-    session.cancellation_token().cancel();
-    let mut held = session;
-    let give_up = tokio::time::Instant::now() + Duration::from_secs(2);
-    loop {
-        match Arc::try_unwrap(held) {
-            Ok(mut owned) => {
-                let _ = tokio::time::timeout(SESSION_CLOSE_TIMEOUT, owned.close()).await;
-                return;
-            }
-            Err(shared) => {
-                if tokio::time::Instant::now() >= give_up {
-                    drop(shared);
-                    return;
-                }
-                tokio::time::sleep(Duration::from_millis(25)).await;
-                held = shared;
-            }
+    session.close().await;
+}
+
+/// A particular registration, unaffected by removing/replacing the same id.
+/// Hosts can prepare registry changes under a short configuration lock and do
+/// remote work through this handle after releasing that lock.
+#[derive(Clone)]
+pub struct McpServerHandle(Arc<Server>);
+
+impl McpServerHandle {
+    /// Whether both handles are the same registration (not a re-registered copy).
+    #[must_use]
+    pub fn same_server(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
+    /// Discover and register this server's tools, with the manager's limits.
+    ///
+    /// # Errors
+    /// Connection/discovery failure, or this registration was removed.
+    pub async fn connect(&self) -> Result<usize> {
+        if !self.0.config.enabled {
+            return Ok(0);
         }
+        self.0.sync_tools().await
+    }
+
+    /// Clear quarantine and reconnect this registration.
+    ///
+    /// # Errors
+    /// Disabled, removed, or connection/discovery failure.
+    pub async fn reenable(&self) -> Result<usize> {
+        self.0.reenable().await
+    }
+
+    /// Retire this registration and wait for its transport to close.
+    pub async fn close(&self) {
+        self.0.retire();
+        self.0.close_session().await;
     }
 }
 
@@ -377,6 +532,7 @@ pub struct McpManager {
     registry: ToolRegistry,
     policy: McpPolicy,
     secrets: Option<Arc<dyn SecretStore>>,
+    redactor: Option<ExternalRedactor>,
     servers: Mutex<BTreeMap<String, Arc<Server>>>,
 }
 
@@ -394,6 +550,7 @@ impl McpManager {
             registry,
             policy,
             secrets: None,
+            redactor: None,
             servers: Mutex::new(BTreeMap::new()),
         }
     }
@@ -403,6 +560,15 @@ impl McpManager {
     #[must_use]
     pub fn with_secret_store(mut self, store: Arc<dyn SecretStore>) -> Self {
         self.secrets = Some(store);
+        self
+    }
+
+    /// Live host redactor (the daemon's `SharedRedactor::redact`) applied to
+    /// every MCP diagnostic, after the per-connection masking: server stderr,
+    /// forwarded rmcp warnings and errors, and connect/discovery errors.
+    #[must_use]
+    pub fn with_redactor(mut self, redactor: ExternalRedactor) -> Self {
+        self.redactor = Some(redactor);
         self
     }
 
@@ -422,15 +588,27 @@ impl McpManager {
     /// # Errors
     /// Invalid or duplicate config, or the connect failure.
     pub async fn add_server(&self, config: McpServerConfig) -> Result<usize> {
+        self.register_server(config)?.connect().await
+    }
+
+    /// Register configuration without performing remote I/O. Connect the
+    /// returned handle after releasing the host's configuration/persistence lock.
+    ///
+    /// # Errors
+    /// Invalid or duplicate configuration.
+    pub fn register_server(&self, config: McpServerConfig) -> Result<McpServerHandle> {
         config.validate()?;
         let server = Arc::new(Server {
             filter: config.tool_filter()?,
             registry: self.registry.clone(),
             policy: self.policy,
             secrets: self.secrets.clone(),
+            redactor: self.redactor.clone(),
             stderr: Arc::default(),
             session: tokio::sync::Mutex::new(None),
             state: Mutex::new(State {
+                generation: 0,
+                retired: false,
                 status: if config.enabled {
                     ServerStatus::Disconnected
                 } else {
@@ -440,6 +618,9 @@ impl McpManager {
                 tools: Vec::new(),
                 last_error: None,
             }),
+            operation: tokio::sync::Mutex::new(()),
+            retired: tokio::sync::watch::channel(false).0,
+            bots: Mutex::new(config.bots.clone()),
             config,
         });
         {
@@ -452,11 +633,33 @@ impl McpManager {
             }
             servers.insert(server.id().to_owned(), Arc::clone(&server));
         }
-        if server.config.enabled {
-            server.sync_tools().await
-        } else {
-            Ok(0)
-        }
+        Ok(McpServerHandle(server))
+    }
+
+    /// The live `bots` list of server `id` (`None` = all bots).
+    ///
+    /// # Errors
+    /// No server with this id is registered.
+    pub fn server_bots(&self, id: &str) -> Result<Option<Vec<String>>> {
+        Ok(self.get(id)?.bots())
+    }
+
+    /// Change who may use server `id` without touching its connection: calls
+    /// already running finish, and the next call (and discovery) sees `bots`.
+    ///
+    /// # Errors
+    /// No server with this id is registered.
+    pub fn set_server_bots(&self, id: &str, bots: Option<Vec<String>>) -> Result<()> {
+        *self.get(id)?.bots.lock() = bots;
+        Ok(())
+    }
+
+    /// Capture a particular registration before releasing a host's lock.
+    ///
+    /// # Errors
+    /// No server with this id is registered.
+    pub fn server_handle(&self, id: &str) -> Result<McpServerHandle> {
+        self.get(id).map(McpServerHandle)
     }
 
     /// Register many servers (e.g. from a config store), connecting them
@@ -484,18 +687,7 @@ impl McpManager {
     /// # Errors
     /// Unknown server, or the connect failure (which counts as a failure again).
     pub async fn reenable(&self, id: &str) -> Result<usize> {
-        let server = self.get(id)?;
-        {
-            let mut st = server.state.lock();
-            if st.status == ServerStatus::Disabled {
-                return Err(McpError::Disabled(id.to_owned()));
-            }
-            st.status = ServerStatus::Disconnected;
-            st.failures = 0;
-            st.last_error = None;
-        }
-        server.drop_session().await;
-        server.sync_tools().await
+        self.get(id)?.reenable().await
     }
 
     /// Disconnect and forget a server, unregistering its tools.
@@ -503,19 +695,30 @@ impl McpManager {
     /// # Errors
     /// [`McpError::UnknownServer`].
     pub async fn remove_server(&self, id: &str) -> Result<()> {
-        let server = self
-            .servers
-            .lock()
+        self.detach_server(id)?.close().await;
+        Ok(())
+    }
+
+    /// Remove and invalidate a registration without waiting for remote I/O.
+    /// The returned handle can be closed outside a host's global lock.
+    ///
+    /// # Errors
+    /// No server with this id is registered.
+    pub fn detach_server(&self, id: &str) -> Result<McpServerHandle> {
+        let mut servers = self.servers.lock();
+        let server = servers
             .remove(id)
             .ok_or_else(|| McpError::UnknownServer(id.to_owned()))?;
-        server.unregister_all();
-        server.close_session().await;
-        Ok(())
+        server.retire();
+        Ok(McpServerHandle(server))
     }
 
     /// Cancel every session and wait for each stdio child to exit.
     pub async fn shutdown(&self) {
         let all: Vec<_> = self.servers.lock().values().cloned().collect();
+        for server in &all {
+            server.retire();
+        }
         let closes = all.iter().map(|s| s.close_session());
         futures::future::join_all(closes).await;
     }
@@ -532,7 +735,7 @@ impl McpManager {
         self.servers.lock().values().map(|s| s.snapshot()).collect()
     }
 
-    /// The most recent stderr lines (at most 200) captured from a stdio server.
+    /// Redacted stderr of a stdio server (at most 200 lines / 64 KiB).
     #[must_use]
     pub fn stderr_tail(&self, id: &str) -> Vec<String> {
         self.servers
@@ -559,5 +762,266 @@ mod tests {
         assert_eq!(b.delay(2), Duration::from_millis(400));
         assert_eq!(b.delay(3), Duration::from_millis(450));
         assert_eq!(b.delay(100), Duration::from_millis(450));
+    }
+
+    enum Reply {
+        Never,
+        Pages,
+        Gated(&'static str),
+        Immediate(&'static str),
+    }
+
+    struct DiscoveryServer {
+        reply: Reply,
+        entered: tokio::sync::mpsc::UnboundedSender<()>,
+        release: Arc<tokio::sync::Notify>,
+    }
+
+    impl rmcp::ServerHandler for DiscoveryServer {
+        fn get_info(&self) -> rmcp::model::ServerConfig {
+            rmcp::model::ServerConfig::new(
+                rmcp::model::ServerCapabilities::builder()
+                    .enable_tools()
+                    .build(),
+            )
+        }
+
+        async fn list_tools(
+            &self,
+            request: Option<rmcp::model::PaginatedRequestParams>,
+            _: rmcp::service::RequestContext<rmcp::RoleServer>,
+        ) -> std::result::Result<rmcp::model::ListToolsResult, rmcp::ErrorData> {
+            self.entered.send(()).unwrap();
+            let name = match self.reply {
+                Reply::Never => std::future::pending().await,
+                Reply::Pages => {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    "page"
+                }
+                Reply::Gated(name) => {
+                    self.release.notified().await;
+                    name
+                }
+                Reply::Immediate(name) => name,
+            };
+            let mut result =
+                rmcp::model::ListToolsResult::with_all_items(vec![rmcp::model::Tool::new(
+                    name,
+                    "fixture",
+                    Arc::default(),
+                )]);
+            if matches!(self.reply, Reply::Pages) {
+                let cursor = request.and_then(|r| r.cursor).unwrap_or_default();
+                result.next_cursor = Some(format!("{cursor}x"));
+            }
+            Ok(result)
+        }
+    }
+
+    /// Fully initialized MCP session over memory pipes: no subprocesses,
+    /// sockets, environment mutation, or wall-clock sleeps.
+    async fn connected(
+        manager: &McpManager,
+        id: &str,
+        reply: Reply,
+    ) -> (
+        McpServerHandle,
+        tokio::sync::mpsc::UnboundedReceiver<()>,
+        Arc<tokio::sync::Notify>,
+        rmcp::service::RunningService<rmcp::RoleServer, DiscoveryServer>,
+    ) {
+        use rmcp::ServiceExt;
+        let handle = manager
+            .register_server(McpServerConfig::stdio(id, "unused-in-memory", [""; 0]))
+            .unwrap();
+        let (entered, received) = tokio::sync::mpsc::unbounded_channel();
+        let release = Arc::new(tokio::sync::Notify::new());
+        let server = DiscoveryServer {
+            reply,
+            entered,
+            release: Arc::clone(&release),
+        };
+        let (client_io, server_io) = tokio::io::duplex(16 * 1024);
+        let (client, server) = tokio::join!(().serve(client_io), server.serve(server_io));
+        *handle.0.session.lock().await = Some(Arc::new(Session::from_running(
+            client.unwrap(),
+            crate::diagnostics::Redactor::default(),
+        )));
+        handle.0.state.lock().status = ServerStatus::Connected;
+        (handle, received, release, server.unwrap())
+    }
+
+    fn short_deadline() -> McpPolicy {
+        McpPolicy {
+            connect_timeout: Duration::from_secs(3),
+            ..McpPolicy::default()
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn initialized_server_that_never_lists_tools_times_out() {
+        let registry = ToolRegistry::new();
+        let manager = McpManager::with_policy(registry.clone(), short_deadline());
+        let (handle, mut entered, _, _server) = connected(&manager, "hung", Reply::Never).await;
+        let discovery = tokio::spawn(async move { handle.connect().await });
+        entered.recv().await.unwrap();
+        tokio::time::advance(Duration::from_secs(3)).await;
+        assert!(matches!(
+            discovery.await.unwrap(),
+            Err(McpError::Timeout { .. })
+        ));
+        let snapshot = manager.snapshots().pop().unwrap();
+        assert_eq!(snapshot.status, ServerStatus::Disconnected);
+        assert_eq!(snapshot.consecutive_failures, 1);
+        assert!(registry.list().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn discovery_deadline_covers_all_pages_together() {
+        let registry = ToolRegistry::new();
+        let manager = McpManager::with_policy(registry.clone(), short_deadline());
+        let (handle, mut entered, _, _server) = connected(&manager, "pages", Reply::Pages).await;
+        let discovery = tokio::spawn(async move { handle.connect().await });
+        entered.recv().await.unwrap();
+        tokio::time::advance(Duration::from_secs(2)).await;
+        entered.recv().await.unwrap();
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(matches!(
+            discovery.await.unwrap(),
+            Err(McpError::Timeout { .. })
+        ));
+        assert!(
+            registry.list().is_empty(),
+            "partial lists must never be published"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn removed_discovery_cannot_publish_or_remove_replacement_tools() {
+        let registry = ToolRegistry::new();
+        let manager = McpManager::with_policy(registry.clone(), short_deadline());
+        let (old, mut entered, release, _old_server) =
+            connected(&manager, "same", Reply::Gated("obsolete")).await;
+        let old_connect = old.clone();
+        let discovery = tokio::spawn(async move { old_connect.connect().await });
+        entered.recv().await.unwrap();
+        let retired = manager.detach_server("same").unwrap();
+        let (new, _entered, _, _new_server) =
+            connected(&manager, "same", Reply::Immediate("current")).await;
+        assert_eq!(new.connect().await.unwrap(), 1);
+        release.notify_one();
+        assert!(matches!(
+            discovery.await.unwrap(),
+            Err(McpError::UnknownServer(_))
+        ));
+        assert!(matches!(
+            old.connect().await,
+            Err(McpError::UnknownServer(_))
+        ));
+        retired.close().await;
+        assert!(registry.get("mcp:same/obsolete").is_none());
+        assert!(registry.get("mcp:same/current").is_some());
+        assert_eq!(manager.snapshots()[0].tools, ["mcp:same/current"]);
+        manager.shutdown().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stale_session_completion_cannot_publish_or_fail_a_reconnected_session() {
+        let registry = ToolRegistry::new();
+        let manager = McpManager::with_policy(registry.clone(), short_deadline());
+        let (handle, mut entered, release, _old_server) =
+            connected(&manager, "replaced", Reply::Gated("obsolete")).await;
+        let old = handle.0.session.lock().await.as_ref().unwrap().clone();
+        let pending = handle.clone();
+        let discovery = tokio::spawn(async move { pending.connect().await });
+        entered.recv().await.unwrap();
+
+        // Deliberately leave the old transport alive to model a response
+        // already queued when a failed connection was replaced.
+        let first_failure = McpError::Transport {
+            server: "replaced".to_owned(),
+            message: "first failure".to_owned(),
+        };
+        handle.0.session.lock().await.take();
+        handle.0.record_failure(&first_failure);
+        let (donor, _new_entered, _, _new_server) =
+            connected(&manager, "donor", Reply::Immediate("current")).await;
+        let new = donor.0.session.lock().await.take().unwrap();
+        *handle.0.session.lock().await = Some(Arc::clone(&new));
+        handle.0.state.lock().status = ServerStatus::Connected;
+
+        // Neither a late success nor another failure on the old connection
+        // may change the new session's consecutive-failure state.
+        handle.0.record_session_success(&old).await;
+        handle.0.fail_session(&old, &first_failure).await;
+        assert_eq!(
+            manager.snapshot("replaced").unwrap().consecutive_failures,
+            1
+        );
+        release.notify_one();
+        assert!(
+            discovery
+                .await
+                .unwrap()
+                .unwrap_err()
+                .to_string()
+                .contains("replaced")
+        );
+        assert!(registry.list().is_empty());
+        assert!(Arc::ptr_eq(
+            handle.0.session.lock().await.as_ref().unwrap(),
+            &new
+        ));
+        assert!(!new.is_closed());
+        assert_eq!(handle.connect().await.unwrap(), 1);
+        assert!(registry.get("mcp:replaced/current").is_some());
+        assert!(registry.get("mcp:replaced/obsolete").is_none());
+        drop((old, new));
+        manager.shutdown().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn failing_a_session_closes_it_even_while_a_caller_holds_an_arc() {
+        let manager = McpManager::new(ToolRegistry::new());
+        let (handle, _entered, _, _server) =
+            connected(&manager, "failed", Reply::Immediate("tool")).await;
+        let caller = handle.0.session.lock().await.as_ref().unwrap().clone();
+        assert!(!caller.is_closed());
+        handle
+            .0
+            .fail_session(
+                &caller,
+                &McpError::Transport {
+                    server: "failed".into(),
+                    message: "call failed".into(),
+                },
+            )
+            .await;
+        assert!(caller.is_closed());
+        assert!(handle.0.session.lock().await.is_none());
+        caller.close().await;
+        manager.shutdown().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn discovery_operations_serialize_for_one_registration() {
+        let manager = McpManager::new(ToolRegistry::new());
+        let (handle, mut entered, release, _server) =
+            connected(&manager, "serial", Reply::Gated("tool")).await;
+        let first_handle = handle.clone();
+        let first = tokio::spawn(async move { first_handle.connect().await });
+        entered.recv().await.unwrap();
+        let second = tokio::spawn(async move { handle.connect().await });
+        tokio::task::yield_now().await;
+        assert!(
+            entered.try_recv().is_err(),
+            "second request must wait for the server operation lock"
+        );
+        release.notify_one();
+        assert_eq!(first.await.unwrap().unwrap(), 1);
+        entered.recv().await.unwrap();
+        release.notify_one();
+        assert_eq!(second.await.unwrap().unwrap(), 1);
+        manager.shutdown().await;
     }
 }

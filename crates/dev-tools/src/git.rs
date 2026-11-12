@@ -1,6 +1,6 @@
 //! Spawning the `git` CLI: no shell, hardened config, timeout, output cap.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -23,8 +23,6 @@ pub(crate) struct GitOutput {
 pub(crate) struct GitRunner {
     bin: String,
     timeout: Duration,
-    /// A path that does not exist, used as `core.hooksPath` to disable hooks.
-    no_hooks: PathBuf,
 }
 
 async fn drain<R: tokio::io::AsyncRead + Unpin>(mut r: R, cap: usize) -> (Vec<u8>, bool) {
@@ -48,11 +46,7 @@ async fn drain<R: tokio::io::AsyncRead + Unpin>(mut r: R, cap: usize) -> (Vec<u8
 
 impl GitRunner {
     pub(crate) fn new(bin: String, timeout: Duration) -> Self {
-        Self {
-            bin,
-            timeout,
-            no_hooks: std::env::temp_dir().join("praxi-dev-tools-no-hooks-dir"),
-        }
+        Self { bin, timeout }
     }
 
     /// Neutralise every `filter.<name>.*` driver configured for the repository
@@ -133,8 +127,16 @@ impl GitRunner {
             .args(["-c", "commit.gpgSign=false"])
             .args(["-c", "tag.gpgSign=false"])
             .args(["-c", "log.showSignature=false"])
-            .arg("-c")
-            .arg(format!("core.hooksPath={}", self.no_hooks.display()))
+            // A null device cannot become a directory populated by another
+            // process, unlike the former predictable temporary directory.
+            .args([
+                "-c",
+                if cfg!(windows) {
+                    "core.hooksPath=NUL"
+                } else {
+                    "core.hooksPath=/dev/null"
+                },
+            ])
             .args(&filter_overrides)
             .args(args)
             .current_dir(cwd)

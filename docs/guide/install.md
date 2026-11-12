@@ -41,7 +41,7 @@ only. On other systems the daemon runs, but without desktop tools.
 
 ## Option B: build the CLI from source
 
-Requirements: Rust 1.88 or newer, a C toolchain (MSVC build tools on Windows),
+Requirements: Rust 1.89 or newer, a C toolchain (MSVC build tools on Windows),
 and for the desktop app Node 24+ and pnpm 10+.
 
 ```sh

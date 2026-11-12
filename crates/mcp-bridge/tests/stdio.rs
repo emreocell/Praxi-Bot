@@ -2,6 +2,9 @@
 
 use std::{path::PathBuf, time::Duration};
 
+#[path = "support/capture.rs"]
+mod capture;
+
 use mcp_bridge::{
     Backoff, McpManager, McpPolicy, McpServerConfig, McpTransport, OS_ESSENTIAL_ENV, ServerStatus,
 };
@@ -368,50 +371,13 @@ async fn shutdown_reaps_stdio_child_tree() {
 // ── fail-closed hardening (task 042) ────────────────────────────────────────
 
 mod hardening {
-    use std::fmt::Write as _;
-
-    use std::{
-        collections::BTreeMap,
-        sync::{Arc, Mutex, atomic::AtomicU64},
-    };
+    use std::{collections::BTreeMap, sync::Arc};
 
     use secret_store::{MemoryStore, SecretStore};
     use tool_registry::PermissionCategory;
-    use tracing::{
-        Event, Metadata, Subscriber,
-        field::{Field, Visit},
-        span,
-    };
 
+    pub(super) use super::capture::Capture;
     use super::*;
-
-    /// Collects every event/span field as text.
-    #[derive(Clone, Default)]
-    struct Capture(Arc<Mutex<String>>, Arc<AtomicU64>);
-
-    struct Rec<'a>(&'a mut String);
-    impl Visit for Rec<'_> {
-        fn record_debug(&mut self, f: &Field, v: &dyn std::fmt::Debug) {
-            let _ = write!(self.0, "{}={v:?} ", f.name());
-        }
-    }
-
-    impl Subscriber for Capture {
-        fn enabled(&self, _: &Metadata<'_>) -> bool {
-            true
-        }
-        fn new_span(&self, a: &span::Attributes<'_>) -> span::Id {
-            a.record(&mut Rec(&mut self.0.lock().unwrap()));
-            span::Id::from_u64(self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1)
-        }
-        fn record(&self, _: &span::Id, _: &span::Record<'_>) {}
-        fn record_follows_from(&self, _: &span::Id, _: &span::Id) {}
-        fn event(&self, e: &Event<'_>) {
-            e.record(&mut Rec(&mut self.0.lock().unwrap()));
-        }
-        fn enter(&self, _: &span::Id) {}
-        fn exit(&self, _: &span::Id) {}
-    }
 
     fn store_with(name: &str, value: &str) -> Arc<dyn SecretStore> {
         let s = MemoryStore::new();
@@ -438,6 +404,7 @@ mod hardening {
         assert!(keys.split(',').any(|k| k == "MCP_TEST_SECRET"), "{keys}");
         assert!(!format!("{:?}", mgr.snapshots()).contains(VALUE));
         assert!(!capture.0.lock().unwrap().contains(VALUE));
+        mgr.shutdown().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -497,4 +464,285 @@ mod hardening {
         cfg.category = Some(PermissionCategory::Meta);
         assert!(mgr.add_server(cfg).await.is_err());
     }
+}
+
+fn mode_config(id: &str, mode: &str) -> McpServerConfig {
+    let mut cfg = config(id);
+    if let McpTransport::Stdio { env, .. } = &mut cfg.transport {
+        env.insert("MCP_TEST_MODE".into(), mode.into());
+    }
+    cfg
+}
+
+async fn wait_for_stderr(mgr: &McpManager, id: &str, marker: &str) {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            if mgr.stderr_tail(id).iter().any(|line| line.contains(marker)) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("child did not reach stderr marker");
+}
+
+struct TestSecrets;
+const STDERR_SECRET: &str = "mcp-sensitive-sentinel-a8f74d20";
+
+impl secret_store::SecretStore for TestSecrets {
+    fn get(&self, _: &str) -> Result<Option<secret_store::SecretValue>, secret_store::SecretError> {
+        Ok(Some(secret_store::SecretValue::new(STDERR_SECRET)))
+    }
+    fn set(&self, _: &str, _: &str) -> Result<(), secret_store::SecretError> {
+        unimplemented!()
+    }
+    fn delete(&self, _: &str) -> Result<bool, secret_store::SecretError> {
+        unimplemented!()
+    }
+    fn list_names(&self) -> Result<Vec<String>, secret_store::SecretError> {
+        unimplemented!()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn resolved_secret_is_absent_from_child_stderr_and_captured_tracing() {
+    use tracing::instrument::WithSubscriber;
+    let capture = hardening::Capture::default();
+    let mgr = McpManager::with_policy(ToolRegistry::new(), fast_policy(3))
+        .with_secret_store(std::sync::Arc::new(TestSecrets));
+    let mut cfg = mode_config("redacted", "secret-stderr");
+    cfg.secret_env
+        .insert("API_KEY".into(), "test-secret".into());
+    mgr.add_server(cfg)
+        .with_subscriber(capture.clone())
+        .await
+        .unwrap();
+    wait_for_stderr(&mgr, "redacted", "child secret:").await;
+    let stderr = mgr.stderr_tail("redacted").join("\n");
+    let traces = capture.0.lock().unwrap().clone();
+    assert!(!stderr.contains(STDERR_SECRET), "secret in stderr log");
+    assert!(!traces.contains(STDERR_SECRET), "secret in tracing");
+    assert!(stderr.contains("[REDACTED]"));
+    assert!(
+        traces.contains("child secret: [REDACTED]"),
+        "stderr trace not captured"
+    );
+    mgr.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn discovery_errors_and_snapshots_redact_resolved_secrets() {
+    let mgr = McpManager::with_policy(ToolRegistry::new(), fast_policy(3))
+        .with_secret_store(std::sync::Arc::new(TestSecrets));
+    let mut cfg = mode_config("redacted-error", "secret-error");
+    cfg.secret_env
+        .insert("API_KEY".into(), "test-secret".into());
+    let error = mgr.add_server(cfg).await.unwrap_err().to_string();
+    assert!(!error.contains(STDERR_SECRET));
+    assert!(error.contains("[REDACTED]"));
+    assert!(
+        !mgr.snapshot("redacted-error")
+            .unwrap()
+            .last_error
+            .unwrap()
+            .contains(STDERR_SECRET)
+    );
+    mgr.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn newline_free_stderr_flood_has_bounded_retained_lines_and_snapshot() {
+    let mgr = McpManager::with_policy(ToolRegistry::new(), fast_policy(3));
+    mgr.add_server(mode_config("flood", "flood")).await.unwrap();
+    wait_for_stderr(&mgr, "flood", "flood-finished").await;
+    let stderr = mgr.stderr_tail("flood");
+    assert!(stderr.iter().all(|line| line.len() <= 8 * 1024));
+    assert!(stderr.iter().map(String::len).sum::<usize>() <= 64 * 1024);
+    assert!(stderr.iter().any(|line| line.ends_with("[truncated]")));
+    mgr.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stalled_discovery_does_not_block_another_server_or_removal() {
+    let mgr = std::sync::Arc::new(McpManager::with_policy(ToolRegistry::new(), fast_policy(3)));
+    let pending = {
+        let mgr = mgr.clone();
+        tokio::spawn(async move { mgr.add_server(mode_config("slow", "stalled")).await })
+    };
+    wait_for_stderr(&mgr, "slow", "tools/list entered").await;
+    tokio::time::timeout(Duration::from_secs(10), mgr.add_server(config("healthy")))
+        .await
+        .unwrap()
+        .unwrap();
+    let removal = {
+        let mgr = mgr.clone();
+        tokio::spawn(async move { mgr.remove_server("slow").await })
+    };
+    let removed = tokio::time::timeout(Duration::from_secs(3), pending)
+        .await
+        .expect("removed discovery was not cancelled")
+        .unwrap();
+    assert!(matches!(
+        removed,
+        Err(mcp_bridge::McpError::UnknownServer(_))
+    ));
+    assert!(mgr.snapshot("slow").is_none());
+    assert_eq!(
+        mgr.snapshot("healthy").unwrap().status,
+        ServerStatus::Connected
+    );
+    // Retirement cancels discovery immediately; process shutdown has its own
+    // bounded grace period, independent of in-flight caller clones.
+    tokio::time::timeout(Duration::from_secs(15), removal)
+        .await
+        .expect("process cleanup exceeded its bound")
+        .unwrap()
+        .unwrap();
+    mgr.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn discovery_caps_reject_remote_tool_sets_before_registration() {
+    for (mode, message) in [
+        ("pages", "page limit"),
+        ("tools", "tool-count limit"),
+        ("schema", "byte limit"),
+    ] {
+        let reg = ToolRegistry::new();
+        let mgr = McpManager::with_policy(reg.clone(), fast_policy(3));
+        let result = tokio::time::timeout(
+            Duration::from_secs(20),
+            mgr.add_server(mode_config("caps", mode)),
+        )
+        .await
+        .expect("discovery did not stop at the cap");
+        assert!(result.unwrap_err().to_string().contains(message));
+        assert!(reg.list().is_empty());
+        assert_eq!(mgr.snapshot("caps").unwrap().consecutive_failures, 1);
+        mgr.shutdown().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_single_page_above_the_frame_limit_is_rejected_while_reading() {
+    let reg = ToolRegistry::new();
+    let mgr = McpManager::with_policy(reg.clone(), fast_policy(1));
+    let result = tokio::time::timeout(
+        Duration::from_secs(20),
+        mgr.add_server(mode_config("huge", "huge-page")),
+    )
+    .await
+    .expect("oversized frame was not rejected promptly");
+    let error = result.unwrap_err();
+    assert!(
+        !matches!(error, mcp_bridge::McpError::Timeout { .. }),
+        "{error}"
+    );
+    assert!(reg.list().is_empty());
+    mgr.shutdown().await;
+}
+
+const ENCODED_SECRET: &str = "Bearer tok/en+value?with=sym&bols-1234";
+
+#[tokio::test(flavor = "multi_thread")]
+async fn encoded_secret_forms_in_child_stderr_are_masked_and_the_live_redactor_runs() {
+    let host: mcp_bridge::ExternalRedactor =
+        std::sync::Arc::new(|text| text.replace("encoded-done", "host-saw-this"));
+    let store = std::sync::Arc::new(secret_store::MemoryStore::new());
+    secret_store::SecretStore::set(&*store, "test/enc", ENCODED_SECRET).unwrap();
+    let mgr = McpManager::with_policy(ToolRegistry::new(), fast_policy(1))
+        .with_secret_store(store)
+        .with_redactor(host);
+    let mut cfg = mode_config("enc", "secret-stderr-encoded");
+    cfg.secret_env.insert("API_KEY".into(), "test/enc".into());
+    mgr.add_server(cfg).await.unwrap();
+    wait_for_stderr(&mgr, "enc", "host-saw-this").await;
+    let stderr = mgr.stderr_tail("enc").join(
+        "
+",
+    );
+    for leak in ["tok/en", "tok%2Fen", "sym", "bols", "dG9rL2Vu", "dG9r"] {
+        assert!(!stderr.contains(leak), "`{leak}` leaked: {stderr}");
+    }
+    assert!(stderr.matches("[REDACTED]").count() >= 5, "{stderr}");
+    mgr.shutdown().await;
+}
+
+fn as_bot(id: &str) -> ToolContext {
+    ToolContext {
+        bot_id: Some(id.into()),
+        ..ToolContext::default()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bots_change_applies_live_without_dropping_in_flight_calls() {
+    let reg = ToolRegistry::new();
+    let mgr = McpManager::with_policy(reg.clone(), fast_policy(3));
+    let mut cfg = config("t");
+    cfg.bots = Some(vec!["a".into(), "b".into()]);
+    mgr.add_server(cfg).await.unwrap();
+    let echo = reg.get("mcp:t/echo").unwrap();
+
+    // A call from bot `b` is running when `b` is removed from the list.
+    let started = std::time::Instant::now();
+    let slow = {
+        let echo = echo.clone();
+        tokio::spawn(async move {
+            echo.call(&as_bot("b"), json!({"text": "late", "sleep_ms": 800}))
+                .await
+        })
+    };
+    // Wait until the SERVER reports it is inside the slow call (a stale example
+    // binary that ignores `sleep_ms` never prints this: fail loudly).
+    let mut in_flight = false;
+    for _ in 0..100 {
+        if mgr
+            .stderr_tail("t")
+            .iter()
+            .any(|l| l.contains("sleeping 800ms in echo"))
+        {
+            in_flight = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        in_flight,
+        "the test_server example did not honour sleep_ms (rebuild it: cargo build -p mcp-bridge --examples)"
+    );
+    assert!(!slow.is_finished(), "the call must still be running");
+    mgr.set_server_bots("t", Some(vec!["a".into()])).unwrap();
+    assert!(!slow.is_finished(), "the swap must not end the call");
+
+    // The in-flight call survives (same connection, no restart) ...
+    let out = slow.await.unwrap().expect("in-flight call must finish");
+    assert!(started.elapsed() >= Duration::from_millis(800));
+    assert_eq!(text_of(&out.content), "late");
+    // ... the removed bot is denied on its next call and no longer sees the
+    // tool, while the remaining bot is unaffected.
+    let denied = echo
+        .call(&as_bot("b"), json!({"text": "x"}))
+        .await
+        .unwrap_err();
+    assert!(matches!(denied, ToolError::PermissionDenied(_)), "{denied}");
+    assert!(!echo.visible_to(Some("b")));
+    assert!(echo.visible_to(Some("a")));
+    let ok = echo
+        .call(&as_bot("a"), json!({"text": "hi"}))
+        .await
+        .unwrap();
+    assert_eq!(text_of(&ok.content), "hi");
+
+    // Empty list = nobody; null = everybody.
+    mgr.set_server_bots("t", Some(vec![])).unwrap();
+    assert!(echo.call(&as_bot("a"), json!({"text": "x"})).await.is_err());
+    mgr.set_server_bots("t", None).unwrap();
+    assert!(
+        echo.call(&as_bot("zzz"), json!({"text": "x"}))
+            .await
+            .is_ok()
+    );
+    assert!(mgr.set_server_bots("missing", None).is_err());
 }

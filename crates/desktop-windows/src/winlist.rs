@@ -2,6 +2,7 @@
 #![allow(unsafe_code)]
 
 use std::ffi::c_void;
+use std::os::windows::io::AsRawHandle;
 
 use desktop_api::{
     DesktopError,
@@ -9,15 +10,24 @@ use desktop_api::{
 };
 use windows::{
     Win32::{
-        Foundation::{CloseHandle, ERROR_SUCCESS, HWND, LPARAM, RECT, SetLastError, WAIT_OBJECT_0},
+        Foundation::{
+            CloseHandle, ERROR_SUCCESS, HANDLE, HWND, LPARAM, RECT, SetLastError, WAIT_OBJECT_0,
+        },
         Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute},
-        System::Threading::{
-            AttachThreadInput, GetCurrentThreadId, GetProcessId, WaitForInputIdle,
-            WaitForSingleObject,
+        Storage::FileSystem::{GetFullPathNameW, SearchPathW},
+        System::{
+            SystemInformation::{GetSystemDirectoryW, GetWindowsDirectoryW},
+            Threading::{
+                AttachThreadInput, GetCurrentThreadId, GetProcessId, WaitForInputIdle,
+                WaitForSingleObject,
+            },
         },
         UI::{
             HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext},
-            Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW},
+            Shell::{
+                ASSOCF_NONE, ASSOCSTR_COMMAND, AssocQueryStringW, SEE_MASK_NOCLOSEPROCESS,
+                SHELLEXECUTEINFOW, ShellExecuteExW,
+            },
             WindowsAndMessaging::{
                 BringWindowToTop, EnumWindows, GWL_EXSTYLE, GetForegroundWindow, GetWindowLongW,
                 GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
@@ -26,7 +36,7 @@ use windows::{
             },
         },
     },
-    core::PCWSTR,
+    core::{PCWSTR, PWSTR},
 };
 
 /// Make this process per-monitor DPI aware so that UIA rectangles, GDI capture
@@ -218,55 +228,85 @@ pub fn activate(hwnd: HWND) -> Result<(), DesktopError> {
     }
 }
 
-/// Quote one argument following the `CommandLineToArgvW` / MSVCRT rules:
-/// backslashes are literal unless they precede a double quote, in which case
-/// they must be doubled (and the quote escaped); trailing backslashes inside
-/// the surrounding quotes are doubled so they do not escape the closing quote.
-fn quote_arg(a: &str) -> String {
-    if !a.is_empty() && !a.contains([' ', '\t', '\n', '\x0b', '"']) {
-        return a.to_string();
-    }
-    let mut out = String::with_capacity(a.len() + 2);
-    out.push('"');
-    let mut backslashes = 0usize;
-    for c in a.chars() {
-        match c {
-            '\\' => backslashes += 1,
-            '"' => {
-                out.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
-                out.push('"');
-                backslashes = 0;
-            }
-            _ => {
-                out.extend(std::iter::repeat_n('\\', backslashes));
-                out.push(c);
-                backslashes = 0;
-            }
-        }
-    }
-    out.extend(std::iter::repeat_n('\\', backslashes * 2));
-    out.push('"');
-    out
-}
-
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 const LAUNCH_IDLE_CAP_MS: u32 = 200;
 
-/// Launch an executable (or document / app alias) via `ShellExecuteExW`.
-/// No shell or PowerShell is involved. Returns the new process id, or 0 when the
-/// shell handled the request without a new process (URI handlers, reused instance).
+/// Classify a borrowed process handle for the desktop tool's window poller.
+/// Launchers/stubs that exit or do not own a titled window report PID 0, so
+/// windows created by their actual application process are not filtered out.
+fn launched_window_pid(process: HANDLE) -> Pid {
+    if process.is_invalid() {
+        return 0;
+    }
+    // SAFETY: callers borrow a live process handle owned by Child or returned
+    // by ShellExecuteExW. They retain it across this call; this helper never
+    // closes the handle or assumes ownership of it.
+    unsafe {
+        // An already-exited launcher needs no initialization wait. Both later
+        // waits also return as soon as their process condition is signalled.
+        if WaitForSingleObject(process, 0) == WAIT_OBJECT_0 {
+            return 0;
+        }
+        let idle = WaitForInputIdle(process, LAUNCH_IDLE_CAP_MS);
+        let stub_wait = if idle == 0 { 0 } else { 100 };
+        if WaitForSingleObject(process, stub_wait) == WAIT_OBJECT_0 {
+            return 0;
+        }
+        let pid = GetProcessId(process);
+        let owns_window = list_windows().is_ok_and(|wins| {
+            wins.iter()
+                .any(|window| window.pid == pid && !window.title.is_empty())
+        });
+        if pid == 0 || !owns_window { 0 } else { pid }
+    }
+}
+
+/// Launch an executable, document, or shortcut.
+///
+/// The path is resolved with `GetFullPathNameW` and `SearchPathW` using
+/// `PATHEXT`, so extensionless names such as `cmd` and `powershell` classify
+/// as the image Windows will execute. Command interpreters refuse shell
+/// metacharacters and are `CreateProcess`'d as that resolved image. They are
+/// never passed to `ShellExecuteExW` unresolved. Batch files, shortcuts, and
+/// associations whose template runs `cmd.exe` use the batch quoting rules.
+/// Other images keep `CommandLineToArgvW` quoting. Returns the process id, or
+/// 0 when the shell handles the request without a new process.
 pub fn launch(app: &AppSpec) -> Result<Pid, DesktopError> {
-    let file = wide(&app.executable);
-    let params = wide(
-        &app.args
-            .iter()
-            .map(|a| quote_arg(a))
-            .collect::<Vec<_>>()
-            .join(" "),
-    );
+    let resolved = resolved_image_path(&app.executable);
+    let cmd_association =
+        crate::pure::needs_association_check(&resolved) && association_expanded_by_cmd(&resolved);
+    let prepared = crate::pure::prepare_launch(app, &resolved, cmd_association)?;
+    // An interpreter must not reach `ShellExecuteExW` under the caller's
+    // original string. `CreateProcess` of the resolved `.exe` is the only route.
+    if crate::pure::file_name_is_shell_interpreter(&resolved) && !prepared.spawns_directly() {
+        return Err(DesktopError::Unsupported(crate::pure::SHELL_REFUSAL.into()));
+    }
+    if prepared.spawns_directly() {
+        let program = if is_launch_file(&resolved) {
+            resolved.as_str()
+        } else {
+            app.executable.as_str()
+        };
+        let child = std::process::Command::new(program)
+            .args(&app.args)
+            .spawn()
+            .map_err(|error| DesktopError::Internal(format!("launch executable: {error}")))?;
+        // Child keeps ownership of the process handle and closes it on drop.
+        return Ok(launched_window_pid(HANDLE(child.as_raw_handle())));
+    }
+    let parameters = prepared.parameters();
+    // Launch the resolved image when it exists so a later `PATHEXT` search
+    // cannot substitute an interpreter for the file just classified.
+    let shell_file = if is_launch_file(&resolved) {
+        resolved.as_str()
+    } else {
+        app.executable.as_str()
+    };
+    let file = wide(shell_file);
+    let params = wide(parameters);
     let verb = wide("open");
     let mut info = SHELLEXECUTEINFOW {
         #[allow(clippy::cast_possible_truncation)]
@@ -293,45 +333,653 @@ pub fn launch(app: &AppSpec) -> Result<Pid, DesktopError> {
             // That is a success, not an error: pid 0 means "not known".
             return Ok(0);
         }
-        // Let GUI apps initialise their message loop (capped). App-execution
-        // aliases (`notepad.exe`, `calc.exe`) keep a launcher pid that never
-        // owns the window; pid 0 tells the caller to accept any new window.
-        // A process that already has a titled window keeps its pid so the
-        // caller can match that process only.
-        let idle = WaitForInputIdle(info.hProcess, LAUNCH_IDLE_CAP_MS);
-        let stub_wait = if idle == 0 { 0 } else { 100 };
-        let pid = if WaitForSingleObject(info.hProcess, stub_wait) == WAIT_OBJECT_0 {
-            0
-        } else {
-            let pid = GetProcessId(info.hProcess);
-            let owns_window = list_windows()
-                .is_ok_and(|wins| wins.iter().any(|w| w.pid == pid && !w.title.is_empty()));
-            if pid == 0 || !owns_window { 0 } else { pid }
-        };
+        let pid = launched_window_pid(info.hProcess);
         let _ = CloseHandle(info.hProcess);
         Ok(pid)
     }
 }
 
+fn resolved_image_path(executable: &str) -> String {
+    let normalized = match win32_full_path(executable) {
+        Some(full) => crate::pure::strip_device_prefix(&full),
+        None => crate::pure::normalize_launch_path(executable),
+    };
+    let name = crate::pure::file_name_of(&normalized);
+    if name.is_empty() {
+        return normalized;
+    }
+    // A qualified path that already names an existing file is that image.
+    // Extensionless names still need `PATHEXT` (`C:\Windows\System32\cmd`).
+    if !is_unqualified_name(executable) && name_has_extension(name) && is_launch_file(&normalized) {
+        return normalized;
+    }
+    let found = if is_unqualified_name(executable) {
+        search_unqualified(name)
+    } else {
+        parent_dir(&normalized).and_then(|dir| search_directory(&dir, name))
+    };
+    found.unwrap_or(normalized)
+}
+
+/// `SearchPathW` directory list, then `PATHEXT` inside each directory.
+///
+/// Calling `SearchPathW` once per extension with a null path would try `.EXE`
+/// in every directory before `.BAT` in the first one. `cmd.exe` and
+/// `ShellExecuteExW` do the opposite: finish one directory before the next.
+fn search_unqualified(name: &str) -> Option<String> {
+    search_directories()
+        .into_iter()
+        .find_map(|dir| search_directory(&dir, name))
+}
+
+fn search_directory(dir: &str, name: &str) -> Option<String> {
+    if name_has_extension(name) {
+        return search_path_in(dir, name, None);
+    }
+    for extension in pathext_extensions() {
+        if let Some(found) = search_path_in(dir, name, Some(&extension)) {
+            return Some(found);
+        }
+    }
+    // No `PATHEXT` match. An extensionless file in this directory is next,
+    // still before later directories.
+    search_path_in(dir, name, None)
+}
+
+fn search_path_in(directory: &str, file_name: &str, extension: Option<&str>) -> Option<String> {
+    if directory.is_empty() || file_name.is_empty() {
+        return None;
+    }
+    let directory = wide(directory);
+    let file_name = wide(file_name);
+    let extension_wide = extension.map(wide);
+    let mut buf = vec![0u16; 32768];
+    // SAFETY: the wide strings are NUL-terminated and live for the call.
+    // `buf` is writable for its full length. `SearchPathW` does not retain
+    // any pointer. A zero return is failure; a length past the buffer means
+    // the buffer was too small. `lpPath` is a single directory, so this call
+    // does not walk the rest of `PATH`.
+    let written = unsafe {
+        SearchPathW(
+            PCWSTR(directory.as_ptr()),
+            PCWSTR(file_name.as_ptr()),
+            extension_wide
+                .as_ref()
+                .map_or(PCWSTR::null(), |units| PCWSTR(units.as_ptr())),
+            Some(&mut buf),
+            None,
+        )
+    };
+    let found = copy_wide(&buf, written).map(|path| crate::pure::strip_device_prefix(&path))?;
+    is_launch_file(&found).then_some(found)
+}
+
+fn search_directories() -> Vec<String> {
+    let mut dirs = Vec::new();
+    let mut seen = Vec::new();
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(parent) = exe.parent()
+    {
+        push_search_dir(&mut dirs, &mut seen, &parent.to_string_lossy());
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        push_search_dir(&mut dirs, &mut seen, &cwd.to_string_lossy());
+    }
+    if let Some(system) = system_directory() {
+        push_search_dir(&mut dirs, &mut seen, &system);
+    }
+    if let Some(windows) = windows_directory() {
+        let system16 = format!("{windows}\\System");
+        push_search_dir(&mut dirs, &mut seen, &system16);
+        push_search_dir(&mut dirs, &mut seen, &windows);
+    }
+    if let Ok(path) = std::env::var("PATH") {
+        for entry in path.split(';') {
+            let entry = entry.trim().trim_matches('"');
+            if !entry.is_empty() {
+                push_search_dir(&mut dirs, &mut seen, entry);
+            }
+        }
+    }
+    dirs
+}
+
+fn push_search_dir(dirs: &mut Vec<String>, seen: &mut Vec<String>, dir: &str) {
+    let stripped = crate::pure::strip_device_prefix(dir.trim());
+    if stripped.is_empty() {
+        return;
+    }
+    let key = stripped.trim_end_matches(['\\', '/']).to_ascii_lowercase();
+    if key.is_empty() || seen.contains(&key) {
+        return;
+    }
+    seen.push(key);
+    dirs.push(stripped);
+}
+
+fn pathext_extensions() -> Vec<String> {
+    let raw = std::env::var("PATHEXT")
+        .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC".to_string());
+    raw.split(';')
+        .filter_map(|part| {
+            let part = part.trim().trim_matches('"');
+            if part.is_empty() {
+                None
+            } else if let Some(stripped) = part.strip_prefix('.') {
+                if stripped.is_empty() {
+                    None
+                } else {
+                    Some(part.to_string())
+                }
+            } else {
+                Some(format!(".{part}"))
+            }
+        })
+        .collect()
+}
+
+fn system_directory() -> Option<String> {
+    let mut buf = vec![0u16; 32768];
+    // SAFETY: `buf` is writable for its full length and lives for the call.
+    // `GetSystemDirectoryW` does not retain the pointer. A zero return is
+    // failure; a length past the buffer means the buffer was too small.
+    let written = unsafe { GetSystemDirectoryW(Some(&mut buf)) };
+    copy_wide(&buf, written).map(|path| crate::pure::strip_device_prefix(&path))
+}
+
+fn windows_directory() -> Option<String> {
+    let mut buf = vec![0u16; 32768];
+    // SAFETY: `buf` is writable for its full length and lives for the call.
+    // `GetWindowsDirectoryW` does not retain the pointer. A zero return is
+    // failure; a length past the buffer means the buffer was too small.
+    let written = unsafe { GetWindowsDirectoryW(Some(&mut buf)) };
+    copy_wide(&buf, written).map(|path| crate::pure::strip_device_prefix(&path))
+}
+
+fn copy_wide(buf: &[u16], written: u32) -> Option<String> {
+    let written = usize::try_from(written).ok()?;
+    if written == 0 || written >= buf.len() {
+        return None;
+    }
+    String::from_utf16(&buf[..written]).ok()
+}
+
+fn is_unqualified_name(path: &str) -> bool {
+    !path.chars().any(|ch| matches!(ch, '\\' | '/' | ':'))
+}
+
+fn name_has_extension(name: &str) -> bool {
+    match name.rsplit_once('.') {
+        Some((stem, ext)) => !stem.is_empty() && !ext.is_empty(),
+        None => false,
+    }
+}
+
+fn parent_dir(path: &str) -> Option<String> {
+    let trimmed = path.trim_end_matches(['\\', '/']);
+    let index = trimmed.rfind(['\\', '/'])?;
+    let parent = &trimmed[..index];
+    if parent.is_empty() {
+        return None;
+    }
+    if parent.ends_with(':') {
+        Some(format!("{parent}\\"))
+    } else {
+        Some(parent.to_string())
+    }
+}
+
+fn is_launch_file(path: &str) -> bool {
+    std::path::Path::new(path).is_file()
+}
+
+fn win32_full_path(path: &str) -> Option<String> {
+    if path.is_empty() {
+        return None;
+    }
+    let wide_path = wide(path);
+    let mut buf = vec![0u16; 32768];
+    // SAFETY: `wide_path` is NUL-terminated and lives for the call. `buf` is
+    // writable for its full length. `GetFullPathNameW` does not retain either
+    // pointer. A zero return is failure; a length past the buffer means the
+    // buffer was too small.
+    let written = unsafe { GetFullPathNameW(PCWSTR(wide_path.as_ptr()), Some(&mut buf), None) };
+    let written = usize::try_from(written).ok()?;
+    if written == 0 || written >= buf.len() {
+        return None;
+    }
+    String::from_utf16(&buf[..written]).ok()
+}
+
+fn association_expanded_by_cmd(path: &str) -> bool {
+    association_command(path)
+        .is_some_and(|template| crate::pure::command_template_uses_cmd(&template))
+}
+
+fn association_command(path: &str) -> Option<String> {
+    let wide_path = wide(path);
+    let mut buf = vec![0u16; 4096];
+    let mut len = u32::try_from(buf.len()).unwrap_or(4096);
+    // SAFETY: `wide_path` is NUL-terminated and lives for the call. `buf` is a
+    // writable buffer of `len` wide characters. `AssocQueryStringW` does not
+    // retain either pointer. On failure the buffer is ignored.
+    let hr = unsafe {
+        AssocQueryStringW(
+            ASSOCF_NONE,
+            ASSOCSTR_COMMAND,
+            PCWSTR(wide_path.as_ptr()),
+            PCWSTR::null(),
+            Some(PWSTR(buf.as_mut_ptr())),
+            &raw mut len,
+        )
+    };
+    if hr.is_err() {
+        return None;
+    }
+    let end = buf.iter().position(|&unit| unit == 0).unwrap_or(buf.len());
+    if end == 0 {
+        return None;
+    }
+    String::from_utf16(&buf[..end]).ok()
+}
+
 #[cfg(test)]
-mod quote_tests {
-    use super::quote_arg;
+mod launch_tests {
+    use std::os::windows::process::CommandExt;
+
+    use super::*;
+
+    const CHILD_TEST: &str = "winlist::launch_tests::non_gui_child_fixture";
 
     #[test]
-    fn plain_and_empty() {
-        assert_eq!(quote_arg("abc"), "abc");
-        assert_eq!(quote_arg(""), r#""""#);
-        assert_eq!(quote_arg(r"C:\dir\file"), r"C:\dir\file");
+    fn non_gui_child_fixture() {}
+
+    #[test]
+    fn direct_executable_without_owned_window_reports_unknown_pid() {
+        let app = AppSpec {
+            executable: std::env::current_exe()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            args: vec!["--exact".into(), CHILD_TEST.into(), "--quiet".into()],
+        };
+        assert_eq!(launch(&app).unwrap(), 0);
     }
 
     #[test]
-    fn trailing_backslash_is_doubled() {
-        assert_eq!(quote_arg(r"C:\My Dir\"), r#""C:\My Dir\\""#);
+    fn exited_process_reports_unknown_pid_without_closing_borrowed_handle() {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", CHILD_TEST, "--quiet"])
+            .spawn()
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+        let process = HANDLE(child.as_raw_handle());
+        assert_eq!(launched_window_pid(process), 0);
+        // SAFETY: Child still owns this process handle. A valid process id
+        // proves the normalization helper did not close the borrowed handle.
+        assert_eq!(unsafe { GetProcessId(process) }, child.id());
     }
 
     #[test]
-    fn embedded_quote_and_backslashes() {
-        assert_eq!(quote_arg(r#"x" /s"#), r#""x\" /s""#);
-        assert_eq!(quote_arg(r#"a\"b"#), r#""a\\\"b""#);
+    fn unsafe_batch_is_rejected_before_shell_execute() {
+        let app = AppSpec {
+            executable: r"C:\does-not-exist\Masaüstü\rejected.cmd".into(),
+            args: vec!["plain & second-command".into()],
+        };
+        assert!(matches!(launch(&app), Err(DesktopError::Unsupported(_))));
+    }
+
+    #[test]
+    fn normalized_image_matches_get_full_path_name() {
+        for path in [
+            r"C:\Windows\System32\cmd.exe.",
+            r"C:\Windows\System32\cmd.exe...",
+            r"C:\Windows\System32\cmd.exe ",
+            r"C:\Windows\System32\cmd.exe. .",
+            r"C:\Windows\System32\cmd.exe\.",
+            r"C:\Windows\System32\cmd.exe\.\.",
+            r"C:\Windows\System32\cmd.exe\..\cmd.exe.",
+            r"C:\Windows.\System32.\cmd.EXE. ",
+            r"C:\foo.\..\cmd.exe.",
+            r"C:\foo...\bar",
+            r"C:\Program Files (x86)\tool.cmd.",
+            r"C:/Windows/System32/cmd.exe.",
+            r"\\?\C:\Windows\System32\cmd.exe.",
+            r"\\?\C:\Windows\System32\cmd.exe\.",
+            r"\\?\C:\foo.\bar.",
+            r"C:\..\Windows\System32\cmd.exe.",
+        ] {
+            let api = win32_full_path(path).unwrap_or_else(|| panic!("GetFullPathName {path}"));
+            assert_eq!(
+                crate::pure::normalize_launch_path(path),
+                crate::pure::strip_device_prefix(&api),
+                "{path} api {api}"
+            );
+        }
+    }
+
+    #[test]
+    fn cmd_exe_and_trailing_dot_with_safe_and_calc_are_unsupported() {
+        let before = (
+            image_count("calc.exe"),
+            image_count("Calculator.exe"),
+            image_count("CalculatorApp.exe"),
+        );
+        for executable in [
+            "cmd.exe",
+            "cmd.exe.",
+            r"C:\Windows\System32\cmd.exe",
+            r"C:\Windows\System32\cmd.exe.",
+            r"C:\Windows\System32\cmd.exe\.",
+        ] {
+            let app = AppSpec {
+                executable: executable.into(),
+                args: vec!["safe&calc".into()],
+            };
+            assert!(
+                matches!(launch(&app), Err(DesktopError::Unsupported(_))),
+                "{executable}"
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        assert_eq!(
+            (
+                image_count("calc.exe"),
+                image_count("Calculator.exe"),
+                image_count("CalculatorApp.exe"),
+            ),
+            before,
+            "safe&calc started the calculator"
+        );
+    }
+
+    #[test]
+    fn benign_trailing_dot_cmd_still_runs() {
+        let app = AppSpec {
+            executable: r"C:\Windows\System32\cmd.exe.".into(),
+            args: vec!["/c".into(), "exit".into(), "0".into()],
+        };
+        assert_eq!(launch(&app).unwrap(), 0);
+    }
+
+    #[test]
+    fn extensionless_cmd_with_plain_args_runs() {
+        for executable in ["cmd", r"C:\Windows\System32\cmd"] {
+            let app = AppSpec {
+                executable: executable.into(),
+                args: vec!["/c".into(), "exit".into(), "0".into()],
+            };
+            assert_eq!(launch(&app).unwrap(), 0, "{executable}");
+        }
+    }
+
+    #[test]
+    fn extensionless_interpreters_do_not_run_shell_injection() {
+        for (input, suffix) in [
+            ("cmd", r"\cmd.exe"),
+            (r"C:\Windows\System32\cmd", r"\cmd.exe"),
+            ("powershell", r"\powershell.exe"),
+            ("pwsh", r"\pwsh.exe"),
+            ("wscript", r"\wscript.exe"),
+            ("cscript", r"\cscript.exe"),
+        ] {
+            let resolved = resolved_image_path(input);
+            assert!(
+                resolved.to_ascii_lowercase().ends_with(suffix),
+                "{input} resolved to {resolved}"
+            );
+            assert!(is_launch_file(&resolved), "{resolved}");
+            assert!(crate::pure::file_name_is_shell_interpreter(&resolved));
+        }
+        let dir = std::env::temp_dir().join(format!("praxi-extless-{}", std::process::id()));
+        let _cleanup = TempDir(dir.clone());
+        std::fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("injected.txt");
+        let marker_arg = marker.display().to_string();
+        assert!(
+            !marker_arg.contains([' ', '\t']),
+            "marker path must stay unquoted so an unfixed ShellExecute would run it: {marker_arg}"
+        );
+        let before = (
+            image_count("calc.exe"),
+            image_count("Calculator.exe"),
+            image_count("CalculatorApp.exe"),
+        );
+        let cmd_args = vec![
+            "/c".into(),
+            format!("echo(safe)&calc&echo(INJECTED)>{marker_arg}"),
+        ];
+        let cases = [
+            ("cmd", cmd_args.clone()),
+            (r"C:\Windows\System32\cmd", cmd_args),
+            (
+                "powershell",
+                vec![
+                    "-NoProfile".into(),
+                    "-Command".into(),
+                    format!(
+                        "echo safe; calc; Set-Content -LiteralPath '{marker_arg}' -Value INJECTED"
+                    ),
+                ],
+            ),
+        ];
+        for (executable, args) in cases {
+            let _ = std::fs::remove_file(&marker);
+            assert!(
+                matches!(
+                    launch(&AppSpec {
+                        executable: executable.into(),
+                        args,
+                    }),
+                    Err(DesktopError::Unsupported(_))
+                ),
+                "{executable}"
+            );
+        }
+        for executable in ["cmd", "powershell", "pwsh", "wscript", "cscript"] {
+            assert!(
+                matches!(
+                    launch(&AppSpec {
+                        executable: executable.into(),
+                        args: vec!["safe&calc".into()],
+                    }),
+                    Err(DesktopError::Unsupported(_))
+                ),
+                "{executable}"
+            );
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            assert!(
+                !marker.exists(),
+                "interpreter wrote {}",
+                std::fs::read_to_string(&marker).unwrap_or_default()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert_eq!(
+            (
+                image_count("calc.exe"),
+                image_count("Calculator.exe"),
+                image_count("CalculatorApp.exe"),
+            ),
+            before,
+            "safe&calc started the calculator"
+        );
+    }
+
+    #[test]
+    fn shortcut_to_cmd_with_plain_and_second_is_unsupported() {
+        let dir = std::env::temp_dir().join(format!("praxi-lnk-{}", std::process::id()));
+        let _cleanup = TempDir(dir.clone());
+        std::fs::create_dir_all(&dir).unwrap();
+        let helper = dir.join("helper.cmd");
+        let second = dir.join("second.cmd");
+        let log = dir.join("helper-log.txt");
+        let marker = dir.join("second-ran.txt");
+        let lnk = dir.join("helper.lnk");
+        std::fs::write(
+            &helper,
+            format!("@echo off\r\necho RAN>\"{}\"\r\n", log.display()),
+        )
+        .unwrap();
+        std::fs::write(
+            &second,
+            format!("@echo off\r\necho INJECTED>\"{}\"\r\n", marker.display()),
+        )
+        .unwrap();
+        create_shortcut(&lnk, &helper, &dir);
+        let app = AppSpec {
+            executable: lnk.display().to_string(),
+            args: vec!["plain&second".into()],
+        };
+        assert!(matches!(launch(&app), Err(DesktopError::Unsupported(_))));
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        assert!(
+            !log.exists(),
+            "shortcut ran: {}",
+            std::fs::read_to_string(&log).unwrap_or_default()
+        );
+        assert!(!marker.exists(), "second command ran");
+    }
+
+    #[test]
+    fn batch_parentheses_trailing_backslash_and_comspec_survive_cmd() {
+        let dir = std::env::temp_dir().join(format!("praxi-batch-{}", std::process::id()));
+        let _cleanup = TempDir(dir.clone());
+        std::fs::create_dir_all(&dir).unwrap();
+        let helper = dir.join("helper.cmd");
+        let out = dir.join("out.txt");
+        std::fs::write(
+            &helper,
+            "@echo off\r\nsetlocal DisableDelayedExpansion\r\nset \"a=%~1\"\r\nsetlocal EnableDelayedExpansion\r\n> \"%~dp0out.txt\" echo(!a!\r\n",
+        )
+        .unwrap();
+        let launch_arg = |arg: &str| {
+            let _ = std::fs::remove_file(&out);
+            launch(&AppSpec {
+                executable: helper.display().to_string(),
+                args: vec![arg.into()],
+            })
+            .unwrap_or_else(|error| panic!("launch {arg:?}: {error}"));
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            loop {
+                if let Ok(text) = std::fs::read_to_string(&out) {
+                    return text;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "script did not write {arg:?}"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        };
+        assert_eq!(launch_arg("(x86)").trim(), "(x86)");
+        assert_eq!(
+            launch_arg(r"C:\Program Files (x86)\").trim(),
+            r"C:\Program Files (x86)\"
+        );
+        // `%COMSPEC%` must not be launched. Doubling to `%%COMSPEC%%` still
+        // expands and used to satisfy a check that only looked for a `%`.
+        // If a future change launches the argument, the script has to receive
+        // the characters `%COMSPEC%` unchanged or this assertion fails.
+        for arg in ["%COMSPEC%", "say \"hi\"", "^quoted", "foo^"] {
+            let _ = std::fs::remove_file(&out);
+            match launch(&AppSpec {
+                executable: helper.display().to_string(),
+                args: vec![arg.into()],
+            }) {
+                Err(DesktopError::Unsupported(_)) => {}
+                Ok(_) => {
+                    let captured = launch_arg_output(&out);
+                    assert_eq!(
+                        captured.trim(),
+                        arg,
+                        "argument was expanded before the script: {captured}"
+                    );
+                    panic!("{arg} was launched");
+                }
+                Err(error) => panic!("launch {arg:?}: {error}"),
+            }
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+            while std::time::Instant::now() < deadline {
+                if let Ok(captured) = std::fs::read_to_string(&out) {
+                    assert_eq!(
+                        captured.trim(),
+                        arg,
+                        "argument was expanded before the script: {captured}"
+                    );
+                    panic!("{arg} ran the script: {captured}");
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
+
+    fn launch_arg_output(out: &std::path::Path) -> String {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            if let Ok(text) = std::fs::read_to_string(out) {
+                return text;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "script did not write {}",
+                out.display()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn file_associations_classify_cmd_templates() {
+        let vbs = association_command(".vbs").expect("vbs association");
+        assert!(!crate::pure::command_template_uses_cmd(&vbs), "{vbs}");
+        let cmd = association_command(".cmd").expect("cmd association");
+        assert!(!crate::pure::command_template_uses_cmd(&cmd), "{cmd}");
+        let comspec = std::env::var("COMSPEC").unwrap();
+        assert!(crate::pure::command_template_uses_cmd(&format!(
+            r#""{comspec}" /c "%1" %*"#
+        )));
+    }
+
+    fn image_count(image: &str) -> usize {
+        let output = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("IMAGENAME eq {image}"), "/FO", "CSV", "/NH"])
+            .output()
+            .expect("tasklist");
+        let text = String::from_utf8_lossy(&output.stdout);
+        let needle = image.to_ascii_lowercase();
+        text.lines()
+            .filter(|line| line.to_ascii_lowercase().contains(&needle))
+            .count()
+    }
+
+    fn create_shortcut(lnk: &std::path::Path, target: &std::path::Path, workdir: &std::path::Path) {
+        let quote = |path: &std::path::Path| path.display().to_string().replace('\'', "''");
+        let script = format!(
+            "$shell = New-Object -ComObject WScript.Shell; $link = $shell.CreateShortcut('{}'); $link.TargetPath = '{}'; $link.WorkingDirectory = '{}'; $link.Save()",
+            quote(lnk),
+            quote(target),
+            quote(workdir)
+        );
+        let output = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .creation_flags(0x0800_0000)
+            .output()
+            .expect("powershell");
+        assert!(
+            output.status.success() && lnk.exists(),
+            "shortcut: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    struct TempDir(std::path::PathBuf);
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 }

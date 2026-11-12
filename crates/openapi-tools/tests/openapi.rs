@@ -16,6 +16,58 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 const PETSTORE: &str = include_str!("fixtures/petstore.yaml");
 const KEY: &str = "sk-live-0123456789abcdef";
 
+#[tokio::test]
+async fn environment_proxy_cannot_observe_openapi_requests() {
+    const CHILD: &str = "PRAXI_OPENAPI_PROXY_TEST_TARGET";
+    if let Ok(target) = std::env::var(CHILD) {
+        let api = parse(&ImportOptions {
+            base_url: Some(target),
+            ..Default::default()
+        });
+        let ts = tools(&api, &cfg(Auth::None)).unwrap();
+        run(&find(&ts, "listPets"), json!({})).await.unwrap();
+        return;
+    }
+    let target = MockServer::start().await;
+    let proxy = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&target)
+        .await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&proxy)
+        .await;
+    let status = tokio::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "environment_proxy_cannot_observe_openapi_requests",
+            "--nocapture",
+        ])
+        .env(CHILD, target.uri())
+        .env("HTTP_PROXY", proxy.uri())
+        .env("http_proxy", proxy.uri())
+        .env("HTTPS_PROXY", proxy.uri())
+        .env("https_proxy", proxy.uri())
+        .env("ALL_PROXY", proxy.uri())
+        .env("all_proxy", proxy.uri())
+        .env("NO_PROXY", "")
+        .env("no_proxy", "")
+        .status()
+        .await
+        .unwrap();
+    assert!(status.success());
+    assert!(
+        proxy.received_requests().await.unwrap().is_empty(),
+        "ambient proxy received an OpenAPI request"
+    );
+    assert_eq!(
+        target.received_requests().await.unwrap().len(),
+        1,
+        "allow_private_hosts still permits the explicit loopback target"
+    );
+}
+
 fn store() -> Arc<MemoryStore> {
     let s = Arc::new(MemoryStore::new());
     s.set("petstore.key", KEY).unwrap();

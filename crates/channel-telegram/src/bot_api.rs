@@ -332,7 +332,7 @@ impl BotApiClient {
     ) -> Result<R> {
         let mut retries = 0;
         loop {
-            let resp = self
+            let mut resp = self
                 .http
                 .post(self.endpoint(method))
                 .timeout(timeout)
@@ -347,9 +347,12 @@ impl BotApiClient {
             {
                 return Err(TelegramError::Http(format!("{method}: response too large")));
             }
-            let bytes = resp.bytes().await.map_err(|e| self.sanitize_error(e))?;
-            if bytes.len() > MAX_RESPONSE_BYTES {
-                return Err(TelegramError::Http(format!("{method}: response too large")));
+            let mut bytes = Vec::new();
+            while let Some(chunk) = resp.chunk().await.map_err(|e| self.sanitize_error(e))? {
+                if chunk.len() > MAX_RESPONSE_BYTES.saturating_sub(bytes.len()) {
+                    return Err(TelegramError::Http(format!("{method}: response too large")));
+                }
+                bytes.extend_from_slice(&chunk);
             }
             let parsed: ApiResponse<R> = serde_json::from_slice(&bytes).map_err(|_| {
                 TelegramError::Http(format!("{method}: invalid response from Telegram"))

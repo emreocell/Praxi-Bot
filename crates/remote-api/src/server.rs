@@ -1,4 +1,6 @@
-use crate::{CONNECT_TIMEOUT, RESPONSE_TIMEOUT, STREAMS, oversized, request_body};
+use crate::{
+    CONNECT_TIMEOUT, CONNECTION_BODY_BUDGET, RESPONSE_TIMEOUT, STREAMS, oversized, request_body,
+};
 use async_trait::async_trait;
 use axum::{Router, body::Body, extract::Request, http::StatusCode, response::IntoResponse};
 use daemon_api::{AppState, PeerIdentity, PeerRole, peer::PeerName};
@@ -35,6 +37,17 @@ impl ApiProtocol {
 
 #[async_trait]
 impl ProtocolHandler for ApiProtocol {
+    fn max_bidi_streams(&self) -> usize {
+        // The connectivity probe consumes one stream id. Quinn only returns that
+        // credit after more than an eighth of the window has closed, which is
+        // later than the STREAMS application requests that follow the probe.
+        STREAMS + 1
+    }
+
+    fn receive_window(&self) -> u64 {
+        CONNECTION_BODY_BUDGET
+    }
+
     async fn handle(&self, conn: Connection, device: Device) {
         let role = match device.role {
             Role::Desktop => PeerRole::Desktop,
@@ -90,5 +103,23 @@ impl ProtocolHandler for ApiProtocol {
             }
         }
         // Dropping JoinSet cancels all active bodies, including SSE, on revoke.
+    }
+}
+
+#[cfg(test)]
+mod limits {
+    use super::ApiProtocol;
+    use crate::{CONNECTION_BODY_BUDGET, MAX_REQUEST_BYTES, STREAMS};
+    use peer_network::ProtocolHandler;
+
+    #[test]
+    fn advertises_per_connection_stream_and_body_budget() {
+        let protocol = ApiProtocol::for_test(axum::Router::new());
+        assert_eq!(protocol.max_bidi_streams(), STREAMS + 1);
+        assert_eq!(protocol.receive_window(), CONNECTION_BODY_BUDGET);
+        assert_eq!(
+            CONNECTION_BODY_BUDGET,
+            u64::try_from(STREAMS).unwrap() * u64::try_from(MAX_REQUEST_BYTES).unwrap()
+        );
     }
 }

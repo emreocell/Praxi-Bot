@@ -465,6 +465,7 @@ function reduce(
     case "workflow_step_started":
     case "workflow_step_completed":
     case "control_requested":
+    case "mcp_server_changed":
       return state;
   }
 }

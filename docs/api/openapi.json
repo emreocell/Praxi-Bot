@@ -981,7 +981,7 @@
           "events"
         ],
         "summary": "Documentation stub for the SSE route (the handler lives in `sse.rs`).",
-        "description": "Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the\nSSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local\n`seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without\nit the stream covers all runs: the SSE `id` is a daemon-wide, strictly\nincreasing `gseq` (persisted) and `Last-Event-ID: <gseq>` replays every\nmissed event of every run, in order, before going live.  Browsers cannot set\nheaders on `EventSource`, so this route (and only this one) also accepts the\nAPI token as the `token` query parameter (Host / Origin checks still apply;\nthe token is compared in constant time; beware that URLs may be logged).\n\nThe daemon-wide stream (no `run_id`) also carries `schedule_changed` events\n(`dto::ScheduleChanged`: `{\"type\":\"schedule_changed\",\"schedule_id\",\"kind\"}`,\nkind `created` / `updated` / `toggled` / `deleted`) when a schedule is changed\nthrough the API.  They have no SSE `id`, are not replayed and are not\nenvelopes: treat them as a hint to refetch `/v1/schedules`.\n\nIt likewise carries `mcp_server_changed` events (`mcp::McpServerChanged`:\n`{\"type\":\"mcp_server_changed\",\"name\",\"status\"}`) when an MCP server is\nadded, updated, removed or changes status (connecting / connected / error /\nquarantined ...); same rules: a hint to refetch `/v1/mcp/servers`.",
+        "description": "Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the\nSSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local\n`seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without\nit the stream covers all runs: the SSE `id` is a daemon-wide, strictly\nincreasing `gseq` (persisted) and `Last-Event-ID: <gseq>` replays every\nmissed event of every run, in order, before going live.  Browsers cannot set\nheaders on `EventSource`, so this route (and only this one) also accepts the\nAPI token as the `token` query parameter (Host / Origin checks still apply;\nthe token is compared in constant time; beware that URLs may be logged).\n\nThe daemon-wide stream (no `run_id`) also carries `schedule_changed` events\n(`dto::ScheduleChanged`: `{\"type\":\"schedule_changed\",\"schedule_id\",\"kind\"}`,\nkind `created` / `updated` / `toggled` / `deleted`) when a schedule is changed\nthrough the API.  They have no SSE `id`, are not replayed and are not\nenvelopes: treat them as a hint to refetch `/v1/schedules`.\n\nA replay gap is explicit: `event: gap` has an `id` equal to `to_gseq` and\ndata `{from_gseq, to_gseq, run_id, reason}`; reason is `log_line_missing` or\n`log_unreadable`. It is audited before the cursor passes the missing row.\n`/v1/events/status.sse_gaps_total` (authenticated) counts these notifications since daemon startup.\nAfter three consecutive replay failures (or live-buffer overflow),\n`event: error` carries `{code: \"replay_unavailable\", last_event_id}` and the\nstream closes. This error has no `id`; reconnect with the last received ID.\nRetry delays start at 250 ms and double up to 5 s. Live buffering is limited\nto 1000 events and 4 MiB per subscriber; replay chunks hold at most 2 MiB of serialized events (a single larger event closes the stream with `replay_unavailable`), and at most `max_sse_subscribers` streams (default 16) may be open: further requests get `503`. The desktop currently ignores unknown\nevent names; card 144 can surface gap/error notifications without changing\nthe ordering or cursor contract.\n\nIt likewise carries `mcp_server_changed` events (`mcp::McpServerChanged`:\n`{\"type\":\"mcp_server_changed\",\"name\",\"status\"}`) when an MCP server is\nadded, updated, removed or changes status (connecting / connected / error /\nquarantined ...); same rules: a hint to refetch `/v1/mcp/servers`.",
         "operationId": "events_doc",
         "parameters": [
           {
@@ -1059,6 +1059,31 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LatestCursor"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/events/status": {
+      "get": {
+        "tags": [
+          "events"
+        ],
+        "operationId": "status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SseStatus"
                 }
               }
             }
@@ -3072,6 +3097,14 @@
           }
         }
       },
+      "Cause": {
+        "type": "string",
+        "enum": [
+          "idle",
+          "action",
+          "refresh"
+        ]
+      },
       "ChannelDto": {
         "type": "object",
         "description": "A messaging channel (e.g. Telegram) as seen by the daemon.",
@@ -3645,6 +3678,113 @@
             "description": "Human-readable message."
           }
         }
+      },
+      "FrameMetadata": {
+        "type": "object",
+        "required": [
+          "target_id",
+          "generation",
+          "frame_seq",
+          "captured_at_ms",
+          "cause",
+          "codec",
+          "width",
+          "height",
+          "source_rect",
+          "geometry_revision",
+          "repeated"
+        ],
+        "properties": {
+          "action_seq": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "captured_at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cause": {
+            "$ref": "#/components/schemas/Cause"
+          },
+          "codec": {
+            "$ref": "#/components/schemas/Codec"
+          },
+          "frame_seq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "geometry_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "height": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "repeated": {
+            "type": "boolean"
+          },
+          "source_rect": {
+            "$ref": "#/components/schemas/SourceRect"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "Gap": {
+        "type": "object",
+        "required": [
+          "from_gseq",
+          "to_gseq",
+          "run_id",
+          "reason"
+        ],
+        "properties": {
+          "from_gseq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "reason": {
+            "$ref": "#/components/schemas/GapReason"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "to_gseq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "GapReason": {
+        "type": "string",
+        "enum": [
+          "log_line_missing",
+          "log_unreadable"
+        ]
       },
       "GrantDto": {
         "type": "object",
@@ -4502,6 +4642,26 @@
             },
             "description": "Bots that may use the server.  Omit to keep the list; `null` = all bots."
           },
+          "bots_add": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Bot ids to add to `bots`, applied atomically on the stored list (no\nread-modify-write by the client).  No effect while the server is open to\nevery bot (`bots: null`).  Applied after `bots`."
+          },
+          "bots_remove": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Bot ids to remove from `bots`, applied atomically; an emptied list stays\n`[]` (no bot), it never becomes `null`.  Applied after `bots_add`."
+          },
           "category": {
             "type": [
               "string",
@@ -5028,6 +5188,134 @@
           "rate_limited",
           "restart",
           "persistence_failed"
+        ]
+      },
+      "RecordHeader": {
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FrameMetadata"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "v",
+                  "session_id",
+                  "sent_at_ms"
+                ],
+                "properties": {
+                  "sent_at_ms": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "v": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "frame"
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "required": [
+              "v",
+              "session_id",
+              "state",
+              "effective_profile",
+              "control_epoch",
+              "input_allowed",
+              "type"
+            ],
+            "properties": {
+              "control_epoch": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "effective_profile": {
+                "$ref": "#/components/schemas/EffectiveProfile"
+              },
+              "input_allowed": {
+                "type": "boolean"
+              },
+              "reason": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Reason"
+                  }
+                ]
+              },
+              "session_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "$ref": "#/components/schemas/ViewState"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "status"
+                ]
+              },
+              "v": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "v",
+              "server_time_ms",
+              "type"
+            ],
+            "properties": {
+              "server_time_ms": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "heartbeat"
+                ]
+              },
+              "v": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              }
+            }
+          }
         ]
       },
       "RecoveryReason": {
@@ -5560,6 +5848,68 @@
           }
         }
       },
+      "SourceRect": {
+        "type": "object",
+        "required": [
+          "x",
+          "y",
+          "width",
+          "height",
+          "units"
+        ],
+        "properties": {
+          "height": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "units": {
+            "$ref": "#/components/schemas/Units"
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "x": {
+            "type": "number",
+            "format": "double"
+          },
+          "y": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "SseStatus": {
+        "type": "object",
+        "description": "Counters of the SSE machinery (authenticated, unlike `/v1/health`).",
+        "required": [
+          "sse_gaps_total",
+          "sse_subscribers",
+          "max_sse_subscribers"
+        ],
+        "properties": {
+          "max_sse_subscribers": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Configured cap on open event streams.",
+            "minimum": 0
+          },
+          "sse_gaps_total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Gap notifications emitted by this daemon (per subscriber, since startup).",
+            "minimum": 0
+          },
+          "sse_subscribers": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Event streams open right now.",
+            "minimum": 0
+          }
+        }
+      },
       "TakeoverAccepted": {
         "type": "object",
         "required": [
@@ -5731,6 +6081,13 @@
         "enum": [
           "browser",
           "desktop"
+        ]
+      },
+      "Units": {
+        "type": "string",
+        "enum": [
+          "physical_px",
+          "css_px"
         ]
       },
       "UsageSummary": {

@@ -2,8 +2,14 @@ use cli_provider::detect::{AuthState, Detector, PathEnv, ShimError, resolve_spaw
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+mod common;
+
 fn fake_cli_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_fake-cli"))
+}
+
+fn fixture_dir() -> tempfile::TempDir {
+    common::fixture_dir(&fake_cli_path())
 }
 
 fn install_fake(dir: &Path, name: &str) -> PathBuf {
@@ -13,20 +19,14 @@ fn install_fake(dir: &Path, name: &str) -> PathBuf {
     let file_name = name.to_owned();
 
     let dest = dir.join(file_name);
-    std::fs::copy(fake_cli_path(), &dest).expect("copy fake-cli");
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755)).expect("set exec");
-    }
+    common::install_binary(&fake_cli_path(), &dest);
 
     dest
 }
 
 #[tokio::test]
 async fn test_all_missing() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = fixture_dir();
     let env = PathEnv::for_test(temp.path().to_path_buf());
     let detector = Detector::with_env(env);
 
@@ -45,7 +45,7 @@ async fn test_all_missing() {
 
 #[tokio::test]
 async fn test_claude_signed_in_and_signed_out() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = fixture_dir();
     install_fake(temp.path(), "claude");
 
     // Signed in
@@ -72,7 +72,7 @@ async fn test_claude_signed_in_and_signed_out() {
 
 #[tokio::test]
 async fn test_claude_extra_fields_never_leaks_token() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = fixture_dir();
     install_fake(temp.path(), "claude");
 
     let env =
@@ -96,7 +96,7 @@ async fn test_claude_extra_fields_never_leaks_token() {
 
 #[tokio::test]
 async fn test_codex_status_variants() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = fixture_dir();
     install_fake(temp.path(), "codex");
 
     // Signed in: "Logged in using ChatGPT"
@@ -140,7 +140,7 @@ async fn test_codex_status_variants() {
 
 #[tokio::test]
 async fn test_cursor_status_variants() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = fixture_dir();
     install_fake(temp.path(), "cursor-agent");
 
     // JSON authenticated
@@ -169,7 +169,7 @@ async fn test_cursor_status_variants() {
 
 #[tokio::test]
 async fn test_opencode_variants() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = fixture_dir();
     install_fake(temp.path(), "opencode");
 
     // Signed in via OPENCODE_API_KEY
@@ -207,7 +207,7 @@ async fn test_opencode_variants() {
 
 #[tokio::test]
 async fn test_gemini_variants() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = fixture_dir();
     install_fake(temp.path(), "gemini");
 
     // Signed in via GEMINI_API_KEY
@@ -250,7 +250,7 @@ async fn test_gemini_variants() {
 
 #[tokio::test]
 async fn test_timeout_and_overflow() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = fixture_dir();
     install_fake(temp.path(), "claude");
 
     // Overflow (> 64 KiB)
@@ -274,7 +274,7 @@ async fn test_timeout_and_overflow() {
 #[cfg(windows)]
 #[tokio::test]
 async fn test_windows_cmd_shim_refused_and_multiline() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = fixture_dir();
 
     // Create a .cmd file that cannot be unwrapped safely
     let cmd_file = temp.path().join("claude.cmd");
@@ -291,7 +291,7 @@ async fn test_windows_cmd_shim_refused_and_multiline() {
     assert_eq!(claude.detail.as_deref(), Some("shim_refused"));
 
     // Multi-line fixture output: only first line is taken as version
-    let temp2 = tempfile::tempdir().unwrap();
+    let temp2 = fixture_dir();
     install_fake(temp2.path(), "codex");
     let env2 =
         PathEnv::for_test(temp2.path().to_path_buf()).with_env_var("FAKE_CLI_MULTILINE", "1");
@@ -324,7 +324,7 @@ fn pid_alive(pid: u32) -> bool {
 
 #[tokio::test]
 async fn test_secret_env_is_not_passed_to_the_probe() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = fixture_dir();
     install_fake(temp.path(), "claude");
     let env = PathEnv::for_test(temp.path().to_path_buf())
         .with_env_var("API_KEY", "SENTINEL_KEY_DO_NOT_LEAK")
@@ -344,7 +344,7 @@ async fn test_secret_env_is_not_passed_to_the_probe() {
 #[cfg(windows)]
 #[tokio::test]
 async fn test_batch_node_shim_is_not_executed() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = fixture_dir();
     let dir = temp.path();
     std::fs::write(dir.join("cli.js"), "console.log('nope')\n").unwrap();
     std::fs::write(dir.join("claude.cmd"), "\"%~dp0\\cli.js\" %*\r\n").unwrap();
@@ -379,7 +379,7 @@ async fn test_batch_node_shim_is_not_executed() {
 
 #[tokio::test]
 async fn test_timeout_kills_the_child_tree() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = fixture_dir();
     install_fake(temp.path(), "claude");
     let marker = temp.path().join("grandchild.pid");
     let env = PathEnv::for_test(temp.path().to_path_buf())
@@ -409,7 +409,7 @@ async fn test_timeout_kills_the_child_tree() {
 
 #[tokio::test]
 async fn test_caching_and_refresh() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = fixture_dir();
     install_fake(temp.path(), "claude");
 
     let env = PathEnv::for_test(temp.path().to_path_buf());
@@ -439,7 +439,7 @@ async fn test_caching_and_refresh() {
 
 #[tokio::test]
 async fn only_installed_claude_and_codex_are_runnable() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = fixture_dir();
     for name in ["claude", "codex", "cursor-agent", "opencode", "gemini"] {
         install_fake(temp.path(), name);
     }
@@ -491,7 +491,7 @@ fn write_package(root: &Path, rel: &str, name: &str, bin_key: &str, bin_rel: &st
 
 #[test]
 fn npm_shim_uses_package_exe_and_js_bins_stay_refused() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = fixture_dir();
     let root = temp.path();
     let outside = root.join("outside.exe");
     std::fs::write(&outside, b"nope").unwrap();
@@ -567,9 +567,11 @@ fn npm_shim_uses_package_exe_and_js_bins_stay_refused() {
     assert!(outside.is_file());
 }
 
+// Detection finds `claude.cmd` through PATHEXT, which Linux does not apply.
+#[cfg(windows)]
 #[tokio::test]
 async fn npm_claude_package_exe_is_the_probed_binary() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = fixture_dir();
     let root = temp.path();
     let pkg = root
         .join("node_modules")

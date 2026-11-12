@@ -112,6 +112,19 @@ pub trait DaemonClient: Send + Sync {
     /// `POST /v1/chats/{chat_id}/messages`: send a user message to `chat_id`.
     async fn send_message(&self, chat_id: ChatId, text: &str) -> Result<SendOutcome>;
 
+    /// Deliver with a stable key such as `tg:123`. HTTP adapters forward this in
+    /// `Idempotency-Key`; in-process adapters can override it when task 136 is available.
+    ///
+    /// The compatibility default cannot deduplicate an ambiguous remote acceptance.
+    async fn send_message_idempotent(
+        &self,
+        chat_id: ChatId,
+        text: &str,
+        _idempotency_key: &str,
+    ) -> Result<SendOutcome> {
+        self.send_message(chat_id, text).await
+    }
+
     /// `POST /v1/approvals/{call_id}`: approve or deny a pending tool call.
     async fn decide_approval(
         &self,
@@ -183,6 +196,16 @@ impl HttpDaemonClient {
     }
 
     async fn request(&self, method: Method, path: &str, body: Option<Value>) -> Result<Value> {
+        self.request_with_key(method, path, body, None).await
+    }
+
+    async fn request_with_key(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+        idempotency_key: Option<&str>,
+    ) -> Result<Value> {
         let mut rb = self
             .http
             .request(method, format!("{}{path}", self.base_url))
@@ -190,6 +213,9 @@ impl HttpDaemonClient {
             .timeout(Duration::from_secs(30));
         if let Some(b) = body {
             rb = rb.json(&b);
+        }
+        if let Some(key) = idempotency_key {
+            rb = rb.header("Idempotency-Key", key);
         }
         let resp = rb
             .send()
@@ -205,7 +231,10 @@ impl HttpDaemonClient {
             let msg = val["error"]["message"]
                 .as_str()
                 .map_or_else(|| status.to_string(), str::to_owned);
-            return Err(TelegramError::Daemon(format!("{status}: {msg}")));
+            return Err(TelegramError::DaemonHttp {
+                status: status.as_u16(),
+                message: msg,
+            });
         }
         Ok(val)
     }
@@ -272,7 +301,7 @@ fn sse_data(block: &str) -> Option<String> {
 impl DaemonClient for HttpDaemonClient {
     async fn list_bots(&self) -> Result<Vec<BotSummary>> {
         let v = self.request(Method::GET, "/v1/bots", None).await?;
-        serde_json::from_value(v).map_err(|e| TelegramError::Daemon(e.to_string()))
+        serde_json::from_value(v).map_err(|e| TelegramError::Malformed(e.to_string()))
     }
 
     async fn create_chat(&self, bot_id: BotId, title: Option<&str>) -> Result<ChatSummary> {
@@ -281,14 +310,11 @@ impl DaemonClient for HttpDaemonClient {
             None => json!({ "bot_id": bot_id.0 }),
         };
         let v = self.request(Method::POST, "/v1/chats", Some(body)).await?;
-        serde_json::from_value(v).map_err(|e| TelegramError::Daemon(e.to_string()))
+        serde_json::from_value(v).map_err(|e| TelegramError::Malformed(e.to_string()))
     }
 
     async fn send_message(&self, chat_id: ChatId, text: &str) -> Result<SendOutcome> {
-        let body = json!({
-            "text": text,
-            "mode": "queue",
-        });
+        let body = json!({ "text": text, "mode": "queue" });
         let v = self
             .request(
                 Method::POST,
@@ -296,7 +322,25 @@ impl DaemonClient for HttpDaemonClient {
                 Some(body),
             )
             .await?;
-        serde_json::from_value(v).map_err(|e| TelegramError::Daemon(e.to_string()))
+        serde_json::from_value(v).map_err(|e| TelegramError::Malformed(e.to_string()))
+    }
+
+    async fn send_message_idempotent(
+        &self,
+        chat_id: ChatId,
+        text: &str,
+        idempotency_key: &str,
+    ) -> Result<SendOutcome> {
+        let body = json!({ "text": text, "mode": "queue" });
+        let v = self
+            .request_with_key(
+                Method::POST,
+                &format!("/v1/chats/{}/messages", chat_id.0),
+                Some(body),
+                Some(idempotency_key),
+            )
+            .await?;
+        serde_json::from_value(v).map_err(|e| TelegramError::Malformed(e.to_string()))
     }
 
     async fn decide_approval(

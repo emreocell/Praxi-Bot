@@ -144,48 +144,7 @@ impl From<Redactor> for SharedRedactor {
     }
 }
 
-/// `value` plus its JSON-escaped, URL-encoded and base64 (standard and
-/// URL-safe, at each of the three byte alignments) renderings.
-#[must_use]
-pub fn secret_variants(value: &str) -> Vec<String> {
-    use base64::Engine as _;
-    use base64::engine::general_purpose::{STANDARD_NO_PAD, URL_SAFE_NO_PAD};
-    let mut out = vec![value.to_owned()];
-    if let Ok(j) = serde_json::to_string(value) {
-        out.push(j[1..j.len() - 1].to_owned());
-    }
-    let mut url = String::new();
-    for b in value.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
-            url.push(char::from(b));
-        } else {
-            {
-                use std::fmt::Write as _;
-                let _ = write!(url, "%{b:02X}");
-            }
-        }
-    }
-    out.push(url);
-    // Base64 of a substring depends on its alignment in the encoded text; the
-    // stable middle of each of the 3 alignments is what appears in practice.
-    for k in 0..3usize {
-        let mut bytes = vec![0u8; k];
-        bytes.extend_from_slice(value.as_bytes());
-        let lead = [0, 2, 3][k];
-        let trail = usize::from(bytes.len() % 3 != 0);
-        for enc in [
-            STANDARD_NO_PAD.encode(&bytes),
-            URL_SAFE_NO_PAD.encode(&bytes),
-        ] {
-            if enc.len() > lead + trail {
-                out.push(enc[lead..enc.len() - trail].to_owned());
-            }
-        }
-    }
-    out.sort();
-    out.dedup();
-    out
-}
+pub use secret_store::secret_variants;
 
 fn add_with_variants(r: &mut Redactor, value: &str) {
     for v in secret_variants(value) {

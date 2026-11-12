@@ -1,4 +1,5 @@
 .brandTitle {
+  display: flex; align-items: center; gap: var(--space-3); letter-spacing: var(--letter-spacing-tight);
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-bold);
   color: var(--color-text);
@@ -29,7 +30,7 @@
   width: var(--size-status-dot);
   height: var(--size-status-dot);
   border-radius: var(--radius-pill);
-  background-color: var(--bot-dot-color, var(--color-accent));
+  background-color: var(--color-success);
   flex-shrink: 0;
 }
 
@@ -57,7 +58,7 @@
 .badgeLabel {
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-accent);
+  color: var(--color-accent-text);
   background-color: var(--color-accent-subtle);
   padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-pill);
@@ -252,7 +253,7 @@
 .activeRunBadge {
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-accent);
+  color: var(--color-accent-text);
   background-color: var(--color-accent-subtle);
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-pill);
@@ -301,8 +302,8 @@
   min-width: var(--size-control-sm);
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-pill);
-  background-color: var(--color-warning);
-  color: var(--color-text-inverse);
+  background-color: var(--color-warning-subtle);
+  color: var(--color-warning);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-bold);
   text-align: center;
@@ -332,3 +333,7 @@
   white-space: pre-wrap;
   max-width: 100%;
 }
+
+
+.brandMark { display: inline-flex; align-items: center; justify-content: center; width: var(--size-avatar-sm); height: var(--size-avatar-sm); border-radius: var(--radius-md); background: var(--color-accent); color: var(--color-accent-contrast); box-shadow: var(--shadow-sm); }
+.emptyIcon { width: var(--space-10); height: var(--space-10); color: var(--color-accent-text); margin-bottom: var(--space-3); }

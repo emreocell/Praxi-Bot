@@ -69,6 +69,7 @@ pub struct DocToolsConfig {
     /// Longest single cell / paragraph kept in structured output (default 4000).
     pub max_cell_chars: usize,
     /// Largest written output (docx/xlsx/csv), in bytes (default 25 MiB).
+    /// Also bounds DOCX read JSON, which has an additional hard 1 MiB cap.
     pub max_output_bytes: usize,
 }
 

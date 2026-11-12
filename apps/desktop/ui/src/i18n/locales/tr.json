@@ -6,7 +6,8 @@
     "needsYouCount": "{{count}} öğe senden bekliyor",
     "newBot": "Yeni bot",
     "usage": "Kullanım",
-    "schedules": "Zamanlanmış görevler"
+    "schedules": "Zamanlanmış görevler",
+    "apps": "Uygulamalar"
   },
   "main": {
     "selectBotTitle": "Bir bot seçin",
@@ -206,6 +207,7 @@
   "common": {
     "back": "Geri",
     "cancel": "Vazgeç",
+    "close": "Kapat",
     "save": "Kaydet",
     "edit": "Düzenle",
     "delete": "Sil"
@@ -339,9 +341,18 @@
       "menu": "Komutlar",
       "mentionMenu": "Botlar",
       "noMatch": "Eşleşme yok"
-    }
+    },
+    "conversationLabel": "Bugün",
+    "composerHint": "Göndermek için Enter · Komutlar için / · Bot seçmek için @"
   },
   "botForm": {
+    "apps": {
+      "title": "Uygulamalar",
+      "hint": "Bu botun kullanabileceği bağlı uygulamalar. Tüm botlara açık bir uygulamanın seçimini kaldırırsan diğer botlarınla sınırlanır. Uygulamaları Uygulamalar ekranından yönetebilirsin.",
+      "none": "Henüz bağlı uygulama yok.",
+      "notApplied": "{{names}}: uygulanmadı, uygulama bu arada değişti (örneğin artık tüm botlara açık). Liste güncel durumu gösteriyor.",
+      "partialFail": "Bot kaydedildi ama şu uygulamalar için erişim güncellenemedi: {{names}}. Tekrar Kaydet’i dene."
+    },
     "createTitle": "Yeni bot",
     "editTitle": "Botu düzenle",
     "create": "Botu oluştur",
@@ -693,6 +704,187 @@
         "text": "Ne zaman çalışacağını yaz.",
         "cron": "Bir cron ifadesi gir.",
         "prompt": "Bot'un ne yapacağını yaz."
+      }
+    }
+  },
+  "account": {
+    "defaultName": "Kullanıcı",
+    "settings": "Ayarlar",
+    "apps": "Uygulamalar",
+    "computer": "Bilgisayar",
+    "help": "Yardım"
+  },
+  "apps": {
+    "title": "Uygulamalar",
+    "subtitle": "MCP sunucularını bağlayarak botlarınınızın dış araçlara erişmesini sağlayın.",
+    "search": "Uygulama ve sunucu ara",
+    "mcpServers": "Özel MCP sunucusu",
+    "categoriesLabel": "Kategoriler",
+    "categories": {
+      "all": "Tümü",
+      "files": "Dosyalar",
+      "developer": "Geliştirici",
+      "communication": "İletişim",
+      "productivity": "Üretkenlik",
+      "data": "Veri",
+      "search": "Arama",
+      "browser": "Tarayıcı",
+      "home": "Ev otomasyonu"
+    },
+    "status": {
+      "connected": "Bağlı",
+      "connecting": "Bağlanıyor",
+      "disconnected": "Bağlı değil",
+      "error": "Hata",
+      "quarantined": "Karantinada"
+    },
+    "toolCount": "{{count}} araç",
+    "toolCount_one": "{{count}} araç",
+    "botsAll": "Tüm botlar",
+    "botsSome": "Botlar: {{names}}",
+    "botsNone": "Hiçbir bot",
+    "access": {
+      "label": "Bu uygulamayı kimler kullanabilir",
+      "all": "Tüm botlar",
+      "some": "Yalnızca seçilen botlar",
+      "noBotsYet": "Henüz bot yok. Önce bir bot oluştur.",
+      "nobody": "En az bir bot seçmedikçe hiçbir bot bu uygulamayı kullanamaz.",
+      "deletedBot": "silinmiş bot",
+      "edit": "Botlar",
+      "save": "Kaydet",
+      "notApplied": "{{name}}: kaydedilmedi, bu uygulama başka yerde değiştirildi (örneğin artık tüm botlara açık). Güncel durum gösteriliyor.",
+      "savedToast": "{{name}}: bot erişimi kaydedildi"
+    },
+    "reconnect": "Yeniden bağlan",
+    "disconnectConfirm": "Bu sunucunun bağlantısı kesilsin mi?",
+    "disconnect": "Bağlantıyı kes",
+    "connected": "Bağlandı",
+    "connect": "Bağlan",
+    "getKey": "API anahtarı al",
+    "secretHint": "Gizli anahtarlar işletim sistemi anahtarlığında saklanır ve bir daha gösterilmez.",
+    "connectNow": "Bağlan",
+    "connectedToast": "{{name}} bağlandı",
+    "disconnectedToast": "{{name}} bağlantısı kesildi",
+    "missingSecret": "Gerekli tüm gizli anahtarları girin.",
+    "connectedSection": "Bağlandı",
+    "catalogSection": "Katalog",
+    "loading": "Katalog yükleniyor…",
+    "noResults": "Eşleşen sunucu yok.",
+    "custom": {
+      "intro": "Stdio veya HTTP MCP sunucusunu elle ekleyin.",
+      "name": "Sunucu adı",
+      "errName": "Bir ad girin.",
+      "transport": "Taşıma",
+      "stdio": "Stdio",
+      "http": "HTTP",
+      "command": "Komut",
+      "errCommand": "Çalıştırılacak komutu girin.",
+      "env": "Ortam değişkenleri",
+      "envHint": "Her satıra bir KEY=değer.",
+      "url": "Sunucu URL’si",
+      "errUrl": "Geçerli bir HTTP URL’si girin.",
+      "add": "Sunucu ekle"
+    }
+  },
+  "help": {
+    "title": "Klavye kısayolları",
+    "intro": "Uygulama açıkken kullanışlı kısayollar.",
+    "palette": "Komut paleti",
+    "send": "Mesaj gönder",
+    "stop": "Tüm bot çalışmalarını durdur"
+  },
+  "modelPicker": {
+    "title": "Model",
+    "none": "Model yok",
+    "search": "Model ara",
+    "empty": "Eşleşen model yok.",
+    "switched": "{{model}} modeline geçildi",
+    "switchedDefault": "Varsayılan model {{model}} olarak ayarlandı"
+  },
+  "settingsModal": {
+    "title": "Ayarlar",
+    "search": "Ayarlarda ara",
+    "results": "Arama sonuçları",
+    "noResults": "Eşleşen ayar yok.",
+    "nav": {
+      "general": "Genel",
+      "ai": "Yapay zeka",
+      "computer": "Bilgisayar",
+      "usage": "Kullanım",
+      "updates": "Güncellemeler"
+    },
+    "general": {
+      "account": {
+        "title": "Hesap adı",
+        "description": "Kenar çubuğundaki hesap menüsünde görünür."
+      },
+      "theme": {
+        "title": "Tema",
+        "description": "Çalışma alanına uygun bir görünüm seç.",
+        "system": "Sistemi izle"
+      },
+      "frame": {
+        "title": "Pencere çerçevesi",
+        "description": "Yerel başlık çubuğunu göster (bazı platformlarda yeniden başlatma gerekebilir)."
+      },
+      "send": {
+        "title": "Mesaj gönder",
+        "description": "Sohbet mesajını hangi tuş gönderir.",
+        "enter": "Enter",
+        "ctrl-enter": "Ctrl+Enter"
+      }
+    },
+    "ai": {
+      "defaultModel": {
+        "title": "Varsayılan model",
+        "description": "Botta model seçili değilse kullanılır."
+      },
+      "keys": {
+        "title": "Sağlayıcı API anahtarları",
+        "description": "Yalnızca yazılır; işletim sistemi anahtarlığında saklanır.",
+        "none": "Henüz sağlayıcı yüklenmedi.",
+        "inputLabel": "{{provider}} için API anahtarı",
+        "replace": "Anahtarı değiştir",
+        "placeholder": "API anahtarını yapıştır",
+        "saved": "{{provider}} anahtarı kaydedildi"
+      }
+    },
+    "computer": {
+      "soon": "Yakında",
+      "target": {
+        "title": "Bot nerede çalışır",
+        "description": "Bilgisayar ve tarayıcı araçlarının nerede çalışacağını seçin."
+      },
+      "targets": {
+        "this-pc": {
+          "title": "Bu bilgisayar",
+          "description": "Bu makinede masaüstü otomasyonu."
+        },
+        "browser": {
+          "title": "Yalnızca tarayıcı",
+          "description": "Yalnızca tarayıcı araçları; işletim sistemi masaüstü kontrolü yok."
+        },
+        "remote": {
+          "title": "Uzak sunucu",
+          "description": "Her zaman açık sunucu (yakında)."
+        },
+        "off": {
+          "title": "Kapalı",
+          "description": "Bilgisayar veya tarayıcı araçları yok."
+        }
+      }
+    },
+    "updates": {
+      "title": "Güncellemeler",
+      "description": "Uygulama ve daemon sürümleri.",
+      "appVersion": "Masaüstü uygulaması",
+      "devBuild": "Geliştirme derlemesi",
+      "daemon": "Daemon",
+      "daemonDescription": "Yerel bot serve işlemi.",
+      "unknown": "Bilinmiyor",
+      "how": {
+        "title": "Güncellemeler nasıl çalışır",
+        "description": "Sürümler ayrı dağıtılır; yükseltme adımları için proje belgelerine bakın."
       }
     }
   },

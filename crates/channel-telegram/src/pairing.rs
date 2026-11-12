@@ -3,6 +3,7 @@
 //! channel state.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -152,6 +153,8 @@ struct StateInner {
 pub struct PairingStore {
     path: Option<PathBuf>,
     inner: Mutex<StateInner>,
+    #[cfg(test)]
+    fail_saves: std::sync::atomic::AtomicBool,
 }
 
 fn ct_eq(a: &str, b: &str) -> bool {
@@ -191,6 +194,8 @@ impl PairingStore {
     pub fn in_memory() -> Self {
         Self {
             path: None,
+            #[cfg(test)]
+            fail_saves: std::sync::atomic::AtomicBool::new(false),
             inner: Mutex::new(StateInner {
                 persisted: PersistedFile {
                     version: 1,
@@ -218,6 +223,8 @@ impl PairingStore {
         };
         Ok(Self {
             path: Some(path),
+            #[cfg(test)]
+            fail_saves: std::sync::atomic::AtomicBool::new(false),
             inner: Mutex::new(StateInner {
                 persisted,
                 ..StateInner::default()
@@ -225,18 +232,51 @@ impl PairingStore {
         })
     }
 
-    fn save_locked(path: Option<&Path>, data: &PersistedFile) -> Result<()> {
-        let Some(path) = path else {
+    fn save_locked(&self, data: &PersistedFile) -> Result<()> {
+        #[cfg(test)]
+        if self.fail_saves.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(TelegramError::Storage(
+                "injected pairing save failure".into(),
+            ));
+        }
+        let Some(path) = self.path.as_deref() else {
             return Ok(());
         };
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| TelegramError::Storage(e.to_string()))?;
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        std::fs::create_dir_all(parent).map_err(storage_error)?;
+        let json = serde_json::to_vec_pretty(data).map_err(storage_error)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
         }
-        let json = serde_json::to_string_pretty(data)
-            .map_err(|e| TelegramError::Storage(e.to_string()))?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, json).map_err(|e| TelegramError::Storage(e.to_string()))?;
-        std::fs::rename(&tmp, path).map_err(|e| TelegramError::Storage(e.to_string()))
+        // A unique sibling prevents another writer or a stale temp from being truncated.
+        let tmp = parent.join(format!(".telegram-pairing-{}.tmp", Uuid::new_v4()));
+        let mut file = options.open(&tmp).map_err(storage_error)?;
+        // Only own cleanup after create_new succeeds: a name collision must not
+        // remove another writer's file. Close the handle before cleanup on Windows.
+        let cleanup = TempFile(tmp.clone());
+        let written = file.write_all(&json).and_then(|()| file.sync_all());
+        drop(file);
+        written.map_err(storage_error)?;
+        std::fs::rename(&tmp, path).map_err(storage_error)?;
+        #[cfg(unix)]
+        std::fs::File::open(parent)
+            .and_then(|dir| dir.sync_all())
+            .map_err(storage_error)?;
+        drop(cleanup);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_saves(&self, enabled: bool) {
+        self.fail_saves
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Generate a new one-time 6-digit pairing code valid for [`PAIR_CODE_TTL`] (10 minutes).
@@ -296,14 +336,17 @@ impl PairingStore {
             }
         }
         if let Some(idx) = matched {
-            let entry = guard.pending_codes.remove(idx);
-            if entry.expires_at <= now {
+            if guard.pending_codes[idx].expires_at <= now {
+                guard.pending_codes.remove(idx);
                 return Ok(PairAttempt::Expired);
             }
+            let mut candidate = guard.persisted.clone();
+            let newly_inserted = candidate.paired_users.insert(user_id);
+            self.save_locked(&candidate)?;
+            guard.persisted = candidate;
+            guard.pending_codes.remove(idx);
             guard.pair_failures.remove(&user_id);
-            let newly_inserted = guard.persisted.paired_users.insert(user_id);
             guard.refused_at.remove(&user_id);
-            Self::save_locked(self.path.as_deref(), &guard.persisted)?;
             return Ok(if newly_inserted {
                 PairAttempt::Paired
             } else {
@@ -340,9 +383,12 @@ impl PairingStore {
     /// Returns [`TelegramError::Storage`] if persistence fails.
     pub fn add_paired_user(&self, user_id: i64) -> Result<()> {
         let mut guard = self.inner.lock();
-        if guard.persisted.paired_users.insert(user_id) {
+        if !guard.persisted.paired_users.contains(&user_id) {
+            let mut candidate = guard.persisted.clone();
+            candidate.paired_users.insert(user_id);
+            self.save_locked(&candidate)?;
+            guard.persisted = candidate;
             guard.refused_at.remove(&user_id);
-            Self::save_locked(self.path.as_deref(), &guard.persisted)?;
         }
         Ok(())
     }
@@ -425,12 +471,15 @@ impl PairingStore {
         {
             return Ok(());
         }
-        guard.persisted.next_offset = Some(offset);
-        guard.persisted.offset_bot = Some(bot_key.to_owned());
-        guard.persisted.offset_saved_at = SystemTime::now()
+        let mut candidate = guard.persisted.clone();
+        candidate.next_offset = Some(offset);
+        candidate.offset_bot = Some(bot_key.to_owned());
+        candidate.offset_saved_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
-        Self::save_locked(self.path.as_deref(), &guard.persisted)
+        self.save_locked(&candidate)?;
+        guard.persisted = candidate;
+        Ok(())
     }
 
     /// Get the bot currently mapped to `telegram_chat_id`.
@@ -450,8 +499,11 @@ impl PairingStore {
     /// Returns [`TelegramError::Storage`] if persistence fails.
     pub fn set_bot_for_chat(&self, telegram_chat_id: i64, bot_id: BotId) -> Result<()> {
         let mut guard = self.inner.lock();
-        guard.persisted.chat_bots.insert(telegram_chat_id, bot_id);
-        Self::save_locked(self.path.as_deref(), &guard.persisted)
+        let mut candidate = guard.persisted.clone();
+        candidate.chat_bots.insert(telegram_chat_id, bot_id);
+        self.save_locked(&candidate)?;
+        guard.persisted = candidate;
+        Ok(())
     }
 
     /// Get the daemon [`ChatId`] previously created for `(telegram_chat_id, bot_id)`.
@@ -473,7 +525,22 @@ impl PairingStore {
     ) -> Result<()> {
         let key = thread_key(telegram_chat_id, bot_id);
         let mut guard = self.inner.lock();
-        guard.persisted.chat_threads.insert(key, chat_id);
-        Self::save_locked(self.path.as_deref(), &guard.persisted)
+        let mut candidate = guard.persisted.clone();
+        candidate.chat_threads.insert(key, chat_id);
+        self.save_locked(&candidate)?;
+        guard.persisted = candidate;
+        Ok(())
+    }
+}
+
+fn storage_error(error: impl std::fmt::Display) -> TelegramError {
+    TelegramError::Storage(error.to_string())
+}
+
+struct TempFile(PathBuf);
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
     }
 }

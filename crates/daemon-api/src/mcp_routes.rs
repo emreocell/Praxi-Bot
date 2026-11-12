@@ -47,6 +47,29 @@ pub(crate) async fn list_mcp_servers(
     Ok(Json(mcp(&s)?.list()))
 }
 
+/// Most ids a `bots` list (or a `bots_add` / `bots_remove` list) may carry.
+pub(crate) const MAX_BOT_IDS: usize = 256;
+/// Longest bot id (a UUID is 36 characters).
+pub(crate) const MAX_BOT_ID_LEN: usize = 64;
+
+/// Reject oversized or malformed bot id lists with `400`.
+pub(crate) fn check_bot_ids(field: &str, ids: &[String]) -> Result<(), ApiError> {
+    if ids.len() > MAX_BOT_IDS {
+        return Err(ApiError::bad_request(format!(
+            "`{field}` has more than {MAX_BOT_IDS} ids"
+        )));
+    }
+    if ids
+        .iter()
+        .any(|id| id.is_empty() || id.len() > MAX_BOT_ID_LEN)
+    {
+        return Err(ApiError::bad_request(format!(
+            "every id in `{field}` must be 1 to {MAX_BOT_ID_LEN} characters"
+        )));
+    }
+    Ok(())
+}
+
 /// Add an MCP server, connect it (when enabled) and save `mcp.toml`.  A server
 /// that cannot connect is still added (`status: error`).  Secrets are given as
 /// secret names (`secret_env` / `secret_headers`), never as values; `category`
@@ -61,6 +84,9 @@ pub(crate) async fn create_mcp_server(
     State(s): State<AppState>,
     ApiJson(input): ApiJson<McpServerInput>,
 ) -> Result<(StatusCode, Json<McpServerDto>), ApiError> {
+    if let Some(bots) = &input.bots {
+        check_bot_ids("bots", bots)?;
+    }
     let server = mcp(&s)?.add(input).await?;
     Ok((StatusCode::CREATED, Json(server)))
 }
@@ -80,6 +106,15 @@ pub(crate) async fn update_mcp_server(
     Path(name): Path<String>,
     ApiJson(patch): ApiJson<serde_json::Value>,
 ) -> Result<Json<McpServerDto>, ApiError> {
+    for field in ["bots", "bots_add", "bots_remove"] {
+        if let Some(arr) = patch.get(field).and_then(serde_json::Value::as_array) {
+            let ids: Vec<String> = arr
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect();
+            check_bot_ids(field, &ids)?;
+        }
+    }
     Ok(Json(mcp(&s)?.update(&name, patch).await?))
 }
 

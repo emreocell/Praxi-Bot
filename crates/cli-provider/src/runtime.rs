@@ -22,8 +22,7 @@ use tokio_util::sync::CancellationToken;
 use tool_registry::ToolSpec;
 
 use crate::detect::{
-    self, PathEnv, apply_sanitized_env, binary_pin, find_candidate, isolate, kill_tree,
-    resolve_spawn,
+    ChildTree, PathEnv, apply_sanitized_env, binary_pin, find_candidate, isolate, resolve_spawn,
 };
 
 /// Supported session dialect.
@@ -158,7 +157,7 @@ struct Bridge {
     child_pid: Arc<AtomicU32>,
     /// Kill-on-close job created by `isolate` for this turn. Empty until spawn.
     #[cfg(windows)]
-    job: detect::SharedJob,
+    job: crate::detect::SharedJob,
     listen: Arc<OnceLock<SocketAddr>>,
 }
 
@@ -347,7 +346,10 @@ async fn restrict_sidecar(path: &std::path::Path) -> Result<(), CliError> {
     }
     Ok(())
 }
+// NamedTempFile is already mode 0600 here, so there is no ACL step to await.
+// `async` stays so the call site can `.await` on every host.
 #[cfg(not(windows))]
+#[allow(clippy::unused_async)] // Match the Windows implementation's async interface.
 async fn restrict_sidecar(_: &std::path::Path) -> Result<(), CliError> {
     Ok(())
 }
@@ -665,8 +667,14 @@ async fn session(
 ) -> Result<TurnUsage, CliError> {
     let candidate = find_candidate(command, env).ok_or(CliError::NotInstalled)?;
     let resolved = resolve_spawn(&candidate, env).map_err(|_| CliError::ShimRefused)?;
+    // Codex remains metadata-only: no probe or turn process is permitted.
+    if engine == Engine::Codex {
+        return Err(CliError::CodexUnconfinable);
+    }
     #[cfg(windows)]
-    let job = detect::SharedJob::new();
+    let (resolved, executable_lock) = crate::detect::lock_executable(resolved)?;
+    #[cfg(windows)]
+    let job = crate::detect::SharedJob::new();
     let bridge = Bridge {
         capability: format!("Bearer {}{}", uuid::Uuid::now_v7(), uuid::Uuid::now_v7()),
         tools: Arc::new(turn.tools.clone()),
@@ -704,6 +712,9 @@ async fn session(
         let help = crate::detect::claude_help(&resolved, env)
             .await
             .ok_or(CliError::NativeToolsOpen)?;
+        if binary_pin(&resolved.program).as_ref() != Some(&pin) {
+            return Err(CliError::BinaryChanged);
+        }
         if !claude_launch_accepted(&help) {
             return Err(CliError::NativeToolsOpen);
         }
@@ -752,13 +763,17 @@ async fn session(
     let mut isolated = isolate(cmd, job);
     #[cfg(not(windows))]
     let mut isolated = isolate(cmd);
-    let mut child = isolated.spawn().map_err(|e| {
+    let child = isolated.spawn().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             CliError::NotInstalled
         } else {
             CliError::Io
         }
     })?;
+    // CreateProcess has returned and the suspended root has joined its job.
+    #[cfg(windows)]
+    drop(executable_lock);
+    let mut child = ChildTree::new(child);
     #[cfg(not(windows))]
     {
         let child_pid = child
@@ -796,7 +811,7 @@ async fn session(
         r = protocol(engine, &turn, &bridge, &server, host.as_ref(), &mut stdin, stdout) => r,
     };
     stop.cancel();
-    kill_tree(child.as_mut()).await;
+    child.terminate().await;
     stderr_task.abort();
     result
 }
@@ -1264,7 +1279,7 @@ mod tests {
             #[cfg(not(windows))]
             child_pid: Arc::new(AtomicU32::new(std::process::id())),
             #[cfg(windows)]
-            job: detect::SharedJob::new(),
+            job: crate::detect::SharedJob::new(),
             listen: Arc::new(OnceLock::new()),
         }
     }
@@ -1295,51 +1310,37 @@ mod tests {
     }
     #[tokio::test]
     async fn bridge_rejects_other_turns_and_unmounted_tools() {
-        let bridge = bridge();
         let req = json!({"id":1,"method":"tools/call","params":{"name":"Bash","arguments":{}}});
-        let reply = bridge.rpc(&req).await;
+        let reply = bridge().rpc(&req).await;
         assert_eq!(reply["result"]["isError"], true);
-        #[cfg(windows)]
-        let job = bridge.job.clone();
-        let server = BridgeServer::open(bridge).await.unwrap();
-        let path = server.file.path().to_owned();
-        let config: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        let url = config["mcpServers"]["praxi"]["url"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        let body = req.to_string();
-        let unauth = post_allowed(
-            &url,
-            None,
-            &body,
+        // Each turn has exactly one root. Reusing an admission-capable job for
+        // three unrelated curl roots would contradict the production boundary.
+        for (auth, status) in [
+            (None, "HTTP/1.1 401"),
+            (Some("Bearer another-turn"), "HTTP/1.1 401"),
+            (Some("Bearer private-turn-capability"), "HTTP/1.1 200"),
+        ] {
+            let bridge = bridge();
             #[cfg(windows)]
-            &job,
-        )
-        .await;
-        assert!(unauth.starts_with("HTTP/1.1 401"), "{unauth}");
-        let wrong = post_allowed(
-            &url,
-            Some("Bearer another-turn"),
-            &body,
-            #[cfg(windows)]
-            &job,
-        )
-        .await;
-        assert!(wrong.starts_with("HTTP/1.1 401"), "{wrong}");
-        let ok = post_allowed(
-            &url,
-            Some("Bearer private-turn-capability"),
-            &body,
-            #[cfg(windows)]
-            &job,
-        )
-        .await;
-        assert!(ok.starts_with("HTTP/1.1 200"), "{ok}");
-        assert!(ok.contains("\"isError\":true"));
-        assert!(path.exists());
-        drop(server);
-        assert!(!path.exists());
+            let job = bridge.job.clone();
+            let server = BridgeServer::open(bridge).await.unwrap();
+            let path = server.file.path().to_owned();
+            let response = post_allowed(
+                &server.url,
+                auth,
+                &req.to_string(),
+                #[cfg(windows)]
+                &job,
+            )
+            .await;
+            assert!(response.starts_with(status), "{response}");
+            if status == "HTTP/1.1 200" {
+                assert!(response.contains("\"isError\":true"));
+            }
+            assert!(path.exists());
+            drop(server);
+            assert!(!path.exists());
+        }
     }
     #[tokio::test]
     async fn non_child_connection_rejected() {
@@ -1370,7 +1371,7 @@ mod tests {
         url: &str,
         auth: Option<&str>,
         body: &str,
-        #[cfg(windows)] job: &detect::SharedJob,
+        #[cfg(windows)] job: &crate::detect::SharedJob,
     ) -> String {
         #[cfg(not(windows))]
         {
@@ -1383,7 +1384,7 @@ mod tests {
     }
     #[cfg(windows)]
     async fn post_inside_job(
-        job: &detect::SharedJob,
+        job: &crate::detect::SharedJob,
         url: &str,
         auth: Option<&str>,
         body: &str,

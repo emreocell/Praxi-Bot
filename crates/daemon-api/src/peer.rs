@@ -65,6 +65,23 @@ async fn guard(State(state): State<AppState>, mut req: Request, next: Next) -> R
     }
     req.extensions_mut()
         .insert(crate::live_view::Actor::peer(&peer));
+    let (req, control_transition) = if req.method() == Method::PUT && path == "/v1/control/state" {
+        let (parts, body) = req.into_parts();
+        let Ok(bytes) = axum::body::to_bytes(body, 4096).await else {
+            return ApiError::bad_request("control state body exceeds 4096 bytes").into_response();
+        };
+        let input: crate::dto::ControlStateInput = match serde_json::from_slice(&bytes) {
+            Ok(input) => input,
+            Err(e) => return ApiError::bad_request(e.to_string()).into_response(),
+        };
+        let changed = input.release || state.hub().reported_mode() != Some(input.mode);
+        (
+            Request::from_parts(parts, axum::body::Body::from(bytes)),
+            changed,
+        )
+    } else {
+        (req, false)
+    };
     // Record the initiator in the existing SQLite audit log before dispatch.
     // Fail closed if attribution cannot be persisted. The normal approval audit
     // and permission engine remain in place and record the resulting decision.
@@ -73,7 +90,7 @@ async fn guard(State(state): State<AppState>, mut req: Request, next: Next) -> R
         && (path.starts_with("/v1/approvals/")
             || path.starts_with("/v1/questions/")
             || path.starts_with("/v1/control/")))
-        || (req.method() == Method::PUT && path == "/v1/control/state")
+        || control_transition
     {
         let role = if peer.role == PeerRole::Phone {
             "phone"

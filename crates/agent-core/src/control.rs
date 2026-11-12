@@ -75,6 +75,8 @@ pub trait ControlGate: Send + Sync {
     ) -> Result<(), String>;
 }
 
+const NOT_CONSULTABLE: &str = "This desktop action was refused because the run it belongs to is not active, so the control state (pause / human driving) cannot be checked. Do not retry it; ask the user how to continue.";
+
 /// The [`DesktopControlGate`] the builtin tools get: resolves the run and
 /// forwards to the registered [`ControlGate`].
 pub(crate) struct LoopControl {
@@ -103,7 +105,8 @@ impl DesktopControlGate for LoopControl {
 impl LoopControl {
     async fn admit(&self, req: &ToolRequest, highlight: bool) -> Result<ActionPermit, String> {
         let Some(sh) = self.sh.upgrade() else {
-            return Ok(ActionPermit::default());
+            // Fail closed: if the loop is gone the latch cannot be consulted.
+            return Err(NOT_CONSULTABLE.to_owned());
         };
         let Some(gate) = sh.control.read().clone() else {
             return Ok(ActionPermit::default());
@@ -113,7 +116,14 @@ impl LoopControl {
             .parse::<Uuid>()
             .ok()
             .and_then(|id| sh.runs.lock().get(&RunId(id)).cloned());
-        if let Some(ctx) = &ctx {
+        // Not a live run (a tool used outside a turn, or a stale id): the
+        // request cannot be attributed to a run and so cannot be checked
+        // against the control latch.  Fail closed.
+        let Some(ctx) = ctx else {
+            return Err(NOT_CONSULTABLE.to_owned());
+        };
+        {
+        let ctx = &ctx;
             let waiting = ComputerWait(Arc::clone(&ctx.waiting_computer));
             if ctx.computer.get().is_none() {
                 ctx.waiting_computer
@@ -140,8 +150,8 @@ impl LoopControl {
         }
         let request = ControlRequest {
             request_id: Uuid::now_v7(),
-            run_id: ctx.as_ref().map_or(RunId(Uuid::nil()), |c| c.run_id),
-            bot_id: ctx.as_ref().map_or(BotId(Uuid::nil()), |c| c.bot_id),
+            run_id: ctx.run_id,
+            bot_id: ctx.bot_id,
             rect: req.rect,
             label: req.label.clone(),
             action: req.action.clone(),
@@ -154,26 +164,18 @@ impl LoopControl {
             label: request.label.clone(),
             action: request.action.clone(),
         });
-        let computer = ctx.as_ref().map(|ctx| Arc::clone(&ctx.computer));
+        let computer = Arc::clone(&ctx.computer);
         let sh2: Arc<Shared> = Arc::clone(&sh);
-        let publish = move || {
-            if let Some(ctx) = &ctx {
-                sh2.emit(ctx, event.clone());
-            }
-        };
+        let publish = move || sh2.emit(&ctx, event.clone());
         let permit = if highlight {
             gate.admit_action(request, &publish).await?
         } else {
             gate.admit_background_action(request).await?
         };
-        if let Some(computer) = computer {
-            Ok(ActionPermit::new(permit.needs_observation(), move || {
-                let _computer = computer;
-                drop(permit);
-            }))
-        } else {
-            Ok(permit)
-        }
+        Ok(ActionPermit::new(permit.needs_observation(), move || {
+            let _computer = computer;
+            drop(permit);
+        }))
     }
 }
 

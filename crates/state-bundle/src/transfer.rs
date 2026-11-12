@@ -11,6 +11,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     FileRecord, ImportError, ImportOptions, Manifest, Phase, ProgressCallback, Result, invalid,
+    policy::{MAX_POLICY_BYTES, POLICY_FILE},
     progress,
 };
 
@@ -24,6 +25,7 @@ pub const INCLUDED_FILES: &[&str] = &[
     "providers.toml",
     "mcp.toml",
     "host.toml",
+    POLICY_FILE,
 ];
 /// Excluded at any depth. A trailing `*` means prefix; matching is case insensitive.
 pub const EXCLUSIONS: &[&str] = &[
@@ -39,6 +41,8 @@ pub const EXCLUSIONS: &[&str] = &[
     "logs",
     "backup-*",
     "import-staging",
+    // Skill scope lock files and publication/write staging (crates/skills).
+    ".praxi-*",
 ];
 const METADATA_CAP: u64 = 8 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
@@ -127,6 +131,65 @@ pub(crate) fn backup(source: &Path, target: &Path) -> Result<()> {
     conn.busy_timeout(Duration::from_secs(5))?;
     let mut dest = Connection::open(target)?;
     Backup::new(&conn, &mut dest)?.run_to_completion(128, Duration::from_millis(10), None)?;
+    Ok(())
+}
+
+pub(crate) async fn write_files(
+    data_dir: &Path,
+    sink: &mut (impl AsyncWrite + Unpin),
+    manifest: &mut Manifest,
+    bytes: &mut u64,
+    cb: Option<&ProgressCallback>,
+) -> Result<()> {
+    let policy_json = crate::policy::export(data_dir)?;
+    let mut paths = collect(data_dir)?;
+    if !paths.iter().any(|path| path == crate::policy::POLICY_FILE) {
+        paths.push(crate::policy::POLICY_FILE.into());
+    }
+    paths.sort();
+    // Keep snapshots alive until their payloads have been streamed.
+    let snapshots = tempfile::tempdir()?;
+    for path in paths {
+        if path == crate::policy::POLICY_FILE {
+            manifest.files.push(
+                write_entry(
+                    sink,
+                    &path,
+                    policy_json.len() as u64,
+                    &mut policy_json.as_slice(),
+                    bytes,
+                    cb,
+                )
+                .await?,
+            );
+            continue;
+        }
+        let mut source = data_dir.join(&path);
+        if matches!(path.as_str(), "bot.db" | "schedules.db" | "memory.db") {
+            let snapshot = snapshots.path().join(&path);
+            backup(&source, &snapshot)?;
+            source = snapshot;
+            let version = storage::migrate::current_version(&rusqlite::Connection::open(&source)?)?;
+            manifest
+                .db_schemas
+                .get_or_insert_default()
+                .insert(path.clone(), version);
+            if path == "bot.db" {
+                manifest.schema_version = version;
+                if manifest.schema_version > storage::migrate::latest_version() {
+                    return Err(invalid("database schema is too new"));
+                }
+            }
+        }
+        let size = std::fs::metadata(&source)?.len();
+        let mut file = tokio::fs::File::open(source).await?;
+        manifest
+            .files
+            .push(write_entry(sink, &path, size, &mut file, bytes, cb).await?);
+    }
+    if !manifest.files.iter().any(|f| f.path == "bot.db") {
+        return Err(invalid("bot.db is required"));
+    }
     Ok(())
 }
 
@@ -251,6 +314,9 @@ pub(crate) async fn receive(
         if size > opts.max_entry_bytes || (metadata && size > METADATA_CAP) {
             return Err(ImportError::SizeLimit);
         }
+        if path == POLICY_FILE && size > MAX_POLICY_BYTES {
+            return Err(ImportError::SizeLimit);
+        }
         // Check the declared size before allocating memory or creating files.
         if input
             .bytes
@@ -270,6 +336,22 @@ pub(crate) async fn receive(
         records.push(FileRecord { path, size, sha256 });
     }
     input.finish().await?;
+    verify_manifest(&manifest, &records)?;
+    let secrets: Secrets = if secret_json.is_empty() {
+        BTreeMap::new()
+    } else {
+        serde_json::from_slice(&secret_json)?
+    };
+    if secrets.keys().cloned().collect::<Vec<_>>() != manifest.secret_names {
+        return Err(invalid("secret names mismatch"));
+    }
+    for name in secrets.keys() {
+        secret_store::validate_name(name)?;
+    }
+    Ok((manifest, secrets, input.bytes))
+}
+
+fn verify_manifest(manifest: &Manifest, records: &[FileRecord]) -> Result<()> {
     if manifest.format_version != crate::FORMAT_VERSION {
         return Err(invalid("unsupported format version"));
     }
@@ -286,18 +368,10 @@ pub(crate) async fn receive(
     if !records.iter().any(|f| f.path == "bot.db") {
         return Err(invalid("missing bot.db"));
     }
-    let secrets: Secrets = if secret_json.is_empty() {
-        BTreeMap::new()
-    } else {
-        serde_json::from_slice(&secret_json)?
-    };
-    if secrets.keys().cloned().collect::<Vec<_>>() != manifest.secret_names {
-        return Err(invalid("secret names mismatch"));
+    if !records.iter().any(|f| f.path == POLICY_FILE) {
+        return Err(invalid("missing policy.json"));
     }
-    for name in secrets.keys() {
-        secret_store::validate_name(name)?;
-    }
-    Ok((manifest, secrets, input.bytes))
+    Ok(())
 }
 
 impl<R: AsyncRead + Unpin> Reader<R> {

@@ -35,6 +35,7 @@ pub mod bridge;
 pub mod channel_trait;
 pub mod daemon_client;
 pub mod error;
+mod inbox;
 pub mod pairing;
 
 #[cfg(test)]

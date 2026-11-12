@@ -278,7 +278,9 @@ fn kill_process_tree(child: &mut Child) {
     #[cfg(windows)]
     killer.args(["/F", "/T", "/PID", &pid.to_string()]);
     #[cfg(not(windows))]
-    killer.args(["-9", &format!("-{pid}")]);
+    // `--` is required. procps parses `kill -9 -<pgid>` as options, then
+    // signals the caller's process group.
+    killer.args(["-9", "--", &format!("-{pid}")]);
     let _ = killer
         .stdin(Stdio::null())
         .stdout(Stdio::null())

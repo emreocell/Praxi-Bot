@@ -1,3 +1,4 @@
+import { Check, Copy } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Token } from "../lib/highlight";
@@ -58,7 +59,7 @@ export const CodeBlock = memo(function CodeBlock({
           onClick={copy}
           aria-label={t("chat.md.copy")}
         >
-          {copied ? t("chat.md.copied") : t("chat.md.copy")}
+          {copied ? <Check /> : <Copy />}{copied ? t("chat.md.copied") : t("chat.md.copy")}
         </button>
       </div>
       <pre className={styles.pre}>

@@ -2546,3 +2546,86 @@ async fn providers_lists_secret_free_cli_records_without_probing() {
             .any(|r| r["id"] == "cli:codex" && r["kind"] == "cli")
     );
 }
+
+#[tokio::test]
+async fn peer_heartbeats_only_audit_mode_changes_and_explicit_release() {
+    let t = setup();
+    for (body, expected_rows) in [
+        (json!({"mode":"paused"}), 2),
+        (json!({"mode":"paused"}), 2),
+        (json!({"mode":"idle"}), 4),
+        (json!({"mode":"idle"}), 4),
+        (json!({"mode":"idle","release":true}), 6),
+    ] {
+        let mut req = Request::builder()
+            .method(Method::PUT)
+            .uri("/v1/control/state")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        req.extensions_mut().insert(crate::PeerIdentity {
+            key: "heartbeat-peer".into(),
+            role: crate::PeerRole::Phone,
+        });
+        let response = crate::peer_router(t.state.clone())
+            .oneshot(req)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let audit = t.state.storage().list_audit(t.state.user_id()).unwrap();
+        assert_eq!(
+            audit.len(),
+            expected_rows,
+            "plain heartbeat must not add audit rows: {body}"
+        );
+        if body["release"] != true {
+            assert_eq!(
+                t.state.hub().latched(),
+                Some(crate::dto::ControlMode::Paused)
+            );
+        }
+    }
+    assert_eq!(t.state.hub().latched(), None);
+}
+
+#[tokio::test]
+async fn event_streams_beyond_the_cap_get_503() {
+    let t = setup();
+    t.state.0.sse_subscribers.store(
+        t.state.0.cfg.max_sse_subscribers,
+        std::sync::atomic::Ordering::SeqCst,
+    );
+    let r = call(&t, Method::GET, "/v1/events", None).await;
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        r.json()["error"]["message"]
+            .to_string()
+            .contains("too many open event streams"),
+        "{:?}",
+        r.json()
+    );
+}
+
+#[tokio::test]
+async fn sse_gap_count_is_on_the_authenticated_status_not_on_health() {
+    let t = setup();
+    assert!(
+        call(&t, Method::GET, "/v1/health", None)
+            .await
+            .json()
+            .get("sse_gaps_total")
+            .is_none()
+    );
+    t.state
+        .0
+        .sse_gaps_total
+        .store(3, std::sync::atomic::Ordering::Relaxed);
+    let status = call(&t, Method::GET, "/v1/events/status", None)
+        .await
+        .json();
+    assert_eq!(status["sse_gaps_total"], 3);
+    assert_eq!(
+        status["max_sse_subscribers"],
+        crate::DEFAULT_MAX_SSE_SUBSCRIBERS
+    );
+}

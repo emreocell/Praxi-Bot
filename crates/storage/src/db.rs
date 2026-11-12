@@ -323,6 +323,53 @@ impl Storage {
             .collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Read the newest contiguous suffix of a chat within both limits.
+    ///
+    /// Returns `(messages, omitted_older_messages)` in chronological order.
+    /// `exclude_run` is filtered before applying the limits, so messages that
+    /// the caller reconstructs from that run's steps do not consume the budget.
+    /// A message that does not fit stops the scan; its text is never copied
+    /// into Rust, and older rows are not substituted for it. Text is never
+    /// truncated, including at UTF-8 boundaries. At most `max_messages + 1`
+    /// rows are considered and returned content totals at most `max_bytes`.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn list_messages_bounded(
+        &self,
+        chat_id: ChatId,
+        exclude_run: Option<RunId>,
+        max_messages: usize,
+        max_bytes: usize,
+    ) -> Result<(Vec<Message>, bool)> {
+        let conn = self.conn();
+        let mut st = conn.prepare(
+            "SELECT id, user_id, chat_id, run_id, role, content, created_at_ms, length(CAST(content AS BLOB)) \
+             FROM messages WHERE chat_id = ?1 AND (?2 IS NULL OR run_id IS NULL OR run_id <> ?2) \
+             ORDER BY created_at_ms DESC, id DESC LIMIT ?3",
+        )?;
+        let limit = i64::try_from(max_messages.saturating_add(1)).unwrap_or(i64::MAX);
+        let mut rows = st.query(params![
+            chat_id.to_string(),
+            exclude_run.map(|r| r.to_string()),
+            limit
+        ])?;
+        let mut messages = Vec::new();
+        let mut used = 0usize;
+        let mut omitted = false;
+        while let Some(row) = rows.next()? {
+            let bytes = usize::try_from(row.get::<_, i64>(7)?).map_err(|e| conv_err(7, e))?;
+            if messages.len() == max_messages || bytes > max_bytes.saturating_sub(used) {
+                omitted = true;
+                break;
+            }
+            messages.push(message_row(row)?);
+            used += bytes;
+        }
+        messages.reverse();
+        Ok((messages, omitted))
+    }
+
     // ---- runs ----
 
     /// Insert a run.
@@ -891,6 +938,80 @@ mod tests {
         assert_eq!(f.st.list_chats(other.id).unwrap().len(), 0);
         run(&f);
         assert_eq!(f.st.list_runs(other.id).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn bounded_messages_keep_latest_rows_and_filter_run_before_limiting() {
+        let f = fx();
+        let excluded = run(&f);
+        for i in 0..10u32 {
+            f.st.insert_message(&Message {
+                id: Uuid::from_u128(u128::from(i) + 1),
+                user_id: f.user.id,
+                chat_id: f.chat.id,
+                run_id: (i >= 6).then_some(excluded.id),
+                role: "user".into(),
+                content: format!("message {i}"),
+                // Equal timestamps exercise the deterministic id tie-break.
+                created_at_ms: 10,
+            })
+            .unwrap();
+        }
+        let (messages, omitted) =
+            f.st.list_messages_bounded(f.chat.id, Some(excluded.id), 3, 100)
+                .unwrap();
+        assert!(omitted);
+        assert_eq!(
+            messages
+                .iter()
+                .map(|m| m.content.as_str())
+                .collect::<Vec<_>>(),
+            ["message 3", "message 4", "message 5"]
+        );
+        let (all, omitted) =
+            f.st.list_messages_bounded(f.chat.id, Some(excluded.id), 6, 100)
+                .unwrap();
+        assert_eq!(all.len(), 6);
+        assert!(!omitted, "exact row boundary is not truncation");
+        assert_eq!(
+            f.st.list_messages_bounded(ChatId::new(), None, 3, 100)
+                .unwrap(),
+            (vec![], false)
+        );
+    }
+
+    #[test]
+    fn bounded_messages_count_utf8_bytes_without_splitting_text() {
+        let f = fx();
+        for i in 0..3u32 {
+            f.st.insert_message(&Message {
+                id: Uuid::from_u128(u128::from(i) + 1),
+                user_id: f.user.id,
+                chat_id: f.chat.id,
+                run_id: None,
+                role: "user".into(),
+                content: "é🙂".into(),
+                created_at_ms: i64::from(i),
+            })
+            .unwrap();
+        }
+        let (messages, omitted) = f.st.list_messages_bounded(f.chat.id, None, 10, 12).unwrap();
+        assert!(omitted);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages.iter().map(|m| m.content.len()).sum::<usize>(), 12);
+        assert!(messages.iter().all(|m| m.content == "é🙂"));
+        assert_eq!(
+            f.st.list_messages_bounded(f.chat.id, None, 10, 5).unwrap(),
+            (vec![], true)
+        );
+        assert_eq!(
+            f.st.list_messages_bounded(f.chat.id, None, 0, 100).unwrap(),
+            (vec![], true)
+        );
+        assert_eq!(
+            f.st.list_messages_bounded(f.chat.id, None, 10, 0).unwrap(),
+            (vec![], true)
+        );
     }
 
     #[test]

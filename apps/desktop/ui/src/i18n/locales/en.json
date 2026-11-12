@@ -6,7 +6,8 @@
     "needsYouCount": "{{count}} waiting for you",
     "newBot": "New bot",
     "usage": "Usage",
-    "schedules": "Scheduled tasks"
+    "schedules": "Scheduled tasks",
+    "apps": "Apps"
   },
   "main": {
     "selectBotTitle": "Select a bot",
@@ -206,6 +207,7 @@
   "common": {
     "back": "Back",
     "cancel": "Cancel",
+    "close": "Close",
     "save": "Save",
     "edit": "Edit",
     "delete": "Delete"
@@ -339,9 +341,18 @@
       "menu": "Commands",
       "mentionMenu": "Bots",
       "noMatch": "No match"
-    }
+    },
+    "conversationLabel": "Today",
+    "composerHint": "Enter to send · / for commands · @ to mention a bot"
   },
   "botForm": {
+    "apps": {
+      "title": "Apps",
+      "hint": "Connected apps this bot may use. Unticking an app that is open to every bot limits it to your other bots. Manage apps from the Apps screen.",
+      "none": "No apps are connected yet.",
+      "notApplied": "{{names}}: not applied, the app changed in the meantime (for example it is now open to all bots). The list shows its current state.",
+      "partialFail": "The bot was saved, but app access could not be updated for: {{names}}. Try Save again."
+    },
     "createTitle": "New bot",
     "editTitle": "Edit bot",
     "create": "Create bot",
@@ -693,6 +704,187 @@
         "text": "Describe when it should run.",
         "cron": "Enter a cron expression.",
         "prompt": "Write what the bot should do."
+      }
+    }
+  },
+  "account": {
+    "defaultName": "User",
+    "settings": "Settings",
+    "apps": "Apps",
+    "computer": "Computer",
+    "help": "Help"
+  },
+  "apps": {
+    "title": "Apps",
+    "subtitle": "Connect MCP servers so your bots can use external tools.",
+    "search": "Search apps and servers",
+    "mcpServers": "Custom MCP server",
+    "categoriesLabel": "Categories",
+    "categories": {
+      "all": "All",
+      "files": "Files",
+      "developer": "Developer",
+      "communication": "Communication",
+      "productivity": "Productivity",
+      "data": "Data",
+      "search": "Search",
+      "browser": "Browser",
+      "home": "Home"
+    },
+    "status": {
+      "connected": "Connected",
+      "connecting": "Connecting",
+      "disconnected": "Disconnected",
+      "error": "Error",
+      "quarantined": "Quarantined"
+    },
+    "toolCount": "{{count}} tools",
+    "toolCount_one": "{{count}} tool",
+    "botsAll": "All bots",
+    "botsSome": "Bots: {{names}}",
+    "botsNone": "No bots",
+    "access": {
+      "label": "Who can use this app",
+      "all": "All bots",
+      "some": "Only these bots",
+      "noBotsYet": "There are no bots yet. Create a bot first.",
+      "nobody": "No bot can use this app until you tick at least one.",
+      "deletedBot": "deleted bot",
+      "edit": "Bots",
+      "save": "Save",
+      "notApplied": "{{name}}: not saved, this app was changed elsewhere (for example it is now open to all bots). Showing its current state.",
+      "savedToast": "{{name}}: bot access saved"
+    },
+    "reconnect": "Reconnect",
+    "disconnectConfirm": "Disconnect this server?",
+    "disconnect": "Disconnect",
+    "connected": "Connected",
+    "connect": "Connect",
+    "getKey": "Get API key",
+    "secretHint": "Secrets are stored in your OS keychain and never shown again.",
+    "connectNow": "Connect",
+    "connectedToast": "{{name}} connected",
+    "disconnectedToast": "{{name}} disconnected",
+    "missingSecret": "Enter every required secret.",
+    "connectedSection": "Connected",
+    "catalogSection": "Catalog",
+    "loading": "Loading catalog…",
+    "noResults": "No matching servers.",
+    "custom": {
+      "intro": "Add a stdio or HTTP MCP server by hand.",
+      "name": "Server name",
+      "errName": "Enter a name.",
+      "transport": "Transport",
+      "stdio": "Stdio",
+      "http": "HTTP",
+      "command": "Command",
+      "errCommand": "Enter the command to run.",
+      "env": "Environment",
+      "envHint": "One KEY=value per line.",
+      "url": "Server URL",
+      "errUrl": "Enter a valid HTTP URL.",
+      "add": "Add server"
+    }
+  },
+  "help": {
+    "title": "Keyboard shortcuts",
+    "intro": "Handy shortcuts while the app is open.",
+    "palette": "Command palette",
+    "send": "Send message",
+    "stop": "Stop all bot runs"
+  },
+  "modelPicker": {
+    "title": "Model",
+    "none": "No model",
+    "search": "Search models",
+    "empty": "No matching models.",
+    "switched": "Switched to {{model}}",
+    "switchedDefault": "Default model set to {{model}}"
+  },
+  "settingsModal": {
+    "title": "Settings",
+    "search": "Search settings",
+    "results": "Search results",
+    "noResults": "No matching settings.",
+    "nav": {
+      "general": "General",
+      "ai": "AI",
+      "computer": "Computer",
+      "usage": "Usage",
+      "updates": "Updates"
+    },
+    "general": {
+      "account": {
+        "title": "Account name",
+        "description": "Shown in the sidebar account menu."
+      },
+      "theme": {
+        "title": "Theme",
+        "description": "Choose a look for your workspace.",
+        "system": "Follow system"
+      },
+      "frame": {
+        "title": "Window frame",
+        "description": "Show the native title bar (requires restart on some platforms)."
+      },
+      "send": {
+        "title": "Send message",
+        "description": "Which key sends a chat message.",
+        "enter": "Enter",
+        "ctrl-enter": "Ctrl+Enter"
+      }
+    },
+    "ai": {
+      "defaultModel": {
+        "title": "Default model",
+        "description": "Used when a bot has no model set."
+      },
+      "keys": {
+        "title": "Provider API keys",
+        "description": "Write-only; stored in the OS keychain.",
+        "none": "No providers loaded.",
+        "inputLabel": "API key for {{provider}}",
+        "replace": "Replace key",
+        "placeholder": "Paste API key",
+        "saved": "Saved key for {{provider}}"
+      }
+    },
+    "computer": {
+      "soon": "Soon",
+      "target": {
+        "title": "Where the bot runs",
+        "description": "Choose where computer and browser tools execute."
+      },
+      "targets": {
+        "this-pc": {
+          "title": "This PC",
+          "description": "Desktop automation on this machine."
+        },
+        "browser": {
+          "title": "Browser only",
+          "description": "Browser tools only; no OS desktop control."
+        },
+        "remote": {
+          "title": "Remote host",
+          "description": "Always-on server (coming soon)."
+        },
+        "off": {
+          "title": "Off",
+          "description": "No computer or browser tools."
+        }
+      }
+    },
+    "updates": {
+      "title": "Updates",
+      "description": "App and daemon versions.",
+      "appVersion": "Desktop app",
+      "devBuild": "Dev build",
+      "daemon": "Daemon",
+      "daemonDescription": "Local bot serve process.",
+      "unknown": "Unknown",
+      "how": {
+        "title": "How updates work",
+        "description": "Releases are distributed separately; check the project docs for upgrade steps."
       }
     }
   },

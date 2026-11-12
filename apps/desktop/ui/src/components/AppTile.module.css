@@ -1,0 +1,29 @@
+.tile {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-avatar-md);
+  height: var(--size-avatar-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text);
+  background: var(--color-surface-elevated);
+  border: var(--size-border) solid var(--color-border);
+}
+
+.tile svg {
+  width: var(--size-icon-lg);
+  height: var(--size-icon-lg);
+}
+
+.small {
+  width: var(--size-control-sm);
+  height: var(--size-control-sm);
+}
+
+.small svg {
+  width: var(--size-icon);
+  height: var(--size-icon);
+}

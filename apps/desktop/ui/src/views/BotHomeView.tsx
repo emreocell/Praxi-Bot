@@ -1,3 +1,4 @@
+import { MessageSquare, PenLine, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Avatar, Button, Card } from "ui";
@@ -113,10 +114,10 @@ export function BotHomeView({
               disabled={busy}
               onClick={() => void newChat()}
             >
-              {t("bots.newChat")}
+              <Plus />{t("bots.newChat")}
             </Button>
             <Button variant="secondary" onClick={onEdit}>
-              {t("common.edit")}
+              <PenLine />{t("common.edit")}
             </Button>
             {confirmDelete ? (
               <Button
@@ -128,7 +129,7 @@ export function BotHomeView({
               </Button>
             ) : (
               <Button variant="ghost" onClick={() => setConfirmDelete(true)}>
-                {t("common.delete")}
+                <Trash2 />{t("common.delete")}
               </Button>
             )}
           </div>
@@ -141,7 +142,7 @@ export function BotHomeView({
 
         <h2 className={styles.heading}>{t("bots.chats")}</h2>
         {botChats.length === 0 ? (
-          <p className={formStyles.hint}>{t("bots.noChats")}</p>
+          <p className={formStyles.hint}><MessageSquare className={formStyles.emptyIcon} />{t("bots.noChats")}</p>
         ) : (
           <ul className={styles.chatList}>
             {botChats.map((c) => {
@@ -153,7 +154,7 @@ export function BotHomeView({
                     className={styles.chatRow}
                     onClick={() => onOpenChat(c.id)}
                   >
-                    <span className={styles.chatTitle}>{c.title}</span>
+                    <MessageSquare /><span className={styles.chatTitle}>{c.title}</span>
                     {st ? (
                       <span
                         className={[
