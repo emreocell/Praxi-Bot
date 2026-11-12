@@ -291,7 +291,7 @@ impl Shared {
     }
 
     /// Everything the ladder may route to, as the bot sees it.
-    pub(crate) fn router_candidates(&self, profile: &BotProfile) -> Vec<Candidate> {
+    pub(crate) fn router_candidates(&self, profile: &BotProfile, bot: BotId) -> Vec<Candidate> {
         let mut out = Vec::new();
         if let Some(w) = self.router.workflows.get()
             && let Ok(entries) = w.store.list()
@@ -321,7 +321,7 @@ impl Shared {
                 );
             }
         }
-        for spec in self.visible_specs(profile) {
+        for spec in self.visible_specs(profile, bot) {
             if matches!(spec.name.as_str(), FIND_TOOL | GET_TOOL_DETAILS | USE_TOOL) {
                 continue;
             }
@@ -348,8 +348,14 @@ impl Shared {
 
     /// Rebuild the ladder's candidates when they changed (embeddings follow in
     /// the background; K2 uses BM25 only until they are there).
-    pub(crate) fn refresh_ladder(&self, bl: &Arc<BotLadder>, profile: &BotProfile, embed: bool) {
-        let candidates = self.router_candidates(profile);
+    pub(crate) fn refresh_ladder(
+        &self,
+        bl: &Arc<BotLadder>,
+        bot: BotId,
+        profile: &BotProfile,
+        embed: bool,
+    ) {
+        let candidates = self.router_candidates(profile, bot);
         let fp = fnv(&serde_json::to_vec(&candidates).unwrap_or_default());
         {
             let mut cur = bl.fingerprint.lock();
@@ -439,7 +445,7 @@ impl Shared {
             let bl = self
                 .ladder_for(run.bot_id, &profile)
                 .ok_or_else(|| LoopError::Router("the router is disabled for this bot".into()))?;
-            self.refresh_ladder(&bl, &profile, false);
+            self.refresh_ladder(&bl, run.bot_id, &profile, false);
             bl.ladder
                 .remember_route(&text, &route)
                 .map_err(|e| LoopError::Router(e.to_string()))?;
@@ -493,7 +499,7 @@ impl TurnExecutor {
             return None;
         }
         let bl = self.sh.ladder_for(ctx.bot_id, &ctx.profile)?;
-        self.sh.refresh_ladder(&bl, &ctx.profile, true);
+        self.sh.refresh_ladder(&bl, ctx.bot_id, &ctx.profile, true);
         let budget: Duration = self.sh.cfg.router_budget;
         let decision =
             match tokio::time::timeout(budget, bl.ladder.decide(&RouteContext::new(text))).await {

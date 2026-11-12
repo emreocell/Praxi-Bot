@@ -1,17 +1,22 @@
-import { Blocks, Cable, Check, FolderOpen, Plus, Search, Server, X } from "lucide-react";
-import { siGithub, siGitlab, siNotion, siGoogledrive, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siLinear, siTodoist, siObsidian, siHomeassistant } from "simple-icons";
+import { Blocks, Cable, Check, Plus, Search, Server, Users, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import type { McpCatalogEntry, McpServer } from "../api/types";
 import formStyles from "../components/Form.module.css";
+import { AppTile } from "../components/AppTile";
+import { BotAccessPicker } from "../components/BotAccessPicker";
 import { Modal } from "../components/Modal";
 import { Segmented } from "../components/SettingsUi";
 import { useToast } from "../components/Toast";
 import { openExternal } from "../lib/externalLink";
 import {
   ALL_CATEGORIES,
-  botAccess,
+  type BotScope,
+  botAccessLabels,
+  botScope,
+  botSelection,
+  saveServerScope,
   catalogCategories,
   connectCatalogEntry,
   customServerConfig,
@@ -25,13 +30,6 @@ import { useDaemon } from "../state/DaemonContext";
 import { useMcp } from "../state/useMcp";
 import styles from "./AppsModal.module.css";
 
-const BRAND_ICONS = [siGithub, siGitlab, siNotion, siGoogledrive, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siLinear, siTodoist, siObsidian, siHomeassistant];
-function Tile({ name }: { name: string }) {
-  const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, "");
-  const brand = BRAND_ICONS.find((icon) => normalized === icon.slug || normalized === icon.title.toLowerCase().replace(/[^a-z0-9]/g, ""));
-  return <span className={styles.tile} aria-hidden="true">{brand ? <svg viewBox="0 0 24 24"><path d={brand.path} fill="currentColor" /></svg> : normalized === "filesystem" ? <FolderOpen /> : <Blocks />}</span>;
-}
-
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
@@ -40,17 +38,24 @@ function ConnectedRow({
   server,
   busy,
   onReconnect,
-  onDisconnect
+  onDisconnect,
+  onSaveBots
 }: {
   server: McpServer;
   busy: boolean;
   onReconnect: () => void;
   onDisconnect: () => void;
+  onSaveBots: (from: BotScope, to: BotScope) => void;
 }) {
   const { t } = useTranslation();
   const { bots } = useDaemon();
   const [confirm, setConfirm] = useState(false);
-  const access = botAccess(server, bots);
+  const [editing, setEditing] = useState(false);
+  const [scope, setScope] = useState<BotScope>(() => botScope(server));
+  // The scope the editor opened with: the saved diff is against this, not
+  // against whatever the live server says at click time.
+  const [baseline, setBaseline] = useState<BotScope>(() => botScope(server));
+  const access = botAccessLabels(server, bots, t("apps.access.deletedBot"));
   const tone = statusTone(server.status);
   const needsReconnect =
     server.status === "error" ||
@@ -58,7 +63,7 @@ function ConnectedRow({
     server.status === "quarantined";
   return (
     <li className={styles.serverRow} data-testid={`mcp-server-${server.name}`}>
-      <Tile name={server.name} />
+      <AppTile name={server.name} />
       <div className={styles.serverMain}>
         <div className={styles.serverTitle}>
           <span className={styles.serverName}>{server.name}</span>
@@ -73,7 +78,9 @@ function ConnectedRow({
           <span>
             {access.all
               ? t("apps.botsAll")
-              : t("apps.botsSome", { names: access.names.join(", ") })}
+              : access.names.length === 0
+                ? t("apps.botsNone")
+                : t("apps.botsSome", { names: access.names.join(", ") })}
           </span>
           <span aria-hidden="true">·</span>
           <span>{server.transport}</span>
@@ -83,6 +90,20 @@ function ConnectedRow({
         ) : null}
       </div>
       <div className={styles.serverActions}>
+        <Button
+          size="sm"
+          variant="ghost"
+          active={editing}
+          disabled={busy}
+          data-testid={`mcp-access-${server.name}`}
+          onClick={() => {
+            setBaseline(botScope(server));
+            setScope(botSelection(botScope(server), bots));
+            setEditing((e) => !e);
+          }}
+        >
+          <Users />{t("apps.access.edit")}
+        </Button>
         {needsReconnect ? (
           <Button size="sm" variant="secondary" disabled={busy} onClick={onReconnect}>
             {t("apps.reconnect")}
@@ -116,6 +137,28 @@ function ConnectedRow({
           </Button>
         )}
       </div>
+      {editing ? (
+        <div className={styles.accessPanel}>
+          <BotAccessPicker scope={scope} bots={bots} onChange={setScope} />
+          <div className={styles.formActions}>
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={busy}
+              data-testid={`mcp-access-save-${server.name}`}
+              onClick={() => {
+                setEditing(false);
+                onSaveBots(baseline, scope);
+              }}
+            >
+              {t("apps.access.save")}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+              {t("common.cancel")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -151,7 +194,7 @@ function CatalogCard({
   return (
     <li className={styles.card} data-testid={`mcp-catalog-${entry.id}`}>
       <div className={styles.cardHead}>
-        <Tile name={entry.name} />
+        <AppTile name={entry.name} />
         <div className={styles.cardTitle}>
           <span className={styles.serverName}>{entry.name}</span>
           <span className={styles.category}>
@@ -258,6 +301,8 @@ function CustomServerForm({
   });
   const [error, setError] = useState<"name" | "command" | "url" | null>(null);
   const [busy, setBusy] = useState(false);
+  const { bots } = useDaemon();
+  const [scope, setScope] = useState<BotScope>({ mode: "all" });
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
 
   return (
@@ -265,7 +310,7 @@ function CustomServerForm({
       className={styles.custom}
       onSubmit={(e) => {
         e.preventDefault();
-        const result = customServerConfig(form, existing);
+        const result = customServerConfig(form, existing, botSelection(scope, bots));
         setError(result.ok ? null : result.error);
         if (result.ok) {
           setBusy(true);
@@ -346,6 +391,10 @@ function CustomServerForm({
           ) : null}
         </div>
       )}
+      <div className={formStyles.field}>
+        <span className={formStyles.label}>{t("apps.access.label")}</span>
+        <BotAccessPicker scope={scope} bots={bots} onChange={setScope} />
+      </div>
       <div className={styles.formActions}>
         <Button type="submit" variant="primary" size="sm" disabled={busy}>
           {t("apps.custom.add")}
@@ -520,6 +569,22 @@ export function AppsModal({
                         onReconnect={() =>
                           void run(s.name, async () => {
                             await client?.reconnectMcpServer(s.name);
+                            await reload();
+                          })
+                        }
+                        onSaveBots={(from, to) =>
+                          void run(s.name, async () => {
+                            if (!client) {
+                              return;
+                            }
+                            const { applied } = await saveServerScope(client, s.name, from, to);
+                            if (applied) {
+                              toast.show(t("apps.access.savedToast", { name: s.name }), "success");
+                            } else {
+                              // The server is not in the state the user chose
+                              // (changed elsewhere meanwhile): say so, show the truth.
+                              toast.show(t("apps.access.notApplied", { name: s.name }), "danger");
+                            }
                             await reload();
                           })
                         }

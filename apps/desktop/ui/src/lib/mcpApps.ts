@@ -1,9 +1,11 @@
 import type { ApiClient } from "../api/client.ts";
 import type {
   Bot,
+  BotInput,
   McpCatalogEntry,
   McpServer,
   McpServerConfig,
+  McpServerPatch,
   McpStatus
 } from "../api/types.ts";
 import { matchesQuery } from "./searchText.ts";
@@ -186,7 +188,8 @@ const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,47}$/i;
 /** Validate the advanced "add MCP server" form and build the config. */
 export function customServerConfig(
   form: CustomServerForm,
-  existing: string[] = []
+  existing: string[] = [],
+  scope: BotScope = { mode: "all" }
 ): CustomServerResult {
   const name = form.name.trim();
   if (!NAME_RE.test(name) || existing.includes(name)) {
@@ -198,6 +201,11 @@ export function customServerConfig(
     category: "other",
     enabled: true
   };
+  // `bots` is written only when narrowed; omitted = every bot.
+  const bots = botsFromScope(scope);
+  if (bots !== null) {
+    config.bots = bots;
+  }
   if (form.transport === "stdio") {
     const parts = splitArgs(form.command.trim());
     if (parts.length === 0) {
@@ -239,6 +247,241 @@ export function statusTone(status: McpStatus): StatusTone {
     case "disconnected":
       return "muted";
   }
+}
+
+/**
+ * Who may use a server, as the editor sees it.  `all` is `bots: null`;
+ * `some` is an explicit list of bot storage UUIDs (what the daemon compares
+ * against `ctx.bot_id`), and an empty list means NO bot, never "all".
+ */
+export type BotScope = { mode: "all" } | { mode: "some"; ids: string[] };
+
+export function botScope(server: Pick<McpServer, "bots">): BotScope {
+  return server.bots === null || server.bots === undefined
+    ? { mode: "all" }
+    : { mode: "some", ids: [...server.bots] };
+}
+
+/** The `bots` value to send: `null` = all bots, otherwise the (maybe empty) list. */
+export function botsFromScope(scope: BotScope): string[] | null {
+  return scope.mode === "all" ? null : [...scope.ids];
+}
+
+/**
+ * Tick / untick one bot.  Ticking while on "all bots" narrows to just that
+ * bot; unticking the last bot leaves an explicit empty list.
+ */
+export function toggleBotInScope(
+  scope: BotScope,
+  botId: string,
+  on: boolean
+): BotScope {
+  const ids = scope.mode === "all" ? [] : scope.ids;
+  if (on) {
+    return { mode: "some", ids: ids.includes(botId) ? ids : [...ids, botId] };
+  }
+  return { mode: "some", ids: ids.filter((id) => id !== botId) };
+}
+
+/** Drop ids of bots that no longer exist; this never turns a list into "all". */
+export function botSelection(
+  scope: BotScope,
+  bots: Pick<Bot, "id">[]
+): BotScope {
+  return scope.mode === "all"
+    ? scope
+    : { mode: "some", ids: scope.ids.filter((id) => bots.some((b) => b.id === id)) };
+}
+
+/**
+ * Whether a bot may use a server.  `botId` is `undefined` for a bot that is
+ * not created yet: it only gets the servers open to every bot.
+ */
+export function botHasAccess(
+  server: Pick<McpServer, "bots">,
+  botId: string | undefined
+): boolean {
+  if (server.bots === null || server.bots === undefined) {
+    return true;
+  }
+  return botId !== undefined && server.bots.includes(botId);
+}
+
+/**
+ * The patch that applies one tick of the bot form's Apps checklist, or `null`
+ * when nothing needs to change.  On a list it is an atomic add / remove of this
+ * one id (the daemon applies it under its lock).  Unticking on an open server
+ * narrows it to every other bot, an explicit list.
+ */
+export function appsPatch(
+  server: Pick<McpServer, "bots">,
+  botId: string,
+  on: boolean,
+  allBotIds: string[]
+): McpServerPatch | null {
+  if (server.bots === null || server.bots === undefined) {
+    return on ? null : { bots: allBotIds.filter((id) => id !== botId) };
+  }
+  return on ? { bots_add: [botId] } : { bots_remove: [botId] };
+}
+
+/**
+ * The patch that turns the scope the editor opened with into the one the user
+ * chose.  List to list is an add / remove diff (applied atomically by the
+ * daemon, so another edit made meanwhile is not overwritten); switching from
+ * or to "all bots" has to be absolute.
+ */
+export function scopePatch(from: BotScope, to: BotScope): McpServerPatch {
+  if (to.mode === "all") {
+    return { bots: null };
+  }
+  if (from.mode === "all") {
+    return { bots: [...to.ids] };
+  }
+  return {
+    bots_add: to.ids.filter((id) => !from.ids.includes(id)),
+    bots_remove: from.ids.filter((id) => !to.ids.includes(id))
+  };
+}
+
+/** Servers whose tick differs from the snapshot taken when the form opened. */
+export function changedApps(
+  initial: Record<string, boolean>,
+  allowed: Record<string, boolean>
+): string[] {
+  return Object.keys(allowed).filter((name) => allowed[name] !== initial[name]);
+}
+
+/** Result of writing the bot form's ticks. */
+export interface AppsResult {
+  /** Servers whose update failed (request error, or the list could not be read). */
+  failed: string[];
+  /** Servers whose update was accepted but did not take effect (e.g. now open to all bots). */
+  notApplied: string[];
+}
+
+/** Whether `result` gives (`on`) or denies (`!on`) the bot access, as intended. */
+export function appTickApplied(
+  result: Pick<McpServer, "bots">,
+  botId: string,
+  on: boolean
+): boolean {
+  return botHasAccess(result, botId) === on;
+}
+
+/**
+ * Apply only the ticks the user changed in this form session, each against the
+ * server's current state, and check every response against the intent.  Never
+ * throws: a failing list call or update is reported in `failed`.
+ */
+export async function applyAppsSelection(
+  api: Pick<McpApi, "listMcpServers" | "updateMcpServer">,
+  botId: string,
+  initial: Record<string, boolean>,
+  allowed: Record<string, boolean>,
+  allBotIds: string[]
+): Promise<AppsResult> {
+  const result: AppsResult = { failed: [], notApplied: [] };
+  const changed = changedApps(initial, allowed);
+  if (changed.length === 0) {
+    return result;
+  }
+  let fresh: McpServer[];
+  try {
+    fresh = await api.listMcpServers();
+  } catch {
+    result.failed = changed;
+    return result;
+  }
+  for (const name of changed) {
+    const server = fresh.find((s) => s.name === name);
+    if (!server) {
+      continue;
+    }
+    const patch = appsPatch(server, botId, allowed[name], allBotIds);
+    if (patch === null) {
+      continue;
+    }
+    try {
+      const updated = await api.updateMcpServer(name, patch);
+      if (!appTickApplied(updated, botId, allowed[name])) {
+        result.notApplied.push(name);
+      }
+    } catch {
+      result.failed.push(name);
+    }
+  }
+  return result;
+}
+
+/**
+ * Whether the server's resulting `bots` matches what the editor meant: all
+ * bots, or a list that has every ticked bot and none of the unticked ones.
+ */
+export function scopeApplied(
+  from: BotScope,
+  to: BotScope,
+  result: Pick<McpServer, "bots">
+): boolean {
+  const now = botScope(result);
+  if (to.mode === "all") {
+    return now.mode === "all";
+  }
+  if (now.mode === "all") {
+    return false;
+  }
+  const removed = from.mode === "some" ? from.ids.filter((id) => !to.ids.includes(id)) : [];
+  return to.ids.every((id) => now.ids.includes(id)) && removed.every((id) => !now.ids.includes(id));
+}
+
+/**
+ * Save the server editor: the diff against the scope it OPENED with, then
+ * check the response.  `applied: false` means the server is not in the state
+ * the user chose (for example it was set to all bots meanwhile).
+ */
+export async function saveServerScope(
+  api: Pick<McpApi, "updateMcpServer">,
+  name: string,
+  from: BotScope,
+  to: BotScope
+): Promise<{ applied: boolean; server: McpServer }> {
+  const server = await api.updateMcpServer(name, scopePatch(from, to));
+  return { applied: scopeApplied(from, to, server), server };
+}
+
+/**
+ * Save the bot form: create or update the bot, then its app ticks.  The bot
+ * the form holds afterwards (`bot`) is the one a retry must update, so a
+ * failure in the apps step can never lead to a second created bot.
+ */
+export async function saveBotAndApps(
+  api: Pick<ApiClient, "createBot" | "updateBot" | "listMcpServers" | "updateMcpServer">,
+  target: Bot | undefined,
+  input: BotInput,
+  initial: Record<string, boolean>,
+  allowed: Record<string, boolean>,
+  allBotIds: string[]
+): Promise<{ bot: Bot } & AppsResult> {
+  const bot = target
+    ? await api.updateBot(target.id, input)
+    : await api.createBot(input);
+  const apps = await applyAppsSelection(api, bot.id, initial, allowed, allBotIds);
+  return { bot, ...apps };
+}
+
+/** Like `botAccess`, but ids of bots that no longer exist read `deleted`. */
+export function botAccessLabels(
+  server: Pick<McpServer, "bots">,
+  bots: Pick<Bot, "id" | "name">[],
+  deleted: string
+): { all: true } | { all: false; names: string[] } {
+  if (server.bots === null || server.bots === undefined) {
+    return { all: true };
+  }
+  return {
+    all: false,
+    names: server.bots.map((id) => bots.find((b) => b.id === id)?.name ?? deleted)
+  };
 }
 
 /** Which bots may use a server: everyone, or the named bots. */
