@@ -285,10 +285,26 @@ impl ControlHub {
         } else if st.latched.is_some() && !(req.recover && privileged && req.reason.is_some()) {
             return Err("explicit recovery required".into());
         }
+        // Everything this call changes, to put back if the write fails: a
+        // takeover that was never persisted must not replace (or invent) one.
+        let snapshot = (
+            st.owned.clone(),
+            st.latched,
+            st.require_recovery,
+            st.epoch,
+            st.affected_runs.clone(),
+            std::mem::take(&mut st.pending),
+        );
         if st.owned.is_none() {
             st.affected_runs = st.active_runs.keys().copied().collect();
         }
-        st.epoch = st.epoch.checked_add(1).ok_or("epoch exhausted")?;
+        st.epoch = match st.epoch.checked_add(1) {
+            Some(epoch) => epoch,
+            None => {
+                st.pending = snapshot.5;
+                return Err("epoch exhausted".into());
+            }
+        };
         let owned = OwnedTakeover {
             info: TakeoverInfo {
                 id: Uuid::now_v7(),
@@ -308,13 +324,21 @@ impl ControlHub {
         st.latched = Some(ControlMode::HumanDriving);
         st.owned = Some(owned.clone());
         st.require_recovery = true;
-        st.pending.clear();
         if let Err(e) = self.persist(&st) {
+            (
+                st.owned,
+                st.latched,
+                st.require_recovery,
+                st.epoch,
+                st.affected_runs,
+                st.pending,
+            ) = snapshot;
             st.persistence_error = true;
-            st.latched = Some(ControlMode::Paused);
-            if let Some(t) = st.owned.as_mut() {
-                t.info.state = ViewState::Paused;
-                t.info.reason = Some(Reason::PersistenceFailed);
+            // Fail closed, but as an ownerless pause (the local user releases
+            // it): never as a takeover that was not written, and never over a
+            // standing latch.
+            if st.latched.is_none() {
+                st.latched = Some(ControlMode::Paused);
             }
             return Err(e);
         }
@@ -1055,6 +1079,50 @@ mod tests {
                 "{reason:?}: the key reset still owed after the restart was forgotten"
             );
         }
+    }
+    #[test]
+    fn a_takeover_that_cannot_be_persisted_leaves_the_previous_state_untouched() {
+        // From a clean state: no phantom owner.
+        let dir = tempfile::tempdir().unwrap();
+        let hub = ControlHub::with_latch_file(
+            super::super::ControlConfig::default(),
+            dir.path().join("control-latch.json"),
+        );
+        hub.set_persist_failure(true);
+        assert!(
+            hub.begin_takeover("peer:alice", &request(), Uuid::now_v7(), 1, true, false)
+                .is_err()
+        );
+        assert!(hub.takeover().is_none(), "no phantom takeover in memory");
+        // Over a standing local override: the override must survive.
+        let hub = ControlHub::with_latch_file(
+            super::super::ControlConfig::default(),
+            dir.path().join("other-latch.json"),
+        );
+        let t = hub
+            .begin_takeover("peer:alice", &request(), Uuid::now_v7(), 1, true, false)
+            .unwrap();
+        hub.activate(t.info.id, t.info.control_epoch).unwrap();
+        hub.force_interrupt(Reason::LocalOverride).unwrap();
+        let before = hub.takeover().unwrap();
+        hub.set_persist_failure(true);
+        let mut req = request();
+        req.recover = true;
+        req.reason = Some(live_view::RecoveryReason::DaemonRestart);
+        assert!(
+            hub.begin_takeover("local", &req, Uuid::now_v7(), 1, true, true)
+                .is_err()
+        );
+        let after = hub.takeover().unwrap();
+        assert_eq!(after.info.reason, Some(Reason::LocalOverride));
+        assert_eq!(after.info.id, before.info.id);
+        assert_eq!(after.info.control_epoch, before.info.control_epoch);
+        hub.set_persist_failure(false);
+        // A paired desktop's recovery is still refused afterwards.
+        assert!(
+            hub.begin_takeover("peer:desk2", &req, Uuid::now_v7(), 1, true, false)
+                .is_err()
+        );
     }
     #[test]
     fn a_tampered_latch_file_cannot_smuggle_text_into_the_release_note() {
