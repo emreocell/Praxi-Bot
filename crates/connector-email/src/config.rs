@@ -98,6 +98,8 @@ pub struct AccountConfig {
 pub const MAX_BOT_ID_LEN: usize = 64;
 /// Most entries `allowed_senders` may hold.
 pub const MAX_ALLOWED_SENDERS: usize = 100;
+/// Longest address or login name (an address is at most 254 characters).
+pub const MAX_LOGIN_LEN: usize = 254;
 /// Longest account name.
 pub const MAX_ACCOUNT_NAME_LEN: usize = 64;
 
@@ -203,6 +205,11 @@ impl AccountConfig {
             .map_err(|_| EmailError::Config("invalid password secret reference".into()))?;
         if self.imap.port == 0 || self.smtp.port == 0 {
             return Err(EmailError::Config("server port must be nonzero".into()));
+        }
+        if self.login().len() > MAX_LOGIN_LEN || self.address.len() > MAX_LOGIN_LEN {
+            return Err(EmailError::Config(
+                "address or login name is too long".into(),
+            ));
         }
         if self.login().chars().any(char::is_control) {
             return Err(EmailError::Config("invalid login name".into()));

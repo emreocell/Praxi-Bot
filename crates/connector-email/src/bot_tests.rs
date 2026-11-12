@@ -391,6 +391,12 @@ fn validation_rejects_hostile_hosts_ports_bots_and_senders() {
         assert!(validate_host(ok, "x").is_ok(), "{ok}");
     }
     let mut a = valid();
+    a.username = "u".repeat(255);
+    assert!(a.validate().is_err(), "username length cap");
+    let mut a = valid();
+    a.address = format!("{}@example.com", "a".repeat(250));
+    assert!(a.validate().is_err(), "address length cap");
+    let mut a = valid();
     a.imap.port = 0;
     assert!(a.validate().is_err());
     let mut a = valid();

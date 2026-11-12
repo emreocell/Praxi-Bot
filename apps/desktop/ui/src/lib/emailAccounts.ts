@@ -106,7 +106,8 @@ export function emptyForm(): EmailForm {
     smtpPort: "465",
     smtpSecurity: "implicit",
     password: "",
-    bot: { mode: "all" },
+    // Least privilege: a new mailbox belongs to no bot until one is picked.
+    bot: { mode: "some", ids: [] },
     allowedSenders: ""
   };
 }

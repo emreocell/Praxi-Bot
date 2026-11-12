@@ -930,7 +930,8 @@
           "label": "Who can use this mailbox",
           "all": "Any bot with e-mail enabled",
           "some": "Only one bot",
-          "nobody": "Pick the bot, or choose any bot."
+          "nobody": "Pick the bot, or choose any bot.",
+          "allWarning": "Every bot that has the e-mail tools can then read this mailbox without asking."
         },
         "senders": "Allowed senders",
         "sendersHint": "Addresses or @domains, one per line. Stored for the coming inbound-mail feature; nothing reacts to incoming mail yet.",

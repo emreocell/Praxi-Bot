@@ -132,7 +132,7 @@ Manage the e-mail accounts of the running daemon (see [email](email.md)). Change
 | Subcommand | Meaning |
 | --- | --- |
 | `bot email list` | List accounts (never shows passwords) |
-| `bot email add <NAME> <ADDRESS>` | Add an account. Options: `--preset gmail\|outlook\|yahoo\|icloud`, `--imap-host`, `--imap-port`, `--smtp-host`, `--smtp-port`, `--smtp-security implicit\|start_tls`, `--username`, `--bot <BOT_ID>` (only this bot), `--allowed-sender <ADDR>` (repeatable), `--password-env <VAR>` (hidden prompt when omitted) |
+| `bot email add <NAME> <ADDRESS>` | Add an account. Options: `--preset gmail\|outlook\|yahoo\|icloud`, `--imap-host`, `--imap-port`, `--smtp-host`, `--smtp-port`, `--smtp-security implicit\|start_tls`, `--username`, `--bot <NAME_OR_ID>` (only this bot) or `--all-bots` (one of the two is required), `--allowed-sender <ADDR>` (repeatable), `--password-env <VAR>` (hidden prompt when omitted) |
 | `bot email rm <NAME>` | Remove an account and its stored password |
 | `bot email test <NAME>` | IMAP login and SMTP authentication, nothing is sent; exit 6 when a server does not accept |
 

@@ -79,11 +79,16 @@ With the daemon running you can add, change, test and remove accounts from
 **Settings, Computer, E-mail** in the desktop app, or from the command line:
 
 ```sh
-bot email add work alice@gmail.com --preset gmail --password-env MAIL_PW
+bot email add work alice@gmail.com --preset gmail --bot Atlas --password-env MAIL_PW
 bot email list
 bot email test work        # IMAP login + SMTP auth, nothing is sent
 bot email rm work
 ```
+
+A new mailbox has no default owner: give `--bot <name-or-id>` (only that bot can
+use it) or `--all-bots` (every bot that has the email tools can then read it
+without asking). The app asks the same: its form starts on "Only one bot" with
+no bot picked, and choosing "Any bot" shows a warning.
 
 Presets exist for `gmail`, `outlook`, `yahoo` and `icloud`; for anything else give
 `--imap-host`, `--smtp-host` and, if needed, `--imap-port`, `--smtp-port`,
@@ -117,7 +122,11 @@ allowed_senders = ["alice@example.com", "@corp.example"]   # stored; used by a l
   to the bot's allowed tools.
 - Deleting a bot **removes** the accounts bound to it, together with the
   passwords the daemon stored for them. They are never turned into shared
-  accounts, which would give every bot access to that mailbox.
+  accounts, which would give every bot access to that mailbox. If a stored
+  password cannot be deleted at that moment, its name is kept in
+  `email-secret-cleanup.json` and deleted on the next start.
+- Bundle exports with "all secrets" leave out `email/<account>/password`
+  secrets; a mailbox password is exported only when you name it.
 - `allowed_senders` is validated and stored but nothing reads incoming mail yet.
 - The "Test connection" action logs in over TLS exactly as configured and
   reports one status per server (`ok`, `unreachable`, `tls`, `auth_failed`,

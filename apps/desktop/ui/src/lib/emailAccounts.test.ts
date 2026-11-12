@@ -40,9 +40,26 @@ function filled() {
     ...applyPreset(emptyForm(), "gmail"),
     name: "work",
     address: "me@gmail.com",
-    password: "app-password"
+    password: "app-password",
+    bot: { mode: "all" as const }
   };
 }
+
+test("a new mailbox defaults to no bot and must be given one", () => {
+  const form = {
+    ...applyPreset(emptyForm(), "gmail"),
+    name: "work",
+    address: "me@gmail.com",
+    password: "app-password"
+  };
+  assert.deepEqual(emptyForm().bot, { mode: "some", ids: [] });
+  assert.deepEqual(validateForm(form, { existing: [], editing: false }), ["bot"]);
+  // Choosing everyone is explicit.
+  assert.deepEqual(
+    validateForm({ ...form, bot: { mode: "all" } }, { existing: [], editing: false }),
+    []
+  );
+});
 
 test("presets prefill the servers and custom keeps what was typed", () => {
   const gmail = applyPreset(emptyForm(), "gmail");

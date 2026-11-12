@@ -27,6 +27,9 @@ use tool_registry::ToolRegistry;
 
 use crate::serve::{EMAIL_FILE, EmailConfigFile};
 
+/// Names of managed passwords whose deletion failed (JSON array), retried on start.
+const CLEANUP_FILE: &str = "email-secret-cleanup.json";
+
 const FILE_HEADER: &str = "\
 # E-mail accounts of this bot (managed by the app; you may edit it while the daemon is stopped).\n\
 # Passwords are never stored here: `password` is the NAME of a secret in the secret store.\n\
@@ -38,6 +41,8 @@ pub struct EmailHost {
     connector: Arc<EmailConnector>,
     secrets: Arc<dyn SecretStore>,
     path: PathBuf,
+    /// Managed secrets that could not be deleted yet (retried on start).
+    cleanup_path: PathBuf,
     /// Serialises changes (read-modify-write of the account list and the file).
     ops: tokio::sync::Mutex<()>,
     /// Set when `email.toml` could not be loaded: it is never overwritten then.
@@ -180,13 +185,61 @@ impl EmailHost {
                 broken = Some(e);
             }
         }
-        Arc::new(Self {
+        let host = Arc::new(Self {
             connector,
             secrets,
             path: data_dir.join(EMAIL_FILE),
+            cleanup_path: data_dir.join(CLEANUP_FILE),
             ops: tokio::sync::Mutex::new(()),
             broken,
-        })
+        });
+        host.retry_pending_deletes();
+        host
+    }
+
+    fn pending_deletes(&self) -> Vec<String> {
+        std::fs::read_to_string(&self.cleanup_path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default()
+    }
+
+    fn save_pending(&self, names: &[String]) {
+        if names.is_empty() {
+            let _ = std::fs::remove_file(&self.cleanup_path);
+            return;
+        }
+        let tmp = self.cleanup_path.with_extension("json.tmp");
+        let ok = serde_json::to_vec(names).is_ok_and(|b| std::fs::write(&tmp, b).is_ok())
+            && std::fs::rename(&tmp, &self.cleanup_path).is_ok();
+        if !ok {
+            eprintln!("email: warning: could not record secrets still to delete");
+        }
+    }
+
+    /// Delete managed passwords whose earlier deletion failed, unless an account
+    /// uses the name again. Names that still fail stay on the list.
+    fn retry_pending_deletes(&self) {
+        let pending = self.pending_deletes();
+        if pending.is_empty() {
+            return;
+        }
+        let in_use: Vec<String> = self
+            .connector
+            .accounts()
+            .iter()
+            .map(|a| a.password.name().to_owned())
+            .collect();
+        let mut left = Vec::new();
+        for name in pending {
+            if in_use.contains(&name) {
+                continue;
+            }
+            if self.secrets.delete(&name).is_err() {
+                left.push(name);
+            }
+        }
+        self.save_pending(&left);
     }
 
     fn dto(&self, a: &AccountConfig) -> EmailAccountDto {
@@ -264,7 +317,8 @@ impl EmailHost {
     }
 
     /// Delete the passwords the daemon created for `removed`, unless another
-    /// account still uses the same secret.
+    /// account still uses the same secret. A deletion that fails is recorded and
+    /// retried on the next start.
     async fn drop_managed_secrets(&self, removed: &[AccountConfig]) {
         let still_used: Vec<String> = self
             .connector
@@ -272,20 +326,56 @@ impl EmailHost {
             .iter()
             .map(|a| a.password.name().to_owned())
             .collect();
+        let mut pending = self.pending_deletes();
+        let before = pending.len();
         for a in removed {
             let secret = a.password.name().to_owned();
             if secret != managed_secret(&a.name) || still_used.contains(&secret) {
                 continue;
             }
             let store = Arc::clone(&self.secrets);
-            let r = tokio::task::spawn_blocking(move || store.delete(&secret)).await;
+            let name = secret.clone();
+            let r = tokio::task::spawn_blocking(move || store.delete(&name)).await;
             if !matches!(r, Ok(Ok(_))) {
                 eprintln!(
-                    "email: warning: could not delete the password of account {}",
+                    "email: warning: could not delete the password of account {}; it will be retried on the next start",
                     a.name
                 );
+                if !pending.contains(&secret) {
+                    pending.push(secret);
+                }
             }
         }
+        if pending.len() != before {
+            self.save_pending(&pending);
+        }
+    }
+
+    /// A name that is about to be used again must not be deleted by a retry.
+    fn unpend(&self, secret: &str) {
+        let mut pending = self.pending_deletes();
+        let n = pending.len();
+        pending.retain(|p| p != secret);
+        if pending.len() != n {
+            self.save_pending(&pending);
+        }
+    }
+
+    /// The account a draft test connects with: the request, plus the private CA
+    /// of the saved account of the same name when it targets the same servers
+    /// and login (a custom CA cannot be set through the API).
+    fn draft_account(&self, input: &EmailAccountInput) -> Result<AccountConfig, EmailControlError> {
+        let mut account = Self::account_from(input)?;
+        if let Some(stored) = self
+            .connector
+            .accounts()
+            .into_iter()
+            .find(|a| a.name == account.name)
+            .filter(|s| credential_target(s) == credential_target(&account))
+        {
+            account.extra_root_pem = stored.extra_root_pem;
+        }
+        Ok(account)
     }
 
     /// Build an account from a request body.
@@ -350,6 +440,7 @@ impl EmailControl for EmailHost {
         // taken back again if the file cannot be written.
         let secret = account.password.name().to_owned();
         self.store_secret(secret.clone(), password).await?;
+        self.unpend(&secret);
         list.push(account.clone());
         if let Err(e) = self.commit(list) {
             self.drop_managed_secrets(std::slice::from_ref(&account))
@@ -413,9 +504,28 @@ impl EmailControl for EmailHost {
         }
         let secret = slot.password.name().to_owned();
         let updated = slot.clone();
-        self.commit(list)?;
-        if let Some(p) = password {
-            self.store_secret(secret, p).await?;
+        // New password first: if storing it fails nothing has changed, and if
+        // the commit fails the old password is put back, so the live servers
+        // and the stored password never disagree for longer than this call.
+        let old = if let Some(p) = &password {
+            let old = self.read_secret(secret.clone()).await;
+            self.store_secret(secret.clone(), p.clone()).await?;
+            Some(old)
+        } else {
+            None
+        };
+        if let Err(e) = self.commit(list) {
+            match old {
+                Some(Some(previous)) => {
+                    let _ = self.store_secret(secret, previous).await;
+                }
+                Some(None) => {
+                    let store = Arc::clone(&self.secrets);
+                    let _ = tokio::task::spawn_blocking(move || store.delete(&secret)).await;
+                }
+                None => {}
+            }
+            return Err(e);
         }
         Ok(self.dto(&updated))
     }
@@ -449,7 +559,7 @@ impl EmailControl for EmailHost {
         &self,
         input: EmailAccountInput,
     ) -> Result<EmailTestReport, EmailControlError> {
-        let account = Self::account_from(&input)?;
+        let account = self.draft_account(&input)?;
         let password = if let Some(p) = input.password.clone().filter(|p| !p.is_empty()) {
             p
         } else {

@@ -100,7 +100,17 @@ pub(crate) async fn create_email_account(
     if input.password.is_none() {
         return Err(ApiError::bad_request("`password` is required"));
     }
-    Ok((StatusCode::CREATED, Json(control.add(input).await?)))
+    let created = control.add(input).await?;
+    // The bot may have been deleted between the check and the insert (its
+    // cleanup ran before the account existed): look again and take the account
+    // back, so nothing stays bound to a bot that is gone.
+    if let Some(bot) = &created.bot
+        && let Err(e) = canonical_bot(&s, bot)
+    {
+        let _ = control.remove(&created.name).await;
+        return Err(e);
+    }
+    Ok((StatusCode::CREATED, Json(created)))
 }
 
 /// Merge a partial config onto the stored account. Omitted fields keep their
@@ -135,7 +145,28 @@ pub(crate) async fn update_email_account(
             Some(_) => return Err(ApiError::bad_request("`bot` must be a string or null")),
         }
     }
-    Ok(Json(control.update(&name, patch).await?))
+    let previous = control
+        .list()
+        .into_iter()
+        .find(|a| a.name == name)
+        .map(|a| a.bot);
+    let bound = patch
+        .get("bot")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    let updated = control.update(&name, patch).await?;
+    if let Some(bot) = bound
+        && let Err(e) = canonical_bot(&s, &bot)
+    {
+        // Same race as on create: put the previous binding back.
+        if let Some(prev) = previous {
+            let _ = control
+                .update(&name, serde_json::json!({ "bot": prev }))
+                .await;
+        }
+        return Err(e);
+    }
+    Ok(Json(updated))
 }
 
 /// Remove an account and the password it owned. Takes effect for the next tool

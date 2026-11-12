@@ -365,3 +365,205 @@ async fn connection_tests_never_reuse_a_stored_password_for_other_servers() {
     assert!(f.store.get("email/draft/password").unwrap().is_none());
     assert_eq!(f.host.list().len(), 1);
 }
+
+/// A store whose writes and deletes can be made to fail.
+struct FlakyStore {
+    inner: MemoryStore,
+    fail_set: std::sync::atomic::AtomicBool,
+    fail_delete: std::sync::atomic::AtomicBool,
+}
+
+impl FlakyStore {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            inner: MemoryStore::new(),
+            fail_set: std::sync::atomic::AtomicBool::new(false),
+            fail_delete: std::sync::atomic::AtomicBool::new(false),
+        })
+    }
+}
+
+impl SecretStore for FlakyStore {
+    fn get(&self, n: &str) -> Result<Option<secret_store::SecretValue>, secret_store::SecretError> {
+        self.inner.get(n)
+    }
+    fn set(&self, n: &str, v: &str) -> Result<(), secret_store::SecretError> {
+        if self.fail_set.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(secret_store::SecretError::InvalidName("injected".into()));
+        }
+        self.inner.set(n, v)
+    }
+    fn delete(&self, n: &str) -> Result<bool, secret_store::SecretError> {
+        if self.fail_delete.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(secret_store::SecretError::InvalidName("injected".into()));
+        }
+        self.inner.delete(n)
+    }
+    fn list_names(&self) -> Result<Vec<String>, secret_store::SecretError> {
+        self.inner.list_names()
+    }
+}
+
+fn flaky_host() -> (tempfile::TempDir, Arc<FlakyStore>, Arc<EmailHost>) {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FlakyStore::new();
+    let dynstore: Arc<dyn SecretStore> = store.clone();
+    let host = EmailHost::open(dir.path(), dynstore);
+    (dir, store, host)
+}
+
+fn moved_patch() -> Value {
+    json!({"imap": {"host": "imap.example.net", "port": 993}, "password": "new-pw-2"})
+}
+
+#[tokio::test]
+async fn a_failed_password_write_leaves_servers_and_password_as_they_were() {
+    let (dir, store, host) = flaky_host();
+    host.add(input("work", None)).await.unwrap();
+    let file_before = std::fs::read_to_string(dir.path().join(EMAIL_FILE)).unwrap();
+    store
+        .fail_set
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let e = host.update("work", moved_patch()).await.unwrap_err();
+    assert!(matches!(e, EmailControlError::Internal(_)), "{e:?}");
+    // Neither the live account, nor the file, nor the stored password moved.
+    assert_eq!(host.list()[0].imap.host, "127.0.0.1");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(EMAIL_FILE)).unwrap(),
+        file_before
+    );
+    assert_eq!(
+        store
+            .inner
+            .get("email/work/password")
+            .unwrap()
+            .unwrap()
+            .expose(),
+        PW
+    );
+}
+
+#[tokio::test]
+async fn a_failed_commit_puts_the_old_password_back() {
+    let (dir, store, host) = flaky_host();
+    host.add(input("work", None)).await.unwrap();
+    // Make saving email.toml fail: a directory sits where the file is.
+    let path = dir.path().join(EMAIL_FILE);
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    let e = host.update("work", moved_patch()).await.unwrap_err();
+    assert!(matches!(e, EmailControlError::Internal(_)), "{e:?}");
+    assert_eq!(
+        host.list()[0].imap.host,
+        "127.0.0.1",
+        "live account unchanged"
+    );
+    assert_eq!(
+        store
+            .inner
+            .get("email/work/password")
+            .unwrap()
+            .unwrap()
+            .expose(),
+        PW,
+        "the old password was restored"
+    );
+}
+
+#[tokio::test]
+async fn a_password_that_could_not_be_deleted_is_retried_on_the_next_start() {
+    let (dir, store, host) = flaky_host();
+    host.add(input("work", None)).await.unwrap();
+    store
+        .fail_delete
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    host.remove("work").await.unwrap();
+    assert!(store.inner.get("email/work/password").unwrap().is_some());
+    let cleanup = dir.path().join("email-secret-cleanup.json");
+    let text = std::fs::read_to_string(&cleanup).unwrap();
+    assert!(
+        text.contains("email/work/password") && !text.contains(PW),
+        "{text}"
+    );
+
+    // Still failing at the next start: stays recorded.
+    let dynstore: Arc<dyn SecretStore> = store.clone();
+    let _again = EmailHost::open(dir.path(), Arc::clone(&dynstore));
+    assert!(cleanup.exists());
+    // Working again: deleted and the record is gone.
+    store
+        .fail_delete
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let _third = EmailHost::open(dir.path(), dynstore);
+    assert!(store.inner.get("email/work/password").unwrap().is_none());
+    assert!(!cleanup.exists());
+}
+
+#[tokio::test]
+async fn a_retry_never_deletes_the_password_of_an_account_created_again() {
+    let (dir, store, host) = flaky_host();
+    host.add(input("work", None)).await.unwrap();
+    store
+        .fail_delete
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    host.remove("work").await.unwrap();
+    store
+        .fail_delete
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    // Same name again, new password.
+    let mut again = input("work", None);
+    again.password = Some("second-pw".into());
+    host.add(again).await.unwrap();
+    let dynstore: Arc<dyn SecretStore> = store.clone();
+    let reopened = EmailHost::open(dir.path(), dynstore);
+    assert_eq!(reopened.list().len(), 1);
+    assert_eq!(
+        store
+            .inner
+            .get("email/work/password")
+            .unwrap()
+            .unwrap()
+            .expose(),
+        "second-pw"
+    );
+}
+
+#[tokio::test]
+async fn a_draft_test_trusts_the_private_ca_of_the_saved_account_only_for_the_same_servers() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(EMAIL_FILE),
+        r#"
+[[accounts]]
+name = "lan"
+address = "me@lan.example"
+password = "email/lan/password"
+extra_root_pem = "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"
+[accounts.imap]
+host = "mail.lan.example"
+[accounts.smtp]
+host = "mail.lan.example"
+"#,
+    )
+    .unwrap();
+    let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
+    let host = EmailHost::open(dir.path(), store);
+    let same: EmailAccountInput = serde_json::from_value(json!({
+        "name": "lan", "address": "me@lan.example",
+        "imap": {"host": "mail.lan.example", "port": 993},
+        "smtp": {"host": "mail.lan.example", "port": 465},
+    }))
+    .unwrap();
+    assert!(host.draft_account(&same).unwrap().extra_root_pem.is_some());
+    let mut moved = same.clone();
+    moved.imap.host = "elsewhere.example".into();
+    assert!(host.draft_account(&moved).unwrap().extra_root_pem.is_none());
+    let mut stranger = same;
+    stranger.name = "other".into();
+    assert!(
+        host.draft_account(&stranger)
+            .unwrap()
+            .extra_root_pem
+            .is_none()
+    );
+}

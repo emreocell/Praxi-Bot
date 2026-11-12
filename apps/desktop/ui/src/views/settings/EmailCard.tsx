@@ -341,6 +341,7 @@ function AccountForm({
             some: t("settingsModal.email.form.access.some"),
             nobody: t("settingsModal.email.form.access.nobody")
           }}
+          allWarning={t("settingsModal.email.form.access.allWarning")}
         />
       </div>
 

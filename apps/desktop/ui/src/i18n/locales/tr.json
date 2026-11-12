@@ -930,7 +930,8 @@
           "label": "Bu posta kutusunu kimler kullanabilir",
           "all": "E-postası açık her bot",
           "some": "Yalnızca bir bot",
-          "nobody": "Botu seçin ya da her bot seçeneğini seçin."
+          "nobody": "Botu seçin ya da her bot seçeneğini seçin.",
+          "allWarning": "E-posta araçları olan her bot bu posta kutusunu sormadan okuyabilir."
         },
         "senders": "İzinli gönderenler",
         "sendersHint": "Adresler veya @alan_adları, her satıra bir tane. Gelecek gelen-posta özelliği için saklanır; şimdilik gelen postaya hiçbir şey tepki vermez.",

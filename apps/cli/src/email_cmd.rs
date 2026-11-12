@@ -57,12 +57,56 @@ pub fn preset(name: &str) -> Option<Preset> {
     })
 }
 
+/// Percent-encode one URL path segment (an account name).
+#[must_use]
+pub fn enc(segment: &str) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(segment.len());
+    for b in segment.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+            out.push(char::from(b));
+        } else {
+            let _ = write!(out, "%{b:02X}");
+        }
+    }
+    out
+}
+
+/// `--bot <name-or-id>`: a bot id as is, else the one bot with that name.
+async fn resolve_bot(c: &Client, wanted: &str) -> Result<String> {
+    let bots = c.request(Method::GET, "/v1/bots", None).await?;
+    let list = bots.as_array().cloned().unwrap_or_default();
+    if let Some(b) = list.iter().find(|b| b["id"].as_str() == Some(wanted)) {
+        return Ok(b["id"].as_str().unwrap_or_default().to_owned());
+    }
+    let named: Vec<&Value> = list
+        .iter()
+        .filter(|b| {
+            b["name"]
+                .as_str()
+                .is_some_and(|n| n.eq_ignore_ascii_case(wanted))
+        })
+        .collect();
+    match named.as_slice() {
+        [one] => Ok(one["id"].as_str().unwrap_or_default().to_owned()),
+        [] => Err(fail(
+            exit::NOT_FOUND,
+            format!("no bot {wanted:?} (see `bot bots list`)"),
+        )),
+        _ => Err(fail(
+            exit::REJECTED,
+            format!("several bots are named {wanted:?}; use the id from `bot bots list`"),
+        )),
+    }
+}
+
 fn print_json(out: &mut dyn Write, v: &Value) -> Result<()> {
     writeln!(out, "{}", serde_json::to_string(v)?)?;
     Ok(())
 }
 
 /// Arguments of `bot email add`.
+#[derive(Clone, Copy)]
 pub struct EmailAdd<'a> {
     /// Account name.
     pub name: &'a str,
@@ -82,7 +126,8 @@ pub struct EmailAdd<'a> {
     pub smtp_security: Option<&'a str>,
     /// Login name when it differs from the address.
     pub username: Option<&'a str>,
-    /// Bot id the account belongs to (default: every bot).
+    /// Bot (id or name) the account belongs to; `None` is "every bot", which
+    /// the command line only allows with an explicit `--all-bots`.
     pub bot: Option<&'a str>,
     /// Senders whose mail may start a run later.
     pub allowed_senders: &'a [String],
@@ -184,6 +229,18 @@ pub async fn add(
     json_out: bool,
     out: &mut dyn Write,
 ) -> Result<()> {
+    let id: String;
+    let resolved: EmailAdd<'_>;
+    let a = if let Some(wanted) = a.bot {
+        id = resolve_bot(c, wanted).await?;
+        resolved = EmailAdd {
+            bot: Some(&id),
+            ..*a
+        };
+        &resolved
+    } else {
+        a
+    };
     let body = add_body(a, password)?;
     let created = c
         .request(Method::POST, "/v1/email/accounts", Some(body))
@@ -206,8 +263,12 @@ pub async fn add(
 /// # Errors
 /// Unknown account (exit 5).
 pub async fn rm(c: &Client, name: &str, json_out: bool, out: &mut dyn Write) -> Result<()> {
-    c.request(Method::DELETE, &format!("/v1/email/accounts/{name}"), None)
-        .await?;
+    c.request(
+        Method::DELETE,
+        &format!("/v1/email/accounts/{}", enc(name)),
+        None,
+    )
+    .await?;
     if json_out {
         return print_json(out, &json!({ "deleted": name }));
     }
@@ -224,7 +285,7 @@ pub async fn test(c: &Client, name: &str, json_out: bool, out: &mut dyn Write) -
     let r = c
         .request(
             Method::POST,
-            &format!("/v1/email/accounts/{name}/test"),
+            &format!("/v1/email/accounts/{}/test", enc(name)),
             None,
         )
         .await?;

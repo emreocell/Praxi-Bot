@@ -28,13 +28,16 @@ export function BotAccessPicker({
   bots,
   onChange,
   single = false,
-  texts
+  texts,
+  allWarning
 }: {
   scope: BotScope;
   bots: Pick<Bot, "id" | "name">[];
   onChange: (scope: BotScope) => void;
   single?: boolean;
   texts?: Partial<BotAccessTexts>;
+  /** One line shown while "all bots" is chosen. */
+  allWarning?: string;
 }) {
   const { t } = useTranslation();
   const uid = useId();
@@ -61,6 +64,12 @@ export function BotAccessPicker({
           { value: "some", label: words.some }
         ]}
       />
+      {scope.mode === "all" && allWarning ? (
+        <p className={styles.warn} role="status">
+          <TriangleAlert aria-hidden="true" />
+          {allWarning}
+        </p>
+      ) : null}
       {scope.mode === "some" ? (
         <>
           {bots.length === 0 ? (

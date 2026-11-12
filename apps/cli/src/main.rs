@@ -229,6 +229,7 @@ enum EmailCmd {
     /// List the accounts (never shows passwords).
     List,
     /// Add an account: `bot email add work me@gmail.com --preset gmail --password-env MAIL_PW`.
+    #[command(group = clap::ArgGroup::new("scope").required(true).args(["bot", "all_bots"]))]
     Add {
         /// Account name (letters, digits, `.`, `_`, `-`).
         name: String,
@@ -255,9 +256,13 @@ enum EmailCmd {
         /// Login name when it differs from the address.
         #[arg(long)]
         username: Option<String>,
-        /// Only this bot may use the account (bot id; default: every bot).
+        /// Only this bot may use the account (bot name or id). Required unless `--all-bots`.
         #[arg(long)]
         bot: Option<String>,
+        /// Let every bot that has the e-mail tools use (and read) this mailbox
+        /// without asking. There is no default: choose this or `--bot`.
+        #[arg(long)]
+        all_bots: bool,
         /// Sender whose mail may start a run later (repeatable).
         #[arg(long = "allowed-sender")]
         allowed_senders: Vec<String>,
@@ -898,6 +903,7 @@ async fn run_email(
             smtp_security,
             username,
             bot,
+            all_bots: _,
             allowed_senders,
             password_env,
         } => {
@@ -1104,6 +1110,13 @@ mod tests {
                 action: EmailCmd::Test { .. }
             }
         ));
+        // No implicit "every bot": a bot or `--all-bots` must be chosen, not both.
+        let base = ["bot", "email", "add", "w", "a@b.c", "--preset", "gmail"];
+        assert!(Cli::try_parse_from(base).is_err(), "no scope given");
+        let with = |extra: &[&str]| Cli::try_parse_from(base.iter().chain(extra));
+        assert!(with(&["--all-bots"]).is_ok());
+        assert!(with(&["--bot", "Atlas"]).is_ok());
+        assert!(with(&["--all-bots", "--bot", "Atlas"]).is_err());
         // Unknown presets and a missing address are refused by the parser.
         assert!(
             Cli::try_parse_from(["bot", "email", "add", "w", "a@b.c", "--preset", "aol"]).is_err()

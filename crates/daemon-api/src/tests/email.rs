@@ -24,6 +24,8 @@ struct FakeEmail {
     fail_forget: bool,
     /// When set, `test_draft` waits for it (to hold test slots open).
     hold: Option<Arc<Semaphore>>,
+    /// Runs at the start of `add` (a bot deleted "in between").
+    before_add: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
     /// Draft tests that started (before waiting on `hold`).
     entered: std::sync::atomic::AtomicUsize,
 }
@@ -36,6 +38,7 @@ impl FakeEmail {
             forgotten: Mutex::new(Vec::new()),
             fail_forget: false,
             hold: None,
+            before_add: Mutex::new(None),
             entered: std::sync::atomic::AtomicUsize::new(0),
         })
     }
@@ -65,6 +68,9 @@ impl EmailControl for FakeEmail {
         self.accounts.lock().clone()
     }
     async fn add(&self, input: EmailAccountInput) -> Result<EmailAccountDto, EmailControlError> {
+        if let Some(hook) = self.before_add.lock().as_ref() {
+            hook();
+        }
         let mut all = self.accounts.lock();
         if all.iter().any(|a| a.name == input.name) {
             return Err(EmailControlError::Conflict(format!(
@@ -450,4 +456,37 @@ fn input_debug_never_prints_the_password() {
     let patch: crate::email::EmailAccountPatch =
         serde_json::from_value(json!({"password": SECRET})).unwrap();
     assert!(!format!("{patch:?}").contains(SECRET));
+}
+
+#[tokio::test]
+async fn an_account_cannot_end_up_bound_to_a_bot_deleted_during_creation() {
+    let (t, fake) = with_email();
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/bots",
+        Some(json!({"profile_toml": "[bot]
+id = \"racy\"
+name = \"Racy\"
+[models]
+executor = \"fake/echo\"
+"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    let bot = r.json()["id"].as_str().unwrap().to_owned();
+    // The bot is deleted after the route checked it and before the insert.
+    let state = t.state.clone();
+    let id: uuid::Uuid = bot.parse().unwrap();
+    *fake.before_add.lock() = Some(Box::new(move || {
+        state.storage().delete_bot(protocol::BotId(id)).unwrap();
+    }));
+    let mut b = body("racy");
+    b["bot"] = json!(bot);
+    let r = call(&t, Method::POST, "/v1/email/accounts", Some(b)).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{:?}", r.json());
+    assert!(
+        fake.accounts.lock().is_empty(),
+        "the account was taken back"
+    );
 }

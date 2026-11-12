@@ -258,3 +258,68 @@ async fn a_bot_bound_account_is_removed_when_its_bot_is_deleted() {
     assert_eq!(accounts, json!([]));
     assert!(d.store.get("email/mine/password").unwrap().is_none());
 }
+
+#[test]
+fn account_names_are_percent_encoded_in_urls() {
+    assert_eq!(enc("work-1.a_b~"), "work-1.a_b~");
+    assert_eq!(enc("a b/c?d#e%"), "a%20b%2Fc%3Fd%23e%25");
+    assert_eq!(enc("caf\u{e9}"), "caf%C3%A9");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bot_can_be_given_by_name_and_unknown_or_ambiguous_names_are_refused() {
+    let d = daemon().await;
+    let c = &d.client;
+    let file = d.dir.path().join("bot.toml");
+    std::fs::write(&file, PROFILE).unwrap();
+    let mut out = Vec::new();
+    crate::remote::bots_add(c, &file, true, &mut out)
+        .await
+        .unwrap();
+    let id = serde_json::from_slice::<Value>(&out).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let port = closed_port();
+    let args = EmailAdd {
+        name: "mine",
+        address: "me@example.com",
+        preset: None,
+        imap_host: Some("127.0.0.1"),
+        imap_port: Some(port),
+        smtp_host: Some("127.0.0.1"),
+        smtp_port: Some(port),
+        smtp_security: None,
+        username: None,
+        bot: Some("t"),
+        allowed_senders: &[],
+    };
+    out.clear();
+    // The profile's bot is called "T".
+    add(c, &args, PW, true, &mut out).await.unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&out).unwrap()["bot"],
+        id.as_str()
+    );
+    let unknown = EmailAdd {
+        name: "x",
+        bot: Some("nobody"),
+        ..args
+    };
+    let err = add(c, &unknown, PW, false, &mut out).await.unwrap_err();
+    assert_eq!(code_of(&*err), exit::NOT_FOUND);
+    // A second bot with the same name makes the name ambiguous.
+    crate::remote::bots_add(c, &file, true, &mut out)
+        .await
+        .unwrap();
+    let again = EmailAdd { name: "y", ..args };
+    let err = add(c, &again, PW, false, &mut out).await.unwrap_err();
+    assert_eq!(code_of(&*err), exit::REJECTED);
+    // The id always works.
+    let by_id = EmailAdd {
+        name: "z",
+        bot: Some(&id),
+        ..args
+    };
+    add(c, &by_id, PW, true, &mut out).await.unwrap();
+}
