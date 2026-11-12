@@ -13,6 +13,10 @@ import type {
   Grant,
   GrantTarget,
   Health,
+  EmailAccount,
+  EmailAccountInput,
+  EmailAccountPatch,
+  EmailTestReport,
   McpCatalogEntry,
   McpServer,
   McpServerPatch,
@@ -288,6 +292,41 @@ export class ApiClient {
     return this.request("POST", `/secrets/${encodeURIComponent(name)}`, {
       body: { value }
     });
+  }
+
+  // ---- E-mail accounts -------------------------------------------------
+
+  listEmailAccounts(): Promise<EmailAccount[]> {
+    return this.request("GET", "/email/accounts");
+  }
+  /** The `password` is write-only: the daemon stores it and never returns it. */
+  createEmailAccount(input: EmailAccountInput): Promise<EmailAccount> {
+    return this.request("POST", "/email/accounts", { body: input });
+  }
+  updateEmailAccount(
+    name: string,
+    patch: EmailAccountPatch
+  ): Promise<EmailAccount> {
+    return this.request("PUT", `/email/accounts/${encodeURIComponent(name)}`, {
+      body: patch
+    });
+  }
+  deleteEmailAccount(name: string): Promise<void> {
+    return this.request(
+      "DELETE",
+      `/email/accounts/${encodeURIComponent(name)}`
+    );
+  }
+  /** IMAP login + SMTP authentication of a saved account; nothing is sent. */
+  testEmailAccount(name: string): Promise<EmailTestReport> {
+    return this.request(
+      "POST",
+      `/email/accounts/${encodeURIComponent(name)}/test`
+    );
+  }
+  /** The same for an account that is not saved (nothing is stored). */
+  testEmailDraft(input: EmailAccountInput): Promise<EmailTestReport> {
+    return this.request("POST", "/email/test", { body: input });
   }
 
   reloadProviders(): Promise<{

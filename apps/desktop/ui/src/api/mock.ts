@@ -3,6 +3,8 @@ import { MOCK_MCP_CATALOG } from "./mockCatalog.ts";
 import type {
   Bot,
   Chat,
+  EmailAccount,
+  EmailAccountInput,
   McpServer,
   McpServerConfig,
   McpTool,
@@ -208,6 +210,32 @@ function serverFromConfig(c: McpServerConfig, category = "other"): McpServer {
 export class MockApiClient extends ApiClient {
   readonly servers: McpServer[];
   readonly secrets = new Map<string, number>();
+  readonly emailAccounts: EmailAccount[] = [
+    {
+      name: "personal",
+      address: "alex@gmail.com",
+      username: "",
+      imap: { host: "imap.gmail.com", port: 993 },
+      smtp: { host: "smtp.gmail.com", port: 465, security: "implicit" },
+      drafts_folder: "Drafts",
+      bot: null,
+      allowed_senders: [],
+      password_set: true,
+      custom_ca: false
+    },
+    {
+      name: "atlas-inbox",
+      address: "atlas@fastmail.example",
+      username: "atlas",
+      imap: { host: "imap.fastmail.example", port: 993 },
+      smtp: { host: "smtp.fastmail.example", port: 587, security: "start_tls" },
+      drafts_folder: "Drafts",
+      bot: ATLAS,
+      allowed_senders: ["alex@gmail.com"],
+      password_set: true,
+      custom_ca: false
+    }
+  ];
 
   constructor() {
     super({ base_url: MOCK_BASE_URL, token: "mock" });
@@ -297,6 +325,11 @@ export class MockApiClient extends ApiClient {
         return ok(undefined);
       case "PUT /bots":
         return ok(BOTS.find((b) => b.id === seg[1]) ?? BOTS[0]);
+      case "GET /email":
+      case "POST /email":
+      case "PUT /email":
+      case "DELETE /email":
+        return ok(this.email(method, seg, opts.body));
       case "GET /mcp":
       case "POST /mcp":
       case "PUT /mcp":
@@ -305,6 +338,65 @@ export class MockApiClient extends ApiClient {
       default:
         throw new ApiError(404, "not_found", `mock: ${method} ${path}`);
     }
+  }
+
+  private email(method: string, seg: string[], body: unknown): unknown {
+    const [, sub, name, action] = seg;
+    if (sub === "test") {
+      return { imap: "ok", smtp: "ok", ok: true };
+    }
+    if (sub !== "accounts") {
+      throw new ApiError(404, "not_found", "mock email");
+    }
+    if (!name) {
+      if (method === "GET") {
+        return this.emailAccounts;
+      }
+      const input = body as EmailAccountInput;
+      if (this.emailAccounts.some((a) => a.name === input.name)) {
+        throw new ApiError(409, "conflict", `account ${input.name} exists`);
+      }
+      const created: EmailAccount = {
+        name: input.name,
+        address: input.address,
+        username: input.username ?? "",
+        imap: { host: input.imap.host, port: input.imap.port ?? 993 },
+        smtp: {
+          host: input.smtp.host,
+          port: input.smtp.port ?? 465,
+          security: input.smtp.security ?? "implicit"
+        },
+        drafts_folder: input.drafts_folder ?? "Drafts",
+        bot: input.bot ?? null,
+        allowed_senders: input.allowed_senders ?? [],
+        // The password is write-only: only the fact that one is stored is kept.
+        password_set: Boolean(input.password),
+        custom_ca: false
+      };
+      this.emailAccounts.push(created);
+      return created;
+    }
+    const idx = this.emailAccounts.findIndex((a) => a.name === name);
+    if (idx < 0) {
+      throw new ApiError(404, "not_found", `no account ${name}`);
+    }
+    if (action === "test") {
+      return { imap: "ok", smtp: "ok", ok: true };
+    }
+    if (method === "DELETE") {
+      this.emailAccounts.splice(idx, 1);
+      return undefined;
+    }
+    // PUT is a patch: a field left out keeps its value, `bot: null` = every bot.
+    const patch = (body ?? {}) as Record<string, unknown>;
+    const { password, ...rest } = patch;
+    const merged = {
+      ...this.emailAccounts[idx],
+      ...rest,
+      password_set: this.emailAccounts[idx].password_set || Boolean(password)
+    } as EmailAccount;
+    this.emailAccounts[idx] = merged;
+    return merged;
   }
 
   private mcp(method: string, seg: string[], body: unknown): unknown {

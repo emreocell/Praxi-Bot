@@ -199,6 +199,15 @@ pub(crate) fn check_folder(name: &str) -> Result<(), EmailError> {
 
 type Stream = TlsStream<TcpStream>;
 
+/// Where [`ImapSession::connect_staged`] stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConnectStage {
+    Connect,
+    Tls,
+    Greeting,
+    Login,
+}
+
 /// An authenticated IMAP session.
 pub struct ImapSession {
     session: async_imap::Session<Stream>,
@@ -212,34 +221,66 @@ impl ImapSession {
     /// # Errors
     /// TLS, network or authentication failures.
     pub async fn connect(acct: &AccountConfig, password: &str) -> Result<Self, EmailError> {
+        Self::connect_inner(acct, password)
+            .await
+            .map_err(|(_, e)| e)
+    }
+
+    /// [`Self::connect`] that only says which stage failed (for the
+    /// "test connection" report, which must not carry server text).
+    pub(crate) async fn connect_staged(
+        acct: &AccountConfig,
+        password: &str,
+    ) -> Result<Self, ConnectStage> {
+        Self::connect_inner(acct, password)
+            .await
+            .map_err(|(stage, _)| stage)
+    }
+
+    async fn connect_inner(
+        acct: &AccountConfig,
+        password: &str,
+    ) -> Result<Self, (ConnectStage, EmailError)> {
         let trace = ImapTraceGuard::enter();
         enforce_imap_trace_ceiling();
-        let connector = tls::connector(acct.extra_root_pem.as_deref())?;
+        let tls_err = |e: EmailError| (ConnectStage::Tls, e);
+        let connector = tls::connector(acct.extra_root_pem.as_deref()).map_err(tls_err)?;
         let host = acct.imap.host.clone();
         let tcp = TcpStream::connect((host.as_str(), acct.imap.port))
             .await
             .map_err(|e| {
-                EmailError::Imap(redact(
-                    &format!("connect {host}:{}: {e}", acct.imap.port),
-                    password,
-                ))
+                (
+                    ConnectStage::Connect,
+                    EmailError::Imap(redact(
+                        &format!("connect {host}:{}: {e}", acct.imap.port),
+                        password,
+                    )),
+                )
             })?;
         let name = ServerName::try_from(host.clone())
-            .map_err(|e| EmailError::Tls(format!("invalid server name {host}: {e}")))?;
+            .map_err(|e| tls_err(EmailError::Tls(format!("invalid server name {host}: {e}"))))?;
         let stream = connector
             .connect(name, tcp)
             .await
-            .map_err(|e| EmailError::Tls(format!("handshake with {host}: {e}")))?;
+            .map_err(|e| tls_err(EmailError::Tls(format!("handshake with {host}: {e}"))))?;
+        let greeting = || {
+            (
+                ConnectStage::Greeting,
+                EmailError::Imap(redact("greeting failed", password)),
+            )
+        };
         let mut client = async_imap::Client::new(stream);
         client
             .read_response()
             .await
-            .map_err(|_| EmailError::Imap(redact("greeting failed", password)))?
-            .ok_or_else(|| EmailError::Imap(redact("greeting failed", password)))?;
-        let session = client
-            .login(acct.login(), password)
-            .await
-            .map_err(|_| EmailError::Imap(redact("login failed", password)))?;
+            .map_err(|_| greeting())?
+            .ok_or_else(greeting)?;
+        let session = client.login(acct.login(), password).await.map_err(|_| {
+            (
+                ConnectStage::Login,
+                EmailError::Imap(redact("login failed", password)),
+            )
+        })?;
         Ok(Self {
             session,
             password: password.to_owned(),
