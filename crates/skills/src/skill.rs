@@ -23,6 +23,17 @@ pub enum Source {
 }
 
 impl Source {
+    /// Scope exposed by the resolver. `User` remains the source-compatible
+    /// enum variant for the shared layer.
+    #[must_use]
+    pub fn scope(self) -> &'static str {
+        match self {
+            Source::Bundled => "bundled",
+            Source::User => "shared",
+            Source::Bot => "bot",
+        }
+    }
+
     /// Lowercase label for display.
     #[must_use]
     pub fn label(self) -> &'static str {

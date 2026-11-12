@@ -645,6 +645,25 @@ pub(crate) struct BinaryPin {
     index: u64,
 }
 
+/// Hold the canonical executable against replacement throughout launch probes.
+/// A read-only share permits execution, but denies new write/delete handles.
+#[cfg(windows)]
+pub(crate) fn lock_executable(
+    mut resolved: ResolvedCommand,
+) -> Result<(ResolvedCommand, std::fs::File), CliError> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows::Win32::Storage::FileSystem::FILE_SHARE_READ;
+
+    resolved.program =
+        std::fs::canonicalize(&resolved.program).map_err(|_| CliError::BinaryChanged)?;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ.0)
+        .open(&resolved.program)
+        .map_err(|_| CliError::BinaryChanged)?;
+    Ok((resolved, file))
+}
+
 pub(crate) fn binary_pin(path: &Path) -> Option<BinaryPin> {
     let meta = std::fs::metadata(path).ok()?;
     let modified = meta
@@ -1847,6 +1866,69 @@ mod tests {
             Some("node.exe")
         );
         assert!(resolved.args.iter().any(|arg| arg.ends_with("cli.js")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn executable_lock_denies_writes_and_renames_until_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("program.exe");
+        let moved = dir.path().join("moved.exe");
+        std::fs::write(&path, b"inert executable fixture").unwrap();
+        let resolved = ResolvedCommand {
+            program: path.clone(),
+            args: vec![],
+        };
+        let (resolved, lease) = lock_executable(resolved).unwrap();
+        assert_eq!(resolved.program, std::fs::canonicalize(&path).unwrap());
+        assert!(std::fs::OpenOptions::new().write(true).open(&path).is_err());
+        assert!(std::fs::rename(&path, &moved).is_err());
+        assert!(std::fs::File::open(&path).is_ok());
+        drop(lease);
+        std::fs::rename(&path, &moved).unwrap();
+        std::fs::write(&moved, b"replacement allowed after spawn").unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn executable_lock_allows_create_process_while_pinned() {
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("test-harness.exe");
+        std::fs::copy(std::env::current_exe().unwrap(), &program).unwrap();
+        let resolved = ResolvedCommand {
+            program,
+            args: vec![],
+        };
+        let (resolved, lease) = lock_executable(resolved).unwrap();
+        let output = std::process::Command::new(&resolved.program)
+            .arg("--list")
+            .output()
+            .expect("read sharing must permit CreateProcess");
+        assert!(output.status.success());
+        drop(lease);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn executable_lock_refuses_an_existing_write_handle() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("program.exe");
+        std::fs::write(&path, b"inert fixture").unwrap();
+        let writer = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        let resolved = ResolvedCommand {
+            program: path.clone(),
+            args: vec![],
+        };
+        assert!(matches!(
+            lock_executable(resolved),
+            Err(CliError::BinaryChanged)
+        ));
+        drop(writer);
+        let resolved = ResolvedCommand {
+            program: path,
+            args: vec![],
+        };
+        assert!(lock_executable(resolved).is_ok());
     }
 
     #[test]

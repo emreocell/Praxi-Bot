@@ -891,6 +891,46 @@ async fn the_foreground_page_makes_matching_skills_suggested() {
     assert!(system_of(&brain.requests()[0]).contains("[suggested] my-site"));
 }
 
+#[tokio::test]
+async fn a_skill_learned_by_this_bot_is_in_its_prompt_and_other_bots_skills_are_not() {
+    let env = setup();
+    let brain = skill_brain();
+    let lp = skill_loop(&env, &brain);
+    let learned = |bot: protocol::BotId, name: &str| {
+        let dir = env
+            .dir
+            .path()
+            .join("bots")
+            .join(bot.to_string())
+            .join("skills")
+            .join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("SKILL.md"),
+            format!(
+                "---
+name: {name}
+description: learned {name}
+---
+body
+"
+            ),
+        )
+        .unwrap();
+    };
+    learned(env.bot, "learned-by-a");
+    learned(protocol::BotId::new(), "learned-by-b");
+    let run = lp.run_turn(env.chat, "hello").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let reqs = brain.requests();
+    let sys = system_of(&reqs[0]);
+    assert!(
+        sys.contains("- learned-by-a: learned learned-by-a"),
+        "{sys}"
+    );
+    assert!(!sys.contains("learned-by-b"), "{sys}");
+}
+
 // ---------- catalog prices ----------
 
 fn priced(input: f64, output: f64) -> ModelInfo {

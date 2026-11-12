@@ -49,11 +49,10 @@ impl TurnHost for Host {
             retry: None,
         };
         let approval = {
-            let resolved = self
-                .sh
-                .ctx(&self.run)
-                .ok()
-                .and_then(|ctx| self.sh.resolve_call(&ctx.profile, name, &input, &[]));
+            let resolved = self.sh.ctx(&self.run).ok().and_then(|ctx| {
+                self.sh
+                    .resolve_call(&ctx.profile, ctx.bot_id, name, &input, &[])
+            });
             let mut approvals = self.approved.lock();
             approvals
                 .iter()
@@ -82,7 +81,10 @@ impl TurnHost for Host {
         let Ok(ctx) = self.sh.ctx(&self.run) else {
             return false;
         };
-        let Some(r) = self.sh.resolve_call(&ctx.profile, name, &input, &[]) else {
+        let Some(r) = self
+            .sh
+            .resolve_call(&ctx.profile, ctx.bot_id, name, &input, &[])
+        else {
             return false;
         };
         let Some(spec) = r.spec else {

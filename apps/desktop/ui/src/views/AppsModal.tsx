@@ -1,4 +1,4 @@
-import { Cable, Check, Plus, Search, Server, X } from "lucide-react";
+import { Cable, Check, Plus, Search, Server, Users, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, Button } from "ui";
@@ -7,13 +7,18 @@ import { brandIcon } from "../lib/brandIcons";
 import { botView } from "../lib/botProfile";
 import type { McpCatalogEntry, McpServer } from "../api/types";
 import formStyles from "../components/Form.module.css";
+import { BotAccessPicker } from "../components/BotAccessPicker";
 import { Modal } from "../components/Modal";
 import { Segmented } from "../components/SettingsUi";
 import { useToast } from "../components/Toast";
 import { openExternal } from "../lib/externalLink";
 import {
   ALL_CATEGORIES,
-  botAccess,
+  type BotScope,
+  botAccessLabels,
+  botScope,
+  botSelection,
+  saveServerScope,
   catalogCategories,
   connectCatalogEntry,
   customServerConfig,
@@ -35,17 +40,24 @@ function ConnectedRow({
   server,
   busy,
   onReconnect,
-  onDisconnect
+  onDisconnect,
+  onSaveBots
 }: {
   server: McpServer;
   busy: boolean;
   onReconnect: () => void;
   onDisconnect: () => void;
+  onSaveBots: (from: BotScope, to: BotScope) => void;
 }) {
   const { t } = useTranslation();
   const { bots } = useDaemon();
   const [confirm, setConfirm] = useState(false);
-  const access = botAccess(server, bots);
+  const [editing, setEditing] = useState(false);
+  const [scope, setScope] = useState<BotScope>(() => botScope(server));
+  // The scope the editor opened with: the saved diff is against this, not
+  // against whatever the live server says at click time.
+  const [baseline, setBaseline] = useState<BotScope>(() => botScope(server));
+  const access = botAccessLabels(server, bots, t("apps.access.deletedBot"));
   const tone = statusTone(server.status);
   const needsReconnect =
     server.status === "error" ||
@@ -64,8 +76,18 @@ function ConnectedRow({
         </div>
         <div className={styles.serverMeta}>
           <span>{t("apps.toolCount", { count: server.tool_count })}</span>
-          <span className={styles.usedBy} title={access.all ? t("apps.botsAll") : t("apps.botsSome", { names: access.names.join(", ") })}>
-            {bots.filter(b => access.all || server.bots?.includes(b.id)).map(b => <BotAvatar key={b.id} bot={botView(b)} size="xs" />)}
+          <span aria-hidden="true">·</span>
+          <span className={styles.usedBy}>
+            {bots
+              .filter((b) => access.all || server.bots?.includes(b.id))
+              .map((b) => <BotAvatar key={b.id} bot={botView(b)} size="xs" />)}
+            <span className={styles.usedByLabel}>
+              {access.all
+                ? t("apps.botsAll")
+                : access.names.length === 0
+                  ? t("apps.botsNone")
+                  : t("apps.botsSome", { names: access.names.join(", ") })}
+            </span>
           </span>
         </div>
         {server.error ? (
@@ -73,6 +95,20 @@ function ConnectedRow({
         ) : null}
       </div>
       <div className={styles.serverActions}>
+        <Button
+          size="sm"
+          variant="ghost"
+          active={editing}
+          disabled={busy}
+          data-testid={`mcp-access-${server.name}`}
+          onClick={() => {
+            setBaseline(botScope(server));
+            setScope(botSelection(botScope(server), bots));
+            setEditing((e) => !e);
+          }}
+        >
+          <Users />{t("apps.access.edit")}
+        </Button>
         {needsReconnect ? (
           <Button size="sm" variant="secondary" disabled={busy} onClick={onReconnect}>
             {t("apps.reconnect")}
@@ -106,6 +142,28 @@ function ConnectedRow({
           </Button>
         )}
       </div>
+      {editing ? (
+        <div className={styles.accessPanel}>
+          <BotAccessPicker scope={scope} bots={bots} onChange={setScope} />
+          <div className={styles.formActions}>
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={busy}
+              data-testid={`mcp-access-save-${server.name}`}
+              onClick={() => {
+                setEditing(false);
+                onSaveBots(baseline, scope);
+              }}
+            >
+              {t("apps.access.save")}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+              {t("common.cancel")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -248,6 +306,8 @@ function CustomServerForm({
   });
   const [error, setError] = useState<"name" | "command" | "url" | null>(null);
   const [busy, setBusy] = useState(false);
+  const { bots } = useDaemon();
+  const [scope, setScope] = useState<BotScope>({ mode: "all" });
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
 
   return (
@@ -255,7 +315,7 @@ function CustomServerForm({
       className={styles.custom}
       onSubmit={(e) => {
         e.preventDefault();
-        const result = customServerConfig(form, existing);
+        const result = customServerConfig(form, existing, botSelection(scope, bots));
         setError(result.ok ? null : result.error);
         if (result.ok) {
           setBusy(true);
@@ -336,6 +396,10 @@ function CustomServerForm({
           ) : null}
         </div>
       )}
+      <div className={formStyles.field}>
+        <span className={formStyles.label}>{t("apps.access.label")}</span>
+        <BotAccessPicker scope={scope} bots={bots} onChange={setScope} />
+      </div>
       <div className={styles.formActions}>
         <Button type="submit" variant="primary" size="sm" disabled={busy}>
           {t("apps.custom.add")}
@@ -511,6 +575,22 @@ export function AppsModal({
                         onReconnect={() =>
                           void run(s.name, async () => {
                             await client?.reconnectMcpServer(s.name);
+                            await reload();
+                          })
+                        }
+                        onSaveBots={(from, to) =>
+                          void run(s.name, async () => {
+                            if (!client) {
+                              return;
+                            }
+                            const { applied } = await saveServerScope(client, s.name, from, to);
+                            if (applied) {
+                              toast.show(t("apps.access.savedToast", { name: s.name }), "success");
+                            } else {
+                              // The server is not in the state the user chose
+                              // (changed elsewhere meanwhile): say so, show the truth.
+                              toast.show(t("apps.access.notApplied", { name: s.name }), "danger");
+                            }
                             await reload();
                           })
                         }

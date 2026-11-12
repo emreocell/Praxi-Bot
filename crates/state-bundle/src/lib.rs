@@ -85,7 +85,16 @@ pub struct Manifest {
     pub files: Vec<FileRecord>,
 }
 
+/// `email/<account>/password`, where the daemon keeps mailbox passwords.
+fn is_mailbox_password(name: &str) -> bool {
+    name.strip_prefix("email/")
+        .and_then(|rest| rest.strip_suffix("/password"))
+        .is_some_and(|account| !account.is_empty() && !account.contains('/'))
+}
+
 /// Select secrets explicitly; the safe default is none.
+/// `All` leaves out mailbox passwords (`email/<account>/password`); they are
+/// exported only when named in `Names`.
 #[derive(Debug, Clone, Default)]
 pub enum SecretSelection {
     #[default]
@@ -225,7 +234,13 @@ pub async fn export(
     .await?;
     let mut names = match opts.secrets {
         SecretSelection::None => Vec::new(),
-        SecretSelection::All => store.list_names()?,
+        // Mailbox passwords never ride along with "all": naming one is the
+        // user's explicit choice.
+        SecretSelection::All => store
+            .list_names()?
+            .into_iter()
+            .filter(|n| !is_mailbox_password(n))
+            .collect(),
         SecretSelection::Names(names) => names,
     };
     names.sort();

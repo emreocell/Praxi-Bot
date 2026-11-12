@@ -336,7 +336,7 @@ async fn tools_roundtrip() {
     let tmp = TempDir::new().unwrap();
     let idx = SkillIndex::load(paths(&tmp));
     let tools = tools(&idx);
-    assert_eq!(tools.len(), 3);
+    assert_eq!(tools.len(), 4);
     let find = |n: &str| tools.iter().find(|t| t.spec().name == n).unwrap().clone();
     for t in &tools {
         assert!(t.spec().is_valid());
@@ -358,7 +358,10 @@ async fn tools_roundtrip() {
         tool_registry::PermissionCategory::Meta
     );
 
-    let ctx = ToolContext::default();
+    let ctx = ToolContext {
+        bot_id: Some("b1".into()),
+        ..ToolContext::default()
+    };
     let content = skill_text("learned", "Learned thing", "", "Step 1");
     find("skill_write")
         .call(&ctx, json!({"name":"learned","content":content}))

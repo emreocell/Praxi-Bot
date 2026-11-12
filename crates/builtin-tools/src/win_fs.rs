@@ -25,7 +25,7 @@ use windows::{
         Foundation::{ERROR_FILE_NOT_FOUND, GetLastError, HANDLE},
         Storage::FileSystem::{
             FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-            FILE_NAME_NORMALIZED, FindClose, FindFirstFileW, GetDriveTypeW,
+            FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FindClose, FindFirstFileW, GetDriveTypeW,
             GetFinalPathNameByHandleW, QueryDosDeviceW, WIN32_FIND_DATAW,
         },
     },
@@ -96,7 +96,7 @@ pub(super) fn final_path_nofollow(path: &Path) -> io::Result<PathBuf> {
     // `FILE_FLAG_OPEN_REPARSE_POINT` names the link itself. Bytes are not read;
     // only `GetFinalPathNameByHandleW` runs on this handle.
     let file = fs::OpenOptions::new()
-        .read(true)
+        .access_mode(FILE_READ_ATTRIBUTES.0)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0 | FILE_FLAG_OPEN_REPARSE_POINT.0)
         .open(path)?;
     let handle = HANDLE(file.as_raw_handle());

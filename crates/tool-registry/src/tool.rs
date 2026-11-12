@@ -85,6 +85,14 @@ pub trait Tool: Send + Sync {
     /// Return the static specification for this tool.
     fn spec(&self) -> &ToolSpec;
 
+    /// Whether the bot `bot_id` (`None` = no bot) may see this tool in
+    /// discovery and in the model's tool list.  Default: every bot.  This is
+    /// a visibility filter only; a tool that restricts callers must still
+    /// enforce that in [`Tool::call`].
+    fn visible_to(&self, _bot_id: Option<&str>) -> bool {
+        true
+    }
+
     /// Execute the tool with the given `input` and return its output.
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError>;
 }

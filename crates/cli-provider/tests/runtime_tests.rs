@@ -14,6 +14,9 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 use tool_registry::{Effect, PermissionCategory, ToolSpec};
+
+mod common;
+
 const PROMPT: &str = "private prompt\n%PATH%\nsecond line";
 struct Host {
     allow: bool,
@@ -78,14 +81,15 @@ fn fixture_env(
     shim: bool,
     extra: &[(&str, &str)],
 ) -> (tempfile::TempDir, CliEngine) {
-    let dir = tempfile::tempdir().unwrap();
+    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_runtime-cli-fixture"));
+    let dir = common::fixture_dir(binary);
     let command = if shim { "shim" } else { "fixture" };
     let dest = dir.path().join(if shim {
         "node.exe".into()
     } else {
         format!("fixture{}", std::env::consts::EXE_SUFFIX)
     });
-    std::fs::copy(env!("CARGO_BIN_EXE_runtime-cli-fixture"), dest).unwrap();
+    common::install_binary(binary, &dest);
     if shim {
         std::fs::write(dir.path().join("cli.js"), "// fixture node only").unwrap();
         std::fs::write(
@@ -231,7 +235,24 @@ async fn codex_unconfinable_is_not_spawned() {
     }
 }
 #[tokio::test]
-async fn codex_reprobe_refuses_when_the_spawn_path_changes() {
+async fn claude_reprobe_refuses_when_the_version_changes() {
+    let (dir, cli) = fixture_env(
+        Engine::Claude,
+        "",
+        false,
+        &[("FAKE_VERSION", "2.1.300"), ("FAKE_VERSION_STEP", "1")],
+    );
+    assert_eq!(
+        cli.run_turn(turn(), Host::new(true), CancellationToken::new())
+            .await
+            .unwrap_err(),
+        CliError::BinaryChanged
+    );
+    assert!(!dir.path().join("argv").exists());
+}
+
+#[tokio::test]
+async fn codex_refusal_precedes_even_version_probes() {
     let (dir, cli) = fixture_env(
         Engine::Codex,
         "",
@@ -242,8 +263,9 @@ async fn codex_reprobe_refuses_when_the_spawn_path_changes() {
         cli.run_turn(turn(), Host::new(true), CancellationToken::new())
             .await
             .unwrap_err(),
-        CliError::BinaryChanged
+        CliError::CodexUnconfinable
     );
+    assert!(!dir.path().join("version-probes").exists());
     assert!(!dir.path().join("argv").exists());
 }
 // `shim.cmd` is resolved through PATHEXT. Linux covers the same prompt check

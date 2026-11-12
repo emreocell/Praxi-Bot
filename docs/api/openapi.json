@@ -904,6 +904,407 @@
         ]
       }
     },
+    "/v1/email/accounts": {
+      "get": {
+        "tags": [
+          "email"
+        ],
+        "summary": "All accounts, with the non-secret fields only (`password_set` says whether\na password is stored; it is never returned).",
+        "operationId": "list_email_accounts",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EmailAccountDto"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "e-mail management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Create an account. The `password` is stored in the secret store (never in\n`email.toml`, never returned). `bot` binds the account to one bot (it must\nexist); without it every bot that may use the e-mail tools can use it. Takes\neffect for the next tool call, no restart needed.",
+        "operationId": "create_email_account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailAccountInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailAccountDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad password or bot id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "unknown bot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "the name is taken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid config",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "e-mail management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/email/accounts/{name}": {
+      "put": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Merge a partial config onto the stored account. Omitted fields keep their\nvalues; `bot: null` makes the account usable by every bot; a `password`\nreplaces the stored one. Takes effect for the next tool call.",
+        "operationId": "update_email_account",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Account name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailAccountPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailAccountDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad password or bot id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid config",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "e-mail management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Remove an account and the password it owned. Takes effect for the next tool\ncall.",
+        "operationId": "delete_email_account",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Account name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "e-mail management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/email/accounts/{name}/test": {
+      "post": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Try IMAP login and SMTP authentication for a stored account. TLS exactly as\nconfigured; **no mail is sent or read**. A failing server is a normal `200`\nwith a status per server (`auth_failed`, `tls`, `unreachable`, ...), never\nthe server's own words. At most two tests run at once (`429`).",
+        "operationId": "test_email_account",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Account name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailTestReport"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "too many tests running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "e-mail management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/email/test": {
+      "post": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Same test for an account that is not saved yet (nothing is stored). With no\n`password` in the body, the stored password of the account with the same\n`name` is used. Same limits and the same coarse report as the saved test.",
+        "operationId": "test_email_draft",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailAccountInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailTestReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad password or bot id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid config or no password",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "too many tests running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "e-mail management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/events": {
       "get": {
         "tags": [
@@ -3142,6 +3543,290 @@
           }
         }
       },
+      "EmailAccountDto": {
+        "type": "object",
+        "description": "A configured account (`GET /v1/email/accounts`): the non-secret fields only.",
+        "required": [
+          "name",
+          "address",
+          "username",
+          "imap",
+          "smtp",
+          "drafts_folder",
+          "allowed_senders",
+          "password_set",
+          "custom_ca"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Address mail is sent from."
+          },
+          "allowed_senders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Senders whose mail may start a run (stored now, enforced by the inbound\ntrigger)."
+          },
+          "bot": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Bot (storage UUID) that owns the account; `null` = every bot that may\nuse the e-mail tools."
+          },
+          "custom_ca": {
+            "type": "boolean",
+            "description": "Whether the account trusts an extra root certificate (a private CA)."
+          },
+          "drafts_folder": {
+            "type": "string",
+            "description": "Folder drafts are saved to."
+          },
+          "imap": {
+            "$ref": "#/components/schemas/EmailImapServer",
+            "description": "IMAP server."
+          },
+          "name": {
+            "type": "string",
+            "description": "Account name."
+          },
+          "password_set": {
+            "type": "boolean",
+            "description": "Whether a password is stored. The password itself is never returned."
+          },
+          "smtp": {
+            "$ref": "#/components/schemas/EmailSmtpServer",
+            "description": "SMTP server."
+          },
+          "username": {
+            "type": "string",
+            "description": "Login name; empty = the address."
+          }
+        }
+      },
+      "EmailAccountInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/email/accounts` and `POST /v1/email/test`.",
+        "required": [
+          "name",
+          "address",
+          "imap",
+          "smtp"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Address mail is sent from."
+          },
+          "allowed_senders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Senders whose mail may start a run (addresses or `@domain`)."
+          },
+          "bot": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Bot (storage UUID) that owns the account; absent / `null` = every bot."
+          },
+          "drafts_folder": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Folder drafts are saved to, default `Drafts`."
+          },
+          "imap": {
+            "$ref": "#/components/schemas/EmailImapServer",
+            "description": "IMAP server."
+          },
+          "name": {
+            "type": "string",
+            "description": "Account name: 1 to 64 characters of `[A-Za-z0-9._-]`. Required on\ncreate; for `POST /v1/email/test` it selects the stored password to\nreuse when `password` is left out."
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The account password or app password. **Write-only**: it goes to the\nsecret store and is never returned or logged. Required on create."
+          },
+          "smtp": {
+            "$ref": "#/components/schemas/EmailSmtpServer",
+            "description": "SMTP server."
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Login name; default (empty) = the address."
+          }
+        }
+      },
+      "EmailAccountPatch": {
+        "type": "object",
+        "description": "Body of `PUT /v1/email/accounts/{name}`. Every field is optional: a field\nleft out keeps the stored value. `bot: null` makes the account unbound\n(every bot), which is why the handler reads the raw JSON. A `password`\nreplaces the stored one.",
+        "properties": {
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Address mail is sent from."
+          },
+          "allowed_senders": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Allowed senders; present list replaces the stored one."
+          },
+          "bot": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Owning bot; `null` = every bot; omit to keep."
+          },
+          "drafts_folder": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Folder drafts are saved to."
+          },
+          "imap": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EmailImapServer",
+                "description": "IMAP server."
+              }
+            ]
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New password (write-only)."
+          },
+          "smtp": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EmailSmtpServer",
+                "description": "SMTP server."
+              }
+            ]
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Login name; empty = the address."
+          }
+        }
+      },
+      "EmailImapServer": {
+        "type": "object",
+        "description": "An IMAP server (always implicit TLS).",
+        "required": [
+          "host"
+        ],
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "Host name."
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Port, default 993.",
+            "minimum": 0
+          }
+        }
+      },
+      "EmailProbeStatus": {
+        "type": "string",
+        "description": "What a \"test connection\" learned about one server.",
+        "enum": [
+          "ok",
+          "unreachable",
+          "tls",
+          "auth_failed",
+          "protocol",
+          "timeout"
+        ]
+      },
+      "EmailSecurity": {
+        "type": "string",
+        "description": "How the SMTP connection is secured.",
+        "enum": [
+          "implicit",
+          "start_tls"
+        ]
+      },
+      "EmailSmtpServer": {
+        "type": "object",
+        "description": "An SMTP server.",
+        "required": [
+          "host"
+        ],
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "Host name."
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Port, default 465.",
+            "minimum": 0
+          },
+          "security": {
+            "$ref": "#/components/schemas/EmailSecurity",
+            "description": "Transport security, default implicit TLS."
+          }
+        }
+      },
+      "EmailTestReport": {
+        "type": "object",
+        "description": "Result of a connection test: one status per server, nothing the servers\nsaid.",
+        "required": [
+          "imap",
+          "smtp",
+          "ok"
+        ],
+        "properties": {
+          "imap": {
+            "$ref": "#/components/schemas/EmailProbeStatus",
+            "description": "IMAP (reading mail)."
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "Both servers accepted the login."
+          },
+          "smtp": {
+            "$ref": "#/components/schemas/EmailProbeStatus",
+            "description": "SMTP (sending mail); authentication only, nothing is sent."
+          }
+        }
+      },
       "ErrorBody": {
         "type": "object",
         "description": "JSON body of an error response.",
@@ -3783,6 +4468,26 @@
               "type": "string"
             },
             "description": "Bots that may use the server.  Omit to keep the list; `null` = all bots."
+          },
+          "bots_add": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Bot ids to add to `bots`, applied atomically on the stored list (no\nread-modify-write by the client).  No effect while the server is open to\nevery bot (`bots: null`).  Applied after `bots`."
+          },
+          "bots_remove": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Bot ids to remove from `bots`, applied atomically; an emptied list stays\n`[]` (no bot), it never becomes `null`.  Applied after `bots_add`."
           },
           "category": {
             "type": [
@@ -4766,6 +5471,9 @@
     },
     {
       "name": "secrets"
+    },
+    {
+      "name": "email"
     }
   ]
 }

@@ -299,6 +299,37 @@ async fn exclusions_are_central_and_apply_at_every_depth() {
 }
 
 #[tokio::test]
+async fn skill_lock_and_publication_staging_files_are_not_bundled() {
+    let dir = tempfile::tempdir().unwrap();
+    database(dir.path(), false);
+    for (path, value) in [
+        ("skills/demo/SKILL.md", "skill"),
+        ("skills/.praxi-skills.lock", ""),
+        ("skills/.praxi-publish-abc123/SKILL.md", "half published"),
+        ("skills/.praxi-publish-old-abc123/skill/SKILL.md", "backup"),
+        ("skills/demo/.praxi-write-abc123", "half written"),
+        ("bots/a/skills/.praxi-skills.lock", ""),
+        ("bots/a/skills/x/.praxi-write-abc123", "half written"),
+    ] {
+        let path = dir.path().join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, value).unwrap();
+    }
+    let paths: Vec<String> = unpack(&bundle(dir.path()).await)
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect();
+    assert!(
+        paths.contains(&"skills/demo/SKILL.md".to_owned()),
+        "{paths:?}"
+    );
+    assert!(
+        paths.iter().all(|path| !path.contains(".praxi-")),
+        "{paths:?}"
+    );
+}
+
+#[tokio::test]
 async fn tampered_payload_fails_sha256() {
     let dir = tempfile::tempdir().unwrap();
     database(dir.path(), false);
@@ -362,13 +393,27 @@ async fn secondary_future_schemas_name_the_database() {
     for db in ["memory.db", "schedules.db"] {
         let source = tempfile::tempdir().unwrap();
         database(source.path(), false);
+        if db == "schedules.db" {
+            drop(scheduler::ScheduleStore::open(source.path()).unwrap());
+        } else {
+            drop(
+                memory_store::MemoryStore::open(
+                    source.path(),
+                    Arc::new(memory_store::HashEmbedder::new(8)),
+                )
+                .unwrap(),
+            );
+        }
         let conn = Connection::open(source.path().join(db)).unwrap();
+        let supported: u32 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
         conn.execute_batch("CREATE TABLE future_table(value TEXT); PRAGMA user_version=999;")
             .unwrap();
         drop(conn);
         let error = rejected(&bundle(source.path()).await, ImportOptions::default()).await;
         assert!(
-            matches!(error, ImportError::IncompatibleSchema { db: name, found: 999, supported: 1 } if name == db)
+            matches!(error, ImportError::IncompatibleSchema { db: name, found: 999, supported: actual } if name == db && actual == supported)
         );
     }
 }
@@ -719,6 +764,71 @@ async fn duplicates_unlisted_files_and_entries_after_manifest_rejected() {
             ImportError::Invalid(_)
         ));
     }
+}
+
+#[tokio::test]
+async fn sqlite_sidecar_entries_are_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    database(dir.path(), false);
+    let entries = unpack(&bundle(dir.path()).await);
+    for sidecar in [
+        "bot.db-wal",
+        "bot.db-shm",
+        "bot.db-journal",
+        "schedules.db-wal",
+        "memory.db-shm",
+    ] {
+        let mut malformed = entries.clone();
+        malformed.insert(0, (sidecar.into(), b"crafted".to_vec()));
+        let error = rejected(&pack(&malformed), ImportOptions::default()).await;
+        assert!(
+            matches!(&error, ImportError::Invalid(msg) if msg.contains("allowlist")),
+            "{sidecar}: {error:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn all_does_not_carry_mailbox_passwords_unless_named() {
+    let dir = tempfile::tempdir().unwrap();
+    database(dir.path(), false);
+    let store = MemoryStore::new();
+    store.set("provider/key", "k").unwrap();
+    store.set("email/work/password", "mailbox-pw").unwrap();
+    store.set("email/a.b/password", "mailbox-pw-2").unwrap();
+    // Not a managed mailbox secret: still exported by `All`.
+    store.set("email/notes", "n").unwrap();
+    let mut bytes = Vec::new();
+    let manifest = export(
+        dir.path(),
+        &store,
+        ExportOptions {
+            secrets: SecretSelection::All,
+            ..Default::default()
+        },
+        &mut bytes,
+    )
+    .await
+    .unwrap();
+    assert_eq!(manifest.secret_names, ["email/notes", "provider/key"]);
+    assert!(
+        !bytes.windows(10).any(|w| w == b"mailbox-pw"),
+        "a mailbox password is in the bundle"
+    );
+    // Naming it explicitly is the user's choice and still works.
+    let mut bytes = Vec::new();
+    let manifest = export(
+        dir.path(),
+        &store,
+        ExportOptions {
+            secrets: SecretSelection::Names(vec!["email/work/password".into()]),
+            ..Default::default()
+        },
+        &mut bytes,
+    )
+    .await
+    .unwrap();
+    assert_eq!(manifest.secret_names, ["email/work/password"]);
 }
 
 #[tokio::test]

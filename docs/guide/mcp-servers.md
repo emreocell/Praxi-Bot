@@ -28,8 +28,13 @@ out keeps its previous value. `bots: null` means every bot.
   (they ask for approval) even when the server marks them read-only. Set
   `trust_hints = true` on that server only if you trust it to lower its own
   tools to read-only.
-- **Who may call it:** `bots` is a list of bot ids, or omitted / `null` for
-  every bot. A listed server refuses calls from any other bot.
+- **Who may use it:** `bots` is a list of bot ids (the bot's storage UUID, not
+  its profile id), or omitted / `null` for every bot. An empty list `[]` means
+  no bot at all, never every bot. A bot that is not listed does not see the
+  server's tools in `find_tool` or the tool list, and a call from it is refused.
+  In the desktop app set this per server in Apps (Bots button) or per bot in the
+  bot form (Apps card). Deleting a bot removes its id from every server's list;
+  a list that becomes empty stays `[]`.
 - **Isolation of the environment:** a stdio server only receives the variables
   you list (plus a tiny OS-essential set). Nothing else is inherited. The
   program itself still runs as the daemon user.

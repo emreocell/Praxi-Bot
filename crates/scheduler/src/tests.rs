@@ -14,6 +14,9 @@ use crate::{
     verify_webhook_signature,
 };
 
+#[path = "consistency_tests.rs"]
+mod consistency;
+
 #[derive(Default)]
 struct RecordingExecutor {
     runs: Mutex<Vec<Schedule>>,

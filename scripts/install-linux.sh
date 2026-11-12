@@ -2,7 +2,7 @@
 # Install Praxi-Bot as an always-on systemd service on a Linux server
 # (x86_64 or aarch64; Debian/Ubuntu or Fedora/RHEL/Oracle Linux family).
 #
-# Trust: use an independently installed GitHub CLI (https://cli.github.com).
+# Trust: use independently installed GitHub CLI >= 2.80.0 (https://cli.github.com).
 # Verify the installer itself BEFORE running it, including with sudo. Copy this
 # bootstrap from a reviewed copy of this repository; replace the example tag:
 #   (
@@ -26,6 +26,8 @@
 #   --version <tag>      Release tag to install, e.g. v0.1.0 (default: latest)
 #   --file <tarball>     Use a local archive (requires an explicit --version)
 #   --bundle <file>      Local provenance bundle (default: sibling praxi-linux.sigstore.json)
+#   --custom-trusted-root <file>  Independently obtained Sigstore trusted_root.jsonl
+#   --offline           Require local archive, bundle, root, and --skip-packages
 #   --sha256 <hex>       Additional checksum check; never replaces provenance verification
 #   --verify-only       Verify without installing; does not require root or Linux
 #   --port <port>        Daemon port on 127.0.0.1 (default: 47821)
@@ -44,6 +46,7 @@ set -euo pipefail
 readonly REPO="emreocell/Praxi-Bot"
 readonly SIGNER_WORKFLOW="github.com/emreocell/Praxi-Bot/.github/workflows/linux-release.yml"
 readonly BUNDLE_ASSET="praxi-linux.sigstore.json"
+readonly MIN_GH_VERSION="2.80.0"
 PREFIX="/opt/praxi"
 DATA_DIR="/var/lib/praxi"
 CONF_DIR="/etc/praxi"
@@ -55,6 +58,8 @@ SVC_USER="praxi"
 VERSION="latest"
 LOCAL_FILE=""
 LOCAL_BUNDLE=""
+TRUSTED_ROOT=""
+OFFLINE=0
 EXPECTED_SHA=""
 VERIFY_ONLY=0
 PORT="47821"
@@ -80,8 +85,8 @@ usage() {
 Usage (as root):
   sudo ./install-linux.sh [options]
 
-Install a trusted GitHub CLI independently (https://cli.github.com); it must
-support `gh attestation verify` and the identity flags below. No verifier is
+Install trusted GitHub CLI >= 2.80.0 independently (https://cli.github.com).
+This is the supported floor for all required identity/offline flags. No verifier is
 downloaded or installed by this script. Old releases without provenance fail.
 
 Verified bootstrap (copy from a reviewed repository, choose a release tag):
@@ -110,6 +115,8 @@ Options:
   --version <tag>      Release tag to install, e.g. v0.1.0 (default: latest)
   --file <tarball>     Use a local archive (requires an explicit --version)
   --bundle <file>      Local provenance bundle (default: sibling praxi-linux.sigstore.json)
+  --custom-trusted-root <file>  Independently obtained Sigstore trusted_root.jsonl
+  --offline           Require local archive, bundle and root; no network downloads
   --sha256 <hex>       Additional checksum check; never replaces provenance verification
   --verify-only       Verify without installing; does not require root or Linux
   --port <port>        Daemon port on 127.0.0.1 (default: 47821; kept on re-install unless given)
@@ -171,6 +178,8 @@ while [[ $# -gt 0 ]]; do
     --version) need_arg "$@"; VERSION="$2"; shift 2 ;;
     --file) need_arg "$@"; LOCAL_FILE="$2"; shift 2 ;;
     --bundle) need_arg "$@"; LOCAL_BUNDLE="$2"; shift 2 ;;
+    --custom-trusted-root) need_arg "$@"; TRUSTED_ROOT="$2"; shift 2 ;;
+    --offline) OFFLINE=1; shift ;;
     --sha256) need_arg "$@"; EXPECTED_SHA="$(sha256_hex "$2")"; shift 2 ;;
     --verify-only) VERIFY_ONLY=1; shift ;;
     --port) need_arg "$@"; PORT="$2"; PORT_SET=1; shift 2 ;;
@@ -362,6 +371,25 @@ install_packages() {
 # curl/gh must already be trusted and installed. Do not change packages, users,
 # services or installation paths until the private copy passes verification.
 command -v gh >/dev/null 2>&1 || die "trusted GitHub CLI (gh) is required; install it independently from https://cli.github.com"
+# Disable optional CLI update checks as well as explicit downloads offline.
+if [[ "${OFFLINE}" -eq 1 ]]; then
+  export GH_NO_UPDATE_NOTIFIER=1 GH_NO_EXTENSION_UPDATE_NOTIFIER=1
+fi
+gh_version="$(gh --version)" || die "could not determine GitHub CLI version"
+gh_version="${gh_version%%$'\n'*}"
+[[ "$gh_version" =~ ^gh[[:space:]]version[[:space:]]([0-9]+)\.([0-9]+)\.([0-9]+)([[:space:]]|$) ]] \
+  || die "GitHub CLI >= ${MIN_GH_VERSION} is required (unrecognized version)"
+(( 10#${BASH_REMATCH[1]} > 2 || (10#${BASH_REMATCH[1]} == 2 && 10#${BASH_REMATCH[2]} >= 80) )) \
+  || die "GitHub CLI >= ${MIN_GH_VERSION} is required"
+if [[ "${OFFLINE}" -eq 1 ]]; then
+  [[ -n "${LOCAL_FILE}" && "${VERSION}" != latest && -n "${TRUSTED_ROOT}" ]] \
+    || die "--offline requires --file, an explicit --version, and --custom-trusted-root"
+  [[ "${VERIFY_ONLY}" -eq 1 || "${SKIP_PACKAGES}" -eq 1 ]] \
+    || die "offline installation requires --skip-packages (install runtime dependencies beforehand)"
+  [[ "${WITH_DESKTOP}" -eq 0 ]] || die "--offline cannot download desktop/browser packages"
+fi
+[[ -z "${TRUSTED_ROOT}" || -s "${TRUSTED_ROOT}" ]] || die "trusted root file is missing or empty"
+
 [[ -z "${LOCAL_FILE}" || "${VERSION}" != "latest" ]] || die "--file requires an explicit --version tag"
 if [[ "${VERSION}" == "latest" ]]; then
   # Resolve the tag before downloading. Never trust an arbitrary redirect host
@@ -415,10 +443,18 @@ else
   download_release_asset "${BUNDLE_ASSET}"
 fi
 
-# The trust root is gh's Sigstore trust store and GitHub's OIDC certificate,
-# never a public key, checksum, or policy supplied by the release assets.
-# These flags deliberately have no environment/CLI overrides or bypass.
-gh attestation verify "${WORK}/${ASSET}" --bundle "${WORK}/${BUNDLE_ASSET}" \
+# A custom root is an explicit administrator trust decision. Never auto-select
+# one from release assets or from the archive directory: fetch it independently
+# with `gh attestation trusted-root` on a trusted online machine.
+# Expand optional arrays as ${a[@]+"${a[@]}"}: bash < 4.4 (including macOS
+# /bin/bash 3.2) aborts on "${a[@]}" of an empty array under set -u.
+trust_args=()
+if [[ -n "${TRUSTED_ROOT}" ]]; then
+  cp -- "${TRUSTED_ROOT}" "${WORK}/trusted_root.jsonl"
+  trust_args=(--custom-trusted-root "${WORK}/trusted_root.jsonl")
+fi
+# Identity constraints remain fixed in both online and offline verification.
+gh attestation verify "${WORK}/${ASSET}" --bundle "${WORK}/${BUNDLE_ASSET}" ${trust_args[@]+"${trust_args[@]}"} \
   --repo "${REPO}" --hostname github.com \
   --signer-workflow "${SIGNER_WORKFLOW}" \
   --source-ref "refs/tags/${VERSION}" --deny-self-hosted-runners \

@@ -83,7 +83,14 @@ fn registers_five_tools_with_builtin_conventions() {
         let spec = reg.get(name).unwrap().spec().clone();
         assert!(spec.is_valid());
         assert_eq!(spec.category, tool_registry::PermissionCategory::Browser);
-        assert_eq!(spec.effect, tool_registry::Effect::Write);
+        // Search only reaches the configured providers; everything that fetches
+        // a model-chosen URL asks like `browser_open`.
+        let want = if *name == "web_search" {
+            tool_registry::Effect::Read
+        } else {
+            tool_registry::Effect::Write
+        };
+        assert_eq!(spec.effect, want, "{name}");
     }
     // Registering twice adds nothing.
     assert_eq!(
@@ -671,4 +678,26 @@ async fn large_sitemap_and_feed_json_respect_inline_budget_and_spill() {
             usize::try_from(limit).unwrap()
         );
     }
+}
+
+#[tokio::test]
+async fn overlong_urls_and_queries_are_refused_before_any_request() {
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, cfg(DefaultUrlPolicy::default())).unwrap();
+    let long_url = format!("https://example.org/?q={}", "a".repeat(2100));
+    for name in ["web_extract", "web_metadata", "web_feed", "web_sitemap"] {
+        let err = call(&reg, name, json!({"url": long_url}))
+            .await
+            .unwrap_err();
+        assert!(err.contains("too long"), "{name}: {err}");
+    }
+    let err = call(&reg, "web_search", json!({"query": "q".repeat(401)}))
+        .await
+        .unwrap_err();
+    assert!(err.contains("too long"), "{err}");
+    // At the limit the call gets past the length check (and fails later, offline).
+    let err = call(&reg, "web_search", json!({"query": "q".repeat(400)}))
+        .await
+        .unwrap_err();
+    assert!(!err.contains("too long"), "{err}");
 }

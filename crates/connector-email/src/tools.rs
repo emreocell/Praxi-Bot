@@ -65,7 +65,7 @@ fn spec(name: &str, description: &str, schema: Value, effect: Effect) -> ToolSpe
 }
 
 fn account_prop() -> Value {
-    json!({"type":"string","description":"Account name; optional when only one account is configured."})
+    json!({"type":"string","description":"Account name. Optional: a bot's own account is used by default, else the only available one."})
 }
 
 fn mail_props() -> Value {
@@ -270,8 +270,15 @@ impl Tool for EmailTool {
         &self.spec
     }
 
+    /// Hidden from a bot that has no usable account (none bound to it and no
+    /// unbound one), so it is not offered a tool that can only fail. Not a
+    /// security boundary: [`Self::call`] enforces the account binding.
+    fn visible_to(&self, bot_id: Option<&str>) -> bool {
+        self.conn.has_account_for(bot_id)
+    }
+
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
-        let c = &self.conn;
+        let c = self.conn.scoped(ctx.bot_id.as_deref());
         match self.kind {
             Kind::ListFolders => {
                 let i: AccountOnly = parse(input)?;

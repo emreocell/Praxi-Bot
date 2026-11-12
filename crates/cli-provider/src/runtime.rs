@@ -667,6 +667,12 @@ async fn session(
 ) -> Result<TurnUsage, CliError> {
     let candidate = find_candidate(command, env).ok_or(CliError::NotInstalled)?;
     let resolved = resolve_spawn(&candidate, env).map_err(|_| CliError::ShimRefused)?;
+    // Codex remains metadata-only: no probe or turn process is permitted.
+    if engine == Engine::Codex {
+        return Err(CliError::CodexUnconfinable);
+    }
+    #[cfg(windows)]
+    let (resolved, executable_lock) = crate::detect::lock_executable(resolved)?;
     #[cfg(windows)]
     let job = crate::detect::SharedJob::new();
     let bridge = Bridge {
@@ -706,6 +712,9 @@ async fn session(
         let help = crate::detect::claude_help(&resolved, env)
             .await
             .ok_or(CliError::NativeToolsOpen)?;
+        if binary_pin(&resolved.program).as_ref() != Some(&pin) {
+            return Err(CliError::BinaryChanged);
+        }
         if !claude_launch_accepted(&help) {
             return Err(CliError::NativeToolsOpen);
         }
@@ -761,6 +770,9 @@ async fn session(
             CliError::Io
         }
     })?;
+    // CreateProcess has returned and the suspended root has joined its job.
+    #[cfg(windows)]
+    drop(executable_lock);
     let mut child = ChildTree::new(child);
     #[cfg(not(windows))]
     {
@@ -1298,51 +1310,37 @@ mod tests {
     }
     #[tokio::test]
     async fn bridge_rejects_other_turns_and_unmounted_tools() {
-        let bridge = bridge();
         let req = json!({"id":1,"method":"tools/call","params":{"name":"Bash","arguments":{}}});
-        let reply = bridge.rpc(&req).await;
+        let reply = bridge().rpc(&req).await;
         assert_eq!(reply["result"]["isError"], true);
-        #[cfg(windows)]
-        let job = bridge.job.clone();
-        let server = BridgeServer::open(bridge).await.unwrap();
-        let path = server.file.path().to_owned();
-        let config: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        let url = config["mcpServers"]["praxi"]["url"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        let body = req.to_string();
-        let unauth = post_allowed(
-            &url,
-            None,
-            &body,
+        // Each turn has exactly one root. Reusing an admission-capable job for
+        // three unrelated curl roots would contradict the production boundary.
+        for (auth, status) in [
+            (None, "HTTP/1.1 401"),
+            (Some("Bearer another-turn"), "HTTP/1.1 401"),
+            (Some("Bearer private-turn-capability"), "HTTP/1.1 200"),
+        ] {
+            let bridge = bridge();
             #[cfg(windows)]
-            &job,
-        )
-        .await;
-        assert!(unauth.starts_with("HTTP/1.1 401"), "{unauth}");
-        let wrong = post_allowed(
-            &url,
-            Some("Bearer another-turn"),
-            &body,
-            #[cfg(windows)]
-            &job,
-        )
-        .await;
-        assert!(wrong.starts_with("HTTP/1.1 401"), "{wrong}");
-        let ok = post_allowed(
-            &url,
-            Some("Bearer private-turn-capability"),
-            &body,
-            #[cfg(windows)]
-            &job,
-        )
-        .await;
-        assert!(ok.starts_with("HTTP/1.1 200"), "{ok}");
-        assert!(ok.contains("\"isError\":true"));
-        assert!(path.exists());
-        drop(server);
-        assert!(!path.exists());
+            let job = bridge.job.clone();
+            let server = BridgeServer::open(bridge).await.unwrap();
+            let path = server.file.path().to_owned();
+            let response = post_allowed(
+                &server.url,
+                auth,
+                &req.to_string(),
+                #[cfg(windows)]
+                &job,
+            )
+            .await;
+            assert!(response.starts_with(status), "{response}");
+            if status == "HTTP/1.1 200" {
+                assert!(response.contains("\"isError\":true"));
+            }
+            assert!(path.exists());
+            drop(server);
+            assert!(!path.exists());
+        }
     }
     #[tokio::test]
     async fn non_child_connection_rejected() {

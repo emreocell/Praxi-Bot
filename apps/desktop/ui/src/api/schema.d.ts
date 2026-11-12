@@ -175,6 +175,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/control/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Explicitly release a latched `paused` / `human_driving`: bots may use the
+         *     desktop again.  This is the only way (besides a daemon restart) to end a
+         *     pause; heartbeats and a lost app never do.  Idempotent.
+         */
+        post: operations["release_control"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/control/state": {
         parameters: {
             query?: never;
@@ -188,7 +209,9 @@ export interface paths {
          * Register the desktop app as controller and report its mode (heartbeat: send
          *     it on every state change and at least every 5 s; it expires after 15 s).
          *     While the mode is `human_driving` or `paused`, desktop actions of bots are
-         *     refused immediately.
+         *     refused immediately.  A latched pause is never released by a heartbeat
+         *     (`idle` included): send `release: true` with `idle` / `bot_driving` (the
+         *     user's resume), or use `POST /v1/control/release`.
          */
         put: operations["put_control_state"];
         post?: never;
@@ -212,6 +235,100 @@ export interface paths {
          *     overlay highlight) or `refuse` it.
          */
         post: operations["decide_control"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/email/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * All accounts, with the non-secret fields only (`password_set` says whether
+         *     a password is stored; it is never returned).
+         */
+        get: operations["list_email_accounts"];
+        put?: never;
+        /**
+         * Create an account. The `password` is stored in the secret store (never in
+         *     `email.toml`, never returned). `bot` binds the account to one bot (it must
+         *     exist); without it every bot that may use the e-mail tools can use it. Takes
+         *     effect for the next tool call, no restart needed.
+         */
+        post: operations["create_email_account"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/email/accounts/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Merge a partial config onto the stored account. Omitted fields keep their
+         *     values; `bot: null` makes the account usable by every bot; a `password`
+         *     replaces the stored one. Takes effect for the next tool call.
+         */
+        put: operations["update_email_account"];
+        post?: never;
+        /**
+         * Remove an account and the password it owned. Takes effect for the next tool
+         *     call.
+         */
+        delete: operations["delete_email_account"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/email/accounts/{name}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Try IMAP login and SMTP authentication for a stored account. TLS exactly as
+         *     configured; **no mail is sent or read**. A failing server is a normal `200`
+         *     with a status per server (`auth_failed`, `tls`, `unreachable`, ...), never
+         *     the server's own words. At most two tests run at once (`429`).
+         */
+        post: operations["test_email_account"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/email/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Same test for an account that is not saved yet (nothing is stored). With no
+         *     `password` in the body, the stored password of the account with the same
+         *     `name` is used. Same limits and the same coarse report as the saved test.
+         */
+        post: operations["test_email_draft"];
         delete?: never;
         options?: never;
         head?: never;
@@ -243,12 +360,62 @@ export interface paths {
          *     through the API.  They have no SSE `id`, are not replayed and are not
          *     envelopes: treat them as a hint to refetch `/v1/schedules`.
          *
+         *     A replay gap is explicit: `event: gap` has an `id` equal to `to_gseq` and
+         *     data `{from_gseq, to_gseq, run_id, reason}`; reason is `log_line_missing` or
+         *     `log_unreadable`. It is audited before the cursor passes the missing row.
+         *     `/v1/events/status.sse_gaps_total` (authenticated) counts these notifications since daemon startup.
+         *     After three consecutive replay failures (or live-buffer overflow),
+         *     `event: error` carries `{code: "replay_unavailable", last_event_id}` and the
+         *     stream closes. This error has no `id`; reconnect with the last received ID.
+         *     Retry delays start at 250 ms and double up to 5 s. Live buffering is limited
+         *     to 1000 events and 4 MiB per subscriber; replay chunks hold at most 2 MiB of serialized events (a single larger event closes the stream with `replay_unavailable`), and at most `max_sse_subscribers` streams (default 16) may be open: further requests get `503`. The desktop currently ignores unknown
+         *     event names; card 144 can surface gap/error notifications without changing
+         *     the ordering or cursor contract.
+         *
          *     It likewise carries `mcp_server_changed` events (`mcp::McpServerChanged`:
          *     `{"type":"mcp_server_changed","name","status"}`) when an MCP server is
          *     added, updated, removed or changes status (connecting / connected / error /
          *     quarantined ...); same rules: a hint to refetch `/v1/mcp/servers`.
          */
         get: operations["events_doc"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/events/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The newest daemon-wide event cursor (`gseq`, `0` = no event yet): what a
+         *     client stores as its resume point after loading a snapshot, so a later
+         *     `GET /v1/events` with `Last-Event-ID: <gseq>` replays exactly what came
+         *     after.
+         */
+        get: operations["latest_cursor"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/events/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["status"];
         put?: never;
         post?: never;
         delete?: never;
@@ -930,7 +1097,6 @@ export interface components {
              * @description Milliseconds until the registration expires; `0` when not registered.
              */
             expires_in_ms: number;
-            /** @description `paused` / `human_driving` while latched: refuses bot actions until `POST /v1/control/release` (or a `PUT` with `release: true`), regardless of the heartbeat.  `null` when nothing is latched. */
             latched?: null | components["schemas"]["ControlMode"];
             mode?: null | components["schemas"]["ControlMode"];
         };
@@ -942,7 +1108,10 @@ export interface components {
         ControlStateInput: {
             /** @description The app's current mode. */
             mode: components["schemas"]["ControlMode"];
-            /** @description With `idle` / `bot_driving`: the user's explicit resume, clears a latched pause.  Plain heartbeats (without it) never release. */
+            /**
+             * @description With `idle` / `bot_driving`: the user's explicit resume, clears a
+             *     latched pause.  Plain heartbeats (without it) never release.
+             */
             release?: boolean;
         };
         /**
@@ -1025,6 +1194,129 @@ export interface components {
             /** @description The profile's own policy as JSON; `null` = the workspace policy applies. */
             policy?: unknown;
         };
+        /** @description A configured account (`GET /v1/email/accounts`): the non-secret fields only. */
+        EmailAccountDto: {
+            /** @description Address mail is sent from. */
+            address: string;
+            /**
+             * @description Senders whose mail may start a run (stored now, enforced by the inbound
+             *     trigger).
+             */
+            allowed_senders: string[];
+            /**
+             * @description Bot (storage UUID) that owns the account; `null` = every bot that may
+             *     use the e-mail tools.
+             */
+            bot?: string | null;
+            /** @description Whether the account trusts an extra root certificate (a private CA). */
+            custom_ca: boolean;
+            /** @description Folder drafts are saved to. */
+            drafts_folder: string;
+            /** @description IMAP server. */
+            imap: components["schemas"]["EmailImapServer"];
+            /** @description Account name. */
+            name: string;
+            /** @description Whether a password is stored. The password itself is never returned. */
+            password_set: boolean;
+            /** @description SMTP server. */
+            smtp: components["schemas"]["EmailSmtpServer"];
+            /** @description Login name; empty = the address. */
+            username: string;
+        };
+        /** @description Body of `POST /v1/email/accounts` and `POST /v1/email/test`. */
+        EmailAccountInput: {
+            /** @description Address mail is sent from. */
+            address: string;
+            /** @description Senders whose mail may start a run (addresses or `@domain`). */
+            allowed_senders?: string[];
+            /** @description Bot (storage UUID) that owns the account; absent / `null` = every bot. */
+            bot?: string | null;
+            /** @description Folder drafts are saved to, default `Drafts`. */
+            drafts_folder?: string | null;
+            /** @description IMAP server. */
+            imap: components["schemas"]["EmailImapServer"];
+            /**
+             * @description Account name: 1 to 64 characters of `[A-Za-z0-9._-]`. Required on
+             *     create; for `POST /v1/email/test` it selects the stored password to
+             *     reuse when `password` is left out.
+             */
+            name: string;
+            /**
+             * @description The account password or app password. **Write-only**: it goes to the
+             *     secret store and is never returned or logged. Required on create.
+             */
+            password?: string | null;
+            /** @description SMTP server. */
+            smtp: components["schemas"]["EmailSmtpServer"];
+            /** @description Login name; default (empty) = the address. */
+            username?: string | null;
+        };
+        /**
+         * @description Body of `PUT /v1/email/accounts/{name}`. Every field is optional: a field
+         *     left out keeps the stored value. `bot: null` makes the account unbound
+         *     (every bot), which is why the handler reads the raw JSON. A `password`
+         *     replaces the stored one.
+         */
+        EmailAccountPatch: {
+            /** @description Address mail is sent from. */
+            address?: string | null;
+            /** @description Allowed senders; present list replaces the stored one. */
+            allowed_senders?: string[] | null;
+            /** @description Owning bot; `null` = every bot; omit to keep. */
+            bot?: string | null;
+            /** @description Folder drafts are saved to. */
+            drafts_folder?: string | null;
+            imap?: null | components["schemas"]["EmailImapServer"];
+            /** @description New password (write-only). */
+            password?: string | null;
+            smtp?: null | components["schemas"]["EmailSmtpServer"];
+            /** @description Login name; empty = the address. */
+            username?: string | null;
+        };
+        /** @description An IMAP server (always implicit TLS). */
+        EmailImapServer: {
+            /** @description Host name. */
+            host: string;
+            /**
+             * Format: int32
+             * @description Port, default 993.
+             */
+            port?: number;
+        };
+        /**
+         * @description What a "test connection" learned about one server.
+         * @enum {string}
+         */
+        EmailProbeStatus: "ok" | "unreachable" | "tls" | "auth_failed" | "protocol" | "timeout";
+        /**
+         * @description How the SMTP connection is secured.
+         * @enum {string}
+         */
+        EmailSecurity: "implicit" | "start_tls";
+        /** @description An SMTP server. */
+        EmailSmtpServer: {
+            /** @description Host name. */
+            host: string;
+            /**
+             * Format: int32
+             * @description Port, default 465.
+             */
+            port?: number;
+            /** @description Transport security, default implicit TLS. */
+            security?: components["schemas"]["EmailSecurity"];
+        };
+        /**
+         * @description Result of a connection test: one status per server, nothing the servers
+         *     said.
+         */
+        EmailTestReport: {
+            /** @description IMAP (reading mail). */
+            imap: components["schemas"]["EmailProbeStatus"];
+            /** @description Both servers accepted the login. */
+            ok: boolean;
+            /** @description SMTP (sending mail); authentication only, nothing is sent. */
+            smtp: components["schemas"]["EmailProbeStatus"];
+        };
         /** @description JSON body of an error response. */
         ErrorBody: {
             /** @description The error. */
@@ -1037,6 +1329,17 @@ export interface components {
             /** @description Human-readable message. */
             message: string;
         };
+        Gap: {
+            /** Format: int64 */
+            from_gseq: number;
+            reason: components["schemas"]["GapReason"];
+            /** Format: uuid */
+            run_id: string;
+            /** Format: int64 */
+            to_gseq: number;
+        };
+        /** @enum {string} */
+        GapReason: "log_line_missing" | "log_unreadable";
         /** @description A persisted "always allow" rule of a bot. */
         GrantDto: {
             /**
@@ -1073,6 +1376,14 @@ export interface components {
             uptime_secs: number;
             /** @description Daemon crate version. */
             version: string;
+        };
+        /** @description `GET /v1/events/latest`. */
+        LatestCursor: {
+            /**
+             * Format: int64
+             * @description Highest daemon-wide event `gseq` (`0` = none yet).
+             */
+            gseq: number;
         };
         /** @description An entry of the curated MCP catalog (`GET /v1/mcp/catalog`). */
         McpCatalogEntryDto: {
@@ -1257,6 +1568,17 @@ export interface components {
             args?: string[] | null;
             /** @description Bots that may use the server.  Omit to keep the list; `null` = all bots. */
             bots?: string[] | null;
+            /**
+             * @description Bot ids to add to `bots`, applied atomically on the stored list (no
+             *     read-modify-write by the client).  No effect while the server is open to
+             *     every bot (`bots: null`).  Applied after `bots`.
+             */
+            bots_add?: string[] | null;
+            /**
+             * @description Bot ids to remove from `bots`, applied atomically; an emptied list stays
+             *     `[]` (no bot), it never becomes `null`.  Applied after `bots_add`.
+             */
+            bots_remove?: string[] | null;
             /** @description Permission category of the tools; `null` clears it; `meta` is rejected. */
             category?: string | null;
             /** @description Executable (stdio). */
@@ -1411,12 +1733,15 @@ export interface components {
                 [key: string]: string;
             };
             /**
+             * @description Set when the persisted `policy.json` could not be loaded: the daemon is
+             *     locked to deny-all until a new policy is saved with `PUT /v1/policy`.
+             */
+            load_error?: string | null;
+            /**
              * @description Name of the preset the policy equals (`read-only`,
              *     `approve-destructive`, `read-and-draft`, `full`); `null` = custom.
              */
             preset?: string | null;
-            /** @description Set when the persisted `policy.json` could not be loaded: the daemon is locked to deny-all until a new policy is saved with `PUT /v1/policy`. */
-            load_error?: string | null;
         };
         /**
          * @description `PUT /v1/policy`.  Start from `preset` (or, without it, from the current
@@ -1645,6 +1970,24 @@ export interface components {
         SetSecret: {
             /** @description The secret value.  Write-only: no route returns it. */
             value: string;
+        };
+        /** @description Counters of the SSE machinery (authenticated, unlike `/v1/health`). */
+        SseStatus: {
+            /**
+             * Format: int64
+             * @description Configured cap on open event streams.
+             */
+            max_sse_subscribers: number;
+            /**
+             * Format: int64
+             * @description Gap notifications emitted by this daemon (per subscriber, since startup).
+             */
+            sse_gaps_total: number;
+            /**
+             * Format: int64
+             * @description Event streams open right now.
+             */
+            sse_subscribers: number;
         };
         /** @description `GET /v1/usage`. */
         UsageSummary: {
@@ -2186,6 +2529,25 @@ export interface operations {
             };
         };
     };
+    release_control: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlStateDto"];
+                };
+            };
+        };
+    };
     get_control_state: {
         parameters: {
             query?: never;
@@ -2271,6 +2633,307 @@ export interface operations {
             };
         };
     };
+    list_email_accounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailAccountDto"][];
+                };
+            };
+            /** @description e-mail management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_email_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailAccountInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailAccountDto"];
+                };
+            };
+            /** @description bad password or bot id */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description unknown bot */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the name is taken */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid config */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description e-mail management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_email_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailAccountPatch"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailAccountDto"];
+                };
+            };
+            /** @description bad password or bot id */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid config */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description e-mail management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_email_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description e-mail management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_email_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailTestReport"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description too many tests running */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description e-mail management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_email_draft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailAccountInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailTestReport"];
+                };
+            };
+            /** @description bad password or bot id */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid config or no password */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description too many tests running */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description e-mail management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     events_doc: {
         parameters: {
             query?: {
@@ -2303,6 +2966,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    latest_cursor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LatestCursor"];
+                };
+            };
+        };
+    };
+    status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SseStatus"];
                 };
             };
         };

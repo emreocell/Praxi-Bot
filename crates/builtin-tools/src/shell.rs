@@ -409,7 +409,7 @@ mod tests {
     // even for echo commands. Keep these semantic checks from competing with
     // native lifetime fixtures; their timing assertions stay unchanged.
     #[cfg(windows)]
-    static WINDOWS_SHELL_TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    use crate::test_serial::WINDOWS_SHELL_TESTS;
 
     fn shell_for_tests() -> &'static str {
         if cfg!(windows) { "powershell" } else { "sh" }
