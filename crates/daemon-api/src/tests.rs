@@ -2636,6 +2636,27 @@ async fn providers_cli_enable_requires_auth_and_loopback_guards() {
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
 
     let (k, v) = auth();
+    // Prove the route itself is mounted (a bogus sibling path 404s while the real route 200s).
+    let bogus = send(
+        &t.app,
+        Method::POST,
+        "/v1/providers/cli/nonexistent",
+        Some(json!({ "id": "claude" })),
+        &[(k, v.as_str()), ("host", "127.0.0.1:47821")],
+    )
+    .await;
+    assert_eq!(bogus.status, StatusCode::NOT_FOUND);
+
+    let ok_resp = send(
+        &t.app,
+        Method::POST,
+        "/v1/providers/cli/enable",
+        Some(json!({ "id": "claude" })),
+        &[(k, v.as_str()), ("host", "127.0.0.1:47821")],
+    )
+    .await;
+    assert_eq!(ok_resp.status, StatusCode::OK, "{:?}", ok_resp.json());
+
     let bad_host = send(
         &t.app,
         Method::POST,
@@ -2660,13 +2681,23 @@ async fn providers_cli_enable_requires_auth_and_loopback_guards() {
 #[tokio::test]
 async fn providers_cli_enable_claude_writes_config_idempotently_reloads_and_audits() {
     let t = setup();
+    t.agent.set_providers(Providers::unconfigured());
+    let pre_health = send(&t.app, Method::GET, "/v1/health", None, &[]).await;
+    assert_eq!(pre_health.json()["status"], "setup_required");
+
     let reload_hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let hits_clone = reload_hits.clone();
+    let data_dir = t.state.storage().data_dir().to_path_buf();
     t.state.set_provider_host(crate::ProviderHost {
         catalog: provider_catalog::Catalog::default(),
         reload: Box::new(move || {
             hits_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Ok(agent_core::Providers::unconfigured())
+            agent_core::build_providers(
+                &data_dir,
+                &provider_catalog::Catalog::default(),
+                &secret_store::MemoryStore::new(),
+                &mut |_| {},
+            )
         }),
     });
 
@@ -2683,6 +2714,9 @@ async fn providers_cli_enable_claude_writes_config_idempotently_reloads_and_audi
     assert_eq!(first.json()["has_key"], false);
     assert_eq!(first.json()["active"], true);
     assert_eq!(reload_hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    let post_health = send(&t.app, Method::GET, "/v1/health", None, &[]).await;
+    assert_eq!(post_health.json()["status"], "ok");
 
     let cfg_path = provider_catalog::config_path(t.state.storage().data_dir());
     let toml_text = std::fs::read_to_string(&cfg_path).unwrap();
@@ -2713,6 +2747,8 @@ async fn providers_cli_enable_claude_writes_config_idempotently_reloads_and_audi
     let listed = call(&t, Method::GET, "/v1/providers", None).await;
     assert_eq!(listed.status, StatusCode::OK);
     let body = listed.json();
+    assert_eq!(body["active"], json!(["cli:claude"]));
+    assert_eq!(body["default_provider"], "cli:claude");
     assert_eq!(body["configured"][0]["id"], "cli:claude");
     assert_eq!(body["configured"][0]["has_key"], false);
     assert_eq!(body["configured"][0]["active"], true);
@@ -2750,10 +2786,11 @@ async fn providers_cli_enable_refuses_non_runnable_unknown_and_extra_fields() {
             .as_str()
             .unwrap_or_default()
             .to_owned();
-        assert_ne!(msg, "", "empty refusal message for {id}");
-        if id == "codex" || id == "chatgpt-plan" {
-            assert!(msg.contains("unified_exec"), "id={id}: {msg}");
-        }
+        assert_eq!(
+            msg,
+            cli_provider::enable_refusal_message(id),
+            "unexpected refusal message for {id}"
+        );
     }
 
     let extra = call(
@@ -2793,4 +2830,93 @@ fn detected_provider_dto_forwards_runnable_and_message() {
         dto.message.as_deref(),
         Some(cli_provider::detect::CODEX_UNCONFINABLE_MESSAGE)
     );
+}
+
+#[tokio::test]
+async fn peer_router_denies_provider_cli_enable_and_reload_for_all_peers() {
+    let t = setup();
+    let cfg_path = provider_catalog::config_path(t.state.storage().data_dir());
+    for role in [crate::PeerRole::Phone, crate::PeerRole::Desktop] {
+        for (path, body) in [
+            ("/v1/providers/cli/enable", Some(json!({ "id": "claude" }))),
+            ("/v1/providers/reload", None),
+        ] {
+            let mut req = Request::builder()
+                .method(Method::POST)
+                .uri(path)
+                .header("content-type", "application/json")
+                .body(Body::from(body.map(|v| v.to_string()).unwrap_or_default()))
+                .unwrap();
+            req.extensions_mut().insert(crate::PeerIdentity {
+                key: "peer-key".into(),
+                role,
+            });
+            let resp = crate::peer_router(t.state.clone())
+                .oneshot(req)
+                .await
+                .unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::FORBIDDEN,
+                "role={role:?} path={path} should be 403"
+            );
+        }
+    }
+    assert!(
+        !cfg_path.exists(),
+        "peer enable attempt must not write providers.toml"
+    );
+
+    // Local actor still works on router().
+    let local = call(
+        &t,
+        Method::POST,
+        "/v1/providers/cli/enable",
+        Some(json!({ "id": "claude" })),
+    )
+    .await;
+    assert_eq!(local.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn providers_cli_enable_preserves_existing_default_model_and_model_caps() {
+    let t = setup();
+    let cfg_path = provider_catalog::config_path(t.state.storage().data_dir());
+    let mut existing = provider_catalog::ProviderSettings::new("cli:claude", 42);
+    existing.enabled = false;
+    existing.default_model = Some("claude-sonnet-4-5".into());
+    existing.cli = Some(provider_catalog::config::CliSettings::Cli {
+        engine: provider_catalog::config::CliEngine::Claude,
+        command: "claude".into(),
+    });
+    existing.model_caps.insert(
+        "claude-sonnet-4-5".into(),
+        provider_catalog::CapabilityOverrides {
+            vision: Some(true),
+            ..provider_catalog::CapabilityOverrides::default()
+        },
+    );
+    provider_catalog::ProviderConfig {
+        providers: vec![existing],
+        default_provider: None,
+    }
+    .save(&cfg_path)
+    .unwrap();
+
+    let resp = call(
+        &t,
+        Method::POST,
+        "/v1/providers/cli/enable",
+        Some(json!({ "id": "claude" })),
+    )
+    .await;
+    assert_eq!(resp.status, StatusCode::OK, "{:?}", resp.json());
+    assert_eq!(resp.json()["default_model"], "claude-sonnet-4-5");
+
+    let cfg = provider_catalog::ProviderConfig::load(&cfg_path).unwrap();
+    let saved = cfg.get("cli:claude").unwrap();
+    assert!(saved.enabled);
+    assert_eq!(saved.added_at_ms, 42);
+    assert_eq!(saved.default_model.as_deref(), Some("claude-sonnet-4-5"));
+    assert_eq!(saved.model_caps["claude-sonnet-4-5"].vision, Some(true));
 }

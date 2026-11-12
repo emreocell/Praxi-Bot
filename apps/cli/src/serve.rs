@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agent_core::{AgentLoop, LoopConfig, Providers, SharedRedactor};
-use agent_router::ladder::{GeminiEmbedder, gemini};
 use builtin_tools::{BuiltinConfig, ResolverGate};
 use daemon_api::{
     AppState, DaemonConfig, McpControl, ProviderHost, load_or_create_token, token_path,
@@ -15,10 +14,7 @@ use daemon_api::{
 use desktop_api::DesktopBackend;
 use permission_engine::{PermissionResolver, Policy};
 use protocol::InitiatorKind;
-use provider_catalog::{
-    Auth, Catalog, ChatProvider, ModelInfo, OpenAiCompatConfig, ProviderConfig, ProviderEntry,
-    ProviderKind, ProviderSettings, config_path,
-};
+use provider_catalog::{Auth, Catalog, ProviderConfig, ProviderEntry, config_path};
 use secret_store::{PASSPHRASE_ENV, SecretStore};
 use serde::Deserialize;
 use skills::{SkillIndex, SkillRoots};
@@ -29,8 +25,8 @@ use workflow_replay::{Handles, WorkflowStore};
 use crate::Result;
 use crate::channels::{self, TelegramRuntime};
 
-/// Providers from `providers.toml`: every enabled one that can be built, the
-/// effective default first.
+/// Providers from `providers.toml`: every enabled one that can be built
+/// (including runnable `cli:*` engines), the effective default active.
 ///
 /// # Errors
 /// Provider configuration cannot be read or parsed.
@@ -40,73 +36,7 @@ pub fn build_providers(
     store: &dyn SecretStore,
     warn: &mut dyn FnMut(&str),
 ) -> Result<Providers> {
-    let cfg = ProviderConfig::load(&config_path(data_dir))?;
-    let default_id = cfg.effective_default().map(|d| d.id.clone());
-    let mut built: Vec<(String, Arc<dyn ChatProvider>, Vec<ModelInfo>)> = Vec::new();
-    for s in cfg.providers.iter().filter(|p| p.enabled) {
-        match build_one(s, catalog, store) {
-            Ok((p, models)) => built.push((s.id.clone(), p, models)),
-            Err(e) => warn(&format!("provider {} skipped: {e}", s.id)),
-        }
-    }
-    let pos = built
-        .iter()
-        .position(|(id, _, _)| Some(id) == default_id.as_ref())
-        .unwrap_or(0);
-    if built.is_empty() {
-        warn("setup required; run `bot setup` or `bot providers add`");
-        return Ok(Providers::unconfigured());
-    }
-    // The catalog's prices go with the providers, so a reload refreshes them
-    // too and `/v1/usage` can report `cost_usd`.
-    let (id, first, models) = built.remove(pos);
-    let mut providers = Providers::single(first).with_catalog_prices(&id, &models);
-    for (id, p, models) in built {
-        providers = providers.with(p).with_catalog_prices(&id, &models);
-    }
-    // K2 embeddings (decision ladder): Gemini when a Gemini key is configured.
-    if let Some(key) = gemini_key(&cfg, catalog, store) {
-        providers = providers.with_embedder(Arc::new(GeminiEmbedder::new(
-            key,
-            gemini::DEFAULT_EMBED_MODEL,
-        )));
-    }
-    Ok(providers)
-}
-
-/// The API key of the first enabled Gemini provider that has one (stored
-/// secret or environment variable), for the router's embedder.
-fn gemini_key(cfg: &ProviderConfig, catalog: &Catalog, store: &dyn SecretStore) -> Option<String> {
-    cfg.providers.iter().filter(|p| p.enabled).find_map(|s| {
-        let entry = s.custom.as_ref().or_else(|| catalog.get(&s.id))?;
-        if entry.kind != ProviderKind::Gemini {
-            return None;
-        }
-        let key = match (&s.key, &entry.auth) {
-            (Some(r), _) => secret_store::resolve(store, r)
-                .ok()
-                .map(|k| k.expose().to_string()),
-            (None, Auth::ApiKeyEnv(var)) => std::env::var(var).ok(),
-            (None, Auth::None) => None,
-        };
-        key.filter(|k| !k.trim().is_empty())
-    })
-}
-
-fn build_one(
-    s: &ProviderSettings,
-    catalog: &Catalog,
-    store: &dyn SecretStore,
-) -> Result<(Arc<dyn ChatProvider>, Vec<ModelInfo>)> {
-    let entry: ProviderEntry = match &s.custom {
-        Some(c) => c.clone(),
-        None => catalog
-            .get(&s.id)
-            .cloned()
-            .ok_or_else(|| format!("{:?} is not in the catalog", s.id))?,
-    };
-    let provider = Arc::from(s.build_provider(&entry, store, OpenAiCompatConfig::default())?);
-    Ok((provider, entry.models))
+    Ok(agent_core::build_providers(data_dir, catalog, store, warn)?)
 }
 
 /// How often the daemon re-reads the secret store into the redactor, so a
@@ -1101,12 +1031,36 @@ min_interval_secs = 0",
     }
 
     #[test]
+    fn cli_only_provider_leaves_setup_required_false_and_sets_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cli = provider_catalog::ProviderSettings::new("cli:claude", 1);
+        cli.cli = Some(provider_catalog::config::CliSettings::Cli {
+            engine: provider_catalog::config::CliEngine::Claude,
+            command: "claude".into(),
+        });
+        let mut cfg = ProviderConfig::default();
+        cfg.upsert(cli);
+        cfg.save(&config_path(dir.path())).unwrap();
+
+        let providers = build_providers(
+            dir.path(),
+            &Catalog::from_entries([]),
+            &MemoryStore::new(),
+            &mut |_| {},
+        )
+        .unwrap();
+        assert!(!providers.setup_required());
+        assert_eq!(providers.default_id(), "cli:claude");
+        assert!(providers.ids().contains(&"cli:claude".to_owned()));
+    }
+
+    #[test]
     fn providers_carry_the_catalog_prices_and_a_reload_refreshes_them() {
         let dir = tempfile::tempdir().unwrap();
         let entry: ProviderEntry = toml::from_str(PRICED).unwrap();
         let catalog = Catalog::from_entries([entry]);
         let mut cfg = ProviderConfig::default();
-        cfg.upsert(ProviderSettings::new("t", 0));
+        cfg.upsert(provider_catalog::ProviderSettings::new("t", 0));
         cfg.save(&config_path(dir.path())).unwrap();
 
         let store = MemoryStore::new();

@@ -116,6 +116,18 @@ test("MockApiClient serves detected providers and enables claude idempotently wh
   const providers = await client.providers();
   assert.ok(providers.configured.some((p) => p.id === "cli:claude" && !p.has_key));
   assert.ok(providers.catalog.some((c) => c.id === "cli:claude" && c.kind === "cli"));
+  assert.equal(
+    providers.configured.some((p) => p.id === "claude-code"),
+    false,
+    "stray mock claude-code entry should not be present"
+  );
+
+  // Re-enabling cli:claude keeps an existing default_model.
+  const cliRow = client.providersDto.configured.find((p) => p.id === "cli:claude");
+  assert.ok(cliRow);
+  cliRow.default_model = "claude-sonnet-4-5";
+  const reEnabled = await client.enableCliProvider("claude");
+  assert.equal(reEnabled.default_model, "claude-sonnet-4-5");
 
   await assert.rejects(() => client.enableCliProvider("codex"));
 });

@@ -28,6 +28,9 @@ pub struct PeerIdentity {
 /// Future host transfer endpoints forbidden to phones.
 pub const PHONE_DENIED_POST_PATHS: &[&str] = &["/v1/host/import", "/v1/host/handover"];
 
+/// Host-local provider management endpoints forbidden to ALL paired peers.
+pub const PEER_DENIED_POST_PATHS: &[&str] = &["/v1/providers/cli/enable", "/v1/providers/reload"];
+
 /// Same API and permissions as loopback, with transport authentication.
 pub fn peer_router(state: AppState) -> Router {
     crate::api_routes()
@@ -48,6 +51,10 @@ async fn guard(State(state): State<AppState>, req: Request, next: Next) -> Respo
         Ok(path) => path.into_owned(),
         Err(_) => return ApiError::forbidden("invalid path").into_response(),
     };
+    if req.method() == Method::POST && PEER_DENIED_POST_PATHS.contains(&path.as_str()) {
+        return ApiError::forbidden("host-local provider management is not allowed for peers")
+            .into_response();
+    }
     let denied = peer.role != PeerRole::Desktop
         && (peer.role != PeerRole::Phone
             || (req.method() == Method::POST && PHONE_DENIED_POST_PATHS.contains(&path.as_str()))

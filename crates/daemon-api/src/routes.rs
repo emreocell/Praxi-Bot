@@ -1062,10 +1062,17 @@ fn persist_cli_enable(
     let provider_id = format!("cli:{}", spec.id);
     let _guard = s.providers_lock();
     let path = provider_catalog::config_path(&s.data_dir());
+    let _file_lock = provider_catalog::ProviderConfig::lock(&path)
+        .map_err(|e| ApiError::internal(format!("providers.lock: {e}")))?;
     let mut cfg = provider_catalog::ProviderConfig::load(&path)
         .map_err(|e| ApiError::internal(format!("providers.toml: {e}")))?;
+    let existing = cfg.get(&provider_id).cloned();
     let mut settings = provider_catalog::ProviderSettings::new(&provider_id, now_ms());
     settings.enabled = true;
+    if let Some(old) = existing {
+        settings.default_model = old.default_model;
+        settings.model_caps = old.model_caps;
+    }
     settings.cli = Some(provider_catalog::config::CliSettings::Cli {
         engine,
         command: spec.command.to_owned(),

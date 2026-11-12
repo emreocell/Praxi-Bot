@@ -386,6 +386,7 @@ pub fn configure_provider(
 ) -> Result<(ProviderSettings, ProviderConfig)> {
     let entry = entry_for(choice, env.catalog)?;
     let path = config_path(env.data_dir);
+    let _guard = ProviderConfig::lock(&path)?;
     let mut cfg = ProviderConfig::load(&path)?;
     let mut s = ProviderSettings::new(&entry.id, now_ms());
     if let Some(k) = key {
@@ -405,6 +406,9 @@ pub fn configure_provider(
         }
         if s.default_model.is_none() {
             s.default_model.clone_from(&old.default_model);
+        }
+        if s.model_caps.is_empty() {
+            s.model_caps.clone_from(&old.model_caps);
         }
     }
     cfg.upsert(s);

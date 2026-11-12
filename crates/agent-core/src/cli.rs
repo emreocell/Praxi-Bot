@@ -206,7 +206,7 @@ impl TurnExecutor {
         }
         // MCP encodes names reversibly; permissions receive the original name.
         let tools = specs.to_vec();
-        let model = cli_model_arg(&req.model);
+        let model = cli_model_arg(&req.model).map_err(xe)?;
         let usage = tokio::time::timeout(
             self.sh.cfg.guards.model_timeout,
             runtime.run_turn(
@@ -238,12 +238,38 @@ impl TurnExecutor {
     }
 }
 
-fn cli_model_arg(model: &provider_catalog::ModelRef) -> Option<String> {
-    model
+/// Validate a `--model` override destined for a subprocess CLI engine.
+///
+/// Rejects leading hyphens (flag injection), whitespace/control bytes, shell
+/// metacharacters, empty strings, and values longer than 128 bytes.
+pub(crate) fn validate_cli_model(model: &str) -> Result<(), String> {
+    if model.is_empty() || model.len() > 128 {
+        return Err(format!("invalid CLI model length: {model:?}"));
+    }
+    if model.starts_with('-') {
+        return Err(format!("invalid CLI model starting with '-': {model:?}"));
+    }
+    if !model
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'/' | b'-'))
+    {
+        return Err(format!(
+            "CLI model contains disallowed characters: {model:?}"
+        ));
+    }
+    Ok(())
+}
+
+fn cli_model_arg(model: &provider_catalog::ModelRef) -> Result<Option<String>, String> {
+    let Some(m) = model
         .provider()
         .map(|_| model.model())
         .filter(|m| !m.is_empty() && *m != "default")
-        .map(str::to_owned)
+    else {
+        return Ok(None);
+    };
+    validate_cli_model(m)?;
+    Ok(Some(m.to_owned()))
 }
 
 #[cfg(test)]
@@ -345,16 +371,40 @@ mod tests {
     fn cli_model_arg_omits_default_placeholder() {
         assert_eq!(
             cli_model_arg(&provider_catalog::ModelRef("cli:claude".into())),
-            None
+            Ok(None)
         );
         assert_eq!(
             cli_model_arg(&provider_catalog::ModelRef("cli:claude/default".into())),
-            None
+            Ok(None)
         );
         assert_eq!(
             cli_model_arg(&provider_catalog::ModelRef("cli:claude/sonnet".into())),
-            Some("sonnet".into())
+            Ok(Some("sonnet".into()))
         );
+        assert_eq!(
+            cli_model_arg(&provider_catalog::ModelRef(
+                "cli:claude/claude-sonnet-4-5:latest".into()
+            )),
+            Ok(Some("claude-sonnet-4-5:latest".into()))
+        );
+    }
+
+    #[test]
+    fn cli_model_arg_rejects_flags_and_unsafe_chars() {
+        let too_long = format!("cli:claude/{}", "a".repeat(129));
+        for bad in [
+            "cli:claude/--dangerously-skip-permissions",
+            "cli:claude/-p",
+            "cli:claude/sonnet --flag",
+            "cli:claude/sonnet\n--evil",
+            "cli:claude/sonnet;id",
+            too_long.as_str(),
+        ] {
+            assert!(
+                cli_model_arg(&provider_catalog::ModelRef(bad.into())).is_err(),
+                "{bad} should be rejected"
+            );
+        }
     }
 
     struct PanicHttp;

@@ -12,7 +12,11 @@ import { isTauriRuntime } from "../overlay/events";
 import formStyles from "../components/Form.module.css";
 import { botView } from "../lib/botProfile";
 import { addProvider, setDefaultProvider, testProvider } from "../lib/providers";
-import { isCliProvider, providersView } from "../lib/providerView";
+import {
+  canTestProvider,
+  isCliProvider,
+  providersView
+} from "../lib/providerView";
 import { useDaemon } from "../state/DaemonContext";
 import { notifyProvidersChanged, useProviders } from "../state/useProviders";
 import styles from "./SettingsSections.module.css";
@@ -131,18 +135,23 @@ export function ProvidersSection() {
                       ? ` · ${t("settings.providers.modelCount", { count: p.models.length })}`
                       : ""}
                   </span>
-                  {native ? (
+                  {native && (canTestProvider(p.id, dto) || !p.isDefault) ? (
                     <span className={styles.rowActions}>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        disabled={busy}
-                        onClick={() =>
-                          void run(async () => outcomeOf(await testProvider(p.id)), false)
-                        }
-                      >
-                        {t("settings.providers.test")}
-                      </Button>
+                      {canTestProvider(p.id, dto) ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={busy}
+                          onClick={() =>
+                            void run(
+                              async () => outcomeOf(await testProvider(p.id)),
+                              false
+                            )
+                          }
+                        >
+                          {t("settings.providers.test")}
+                        </Button>
+                      ) : null}
                       {!p.isDefault ? (
                         <Button
                           size="sm"

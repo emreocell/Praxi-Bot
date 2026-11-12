@@ -169,6 +169,7 @@ pub fn providers_default(
     out: &mut dyn FnMut(&str),
 ) -> Result<()> {
     let path = config_path(data_dir);
+    let _guard = ProviderConfig::lock(&path)?;
     let mut cfg = ProviderConfig::load(&path)?;
     cfg.set_default(id)?;
     if let Some(m) = model {

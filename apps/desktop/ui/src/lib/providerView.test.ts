@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ProvidersDto } from "../api/types.ts";
 import {
+  canTestProvider,
+  defaultModelRef,
   FALLBACK_CATALOG,
   isCliProvider,
+  nonCliProviderIds,
   providerRoleDefaults,
   providersView
 } from "./providerView.ts";
@@ -135,4 +138,25 @@ test("providersView excludes cli catalog entries from add-provider catalog while
   assert.equal(isCliProvider("cli:claude", withCli), true);
   assert.equal(isCliProvider("openai", withCli), false);
   assert.ok(v.configured.some((r) => r.id === "cli:claude"));
+  assert.equal(canTestProvider("cli:claude", withCli), false);
+  assert.equal(canTestProvider("second", withCli), true);
+  assert.deepEqual(nonCliProviderIds(v.selectable, withCli), [
+    "aaa",
+    "ghost",
+    "second"
+  ]);
+  assert.equal(
+    defaultModelRef({ ...withCli, default_provider: "cli:claude" }),
+    "cli:claude/default"
+  );
+  assert.equal(
+    defaultModelRef({
+      ...withCli,
+      default_provider: "cli:claude",
+      configured: withCli.configured.map((c) =>
+        c.id === "cli:claude" ? { ...c, default_model: "claude-sonnet-4-5" } : c
+      )
+    }),
+    "cli:claude/claude-sonnet-4-5"
+  );
 });

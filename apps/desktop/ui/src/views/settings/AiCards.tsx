@@ -8,6 +8,7 @@ import { ModelPicker } from "../../components/ModelPicker";
 import { SettingGroup, SettingRow } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
 import { modelGroups } from "../../lib/modelPicker";
+import { defaultModelRef } from "../../lib/providerView";
 import { setDefaultProvider } from "../../lib/providers";
 import { isTauriRuntime } from "../../overlay/events";
 import { useDaemon } from "../../state/DaemonContext";
@@ -27,11 +28,7 @@ function DefaultModelRow() {
   const mock = client?.baseUrl === MOCK_BASE_URL;
   const canChange = isTauriRuntime() || mock;
 
-  const current = useMemo(() => {
-    const id = dto?.default_provider;
-    const row = dto?.configured.find((p) => p.id === id);
-    return id && row?.default_model ? `${id}/${row.default_model}` : "";
-  }, [dto]);
+  const current = useMemo(() => defaultModelRef(dto), [dto]);
   const groups = useMemo(() => modelGroups(dto, current), [dto, current]);
 
   const pick = async (ref: string) => {

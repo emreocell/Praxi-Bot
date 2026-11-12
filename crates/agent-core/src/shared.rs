@@ -2,10 +2,12 @@
 //! the step executor.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
 use agent_router::ToolSurface;
+use agent_router::ladder::{GeminiEmbedder, gemini};
 use parking_lot::{Mutex, RwLock};
 use permission_engine::{Decision, PermissionResolver, Policy};
 use protocol::event::TodoItem;
@@ -13,7 +15,12 @@ use protocol::{
     BotId, ChatId, Envelope, Event, InitiatorKind, PermissionCategory, RunId, TaskId, ToolCallId,
     UserId,
 };
-use provider_catalog::{ChatProvider, ModelRef};
+use provider_catalog::config::CliSettings;
+use provider_catalog::{
+    Auth, Catalog, ChatProvider, ModelInfo, ModelRef, OpenAiCompatConfig, ProviderConfig,
+    ProviderEntry, ProviderKind, ProviderSettings, config_path,
+};
+use secret_store::SecretStore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use storage::{EventJournal, JournalRecord, Run, Storage, read_event_log};
@@ -167,7 +174,11 @@ pub struct StreamItem {
 #[derive(Clone)]
 pub struct Providers {
     default: Option<Arc<dyn ChatProvider>>,
+    /// Explicit default provider id (may refer to an HTTP provider or a `cli:*` engine).
+    default_id: Option<String>,
     by_id: HashMap<String, Arc<dyn ChatProvider>>,
+    /// Enabled runnable `cli:*` provider ids (executed via `cli-provider`, not `ChatProvider`).
+    cli_ids: Vec<String>,
     /// Catalog prices keyed by the full model reference (`provider/model`).
     prices: HashMap<String, ModelPrice>,
     /// Embedding backend of the K2 router (`None` = BM25 only).
@@ -182,7 +193,9 @@ impl Providers {
     pub fn unconfigured() -> Self {
         Self {
             default: None,
+            default_id: None,
             by_id: HashMap::new(),
+            cli_ids: Vec::new(),
             prices: HashMap::new(),
             embedder: None,
             redactor: None,
@@ -192,17 +205,20 @@ impl Providers {
     /// Whether inference needs provider setup.
     #[must_use]
     pub fn setup_required(&self) -> bool {
-        self.default.is_none()
+        self.default.is_none() && self.cli_ids.is_empty()
     }
 
     /// A set whose only (and default) provider is `p`.
     #[must_use]
     pub fn single(p: Arc<dyn ChatProvider>) -> Self {
         let mut by_id = HashMap::new();
-        by_id.insert(p.id().to_owned(), Arc::clone(&p));
+        let id = p.id().to_owned();
+        by_id.insert(id.clone(), Arc::clone(&p));
         Self {
             default: Some(p),
+            default_id: Some(id),
             by_id,
+            cli_ids: Vec::new(),
             prices: HashMap::new(),
             embedder: None,
             redactor: None,
@@ -266,9 +282,36 @@ impl Providers {
     #[must_use]
     pub fn with(mut self, p: Arc<dyn ChatProvider>) -> Self {
         if self.default.is_none() {
+            if self.default_id.is_none() {
+                self.default_id = Some(p.id().to_owned());
+            }
             self.default = Some(Arc::clone(&p));
         }
         self.by_id.insert(p.id().to_owned(), p);
+        self
+    }
+
+    /// Register a runnable `cli:*` engine id (`"cli:claude"`).
+    #[must_use]
+    pub fn with_cli(mut self, id: impl Into<String>) -> Self {
+        let id = id.into();
+        if !self.cli_ids.contains(&id) {
+            self.cli_ids.push(id.clone());
+        }
+        if self.default_id.is_none() {
+            self.default_id = Some(id);
+        }
+        self
+    }
+
+    /// Override the active default provider id (and HTTP default if `id` is HTTP).
+    #[must_use]
+    pub fn with_default_id(mut self, id: impl Into<String>) -> Self {
+        let id = id.into();
+        if let Some(p) = self.by_id.get(&id) {
+            self.default = Some(Arc::clone(p));
+        }
+        self.default_id = Some(id);
         self
     }
 
@@ -276,14 +319,20 @@ impl Providers {
     /// or an empty string when setup is required.
     #[must_use]
     pub fn default_id(&self) -> &str {
-        self.default.as_ref().map_or("", |p| p.id())
+        self.default_id.as_deref().unwrap_or("")
     }
 
-    /// Ids of all providers, sorted.
+    /// Ids of all providers (HTTP + runnable CLI), sorted and deduplicated.
     #[must_use]
     pub fn ids(&self) -> Vec<String> {
-        let mut v: Vec<String> = self.by_id.keys().cloned().collect();
+        let mut v: Vec<String> = self
+            .by_id
+            .keys()
+            .cloned()
+            .chain(self.cli_ids.iter().cloned())
+            .collect();
         v.sort();
+        v.dedup();
         v
     }
 
@@ -297,6 +346,12 @@ impl Providers {
         &self,
         model: &ModelRef,
     ) -> Result<Arc<dyn ChatProvider>, provider_catalog::ProviderError> {
+        if model.0.starts_with("cli:") {
+            return Err(provider_catalog::ProviderError::NoProvider(format!(
+                "provider {:?} is CLI-only and cannot serve HTTP requests",
+                model.0
+            )));
+        }
         let p = model
             .provider()
             .and_then(|p| self.by_id.get(p))
@@ -315,6 +370,116 @@ impl Providers {
             None => p,
         })
     }
+}
+
+/// Build runtime [`Providers`] from `providers.toml`: every enabled HTTP
+/// provider that can be constructed plus every enabled runnable `cli:*` engine,
+/// keeping the effective default active.
+///
+/// # Errors
+/// Returns an error if `providers.toml` cannot be read or parsed.
+pub fn build_providers(
+    data_dir: &Path,
+    catalog: &Catalog,
+    store: &dyn SecretStore,
+    warn: &mut dyn FnMut(&str),
+) -> Result<Providers, String> {
+    let cfg = ProviderConfig::load(&config_path(data_dir)).map_err(|e| e.to_string())?;
+    let default_id = cfg.effective_default().map(|d| d.id.clone());
+    let mut built: Vec<(String, Arc<dyn ChatProvider>, Vec<ModelInfo>)> = Vec::new();
+    let mut cli_built: Vec<String> = Vec::new();
+    for s in cfg.providers.iter().filter(|p| p.enabled) {
+        if let Some(CliSettings::Cli { engine, .. }) = &s.cli {
+            if cli_provider::engine_spec(engine.as_str()).is_some_and(|spec| spec.runnable) {
+                cli_built.push(s.id.clone());
+            } else {
+                warn(&format!(
+                    "provider {} skipped: CLI engine {} is not runnable",
+                    s.id,
+                    engine.as_str()
+                ));
+            }
+            continue;
+        }
+        match build_one(s, catalog, store) {
+            Ok((p, models)) => built.push((s.id.clone(), p, models)),
+            Err(e) => warn(&format!("provider {} skipped: {e}", s.id)),
+        }
+    }
+    if built.is_empty() && cli_built.is_empty() {
+        warn("setup required; run `bot setup` or `bot providers add`");
+        return Ok(Providers::unconfigured());
+    }
+    let mut providers = if built.is_empty() {
+        Providers::unconfigured()
+    } else {
+        let pos = built
+            .iter()
+            .position(|(id, _, _)| Some(id) == default_id.as_ref())
+            .unwrap_or(0);
+        // The catalog's prices go with the providers, so a reload refreshes them
+        // too and `/v1/usage` can report `cost_usd`.
+        let (id, first, models) = built.remove(pos);
+        let mut p = Providers::single(first).with_catalog_prices(&id, &models);
+        for (id, next, models) in built {
+            p = p.with(next).with_catalog_prices(&id, &models);
+        }
+        p
+    };
+    for cli_id in cli_built {
+        providers = providers.with_cli(cli_id);
+    }
+    if let Some(def) = default_id
+        && providers.ids().iter().any(|id| id == &def)
+    {
+        providers = providers.with_default_id(def);
+    }
+    // K2 embeddings (decision ladder): Gemini when a Gemini key is configured.
+    if let Some(key) = gemini_key(&cfg, catalog, store) {
+        providers = providers.with_embedder(Arc::new(GeminiEmbedder::new(
+            key,
+            gemini::DEFAULT_EMBED_MODEL,
+        )));
+    }
+    Ok(providers)
+}
+
+/// The API key of the first enabled Gemini provider that has one (stored
+/// secret or environment variable), for the router's embedder.
+fn gemini_key(cfg: &ProviderConfig, catalog: &Catalog, store: &dyn SecretStore) -> Option<String> {
+    cfg.providers.iter().filter(|p| p.enabled).find_map(|s| {
+        let entry = s.custom.as_ref().or_else(|| catalog.get(&s.id))?;
+        if entry.kind != ProviderKind::Gemini {
+            return None;
+        }
+        let key = match (&s.key, &entry.auth) {
+            (Some(r), _) => secret_store::resolve(store, r)
+                .ok()
+                .map(|k| k.expose().to_string()),
+            (None, Auth::ApiKeyEnv(var)) => std::env::var(var).ok(),
+            (None, Auth::None) => None,
+        };
+        key.filter(|k| !k.trim().is_empty())
+    })
+}
+
+fn build_one(
+    s: &ProviderSettings,
+    catalog: &Catalog,
+    store: &dyn SecretStore,
+) -> Result<(Arc<dyn ChatProvider>, Vec<ModelInfo>), String> {
+    let entry: ProviderEntry = match &s.custom {
+        Some(c) => c.clone(),
+        None => catalog
+            .get(&s.id)
+            .cloned()
+            .ok_or_else(|| format!("{:?} is not in the catalog", s.id))?,
+    };
+    let provider = Arc::from(
+        s.build_provider(&entry, store, OpenAiCompatConfig::default())
+            .map_err(|e| e.to_string())?,
+    );
+    Ok((provider, entry.models))
 }
 
 /// Provider wrapper that masks secrets in the whole request (every message

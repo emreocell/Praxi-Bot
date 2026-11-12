@@ -64,7 +64,7 @@ const CHATS: Chat[] = [
 ];
 
 const PROVIDERS: ProvidersDto = {
-  active: ["anthropic", "openai", "gemini", "ollama", "claude-code"],
+  active: ["anthropic", "openai", "gemini", "ollama"],
   default_provider: "anthropic",
   catalog: [
     {
@@ -110,7 +110,6 @@ const PROVIDERS: ProvidersDto = {
   ],
   configured: [
     { id: "openai", active: true, custom: false, default_model: "gpt-4.1", enabled: true, has_key: true, is_default: false, models: ["gpt-4.1", "o3"] },
-    { id: "claude-code", active: true, custom: false, default_model: "sonnet", enabled: true, has_key: true, is_default: false, models: ["sonnet", "opus"] },
     {
       id: "anthropic",
       active: true,
@@ -455,11 +454,11 @@ export class MockApiClient extends ApiClient {
             id: providerId,
             enabled: true,
             is_default: existing?.is_default ?? false,
-            default_model: null,
+            default_model: existing?.default_model ?? null,
             has_key: false,
             custom: false,
             active: true,
-            models: [],
+            models: existing?.models ?? [],
             models_error: null
           };
           if (existing) {

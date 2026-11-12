@@ -23,7 +23,12 @@ import { BrandIcon } from "../components/BrandIcon";
 import { brandIcon } from "../lib/brandIcons";
 import { botHasAccess, changedApps, saveBotAndApps } from "../lib/mcpApps";
 import { FAKE_PROVIDER_ID } from "../lib/providers";
-import { isCliProvider, type ProvidersView, providersView } from "../lib/providerView";
+import {
+  isCliProvider,
+  nonCliProviderIds,
+  type ProvidersView,
+  providersView
+} from "../lib/providerView";
 import { useDaemon } from "../state/DaemonContext";
 import styles from "./BotFormView.module.css";
 
@@ -181,8 +186,8 @@ export function BotFormView({
     return [...ids];
   }, [providerList, conn?.fake_provider]);
 
-  const classifierProviders = useMemo(
-    () => providerIds.filter((p) => !isCliProvider(p)),
+  const httpProviders = useMemo(
+    () => nonCliProviderIds(providerIds),
     [providerIds]
   );
 
@@ -408,13 +413,13 @@ export function BotFormView({
           <ModelField
             label={t("botForm.role.planner")}
             value={draft.planner}
-            providers={providerIds}
+            providers={httpProviders}
             onChange={(planner) => patch({ planner })}
           />
           <ModelField
             label={t("botForm.role.classifier")}
             value={draft.classifier}
-            providers={classifierProviders}
+            providers={httpProviders}
             onChange={(classifier) => patch({ classifier })}
           />
           <div className={formStyles.field}>

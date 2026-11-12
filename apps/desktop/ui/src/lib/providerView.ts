@@ -138,6 +138,33 @@ export function isCliProvider(
   return dto?.catalog.some((c) => c.id === id && c.kind === "cli") ?? false;
 }
 
+/** Whether the "Test connection" button applies to this provider row. */
+export function canTestProvider(
+  id: string,
+  dto?: ProvidersDto | null
+): boolean {
+  return !isCliProvider(id, dto);
+}
+
+/** Provider ids suitable for non-executor roles (planner, classifier). */
+export function nonCliProviderIds(
+  ids: readonly string[],
+  dto?: ProvidersDto | null
+): string[] {
+  return ids.filter((id) => !isCliProvider(id, dto));
+}
+
+/** Current `provider/model` ref for the global default model selector. */
+export function defaultModelRef(dto: ProvidersDto | null): string {
+  const id = dto?.default_provider;
+  if (!id) {
+    return "";
+  }
+  const row = dto.configured.find((p) => p.id === id);
+  const model = row?.default_model || (isCliProvider(id, dto) ? "default" : "");
+  return model ? `${id}/${model}` : "";
+}
+
 /** Reshape `GET /v1/providers` for the UI (pure). */
 export function providersView(dto: ProvidersDto | null): ProvidersView {
   if (!dto) {
