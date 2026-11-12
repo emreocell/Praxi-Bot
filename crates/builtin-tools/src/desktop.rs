@@ -1322,6 +1322,9 @@ pub(crate) mod fake {
     use desktop_api::snapshot::{Image, Pid, Rect, UiNode, WindowInfo};
     use desktop_api::{ActionResult, Capabilities};
 
+    /// A callback a test runs inside a backend call.
+    pub type FakeHook = Arc<dyn Fn(&str) + Send + Sync>;
+
     pub struct FakeDesktop {
         pub actions: Mutex<Vec<Action>>,
         pub generation: Mutex<u64>,
@@ -1344,7 +1347,7 @@ pub(crate) mod fake {
         /// Timestamp when `launch()` was called.
         pub launched_at: Mutex<Option<tokio::time::Instant>>,
         /// Runs inside `screenshot` / `windows` (a takeover landing mid-capture).
-        pub hook: Mutex<Option<Arc<dyn Fn(&str) + Send + Sync>>>,
+        pub hook: Mutex<Option<FakeHook>>,
     }
 
     impl FakeDesktop {

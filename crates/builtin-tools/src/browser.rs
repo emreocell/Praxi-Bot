@@ -1411,6 +1411,9 @@ pub(crate) mod fake {
     use super::*;
     use parking_lot::Mutex as PMutex;
 
+    /// A callback a test runs inside a backend call.
+    pub type FakeHook = Arc<dyn Fn(&str) + Send + Sync>;
+
     /// Records calls as `name:args` strings and returns canned text.
     #[derive(Default)]
     pub struct FakeBrowser {
@@ -1418,7 +1421,7 @@ pub(crate) mod fake {
         /// When set, mutating actions go through the desktop control gate.
         pub on_desktop: bool,
         /// Runs inside every backend call (a human takeover landing mid-call).
-        pub hook: PMutex<Option<Arc<dyn Fn(&str) + Send + Sync>>>,
+        pub hook: PMutex<Option<FakeHook>>,
     }
 
     impl FakeBrowser {
