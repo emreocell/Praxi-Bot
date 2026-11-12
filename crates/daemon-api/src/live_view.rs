@@ -701,19 +701,27 @@ async fn end_session(
         if let Some(cancel) = session.stream {
             cancel.cancel();
         }
-        if let Some(t) = s.hub().takeover().filter(|t| t.info.session_id == id) {
-            interrupt(s, actor, &t, reason.clone()).await?;
-        }
-        live.source_profile(session.target).await?;
-        audit(
+        // Every step runs, whatever an earlier one returns: the session end
+        // is audited and the actor's rate state is dropped even if the
+        // interruption's audit or the backend profile update fails (the first
+        // error is still reported).
+        let interrupted = match s.hub().takeover().filter(|t| t.info.session_id == id) {
+            Some(t) => interrupt(s, actor, &t, reason.clone()).await,
+            None => Ok(()),
+        };
+        let profile = live.source_profile(session.target).await;
+        let ended = audit(
             s,
             actor,
             "view.ended",
             serde_json::json!({"session_id":id,"target_id":session.target,"reason":reason}),
-        )?;
+        );
         if !live.sessions.lock().values().any(|s| s.actor == actor.key) {
             live.rates.lock().remove(&actor.key);
         }
+        interrupted?;
+        profile?;
+        ended?;
     }
     Ok(())
 }

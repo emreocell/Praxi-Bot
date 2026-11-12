@@ -3182,6 +3182,44 @@ async fn a_cancelled_session_delete_still_owes_the_key_reset() {
     assert!(!t.state.hub().override_pending().0);
 }
 
+// ---- audit3 F9: a session end is audited even when a later step fails
+#[tokio::test]
+async fn view_ended_is_audited_even_when_the_interrupt_audit_fails() {
+    let t = Test::new();
+    let id = t.session(Some("alice")).await;
+    let (status, v) = t
+        .call(
+            Some("alice"),
+            Method::POST,
+            "/v1/control/takeover",
+            Some(json!({"session_id":id,"request_id":Uuid::now_v7()})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{v}");
+    for _ in 0..100 {
+        if t.state.hub().takeover().unwrap().info.state == ViewState::Active {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    let db = rusqlite::Connection::open(t.dir.path().join("bot.db")).unwrap();
+    db.execute_batch("CREATE TRIGGER fail_live_audit BEFORE INSERT ON audit_log WHEN NEW.action = 'takeover.interrupted' BEGIN SELECT RAISE(ABORT, 'injected audit failure'); END;").unwrap();
+    let (status, _) = t
+        .call(
+            Some("alice"),
+            Method::DELETE,
+            &format!("/v1/view/sessions/{id}"),
+            None,
+        )
+        .await;
+    assert!(!status.is_success(), "{status}");
+    assert_eq!(
+        audit_count(&t, "view.ended"),
+        1,
+        "the session end was lost behind a failed interrupt audit"
+    );
+}
+
 // ---- audit3 F4: the effect of a partial batch is never coalesced away
 #[tokio::test]
 async fn a_partial_injection_outcome_is_audited_even_after_a_denial() {
