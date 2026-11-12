@@ -111,12 +111,20 @@ impl Shared {
         if self.locked_deny(category) {
             return Decision::Deny;
         }
-        let d = r.resolve(
+        let mut d = r.resolve(
             &self.global_policy.read(),
             ctx.bot_policy.as_ref(),
             None,
             &req,
         );
+        // A tool that delegates future authority is confirmed every time:
+        // an allow becomes a plain ask, and no grant waives it (a deny stays).
+        if self.always_ask(name) {
+            if d == Decision::Allow {
+                d = Decision::ask();
+            }
+            return d;
+        }
         if !d.is_ask() {
             return d;
         }
@@ -142,6 +150,111 @@ impl Shared {
         } else {
             d
         }
+    }
+
+    /// The registered tool `name` must be confirmed on every call
+    /// ([`tool_registry::Tool::always_ask`]).
+    pub(crate) fn always_ask(&self, name: &str) -> bool {
+        self.tools.get(name).is_some_and(|t| t.always_ask())
+    }
+
+    /// What the tool wants the approval card to show for this call, plus the
+    /// bot's permission picture (it applies to every future firing).
+    ///
+    /// # Errors
+    /// The tool rejects the call; it must not be offered for approval.
+    pub(crate) async fn approval_details(
+        &self,
+        ctx: &RunCtx,
+        name: &str,
+        input: &Value,
+    ) -> Result<Option<Value>, String> {
+        let Some(tool) = self.tools.get(name) else {
+            return Ok(None);
+        };
+        let tctx = tool_registry::ToolContext {
+            run_id: ctx.run_id.to_string(),
+            bot_id: Some(ctx.bot_id.to_string()),
+            ..tool_registry::ToolContext::default()
+        };
+        let details = tool
+            .approval_details(&tctx, input)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(details.map(|mut v| {
+            if let Some(o) = v.as_object_mut() {
+                o.insert("permission".into(), self.scheduled_permission(ctx));
+            }
+            v
+        }))
+    }
+
+    /// What a scheduled firing of this run's bot may do: the policy level per
+    /// category for initiator `Schedule`, with category grants applied.
+    fn scheduled_permission(&self, ctx: &RunCtx) -> Value {
+        use PermissionCategory as C;
+        let (mut allow, mut ask, mut deny) = (Vec::new(), Vec::new(), Vec::new());
+        let cats = [
+            C::Fs,
+            C::Shell,
+            C::Desktop,
+            C::Browser,
+            C::Accounts,
+            C::Messaging,
+            C::Money,
+            C::System,
+            C::Remote,
+            C::Script,
+        ];
+        for c in cats {
+            let req = ActionRequest {
+                category: c,
+                raw_command: String::new(),
+                initiator: InitiatorKind::Schedule,
+            };
+            let mut d = if self.locked_deny(c) {
+                Decision::Deny
+            } else {
+                self.resolver.resolve(
+                    &self.global_policy.read(),
+                    ctx.bot_policy.as_ref(),
+                    None,
+                    &req,
+                )
+            };
+            let floor = self.resolver.resolve(&Policy::full(), None, None, &req) != Decision::Allow;
+            if d.is_ask()
+                && d.unsupported_limits().is_none()
+                && !floor
+                && self
+                    .grants
+                    .lock()
+                    .always
+                    .iter()
+                    .any(|g| g.bot_id == ctx.bot_id && g.target == GrantTarget::Category(c))
+            {
+                d = Decision::Allow;
+            }
+            let name = serde_json::to_value(c)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_default();
+            match d {
+                Decision::Allow => allow.push(name),
+                Decision::Deny => deny.push(name),
+                Decision::Ask { .. } => ask.push(name),
+            }
+        }
+        let level = if deny.len() == cats.len() {
+            "read_only"
+        } else if ask.is_empty() && deny.is_empty() {
+            "full"
+        } else if allow.is_empty() {
+            "ask_first"
+        } else {
+            "mixed"
+        };
+        json!({ "level": level, "allow": allow, "ask": ask, "deny": deny })
     }
 
     /// Locked deny-all mode applies to `category`.
@@ -260,6 +373,7 @@ impl Shared {
     /// immediately before invoking the tool: that recheck runs under
     /// [`Shared::exec_gate`] and is what creates a grant. `Err` means the
     /// call is denied (no grant, tool must not run).
+    #[allow(clippy::too_many_arguments)] // `details` joined an already wide call
     pub(crate) async fn request_approval(
         self: &Arc<Self>,
         ctx: &Arc<RunCtx>,
@@ -268,6 +382,7 @@ impl Shared {
         effect: Effect,
         category: PermissionCategory,
         input: &Value,
+        details: Option<Value>,
     ) -> Result<ExecPermit, Option<String>> {
         let args = input.to_string();
         let summary = self.redact(format!("{name} {}", truncate_utf8(&args, 300)));
@@ -282,6 +397,7 @@ impl Shared {
                 tool_name: name.to_owned(),
                 input: input.clone(),
                 summary,
+                details,
             }),
         );
         let verdict = self.wait_verdict(ctx, rx).await;
@@ -520,7 +636,13 @@ impl ExecPermit {
             .sh
             .storage
             .decide_approval(self.approval_id, "approved");
-        match self.scope {
+        // Approving an always-ask tool confirms this one call only.
+        let scope = if self.sh.always_ask(&self.name) {
+            ApprovalScope::Once
+        } else {
+            self.scope
+        };
+        match scope {
             ApprovalScope::Once => {}
             ApprovalScope::ThisChat => {
                 self.sh
@@ -544,7 +666,7 @@ impl ExecPermit {
             "approval.approved",
             &json!({
                 "tool": self.name,
-                "scope": format!("{:?}", self.scope),
+                "scope": format!("{scope:?}"),
                 "policy_revision": policy_revision(&self.sh),
                 "parked_at": self.parked_at,
             }),
@@ -696,14 +818,19 @@ impl ToolGate for LoopGate {
                 "permission denied: {} is not allowed by policy",
                 req.tool
             )),
-            Decision::Ask { .. } => sh
-                .request_approval(
+            Decision::Ask { .. } => {
+                let details = sh
+                    .approval_details(&ctx, &req.tool, &req.input)
+                    .await
+                    .map_err(|e| format!("{}: {e}", req.tool))?;
+                sh.request_approval(
                     &ctx,
                     ToolCallId::new(),
                     &req.tool,
                     req.effect,
                     req.category,
                     &req.input,
+                    details,
                 )
                 .await
                 .and_then(ExecPermit::commit)
@@ -712,7 +839,8 @@ impl ToolGate for LoopGate {
                         "permission denied by the user{}",
                         reason.map_or_else(String::new, |r| format!(": {r}"))
                     )
-                }),
+                })
+            }
         }
     }
 }

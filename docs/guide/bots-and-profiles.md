@@ -98,6 +98,7 @@ wildcards. The built-in tool groups:
 | Shell | `shell_run` |
 | Browser | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_select`, `browser_press`, `browser_scroll`, `browser_wait`, `browser_back`, `browser_tabs`, `browser_screenshot`, `browser_eval` |
 | Web (read-only, no browser) | `web_search`, `web_extract`, `web_feed`, `web_sitemap`, `web_metadata` (see [Web tools](web.md)) |
+| Schedules (General preset only) | `schedule_list`, `schedule_create`, `schedule_update`, `schedule_pause`, `schedule_resume`, `schedule_delete` (see [Scheduled tasks](scheduled-tasks.md)) |
 | Desktop (Windows) | `desktop_list_apps`, `desktop_launch`, `desktop_get_state`, `desktop_click`, `desktop_type`, `desktop_set_value`, `desktop_key`, `desktop_scroll`, `desktop_drag` |
 | Scripts | `script_run` |
 | Agent-internal | `ask_user`, `todo_write`, `spawn_subagent` |

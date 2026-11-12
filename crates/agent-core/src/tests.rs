@@ -4272,3 +4272,229 @@ async fn policy_deny_after_approval_recheck_does_not_run_the_tool_or_keep_the_gr
     )
     .await;
 }
+
+// ---------- always-ask tools (schedule delegation) ----------
+
+/// A tool like `schedule_create`: category `System`, write effect, confirmed
+/// on every call, with approval-card details (or a veto).
+struct AskTool {
+    spec: ToolSpec,
+    count: Arc<AtomicUsize>,
+    veto: Option<&'static str>,
+}
+
+fn ask_tool(veto: Option<&'static str>) -> Arc<AskTool> {
+    Arc::new(AskTool {
+        spec: ToolSpec {
+            name: "sched_make".into(),
+            description: "test schedule tool".into(),
+            input_schema: json!({"type": "object"}),
+            effect: Effect::Write,
+            category: PermissionCategory::System,
+            platforms: vec![Platform::All],
+        },
+        count: Arc::new(AtomicUsize::new(0)),
+        veto,
+    })
+}
+
+#[async_trait]
+impl Tool for AskTool {
+    fn spec(&self) -> &ToolSpec {
+        &self.spec
+    }
+    fn always_ask(&self) -> bool {
+        true
+    }
+    async fn approval_details(
+        &self,
+        ctx: &ToolContext,
+        input: &Value,
+    ) -> Result<Option<Value>, ToolError> {
+        if let Some(msg) = self.veto {
+            return Err(ToolError::Execution(msg.into()));
+        }
+        Ok(Some(json!({
+            "kind": "schedule",
+            "prompt": input["prompt"],
+            "bot_id": ctx.bot_id,
+            "next_runs": ["a", "b", "c"],
+        })))
+    }
+    async fn call(&self, _: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
+        self.count.fetch_add(1, Ordering::SeqCst);
+        Ok(ToolOutput::text("scheduled"))
+    }
+}
+
+fn ask_loop(env: &Env, fake: &Arc<Fake>, tool: &Arc<AskTool>, policy: Policy) -> AgentLoop {
+    let registry = ToolRegistry::new();
+    registry.register(Arc::clone(tool) as Arc<dyn Tool>);
+    let lp = AgentLoop::new(
+        Arc::clone(&env.storage),
+        registry,
+        Providers::single(Arc::clone(fake) as Arc<dyn ChatProvider>),
+        cfg(policy),
+    );
+    lp.add_profile(env.bot, profile(""));
+    lp
+}
+
+#[tokio::test]
+async fn always_ask_tool_asks_even_when_policy_allows() {
+    let env = setup();
+    let tool = ask_tool(None);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "sched_make", json!({"prompt": "do x"}))]),
+        text("done"),
+    ]);
+    let lp = ask_loop(&env, &fake, &tool, Policy::full());
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(
+        tool.count.load(Ordering::SeqCst),
+        0,
+        "not run before approval"
+    );
+    lp.approve(a.call_id, ApprovalScope::Once, env.user)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(tool.count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn always_ask_tool_ignores_tool_category_and_chat_grants() {
+    let env = setup();
+    let tool = ask_tool(None);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "sched_make", json!({"prompt": "p"}))]),
+        text("done"),
+    ]);
+    let lp = ask_loop(&env, &fake, &tool, Policy::approve_destructive());
+    {
+        let mut g = lp.sh.grants.lock();
+        for target in [
+            GrantTarget::Tool("sched_make".into()),
+            GrantTarget::Category(PermissionCategory::System),
+        ] {
+            g.always.push(crate::Grant {
+                bot_id: env.bot,
+                target,
+                granted_at_ms: 1,
+            });
+        }
+        g.this_chat.insert((env.chat, "sched_make".into()));
+    }
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(_) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!("grants must not silently cover an always-ask tool")
+    };
+    assert_eq!(tool.count.load(Ordering::SeqCst), 0);
+    lp.cancel(run).unwrap();
+}
+
+#[tokio::test]
+async fn approving_an_always_ask_tool_with_always_mints_no_grant() {
+    let env = setup();
+    let tool = ask_tool(None);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "sched_make", json!({"prompt": "p"}))]),
+        calls(&[("c2", "sched_make", json!({"prompt": "p"}))]),
+        text("done"),
+    ]);
+    let lp = ask_loop(&env, &fake, &tool, Policy::approve_destructive());
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    for scope in [ApprovalScope::Always, ApprovalScope::AlwaysCategory] {
+        let Event::ApprovalNeeded(a) =
+            until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+        else {
+            unreachable!()
+        };
+        lp.approve(a.call_id, scope, env.user).unwrap();
+    }
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(
+        tool.count.load(Ordering::SeqCst),
+        2,
+        "second call asked again"
+    );
+    assert!(lp.list_grants(env.bot).is_empty(), "no grant is recorded");
+    assert!(lp.sh.grants.lock().this_chat.is_empty());
+}
+
+#[tokio::test]
+async fn always_ask_tool_is_still_denied_by_a_deny_policy() {
+    let env = setup();
+    let tool = ask_tool(None);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "sched_make", json!({"prompt": "p"}))]),
+        text("ok"),
+    ]);
+    let mut policy = Policy::approve_destructive();
+    policy
+        .categories
+        .insert(PermissionCategory::System, Rule::new(Level::Deny));
+    let lp = ask_loop(&env, &fake, &tool, policy);
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(tool.count.load(Ordering::SeqCst), 0);
+    assert!(
+        tool_messages(&fake.request(1))
+            .join("\n")
+            .contains("Permission denied")
+    );
+}
+
+#[tokio::test]
+async fn approval_event_carries_tool_details_and_bot_permission() {
+    let env = setup();
+    let tool = ask_tool(None);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "sched_make", json!({"prompt": "water the plants"}))]),
+        text("done"),
+    ]);
+    let lp = ask_loop(&env, &fake, &tool, Policy::approve_destructive());
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    let d = a.details.clone().expect("details on the card");
+    assert_eq!(d["kind"], "schedule");
+    assert_eq!(d["prompt"], "water the plants");
+    assert_eq!(d["bot_id"], env.bot.to_string(), "tool saw the calling bot");
+    assert_eq!(d["permission"]["level"], "ask_first");
+    assert_eq!(d["permission"]["ask"].as_array().unwrap().len(), 10);
+    lp.cancel(run).unwrap();
+}
+
+#[tokio::test]
+async fn a_vetoed_call_never_reaches_the_user() {
+    let env = setup();
+    let tool = ask_tool(Some("schedule limit reached (20)"));
+    let fake = Fake::new(vec![
+        calls(&[("c1", "sched_make", json!({"prompt": "p"}))]),
+        text("ok"),
+    ]);
+    let lp = ask_loop(&env, &fake, &tool, Policy::approve_destructive());
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(tool.count.load(Ordering::SeqCst), 0);
+    let msg = tool_messages(&fake.request(1)).join("\n");
+    assert!(msg.contains("schedule limit reached (20)"), "{msg}");
+    while let Ok(item) = rx.try_recv() {
+        assert!(
+            !matches!(item.envelope.event, Event::ApprovalNeeded(_)),
+            "no approval card for a vetoed call"
+        );
+    }
+}

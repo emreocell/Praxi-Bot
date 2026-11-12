@@ -461,6 +461,20 @@ pub fn register_email(
     }
 }
 
+/// Give bots the `schedule_*` tools (limits from `<data_dir>/schedule.toml`).
+/// Create / update / resume always ask the user; a failure only disables them.
+fn register_schedule_tools(data_dir: &Path, state: &AppState) {
+    let (limits, warnings) = daemon_api::load_schedule_limits(data_dir);
+    for w in warnings {
+        eprintln!("warning: {w}");
+    }
+    match state.enable_schedule_tools(limits) {
+        Ok(n) if n == builtin_tools::SCHEDULE_TOOL_NAMES.len() => {}
+        Ok(n) => eprintln!("warning: only {n} schedule tool(s) registered (name clash)"),
+        Err(e) => eprintln!("warning: schedule tools disabled: {e}"),
+    }
+}
+
 /// Filename of the optional web tools configuration in `<data_dir>`.
 pub const WEB_FILE: &str = "web.toml";
 
@@ -798,6 +812,7 @@ pub fn serve(
         cfg.allowed_origins.extend(parse_origins(&extra));
     }
     let state = AppState::new(agent, storage, cfg)?;
+    register_schedule_tools(data_dir, &state);
     if let Some(host) = host {
         state.set_provider_host(host);
     }
@@ -958,6 +973,29 @@ id = "unpriced"
 
     // SEC-02 (redaction half): production wiring masks stored secrets, the
     // daemon bearer token and the vault passphrase, and follows later changes.
+    #[test]
+    fn serve_wiring_registers_the_schedule_tools_even_with_a_bad_schedule_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("schedule.toml"), "max_per_bot = \"many\"").unwrap();
+        let storage = Arc::new(Storage::open(dir.path()).unwrap());
+        let agent = build_agent_with_redactor(
+            &storage,
+            Providers::unconfigured(),
+            dir.path(),
+            None,
+            production_redactor(&sources(None, None)),
+        );
+        let state =
+            AppState::new(agent.clone(), storage, DaemonConfig::new("daemon-token")).unwrap();
+        register_schedule_tools(dir.path(), &state);
+        let names = agent.tool_names();
+        for n in builtin_tools::SCHEDULE_TOOL_NAMES {
+            assert!(names.iter().any(|x| x == n), "{n} missing: {names:?}");
+        }
+        let create = agent.tool_registry().get("schedule_create").unwrap();
+        assert!(create.always_ask());
+    }
+
     #[test]
     fn production_redactor_masks_store_token_and_passphrase() {
         let store = Arc::new(MemoryStore::new());

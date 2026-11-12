@@ -108,7 +108,7 @@ impl BotPreset {
             "workflow_*",
         ];
         match self {
-            Self::General => v.extend(["fs_read", "fs_list", "fs_search", "web_*"]),
+            Self::General => v.extend(["fs_read", "fs_list", "fs_search", "web_*", "schedule_*"]),
             Self::Browser => v.extend(["web_*", "browser_*"]),
             Self::Desktop => v.extend(["desktop_*", "fs_*", "checkpoint_*"]),
         }
@@ -220,4 +220,17 @@ pub fn bot_config(
         "permissions": { "preset": perm.id() },
         "tools": { "allow": preset.tool_allow() },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_general_preset_offers_schedule_tools() {
+        assert!(BotPreset::General.tool_allow().contains(&"schedule_*"));
+        for p in [BotPreset::Browser, BotPreset::Desktop] {
+            assert!(!p.tool_allow().contains(&"schedule_*"), "{}", p.id());
+        }
+    }
 }

@@ -26,7 +26,11 @@ pub mod policy;
 pub use peer::{PeerIdentity, PeerRole, peer_router};
 mod routes;
 mod schedule;
+mod schedule_tools;
 mod sse;
+
+#[cfg(test)]
+mod schedule_tools_tests;
 
 #[cfg(test)]
 mod tests;
@@ -52,6 +56,7 @@ pub use error::ApiError;
 pub use mcp::{McpControl, McpControlError};
 pub use openapi::openapi_json;
 pub use policy::{PolicyLoadError, load_policy, validate_policy};
+pub use schedule_tools::{ScheduleLimits, load_schedule_limits};
 
 /// Default TCP port of `bot serve`.
 pub const DEFAULT_PORT: u16 = 47821;
@@ -323,6 +328,33 @@ impl AppState {
         });
         let _ = self.0.scheduler.set(Scheduler::start(store, exec));
         Ok(())
+    }
+
+    /// Register the `schedule_*` tools so a bot can manage its own schedules
+    /// (scoped to the calling bot; create / update / resume always ask the
+    /// user). Returns how many tools were registered. [`serve`]'s embedder
+    /// calls this once after [`AppState::new`].
+    ///
+    /// # Errors
+    /// The schedule store cannot be opened.
+    pub fn enable_schedule_tools(
+        &self,
+        limits: ScheduleLimits,
+    ) -> Result<usize, scheduler::SchedulerError> {
+        let host = Arc::new(schedule_tools::DaemonScheduleHost::new(
+            self.schedule_store()?,
+            self.storage_arc(),
+            self.user_id(),
+            self.0.schedule_events.clone(),
+            limits,
+        ));
+        let registry = self.0.agent.tool_registry();
+        Ok(
+            builtin_tools::schedule::tools(&(host as Arc<dyn builtin_tools::ScheduleHost>))
+                .into_iter()
+                .filter(|t| registry.register(Arc::clone(t)))
+                .count(),
+        )
     }
 
     /// Stop the scheduler (no new firings); running firings are left to the

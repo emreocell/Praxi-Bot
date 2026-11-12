@@ -382,3 +382,25 @@ test("route_decided is stored on the run; runText joins the reply", () => {
   s = feed(s, { type: "message_delta", run_id: RUN, text: "Started a new chat: x" });
   assert.equal(runText(s.runs[RUN]), "Started a new chat: x");
 });
+
+test("approval details reach the tool item for the card", () => {
+  let s = started();
+  s = feed(s, {
+    type: "tool_call_requested",
+    run_id: RUN,
+    call_id: "k9",
+    tool_name: "schedule_create",
+    input: {}
+  });
+  s = feed(s, {
+    type: "approval_needed",
+    run_id: RUN,
+    call_id: "k9",
+    tool_name: "schedule_create",
+    input: {},
+    summary: "schedule_create {}",
+    details: { kind: "schedule", action: "create", prompt: "p" }
+  });
+  const tool = s.runs[RUN].items.find((i) => i.kind === "tool") as ToolItem;
+  assert.deepEqual(tool.details, { kind: "schedule", action: "create", prompt: "p" });
+});

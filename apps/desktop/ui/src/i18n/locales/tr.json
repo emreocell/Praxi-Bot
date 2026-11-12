@@ -290,7 +290,25 @@
       "thisChat": "Bu sohbet",
       "always": "Her zaman",
       "deny": "Reddet",
-      "reasonPlaceholder": "Reddetme gerekçesi (isteğe bağlı)"
+      "reasonPlaceholder": "Reddetme gerekçesi (isteğe bağlı)",
+      "schedule": {
+        "title": {
+          "create": "Yinelenen görev oluşturulsun mu?",
+          "update": "Yinelenen görev değiştirilsin mi?",
+          "resume": "Yinelenen görev sürdürülsün mü?"
+        },
+        "prompt": "Her seferinde şu istemi çalıştırır:",
+        "next": "Sonraki çalışmalar:",
+        "permission": "Her çalışma bu botun izinlerini kullanır ({{level}}).",
+        "allowed": "Sormadan izin verilenler: {{list}}.",
+        "level": {
+          "full": "her şeye izin var",
+          "ask_first": "işlemden önce sorar",
+          "mixed": "kısmen izinli",
+          "read_only": "salt okunur"
+        },
+        "note": "Bu onay yalnızca bu değişikliği kapsar; her seferinde sorulur."
+      }
     },
     "question": {
       "title": "Bot soruyor",

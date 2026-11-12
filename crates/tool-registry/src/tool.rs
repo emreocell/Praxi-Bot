@@ -87,4 +87,27 @@ pub trait Tool: Send + Sync {
 
     /// Execute the tool with the given `input` and return its output.
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError>;
+
+    /// Structured facts an approval card should show for this exact call
+    /// (computed before the user is asked; carried on the `approval_needed`
+    /// event). `Ok(None)` (the default) means the generic card is enough.
+    ///
+    /// # Errors
+    /// The call is invalid and must not be offered for approval: the error
+    /// goes straight back to the model.
+    async fn approval_details(
+        &self,
+        _ctx: &ToolContext,
+        _input: &Value,
+    ) -> Result<Option<Value>, ToolError> {
+        Ok(None)
+    }
+
+    /// `true` when the call must always be confirmed by the user: a policy
+    /// that would allow it is raised to "ask", and neither "always allow"
+    /// grants (tool or category) nor "this chat" grants waive the ask. Only an
+    /// outright deny is stricter. For tools that delegate future authority.
+    fn always_ask(&self) -> bool {
+        false
+    }
 }

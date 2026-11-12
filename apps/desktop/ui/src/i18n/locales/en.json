@@ -290,7 +290,25 @@
       "thisChat": "This chat",
       "always": "Always",
       "deny": "Deny",
-      "reasonPlaceholder": "Reason for denying (optional)"
+      "reasonPlaceholder": "Reason for denying (optional)",
+      "schedule": {
+        "title": {
+          "create": "Create a recurring task?",
+          "update": "Change a recurring task?",
+          "resume": "Resume a recurring task?"
+        },
+        "prompt": "Runs this prompt each time:",
+        "next": "Next runs:",
+        "permission": "Each run uses this bot's permissions ({{level}}).",
+        "allowed": "Allowed without asking: {{list}}.",
+        "level": {
+          "full": "everything allowed",
+          "ask_first": "asks before acting",
+          "mixed": "partly allowed",
+          "read_only": "read-only"
+        },
+        "note": "This approval covers only this change; it is asked every time."
+      }
     },
     "question": {
       "title": "The bot asks",

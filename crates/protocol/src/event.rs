@@ -60,6 +60,10 @@ pub struct ApprovalNeeded {
     pub input: Value,
     /// A human-readable summary of what will happen.
     pub summary: String,
+    /// Structured facts the tool supplies for the approval card (for example
+    /// a schedule's prompt and next firing times), when it has any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
 }
 
 /// The user approved a pending tool call.
