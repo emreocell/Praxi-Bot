@@ -3117,6 +3117,30 @@ async fn a_release_whose_grant_was_revoked_meanwhile_does_not_resume_the_bot() {
     assert!(t.state.hub().takeover().is_some());
 }
 
+// ---- audit3 F7: Stop with nothing to override still pauses the bot
+#[tokio::test]
+async fn the_override_route_pauses_the_bot_even_with_no_takeover() {
+    let t = Test::new();
+    assert!(t.state.hub().takeover().is_none());
+    assert!(t.state.hub().latched().is_none());
+    let (status, v) = t
+        .call(None, Method::POST, "/v1/control/override", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(
+        t.state.hub().latched(),
+        Some(crate::dto::ControlMode::Paused),
+        "an acknowledged Stop left the bot running"
+    );
+    // It is the local app's own Stop: a granted peer cannot clear it.
+    assert_eq!(
+        t.call(Some("alice"), Method::POST, "/v1/control/release", None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+}
+
 // ---- audit3 F4: the effect of a partial batch is never coalesced away
 #[tokio::test]
 async fn a_partial_injection_outcome_is_audited_even_after_a_denial() {

@@ -1083,7 +1083,22 @@ pub(crate) async fn local_override(
     Extension(actor): Extension<Actor>,
 ) -> Result<Json<crate::dto::ControlStateDto>, ApiError> {
     require_local(&s, &actor, "override")?;
-    override_takeover(&s, &actor, Reason::LocalOverride).await?;
+    if override_takeover(&s, &actor, Reason::LocalOverride)
+        .await?
+        .is_none()
+    {
+        // Nothing to override (no takeover, or it ended a moment ago): the
+        // acknowledged Stop still pauses the bot, as the app's own pause.
+        s.hub()
+            .try_apply_state_as(crate::dto::ControlMode::Paused, false, true)
+            .map_err(|e| {
+                if e == "control persistence failed" {
+                    ApiError::unavailable(e)
+                } else {
+                    ApiError::conflict(e)
+                }
+            })?;
+    }
     Ok(Json(crate::routes::control_state_dto(&s, Some(&actor))))
 }
 
