@@ -5,7 +5,7 @@
 //! `UPDATE_OPENAPI=1 cargo test -p daemon-api openapi_snapshot`.
 
 use axum::Json;
-use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityRequirement, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
 use crate::{dto, email, email_routes, error, mcp, mcp_routes, routes, sse};
@@ -20,10 +20,44 @@ impl Modify for Security {
                 SecurityScheme::Http(
                     HttpBuilder::new()
                         .scheme(HttpAuthScheme::Bearer)
-                        .description(Some("Per-install token stored in `<data dir>/api-token`."))
+                        .description(Some("Low-privilege CLI token stored in `<data dir>/api-token`. Management routes require the separate per-launch memory-only UI bearer; desktop-only locally. The UI bearer is accepted only in Authorization headers, never query parameters."))
                         .build(),
                 ),
             );
+            c.add_security_scheme("management", SecurityScheme::Http(
+                HttpBuilder::new().scheme(HttpAuthScheme::Bearer)
+                    .description(Some("Per-launch desktop management credential. Memory and anonymous bootstrap pipe only; never the api-token file. Paired peers authenticate through their transport instead."))
+                    .build()));
+        }
+        // Keep the documented scope tied to the same declaration that builds
+        // the router. Changing a handler cannot silently omit its scope.
+        for (path, method, privilege, phone, desktop) in crate::ROUTE_PRIVILEGES {
+            let path = path.replace("{*name}", "{name}");
+            let Some(item) = openapi.paths.paths.get_mut(&path) else {
+                continue;
+            };
+            let operation = match *method {
+                "GET" => &mut item.get,
+                "POST" => &mut item.post,
+                "PUT" => &mut item.put,
+                "DELETE" => &mut item.delete,
+                _ => continue,
+            };
+            if let Some(operation) = operation {
+                operation.extensions.get_or_insert_with(utoipa::openapi::extensions::Extensions::default)
+                    .insert("x-praxi-peer-scopes".into(), serde_json::json!({"phone":format!("{phone:?}"),"desktop":format!("{desktop:?}")}));
+                operation.security = match privilege {
+                    crate::auth::Privilege::Public => None,
+                    crate::auth::Privilege::Cli => Some(vec![
+                        SecurityRequirement::new("bearer", Vec::<String>::new()),
+                        SecurityRequirement::new("management", Vec::<String>::new()),
+                    ]),
+                    crate::auth::Privilege::Management => Some(vec![SecurityRequirement::new(
+                        "management",
+                        Vec::<String>::new(),
+                    )]),
+                };
+            }
         }
     }
 }
@@ -37,10 +71,11 @@ impl Modify for Security {
         version = "1.0.0",
         description = "Local HTTP API of the bot daemon. Bind: 127.0.0.1 only. Host must be \
             loopback; a browser Origin must be an allowed desktop-app origin; all routes \
-            except GET /v1/health need `Authorization: Bearer <token>`."
+            except GET /v1/health and HMAC webhooks need `Authorization: Bearer <token>`. The disk token has CLI authority only; management, approvals, questions, email configuration and all control/view operations require the desktop per-launch memory-only bearer. Forbidden operations return 403 with migration guidance (ADR-0030)."
     ),
     paths(
         routes::health,
+        routes::isolation,
         routes::list_bots,
         routes::create_bot,
         routes::get_bot,
@@ -53,6 +88,7 @@ impl Modify for Security {
         routes::list_messages,
         routes::send_message,
         routes::list_approvals,
+        routes::approval_count,
         routes::decide_approval,
         routes::answer_question,
         routes::list_runs,
@@ -99,9 +135,9 @@ impl Modify for Security {
         events_doc,
     ),
     components(schemas(
-        sse::SseStatus, sse::Gap, dto::Health, dto::BotDto, dto::BotInput, dto::ChatDto, dto::CreateChat,
+        sse::SseStatus, sse::Gap, dto::IsolationStatus, dto::Health, dto::BotDto, dto::BotInput, dto::ChatDto, dto::CreateChat,
         dto::MessageDto, dto::Mode, dto::SendMessage, dto::DeliveryKind, dto::SendResponse,
-        dto::ApprovalDto, dto::Decision, dto::Scope, dto::DecideApproval,
+        dto::ApprovalCount, dto::ApprovalDto, dto::Decision, dto::Scope, dto::DecideApproval,
         dto::DecisionResponse, dto::RunDto, dto::UsageTotals, dto::BotUsage,
         dto::UsageSummary, dto::AnswerQuestion, dto::AnswerResponse, dto::GrantDto,
         dto::GrantTargetDto, dto::RevokeGrant, dto::EffectivePolicyDto,
@@ -135,10 +171,13 @@ pub struct ApiDoc;
 /// `seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without
 /// it the stream covers all runs: the SSE `id` is a daemon-wide, strictly
 /// increasing `gseq` (persisted) and `Last-Event-ID: <gseq>` replays every
-/// missed event of every run, in order, before going live.  Browsers cannot set
-/// headers on `EventSource`, so this route (and only this one) also accepts the
-/// API token as the `token` query parameter (Host / Origin checks still apply;
-/// the token is compared in constant time; beware that URLs may be logged).
+/// missed event of every run, in order, before going live. The desktop UI uses
+/// fetch streaming and Authorization/Last-Event-ID headers. Native `EventSource`
+/// cannot set headers; only this route accepts the low-privilege CLI token in
+/// `token` for legacy clients. Management credentials in query parameters are
+/// rejected. Low-privilege streams omit approval/question decisions; only local
+/// management receives `control_requested`. Filtering applies to live and replay.
+/// Host / Origin checks still apply; query URLs may be logged.
 ///
 /// The daemon-wide stream (no `run_id`) also carries `schedule_changed` events
 /// (`dto::ScheduleChanged`: `{"type":"schedule_changed","schedule_id","kind"}`,

@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use axum::extract::{Request, State};
+use axum::extract::{MatchedPath, Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -12,6 +12,106 @@ use crate::error::ApiError;
 
 /// File name of the token inside the data directory.
 pub const TOKEN_FILE_NAME: &str = "api-token";
+
+/// Authority required by a route; declared alongside its handler.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Privilege {
+    Public,
+    Cli,
+    Management,
+}
+
+/// Peer scope is mandatory in each route declaration. `HostManagement` is
+/// opt-in for a specifically authorized paired Desktop key, never for phones.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PeerScope {
+    Deny,
+    Allow,
+    HostManagement,
+}
+
+/// Ingress-created authority. Never inferred from request bodies or headers
+/// claiming to be a peer. This also scopes live and replayed SSE events.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Principal {
+    LocalCli,
+    LocalManagement,
+    Peer { host_management: bool },
+}
+
+impl Principal {
+    pub(crate) fn is_local_management(self) -> bool {
+        self == Self::LocalManagement
+    }
+    pub(crate) fn may_manage_host(self) -> bool {
+        matches!(
+            self,
+            Self::LocalManagement
+                | Self::Peer {
+                    host_management: true
+                }
+        )
+    }
+    pub(crate) fn may_receive_decisions(self) -> bool {
+        self != Self::LocalCli
+    }
+}
+
+pub(crate) type RouteRule = (&'static str, &'static str, Privilege, PeerScope, PeerScope);
+
+pub(crate) fn route_rule(req: &Request) -> Option<&'static RouteRule> {
+    let path = req.extensions().get::<MatchedPath>()?.as_str();
+    let method = if req.method() == Method::HEAD {
+        "GET"
+    } else {
+        req.method().as_str()
+    };
+    crate::ROUTE_PRIVILEGES
+        .iter()
+        .find(|(p, m, _, _, _)| *p == path && *m == method)
+}
+
+/// Random memory-only principal for this launch. Never persist it or pass it
+/// through environment variables or command-line arguments.
+///
+/// # Errors
+/// The OS random source is unavailable.
+pub fn launch_token() -> std::io::Result<String> {
+    use std::fmt::Write as _;
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).map_err(|e| std::io::Error::other(e.to_string()))?;
+    Ok(bytes.iter().fold(String::with_capacity(64), |mut out, b| {
+        let _ = write!(out, "{b:02x}");
+        out
+    }))
+}
+
+/// Consume the fixed-size bootstrap frame before any tool children start.
+/// Reading a frame rather than an environment variable avoids inherited secrets.
+///
+/// # Errors
+/// Missing, short or malformed bootstrap input. No fallback to disk authority.
+pub fn read_launch_token(reader: &mut impl std::io::Read) -> std::io::Result<String> {
+    let mut frame = [0u8; 65];
+    reader.read_exact(&mut frame)?;
+    let token = std::str::from_utf8(&frame[..64]).unwrap_or_default();
+    if frame[64] != b'\n' || !valid_token(token) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid UI bootstrap frame",
+        ));
+    }
+    Ok(token.to_owned())
+}
+
+/// Consume and seal the desktop's anonymous stdin channel before tools start.
+///
+/// # Errors
+/// Invalid input or inability to prevent descriptor inheritance. Startup fails.
+pub fn bootstrap_from_stdin() -> std::io::Result<String> {
+    process_guard::seal_bootstrap_stdin()?;
+    read_launch_token(&mut std::io::stdin().lock())
+}
 
 /// Path of the token file for a data directory.
 #[must_use]
@@ -285,7 +385,7 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
 
 /// Request guard, outermost layer: Host check, Origin check, CORS preflight,
 /// then bearer auth (except `GET /v1/health`).
-pub(crate) async fn guard(State(state): State<AppState>, req: Request, next: Next) -> Response {
+pub(crate) async fn guard(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     // DNS-rebinding protection: only loopback host names.
     let host_ok = req
         .headers()
@@ -309,8 +409,8 @@ pub(crate) async fn guard(State(state): State<AppState>, req: Request, next: Nex
     }
     // `GET /v1/health`, and the webhooks, which carry an HMAC of the body
     // instead of the bearer token (the route verifies it).
-    let public =
-        (req.method() == Method::GET && req.uri().path() == "/v1/health") || is_webhook_route(&req);
+    let required = route_rule(&req).map(|rule| rule.2);
+    let public = required == Some(Privilege::Public);
     if !public {
         let presented = match bearer(req.headers()) {
             Some(t) => Some(t),
@@ -320,16 +420,31 @@ pub(crate) async fn guard(State(state): State<AppState>, req: Request, next: Nex
             None if is_events_route(&req) => query_token(req.uri().query()),
             None => None,
         };
-        let ok = presented.is_some_and(|t| ct_eq(t.as_bytes(), state.token().as_bytes()));
-        if !ok {
+        // High authority is accepted ONLY in a header, never in a query URL.
+        // The on-disk token cannot be promoted by configuration equality.
+        let management = bearer(req.headers()).is_some_and(|t| {
+            state.management_token().is_some_and(|secret| {
+                !secret.is_empty()
+                    && secret != state.token()
+                    && ct_eq(t.as_bytes(), secret.as_bytes())
+            })
+        });
+        let cli = presented.is_some_and(|t| ct_eq(t.as_bytes(), state.token().as_bytes()));
+        if !cli && !management {
             return with_cors(ApiError::unauthorized().into_response(), origin, false);
         }
+        if required.is_none() || (required == Some(Privilege::Management) && !management) {
+            return with_cors(ApiError::forbidden(
+                "desktop-only operation: the api-token credential has no management, approval or control authority; use the desktop app (stop a manually started daemon and let the desktop start it), or an authorized paired device",
+            ).into_response(), origin, false);
+        }
+        req.extensions_mut().insert(if management {
+            Principal::LocalManagement
+        } else {
+            Principal::LocalCli
+        });
     }
     with_cors(next.run(req).await, origin, false)
-}
-
-fn is_webhook_route(req: &Request) -> bool {
-    req.method() == Method::POST && req.uri().path().starts_with("/v1/webhooks/")
 }
 
 fn is_events_route(req: &Request) -> bool {

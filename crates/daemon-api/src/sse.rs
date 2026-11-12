@@ -14,8 +14,11 @@
 //!   it the stream is live only.  A subscriber that lags behind the broadcast
 //!   buffer recovers the missed events from the index; nothing is skipped.
 //!
-//! A browser `EventSource` cannot set headers, so this route (and only this
-//! route) also accepts the API token as `?token=...` (see `auth`).
+//! The desktop uses fetch streaming with Authorization headers. Native
+//! `EventSource` cannot set headers; for legacy callers only this route accepts
+//! the low-privilege API token as `?token=...` (see `auth`). Decision/control
+//! visibility is enforced for both replay and live delivery; UI secrets are
+//! never accepted through a query.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
@@ -26,6 +29,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use agent_core::StreamItem;
+use axum::Extension;
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
@@ -861,10 +865,42 @@ fn to_sse(item: &StreamItem, scoped: bool) -> SseEvent {
         .unwrap_or_else(|_| SseEvent::default().comment("unserialisable event"))
 }
 
-fn event_stream(feed: Feed) -> impl Stream<Item = Result<SseEvent, Infallible>> {
-    stream::unfold(feed, |mut feed| async move {
-        let ev = match feed.next_item().await? {
-            Out::Run(item) => to_sse(&item, feed.scoped),
+// Exhaustive on purpose: adding an event requires an explicit visibility choice.
+fn event_visible(event: &Event, principal: crate::auth::Principal) -> bool {
+    match event {
+        Event::ControlRequested(_) => principal.is_local_management(),
+        Event::ApprovalNeeded(_)
+        | Event::ToolCallApproved(_)
+        | Event::ToolCallDenied(_)
+        | Event::QuestionAsked(_) => principal.may_receive_decisions(),
+        Event::RunStarted(_)
+        | Event::RunFinished(_)
+        | Event::MessageDelta(_)
+        | Event::ToolCallRequested(_)
+        | Event::ToolCallCompleted(_)
+        | Event::TodoUpdated(_)
+        | Event::ModelFallback(_)
+        | Event::RouteDecided(_)
+        | Event::WorkflowStepStarted(_)
+        | Event::WorkflowStepCompleted(_)
+        | Event::WorkflowDrift(_)
+        | Event::SubagentStarted(_)
+        | Event::SubagentFinished(_)
+        | Event::Error(_) => true,
+    }
+}
+
+fn event_stream(
+    feed: Feed,
+    principal: crate::auth::Principal,
+) -> impl Stream<Item = Result<SseEvent, Infallible>> {
+    stream::unfold(feed, move |mut feed| async move {
+        loop {
+            let ev = match feed.next_item().await? {
+            Out::Run(item) => {
+                if !event_visible(&item.envelope.event, principal) { continue; }
+                to_sse(&item, feed.scoped)
+            },
             Out::Schedule(change) => SseEvent::default()
                 .event("schedule_changed")
                 .json_data(&change)
@@ -885,13 +921,15 @@ fn event_stream(feed: Feed) -> impl Stream<Item = Result<SseEvent, Infallible>> 
                 .json_data(&change)
                 .unwrap_or_else(|_| SseEvent::default().comment("unserialisable event")),
         };
-        Some((Ok(ev), feed))
+            return Some((Ok(ev), feed));
+        }
     })
 }
 
 /// `GET /v1/events`.
 pub(crate) async fn events(
     State(state): State<AppState>,
+    Extension(principal): Extension<crate::auth::Principal>,
     Query(q): Query<EventsQuery>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -947,7 +985,8 @@ pub(crate) async fn events(
         data_dir: state.data_dir(),
         logs: Arc::default(),
         cancel: state.shutdown_token(),
-        _app: scoped_run.is_none().then(|| state.hub().subscribe()),
+        _app: (scoped_run.is_none() && principal.is_local_management())
+            .then(|| state.hub().subscribe()),
     };
     match cursor {
         Cursor::Run(run, last) => {
@@ -977,7 +1016,7 @@ pub(crate) async fn events(
             feed.delivered = feed.scan;
         }
     }
-    Ok(Sse::new(event_stream(feed)).keep_alive(KeepAlive::default()))
+    Ok(Sse::new(event_stream(feed, principal)).keep_alive(KeepAlive::default()))
 }
 
 /// Counters of the SSE machinery (authenticated, unlike `/v1/health`).
@@ -1004,6 +1043,75 @@ pub(crate) async fn status(State(state): State<AppState>) -> axum::Json<SseStatu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn live_and_replayed_control_requests_are_local_management_only() {
+        use crate::auth::Principal;
+        use futures::StreamExt as _;
+        for principal in [
+            Principal::LocalCli,
+            Principal::LocalManagement,
+            Principal::Peer {
+                host_management: false,
+            },
+            Principal::Peer {
+                host_management: true,
+            },
+        ] {
+            for scoped in [false, true] {
+                let (_dir, _storage, mut feed, _tx) = replay_fixture();
+                let run = RunId::new();
+                let control = Event::ControlRequested(protocol::event::ControlRequested {
+                    request_id: Uuid::now_v7(),
+                    run_id: run,
+                    bot_id: protocol::BotId::new(),
+                    rect: None,
+                    label: "PRIVATE_LOCAL_OVERLAY".into(),
+                    action: "click".into(),
+                });
+                let approval = Event::ApprovalNeeded(protocol::event::ApprovalNeeded {
+                    run_id: run,
+                    call_id: protocol::ToolCallId::new(),
+                    tool_name: "danger".into(),
+                    input: serde_json::json!({}),
+                    summary: "PRIVATE_APPROVAL".into(),
+                    details: None,
+                });
+                feed.scoped = scoped;
+                feed.run = Some(run);
+                feed.finished_in_log = true;
+                feed.done = !scoped;
+                for (seq, event) in [control, approval, msg(run, 2).event]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let item = StreamItem {
+                        gseq: seq as u64 + 1,
+                        run_id: run,
+                        envelope: Envelope::new(seq as u64, event),
+                    };
+                    if scoped {
+                        feed.backlog.push_back(item);
+                    } else {
+                        feed.pending.push_back(Out::Run(item));
+                    }
+                }
+                let events: Vec<_> = event_stream(feed, principal).collect().await;
+                let text = format!("{events:?}");
+                assert_eq!(
+                    text.contains("PRIVATE_LOCAL_OVERLAY"),
+                    principal.is_local_management(),
+                    "{principal:?} scoped={scoped}"
+                );
+                assert_eq!(
+                    text.contains("PRIVATE_APPROVAL"),
+                    principal.may_receive_decisions(),
+                    "{principal:?} scoped={scoped}"
+                );
+                assert!(text.contains("message_delta"));
+            }
+        }
+    }
 
     #[test]
     fn cursor_forms() {

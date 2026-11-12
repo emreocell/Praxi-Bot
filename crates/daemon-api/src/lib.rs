@@ -44,7 +44,6 @@ use std::time::{Duration, Instant};
 
 use agent_core::{AgentLoop, BotProfile, Providers};
 use axum::Router;
-use axum::routing::{get, post, put};
 use protocol::{BotId, ChatId, RunId, UserId};
 use provider_catalog::Catalog;
 use scheduler::{ScheduleStore, Scheduler};
@@ -75,10 +74,17 @@ pub const DEFAULT_ALLOWED_ORIGINS: &[&str] = &[
 ];
 
 /// Daemon settings.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DaemonConfig {
     /// Bearer token clients must present.
     pub token: String,
+    /// Per-launch, memory-only management bearer. Never load this from the token file.
+    pub management_token: Option<String>,
+    /// Explicit operator-authorized paired Desktop keys (public keys, not secrets).
+    /// Empty by default. Phone and Node roles cannot acquire host management.
+    pub peer_managers: std::collections::BTreeSet<String>,
+    /// The embedder verified its shell/MCP/CLI child environment wiring.
+    pub children_scrubbed: bool,
     /// Browser origins that may call the API (exact match).
     pub allowed_origins: Vec<String>,
     /// How long [`serve`] lets running tool steps finish on shutdown before
@@ -89,6 +95,15 @@ pub struct DaemonConfig {
     /// Most concurrent `GET /v1/events` streams (each holds replay buffers);
     /// further requests get `503` until one closes.
     pub max_sse_subscribers: usize,
+}
+
+impl std::fmt::Debug for DaemonConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DaemonConfig")
+            .field("management_enabled", &self.management_token.is_some())
+            .field("allowed_origins", &self.allowed_origins)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Default [`DaemonConfig::max_sse_subscribers`].
@@ -103,6 +118,9 @@ impl DaemonConfig {
     pub fn new(token: impl Into<String>) -> Self {
         Self {
             token: token.into(),
+            management_token: None,
+            peer_managers: std::collections::BTreeSet::new(),
+            children_scrubbed: false,
             allowed_origins: DEFAULT_ALLOWED_ORIGINS
                 .iter()
                 .map(ToString::to_string)
@@ -440,6 +458,15 @@ impl AppState {
     pub(crate) fn token(&self) -> &str {
         &self.0.cfg.token
     }
+    pub(crate) fn management_token(&self) -> Option<&str> {
+        self.0.cfg.management_token.as_deref()
+    }
+    pub(crate) fn peer_may_manage(&self, key: &str) -> bool {
+        self.0.cfg.peer_managers.contains(key)
+    }
+    pub(crate) fn children_scrubbed(&self) -> bool {
+        self.0.cfg.children_scrubbed
+    }
     pub(crate) fn origin_allowed(&self, origin: &str) -> bool {
         self.0.cfg.allowed_origins.iter().any(|o| o == origin)
     }
@@ -518,98 +545,73 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
-fn api_routes() -> Router<AppState> {
-    use email_routes as e;
-    use mcp_routes as m;
-    use routes as r;
-    Router::new()
-        .route("/v1/health", get(r::health))
-        .route("/v1/openapi.json", get(openapi::serve_openapi))
-        .route("/v1/bots", get(r::list_bots).post(r::create_bot))
-        .route(
-            "/v1/bots/{id}/grants",
-            get(r::list_grants).delete(r::revoke_grant),
-        )
-        .route(
-            "/v1/bots/{id}",
-            get(r::get_bot).put(r::update_bot).delete(r::delete_bot),
-        )
-        .route("/v1/chats", get(r::list_chats).post(r::create_chat))
-        .route(
-            "/v1/chats/{id}/messages",
-            get(r::list_messages).post(r::send_message),
-        )
-        .route("/v1/approvals", get(r::list_approvals))
-        .route("/v1/approvals/{call_id}", post(r::decide_approval))
-        .route("/v1/questions/{call_id}", post(r::answer_question))
-        .route("/v1/runs", get(r::list_runs))
-        .route("/v1/runs/{id}", get(r::get_run))
-        .route("/v1/runs/{id}/cancel", post(r::cancel_run))
-        .route("/v1/runs/{id}/resume", post(r::resume_run))
-        .route("/v1/runs/{id}/remember", post(r::remember_run))
-        .route("/v1/usage", get(r::usage))
-        .route(
-            "/v1/control/state",
-            get(r::get_control_state).put(r::put_control_state),
-        )
-        .route("/v1/control/release", post(r::release_control))
-        .route("/v1/control/{request_id}", post(r::decide_control))
-        .route("/v1/events/latest", get(r::latest_cursor))
-        .route("/v1/events/status", get(sse::status))
-        .route("/v1/policy", get(r::get_policy).put(r::put_policy))
-        .route("/v1/providers", get(r::list_providers))
-        .route("/v1/providers/detected", get(r::detect_providers))
-        .route("/v1/providers/reload", post(r::reload_providers))
-        .route(
-            "/v1/schedules",
-            get(r::list_schedules).post(r::create_schedule),
-        )
-        .route("/v1/schedules/parse", post(r::parse_schedule))
-        .route(
-            "/v1/schedules/{id}",
-            get(r::get_schedule)
-                .put(r::update_schedule)
-                .delete(r::delete_schedule),
-        )
-        .route("/v1/schedules/{id}/run-now", post(r::run_schedule_now))
-        .route(
-            "/v1/webhooks/{id}",
-            post(r::webhook).layer(axum::extract::DefaultBodyLimit::max(r::WEBHOOK_MAX_BODY)),
-        )
-        .route("/v1/channels", get(r::list_channels))
-        .route(
-            "/v1/channels/telegram/pair-code",
-            post(r::telegram_pair_code),
-        )
-        .route(
-            "/v1/mcp/servers",
-            get(m::list_mcp_servers).post(m::create_mcp_server),
-        )
-        .route(
-            "/v1/mcp/servers/{name}",
-            put(m::update_mcp_server).delete(m::delete_mcp_server),
-        )
-        .route(
-            "/v1/mcp/servers/{name}/reconnect",
-            post(m::reconnect_mcp_server),
-        )
-        .route("/v1/mcp/servers/{name}/tools", get(m::list_mcp_tools))
-        .route("/v1/mcp/catalog", get(m::mcp_catalog))
-        .route(
-            "/v1/email/accounts",
-            get(e::list_email_accounts).post(e::create_email_account),
-        )
-        .route(
-            "/v1/email/accounts/{name}",
-            put(e::update_email_account).delete(e::delete_email_account),
-        )
-        .route(
-            "/v1/email/accounts/{name}/test",
-            post(e::test_email_account),
-        )
-        .route("/v1/email/test", post(e::test_email_draft))
-        .route("/v1/secrets/{*name}", post(m::set_secret))
-        .route("/v1/events", get(sse::events))
+// This declaration constructs BOTH the router and its authority registry. Adding a
+// method without a privilege is a compile error. Unknown routes fail closed.
+macro_rules! classified_routes {
+    ($($path:literal => [$($method:ident: $privilege:ident / $phone:ident / $desktop:ident => $handler:path),+]
+        $(; limit = $limit:expr)?),+ $(,)?) => {
+        pub(crate) const ROUTE_PRIVILEGES: &[auth::RouteRule] = &[
+            $($(($path, stringify!($method), auth::Privilege::$privilege, auth::PeerScope::$phone, auth::PeerScope::$desktop),)+)+
+        ];
+        fn api_routes() -> Router<AppState> {
+            use email_routes as e;
+            use mcp_routes as m;
+            use routes as r;
+            Router::new()$(.route($path,
+                axum::routing::MethodRouter::new()
+                    $(.on(axum::routing::MethodFilter::$method, $handler))+
+                    $(.layer(axum::extract::DefaultBodyLimit::max($limit)))?
+            ))+
+        }
+    };
+}
+
+classified_routes! {
+    "/v1/health" => [GET: Public / Allow / Allow => r::health],
+    "/v1/isolation" => [GET: Cli / Allow / Allow => r::isolation],
+    "/v1/openapi.json" => [GET: Cli / Allow / Allow => openapi::serve_openapi],
+    "/v1/bots" => [GET: Cli / Allow / Allow => r::list_bots, POST: Management / Deny / HostManagement => r::create_bot],
+    "/v1/bots/{id}/grants" => [GET: Cli / Allow / Allow => r::list_grants, DELETE: Management / Deny / HostManagement => r::revoke_grant],
+    "/v1/bots/{id}" => [GET: Cli / Allow / Allow => r::get_bot, PUT: Management / Deny / HostManagement => r::update_bot, DELETE: Management / Deny / HostManagement => r::delete_bot],
+    "/v1/chats" => [GET: Cli / Allow / Allow => r::list_chats, POST: Cli / Allow / Allow => r::create_chat],
+    "/v1/chats/{id}/messages" => [GET: Cli / Allow / Allow => r::list_messages, POST: Cli / Allow / Allow => r::send_message],
+    "/v1/approvals/count" => [GET: Cli / Allow / Allow => r::approval_count],
+    "/v1/approvals" => [GET: Management / Allow / Allow => r::list_approvals],
+    "/v1/approvals/{call_id}" => [POST: Management / Allow / Allow => r::decide_approval],
+    "/v1/questions/{call_id}" => [POST: Management / Allow / Allow => r::answer_question],
+    "/v1/runs" => [GET: Cli / Allow / Allow => r::list_runs],
+    "/v1/runs/{id}" => [GET: Cli / Allow / Allow => r::get_run],
+    "/v1/runs/{id}/cancel" => [POST: Cli / Allow / Allow => r::cancel_run],
+    "/v1/runs/{id}/resume" => [POST: Cli / Allow / Allow => r::resume_run],
+    "/v1/runs/{id}/remember" => [POST: Management / Deny / HostManagement => r::remember_run],
+    "/v1/usage" => [GET: Cli / Allow / Allow => r::usage],
+    "/v1/control/state" => [GET: Management / Deny / HostManagement => r::get_control_state, PUT: Management / Deny / HostManagement => r::put_control_state],
+    "/v1/control/release" => [POST: Management / Deny / HostManagement => r::release_control],
+    "/v1/control/{request_id}" => [POST: Management / Deny / Deny => r::decide_control],
+    "/v1/events/latest" => [GET: Cli / Allow / Allow => r::latest_cursor],
+    "/v1/events/status" => [GET: Cli / Allow / Allow => sse::status],
+    "/v1/policy" => [GET: Cli / Allow / Allow => r::get_policy, PUT: Management / Deny / HostManagement => r::put_policy],
+    "/v1/providers" => [GET: Cli / Allow / Allow => r::list_providers],
+    "/v1/providers/detected" => [GET: Management / Deny / HostManagement => r::detect_providers],
+    "/v1/providers/reload" => [POST: Management / Deny / HostManagement => r::reload_providers],
+    "/v1/schedules" => [GET: Cli / Allow / Allow => r::list_schedules, POST: Management / Deny / HostManagement => r::create_schedule],
+    "/v1/schedules/parse" => [POST: Cli / Allow / Allow => r::parse_schedule],
+    "/v1/schedules/{id}" => [GET: Cli / Allow / Allow => r::get_schedule, PUT: Management / Deny / HostManagement => r::update_schedule, DELETE: Management / Deny / HostManagement => r::delete_schedule],
+    "/v1/schedules/{id}/run-now" => [POST: Management / Deny / HostManagement => r::run_schedule_now],
+    "/v1/webhooks/{id}" => [POST: Public / Allow / Allow => r::webhook]; limit = r::WEBHOOK_MAX_BODY,
+    "/v1/channels" => [GET: Cli / Allow / Allow => r::list_channels],
+    "/v1/channels/telegram/pair-code" => [POST: Management / Deny / HostManagement => r::telegram_pair_code],
+    "/v1/mcp/servers" => [GET: Cli / Allow / Allow => m::list_mcp_servers, POST: Management / Deny / HostManagement => m::create_mcp_server],
+    "/v1/mcp/servers/{name}" => [PUT: Management / Deny / HostManagement => m::update_mcp_server, DELETE: Management / Deny / HostManagement => m::delete_mcp_server],
+    "/v1/mcp/servers/{name}/reconnect" => [POST: Management / Deny / HostManagement => m::reconnect_mcp_server],
+    "/v1/mcp/servers/{name}/tools" => [GET: Cli / Allow / Allow => m::list_mcp_tools],
+    "/v1/mcp/catalog" => [GET: Cli / Allow / Allow => m::mcp_catalog],
+    "/v1/email/accounts" => [GET: Management / Deny / HostManagement => e::list_email_accounts, POST: Management / Deny / HostManagement => e::create_email_account],
+    "/v1/email/accounts/{name}" => [PUT: Management / Deny / HostManagement => e::update_email_account, DELETE: Management / Deny / HostManagement => e::delete_email_account],
+    "/v1/email/accounts/{name}/test" => [POST: Management / Deny / HostManagement => e::test_email_account],
+    "/v1/email/test" => [POST: Management / Deny / HostManagement => e::test_email_draft],
+    "/v1/secrets/{*name}" => [POST: Management / Deny / HostManagement => m::set_secret],
+    "/v1/events" => [GET: Cli / Allow / Allow => sse::events],
 }
 
 /// Serve the API on `listener` until `shutdown` completes.

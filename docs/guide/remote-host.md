@@ -353,6 +353,46 @@ is a short launch smoke test, not a representative chat workload measurement.
 
 ## Update, logs, uninstall
 
+### Management after token isolation (ADR-0030)
+
+The disk `api-token` supports status/list/chat operations. It no longer grants
+approval, configuration or control authority. A headless service can explicitly
+authorize an **already-paired Desktop** public key:
+
+```sh
+bot serve --host --peer --management-peer <paired-desktop-public-key>
+```
+
+Use the same arguments in the service's `ExecStart` or Windows autostart command.
+Repeat `--management-peer` for multiple managers. These are public keys, not
+credentials. Pairing and the Desktop role alone do not grant host management;
+Phone/Node/Host keys cannot receive this privilege. Remote Desktop API management
+continues over the authenticated peer transport, including the CLI's existing
+`--remote` connection. Local overlay proceed/refuse remains local-management-only.
+
+For a custom trusted launcher, `--management-stdin` consumes exactly 64 hex
+characters encoding a fresh 256-bit credential, followed by LF, from an inherited
+pipe/socket. Regular-file stdin is rejected before reading. The legacy desktop
+option `--ui-bootstrap-stdin` remains an alias. The launcher must protect its own
+memory and deliver the capability to its management client through protected IPC;
+do not put the capability in argv, environment, URLs or same-user-readable files.
+There is no fallback to management authority from the disk token.
+
+A systemd `LoadCredential` file readable by the daemon UID is also readable by bot
+children of that UID. Redirecting it, or piping `cat` from such a file, does not
+solve this problem. A distinct privileged supervisor may generate/read a secret
+and pipe it without exposing its source to the bot UID. This PR does not ship a
+general systemd/terminal credential broker. Without a trusted bootstrap client,
+local high-privilege CLI operations require the desktop; error messages explain
+the migration. Low-privilege CLI operations remain available.
+
+First-time headless peer provisioning is not implemented here: there is no new
+generic invite/pair CLI command. Provision pairing through an existing trusted
+pairing integration or the desktop first. The explicit-key path supports
+already-paired remote desktops; a completely new unattended installation still
+needs a secure initial-pairing flow. `bot doctor` reports observed safeguards and
+warns that full child sandboxing remains incomplete.
+
 ```sh
 sudo ./scripts/install-linux.sh --version v0.1.0 --file ./praxi-linux-aarch64.tar.gz   # update
 # an existing praxi-xvfb unit and DISPLAY are kept

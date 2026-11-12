@@ -19,6 +19,28 @@ pub struct Health {
     pub uptime_secs: u64,
 }
 
+/// Observed daemon isolation state; never contains credentials.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[allow(clippy::struct_excessive_bools)] // independent observed safeguards, not a state machine
+pub struct IsolationStatus {
+    /// OS of the running daemon (not the CLI client).
+    pub platform: String,
+    /// Active native guard, or an explicit inactive/unsupported description.
+    pub memory_guard_kind: String,
+    pub privilege_split: bool,
+    pub children_scrubbed: bool,
+    pub memory_guard: bool,
+    pub no_new_privs: bool,
+    /// Praxi does not yet provide a full restricted-token/namespace sandbox.
+    pub os_sandbox: bool,
+}
+
+/// Low-privilege status information, without approval IDs or arguments.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ApprovalCount {
+    pub pending: u64,
+}
+
 /// A bot.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct BotDto {

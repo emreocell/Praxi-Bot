@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Praxi-Bot daemon API",
-    "description": "Local HTTP API of the bot daemon. Bind: 127.0.0.1 only. Host must be loopback; a browser Origin must be an allowed desktop-app origin; all routes except GET /v1/health need `Authorization: Bearer <token>`.",
+    "description": "Local HTTP API of the bot daemon. Bind: 127.0.0.1 only. Host must be loopback; a browser Origin must be an allowed desktop-app origin; all routes except GET /v1/health and HMAC webhooks need `Authorization: Bearer <token>`. The disk token has CLI authority only; management, approvals, questions, email configuration and all control/view operations require the desktop per-launch memory-only bearer. Forbidden operations return 403 with migration guidance (ADR-0030).",
     "license": {
       "name": "Apache-2.0",
       "identifier": "Apache-2.0"
@@ -46,9 +46,46 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
+      }
+    },
+    "/v1/approvals/count": {
+      "get": {
+        "tags": [
+          "approvals"
+        ],
+        "summary": "Count pending approvals without disclosing decision IDs or payloads.",
+        "operationId": "approval_count",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalCount"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "management": []
+          }
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       }
     },
     "/v1/approvals/{call_id}": {
@@ -104,9 +141,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       }
     },
     "/v1/bots": {
@@ -144,8 +185,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       },
       "post": {
         "tags": [
@@ -197,9 +245,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/bots/{id}": {
@@ -246,8 +298,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       },
       "put": {
         "tags": [
@@ -311,9 +370,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       },
       "delete": {
         "tags": [
@@ -360,9 +423,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/bots/{id}/grants": {
@@ -412,8 +479,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       },
       "delete": {
         "tags": [
@@ -470,9 +544,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/channels": {
@@ -500,8 +578,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       }
     },
     "/v1/channels/telegram/pair-code": {
@@ -545,9 +630,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/chats": {
@@ -575,8 +664,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       },
       "post": {
         "tags": [
@@ -619,8 +715,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       }
     },
     "/v1/chats/{id}/messages": {
@@ -670,8 +773,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       },
       "post": {
         "tags": [
@@ -746,8 +856,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       }
     },
     "/v1/control/release": {
@@ -771,9 +888,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/control/state": {
@@ -797,9 +918,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       },
       "put": {
         "tags": [
@@ -841,9 +966,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/control/{request_id}": {
@@ -899,9 +1028,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Deny",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/email/accounts": {
@@ -938,9 +1071,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       },
       "post": {
         "tags": [
@@ -1022,9 +1159,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/email/accounts/{name}": {
@@ -1109,9 +1250,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       },
       "delete": {
         "tags": [
@@ -1186,9 +1331,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/email/accounts/{name}/test": {
@@ -1253,9 +1402,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/email/test": {
@@ -1329,9 +1482,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/events": {
@@ -1340,7 +1497,7 @@
           "events"
         ],
         "summary": "Documentation stub for the SSE route (the handler lives in `sse.rs`).",
-        "description": "Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the\nSSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local\n`seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without\nit the stream covers all runs: the SSE `id` is a daemon-wide, strictly\nincreasing `gseq` (persisted) and `Last-Event-ID: <gseq>` replays every\nmissed event of every run, in order, before going live.  Browsers cannot set\nheaders on `EventSource`, so this route (and only this one) also accepts the\nAPI token as the `token` query parameter (Host / Origin checks still apply;\nthe token is compared in constant time; beware that URLs may be logged).\n\nThe daemon-wide stream (no `run_id`) also carries `schedule_changed` events\n(`dto::ScheduleChanged`: `{\"type\":\"schedule_changed\",\"schedule_id\",\"kind\"}`,\nkind `created` / `updated` / `toggled` / `deleted`) when a schedule is changed\nthrough the API.  They have no SSE `id`, are not replayed and are not\nenvelopes: treat them as a hint to refetch `/v1/schedules`.\n\nA replay gap is explicit: `event: gap` has an `id` equal to `to_gseq` and\ndata `{from_gseq, to_gseq, run_id, reason}`; reason is `log_line_missing` or\n`log_unreadable`. It is audited before the cursor passes the missing row.\n`/v1/events/status.sse_gaps_total` (authenticated) counts these notifications since daemon startup.\nAfter three consecutive replay failures (or live-buffer overflow),\n`event: error` carries `{code: \"replay_unavailable\", last_event_id}` and the\nstream closes. This error has no `id`; reconnect with the last received ID.\nRetry delays start at 250 ms and double up to 5 s. Live buffering is limited\nto 1000 events and 4 MiB per subscriber; replay chunks hold at most 2 MiB of serialized events (a single larger event closes the stream with `replay_unavailable`), and at most `max_sse_subscribers` streams (default 16) may be open: further requests get `503`. The desktop currently ignores unknown\nevent names; card 144 can surface gap/error notifications without changing\nthe ordering or cursor contract.\n\nIt likewise carries `mcp_server_changed` events (`mcp::McpServerChanged`:\n`{\"type\":\"mcp_server_changed\",\"name\",\"status\"}`) when an MCP server is\nadded, updated, removed or changes status (connecting / connected / error /\nquarantined ...); same rules: a hint to refetch `/v1/mcp/servers`.",
+        "description": "Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the\nSSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local\n`seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without\nit the stream covers all runs: the SSE `id` is a daemon-wide, strictly\nincreasing `gseq` (persisted) and `Last-Event-ID: <gseq>` replays every\nmissed event of every run, in order, before going live. The desktop UI uses\nfetch streaming and Authorization/Last-Event-ID headers. Native `EventSource`\ncannot set headers; only this route accepts the low-privilege CLI token in\n`token` for legacy clients. Management credentials in query parameters are\nrejected. Low-privilege streams omit approval/question decisions; only local\nmanagement receives `control_requested`. Filtering applies to live and replay.\nHost / Origin checks still apply; query URLs may be logged.\n\nThe daemon-wide stream (no `run_id`) also carries `schedule_changed` events\n(`dto::ScheduleChanged`: `{\"type\":\"schedule_changed\",\"schedule_id\",\"kind\"}`,\nkind `created` / `updated` / `toggled` / `deleted`) when a schedule is changed\nthrough the API.  They have no SSE `id`, are not replayed and are not\nenvelopes: treat them as a hint to refetch `/v1/schedules`.\n\nA replay gap is explicit: `event: gap` has an `id` equal to `to_gseq` and\ndata `{from_gseq, to_gseq, run_id, reason}`; reason is `log_line_missing` or\n`log_unreadable`. It is audited before the cursor passes the missing row.\n`/v1/events/status.sse_gaps_total` (authenticated) counts these notifications since daemon startup.\nAfter three consecutive replay failures (or live-buffer overflow),\n`event: error` carries `{code: \"replay_unavailable\", last_event_id}` and the\nstream closes. This error has no `id`; reconnect with the last received ID.\nRetry delays start at 250 ms and double up to 5 s. Live buffering is limited\nto 1000 events and 4 MiB per subscriber; replay chunks hold at most 2 MiB of serialized events (a single larger event closes the stream with `replay_unavailable`), and at most `max_sse_subscribers` streams (default 16) may be open: further requests get `503`. The desktop currently ignores unknown\nevent names; card 144 can surface gap/error notifications without changing\nthe ordering or cursor contract.\n\nIt likewise carries `mcp_server_changed` events (`mcp::McpServerChanged`:\n`{\"type\":\"mcp_server_changed\",\"name\",\"status\"}`) when an MCP server is\nadded, updated, removed or changes status (connecting / connected / error /\nquarantined ...); same rules: a hint to refetch `/v1/mcp/servers`.",
         "operationId": "events_doc",
         "parameters": [
           {
@@ -1400,8 +1557,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       }
     },
     "/v1/events/latest": {
@@ -1426,8 +1590,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       }
     },
     "/v1/events/status": {
@@ -1451,8 +1622,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       }
     },
     "/v1/health": {
@@ -1473,6 +1651,43 @@
               }
             }
           }
+        },
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
+      }
+    },
+    "/v1/isolation": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Isolation observations, accessible with the low-privilege CLI bearer.",
+        "operationId": "isolation",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IsolationStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "management": []
+          }
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
         }
       }
     },
@@ -1511,8 +1726,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       }
     },
     "/v1/mcp/servers": {
@@ -1550,8 +1772,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       },
       "post": {
         "tags": [
@@ -1613,9 +1842,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/mcp/servers/{name}": {
@@ -1690,9 +1923,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       },
       "delete": {
         "tags": [
@@ -1738,9 +1975,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/mcp/servers/{name}/reconnect": {
@@ -1795,9 +2036,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/mcp/servers/{name}/tools": {
@@ -1856,8 +2101,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       }
     },
     "/v1/policy": {
@@ -1882,8 +2134,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       },
       "put": {
         "tags": [
@@ -1925,9 +2184,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/providers": {
@@ -1952,8 +2215,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       }
     },
     "/v1/providers/detected": {
@@ -1994,9 +2264,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/providers/reload": {
@@ -2040,9 +2314,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/questions/{call_id}": {
@@ -2098,9 +2376,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       }
     },
     "/v1/runs": {
@@ -2128,8 +2410,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       }
     },
     "/v1/runs/{id}": {
@@ -2176,8 +2465,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       }
     },
     "/v1/runs/{id}/cancel": {
@@ -2234,8 +2530,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       }
     },
     "/v1/runs/{id}/remember": {
@@ -2291,9 +2594,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/runs/{id}/resume": {
@@ -2350,8 +2657,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       }
     },
     "/v1/schedules": {
@@ -2379,8 +2693,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       },
       "post": {
         "tags": [
@@ -2432,9 +2753,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/schedules/parse": {
@@ -2479,8 +2804,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       }
     },
     "/v1/schedules/{id}": {
@@ -2527,8 +2859,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       },
       "put": {
         "tags": [
@@ -2592,9 +2931,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       },
       "delete": {
         "tags": [
@@ -2631,9 +2974,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/schedules/{id}/run-now": {
@@ -2699,9 +3046,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/secrets/{name}": {
@@ -2759,9 +3110,13 @@
         },
         "security": [
           {
-            "bearer": []
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "HostManagement",
+          "phone": "Deny"
+        }
       }
     },
     "/v1/usage": {
@@ -2798,8 +3153,15 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "management": []
           }
-        ]
+        ],
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
+        }
       }
     },
     "/v1/webhooks/{id}": {
@@ -2894,6 +3256,10 @@
               }
             }
           }
+        },
+        "x-praxi-peer-scopes": {
+          "desktop": "Allow",
+          "phone": "Allow"
         }
       }
     }
@@ -2943,6 +3309,20 @@
             "type": "string",
             "format": "uuid",
             "description": "Tool call id of the question card."
+          }
+        }
+      },
+      "ApprovalCount": {
+        "type": "object",
+        "description": "Low-privilege status information, without approval IDs or arguments.",
+        "required": [
+          "pending"
+        ],
+        "properties": {
+          "pending": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -4068,6 +4448,45 @@
           "version": {
             "type": "string",
             "description": "Daemon crate version."
+          }
+        }
+      },
+      "IsolationStatus": {
+        "type": "object",
+        "description": "Observed daemon isolation state; never contains credentials.",
+        "required": [
+          "platform",
+          "memory_guard_kind",
+          "privilege_split",
+          "children_scrubbed",
+          "memory_guard",
+          "no_new_privs",
+          "os_sandbox"
+        ],
+        "properties": {
+          "children_scrubbed": {
+            "type": "boolean"
+          },
+          "memory_guard": {
+            "type": "boolean"
+          },
+          "memory_guard_kind": {
+            "type": "string",
+            "description": "Active native guard, or an explicit inactive/unsupported description."
+          },
+          "no_new_privs": {
+            "type": "boolean"
+          },
+          "os_sandbox": {
+            "type": "boolean",
+            "description": "Praxi does not yet provide a full restricted-token/namespace sandbox."
+          },
+          "platform": {
+            "type": "string",
+            "description": "OS of the running daemon (not the CLI client)."
+          },
+          "privilege_split": {
+            "type": "boolean"
           }
         }
       },
@@ -5519,7 +5938,12 @@
       "bearer": {
         "type": "http",
         "scheme": "bearer",
-        "description": "Per-install token stored in `<data dir>/api-token`."
+        "description": "Low-privilege CLI token stored in `<data dir>/api-token`. Management routes require the separate per-launch memory-only UI bearer; desktop-only locally. The UI bearer is accepted only in Authorization headers, never query parameters."
+      },
+      "management": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Per-launch desktop management credential. Memory and anonymous bootstrap pipe only; never the api-token file. Paired peers authenticate through their transport instead."
       }
     }
   },

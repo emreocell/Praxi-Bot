@@ -824,8 +824,12 @@ const CREDENTIAL_NAMES: &[&str] = &[
 /// is not detected. These tools cannot create a hard link; a second directory
 /// entry for the same file is a known limitation of the name denylist.
 fn name_is_credential(name: &str) -> bool {
-    let n = name.trim_end_matches([' ', '.']).to_ascii_lowercase();
-    n == ".env" || n.starts_with(".env.") || CREDENTIAL_NAMES.contains(&n.as_str())
+    let n = canonical_name(name);
+    n == ".env"
+        || n.starts_with(".env.")
+        || CREDENTIAL_NAMES
+            .iter()
+            .any(|base| sensitive_file_name(&n, base))
 }
 
 fn is_protected(path: &Path, data_dir: &Path) -> bool {
@@ -846,13 +850,101 @@ fn under_data_sensitive(path: &Path, data_dir: &Path) -> bool {
     if p.len() <= d.len() || p[..d.len()] != d[..] {
         return false;
     }
-    let rel = &p[d.len()..];
+    // Windows resolves a trailing dot or space and `:stream` / `::$DATA` to the
+    // same file, so names are compared canonically (on every platform: a
+    // lexical match is cheap and conservative).
+    let rel: Vec<String> = p[d.len()..]
+        .iter()
+        .map(|part| canonical_name(part))
+        .collect();
     let Some(base) = rel.last().map(String::as_str) else {
         return false;
     };
-    base == "devices.json"
+    // Directly under the data dir only: these names are ordinary elsewhere.
+    sensitive_file_name(base, DEVICE_LIST_FILE)
         || base == "peer-node"
         || rel.iter().any(|s| s == "vault" || s == "secrets")
+        || rel
+            .first()
+            .is_some_and(|first| DAEMON_STATE_DIRS.contains(&first.as_str()))
+        || (rel.len() == 1 && daemon_state_name(base))
+}
+
+/// Compare-form of one path component: no `:stream` suffix, no trailing dots or
+/// spaces, lower case.
+fn canonical_name(part: &str) -> String {
+    let base = part.split(':').next().unwrap_or(part);
+    base.trim_end_matches([' ', '.']).to_ascii_lowercase()
+}
+
+/// Directories under the data dir whose contents grant authority or are the
+/// daemon's own records, so the bot's file tools never touch them:
+/// `peer` (pairing keys and device list), `bots` and `profiles` (bot profiles
+/// and their policies), `runs` (the event logs the UI and replay trust).
+/// Deliberately NOT protected, with the reason: `skills` and `workflows`
+/// (the bot authors them on purpose), `checkpoints` (the file tools' own undo
+/// store), `files`, `spill` and `screenshots` (bot output), logs (no authority).
+const DAEMON_STATE_DIRS: [&str; 7] = [
+    "peer",
+    "peer-node",
+    "vault",
+    "secrets",
+    "bots",
+    "profiles",
+    "runs",
+];
+const DEVICE_LIST_FILE: &str = "devices.json";
+
+/// The daemon's own state files directly under the data dir, each one a file
+/// that grants authority or forges history if tampered with:
+/// - `bot.db`, `schedules.db`, `memory.db` (+ `-wal`/`-shm`/`-journal`):
+///   chats, approvals, audit, schedules that run unattended, memory.
+/// - `control-latch.json` (the takeover latch and its release journal) and
+///   `policy.json` (the global permission policy).
+/// - `host.toml` (leader/epoch), `config.toml` (peer networking), `mcp.toml`
+///   (servers the daemon launches), `providers.toml` (where model traffic
+///   goes), `web.toml` (web tool limits).
+/// - `telegram_state.json` and `telegram-inbox.jsonl` (which chats may command
+///   the bot, and what they sent).
+/// - `email.toml` (mail server targets and secret references: tampering would
+///   redirect a stored password) and `email-secret-cleanup.json` (pending
+///   secret deletions after an account change).
+/// - `schedule.toml` (limits for bot-created schedules).
+/// - the atomic-write temp files (`.tmp*`) of any of them.
+///
+/// Deliberately NOT listed: `skills.lock.json` / `skills-usage.json` (counters
+/// and a lockfile for bot-writable skills; no authority) and logs.
+fn daemon_state_name(base: &str) -> bool {
+    const FILES: [&str; 17] = [
+        DEVICE_LIST_FILE,
+        "bot.db",
+        "schedules.db",
+        "memory.db",
+        "control-latch.json",
+        "policy.json",
+        "host.toml",
+        "config.toml",
+        "mcp.toml",
+        "providers.toml",
+        "web.toml",
+        "telegram_state.json",
+        "telegram-inbox.jsonl",
+        "email.toml",
+        "email-secret-cleanup.json",
+        "schedule.toml",
+        "isolation.toml",
+    ];
+    FILES.iter().any(|name| sensitive_file_name(base, name)) || base.starts_with(".tmp")
+}
+
+/// Shared by global credential names and data-directory authority files.
+fn sensitive_file_name(candidate: &str, name: &str) -> bool {
+    candidate == name
+        || candidate.strip_prefix(name).is_some_and(|suffix| {
+            matches!(suffix, "-wal" | "-shm" | "-journal")
+                || suffix.starts_with(".tmp")
+                || suffix.starts_with(".bak")
+        })
 }
 
 /// A protected path is readable only when that path itself is granted.
@@ -2582,6 +2674,55 @@ impl Tool for FsTool {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::many_single_char_names)]
+    #[test]
+    fn sensitive_state_and_credential_siblings_use_the_same_canonical_comparison() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in [
+            "devices.json",
+            "identity.key",
+            "api-token",
+            "secrets.enc",
+            "bot.db",
+            "schedules.db",
+            "memory.db",
+            "policy.json",
+            "control-latch.json",
+            "providers.toml",
+            "email.toml",
+            "web.toml",
+            "schedule.toml",
+            "isolation.toml",
+            "mcp.toml",
+        ] {
+            for suffix in [
+                "", "-wal", "-shm", "-journal", ".tmp", ".tmp-123", ".bak", ".bak.1",
+            ] {
+                let file = format!("{name}{suffix}");
+                for canonical_alias in [
+                    file.clone(),
+                    format!("{}. .", file.to_uppercase()),
+                    format!("{file}:stream"),
+                    format!("{file}::$DATA"),
+                ] {
+                    assert!(
+                        super::is_protected(&dir.path().join(&canonical_alias), dir.path()),
+                        "{canonical_alias}"
+                    );
+                }
+            }
+        }
+        for directory in ["peer", "peer-node", "vault", "secrets"] {
+            assert!(super::is_protected(
+                &dir.path().join(directory).join("private-key"),
+                dir.path()
+            ));
+        }
+        let ordinary = tempfile::tempdir().unwrap();
+        assert!(!super::is_protected(
+            &ordinary.path().join("providers.toml.bak"),
+            dir.path()
+        ));
+    }
     use super::*;
 
     fn setup() -> (tempfile::TempDir, tempfile::TempDir, Vec<Arc<dyn Tool>>) {
@@ -3743,6 +3884,162 @@ mod tests {
                 matches!(err, ToolError::PermissionDenied(_)),
                 "{name}: {err}"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn daemon_state_files_in_the_data_dir_are_protected_for_read_and_write() {
+        let (d, w, t) = setup();
+        let c = ctx();
+        let secret = "PRAXI_SENTINEL_state_files";
+        for name in [
+            "control-latch.json",
+            "bot.db",
+            "bot.db-wal",
+            "bot.db-shm",
+            "bot.db-journal",
+            "policy.json",
+            "policy.json.tmp",
+            ".tmpAbC123",
+            "schedules.db",
+            "schedules.db-wal",
+            "memory.db",
+            "memory.db-shm",
+            "memory.db-journal",
+            "host.toml",
+            "config.toml",
+            "mcp.toml",
+            "providers.toml",
+            "web.toml",
+            "telegram_state.json",
+            "telegram-inbox.jsonl",
+            "email.toml",
+            "email.toml.tmp",
+            "email.toml.bak",
+            "email-secret-cleanup.json",
+            "email-secret-cleanup.json.tmp",
+            "schedule.toml",
+            "schedule.toml.bak",
+            "isolation.toml",
+            "isolation.toml.bak",
+        ] {
+            let file = d.path().join(name);
+            fs::write(&file, secret).unwrap();
+            let err = get(&t, "fs_read")
+                .call(&c, json!({"path": &file}))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "read {name}: {err}"
+            );
+            assert!(!err.to_string().contains(secret), "{name}: {err}");
+            let err = get(&t, "fs_write")
+                .call(&c, json!({"path": &file, "content": "x"}))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "write {name}: {err}"
+            );
+            assert_eq!(fs::read_to_string(&file).unwrap(), secret, "{name}");
+        }
+        // The same names elsewhere (a user's own project) are ordinary files.
+        let project = w.path().join("policy.json");
+        fs::write(&project, "{}").unwrap();
+        assert!(
+            get(&t, "fs_read")
+                .call(&c, json!({"path": &project}))
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn daemon_state_directories_are_protected_but_bot_authored_ones_are_not() {
+        let (d, _w, t) = setup();
+        let c = ctx();
+        for dir in ["peer", "bots", "profiles", "runs"] {
+            let file = d.path().join(dir).join("x.toml");
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(&file, "secret").unwrap();
+            let err = get(&t, "fs_read")
+                .call(&c, json!({"path": &file}))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "{dir}: {err}"
+            );
+            let err = get(&t, "fs_write")
+                .call(&c, json!({"path": &file, "content": "x"}))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "{dir}: {err}"
+            );
+        }
+        // Bot-authored by design (skills, workflows) or bot output: ordinary.
+        for dir in ["skills", "workflows", "screenshots", "files"] {
+            let file = d.path().join(dir).join("note.txt");
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(&file, "ok").unwrap();
+            assert!(
+                get(&t, "fs_read")
+                    .call(&c, json!({"path": &file}))
+                    .await
+                    .is_ok(),
+                "{dir} must stay usable"
+            );
+        }
+    }
+
+    #[test]
+    fn trailing_dots_spaces_and_streams_cannot_name_a_protected_file() {
+        let d = tempfile::tempdir().unwrap();
+        for name in [
+            "control-latch.json.",
+            "control-latch.json ",
+            "control-latch.json. .",
+            "CONTROL-LATCH.JSON",
+            "bot.db::$DATA",
+            "policy.json:stream",
+            "email.toml.",
+            "email-secret-cleanup.json ",
+            "schedule.toml:stream",
+            "schedules.db-wal.",
+            "host.toml ",
+        ] {
+            assert!(
+                is_protected(&d.path().join(name), d.path()),
+                "{name:?} must resolve to a protected name"
+            );
+        }
+        assert!(is_protected(
+            &d.path().join("bots. ").join("a.toml"),
+            d.path()
+        ));
+        assert!(!is_protected(&d.path().join("notes.txt."), d.path()));
+    }
+
+    #[tokio::test]
+    async fn a_not_yet_existing_protected_name_with_a_trailing_dot_cannot_be_created() {
+        let (d, _w, t) = setup();
+        let c = ctx();
+        for name in ["control-latch.json.", "policy.json ", "mcp.toml."] {
+            let file = d.path().join(name);
+            let err = get(&t, "fs_write")
+                .call(&c, json!({"path": &file, "content": "forged"}))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "{name:?}: {err}"
+            );
+            assert!(!d.path().join("control-latch.json").exists());
+            assert!(!d.path().join("policy.json").exists());
+            assert!(!d.path().join("mcp.toml").exists());
         }
     }
 

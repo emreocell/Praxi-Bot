@@ -15,6 +15,7 @@ fake-provider = []
 workspace = true
 
 [dependencies]
+process-guard = { path = "../process-guard", version = "0.1.0" }
 agent-core = { path = "../agent-core", version = "0.1.0" }
 async-trait.workspace = true
 builtin-tools = { path = "../builtin-tools", version = "0.1.0" }

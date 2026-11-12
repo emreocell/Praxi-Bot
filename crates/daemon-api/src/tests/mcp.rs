@@ -577,14 +577,8 @@ async fn secrets_are_write_only() {
     // No way to read it back.
     for m in [Method::GET, Method::PUT, Method::DELETE] {
         let r = call(&t, m, "/v1/secrets/mcp/github-token", None).await;
-        assert!(
-            matches!(
-                r.status,
-                StatusCode::METHOD_NOT_ALLOWED | StatusCode::NOT_FOUND
-            ),
-            "{}",
-            r.status
-        );
+        // Unclassified methods now fail closed at the authority boundary.
+        assert_eq!(r.status, StatusCode::FORBIDDEN);
         assert!(!String::from_utf8_lossy(&r.body).contains("second"));
     }
     let r = call(&t, Method::GET, "/v1/secrets", None).await;

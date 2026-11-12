@@ -1242,6 +1242,7 @@ dependencies = [
  "parking_lot",
  "peer-network",
  "permission-engine",
+ "process-guard",
  "protocol",
  "provider-catalog",
  "remote-api",
@@ -1745,6 +1746,7 @@ dependencies = [
  "parking_lot",
  "percent-encoding",
  "permission-engine",
+ "process-guard",
  "protocol",
  "provider-catalog",
  "rusqlite",
@@ -2018,7 +2020,9 @@ dependencies = [
 name = "desktop"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.3.4",
  "parking_lot",
+ "process-guard",
  "serde",
  "serde_json",
  "storage",
@@ -6105,6 +6109,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "process-guard"
+version = "0.1.0"
+dependencies = [
+ "rustix",
+ "serde",
+ "tempfile",
+ "toml 0.8.2",
+ "windows 0.62.2",
 ]
 
 [[package]]

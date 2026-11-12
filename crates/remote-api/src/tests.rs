@@ -27,6 +27,12 @@ fn config(dir: &std::path::Path, name: &str, role: Role) -> PeerConfig {
     cfg
 }
 fn state(dir: &std::path::Path) -> AppState {
+    state_with_managers(dir, std::collections::BTreeSet::new())
+}
+fn state_with_managers(
+    dir: &std::path::Path,
+    peer_managers: std::collections::BTreeSet<String>,
+) -> AppState {
     let storage = Arc::new(Storage::open(dir).unwrap());
     let agent = AgentLoop::new(
         storage.clone(),
@@ -34,12 +40,9 @@ fn state(dir: &std::path::Path) -> AppState {
         Providers::single(Arc::new(daemon_api::fake::FakeProvider)),
         LoopConfig::default(),
     );
-    AppState::new(
-        agent,
-        storage,
-        DaemonConfig::new("server-secret-never-on-client"),
-    )
-    .unwrap()
+    let mut cfg = DaemonConfig::new("server-secret-never-on-client");
+    cfg.peer_managers = peer_managers;
+    AppState::new(agent, storage, cfg).unwrap()
 }
 async fn pair(host: &PeerNetwork, client: &PeerNetwork, role: Role) {
     let invite = host.create_invite(role).await;
@@ -53,13 +56,21 @@ async fn networks(
     role: Role,
     protocol: ApiProtocol,
 ) -> (PeerNetwork, PeerNetwork, ApiProxy) {
-    let mut cfg = config(dir, "host", Role::Host);
-    cfg.extra_protocols
-        .push((ALPN_API.to_vec(), Arc::new(protocol)));
-    let host = PeerNetwork::start(cfg, None).await.unwrap();
+    networks_for_client(dir, role, |_| protocol).await
+}
+
+async fn networks_for_client(
+    dir: &std::path::Path,
+    role: Role,
+    protocol: impl FnOnce(&PeerNetwork) -> ApiProtocol,
+) -> (PeerNetwork, PeerNetwork, ApiProxy) {
     let client = PeerNetwork::start(config(dir, "client", role), None)
         .await
         .unwrap();
+    let mut cfg = config(dir, "host", Role::Host);
+    cfg.extra_protocols
+        .push((ALPN_API.to_vec(), Arc::new(protocol(&client))));
+    let host = PeerNetwork::start(cfg, None).await.unwrap();
     pair(&host, &client, role).await;
     let mut proxy = ApiProxy::start(client.clone(), host.id()).await.unwrap();
     tokio::time::timeout(
@@ -85,11 +96,12 @@ async fn stop(host: PeerNetwork, client: PeerNetwork, proxy: ApiProxy) {
 #[tokio::test]
 async fn daemon_routes_and_two_live_sse_events() {
     let dir = tempfile::tempdir().unwrap();
-    let (host, client, proxy) = networks(
-        dir.path(),
-        Role::Desktop,
-        ApiProtocol::new(state(&dir.path().join("db"))),
-    )
+    let (host, client, proxy) = networks_for_client(dir.path(), Role::Desktop, |client| {
+        let managers = [peer_network::identity::key_to_string(&client.id())]
+            .into_iter()
+            .collect();
+        ApiProtocol::new(state_with_managers(&dir.path().join("db"), managers))
+    })
     .await;
     let health = request(&proxy, reqwest::Method::GET, "/v1/health")
         .send()

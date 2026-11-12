@@ -690,6 +690,10 @@ pub fn register_web(
 
 /// How `bot serve` runs.
 pub struct ServeOptions {
+    /// Memory-only UI bootstrap; never obtained from the environment or a file.
+    pub management_token: Option<String>,
+    /// Public keys explicitly authorized by the operator; pairing alone is insufficient.
+    pub peer_managers: std::collections::BTreeSet<String>,
     /// Use the host pairing role and default peer networking on.
     pub host_mode: bool,
     /// Explicitly enable peer networking.
@@ -745,6 +749,8 @@ pub fn serve(
         telegram_store,
         host_mode,
         peer_enabled,
+        management_token,
+        peer_managers,
     } = opts;
     let (port, json, grace) = (*port, *json, *grace);
     let storage = Arc::new(Storage::open(data_dir)?);
@@ -756,6 +762,13 @@ pub fn serve(
         );
     }
     let api_token = token.token;
+    // Headless Telegram still needs its in-memory gateway authority. It never
+    // uses the on-disk CLI token for approval decisions.
+    let management_token = match management_token {
+        Some(token) if token != &api_token => token.clone(),
+        Some(_) => return Err("UI credential must differ from the disk credential".into()),
+        None => daemon_api::auth::launch_token()?,
+    };
     let passphrase = env_passphrase();
     let sources = RedactorSources {
         store: telegram_store.clone(),
@@ -764,6 +777,7 @@ pub fn serve(
         catalog_vars: catalog_env_vars(data_dir),
     };
     let redactor = production_redactor(&sources);
+    redactor.register(&management_token);
     // Secrets written through the daemon are masked immediately.
     let telegram_store: Option<Arc<dyn SecretStore>> = telegram_store.as_ref().map(|s| {
         Arc::new(RegisteringStore {
@@ -779,6 +793,9 @@ pub fn serve(
     register_web(data_dir, port, &mcp_tools, telegram_store.as_ref());
     let recovered = agent.recover()?;
     let mut cfg = DaemonConfig::new(api_token.clone());
+    cfg.management_token = Some(management_token.clone());
+    cfg.peer_managers.clone_from(peer_managers);
+    cfg.children_scrubbed = true;
     cfg.shutdown_grace = grace;
     // Extra browser origins (e.g. the desktop app's dev server), comma separated.
     if let Ok(extra) = std::env::var(ALLOWED_ORIGINS_ENV) {
@@ -845,7 +862,7 @@ pub fn serve(
                 data_dir,
                 Arc::clone(store),
                 &format!("http://{addr}"),
-                &api_token,
+                &management_token,
                 None,
             );
             state.add_channel(t.clone());

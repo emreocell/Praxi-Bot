@@ -33,6 +33,22 @@ from calling it (only the desktop app and origins you list in
 with `icacls` on Windows; the daemon warns if that fails). The one route without
 the token, `POST /v1/webhooks/{id}`, requires a valid HMAC signature.
 
+The disk token has only CLI authority (status, lists, chat and run cancellation /
+resumption). Management, approval/question decisions, account configuration and
+all screen control routes require a per-launch in-memory management bearer.
+The desktop generates it, writes it to its daemon's anonymous stdin pipe and
+uses it only in HTTP headers. It is never loaded from a file or environment
+variable, and is not accepted as an events URL token. Paired peers still use
+their transport identities; Telegram keeps its in-process gateway credential.
+See [ADR-0030](../kararlar/0030-yerel-api-yetki-ayrimi.md).
+
+**This does not sandbox arbitrary same-user code.** A shell can still modify
+configuration/database/peer-key files directly, invoke offline CLI commands,
+automate the UI or (where OS policy permits) read daemon/UI process memory.
+Existing process groups/jobs manage lifetimes; they are not a memory or file
+security boundary. Do not approve untrusted shell/MCP/CLI-engine programs on
+the assumption that the credential split isolates the whole computer.
+
 **6. Secrets stay out of files and logs.** API keys and the Telegram token are in
 the OS keychain or an encrypted file, never in `providers.toml` or on a command
 line (`--key-env` and hidden prompts only). Output sent to Telegram is passed
@@ -97,3 +113,66 @@ Please do not post exploit details in a public issue. The repository does not
 list a dedicated security contact yet (**Planned**); contact the maintainers
 privately through the channel you use to reach them, and keep the report
 confidential until it is fixed.
+
+## Process memory hardening and compatibility
+
+Before reading its launch credential, the daemon protects its process object.
+On Windows, an OWNER RIGHTS DACL blocks new same-user opens for process memory,
+handle duplication and ACL changes; ordinary query/wait/termination still work.
+The desktop applies the same guard before generating credentials. This does not
+protect thread objects, revoke already-open handles, or stop DLL/code injection,
+UI automation or direct configuration writes. It is not a restricted-token or
+AppContainer sandbox. Administrator/debug privileges remain outside this guard.
+
+On Linux, credential holders become non-dumpable. The daemon also sets
+`no_new_privs` before creating workers, so shell, MCP and CLI-engine descendants
+inherit it. Existing jobs/process groups still manage process lifetimes. There
+is no separate UID, bwrap or Landlock filesystem boundary yet.
+
+For compatibility, `<data dir>/isolation.toml` accepts `memory_guard = false`
+and/or `linux_no_new_privs = false`; both default to true and malformed policy
+fails startup. Disabling memory protection logs a warning. No-new-privs prevents
+sudo/setuid/file-capability elevation and may affect older browser sandboxes.
+Process memory guards can prevent debugger/crash-dump attachment. Linux runtime
+and packaged Tauri compatibility still require validation before release.
+
+## Checking the running daemon
+
+`bot doctor` reads the authenticated `/v1/isolation` report with the low-privilege
+token. It reports the privilege split, child environment scrubbing, observed
+process memory protection, inherited no-new-privs, and the absence of a full
+Praxi child sandbox separately. Missing fields or an unavailable/older daemon
+are shown as unverified. A token file or a recent version alone proves nothing.
+
+File tools share PR #30's data-directory protection helper for authority-bearing
+state/configuration, database sidecars and private directories. `isolation.toml`
+is added to that same list. This includes canonical Windows trailing-dot/space
+and alternate-stream names. Normal project files outside the daemon data
+directory retain their usual behavior. These checks do not restrict arbitrary
+shell programs or defend against hard-link aliases created outside the tools.
+
+## Paired-peer authority and event visibility
+
+Pairing alone no longer grants host-configuration management. Every route has
+explicit local, Phone and Desktop scopes. Phone cannot mutate host configuration;
+a paired Desktop needs an explicit operator-authorized key to manage it. Nodes,
+host-role API clients and unclassified routes/methods are denied. Normal paired
+users can still chat and make one-time approval/question decisions; persistent
+grants require host-management authority.
+
+Overlay proceed/refuse is local-management-only even for an authorized remote
+manager. Only local-management SSE streams receive `control_requested` and count
+as the connected local overlay. Low-privilege streams omit approval/question
+notifications and decisions in both replay and live delivery. `bot status` uses
+a count-only endpoint rather than reading approval IDs or arguments.
+
+The desktop UI streams events with fetch and Authorization/Last-Event-ID headers,
+not native EventSource. It never puts the management secret in a URL. Only the
+legacy low-privilege events query-token exception remains; it receives the same
+filtered stream. Other routes do not authenticate query tokens.
+
+The isolation report identifies the daemon OS and native guard kind. Doctor marks
+missing memory/environment protection, or disabled Linux no-new-privs, as
+`DEGRADED`. Windows reports no-new-privs as not applicable. Temporary and backup
+siblings (`.tmp*`, `.bak*`) and SQLite journal siblings use the same canonical
+protected-name comparison as the base file; credential ADS aliases are covered.

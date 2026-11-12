@@ -92,12 +92,20 @@ enum Command {
     /// Exit codes of the client commands: 0 ok, 1 error, 2 usage, 3 daemon
     /// unreachable, 4 auth rejected, 5 not found, 6 request rejected, 7 run failed.
     Serve {
+        /// Read a fresh management credential from a supervised inherited pipe/socket.
+        /// Never redirect a credential file here; there is no disk-token fallback.
+        #[arg(long, alias = "ui-bootstrap-stdin")]
+        management_stdin: bool,
         /// Run as an always-on host (peer networking defaults on).
         #[arg(long)]
         host: bool,
         /// Enable paired remote API access over iroh.
         #[arg(long)]
         peer: bool,
+        /// Allow this already-paired Desktop public key to manage host configuration.
+        /// Repeat for multiple managers; Phone/Node/Host roles cannot manage hosts.
+        #[arg(long, requires = "peer", value_parser = parse_management_peer)]
+        management_peer: Vec<String>,
         /// Use the built-in echo provider instead of configured providers.
         #[cfg(feature = "fake-provider")]
         #[arg(long)]
@@ -687,9 +695,40 @@ fn run_doctor(cli: &Cli, c: &DoctorCmd, data_dir: &std::path::Path) -> Result<()
     Ok(())
 }
 
+fn parse_management_peer(value: &str) -> std::result::Result<String, String> {
+    peer_network::key_from_string(value)
+        .map(|key| peer_network::key_to_string(&key))
+        .map_err(|error| error.to_string())
+}
+
 fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result<()> {
     use std::sync::Arc;
 
+    // Before reading the bootstrap secret or creating worker threads: child
+    // processes must not get a chance to pre-open this credential holder.
+    let guard = process_guard::protect(process_guard::Policy::load(data_dir)?)?;
+    if !guard.memory_guard {
+        eprintln!(
+            "warning: process memory guard is disabled or unsupported; same-user children may read management credentials"
+        );
+    }
+    let management_token = if matches!(
+        command,
+        Command::Serve {
+            management_stdin: true,
+            ..
+        }
+    ) {
+        Some(daemon_api::auth::bootstrap_from_stdin()?)
+    } else {
+        None
+    };
+    let peer_managers = match command {
+        Command::Serve {
+            management_peer, ..
+        } => management_peer.iter().cloned().collect(),
+        _ => std::collections::BTreeSet::new(),
+    };
     let (host_mode, peer_enabled) = match command {
         Command::Serve { host, peer, .. } => (*host, *peer),
         _ => (false, false),
@@ -715,6 +754,8 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
             telegram_store: None,
             host_mode,
             peer_enabled,
+            management_token,
+            peer_managers,
         };
         return serve::serve(data_dir, &opts, providers, None, Some(desktop));
     }
@@ -745,6 +786,8 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
         telegram_store: Some(telegram_store),
         host_mode,
         peer_enabled,
+        management_token,
+        peer_managers,
     };
     serve::serve(data_dir, &opts, providers, Some(host), desktop)
 }
@@ -1060,6 +1103,34 @@ fn run_setup(c: &SetupCmd, env: &SetupEnv<'_>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn headless_management_arguments_require_a_paired_key_and_explicit_ingress() {
+        use clap::Parser as _;
+        assert!(super::Cli::try_parse_from(["bot", "serve", "--management-stdin"]).is_ok());
+        assert!(super::Cli::try_parse_from(["bot", "serve", "--ui-bootstrap-stdin"]).is_ok());
+        let dir = tempfile::tempdir().unwrap();
+        let key =
+            peer_network::identity::load_or_create_secret_key(&dir.path().join("identity.key"))
+                .unwrap();
+        let public = peer_network::key_to_string(&key.public());
+        assert!(
+            super::Cli::try_parse_from(["bot", "serve", "--peer", "--management-peer", &public])
+                .is_ok()
+        );
+        assert!(
+            super::Cli::try_parse_from(["bot", "serve", "--management-peer", &public]).is_err()
+        );
+        assert!(
+            super::Cli::try_parse_from([
+                "bot",
+                "serve",
+                "--peer",
+                "--management-peer",
+                "not-a-public-key"
+            ])
+            .is_err()
+        );
+    }
     use super::*;
     use clap::CommandFactory;
 
