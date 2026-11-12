@@ -867,6 +867,9 @@ impl ControlHub {
             st.active_actions += 1;
             *st.active_runs.entry(req.run_id).or_default() += 1;
             let reobserve = waited || start_epoch != st.epoch;
+            // Read under the same lock as the decision above: the permit's
+            // epoch is exactly the one `reobserve` was computed against.
+            let admitted_epoch = st.epoch;
             drop(st);
             let hub = Arc::clone(&self);
             let run_id = req.run_id;
@@ -874,7 +877,6 @@ impl ControlHub {
             if let Some(hook) = self.refresh.lock().as_ref() {
                 hook(seq);
             }
-            let admitted_epoch = self.state.lock().epoch;
             let checker = Arc::clone(&self);
             let validator: builtin_tools::PermitValidator = Arc::new(move |permit_epoch| {
                 // At dispatch: a pause / takeover / override that began since
