@@ -3586,6 +3586,9 @@ mod tests {
     #[cfg(windows)]
     #[tokio::test]
     async fn live_remote_drive_letter_is_refused_without_network_io() {
+        // Defines process-session-wide drive letters, one of them pointing at an
+        // unreachable share; PowerShell started meanwhile stalls on it.
+        let _serial = crate::test_serial::WINDOWS_SHELL_TESTS.lock().await;
         let failed = drive_decision(win_fs::DosQuery::Failed, DRIVE_UNKNOWN).unwrap_err();
         assert!(matches!(failed, ToolError::PermissionDenied(_)), "{failed}");
         let remote = drive_decision(
