@@ -122,32 +122,29 @@ impl LoopControl {
         let Some(ctx) = ctx else {
             return Err(NOT_CONSULTABLE.to_owned());
         };
-        {
-        let ctx = &ctx;
-            let waiting = ComputerWait(Arc::clone(&ctx.waiting_computer));
-            if ctx.computer.get().is_none() {
-                ctx.waiting_computer
-                    .store(true, std::sync::atomic::Ordering::SeqCst);
-                if sh.computer_slots.available_permits() == 0 {
-                    sh.emit(
-                        ctx,
-                        Event::MessageDelta(protocol::event::MessageDelta {
-                            run_id: ctx.run_id,
-                            text: "Waiting for computer.\n".into(),
-                        }),
-                    );
-                }
+        let waiting = ComputerWait(Arc::clone(&ctx.waiting_computer));
+        if ctx.computer.get().is_none() {
+            ctx.waiting_computer
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            if sh.computer_slots.available_permits() == 0 {
+                sh.emit(
+                    &ctx,
+                    Event::MessageDelta(protocol::event::MessageDelta {
+                        run_id: ctx.run_id,
+                        text: "Waiting for computer.\n".into(),
+                    }),
+                );
             }
-            ctx.computer
-                .get_or_try_init(|| async {
-                    Arc::clone(&sh.computer_slots)
-                        .acquire_owned()
-                        .await
-                        .map_err(|_| "computer admission closed".to_string())
-                })
-                .await?;
-            drop(waiting);
         }
+        ctx.computer
+            .get_or_try_init(|| async {
+                Arc::clone(&sh.computer_slots)
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| "computer admission closed".to_string())
+            })
+            .await?;
+        drop(waiting);
         let request = ControlRequest {
             request_id: Uuid::now_v7(),
             run_id: ctx.run_id,

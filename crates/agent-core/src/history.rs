@@ -104,6 +104,9 @@ fn append_chat_history(
         match m.role.as_str() {
             "user" => out.push(Message::text(MessageRole::User, m.content)),
             "assistant" => out.push(Message::text(MessageRole::Assistant, m.content)),
+            // Durable, payload-free notes written by the daemon itself (for
+            // example the end of a human takeover); chats cannot author this role.
+            "system" => out.push(Message::text(MessageRole::System, m.content)),
             _ => {}
         }
     }
@@ -502,6 +505,36 @@ mod tests {
         assert_eq!(conversation[0].role, MessageRole::User);
         assert_eq!(conversation.last().unwrap().content, "Newest request");
         assert!(conversation.iter().any(|m| m.content == "old message 599"));
+    }
+
+    #[test]
+    fn durable_system_notes_of_the_chat_reach_the_model_as_system_messages() {
+        let (storage, run, profile) = fixture();
+        let chat = run.chat_id.unwrap();
+        for ((role, text), i) in [
+            ("user", "earlier request"),
+            ("assistant", "earlier answer"),
+            ("system", "Human intervention completed; user intervened."),
+        ]
+        .into_iter()
+        .zip(1u32..)
+        {
+            storage
+                .insert_message(&storage::Message {
+                    id: uuid::Uuid::from_u128(u128::from(i)),
+                    user_id: run.user_id,
+                    chat_id: chat,
+                    run_id: None,
+                    role: role.into(),
+                    content: text.into(),
+                    created_at_ms: i64::from(i),
+                })
+                .unwrap();
+        }
+        let steps = [step(&run, 0, STEP_USER, json!({"text": "next"}), None)];
+        let messages = build_messages(&storage, &run, &steps, &profile, None, None).unwrap();
+        assert!(messages.iter().any(|m| m.role == MessageRole::System
+            && m.content == "Human intervention completed; user intervened."));
     }
 
     #[test]
