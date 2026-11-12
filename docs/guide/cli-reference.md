@@ -23,7 +23,7 @@ Running `bot` with no command prints a hint to run `bot setup`.
 | `--version`, `--help` | | | |
 
 Commands that talk to a running daemon (`status`, `chat`, `bots`, `answer`,
-`approve`, `grants`, `schedules`, `channels telegram pair`) read the API token
+`approve`, `grants`, `schedules`, `email`, `channels telegram pair`) read the API token
 from `<data dir>/api-token`; make sure they use the same data directory as
 `bot serve`.
 
@@ -124,6 +124,17 @@ Answer a pending question card.
 | `bot schedules add <BOT_ID> <WHEN> <PROMPT>` | Add a schedule. Options: `--name <NAME>`, `--tz <IANA_TZ>`, `--chat <CHAT_ID>` |
 | `bot schedules rm <ID>` | Delete a schedule |
 | `bot schedules run-now <ID>` | Fire a schedule now, in the background |
+
+### `bot email`
+
+Manage the e-mail accounts of the running daemon (see [email](email.md)). Changes apply to the next tool call.
+
+| Subcommand | Meaning |
+| --- | --- |
+| `bot email list` | List accounts (never shows passwords) |
+| `bot email add <NAME> <ADDRESS>` | Add an account. Options: `--preset gmail\|outlook\|yahoo\|icloud`, `--imap-host`, `--imap-port`, `--smtp-host`, `--smtp-port`, `--smtp-security implicit\|start_tls`, `--username`, `--bot <NAME_OR_ID>` (only this bot) or `--all-bots` (one of the two is required), `--allowed-sender <ADDR>` (repeatable), `--password-env <VAR>` (hidden prompt when omitted) |
+| `bot email rm <NAME>` | Remove an account and its stored password |
+| `bot email test <NAME>` | IMAP login and SMTP authentication, nothing is sent; exit 6 when a server does not accept |
 
 ### `bot providers`
 

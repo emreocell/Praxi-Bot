@@ -19,6 +19,7 @@ pub mod connector;
 pub mod error;
 pub mod imap;
 pub mod message;
+pub mod probe;
 pub mod smtp;
 mod tls;
 pub mod tools;
@@ -27,11 +28,15 @@ use std::sync::Arc;
 
 use tool_registry::{Tool, ToolRegistry};
 
-pub use config::{AccountConfig, ImapSettings, SmtpSecurity, SmtpSettings};
-pub use connector::{EmailConnector, SearchResult};
+pub use config::{
+    AccountConfig, ImapSettings, SmtpSecurity, SmtpSettings, normalize_sender,
+    validate_account_name, validate_host,
+};
+pub use connector::{EmailConnector, Scoped, SearchResult};
 pub use error::EmailError;
 pub use imap::{FolderInfo, SearchQuery};
 pub use message::{AttachmentInfo, MessageDetail, MessageSummary};
+pub use probe::{ProbeReport, ProbeStatus, probe};
 pub use smtp::OutgoingMail;
 pub use tools::TOOL_NAMES;
 
@@ -50,6 +55,10 @@ pub fn register(registry: &ToolRegistry, connector: &Arc<EmailConnector>) -> usi
         .count()
 }
 
+#[cfg(test)]
+mod bot_tests;
+#[cfg(test)]
+mod probe_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

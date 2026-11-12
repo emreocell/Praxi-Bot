@@ -15,6 +15,8 @@
 pub mod auth;
 pub mod control;
 pub mod dto;
+pub mod email;
+mod email_routes;
 pub mod error;
 #[cfg(any(test, feature = "fake-provider"))]
 pub mod fake;
@@ -50,8 +52,12 @@ use storage::{Bot, Chat, Run, Storage, User, now_ms};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
+/// Connection tests (`/v1/email/*/test`) that may run at the same time.
+const EMAIL_TESTS_AT_ONCE: usize = 2;
+
 pub use auth::{TOKEN_FILE_NAME, TokenInfo, load_or_create_token, read_token, token_path};
 pub use control::{ControlConfig, ControlHub};
+pub use email::{EmailControl, EmailControlError};
 pub use error::ApiError;
 pub use mcp::{McpControl, McpControlError};
 pub use openapi::openapi_json;
@@ -150,6 +156,10 @@ struct Inner {
     provider_host: OnceLock<ProviderHost>,
     /// MCP server management (see [`AppState::set_mcp`]).
     mcp: OnceLock<Arc<dyn McpControl>>,
+    /// E-mail account management (see [`AppState::set_email`]).
+    email: OnceLock<Arc<dyn EmailControl>>,
+    /// Bounds concurrent "test connection" calls (see `email_routes`).
+    email_tests: Arc<tokio::sync::Semaphore>,
     /// Write-only secret sink of `POST /v1/secrets/{name}`.
     secrets: OnceLock<Arc<dyn secret_store::SecretStore>>,
     /// `schedules.db`, opened on first use.
@@ -230,6 +240,8 @@ impl AppState {
             hub,
             provider_host: OnceLock::new(),
             mcp: OnceLock::new(),
+            email: OnceLock::new(),
+            email_tests: Arc::new(tokio::sync::Semaphore::new(EMAIL_TESTS_AT_ONCE)),
             secrets: OnceLock::new(),
             schedules: parking_lot::Mutex::new(None),
             policy_lock: parking_lot::Mutex::new(()),
@@ -253,6 +265,12 @@ impl AppState {
         let _ = self.0.mcp.set(mcp);
     }
 
+    /// Enable `/v1/email/*` with the embedder e-mail manager (call once, before
+    /// [`serve`]; a second call is ignored).
+    pub fn set_email(&self, email: Arc<dyn EmailControl>) {
+        let _ = self.0.email.set(email);
+    }
+
     /// Enable `POST /v1/secrets/{name}` (write-only) over `store` (call once;
     /// a second call is ignored).
     pub fn set_secret_store(&self, store: Arc<dyn secret_store::SecretStore>) {
@@ -261,6 +279,26 @@ impl AppState {
 
     pub(crate) fn mcp(&self) -> Option<Arc<dyn McpControl>> {
         self.0.mcp.get().cloned()
+    }
+
+    pub(crate) fn email(&self) -> Option<Arc<dyn EmailControl>> {
+        self.0.email.get().cloned()
+    }
+
+    /// A slot for one connection test, or `429`: tests dial out to hosts the
+    /// caller names, so only a couple may run at once.
+    pub(crate) fn email_test_permit(
+        &self,
+    ) -> Result<tokio::sync::OwnedSemaphorePermit, error::ApiError> {
+        Arc::clone(&self.0.email_tests)
+            .try_acquire_owned()
+            .map_err(|_| {
+                error::ApiError::new(
+                    axum::http::StatusCode::TOO_MANY_REQUESTS,
+                    "too_many_requests",
+                    "too many connection tests are running; try again in a moment",
+                )
+            })
     }
 
     pub(crate) fn secret_store(&self) -> Option<Arc<dyn secret_store::SecretStore>> {
@@ -481,6 +519,7 @@ pub fn router(state: AppState) -> Router {
 }
 
 fn api_routes() -> Router<AppState> {
+    use email_routes as e;
     use mcp_routes as m;
     use routes as r;
     Router::new()
@@ -556,6 +595,19 @@ fn api_routes() -> Router<AppState> {
         )
         .route("/v1/mcp/servers/{name}/tools", get(m::list_mcp_tools))
         .route("/v1/mcp/catalog", get(m::mcp_catalog))
+        .route(
+            "/v1/email/accounts",
+            get(e::list_email_accounts).post(e::create_email_account),
+        )
+        .route(
+            "/v1/email/accounts/{name}",
+            put(e::update_email_account).delete(e::delete_email_account),
+        )
+        .route(
+            "/v1/email/accounts/{name}/test",
+            post(e::test_email_account),
+        )
+        .route("/v1/email/test", post(e::test_email_draft))
         .route("/v1/secrets/{*name}", post(m::set_secret))
         .route("/v1/events", get(sse::events))
 }

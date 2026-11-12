@@ -241,6 +241,100 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/email/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * All accounts, with the non-secret fields only (`password_set` says whether
+         *     a password is stored; it is never returned).
+         */
+        get: operations["list_email_accounts"];
+        put?: never;
+        /**
+         * Create an account. The `password` is stored in the secret store (never in
+         *     `email.toml`, never returned). `bot` binds the account to one bot (it must
+         *     exist); without it every bot that may use the e-mail tools can use it. Takes
+         *     effect for the next tool call, no restart needed.
+         */
+        post: operations["create_email_account"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/email/accounts/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Merge a partial config onto the stored account. Omitted fields keep their
+         *     values; `bot: null` makes the account usable by every bot; a `password`
+         *     replaces the stored one. Takes effect for the next tool call.
+         */
+        put: operations["update_email_account"];
+        post?: never;
+        /**
+         * Remove an account and the password it owned. Takes effect for the next tool
+         *     call.
+         */
+        delete: operations["delete_email_account"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/email/accounts/{name}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Try IMAP login and SMTP authentication for a stored account. TLS exactly as
+         *     configured; **no mail is sent or read**. A failing server is a normal `200`
+         *     with a status per server (`auth_failed`, `tls`, `unreachable`, ...), never
+         *     the server's own words. At most two tests run at once (`429`).
+         */
+        post: operations["test_email_account"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/email/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Same test for an account that is not saved yet (nothing is stored). With no
+         *     `password` in the body, the stored password of the account with the same
+         *     `name` is used. Same limits and the same coarse report as the saved test.
+         */
+        post: operations["test_email_draft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/events": {
         parameters: {
             query?: never;
@@ -1099,6 +1193,129 @@ export interface components {
             grants: components["schemas"]["GrantDto"][];
             /** @description The profile's own policy as JSON; `null` = the workspace policy applies. */
             policy?: unknown;
+        };
+        /** @description A configured account (`GET /v1/email/accounts`): the non-secret fields only. */
+        EmailAccountDto: {
+            /** @description Address mail is sent from. */
+            address: string;
+            /**
+             * @description Senders whose mail may start a run (stored now, enforced by the inbound
+             *     trigger).
+             */
+            allowed_senders: string[];
+            /**
+             * @description Bot (storage UUID) that owns the account; `null` = every bot that may
+             *     use the e-mail tools.
+             */
+            bot?: string | null;
+            /** @description Whether the account trusts an extra root certificate (a private CA). */
+            custom_ca: boolean;
+            /** @description Folder drafts are saved to. */
+            drafts_folder: string;
+            /** @description IMAP server. */
+            imap: components["schemas"]["EmailImapServer"];
+            /** @description Account name. */
+            name: string;
+            /** @description Whether a password is stored. The password itself is never returned. */
+            password_set: boolean;
+            /** @description SMTP server. */
+            smtp: components["schemas"]["EmailSmtpServer"];
+            /** @description Login name; empty = the address. */
+            username: string;
+        };
+        /** @description Body of `POST /v1/email/accounts` and `POST /v1/email/test`. */
+        EmailAccountInput: {
+            /** @description Address mail is sent from. */
+            address: string;
+            /** @description Senders whose mail may start a run (addresses or `@domain`). */
+            allowed_senders?: string[];
+            /** @description Bot (storage UUID) that owns the account; absent / `null` = every bot. */
+            bot?: string | null;
+            /** @description Folder drafts are saved to, default `Drafts`. */
+            drafts_folder?: string | null;
+            /** @description IMAP server. */
+            imap: components["schemas"]["EmailImapServer"];
+            /**
+             * @description Account name: 1 to 64 characters of `[A-Za-z0-9._-]`. Required on
+             *     create; for `POST /v1/email/test` it selects the stored password to
+             *     reuse when `password` is left out.
+             */
+            name: string;
+            /**
+             * @description The account password or app password. **Write-only**: it goes to the
+             *     secret store and is never returned or logged. Required on create.
+             */
+            password?: string | null;
+            /** @description SMTP server. */
+            smtp: components["schemas"]["EmailSmtpServer"];
+            /** @description Login name; default (empty) = the address. */
+            username?: string | null;
+        };
+        /**
+         * @description Body of `PUT /v1/email/accounts/{name}`. Every field is optional: a field
+         *     left out keeps the stored value. `bot: null` makes the account unbound
+         *     (every bot), which is why the handler reads the raw JSON. A `password`
+         *     replaces the stored one.
+         */
+        EmailAccountPatch: {
+            /** @description Address mail is sent from. */
+            address?: string | null;
+            /** @description Allowed senders; present list replaces the stored one. */
+            allowed_senders?: string[] | null;
+            /** @description Owning bot; `null` = every bot; omit to keep. */
+            bot?: string | null;
+            /** @description Folder drafts are saved to. */
+            drafts_folder?: string | null;
+            imap?: null | components["schemas"]["EmailImapServer"];
+            /** @description New password (write-only). */
+            password?: string | null;
+            smtp?: null | components["schemas"]["EmailSmtpServer"];
+            /** @description Login name; empty = the address. */
+            username?: string | null;
+        };
+        /** @description An IMAP server (always implicit TLS). */
+        EmailImapServer: {
+            /** @description Host name. */
+            host: string;
+            /**
+             * Format: int32
+             * @description Port, default 993.
+             */
+            port?: number;
+        };
+        /**
+         * @description What a "test connection" learned about one server.
+         * @enum {string}
+         */
+        EmailProbeStatus: "ok" | "unreachable" | "tls" | "auth_failed" | "protocol" | "timeout";
+        /**
+         * @description How the SMTP connection is secured.
+         * @enum {string}
+         */
+        EmailSecurity: "implicit" | "start_tls";
+        /** @description An SMTP server. */
+        EmailSmtpServer: {
+            /** @description Host name. */
+            host: string;
+            /**
+             * Format: int32
+             * @description Port, default 465.
+             */
+            port?: number;
+            /** @description Transport security, default implicit TLS. */
+            security?: components["schemas"]["EmailSecurity"];
+        };
+        /**
+         * @description Result of a connection test: one status per server, nothing the servers
+         *     said.
+         */
+        EmailTestReport: {
+            /** @description IMAP (reading mail). */
+            imap: components["schemas"]["EmailProbeStatus"];
+            /** @description Both servers accepted the login. */
+            ok: boolean;
+            /** @description SMTP (sending mail); authentication only, nothing is sent. */
+            smtp: components["schemas"]["EmailProbeStatus"];
         };
         /** @description JSON body of an error response. */
         ErrorBody: {
@@ -2412,6 +2629,307 @@ export interface operations {
             };
             /** @description unknown, answered or timed-out request */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_email_accounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailAccountDto"][];
+                };
+            };
+            /** @description e-mail management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_email_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailAccountInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailAccountDto"];
+                };
+            };
+            /** @description bad password or bot id */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description unknown bot */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the name is taken */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid config */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description e-mail management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_email_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailAccountPatch"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailAccountDto"];
+                };
+            };
+            /** @description bad password or bot id */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid config */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description e-mail management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_email_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description e-mail management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_email_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailTestReport"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description too many tests running */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description e-mail management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_email_draft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailAccountInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailTestReport"];
+                };
+            };
+            /** @description bad password or bot id */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid config or no password */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description too many tests running */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description e-mail management is not available */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

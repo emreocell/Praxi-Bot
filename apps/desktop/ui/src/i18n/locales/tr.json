@@ -910,6 +910,83 @@
         "title": "Güncellemeler nasıl çalışır",
         "description": "Sürümler ayrı dağıtılır; yükseltme adımları için proje belgelerine bakın."
       }
+    },
+    "email": {
+      "title": "E-posta",
+      "description": "Botlarınızın okuyup yazabileceği posta kutuları. Bir posta kutusu tek bir bota ait olabilir.",
+      "note": "Botlar e-posta araçlarını varsayılan olarak almaz. Bir botun posta kutusunu kullanması için botun ayarlarında izinli araçlara email_* ekleyin. Postayı okuma ve arama sormadan çalışır; gönderme her zaman önce sorar.",
+      "empty": "Henüz posta kutusu yok.",
+      "add": "Posta kutusu ekle",
+      "edit": "Düzenle",
+      "test": "Bağlantıyı dene",
+      "testing": "Deneniyor…",
+      "delete": "Sil",
+      "deleteConfirm": "Bu posta kutusu silinsin mi?",
+      "allBots": "E-postası açık her bot",
+      "onlyBot": "Yalnızca {{name}}",
+      "deletedBot": "silinmiş bot",
+      "passwordMissing": "Kayıtlı parola yok",
+      "loadError": "Posta kutuları yüklenemedi: {{message}}",
+      "form": {
+        "preset": "Sağlayıcı",
+        "presets": {
+          "gmail": "Gmail",
+          "outlook": "Outlook",
+          "yahoo": "Yahoo",
+          "icloud": "iCloud",
+          "custom": "Özel"
+        },
+        "name": "Ad",
+        "nameHint": "Posta kutusu için kısa bir ad, örneğin is.",
+        "address": "E-posta adresi",
+        "username": "Kullanıcı adı",
+        "usernameHint": "Yalnızca adresten farklıysa.",
+        "imapHost": "IMAP sunucusu",
+        "smtpHost": "SMTP sunucusu",
+        "port": "Port",
+        "security": "SMTP güvenliği",
+        "implicit": "TLS",
+        "startTls": "STARTTLS",
+        "password": "Parola veya uygulama parolası",
+        "passwordHint": "İşletim sistemi anahtar zincirinde saklanır, bir daha gösterilmez. Çoğu sağlayıcı uygulama parolası ister.",
+        "passwordKeep": "Kayıtlı parolayı korumak için boş bırakın.",
+        "access": {
+          "label": "Bu posta kutusunu kimler kullanabilir",
+          "all": "E-postası açık her bot",
+          "some": "Yalnızca bir bot",
+          "nobody": "Botu seçin ya da her bot seçeneğini seçin.",
+          "allWarning": "E-posta araçları olan her bot bu posta kutusunu sormadan okuyabilir."
+        },
+        "senders": "İzinli gönderenler",
+        "sendersHint": "Adresler veya @alan_adları, her satıra bir tane. Gelecek gelen-posta özelliği için saklanır; şimdilik gelen postaya hiçbir şey tepki vermez.",
+        "create": "Posta kutusu ekle",
+        "save": "Kaydet"
+      },
+      "errors": {
+        "name": "1-64 harf, rakam, nokta, tire veya alt çizgi kullanın; ad başka bir kutuda kullanılmasın.",
+        "address": "Geçerli bir e-posta adresi girin.",
+        "imapHost": "IMAP sunucu adını girin (boşluk ve port olmadan).",
+        "imapPort": "1 ile 65535 arasında bir port girin.",
+        "smtpHost": "SMTP sunucu adını girin (boşluk ve port olmadan).",
+        "smtpPort": "1 ile 65535 arasında bir port girin.",
+        "password": "Parolayı girin. Sunucu veya kullanıcı adını değiştirmek parolayı yeniden gerektirir.",
+        "senders": "Adres (ann@example.com) veya @alan_adı (@example.com) kullanın."
+      },
+      "result": {
+        "imap": "IMAP",
+        "smtp": "SMTP",
+        "ok": "Bağlandı",
+        "unreachable": "Bağlanılamıyor",
+        "tls": "TLS başarısız",
+        "auth_failed": "Giriş reddedildi",
+        "protocol": "Beklenmeyen yanıt",
+        "timeout": "Yanıt yok"
+      },
+      "toast": {
+        "added": "{{name}} eklendi",
+        "saved": "{{name}} kaydedildi",
+        "deleted": "{{name}} silindi"
+      }
     }
   },
   "palette": {

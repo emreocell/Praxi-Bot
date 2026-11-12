@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError, RwLock};
 
 use secret_store::{SecretStore, resolve};
 
@@ -10,6 +10,7 @@ use crate::config::AccountConfig;
 use crate::error::EmailError;
 use crate::imap::{FolderInfo, ImapSession, SearchQuery};
 use crate::message::{MessageDetail, MessageSummary};
+use crate::probe::ProbeReport;
 use crate::smtp::{self, OutgoingMail};
 
 /// Result of a search.
@@ -24,10 +25,29 @@ pub struct SearchResult {
 /// Holds account configs and resolves their credentials lazily.
 ///
 /// Passwords are fetched from the [`SecretStore`] at connection time only; they
-/// are never kept, logged or returned.
+/// are never kept, logged or returned. The account set can be replaced at
+/// runtime ([`EmailConnector::replace_accounts`]); a call already in flight
+/// keeps the snapshot it started with, the next call sees the new set.
 pub struct EmailConnector {
-    accounts: BTreeMap<String, AccountConfig>,
+    accounts: RwLock<Arc<BTreeMap<String, AccountConfig>>>,
     secrets: Arc<dyn SecretStore>,
+}
+
+/// A bound account is usable only by its bot (ids compare case-insensitively,
+/// they are UUIDs); an unbound one by every caller. `bot == None` (not a bot)
+/// is never "every bot": it reaches unbound accounts only.
+fn usable_by(acct: &AccountConfig, bot: Option<&str>) -> bool {
+    match &acct.bot {
+        None => true,
+        Some(owner) => bot.is_some_and(|b| owner.eq_ignore_ascii_case(b)),
+    }
+}
+
+fn owned_by(acct: &AccountConfig, bot: Option<&str>) -> bool {
+    match (&acct.bot, bot) {
+        (Some(owner), Some(b)) => owner.eq_ignore_ascii_case(b),
+        _ => false,
+    }
 }
 
 impl EmailConnector {
@@ -42,6 +62,27 @@ impl EmailConnector {
         if accounts.is_empty() {
             return Err(EmailError::Config("no e-mail accounts configured".into()));
         }
+        let c = Self::reloadable(secrets);
+        c.replace_accounts(accounts)?;
+        Ok(c)
+    }
+
+    /// A connector that starts with no accounts and is filled (and changed) at
+    /// runtime with [`EmailConnector::replace_accounts`].
+    #[must_use]
+    pub fn reloadable(secrets: Arc<dyn SecretStore>) -> Self {
+        Self {
+            accounts: RwLock::new(Arc::new(BTreeMap::new())),
+            secrets,
+        }
+    }
+
+    /// Atomically replace the whole account set (may be empty). Everything is
+    /// validated first; on error the previous set stays in force.
+    ///
+    /// # Errors
+    /// [`EmailError::Config`] for an invalid or duplicate account.
+    pub fn replace_accounts(&self, accounts: Vec<AccountConfig>) -> Result<(), EmailError> {
         let mut map = BTreeMap::new();
         for a in accounts {
             a.validate()?;
@@ -49,30 +90,40 @@ impl EmailConnector {
                 return Err(EmailError::Config("duplicate account name".into()));
             }
         }
-        Ok(Self {
-            accounts: map,
-            secrets,
-        })
+        *self
+            .accounts
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = Arc::new(map);
+        Ok(())
     }
 
-    /// Configured account names.
+    fn snapshot(&self) -> Arc<BTreeMap<String, AccountConfig>> {
+        Arc::clone(&self.accounts.read().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    /// The current accounts (name order).
+    #[must_use]
+    pub fn accounts(&self) -> Vec<AccountConfig> {
+        self.snapshot().values().cloned().collect()
+    }
+
+    /// Configured account names (all of them; for the host, not for bots).
     #[must_use]
     pub fn account_names(&self) -> Vec<String> {
-        self.accounts.keys().cloned().collect()
+        self.snapshot().keys().cloned().collect()
     }
 
-    fn account(&self, name: Option<&str>) -> Result<&AccountConfig, EmailError> {
-        match name {
-            Some(n) => self
-                .accounts
-                .get(n)
-                .ok_or_else(|| EmailError::Input(format!("unknown account {n:?}"))),
-            None if self.accounts.len() == 1 => Ok(self.accounts.values().next().expect("one")),
-            None => Err(EmailError::Input(format!(
-                "several accounts configured, pass `account` (one of: {})",
-                self.account_names().join(", ")
-            ))),
-        }
+    /// Whether at least one account is usable by `bot`.
+    #[must_use]
+    pub fn has_account_for(&self, bot: Option<&str>) -> bool {
+        self.snapshot().values().any(|a| usable_by(a, bot))
+    }
+
+    /// Operations on behalf of `bot` (`None` = a caller that is not a bot, which
+    /// only reaches unbound accounts).
+    #[must_use]
+    pub fn scoped<'a>(&'a self, bot: Option<&'a str>) -> Scoped<'a> {
+        Scoped { conn: self, bot }
     }
 
     async fn password(&self, acct: &AccountConfig) -> Result<String, EmailError> {
@@ -98,6 +149,167 @@ impl EmailConnector {
         }
     }
 
+    /// Check the password of `acct` is in the secret store (the value is not
+    /// returned).
+    ///
+    /// # Errors
+    /// [`EmailError::Credential`] when it cannot be resolved.
+    pub async fn password_present(&self, acct: &AccountConfig) -> Result<(), EmailError> {
+        self.password(acct).await.map(|_| ())
+    }
+
+    /// "Test connection" for a stored account: IMAP login and SMTP
+    /// authentication, nothing sent or read (see [`crate::probe`]).
+    ///
+    /// # Errors
+    /// [`EmailError::Input`] for an unknown account, [`EmailError::Credential`]
+    /// when its password cannot be resolved. A failing server is a normal
+    /// [`ProbeReport`].
+    pub async fn probe_saved(&self, name: &str) -> Result<ProbeReport, EmailError> {
+        let acct = self
+            .snapshot()
+            .get(name)
+            .cloned()
+            .ok_or_else(|| EmailError::Input(format!("unknown account {name:?}")))?;
+        let password = self.password(&acct).await?;
+        Ok(crate::probe::probe(&acct, &password).await)
+    }
+
+    /// List folders (not bot-scoped; see [`EmailConnector::scoped`]).
+    ///
+    /// # Errors
+    /// See [`EmailError`].
+    pub async fn list_folders(&self, account: Option<&str>) -> Result<Vec<FolderInfo>, EmailError> {
+        self.scoped(None).list_folders(account).await
+    }
+
+    /// Search a folder (not bot-scoped).
+    ///
+    /// # Errors
+    /// See [`EmailError`].
+    pub async fn search(
+        &self,
+        account: Option<&str>,
+        folder: &str,
+        query: &SearchQuery,
+        limit: usize,
+    ) -> Result<SearchResult, EmailError> {
+        self.scoped(None)
+            .search(account, folder, query, limit)
+            .await
+    }
+
+    /// Fetch a message, does not mark it read (not bot-scoped).
+    ///
+    /// # Errors
+    /// See [`EmailError`].
+    pub async fn fetch(
+        &self,
+        account: Option<&str>,
+        folder: &str,
+        uid: u32,
+        max_body_chars: usize,
+    ) -> Result<MessageDetail, EmailError> {
+        self.scoped(None)
+            .fetch(account, folder, uid, max_body_chars)
+            .await
+    }
+
+    /// Mark a message read or unread (not bot-scoped).
+    ///
+    /// # Errors
+    /// See [`EmailError`].
+    pub async fn mark_read(
+        &self,
+        account: Option<&str>,
+        folder: &str,
+        uid: u32,
+        read: bool,
+    ) -> Result<(), EmailError> {
+        self.scoped(None)
+            .mark_read(account, folder, uid, read)
+            .await
+    }
+
+    /// Save a draft; nothing is sent (not bot-scoped).
+    ///
+    /// # Errors
+    /// See [`EmailError`].
+    pub async fn save_draft(
+        &self,
+        account: Option<&str>,
+        mail: &OutgoingMail,
+    ) -> Result<String, EmailError> {
+        self.scoped(None).save_draft(account, mail).await
+    }
+
+    /// Send a message **immediately** (not bot-scoped). Callers must have
+    /// obtained approval.
+    ///
+    /// # Errors
+    /// See [`EmailError`].
+    pub async fn send(
+        &self,
+        account: Option<&str>,
+        mail: &OutgoingMail,
+    ) -> Result<String, EmailError> {
+        self.scoped(None).send(account, mail).await
+    }
+}
+
+/// [`EmailConnector`] operations on behalf of one bot. See
+/// [`EmailConnector::scoped`].
+pub struct Scoped<'a> {
+    conn: &'a EmailConnector,
+    bot: Option<&'a str>,
+}
+
+impl Scoped<'_> {
+    /// Pick the account for a call.
+    ///
+    /// With a name: it must exist *and* be usable by this bot, otherwise the
+    /// error is the same "unknown account" for a missing account and for one
+    /// bound to another bot (no oracle for other bots' accounts).
+    /// Without a name: the bot's own bound account, else the single unbound
+    /// one. Names listed in errors are only those this bot can use.
+    fn account(&self, name: Option<&str>) -> Result<AccountConfig, EmailError> {
+        let all = self.conn.snapshot();
+        if let Some(n) = name {
+            return all
+                .get(n)
+                .filter(|a| usable_by(a, self.bot))
+                .cloned()
+                .ok_or_else(|| EmailError::Input(format!("unknown account {n:?}")));
+        }
+        let mine: Vec<&AccountConfig> = all.values().filter(|a| owned_by(a, self.bot)).collect();
+        let pool: Vec<&AccountConfig> = if mine.is_empty() {
+            all.values().filter(|a| a.bot.is_none()).collect()
+        } else {
+            mine
+        };
+        match pool.as_slice() {
+            [one] => Ok((*one).clone()),
+            [] => Err(EmailError::Input(
+                "no e-mail account is available to this bot".into(),
+            )),
+            many => Err(EmailError::Input(format!(
+                "several accounts configured, pass `account` (one of: {})",
+                many.iter()
+                    .map(|a| a.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))),
+        }
+    }
+
+    /// Name of the account a call with `account` would use.
+    ///
+    /// # Errors
+    /// [`EmailError::Input`] as for any call.
+    pub fn resolve_name(&self, account: Option<&str>) -> Result<String, EmailError> {
+        self.account(account).map(|a| a.name)
+    }
+
     async fn with_imap<T, F>(&self, account: Option<&str>, f: F) -> Result<T, EmailError>
     where
         F: for<'a> FnOnce(
@@ -107,11 +319,23 @@ impl EmailConnector {
             Box<dyn Future<Output = Result<T, EmailError>> + Send + 'a>,
         >,
     {
-        let acct = self.account(account)?.clone();
+        let acct = self.account(account)?;
+        self.with_imap_for(acct, f).await
+    }
+
+    async fn with_imap_for<T, F>(&self, acct: AccountConfig, f: F) -> Result<T, EmailError>
+    where
+        F: for<'a> FnOnce(
+            &'a mut ImapSession,
+            &'a AccountConfig,
+        ) -> std::pin::Pin<
+            Box<dyn Future<Output = Result<T, EmailError>> + Send + 'a>,
+        >,
+    {
         let limit = acct.timeout();
         let secs = limit.as_secs();
-        Self::deadline(limit, secs, async {
-            let pw = self.password(&acct).await?;
+        EmailConnector::deadline(limit, secs, async {
+            let pw = self.conn.password(&acct).await?;
             let mut s = ImapSession::connect(&acct, &pw).await?;
             let r = f(&mut s, &acct).await;
             s.logout().await;
@@ -205,9 +429,9 @@ impl EmailConnector {
         account: Option<&str>,
         mail: &OutgoingMail,
     ) -> Result<String, EmailError> {
-        let from = self.account(account)?.address.clone();
-        let raw = smtp::compose_draft(&from, mail)?.formatted();
-        self.with_imap(account, |s, acct| {
+        let acct = self.account(account)?;
+        let raw = smtp::compose_draft(&acct.address, mail)?.formatted();
+        self.with_imap_for(acct, |s, acct| {
             Box::pin(async move {
                 s.append_draft(&acct.drafts_folder, &raw).await?;
                 Ok(acct.drafts_folder.clone())
@@ -225,12 +449,12 @@ impl EmailConnector {
         account: Option<&str>,
         mail: &OutgoingMail,
     ) -> Result<String, EmailError> {
-        let acct = self.account(account)?.clone();
+        let acct = self.account(account)?;
         let msg = smtp::compose(&acct.address, mail)?;
         let limit = acct.timeout();
         let secs = limit.as_secs();
-        Self::deadline(limit, secs, async {
-            let pw = self.password(&acct).await?;
+        EmailConnector::deadline(limit, secs, async {
+            let pw = self.conn.password(&acct).await?;
             smtp::send(&acct, &pw, msg).await
         })
         .await

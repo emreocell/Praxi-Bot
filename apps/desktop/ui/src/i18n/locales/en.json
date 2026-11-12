@@ -910,6 +910,83 @@
         "title": "How updates work",
         "description": "Releases are distributed separately; check the project docs for upgrade steps."
       }
+    },
+    "email": {
+      "title": "E-mail",
+      "description": "Mailboxes your bots can read and write with. A mailbox can belong to one bot.",
+      "note": "Bots do not get the e-mail tools by default. To let a bot use a mailbox, add email_* to its allowed tools in the bot's settings. Reading and searching mail runs without asking; sending always asks first.",
+      "empty": "No mailboxes yet.",
+      "add": "Add mailbox",
+      "edit": "Edit",
+      "test": "Test connection",
+      "testing": "Testing…",
+      "delete": "Delete",
+      "deleteConfirm": "Delete this mailbox?",
+      "allBots": "Any bot with e-mail enabled",
+      "onlyBot": "Only {{name}}",
+      "deletedBot": "deleted bot",
+      "passwordMissing": "No password stored",
+      "loadError": "Could not load mailboxes: {{message}}",
+      "form": {
+        "preset": "Provider",
+        "presets": {
+          "gmail": "Gmail",
+          "outlook": "Outlook",
+          "yahoo": "Yahoo",
+          "icloud": "iCloud",
+          "custom": "Custom"
+        },
+        "name": "Name",
+        "nameHint": "A short name for the mailbox, such as work.",
+        "address": "E-mail address",
+        "username": "Login name",
+        "usernameHint": "Only if it differs from the address.",
+        "imapHost": "IMAP server",
+        "smtpHost": "SMTP server",
+        "port": "Port",
+        "security": "SMTP security",
+        "implicit": "TLS",
+        "startTls": "STARTTLS",
+        "password": "Password or app password",
+        "passwordHint": "Stored in your OS keychain and never shown again. Most providers need an app password.",
+        "passwordKeep": "Leave empty to keep the stored password.",
+        "access": {
+          "label": "Who can use this mailbox",
+          "all": "Any bot with e-mail enabled",
+          "some": "Only one bot",
+          "nobody": "Pick the bot, or choose any bot.",
+          "allWarning": "Every bot that has the e-mail tools can then read this mailbox without asking."
+        },
+        "senders": "Allowed senders",
+        "sendersHint": "Addresses or @domains, one per line. Stored for the coming inbound-mail feature; nothing reacts to incoming mail yet.",
+        "create": "Add mailbox",
+        "save": "Save"
+      },
+      "errors": {
+        "name": "Use 1 to 64 letters, digits, dots, dashes or underscores, and a name that is not taken.",
+        "address": "Enter a valid e-mail address.",
+        "imapHost": "Enter the IMAP host name (no spaces, no port).",
+        "imapPort": "Enter a port from 1 to 65535.",
+        "smtpHost": "Enter the SMTP host name (no spaces, no port).",
+        "smtpPort": "Enter a port from 1 to 65535.",
+        "password": "Enter the password. Changing servers or the login needs it again.",
+        "senders": "Use addresses (ann@example.com) or @domains (@example.com)."
+      },
+      "result": {
+        "imap": "IMAP",
+        "smtp": "SMTP",
+        "ok": "Connected",
+        "unreachable": "Cannot connect",
+        "tls": "TLS failed",
+        "auth_failed": "Login rejected",
+        "protocol": "Unexpected reply",
+        "timeout": "No answer"
+      },
+      "toast": {
+        "added": "{{name}} added",
+        "saved": "{{name}} saved",
+        "deleted": "{{name}} deleted"
+      }
     }
   },
   "palette": {

@@ -89,7 +89,7 @@ pub async fn server(protocol: Protocol) -> Server {
                 if matches!(protocol, Protocol::NoStartTls) {
                     reader
                         .get_mut()
-                        .write_all(b"250 localhost\r\n")
+                        .write_all(b"250-localhost\r\n250 8BITMIME\r\n")
                         .await
                         .unwrap();
                     line.clear();
@@ -332,6 +332,8 @@ pub fn account(imap: &Server, smtp: &Server, security: SmtpSecurity) -> AccountC
         drafts_folder: "Drafts".into(),
         extra_root_pem: Some(format!("{}{}", imap.pem, smtp.pem)),
         timeout_secs: 3,
+        bot: None,
+        allowed_senders: Vec::new(),
     }
 }
 

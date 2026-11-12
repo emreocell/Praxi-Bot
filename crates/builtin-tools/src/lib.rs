@@ -377,6 +377,8 @@ mod tests {
             drafts_folder: "Drafts".to_string(),
             extra_root_pem: None,
             timeout_secs: 30,
+            bot: None,
+            allowed_senders: Vec::new(),
         };
         let connector =
             Arc::new(connector_email::EmailConnector::new(vec![account], store).unwrap());
