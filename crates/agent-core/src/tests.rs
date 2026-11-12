@@ -4610,3 +4610,86 @@ async fn policy_deny_after_approval_recheck_does_not_run_the_tool_or_keep_the_gr
     )
     .await;
 }
+
+#[tokio::test]
+async fn a_bot_writes_and_reads_its_own_skill_while_the_file_tools_refuse_that_folder() {
+    use tool_registry::{ContentPart, ToolContext};
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path();
+    let gate = builtin_tools::ResolverGate::new(
+        permission_engine::PermissionResolver::new(),
+        permission_engine::Policy::full(),
+        None,
+        protocol::InitiatorKind::Human,
+    );
+    let registry = tool_registry::ToolRegistry::new();
+    let registered = builtin_tools::register_builtin_tools(
+        &registry,
+        builtin_tools::BuiltinConfig::new(data.to_path_buf(), Arc::new(gate)),
+    );
+    assert!(registered > 0);
+    let index = skills::SkillIndex::load_roots(skills::SkillRoots::from_data_dir(data));
+    for tool in skills::tools(&index) {
+        registry.register(tool);
+    }
+    let bot = uuid::Uuid::now_v7().to_string();
+    let ctx = ToolContext {
+        bot_id: Some(bot.clone()),
+        ..ToolContext::default()
+    };
+    let text = |out: &tool_registry::ToolOutput| {
+        out.content
+            .iter()
+            .filter_map(|p| match p {
+                ContentPart::Text { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<String>()
+    };
+    let skill = "---\nname: my-site\ndescription: How to use my-site\n---\nSteps\n";
+    registry
+        .get("skill_write")
+        .unwrap()
+        .call(&ctx, json!({"name": "my-site", "content": skill}))
+        .await
+        .unwrap();
+    let path = data
+        .join("bots")
+        .join(&bot)
+        .join("skills")
+        .join("my-site")
+        .join("SKILL.md");
+    assert!(
+        path.exists(),
+        "skill_write saved under the bot's own folder"
+    );
+    let read = registry
+        .get("skill_read")
+        .unwrap()
+        .call(&ctx, json!({"name": "my-site"}))
+        .await
+        .unwrap();
+    assert!(text(&read).contains("Steps"), "{}", text(&read));
+    // The generic file tools stay out of that folder, for read and write.
+    let err = registry
+        .get("fs_read")
+        .unwrap()
+        .call(&ctx, json!({"path": &path}))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, tool_registry::ToolError::PermissionDenied(_)),
+        "{err}"
+    );
+    let err = registry
+        .get("fs_write")
+        .unwrap()
+        .call(&ctx, json!({"path": &path, "content": "forged"}))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, tool_registry::ToolError::PermissionDenied(_)),
+        "{err}"
+    );
+    assert!(std::fs::read_to_string(&path).unwrap().contains("Steps"));
+}

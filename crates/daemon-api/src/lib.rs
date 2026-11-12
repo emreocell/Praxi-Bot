@@ -562,6 +562,7 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
+#[allow(clippy::too_many_lines)] // The route table of the whole API.
 fn api_routes() -> Router<AppState> {
     use email_routes as e;
     use live_view as v;

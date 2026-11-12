@@ -893,13 +893,17 @@ const DAEMON_STATE_DIRS: [&str; 4] = ["peer", "bots", "profiles", "runs"];
 ///   goes), `web.toml` (web tool limits).
 /// - `telegram_state.json` and `telegram-inbox.jsonl` (which chats may command
 ///   the bot, and what they sent).
+/// - `email.toml` (mail server targets and secret references: tampering would
+///   redirect a stored password) and `email-secret-cleanup.json` (pending
+///   secret deletions after an account change).
+/// - `schedule.toml` (limits for bot-created schedules).
 /// - the atomic-write temp files (`.tmp*`) of any of them.
 ///
 /// Deliberately NOT listed: `skills.lock.json` / `skills-usage.json` (counters
 /// and a lockfile for bot-writable skills; no authority) and logs.
 fn daemon_state_name(base: &str) -> bool {
     const DATABASES: [&str; 3] = ["bot.db", "schedules.db", "memory.db"];
-    const FILES: [&str; 9] = [
+    const FILES: [&str; 12] = [
         "control-latch.json",
         "policy.json",
         "host.toml",
@@ -909,6 +913,9 @@ fn daemon_state_name(base: &str) -> bool {
         "web.toml",
         "telegram_state.json",
         "telegram-inbox.jsonl",
+        "email.toml",
+        "email-secret-cleanup.json",
+        "schedule.toml",
     ];
     DATABASES.iter().any(|s| {
         base == *s
@@ -3840,6 +3847,13 @@ mod tests {
             "web.toml",
             "telegram_state.json",
             "telegram-inbox.jsonl",
+            "email.toml",
+            "email.toml.tmp",
+            "email.toml.bak",
+            "email-secret-cleanup.json",
+            "email-secret-cleanup.json.tmp",
+            "schedule.toml",
+            "schedule.toml.bak",
         ] {
             let file = d.path().join(name);
             fs::write(&file, secret).unwrap();
@@ -3923,6 +3937,9 @@ mod tests {
             "CONTROL-LATCH.JSON",
             "bot.db::$DATA",
             "policy.json:stream",
+            "email.toml.",
+            "email-secret-cleanup.json ",
+            "schedule.toml:stream",
             "schedules.db-wal.",
             "host.toml ",
         ] {
