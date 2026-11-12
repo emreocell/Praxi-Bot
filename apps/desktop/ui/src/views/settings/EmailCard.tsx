@@ -1,12 +1,18 @@
 import {
+  AtSign,
+  Check,
   CircleAlert,
   CircleCheck,
+  Copy,
+  ExternalLink,
   Info,
+  KeyRound,
   Mail,
   Pencil,
   PlugZap,
   Plus,
   Trash2,
+  TriangleAlert,
   Users
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -15,22 +21,30 @@ import { BotAvatar, Button, Card } from "ui";
 import { BrandIcon } from "../../components/BrandIcon";
 import { botView } from "../../lib/botProfile";
 import type { EmailAccount, EmailTestReport } from "../../api/types";
+import { openExternal } from "../../lib/externalLink";
 import { BotAccessPicker } from "../../components/BotAccessPicker";
 import formStyles from "../../components/Form.module.css";
 import { Segmented } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
 import {
   accountBotName,
+  AGENTMAIL_CONSOLE_URL,
+  AGENTMAIL_PRICING_URL,
+  type AgentmailForm,
+  type AgentmailFormError,
   applyPreset,
   EMAIL_PRESETS,
   type EmailForm,
   type EmailFormError,
   type EmailPresetId,
+  emptyAgentmailForm,
   emptyForm,
   formFromAccount,
   probeTone,
+  toAgentmailInput,
   toInput,
   toPatch,
+  validateAgentmailForm,
   validateForm
 } from "../../lib/emailAccounts";
 import { useDaemon } from "../../state/DaemonContext";
@@ -48,10 +62,13 @@ const PRESET_IDS: readonly EmailPresetId[] = [
 /** One line per server: "IMAP: Connected", "SMTP: Login rejected". */
 function TestResult({ report }: { report: EmailTestReport }) {
   const { t } = useTranslation();
+  // An API-backed mailbox has one check; the IMAP and SMTP lines would repeat it.
+  const keys = report.api ? (["api"] as const) : (["imap", "smtp"] as const);
   return (
     <ul className={styles.result} data-testid="email-test-result">
-      {(["imap", "smtp"] as const).map((k) => {
-        const tone = probeTone(report[k]);
+      {keys.map((k) => {
+        const status = k === "api" ? (report.api ?? "protocol") : report[k];
+        const tone = probeTone(status);
         return (
           <li
             key={k}
@@ -59,7 +76,7 @@ function TestResult({ report }: { report: EmailTestReport }) {
           >
             {tone === "ok" ? <CircleCheck aria-hidden="true" /> : <CircleAlert aria-hidden="true" />}
             <span>
-              {t(`settingsModal.email.result.${k}`)}: {t(`settingsModal.email.result.${report[k]}`)}
+              {t(`settingsModal.email.result.${k}`)}: {t(`settingsModal.email.result.${status}`)}
             </span>
           </li>
         );
@@ -387,6 +404,233 @@ function AccountForm({
   );
 }
 
+/** What the user must know before creating an address at AgentMail. */
+function AgentmailNotes() {
+  const { t } = useTranslation();
+  return (
+    <ul className={styles.notes} data-testid="agentmail-notes">
+      <li>
+        <KeyRound aria-hidden="true" />
+        <span>
+          {t("settingsModal.email.agentmail.ownAccount")}{" "}
+          <button
+            type="button"
+            className={styles.link}
+            onClick={() => openExternal(AGENTMAIL_CONSOLE_URL)}
+          >
+            {t("settingsModal.email.agentmail.getKey")}
+            <ExternalLink aria-hidden="true" />
+          </button>
+        </span>
+      </li>
+      <li>
+        <Info aria-hidden="true" />
+        <span>
+          {t("settingsModal.email.agentmail.limits")}{" "}
+          <button
+            type="button"
+            className={styles.link}
+            onClick={() => openExternal(AGENTMAIL_PRICING_URL)}
+          >
+            {t("settingsModal.email.agentmail.pricing")}
+            <ExternalLink aria-hidden="true" />
+          </button>
+        </span>
+      </li>
+      <li className={styles.warn}>
+        <TriangleAlert aria-hidden="true" />
+        <span>{t("settingsModal.email.agentmail.noColdOutreach")}</span>
+      </li>
+    </ul>
+  );
+}
+
+/** The created address, with a copy button. */
+function CreatedAddress({ account, onDone }: { account: EmailAccount; onDone: () => void }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    void navigator.clipboard
+      .writeText(account.address)
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {});
+  };
+  return (
+    <div className={styles.form} data-testid="agentmail-created">
+      <h3 className={styles.subheading}>{t("settingsModal.email.agentmail.created")}</h3>
+      <div className={styles.address_box}>
+        <AtSign aria-hidden="true" />
+        <code className={styles.address_code} data-testid="agentmail-address">
+          {account.address}
+        </code>
+        <Button size="sm" variant="secondary" data-testid="agentmail-copy" onClick={copy}>
+          {copied ? <Check /> : <Copy />}
+          {copied ? t("settingsModal.email.agentmail.copied") : t("settingsModal.email.agentmail.copy")}
+        </Button>
+      </div>
+      <p className={formStyles.hint}>{t("settingsModal.email.agentmail.createdHint")}</p>
+      <div className={styles.actions}>
+        <Button size="sm" variant="primary" onClick={onDone}>
+          {t("settingsModal.email.agentmail.done")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** "Give this bot an address": paste the user's own AgentMail key, pick the bot. */
+function AgentmailFlow({
+  existing,
+  onDone
+}: {
+  existing: string[];
+  onDone: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const { client, bots } = useDaemon();
+  const [form, setForm] = useState<AgentmailForm>(emptyAgentmailForm);
+  const [errors, setErrors] = useState<AgentmailFormError[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [created, setCreated] = useState<EmailAccount | null>(null);
+  const set = (patch: Partial<AgentmailForm>) => {
+    setForm((f) => ({ ...f, ...patch }));
+    setErrors([]);
+  };
+  const err = (k: AgentmailFormError) =>
+    errors.includes(k) ? t(`settingsModal.email.agentmail.errors.${k}`) : null;
+
+  if (created) {
+    return <CreatedAddress account={created} onDone={() => void onDone()} />;
+  }
+
+  const submit = async () => {
+    const found = validateAgentmailForm(form);
+    setErrors(found);
+    if (!client || found.length > 0) {
+      return;
+    }
+    setBusy(true);
+    try {
+      setCreated(await client.createEmailAccount(toAgentmailInput(form, existing)));
+    } catch (e) {
+      toast.show(errorText(e), "danger");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form
+      className={styles.form}
+      data-testid="agentmail-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void submit();
+      }}
+    >
+      <h3 className={styles.subheading}>{t("settingsModal.email.agentmail.title")}</h3>
+      <AgentmailNotes />
+      <Field
+        id="agentmail-key"
+        label={t("settingsModal.email.agentmail.apiKey")}
+        hint={t("settingsModal.email.agentmail.apiKeyHint")}
+        error={err("apiKey")}
+      >
+        <input
+          id="agentmail-key"
+          className={formStyles.input}
+          type="password"
+          value={form.apiKey}
+          autoComplete="new-password"
+          onChange={(e) => set({ apiKey: e.target.value })}
+        />
+      </Field>
+      <div className={formStyles.field}>
+        <span className={formStyles.label}>{t("settingsModal.email.agentmail.bot")}</span>
+        <BotAccessPicker
+          single
+          scope={form.bot}
+          bots={bots}
+          onChange={(bot) => set({ bot })}
+          texts={{
+            label: t("settingsModal.email.agentmail.bot"),
+            all: t("settingsModal.email.form.access.all"),
+            some: t("settingsModal.email.form.access.some"),
+            nobody: t("settingsModal.email.form.access.nobody")
+          }}
+          allWarning={t("settingsModal.email.form.access.allWarning")}
+        />
+        {err("bot") ? <p className={formStyles.error}>{err("bot")}</p> : null}
+      </div>
+      <Field
+        id="agentmail-hint"
+        label={t("settingsModal.email.agentmail.nameHint")}
+        hint={t("settingsModal.email.agentmail.nameHintHelp")}
+        error={err("nameHint")}
+      >
+        <input
+          id="agentmail-hint"
+          className={formStyles.input}
+          value={form.nameHint}
+          maxLength={32}
+          autoComplete="off"
+          placeholder="atlas"
+          onChange={(e) => set({ nameHint: e.target.value })}
+        />
+      </Field>
+      <div className={styles.actions}>
+        <Button type="submit" size="sm" variant="primary" disabled={busy}>
+          {busy ? t("settingsModal.email.agentmail.creating") : t("settingsModal.email.agentmail.create")}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => void onDone()}>
+          {t("common.cancel")}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** First step of adding: own mailbox, or an AgentMail address. */
+function AddChoice({
+  onOwn,
+  onAgentmail,
+  onCancel
+}: {
+  onOwn: () => void;
+  onAgentmail: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.choice} data-testid="email-choice">
+      <button type="button" className={styles.choiceCard} data-testid="email-choose-own" onClick={onOwn}>
+        <Mail aria-hidden="true" />
+        <span className={styles.choiceTitle}>{t("settingsModal.email.choice.own")}</span>
+        <span className={styles.choiceText}>{t("settingsModal.email.choice.ownText")}</span>
+      </button>
+      <button
+        type="button"
+        className={styles.choiceCard}
+        data-testid="email-choose-agentmail"
+        onClick={onAgentmail}
+      >
+        <AtSign aria-hidden="true" />
+        <span className={styles.choiceTitle}>{t("settingsModal.email.choice.agentmail")}</span>
+        <span className={styles.choiceText}>{t("settingsModal.email.choice.agentmailText")}</span>
+      </button>
+      <div className={styles.actions}>
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          {t("common.cancel")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function AccountRow({
   account,
   busy,
@@ -397,12 +641,14 @@ function AccountRow({
   account: EmailAccount;
   busy: boolean;
   onEdit: () => void;
-  onDelete: () => void;
+  onDelete: (deleteInbox: boolean) => void;
   onTest: () => Promise<EmailTestReport | null>;
 }) {
   const { t } = useTranslation();
   const { bots } = useDaemon();
   const [confirm, setConfirm] = useState(false);
+  const [alsoRemote, setAlsoRemote] = useState(false);
+  const isAgentmail = account.provider === "agentmail";
   const [testing, setTesting] = useState(false);
   const [report, setReport] = useState<EmailTestReport | null>(null);
   const botName = accountBotName(account, bots, t("settingsModal.email.deletedBot"));
@@ -413,13 +659,14 @@ function AccountRow({
         <BrandIcon name="gmail" />
       ) : (
         <span className={styles.icon} aria-hidden="true">
-          <Mail />
+          {isAgentmail ? <AtSign /> : <Mail />}
         </span>
       )}
       <div className={styles.main}>
         <div className={styles.title}>
           <span className={styles.name}>{account.name}</span>
           <span className={styles.address}>{account.address}</span>
+          {isAgentmail ? <span className={styles.tag}>AgentMail</span> : null}
           <span className={styles.tag}>
             {boundBot ? <BotAvatar bot={botView(boundBot)} size="xs" decorative /> : <Users aria-hidden="true" />}
             {botName === null
@@ -428,13 +675,23 @@ function AccountRow({
           </span>
         </div>
         <div className={styles.meta}>
-          <span>{account.imap.host}</span>
-          <span aria-hidden="true">·</span>
-          <span>{account.smtp.host}</span>
+          {isAgentmail ? (
+            <span>{t("settingsModal.email.agentmail.viaApi")}</span>
+          ) : (
+            <>
+              <span>{account.imap.host}</span>
+              <span aria-hidden="true">·</span>
+              <span>{account.smtp.host}</span>
+            </>
+          )}
           {account.password_set ? null : (
             <>
               <span aria-hidden="true">·</span>
-              <span className={styles.missing}>{t("settingsModal.email.passwordMissing")}</span>
+              <span className={styles.missing}>
+                {isAgentmail
+                  ? t("settingsModal.email.agentmail.keyMissing")
+                  : t("settingsModal.email.passwordMissing")}
+              </span>
             </>
           )}
         </div>
@@ -462,6 +719,17 @@ function AccountRow({
         </Button>
         {confirm ? (
           <>
+            {isAgentmail ? (
+              <label className={styles.remote}>
+                <input
+                  type="checkbox"
+                  checked={alsoRemote}
+                  data-testid={`email-delete-remote-${account.name}`}
+                  onChange={(e) => setAlsoRemote(e.target.checked)}
+                />
+                <span>{t("settingsModal.email.agentmail.alsoDelete")}</span>
+              </label>
+            ) : null}
             <Button
               size="sm"
               variant="danger"
@@ -469,7 +737,8 @@ function AccountRow({
               data-testid={`email-delete-confirm-${account.name}`}
               onClick={() => {
                 setConfirm(false);
-                onDelete();
+                onDelete(isAgentmail && alsoRemote);
+                setAlsoRemote(false);
               }}
             >
               {t("settingsModal.email.deleteConfirm")}
@@ -505,7 +774,9 @@ export function EmailCard() {
   const { client } = useDaemon();
   const [accounts, setAccounts] = useState<EmailAccount[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [mode, setMode] = useState<"list" | "add" | { edit: string }>("list");
+  const [mode, setMode] = useState<
+    "list" | "choose" | "add" | "agentmail" | { edit: string }
+  >("list");
   const [busy, setBusy] = useState(false);
 
   const reload = useCallback(async () => {
@@ -524,13 +795,13 @@ export function EmailCard() {
     void reload();
   }, [reload]);
 
-  const remove = async (name: string) => {
+  const remove = async (name: string, deleteInbox: boolean) => {
     if (!client) {
       return;
     }
     setBusy(true);
     try {
-      await client.deleteEmailAccount(name);
+      await client.deleteEmailAccount(name, { deleteInbox });
       toast.show(t("settingsModal.email.toast.deleted", { name }), "success");
       await reload();
     } catch (e) {
@@ -581,7 +852,7 @@ export function EmailCard() {
               account={a}
               busy={busy}
               onEdit={() => setMode({ edit: a.name })}
-              onDelete={() => void remove(a.name)}
+              onDelete={(deleteInbox) => void remove(a.name, deleteInbox)}
               onTest={() => test(a.name)}
             />
           ))}
@@ -593,12 +864,26 @@ export function EmailCard() {
             size="sm"
             variant="secondary"
             data-testid="email-add"
-            onClick={() => setMode("add")}
+            onClick={() => setMode("choose")}
           >
             <Plus />
             {t("settingsModal.email.add")}
           </Button>
         </div>
+      ) : mode === "choose" ? (
+        <AddChoice
+          onOwn={() => setMode("add")}
+          onAgentmail={() => setMode("agentmail")}
+          onCancel={() => setMode("list")}
+        />
+      ) : mode === "agentmail" ? (
+        <AgentmailFlow
+          existing={list.map((a) => a.name)}
+          onDone={async () => {
+            setMode("list");
+            await reload();
+          }}
+        />
       ) : (
         <AccountForm
           key={typeof mode === "object" ? mode.edit : "add"}

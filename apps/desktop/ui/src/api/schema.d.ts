@@ -283,8 +283,10 @@ export interface paths {
         put: operations["update_email_account"];
         post?: never;
         /**
-         * Remove an account and the password it owned. Takes effect for the next tool
-         *     call.
+         * Remove an account and the secret it owned. Takes effect for the next tool
+         *     call. With `delete_inbox=true` the inbox is first deleted at the provider
+         *     (irreversible); if that fails the account is kept (`502`) so it can be
+         *     retried. Deleting a bot never deletes inboxes at the provider.
          */
         delete: operations["delete_email_account"];
         options?: never;
@@ -1212,12 +1214,19 @@ export interface components {
             custom_ca: boolean;
             /** @description Folder drafts are saved to. */
             drafts_folder: string;
-            /** @description IMAP server. */
+            /** @description IMAP server (empty host for API-backed accounts). */
             imap: components["schemas"]["EmailImapServer"];
+            /** @description The provider's id of the inbox (`agentmail` accounts); `null` otherwise. */
+            inbox_id?: string | null;
             /** @description Account name. */
             name: string;
-            /** @description Whether a password is stored. The password itself is never returned. */
+            /**
+             * @description Whether the secret (password, or the API key of an `agentmail` account)
+             *     is stored. The secret itself is never returned.
+             */
             password_set: boolean;
+            /** @description Kind of mailbox. */
+            provider: components["schemas"]["EmailProviderKind"];
             /** @description SMTP server. */
             smtp: components["schemas"]["EmailSmtpServer"];
             /** @description Login name; empty = the address. */
@@ -1225,29 +1234,47 @@ export interface components {
         };
         /** @description Body of `POST /v1/email/accounts` and `POST /v1/email/test`. */
         EmailAccountInput: {
-            /** @description Address mail is sent from. */
-            address: string;
+            /** @description Address mail is sent from (`imap_smtp`). */
+            address?: string;
             /** @description Senders whose mail may start a run (addresses or `@domain`). */
             allowed_senders?: string[];
+            /**
+             * @description The user's own `AgentMail` API key (`agentmail`). **Write-only**: it goes
+             *     to the secret store and is never returned or logged.
+             */
+            api_key?: string | null;
             /** @description Bot (storage UUID) that owns the account; absent / `null` = every bot. */
             bot?: string | null;
+            /**
+             * @description Custom (verified) domain for a new `agentmail` address; default the
+             *     provider's shared domain.
+             */
+            domain?: string | null;
             /** @description Folder drafts are saved to, default `Drafts`. */
             drafts_folder?: string | null;
-            /** @description IMAP server. */
-            imap: components["schemas"]["EmailImapServer"];
+            /** @description IMAP server (`imap_smtp`). */
+            imap?: components["schemas"]["EmailImapServer"];
             /**
              * @description Account name: 1 to 64 characters of `[A-Za-z0-9._-]`. Required on
              *     create; for `POST /v1/email/test` it selects the stored password to
              *     reuse when `password` is left out.
              */
             name: string;
+            /** @description Hint for the local part of a new `agentmail` address. */
+            name_hint?: string | null;
             /**
              * @description The account password or app password. **Write-only**: it goes to the
              *     secret store and is never returned or logged. Required on create.
              */
             password?: string | null;
-            /** @description SMTP server. */
-            smtp: components["schemas"]["EmailSmtpServer"];
+            /**
+             * @description Kind of mailbox; default `imap_smtp`. For `agentmail` the inbox is
+             *     created at the provider (its address is returned); `address`, `imap`
+             *     and `smtp` are not used and `api_key` is required.
+             */
+            provider?: components["schemas"]["EmailProviderKind"];
+            /** @description SMTP server (`imap_smtp`). */
+            smtp?: components["schemas"]["EmailSmtpServer"];
             /** @description Login name; default (empty) = the address. */
             username?: string | null;
         };
@@ -1262,6 +1289,8 @@ export interface components {
             address?: string | null;
             /** @description Allowed senders; present list replaces the stored one. */
             allowed_senders?: string[] | null;
+            /** @description New `AgentMail` API key (write-only). */
+            api_key?: string | null;
             /** @description Owning bot; `null` = every bot; omit to keep. */
             bot?: string | null;
             /** @description Folder drafts are saved to. */
@@ -1289,6 +1318,11 @@ export interface components {
          */
         EmailProbeStatus: "ok" | "unreachable" | "tls" | "auth_failed" | "protocol" | "timeout";
         /**
+         * @description What kind of mailbox an account is.
+         * @enum {string}
+         */
+        EmailProviderKind: "imap_smtp" | "agentmail";
+        /**
          * @description How the SMTP connection is secured.
          * @enum {string}
          */
@@ -1310,9 +1344,13 @@ export interface components {
          *     said.
          */
         EmailTestReport: {
+            api?: null | components["schemas"]["EmailProbeStatus"];
             /** @description IMAP (reading mail). */
             imap: components["schemas"]["EmailProbeStatus"];
-            /** @description Both servers accepted the login. */
+            /**
+             * @description Both servers accepted the login (for `agentmail`: the API check
+             *     passed).
+             */
             ok: boolean;
             /** @description SMTP (sending mail); authentication only, nothing is sent. */
             smtp: components["schemas"]["EmailProbeStatus"];
@@ -2802,6 +2840,11 @@ export interface operations {
             path: {
                 /** @description Account name */
                 name: string;
+                /**
+                 * @description Also delete the inbox at the provider (`agentmail` accounts). Default
+                 *     `false`: removing an account only forgets it locally.
+                 */
+                delete_inbox: boolean;
             };
             cookie?: never;
         };
@@ -2814,6 +2857,24 @@ export interface operations {
                 content?: never;
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the account has no remote inbox */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the provider refused or failed */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };

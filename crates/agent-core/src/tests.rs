@@ -5134,17 +5134,30 @@ async fn an_approved_permit_that_never_executes_releases_the_tools_entry() {
     else {
         unreachable!()
     };
-    // The user approves, but the policy now denies the category: the call is
-    // never executed, so the approval's frozen state must be released.
-    let mut deny = Policy::approve_destructive();
-    deny.categories
-        .insert(PermissionCategory::System, Rule::new(Level::Deny));
-    lp.set_global_policy(deny);
-    let _ = lp.approve(a.call_id, ApprovalScope::Once, env.user);
+    // Tighten the policy *inside* `ExecPermit::commit`, after `request_approval`
+    // has already returned `Ok(ExecPermit)`: `commit` fails, dropping the permit
+    // and its `ClosedGuard`, which must release the tool's frozen entry.
+    let hook_ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let hook_ran_h = Arc::clone(&hook_ran);
+    *lp.sh.exec_commit_hook.lock() = Some(Arc::new(move |sh| {
+        hook_ran_h.store(true, Ordering::SeqCst);
+        let mut deny = Policy::approve_destructive();
+        deny.categories
+            .insert(PermissionCategory::System, Rule::new(Level::Deny));
+        crate::approval::install_global_policy(sh, deny);
+    }));
+    lp.approve(a.call_id, ApprovalScope::Once, env.user)
+        .unwrap();
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(
+        hook_ran.load(Ordering::SeqCst),
+        "ExecPermit::commit must run"
+    );
     assert_eq!(t.count.load(Ordering::SeqCst), 0, "never executed");
     assert_eq!(t.closed.load(Ordering::SeqCst), 1);
     assert_eq!(*t.tokens.lock(), [Some("tok-xyz".to_owned())]);
+    let msg = tool_messages(&fake.request(1)).join("\n");
+    assert!(msg.contains("denied by policy"), "{msg}");
 }
 
 #[tokio::test]

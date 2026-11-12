@@ -47,6 +47,7 @@ tokio = { workspace = true, features = ["signal"] }
 tool-registry = { path = "../../crates/tool-registry", version = "0.1.0" }
 toml.workspace = true
 url.workspace = true
+uuid.workspace = true
 web-tools = { path = "../../crates/web-tools", version = "0.1.0" }
 workflow-replay = { path = "../../crates/workflow-replay", version = "0.1.0" }
 
@@ -57,7 +58,6 @@ desktop-windows = { path = "../../crates/desktop-windows", version = "0.1.0" }
 wiremock.workspace = true
 daemon-api = { path = "../../crates/daemon-api", version = "0.1.0", features = ["fake-provider"] }
 tempfile.workspace = true
-uuid.workspace = true
 
 [lints]
 workspace = true

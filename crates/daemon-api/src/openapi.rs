@@ -125,7 +125,7 @@ impl Modify for Security {
         mcp::McpTransportKind, mcp::McpStatus, mcp::McpServerDto, mcp::McpTransportObject,
         mcp::McpTransportInput, mcp::McpServerInput, mcp::McpToolDto, mcp::McpRequiredSecretDto,
         mcp::McpCatalogInstallDto, mcp::McpCatalogEntryDto, mcp::SetSecret, mcp::McpServerChanged,
-        email::EmailSecurity, email::EmailImapServer, email::EmailSmtpServer,
+        email::EmailProviderKind, email::EmailSecurity, email::EmailImapServer, email::EmailSmtpServer,
         email::EmailAccountDto, email::EmailAccountInput, email::EmailAccountPatch,
         email::EmailProbeStatus, email::EmailTestReport,
         error::ErrorBody, error::ErrorDetail,

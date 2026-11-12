@@ -1,17 +1,26 @@
 //! [`EmailConnector`]: accounts + secret store + the high-level operations.
 
 use std::collections::BTreeMap;
-use std::future::Future;
+use std::path::PathBuf;
 use std::sync::{Arc, PoisonError, RwLock};
 
-use secret_store::{SecretStore, resolve};
+use secret_store::SecretStore;
 
-use crate::config::AccountConfig;
+use crate::agentmail::{AgentMailClient, AgentMailEndpoint, AgentMailProvider, ApiKey};
+use crate::config::{AccountConfig, AccountKind};
+use crate::cred::resolve_secret;
 use crate::error::EmailError;
-use crate::imap::{FolderInfo, ImapSession, SearchQuery};
+use crate::imap::{FolderInfo, SearchQuery};
+use crate::imap_provider::ImapSmtpProvider;
 use crate::message::{MessageDetail, MessageSummary};
 use crate::probe::ProbeReport;
-use crate::smtp::{self, OutgoingMail};
+use crate::provider::{
+    AttachmentData, Capabilities, MailboxProvider, NewMessages, Receipt, SearchRequest,
+};
+use crate::smtp::OutgoingMail;
+
+/// Largest attachment downloaded and saved.
+pub const MAX_ATTACHMENT_BYTES: usize = 10 * 1024 * 1024;
 
 /// Result of a search.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +40,11 @@ pub struct SearchResult {
 pub struct EmailConnector {
     accounts: RwLock<Arc<BTreeMap<String, AccountConfig>>>,
     secrets: Arc<dyn SecretStore>,
+    endpoint: AgentMailEndpoint,
+    /// Built on first use (TLS roots are loaded then, not at start-up).
+    client: RwLock<Option<AgentMailClient>>,
+    /// Where downloaded attachments are saved (`None` = downloads refused).
+    attachments_dir: RwLock<Option<PathBuf>>,
 }
 
 /// A bound account is usable only by its bot (ids compare case-insensitively,
@@ -71,10 +85,77 @@ impl EmailConnector {
     /// runtime with [`EmailConnector::replace_accounts`].
     #[must_use]
     pub fn reloadable(secrets: Arc<dyn SecretStore>) -> Self {
+        Self::reloadable_with(secrets, AgentMailEndpoint::production())
+    }
+
+    /// Like [`EmailConnector::reloadable`] with an explicit `AgentMail`
+    /// endpoint (production, or a loopback mock in tests).
+    #[must_use]
+    pub fn reloadable_with(secrets: Arc<dyn SecretStore>, endpoint: AgentMailEndpoint) -> Self {
         Self {
             accounts: RwLock::new(Arc::new(BTreeMap::new())),
             secrets,
+            endpoint,
+            client: RwLock::new(None),
+            attachments_dir: RwLock::new(None),
         }
+    }
+
+    /// Set the directory attachments are saved in (created on first use).
+    pub fn set_attachments_dir(&self, dir: PathBuf) {
+        *self
+            .attachments_dir
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = Some(dir);
+    }
+
+    fn agentmail_client(&self) -> Result<AgentMailClient, EmailError> {
+        if let Some(c) = self
+            .client
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+        {
+            return Ok(c.clone());
+        }
+        let c = AgentMailClient::new(self.endpoint.clone())?;
+        *self.client.write().unwrap_or_else(PoisonError::into_inner) = Some(c.clone());
+        Ok(c)
+    }
+
+    /// The provider serving `acct`.
+    ///
+    /// # Errors
+    /// Credential or config failures (an `AgentMail` account resolves its key
+    /// here).
+    pub async fn provider_for(
+        &self,
+        acct: &AccountConfig,
+    ) -> Result<Box<dyn MailboxProvider>, EmailError> {
+        match acct.kind {
+            AccountKind::ImapSmtp => Ok(Box::new(ImapSmtpProvider::new(
+                acct.clone(),
+                Arc::clone(&self.secrets),
+            ))),
+            AccountKind::AgentMail => {
+                let key = resolve_secret(&self.secrets, &acct.password).await?;
+                Ok(Box::new(self.agentmail_for(&key, Some(acct))?))
+            }
+        }
+    }
+
+    /// An `AgentMail` provider for `key`, bound to the inbox of `acct` when
+    /// given (without one it can only create an inbox).
+    ///
+    /// # Errors
+    /// [`EmailError::Input`] for a malformed key.
+    pub fn agentmail_for(
+        &self,
+        key: &str,
+        acct: Option<&AccountConfig>,
+    ) -> Result<AgentMailProvider, EmailError> {
+        let inbox = acct.and_then(|a| a.inbox_id.clone().map(|id| (id, a.address.clone())));
+        AgentMailProvider::new(self.agentmail_client()?, ApiKey::new(key)?, inbox)
     }
 
     /// Atomically replace the whole account set (may be empty). Everything is
@@ -127,26 +208,7 @@ impl EmailConnector {
     }
 
     async fn password(&self, acct: &AccountConfig) -> Result<String, EmailError> {
-        let store = self.secrets.clone();
-        let r = acct.password.clone();
-        tokio::task::spawn_blocking(move || {
-            resolve(store.as_ref(), &r).map(|v| v.expose().to_string())
-        })
-        .await
-        .map_err(|e| EmailError::Credential(e.to_string()))?
-        .map_err(|e| EmailError::Credential(e.to_string()))
-    }
-
-    /// One deadline around secret resolution and the network call.
-    async fn deadline<T>(
-        limit: std::time::Duration,
-        secs: u64,
-        fut: impl Future<Output = Result<T, EmailError>>,
-    ) -> Result<T, EmailError> {
-        match tokio::time::timeout(limit, fut).await {
-            Ok(result) => result,
-            Err(_) => Err(EmailError::Timeout(secs)),
-        }
+        resolve_secret(&self.secrets, &acct.password).await
     }
 
     /// Check the password of `acct` is in the secret store (the value is not
@@ -173,6 +235,21 @@ impl EmailConnector {
             .ok_or_else(|| EmailError::Input(format!("unknown account {name:?}")))?;
         let password = self.password(&acct).await?;
         Ok(crate::probe::probe(&acct, &password).await)
+    }
+
+    /// "Test connection" for a stored API-backed account: one cheap
+    /// authenticated call, nothing read or sent.
+    ///
+    /// # Errors
+    /// [`EmailError::Input`] for an unknown account, credential and provider
+    /// failures otherwise.
+    pub async fn check_saved(&self, name: &str) -> Result<(), EmailError> {
+        let acct = self
+            .snapshot()
+            .get(name)
+            .cloned()
+            .ok_or_else(|| EmailError::Input(format!("unknown account {name:?}")))?;
+        self.provider_for(&acct).await?.check().await
     }
 
     /// List folders (not bot-scoped; see [`EmailConnector::scoped`]).
@@ -310,47 +387,45 @@ impl Scoped<'_> {
         self.account(account).map(|a| a.name)
     }
 
-    async fn with_imap<T, F>(&self, account: Option<&str>, f: F) -> Result<T, EmailError>
-    where
-        F: for<'a> FnOnce(
-            &'a mut ImapSession,
-            &'a AccountConfig,
-        ) -> std::pin::Pin<
-            Box<dyn Future<Output = Result<T, EmailError>> + Send + 'a>,
-        >,
-    {
+    async fn provider(
+        &self,
+        account: Option<&str>,
+    ) -> Result<Box<dyn MailboxProvider>, EmailError> {
         let acct = self.account(account)?;
-        self.with_imap_for(acct, f).await
+        self.conn.provider_for(&acct).await
     }
 
-    async fn with_imap_for<T, F>(&self, acct: AccountConfig, f: F) -> Result<T, EmailError>
-    where
-        F: for<'a> FnOnce(
-            &'a mut ImapSession,
-            &'a AccountConfig,
-        ) -> std::pin::Pin<
-            Box<dyn Future<Output = Result<T, EmailError>> + Send + 'a>,
-        >,
-    {
-        let limit = acct.timeout();
-        let secs = limit.as_secs();
-        EmailConnector::deadline(limit, secs, async {
-            let pw = self.conn.password(&acct).await?;
-            let mut s = ImapSession::connect(&acct, &pw).await?;
-            let r = f(&mut s, &acct).await;
-            s.logout().await;
-            r
+    /// What the mailbox of this call can do.
+    ///
+    /// # Errors
+    /// [`EmailError::Input`] when no account applies.
+    pub fn capabilities(&self, account: Option<&str>) -> Result<Capabilities, EmailError> {
+        let acct = self.account(account)?;
+        Ok(match acct.kind {
+            AccountKind::ImapSmtp => {
+                ImapSmtpProvider::new(acct, Arc::clone(&self.conn.secrets)).capabilities()
+            }
+            AccountKind::AgentMail => self
+                .conn
+                .agentmail_for("placeholder-key", Some(&acct))?
+                .capabilities(),
         })
-        .await
+    }
+
+    /// The kind of the account a call with `account` would use.
+    ///
+    /// # Errors
+    /// [`EmailError::Input`] as for any call.
+    pub fn kind(&self, account: Option<&str>) -> Result<AccountKind, EmailError> {
+        self.account(account).map(|a| a.kind)
     }
 
     /// List folders.
     ///
     /// # Errors
-    /// See [`EmailError`].
+    /// See [`EmailError`]; [`EmailError::Unsupported`] for mailboxes without folders.
     pub async fn list_folders(&self, account: Option<&str>) -> Result<Vec<FolderInfo>, EmailError> {
-        self.with_imap(account, |s, _| Box::pin(s.list_folders()))
-            .await
+        self.provider(account).await?.list_folders().await
     }
 
     /// Search a folder.
@@ -364,19 +439,22 @@ impl Scoped<'_> {
         query: &SearchQuery,
         limit: usize,
     ) -> Result<SearchResult, EmailError> {
-        query.to_imap()?; // validate before connecting
-        crate::imap::check_folder(folder)?;
-        let folder = folder.to_owned();
-        let query = query.clone();
-        let (messages, total) = self
-            .with_imap(account, move |s, _| {
-                Box::pin(async move { s.search(&folder, &query, limit).await })
+        let found = self
+            .provider(account)
+            .await?
+            .search(&SearchRequest {
+                folder,
+                query,
+                limit,
             })
             .await?;
-        Ok(SearchResult { messages, total })
+        Ok(SearchResult {
+            messages: found.messages,
+            total: found.total,
+        })
     }
 
-    /// Fetch a message (does not mark it read).
+    /// Fetch a message by IMAP UID (does not mark it read).
     ///
     /// # Errors
     /// See [`EmailError`].
@@ -387,18 +465,31 @@ impl Scoped<'_> {
         uid: u32,
         max_body_chars: usize,
     ) -> Result<MessageDetail, EmailError> {
-        crate::imap::check_folder(folder)?;
         if uid == 0 {
             return Err(EmailError::Input("uid must be nonzero".into()));
         }
-        let folder = folder.to_owned();
-        self.with_imap(account, move |s, _| {
-            Box::pin(async move { s.fetch(&folder, uid, max_body_chars).await })
-        })
-        .await
+        self.fetch_id(account, folder, &uid.to_string(), max_body_chars)
+            .await
     }
 
-    /// Mark a message read (or unread).
+    /// Fetch a message by the provider id (does not mark it read).
+    ///
+    /// # Errors
+    /// See [`EmailError`].
+    pub async fn fetch_id(
+        &self,
+        account: Option<&str>,
+        folder: &str,
+        id: &str,
+        max_body_chars: usize,
+    ) -> Result<MessageDetail, EmailError> {
+        self.provider(account)
+            .await?
+            .get_message(folder, id, max_body_chars)
+            .await
+    }
+
+    /// Mark a message read (or unread) by IMAP UID.
     ///
     /// # Errors
     /// See [`EmailError`].
@@ -409,18 +500,31 @@ impl Scoped<'_> {
         uid: u32,
         read: bool,
     ) -> Result<(), EmailError> {
-        crate::imap::check_folder(folder)?;
         if uid == 0 {
             return Err(EmailError::Input("uid must be nonzero".into()));
         }
-        let folder = folder.to_owned();
-        self.with_imap(account, move |s, _| {
-            Box::pin(async move { s.set_seen(&folder, uid, read).await })
-        })
-        .await
+        self.mark_read_id(account, folder, &uid.to_string(), read)
+            .await
     }
 
-    /// Save a draft to the account's drafts folder. Nothing is sent.
+    /// Mark a message read (or unread) by the provider id.
+    ///
+    /// # Errors
+    /// See [`EmailError`].
+    pub async fn mark_read_id(
+        &self,
+        account: Option<&str>,
+        folder: &str,
+        id: &str,
+        read: bool,
+    ) -> Result<(), EmailError> {
+        self.provider(account)
+            .await?
+            .mark_read(folder, id, read)
+            .await
+    }
+
+    /// Save a draft to the account drafts folder. Nothing is sent.
     ///
     /// # Errors
     /// See [`EmailError`].
@@ -429,18 +533,11 @@ impl Scoped<'_> {
         account: Option<&str>,
         mail: &OutgoingMail,
     ) -> Result<String, EmailError> {
-        let acct = self.account(account)?;
-        let raw = smtp::compose_draft(&acct.address, mail)?.formatted();
-        self.with_imap_for(acct, |s, acct| {
-            Box::pin(async move {
-                s.append_draft(&acct.drafts_folder, &raw).await?;
-                Ok(acct.drafts_folder.clone())
-            })
-        })
-        .await
+        self.provider(account).await?.save_draft(mail).await
     }
 
     /// Send a message **immediately**. Callers must have obtained approval.
+    /// Returns the server reply (SMTP) or the provider message id.
     ///
     /// # Errors
     /// See [`EmailError`].
@@ -449,14 +546,91 @@ impl Scoped<'_> {
         account: Option<&str>,
         mail: &OutgoingMail,
     ) -> Result<String, EmailError> {
+        Ok(self.send_receipt(account, mail).await?.id)
+    }
+
+    /// Like [`Scoped::send`] with the full receipt.
+    ///
+    /// # Errors
+    /// See [`EmailError`].
+    pub async fn send_receipt(
+        &self,
+        account: Option<&str>,
+        mail: &OutgoingMail,
+    ) -> Result<Receipt, EmailError> {
+        self.provider(account).await?.send(mail).await
+    }
+
+    /// Reply in the thread of a message. **Sends immediately**; callers must
+    /// have obtained approval.
+    ///
+    /// # Errors
+    /// [`EmailError::Unsupported`] for mailboxes without thread replies.
+    pub async fn reply(
+        &self,
+        account: Option<&str>,
+        message_id: &str,
+        mail: &OutgoingMail,
+        reply_all: bool,
+    ) -> Result<Receipt, EmailError> {
+        self.provider(account)
+            .await?
+            .reply(message_id, mail, reply_all)
+            .await
+    }
+
+    /// Messages that arrived after `cursor` (providers with cursor polling).
+    ///
+    /// # Errors
+    /// [`EmailError::Unsupported`] for IMAP accounts.
+    pub async fn list_new(
+        &self,
+        account: Option<&str>,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<NewMessages, EmailError> {
+        self.provider(account).await?.list_new(cursor, limit).await
+    }
+
+    /// Download an attachment (at most [`MAX_ATTACHMENT_BYTES`]) and save it
+    /// under the attachments directory with a generated name (the declared
+    /// file name is never used for the path, and nothing is ever executed).
+    /// Returns the saved path and the data.
+    ///
+    /// # Errors
+    /// [`EmailError::Unsupported`] without provider support,
+    /// [`EmailError::Config`] when no attachments directory is configured.
+    pub async fn save_attachment(
+        &self,
+        account: Option<&str>,
+        message_id: &str,
+        attachment_id: &str,
+    ) -> Result<(PathBuf, AttachmentData), EmailError> {
         let acct = self.account(account)?;
-        let msg = smtp::compose(&acct.address, mail)?;
-        let limit = acct.timeout();
-        let secs = limit.as_secs();
-        EmailConnector::deadline(limit, secs, async {
-            let pw = self.conn.password(&acct).await?;
-            smtp::send(&acct, &pw, msg).await
+        let dir = self
+            .conn
+            .attachments_dir
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .ok_or_else(|| EmailError::Config("no attachments directory is configured".into()))?
+            .join(&acct.name);
+        let data = self
+            .conn
+            .provider_for(&acct)
+            .await?
+            .get_attachment(message_id, attachment_id, MAX_ATTACHMENT_BYTES)
+            .await?;
+        let path = dir.join(format!("{}.bin", uuid::Uuid::now_v7()));
+        let bytes = data.bytes.clone();
+        let target = path.clone();
+        tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+            std::fs::create_dir_all(target.parent().unwrap_or(&target))?;
+            std::fs::write(&target, bytes)
         })
         .await
+        .map_err(|_| EmailError::Config("cannot save the attachment".into()))?
+        .map_err(|_| EmailError::Config("cannot save the attachment".into()))?;
+        Ok((path, data))
     }
 }

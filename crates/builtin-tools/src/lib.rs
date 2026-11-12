@@ -799,6 +799,8 @@ mod tests {
             timeout_secs: 30,
             bot: None,
             allowed_senders: Vec::new(),
+            kind: connector_email::AccountKind::ImapSmtp,
+            inbox_id: None,
         };
         let connector =
             Arc::new(connector_email::EmailConnector::new(vec![account], store).unwrap());

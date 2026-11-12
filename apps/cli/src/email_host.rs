@@ -13,12 +13,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use connector_email::{
-    AccountConfig, EmailConnector, EmailError, ImapSettings, ProbeReport, ProbeStatus,
-    SmtpSecurity, SmtpSettings, normalize_sender, validate_account_name,
+    AccountConfig, AccountKind, AgentMailEndpoint, CreateInbox, EmailConnector, EmailError,
+    ImapSettings, ProbeReport, ProbeStatus, ProviderError, SmtpSecurity, SmtpSettings,
+    normalize_sender, validate_account_name,
 };
 use daemon_api::email::{
     EmailAccountDto, EmailAccountInput, EmailAccountPatch, EmailImapServer, EmailProbeStatus,
-    EmailSecurity, EmailSmtpServer, EmailTestReport,
+    EmailProviderKind, EmailSecurity, EmailSmtpServer, EmailTestReport,
 };
 use daemon_api::{EmailControl, EmailControlError};
 use secret_store::{SecretRef, SecretStore};
@@ -32,7 +33,7 @@ const CLEANUP_FILE: &str = "email-secret-cleanup.json";
 
 const FILE_HEADER: &str = "\
 # E-mail accounts of this bot (managed by the app; you may edit it while the daemon is stopped).\n\
-# Passwords are never stored here: `password` is the NAME of a secret in the secret store.\n\
+# Passwords and API keys are never stored here: `password` is the NAME of a secret in the secret store.\n\
 # `bot` binds an account to one bot (its storage id); without it every bot that may use the\n\
 # e-mail tools can use the account.\n\n";
 
@@ -54,11 +55,64 @@ struct FileOut<'a> {
     accounts: &'a [AccountConfig],
 }
 
-/// Name under which the daemon stores the password of account `name`.
+/// Name under which the daemon stores the password of IMAP/SMTP account `name`.
 #[must_use]
 pub fn managed_secret(name: &str) -> String {
     format!("email/{name}/password")
 }
+
+/// Name under which the daemon stores the API key of `AgentMail` account `name`.
+#[must_use]
+pub fn managed_api_key(name: &str) -> String {
+    format!("email/{name}/api_key")
+}
+
+/// The secret the daemon manages for an account of `kind`.
+fn managed_secret_for(name: &str, kind: AccountKind) -> String {
+    match kind {
+        AccountKind::ImapSmtp => managed_secret(name),
+        AccountKind::AgentMail => managed_api_key(name),
+    }
+}
+
+/// A provider failure as an API error: coarse text only (never the provider's
+/// words, never a secret).
+fn upstream(e: &EmailError) -> EmailControlError {
+    match e {
+        EmailError::Input(m) | EmailError::Config(m) => EmailControlError::Invalid(m.clone()),
+        EmailError::Credential(_) => invalid("no API key is stored for this account"),
+        other => EmailControlError::Upstream(other.to_string()),
+    }
+}
+
+fn probe_status_of(e: &EmailError) -> EmailProbeStatus {
+    match e {
+        EmailError::Provider(ProviderError::Auth | ProviderError::Forbidden) => {
+            EmailProbeStatus::AuthFailed
+        }
+        EmailError::Provider(ProviderError::Transient | ProviderError::RateLimited { .. }) => {
+            EmailProbeStatus::Unreachable
+        }
+        EmailError::Timeout(_) => EmailProbeStatus::Timeout,
+        _ => EmailProbeStatus::Protocol,
+    }
+}
+
+fn api_report(r: &Result<(), EmailError>) -> EmailTestReport {
+    let status = match r {
+        Ok(()) => EmailProbeStatus::Ok,
+        Err(e) => probe_status_of(e),
+    };
+    EmailTestReport {
+        imap: status,
+        smtp: status,
+        ok: status == EmailProbeStatus::Ok,
+        api: Some(status),
+    }
+}
+
+/// Directory attachments are saved in, under the data dir.
+pub const ATTACHMENTS_DIR: &str = "email-attachments";
 
 fn invalid(e: impl std::fmt::Display) -> EmailControlError {
     EmailControlError::Invalid(e.to_string())
@@ -90,11 +144,22 @@ pub fn start_email(
     registry: &ToolRegistry,
     store: Option<&Arc<dyn SecretStore>>,
 ) -> Option<(Arc<EmailHost>, usize)> {
+    start_email_with(data_dir, registry, store, AgentMailEndpoint::production())
+}
+
+/// [`start_email`] with an explicit `AgentMail` endpoint (a loopback mock in
+/// tests).
+pub fn start_email_with(
+    data_dir: &Path,
+    registry: &ToolRegistry,
+    store: Option<&Arc<dyn SecretStore>>,
+    endpoint: AgentMailEndpoint,
+) -> Option<(Arc<EmailHost>, usize)> {
     let Some(store) = store else {
         eprintln!("warning: e-mail needs a secret store, which is not available");
         return None;
     };
-    let host = EmailHost::open(data_dir, Arc::clone(store));
+    let host = EmailHost::open_with(data_dir, Arc::clone(store), endpoint);
     let added = connector_email::register(registry, &host.connector);
     let count = host.connector.account_names().len();
     eprintln!("email: {added} tool(s) registered ({count} account(s))");
@@ -141,6 +206,7 @@ fn report_out(r: ProbeReport) -> EmailTestReport {
         imap: status_out(r.imap),
         smtp: status_out(r.smtp),
         ok: r.all_ok(),
+        api: None,
     }
 }
 
@@ -153,7 +219,9 @@ fn credential_target(a: &AccountConfig) -> (String, u16, String, u16, String) {
         a.imap.port,
         a.smtp.host.to_ascii_lowercase(),
         a.smtp.port,
-        a.login().to_owned(),
+        // An `AgentMail` key only ever goes to the pinned API host; what can
+        // differ is the inbox it is used on.
+        a.inbox_id.clone().unwrap_or_else(|| a.login().to_owned()),
     )
 }
 
@@ -170,8 +238,21 @@ fn senders(list: &[String]) -> Result<Vec<String>, EmailControlError> {
 
 impl EmailHost {
     /// Load `email.toml` into a fresh reloadable connector.
+    #[cfg(test)]
     fn open(data_dir: &Path, secrets: Arc<dyn SecretStore>) -> Arc<Self> {
-        let connector = Arc::new(EmailConnector::reloadable(Arc::clone(&secrets)));
+        Self::open_with(data_dir, secrets, AgentMailEndpoint::production())
+    }
+
+    fn open_with(
+        data_dir: &Path,
+        secrets: Arc<dyn SecretStore>,
+        endpoint: AgentMailEndpoint,
+    ) -> Arc<Self> {
+        let connector = Arc::new(EmailConnector::reloadable_with(
+            Arc::clone(&secrets),
+            endpoint,
+        ));
+        connector.set_attachments_dir(data_dir.join(ATTACHMENTS_DIR));
         let mut broken = None;
         match load(data_dir) {
             Ok(accounts) => {
@@ -245,6 +326,11 @@ impl EmailHost {
     fn dto(&self, a: &AccountConfig) -> EmailAccountDto {
         EmailAccountDto {
             name: a.name.clone(),
+            provider: match a.kind {
+                AccountKind::ImapSmtp => EmailProviderKind::ImapSmtp,
+                AccountKind::AgentMail => EmailProviderKind::Agentmail,
+            },
+            inbox_id: a.inbox_id.clone(),
             address: a.address.clone(),
             username: a.username.clone(),
             imap: EmailImapServer {
@@ -330,7 +416,7 @@ impl EmailHost {
         let before = pending.len();
         for a in removed {
             let secret = a.password.name().to_owned();
-            if secret != managed_secret(&a.name) || still_used.contains(&secret) {
+            if secret != managed_secret_for(&a.name, a.kind) || still_used.contains(&secret) {
                 continue;
             }
             let store = Arc::clone(&self.secrets);
@@ -365,6 +451,9 @@ impl EmailHost {
     /// of the saved account of the same name when it targets the same servers
     /// and login (a custom CA cannot be set through the API).
     fn draft_account(&self, input: &EmailAccountInput) -> Result<AccountConfig, EmailControlError> {
+        if input.provider == EmailProviderKind::Agentmail {
+            return Err(invalid("a draft test of an AgentMail account is not saved"));
+        }
         let mut account = Self::account_from(input)?;
         if let Some(stored) = self
             .connector
@@ -405,9 +494,121 @@ impl EmailHost {
             timeout_secs: 30,
             bot: input.bot.clone(),
             allowed_senders: senders(&input.allowed_senders)?,
+            kind: AccountKind::ImapSmtp,
+            inbox_id: None,
         };
         account.validate().map_err(invalid)?;
         Ok(account)
+    }
+}
+
+impl EmailHost {
+    /// Create the inbox at `AgentMail` with the user's key, then store the key
+    /// and save the account. A failure after the inbox exists takes the new
+    /// inbox back (it is one this very call created).
+    async fn add_agentmail(
+        &self,
+        input: EmailAccountInput,
+    ) -> Result<EmailAccountDto, EmailControlError> {
+        validate_account_name(&input.name).map_err(invalid)?;
+        let key = input
+            .api_key
+            .clone()
+            .filter(|k| !k.is_empty())
+            .ok_or_else(|| invalid("an API key is required"))?;
+        let secret = SecretRef::new(managed_api_key(&input.name))
+            .map_err(|_| invalid("invalid account name for a secret"))?;
+        let _guard = self.ops.lock().await;
+        let mut list = self.connector.accounts();
+        if list.iter().any(|a| a.name == input.name) {
+            return Err(EmailControlError::Conflict(format!(
+                "account {} already exists",
+                input.name
+            )));
+        }
+        let creator = self
+            .connector
+            .agentmail_for(&key, None)
+            .map_err(|e| upstream(&e))?;
+        let inbox = connector_email::MailboxProvider::create_inbox(
+            &creator,
+            &CreateInbox {
+                name_hint: input.name_hint.clone().or_else(|| Some(input.name.clone())),
+                domain: input.domain.clone(),
+                client_id: format!("praxi-{}", uuid::Uuid::now_v7()),
+            },
+        )
+        .await
+        .map_err(|e| upstream(&e))?;
+        let account = AccountConfig {
+            name: input.name.clone(),
+            address: inbox.address.clone(),
+            username: String::new(),
+            password: secret,
+            imap: ImapSettings::default(),
+            smtp: SmtpSettings::default(),
+            drafts_folder: "Drafts".to_owned(),
+            extra_root_pem: None,
+            timeout_secs: 30,
+            bot: input.bot.clone(),
+            allowed_senders: senders(&input.allowed_senders)?,
+            kind: AccountKind::AgentMail,
+            inbox_id: Some(inbox.inbox_id.clone()),
+        };
+        let stored = match account.validate().map_err(invalid) {
+            Ok(()) => {
+                let name = account.password.name().to_owned();
+                self.store_secret(name.clone(), key.clone())
+                    .await
+                    .map(|()| self.unpend(&name))
+            }
+            Err(e) => Err(e),
+        };
+        let result = match stored {
+            Ok(()) => {
+                list.push(account.clone());
+                self.commit(list)
+            }
+            Err(e) => Err(e),
+        };
+        if let Err(e) = result {
+            self.drop_managed_secrets(std::slice::from_ref(&account))
+                .await;
+            // Best effort: the user never saw this inbox, so do not leave it
+            // counting against their plan.
+            if let Ok(p) = self.connector.agentmail_for(&key, Some(&account)) {
+                let _ = connector_email::MailboxProvider::delete_inbox(&p).await;
+            }
+            return Err(e);
+        }
+        Ok(self.dto(&account))
+    }
+
+    /// Test an `AgentMail` key: the one in the request, else the stored key of
+    /// the saved account with the same name (which must be an `AgentMail` one).
+    async fn test_agentmail_key(
+        &self,
+        input: &EmailAccountInput,
+    ) -> Result<EmailTestReport, EmailControlError> {
+        let key = if let Some(k) = input.api_key.clone().filter(|k| !k.is_empty()) {
+            k
+        } else {
+            let stored = self
+                .connector
+                .accounts()
+                .into_iter()
+                .find(|a| a.name == input.name && a.kind == AccountKind::AgentMail)
+                .ok_or_else(|| invalid("enter the API key to test this account"))?;
+            self.read_secret(stored.password.name().to_owned())
+                .await
+                .ok_or_else(|| invalid("no API key is stored for this account"))?
+        };
+        let provider = self
+            .connector
+            .agentmail_for(&key, None)
+            .map_err(|e| upstream(&e))?;
+        let checked = connector_email::MailboxProvider::check(&provider).await;
+        Ok(api_report(&checked))
     }
 }
 
@@ -422,6 +623,9 @@ impl EmailControl for EmailHost {
     }
 
     async fn add(&self, input: EmailAccountInput) -> Result<EmailAccountDto, EmailControlError> {
+        if input.provider == EmailProviderKind::Agentmail {
+            return self.add_agentmail(input).await;
+        }
         let password = input
             .password
             .clone()
@@ -467,6 +671,22 @@ impl EmailControl for EmailHost {
             .find(|a| a.name == name)
             .ok_or_else(|| EmailControlError::NotFound(format!("email account {name}")))?;
         let before = credential_target(slot);
+        let api = slot.kind == AccountKind::AgentMail;
+        if api
+            && (typed.address.is_some()
+                || typed.username.is_some()
+                || typed.imap.is_some()
+                || typed.smtp.is_some()
+                || typed.drafts_folder.is_some()
+                || typed.password.is_some())
+        {
+            return Err(invalid(
+                "an AgentMail account only takes `bot`, `allowed_senders` and `api_key`",
+            ));
+        }
+        if !api && typed.api_key.is_some() {
+            return Err(invalid("`api_key` is only for AgentMail accounts"));
+        }
         if let Some(v) = typed.address {
             v.trim().clone_into(&mut slot.address);
         }
@@ -496,7 +716,7 @@ impl EmailControl for EmailHost {
             slot.allowed_senders = senders(&v)?;
         }
         slot.validate().map_err(invalid)?;
-        let password = typed.password.filter(|p| !p.is_empty());
+        let password = if api { typed.api_key } else { typed.password }.filter(|p| !p.is_empty());
         if password.is_none() && credential_target(slot) != before {
             return Err(invalid(
                 "changing the servers or the login requires entering the password again",
@@ -531,11 +751,38 @@ impl EmailControl for EmailHost {
     }
 
     async fn remove(&self, name: &str) -> Result<(), EmailControlError> {
+        self.remove_account(name, false).await
+    }
+
+    async fn remove_account(
+        &self,
+        name: &str,
+        delete_remote: bool,
+    ) -> Result<(), EmailControlError> {
         let _guard = self.ops.lock().await;
         let list = self.connector.accounts();
         let Some(gone) = list.iter().find(|a| a.name == name).cloned() else {
             return Err(EmailControlError::NotFound(format!("email account {name}")));
         };
+        if delete_remote {
+            if gone.kind != AccountKind::AgentMail {
+                return Err(invalid("this account has no inbox at a provider to delete"));
+            }
+            // Remote first: if the provider refuses, the account stays so the
+            // user can try again. An inbox that is already gone counts as done.
+            let key = self
+                .read_secret(gone.password.name().to_owned())
+                .await
+                .ok_or_else(|| invalid("no API key is stored for this account"))?;
+            let provider = self
+                .connector
+                .agentmail_for(&key, Some(&gone))
+                .map_err(|e| upstream(&e))?;
+            match connector_email::MailboxProvider::delete_inbox(&provider).await {
+                Ok(()) | Err(EmailError::NotFound(_)) => {}
+                Err(e) => return Err(upstream(&e)),
+            }
+        }
         let rest: Vec<_> = list.into_iter().filter(|a| a.name != name).collect();
         self.commit(rest)?;
         self.drop_managed_secrets(&[gone]).await;
@@ -543,6 +790,20 @@ impl EmailControl for EmailHost {
     }
 
     async fn test_saved(&self, name: &str) -> Result<EmailTestReport, EmailControlError> {
+        let kind = self
+            .connector
+            .accounts()
+            .into_iter()
+            .find(|a| a.name == name)
+            .map(|a| a.kind);
+        if kind == Some(AccountKind::AgentMail) {
+            return match self.connector.check_saved(name).await {
+                Err(EmailError::Credential(_)) => {
+                    Err(invalid("no API key is stored for this account"))
+                }
+                r => Ok(api_report(&r)),
+            };
+        }
         match self.connector.probe_saved(name).await {
             Ok(r) => Ok(report_out(r)),
             Err(EmailError::Input(_)) => {
@@ -559,6 +820,9 @@ impl EmailControl for EmailHost {
         &self,
         input: EmailAccountInput,
     ) -> Result<EmailTestReport, EmailControlError> {
+        if input.provider == EmailProviderKind::Agentmail {
+            return self.test_agentmail_key(&input).await;
+        }
         let account = self.draft_account(&input)?;
         let password = if let Some(p) = input.password.clone().filter(|p| !p.is_empty()) {
             p
@@ -605,3 +869,7 @@ impl EmailControl for EmailHost {
 #[cfg(test)]
 #[path = "email_host_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "email_host_agentmail_tests.rs"]
+mod agentmail_tests;

@@ -16,6 +16,7 @@ use tool_registry::{
     ToolSpec,
 };
 
+use crate::config::AccountKind;
 use crate::connector::EmailConnector;
 use crate::imap::{DEFAULT_LIMIT, MAX_LIMIT, SearchQuery};
 use crate::message::{DEFAULT_MAX_BODY_CHARS, MAX_BODY_CHARS};
@@ -69,7 +70,7 @@ fn account_prop() -> Value {
 }
 
 fn mail_props() -> Value {
-    let addrs = json!({"type":"array","items":{"type":"string"},"description":"Addresses, optionally `Name <addr>`."});
+    let addrs = json!({"type":"array","items":{"type":"string"},"description":"Addresses: name@example.com. IMAP/SMTP accounts also accept `Name <addr>`; API mailboxes (AgentMail) need the plain form."});
     json!({
         "account": account_prop(),
         "to": addrs, "cc": addrs, "bcc": addrs,
@@ -119,9 +120,10 @@ fn specs() -> Vec<(Kind, ToolSpec)> {
                 json!({"type":"object","properties":{
                     "account": account_prop(),
                     "folder":{"type":"string","description":"Default INBOX."},
-                    "uid":{"type":"integer","minimum":1},
+                    "uid":{"type":"integer","minimum":1,"description":"IMAP/SMTP accounts: the message uid."},
+                    "message_id":{"type":"string","description":"API mailboxes (for example AgentMail): the message id from email_search."},
                     "max_body_chars":{"type":"integer","minimum":1,"maximum":MAX_BODY_CHARS,"description":"Default 20000. Hard maximum 20000."}
-                },"required":["uid"]}),
+                }}),
                 Effect::Read,
             ),
         ),
@@ -133,9 +135,10 @@ fn specs() -> Vec<(Kind, ToolSpec)> {
                 json!({"type":"object","properties":{
                     "account": account_prop(),
                     "folder":{"type":"string","description":"Default INBOX."},
-                    "uid":{"type":"integer","minimum":1},
+                    "uid":{"type":"integer","minimum":1,"description":"IMAP/SMTP accounts: the message uid."},
+                    "message_id":{"type":"string","description":"API mailboxes: the message id."},
                     "read":{"type":"boolean","description":"Default true."}
-                },"required":["uid"]}),
+                }}),
                 Effect::Write,
             ),
         ),
@@ -153,7 +156,7 @@ fn specs() -> Vec<(Kind, ToolSpec)> {
             Kind::Send,
             spec(
                 SEND,
-                "Send an e-mail NOW over SMTP. Irreversible and visible to third parties: requires user approval. \
+                "Send an e-mail NOW from the account. Irreversible and visible to third parties: requires user approval. \
                  Prefer email_draft unless the user asked to send. \
                  Example: {\"to\":[\"bob@example.com\"],\"subject\":\"Hi\",\"body\":\"...\"}",
                 json!({"type":"object","properties":mail_props(),"required":["to","subject","body"]}),
@@ -215,6 +218,28 @@ fn clamped_body_chars(ctx: &ToolContext, requested: Option<usize>) -> usize {
     requested.min(MAX_BODY_CHARS).min(host_cap)
 }
 
+/// Which message a call means: the provider id for API mailboxes, the UID for IMAP.
+fn message_key(uid: Option<u32>, message_id: Option<String>) -> Result<String, ToolError> {
+    match (uid, message_id) {
+        (Some(_), Some(_)) => Err(ToolError::InvalidInput(
+            "pass either `uid` or `message_id`, not both".into(),
+        )),
+        (Some(u), None) => Ok(u.to_string()),
+        (None, Some(m)) => Ok(m),
+        (None, None) => Err(ToolError::InvalidInput(
+            "`uid` (IMAP/SMTP accounts) or `message_id` (API mailboxes) is required".into(),
+        )),
+    }
+}
+
+/// Provenance label for untrusted-content notices.
+fn source_label(kind: AccountKind, what: &str) -> String {
+    match kind {
+        AccountKind::ImapSmtp => format!("imap {what}"),
+        AccountKind::AgentMail => format!("agentmail {what}"),
+    }
+}
+
 fn default_folder() -> String {
     "INBOX".to_string()
 }
@@ -242,7 +267,8 @@ struct ReadInput {
     account: Option<String>,
     #[serde(default = "default_folder")]
     folder: String,
-    uid: u32,
+    uid: Option<u32>,
+    message_id: Option<String>,
     max_body_chars: Option<usize>,
 }
 
@@ -252,7 +278,8 @@ struct MarkInput {
     account: Option<String>,
     #[serde(default = "default_folder")]
     folder: String,
-    uid: u32,
+    uid: Option<u32>,
+    message_id: Option<String>,
     read: Option<bool>,
 }
 
@@ -282,14 +309,16 @@ impl Tool for EmailTool {
         match self.kind {
             Kind::ListFolders => {
                 let i: AccountOnly = parse(input)?;
+                let kind = c.kind(i.account.as_deref())?;
                 let folders = c.list_folders(i.account.as_deref()).await?;
                 Ok(server_json(
-                    "imap folder list",
+                    &source_label(kind, "folder list"),
                     json!({ "folders": folders }),
                 ))
             }
             Kind::Search => {
                 let i: SearchInput = parse(input)?;
+                let kind = c.kind(i.account.as_deref())?;
                 let r = c
                     .search(
                         i.account.as_deref(),
@@ -299,7 +328,7 @@ impl Tool for EmailTool {
                     )
                     .await?;
                 Ok(server_json(
-                    "imap search results",
+                    &source_label(kind, "search results"),
                     json!({
                         "folder": i.folder,
                         "total_matches": r.total,
@@ -310,11 +339,13 @@ impl Tool for EmailTool {
             }
             Kind::Read => {
                 let i: ReadInput = parse(input)?;
+                let kind = c.kind(i.account.as_deref())?;
+                let id = message_key(i.uid, i.message_id)?;
                 let m = c
-                    .fetch(
+                    .fetch_id(
                         i.account.as_deref(),
                         &i.folder,
-                        i.uid,
+                        &id,
                         clamped_body_chars(ctx, i.max_body_chars),
                     )
                     .await?;
@@ -324,12 +355,13 @@ impl Tool for EmailTool {
                     message.get_mut("attachments").and_then(Value::as_array_mut)
                 {
                     for attachment in attachments {
-                        annotate_untrusted("imap attachment filename", attachment);
+                        annotate_untrusted(&source_label(kind, "attachment filename"), attachment);
                     }
                 }
-                annotate_untrusted("imap message", &mut message);
+                let label = source_label(kind, "message");
+                annotate_untrusted(&label, &mut message);
                 Ok(server_json(
-                    "imap message",
+                    &label,
                     json!({
                         "untrusted_content": true,
                         "message": message,
@@ -339,11 +371,15 @@ impl Tool for EmailTool {
             Kind::MarkRead => {
                 let i: MarkInput = parse(input)?;
                 let read = i.read.unwrap_or(true);
-                c.mark_read(i.account.as_deref(), &i.folder, i.uid, read)
+                let id = message_key(i.uid, i.message_id)?;
+                c.mark_read_id(i.account.as_deref(), &i.folder, &id, read)
                     .await?;
-                Ok(json_out(
-                    json!({"uid": i.uid, "folder": i.folder, "read": read}),
-                ))
+                Ok(json_out(json!(match id.parse::<u32>() {
+                    Ok(uid) if i.uid.is_some() => {
+                        json!({"uid": uid, "folder": i.folder, "read": read})
+                    }
+                    _ => json!({"message_id": id, "read": read}),
+                })))
             }
             Kind::Draft => {
                 let i: MailInput = parse(input)?;

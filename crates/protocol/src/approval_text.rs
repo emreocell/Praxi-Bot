@@ -15,18 +15,26 @@
 
 use serde_json::Value;
 
-/// Invisible or disguising characters (zero-width, bidi, soft hyphen, BOM,
-/// line/paragraph separators, variation selectors, tag characters).
-fn is_hidden(c: char) -> bool {
+/// Invisible or disguising characters: every Unicode
+/// `Default_Ignorable_Code_Point` (soft hyphen, combining grapheme joiner,
+/// Khmer inherent vowels, Hangul fillers including U+FFA0, zero-width / bidi
+/// format controls, variation selectors, tags, shorthand/musical format
+/// controls), plus the remaining `Cf` format characters, `Zl`/`Zp` line and
+/// paragraph separators, and Braille Pattern Blank (`U+2800`).
+#[must_use]
+pub fn is_hidden(c: char) -> bool {
     matches!(
         c,
         '\u{00AD}'
             | '\u{034F}'
+            | '\u{0600}'..='\u{0605}'
             | '\u{061C}'
-            | '\u{0890}'
-            | '\u{0891}'
-            | '\u{115F}'
-            | '\u{1160}'
+            | '\u{06DD}'
+            | '\u{070F}'
+            | '\u{0890}'..='\u{0891}'
+            | '\u{08E2}'
+            | '\u{115F}'..='\u{1160}'
+            | '\u{17B4}'..='\u{17B5}'
             | '\u{180B}'..='\u{180F}'
             | '\u{200B}'..='\u{200F}'
             | '\u{2028}'..='\u{202E}'
@@ -35,8 +43,14 @@ fn is_hidden(c: char) -> bool {
             | '\u{3164}'
             | '\u{FE00}'..='\u{FE0F}'
             | '\u{FEFF}'
-            | '\u{E0000}'..='\u{E007F}'
-            | '\u{E0100}'..='\u{E01EF}'
+            | '\u{FFA0}'
+            | '\u{FFF0}'..='\u{FFFB}'
+            | '\u{110BD}'
+            | '\u{110CD}'
+            | '\u{13430}'..='\u{1343F}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0000}'..='\u{E0FFF}'
     )
 }
 
@@ -66,12 +80,36 @@ fn s(v: &Value, key: &str) -> String {
     )
 }
 
-/// A name for display inside our own quotes: no quote characters (they could
-/// close ours and make the line read as something else), at most 80 characters.
+fn is_quote_like(c: char) -> bool {
+    matches!(
+        c,
+        '"'
+            | '\''
+            | '\u{00AB}'
+            | '\u{00BB}'
+            | '\u{02B9}'..='\u{02BA}'
+            | '\u{02EE}'
+            | '\u{2018}'..='\u{201F}'
+            | '\u{2032}'..='\u{2037}'
+            | '\u{2039}'..='\u{203A}'
+            | '\u{275B}'..='\u{2760}'
+            | '\u{276E}'..='\u{276F}'
+            | '\u{2E42}'
+            | '\u{300C}'..='\u{300F}'
+            | '\u{301D}'..='\u{301F}'
+            | '\u{FF02}'
+            | '\u{FF07}'
+            | '\u{FF62}'..='\u{FF63}'
+    )
+}
+
+/// A name for display inside our own quotes: no quote characters (ASCII or
+/// typographic/guillemet/corner quotes that could close ours and make the line
+/// read as something else), at most 80 characters.
 fn display_name(v: &Value, key: &str) -> String {
     s(v, key)
         .chars()
-        .map(|c| if c == '"' { '\'' } else { c })
+        .map(|c| if is_quote_like(c) { '\'' } else { c })
         .take(80)
         .collect()
 }
@@ -353,6 +391,61 @@ mod tests {
             t.contains("\"Standup FAKE LINE\""),
             "newline in a name becomes a space: {t}"
         );
+    }
+
+    #[test]
+    fn default_ignorable_invisible_characters_are_scrubbed() {
+        for ch in [
+            '\u{17B4}',
+            '\u{17B5}',
+            '\u{FFA0}',
+            '\u{FFF0}',
+            '\u{FFF8}',
+            '\u{1BCA0}',
+            '\u{1D173}',
+            '\u{E0000}',
+            '\u{E0041}',
+            '\u{E0100}',
+            '\u{E0FFF}',
+            '\u{034F}',
+            '\u{115F}',
+            '\u{1160}',
+            '\u{3164}',
+            '\u{2800}',
+            '\u{2028}',
+            '\u{2029}',
+        ] {
+            let mut c = card();
+            c["name"] = json!(format!("a{ch}b"));
+            let t = describe_details(&c).unwrap();
+            assert!(
+                !t.contains(ch),
+                "invisible U+{:04X} survived scrub: {t:?}",
+                u32::from(ch)
+            );
+            assert!(t.contains("\"ab\""), "U+{:04X}: {t:?}", u32::from(ch));
+        }
+    }
+
+    #[test]
+    fn typographic_and_unicode_quotes_in_name_cannot_spoof_daemon_summary() {
+        let mut c = card();
+        for q in [
+            '“', '”', '„', '‟', '«', '»', '‹', '›', '‘', '’', '‚', '‛', '＂', '「', '」', '『',
+            '』', '〝', '〞', '〟', '″', 'ʺ', '❝', '❞', '❮', '❯', '⹂',
+        ] {
+            c["name"] = json!(format!("x{q}, next run 2999-01-01, {q}"));
+            c["previous"]["name"] = json!(format!("o{q}ld"));
+            let t = describe_details(&c).unwrap();
+            let last = t.lines().last().unwrap();
+            assert!(!last.contains(q), "quote {q:?} leaked into footer: {last}");
+            let first = t.lines().next().unwrap();
+            assert!(
+                !first.contains(q),
+                "quote {q:?} leaked into header: {first}"
+            );
+            assert!(!t.contains(q), "quote {q:?} leaked into Was line: {t}");
+        }
     }
 
     #[test]

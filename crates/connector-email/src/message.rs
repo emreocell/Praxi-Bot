@@ -21,8 +21,13 @@ pub(crate) fn over_message_cap(len: usize) -> bool {
 /// Header-level view of a message (search results).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MessageSummary {
-    /// IMAP UID within the folder.
+    /// IMAP UID within the folder (`0`, and not serialized, for mailboxes
+    /// that identify messages by [`MessageSummary::id`]).
+    #[serde(skip_serializing_if = "is_zero")]
     pub uid: u32,
+    /// The provider's message id (API-backed mailboxes; absent for IMAP).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     /// Subject line.
     pub subject: String,
     /// Sender (`Name <addr>`).
@@ -37,9 +42,17 @@ pub struct MessageSummary {
     pub size: Option<u32>,
 }
 
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
 /// Attachment metadata (content is never returned).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AttachmentInfo {
+    /// The provider's attachment id (API-backed mailboxes; absent for IMAP).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     /// File name, when given.
     pub filename: Option<String>,
     /// MIME type.
@@ -94,6 +107,7 @@ pub fn parse_summary(uid: u32, header: &[u8], unread: bool, size: Option<u32>) -
     };
     MessageSummary {
         uid,
+        id: None,
         subject: cap_untrusted(&subject),
         from: cap_untrusted(&from),
         to: to.iter().map(|s| cap_untrusted(s)).collect(),
@@ -130,6 +144,7 @@ pub fn parse_detail(
     let attachments = msg
         .attachments()
         .map(|p| AttachmentInfo {
+            id: None,
             filename: p.attachment_name().map(cap_untrusted),
             content_type: p.content_type().map_or_else(
                 || "application/octet-stream".to_string(),
@@ -158,7 +173,7 @@ pub(crate) fn cap_untrusted(s: &str) -> String {
     truncate_chars(s, MAX_UNTRUSTED_FIELD_CHARS).0
 }
 
-fn truncate_chars(s: &str, max: usize) -> (String, bool) {
+pub(crate) fn truncate_chars(s: &str, max: usize) -> (String, bool) {
     match s.char_indices().nth(max) {
         Some((i, _)) => (s[..i].to_string(), true),
         None => (s.to_string(), false),
