@@ -47,6 +47,14 @@ Frame viewers do not register as overlay controllers.
 - `POST /v1/control/takeover` durably closes global mutation admission and returns
   202/acquiring. Active is published only after admitted actions drain (10 second
   bound), input reset, pinning and audit. Retries use `request_id`.
+- Input batches are authorised cheaply before they queue (input grant, own
+  session, own takeover id) and fully re-validated under the executor. Up to 4
+  batches per session and 16 in total may wait for it (FIFO, at most 1 s); beyond
+  that, or after the wait, the answer is `429 input_busy`. A local Stop wakes all
+  waiters so they give up at once, and the Stop's key reset and audit never queue
+  behind them. Every backend call of a key reset is bounded (2 s); an unconfirmed
+  reset leaves the Stop in force, answers 503 and is retried by the next `paused`
+  heartbeat, also after a restart (the pending flags are in the latch file).
 - `POST /v1/view/sessions/{id}/input` carries version, takeover/epoch, generation,
   geometry revision, first sequence number and typed events.
 - `POST /v1/control/override` (local user only) interrupts any takeover, whoever

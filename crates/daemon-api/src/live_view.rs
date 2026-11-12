@@ -93,12 +93,67 @@ pub struct LiveView {
     /// Last written denial audit per `actor|event`, and how many were folded
     /// into it since (see [`audit`]).
     denials: Mutex<BTreeMap<String, DenialWindow>>,
+    /// Input batches queued for the executor, per session (see [`INPUT_WAITERS`]).
+    input_waiting: Mutex<BTreeMap<Uuid, usize>>,
+    /// Woken by a local Stop: queued input batches give up at once, so the
+    /// Stop's key reset and audit never wait behind them.
+    stop: tokio::sync::Notify,
+    /// Test seam: runs after an input batch is validated under the executor,
+    /// right before its first event is applied.
+    #[cfg(test)]
+    input_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     /// Test seam: runs right after a release suspends input, to land a local
     /// override in the middle of a release.
     #[cfg(test)]
     release_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
+/// Input batches that may queue for the executor: per session and in total.
+/// Beyond that the answer is `input_busy` at once.
+const INPUT_WAITERS_PER_SESSION: usize = 4;
+const INPUT_WAITERS_TOTAL: usize = 16;
+/// Bound on each backend call a key reset makes while the executor is held.
+const BACKEND_CALL_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// A queued input batch; counted until it holds the executor or gives up.
+pub(crate) struct InputWaiter {
+    live: Arc<LiveView>,
+    session: Uuid,
+}
+impl Drop for InputWaiter {
+    fn drop(&mut self) {
+        let mut waiting = self.live.input_waiting.lock();
+        if let Some(n) = waiting.get_mut(&self.session) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                waiting.remove(&self.session);
+            }
+        }
+    }
+}
+
 impl LiveView {
+    /// Reserve a place in the input queue, or `input_busy` immediately.
+    pub(crate) fn enter_input_queue(
+        self: &Arc<Self>,
+        session: Uuid,
+    ) -> Result<InputWaiter, ApiError> {
+        let mut waiting = self.input_waiting.lock();
+        let total: usize = waiting.values().sum();
+        let mine = waiting.get(&session).copied().unwrap_or(0);
+        if mine >= INPUT_WAITERS_PER_SESSION || total >= INPUT_WAITERS_TOTAL {
+            return Err(ApiError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "input_busy",
+                "input queue full",
+            ));
+        }
+        *waiting.entry(session).or_default() += 1;
+        Ok(InputWaiter {
+            live: Arc::clone(self),
+            session,
+        })
+    }
+
     pub(crate) fn capture_targets(&self) -> std::collections::BTreeSet<Uuid> {
         self.sessions
             .lock()
@@ -492,16 +547,23 @@ pub(crate) async fn delete_session(
 /// Reset pressed inputs of the takeover's target and drop live capture.
 /// `false` when the key reset itself failed.
 async fn reset_target(s: &AppState, t: &OwnedTakeover) -> bool {
+    // Every backend call is bounded: a hanging sink must not wedge the
+    // executor (and with it heartbeats and the next Stop).
     let mut reset_ok = true;
     if let Some(target) = s.live_view().registry.get(t.info.target_id) {
         if let Some(sink) = target.input_sink() {
-            reset_ok = sink.release_pressed_inputs().await.is_ok();
-            let _ = sink.set_takeover_active(false).await;
+            reset_ok = matches!(
+                tokio::time::timeout(BACKEND_CALL_TIMEOUT, sink.release_pressed_inputs()).await,
+                Ok(Ok(()))
+            );
+            let _ =
+                tokio::time::timeout(BACKEND_CALL_TIMEOUT, sink.set_takeover_active(false)).await;
         }
-        let _ = target
-            .frame_source()
-            .set_profile(EffectiveProfile::watch())
-            .await;
+        let _ = tokio::time::timeout(
+            BACKEND_CALL_TIMEOUT,
+            target.frame_source().set_profile(EffectiveProfile::watch()),
+        )
+        .await;
     }
     reset_ok
 }
@@ -778,7 +840,11 @@ async fn override_takeover(
         if !reset_pending && !audit_pending {
             return Ok(None);
         }
+        live.stop.notify_waiters();
         let _executor = live.executor.lock().await;
+        // Read again under the lock: a queued heartbeat that ran first may
+        // already have finished the work (no double audit row).
+        let (reset_pending, audit_pending) = s.hub().override_pending();
         let Some(t) = s.hub().takeover() else {
             return Ok(None);
         };
@@ -789,7 +855,7 @@ async fn override_takeover(
             audit_interrupted(s, actor, &t, &reason)?;
             s.hub().resolve_override_audit();
         }
-        return Ok(None);
+        return reset_confirmed(s, reason == Reason::LocalOverride).map(|()| None);
     }
     // 1. Revoke the overridden device's input grant FIRST, so that nothing
     // below (a failing audit write, a failing key reset) can leave it in
@@ -811,12 +877,27 @@ async fn override_takeover(
     let Some(old) = s.hub().force_interrupt(reason.clone()) else {
         return Ok(None);
     };
+    // Queued input batches give up at once: the Stop must not wait behind them.
+    live.stop.notify_waiters();
     // 3. Reset pressed inputs and audit. Failures are reported, but the stop
     // and the revoke above already happened.
     let _executor = live.executor.lock().await;
     let t = s.hub().takeover().unwrap_or(old.clone());
+    let local = reason == Reason::LocalOverride;
     interrupt(s, actor, &t, reason).await?;
+    reset_confirmed(s, local)?;
     Ok(Some(old))
+}
+
+/// The Stop took effect, but if the key reset is not confirmed (failed or timed
+/// out) say so: it stays pending and is retried by the next `paused` heartbeat.
+fn reset_confirmed(s: &AppState, local_override: bool) -> Result<(), ApiError> {
+    if local_override && s.hub().override_pending().0 {
+        return Err(ApiError::unavailable(
+            "stopped, but the pressed-key reset did not complete; it will be retried",
+        ));
+    }
+    Ok(())
 }
 
 /// The app's `PUT /v1/control/state {mode: paused}` while a takeover is owned.
@@ -1024,12 +1105,6 @@ pub(crate) async fn release(
         .map_err(ApiError::unavailable)?;
     ensure_not_overridden(s)?;
     flush_note(s, &mut journal)?;
-    audit(
-        s,
-        actor,
-        "takeover.released",
-        serde_json::json!({"target_id":t.info.target_id,"takeover_id":t.info.id,"control_epoch":t.info.control_epoch,"request_id":i.request_id,"counts":counts}),
-    )?;
     sink.set_takeover_active(false).await.map_err(backend)?;
     target
         .frame_source()
@@ -1048,6 +1123,14 @@ pub(crate) async fn release(
     if let Some(session) = live.sessions.lock().get_mut(&t.info.session_id) {
         session.profile = EffectiveProfile::watch();
     }
+    // Recorded once the release really happened (never for one that failed or
+    // lost to a local Stop).
+    audit(
+        s,
+        actor,
+        "takeover.released",
+        serde_json::json!({"target_id":t.info.target_id,"takeover_id":t.info.id,"control_epoch":t.info.control_epoch,"request_id":i.request_id,"counts":counts}),
+    )?;
     Ok(())
 }
 

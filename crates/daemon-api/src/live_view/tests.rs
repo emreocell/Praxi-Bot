@@ -24,6 +24,8 @@ struct Sink {
     fail_at: AtomicUsize,
     hold: AtomicBool,
     fail_reset: AtomicBool,
+    /// `release_pressed_inputs` never returns (a hanging backend).
+    hang_reset: AtomicBool,
     /// Fail `set_takeover_active(false)` (a release that dies half way).
     fail_active: AtomicBool,
     entered: tokio::sync::Notify,
@@ -45,6 +47,9 @@ impl InputSink for Sink {
     }
     async fn release_pressed_inputs(&self) -> Result<(), ViewError> {
         self.resets.fetch_add(1, Ordering::SeqCst);
+        if self.hang_reset.load(Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
         if self.fail_reset.load(Ordering::SeqCst) {
             return Err(ViewError::Unavailable);
         }
@@ -1873,7 +1878,10 @@ async fn a_local_override_survives_a_failed_key_reset() {
     let t = Test::new();
     let (_id, owned, _body) = t.active(Some("alice")).await;
     t.target.sink.fail_reset.store(true, Ordering::SeqCst);
-    local_override(&t).await;
+    let (status, _) = t
+        .call(None, Method::POST, "/v1/control/override", None)
+        .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "reset unconfirmed");
     t.target.sink.fail_reset.store(false, Ordering::SeqCst);
     assert_override_stays_terminal(&t, &owned).await;
 }
@@ -2060,7 +2068,10 @@ async fn a_failed_key_reset_during_override_is_retried_until_it_succeeds() {
     let t = Test::new();
     let (_id, _owned, _body) = t.active(Some("alice")).await;
     t.target.sink.fail_reset.store(true, Ordering::SeqCst);
-    local_override(&t).await;
+    let (status, _) = t
+        .call(None, Method::POST, "/v1/control/override", None)
+        .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert!(t.state.hub().override_pending().0, "reset is pending");
     let after_first = t.target.sink.resets.load(Ordering::SeqCst);
     // The next heartbeat retries (and fails again), still pending.
@@ -2213,4 +2224,364 @@ async fn a_batch_still_gets_429_when_the_executor_stays_busy() {
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{v}");
     assert_eq!(v["error"]["code"], json!("input_busy"));
     drop(held);
+}
+
+fn input_path(id: Uuid) -> String {
+    format!("/v1/view/sessions/{id}/input")
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_batch_queued_behind_the_executor_never_injects_after_a_local_stop() {
+    let t = Arc::new(Test::new());
+    let (id, owned, _body) = t.active(Some("alice")).await;
+    let live = Arc::clone(t.state.live_view());
+    let held = live.executor.lock().await;
+    let sender = Arc::clone(&t);
+    let batch = Test::batch(&owned, 1);
+    let queued = tokio::spawn(async move {
+        sender
+            .call(Some("alice"), Method::POST, &input_path(id), Some(batch))
+            .await
+    });
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+    assert!(!queued.is_finished(), "queued behind the held executor");
+    // The local Stop lands while the batch waits (its handler wakes the waiters
+    // before it queues for the executor itself).
+    let stopper = Arc::clone(&t);
+    let stop = tokio::spawn(async move {
+        stopper
+            .call(None, Method::POST, "/v1/control/override", None)
+            .await
+    });
+    // The batch gives up at once, with the executor still held.
+    let (status, v) = queued.await.unwrap();
+    assert_eq!(status, StatusCode::CONFLICT, "{v}");
+    assert!(v.to_string().contains("stopped"), "{v}");
+    assert_eq!(
+        t.target.sink.calls.load(Ordering::SeqCst),
+        0,
+        "nothing injected"
+    );
+    drop(held);
+    let (status, _) = stop.await.unwrap();
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(t.target.sink.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        t.state.hub().takeover().unwrap().info.reason,
+        Some(Reason::LocalOverride)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_queued_batch_is_validated_again_after_the_lock() {
+    // No wake-up signal at all: the Stop only changes the hub state, as if it
+    // landed between the cheap pre-check and the executor.
+    let t = Arc::new(Test::new());
+    let (id, owned, _body) = t.active(Some("alice")).await;
+    let live = Arc::clone(t.state.live_view());
+    let held = live.executor.lock().await;
+    let sender = Arc::clone(&t);
+    let batch = Test::batch(&owned, 1);
+    let queued = tokio::spawn(async move {
+        sender
+            .call(Some("alice"), Method::POST, &input_path(id), Some(batch))
+            .await
+    });
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+    t.state.hub().force_interrupt(Reason::LocalOverride);
+    drop(held);
+    let (status, v) = queued.await.unwrap();
+    assert!(!status.is_success(), "{status} {v}");
+    assert_eq!(
+        t.target.sink.calls.load(Ordering::SeqCst),
+        0,
+        "nothing injected"
+    );
+}
+
+#[tokio::test]
+async fn a_stop_between_the_validation_and_the_first_event_injects_nothing() {
+    let t = Test::new();
+    let (id, owned, _body) = t.active(Some("alice")).await;
+    let state = t.state.clone();
+    *t.state.live_view().input_hook.lock() = Some(Arc::new(move || {
+        state.hub().force_interrupt(Reason::LocalOverride);
+    }));
+    let (status, v) = t
+        .call(
+            Some("alice"),
+            Method::POST,
+            &input_path(id),
+            Some(Test::batch(&owned, 1)),
+        )
+        .await;
+    // Either an error or a paused result, never an applied event.
+    if status == StatusCode::OK {
+        assert_eq!(v["applied_through"], json!(0), "{v}");
+        assert_eq!(v["state"], json!("paused"), "{v}");
+    }
+    assert_eq!(
+        t.target.sink.calls.load(Ordering::SeqCst),
+        0,
+        "nothing injected"
+    );
+    assert_eq!(
+        t.state.hub().takeover().unwrap().info.reason,
+        Some(Reason::LocalOverride)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_device_without_the_grant_cannot_park_input_waiters() {
+    let t = Arc::new(Test::new());
+    let (id, owned, _body) = t.active(Some("alice")).await;
+    t.auto_grant.store(false, Ordering::SeqCst);
+    grant(&t, "viewer", true, false).await;
+    let live = Arc::clone(t.state.live_view());
+    let held = live.executor.lock().await;
+    for _ in 0..30 {
+        let (status, _) = t
+            .call(
+                Some("viewer"),
+                Method::POST,
+                &input_path(id),
+                Some(Test::batch(&owned, 1)),
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "refused without queueing");
+    }
+    // A stranger's session id and someone else's takeover are refused too.
+    let (status, _) = t
+        .call(
+            Some("alice"),
+            Method::POST,
+            &input_path(Uuid::now_v7()),
+            Some(Test::batch(&owned, 1)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(live.input_waiting.lock().is_empty(), "nothing is queued");
+    drop(held);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_input_queue_is_capped_per_session() {
+    let t = Arc::new(Test::new());
+    let (id, owned, _body) = t.active(Some("alice")).await;
+    let live = Arc::clone(t.state.live_view());
+    let held = live.executor.lock().await;
+    let mut queued = Vec::new();
+    for n in 0..4u64 {
+        let sender = Arc::clone(&t);
+        let batch = Test::batch(&owned, 1 + n);
+        queued.push(tokio::spawn(async move {
+            sender
+                .call(Some("alice"), Method::POST, &input_path(id), Some(batch))
+                .await
+        }));
+    }
+    for _ in 0..30 {
+        tokio::task::yield_now().await;
+    }
+    assert!(queued.iter().all(|q| !q.is_finished()), "four wait");
+    // The fifth is refused immediately, without waiting for the executor.
+    let (status, v) = t
+        .call(
+            Some("alice"),
+            Method::POST,
+            &input_path(id),
+            Some(Test::batch(&owned, 9)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{v}");
+    assert_eq!(v["error"]["code"], json!("input_busy"));
+    drop(held);
+    for q in queued {
+        let _ = q.await.unwrap();
+    }
+    assert!(live.input_waiting.lock().is_empty());
+}
+
+#[test]
+fn the_global_input_queue_cap_applies_across_sessions() {
+    let live = Arc::new(LiveView::default());
+    let mut held = Vec::new();
+    for _ in 0..4 {
+        let session = Uuid::now_v7();
+        for _ in 0..4 {
+            held.push(live.enter_input_queue(session).unwrap());
+        }
+    }
+    assert_eq!(held.len(), 16);
+    assert!(
+        live.enter_input_queue(Uuid::now_v7()).is_err(),
+        "17th refused"
+    );
+    held.pop();
+    assert!(live.enter_input_queue(Uuid::now_v7()).is_ok());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_hanging_key_reset_is_bounded_and_stays_pending() {
+    let t = Test::new();
+    let (_id, _owned, _body) = t.active(Some("alice")).await;
+    t.target.sink.hang_reset.store(true, Ordering::SeqCst);
+    let (status, v) = t
+        .call(None, Method::POST, "/v1/control/override", None)
+        .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{v}");
+    assert_eq!(
+        t.state.hub().takeover().unwrap().info.reason,
+        Some(Reason::LocalOverride),
+        "the stop took effect"
+    );
+    assert!(t.state.hub().override_pending().0);
+    // The executor was not wedged by the hang, and the retry is bounded too.
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(50),
+            t.state.live_view().executor.lock()
+        )
+        .await
+        .is_ok(),
+        "the executor is not wedged"
+    );
+    let (status, _) = t
+        .call(
+            None,
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode":"paused","release":false})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(50),
+            t.state.live_view().executor.lock()
+        )
+        .await
+        .is_ok(),
+        "the executor is not wedged"
+    );
+    t.target.sink.hang_reset.store(false, Ordering::SeqCst);
+    let (status, _) = t
+        .call(
+            None,
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode":"paused","release":false})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!t.state.hub().override_pending().0);
+}
+
+#[tokio::test]
+async fn two_queued_heartbeats_audit_the_override_once() {
+    let t = Arc::new(Test::new());
+    let (_id, _owned, _body) = t.active(Some("alice")).await;
+    // The first audit attempt fails, so the audit stays pending.
+    let db = rusqlite::Connection::open(t.dir.path().join("bot.db")).unwrap();
+    db.execute_batch("CREATE TRIGGER fail_live_audit BEFORE INSERT ON audit_log WHEN NEW.action = 'takeover.interrupted' BEGIN SELECT RAISE(ABORT, 'injected'); END;").unwrap();
+    let (status, _) = t
+        .call(None, Method::POST, "/v1/control/override", None)
+        .await;
+    assert_ne!(status, StatusCode::OK);
+    assert!(t.state.hub().override_pending().1);
+    db.execute_batch("DROP TRIGGER fail_live_audit").unwrap();
+    let live = Arc::clone(t.state.live_view());
+    let held = live.executor.lock().await;
+    let mut beats = Vec::new();
+    for _ in 0..2 {
+        let sender = Arc::clone(&t);
+        beats.push(tokio::spawn(async move {
+            sender
+                .call(
+                    None,
+                    Method::PUT,
+                    "/v1/control/state",
+                    Some(json!({"mode":"paused","release":false})),
+                )
+                .await
+        }));
+    }
+    for _ in 0..30 {
+        tokio::task::yield_now().await;
+    }
+    drop(held);
+    for b in beats {
+        assert_eq!(b.await.unwrap().0, StatusCode::OK);
+    }
+    let rows = t
+        .state
+        .storage()
+        .list_audit(t.state.user_id())
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.action == "takeover.interrupted")
+        .count();
+    assert_eq!(rows, 1, "one row, not one per queued heartbeat");
+}
+
+#[tokio::test]
+async fn pending_reset_and_audit_survive_a_restart_and_are_retried() {
+    let t = Test::new();
+    let (_id, _owned, _body) = t.active(Some("alice")).await;
+    t.target.sink.fail_reset.store(true, Ordering::SeqCst);
+    let (status, _) = t
+        .call(None, Method::POST, "/v1/control/override", None)
+        .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    let t2 = t.restarted();
+    assert_eq!(
+        t2.state.hub().override_pending(),
+        (true, false),
+        "audit was written"
+    );
+    t.target.sink.fail_reset.store(false, Ordering::SeqCst);
+    let resets = t.target.sink.resets.load(Ordering::SeqCst);
+    let (status, _) = t2
+        .call(
+            None,
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode":"paused","release":false})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(t.target.sink.resets.load(Ordering::SeqCst), resets + 1);
+    assert_eq!(t2.state.hub().override_pending(), (false, false));
+    // And that is persisted too: a second restart has nothing left to retry.
+    assert_eq!(
+        t2.restarted().state.hub().override_pending(),
+        (false, false)
+    );
+}
+
+#[tokio::test]
+async fn a_release_that_fails_or_loses_to_a_stop_is_never_audited_as_released() {
+    let t = Test::new();
+    let (_id, owned, _body) = t.active(Some("alice")).await;
+    t.target.sink.fail_active.store(true, Ordering::SeqCst);
+    let (status, _) = t.release(Some("alice"), &owned, Uuid::now_v7()).await;
+    assert!(!status.is_success());
+    let released = |t: &Test| {
+        t.state
+            .storage()
+            .list_audit(t.state.user_id())
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.action == "takeover.released")
+            .count()
+    };
+    assert_eq!(released(&t), 0, "a failed release leaves no released row");
+    t.target.sink.fail_active.store(false, Ordering::SeqCst);
+    let (status, _) = t.release(Some("alice"), &owned, Uuid::now_v7()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(released(&t), 1);
 }

@@ -52,6 +52,12 @@ struct Disk {
     releases: Vec<ReleaseJournal>,
     #[serde(default)]
     require_recovery: bool,
+    /// A local override still owes its key reset / audit row (retried after a
+    /// restart). Only meaningful together with a `local_override` takeover.
+    #[serde(default)]
+    reset_pending: bool,
+    #[serde(default)]
+    audit_pending: bool,
 }
 pub(super) fn restore(st: &mut State, path: &Path) {
     match std::fs::read(path) {
@@ -70,6 +76,7 @@ pub(super) fn restore(st: &mut State, path: &Path) {
                     j.runs.truncate(64);
                     j.messages.truncate(64);
                 }
+                let (reset_pending, audit_pending) = (disk.reset_pending, disk.audit_pending);
                 st.latched = disk.latched;
                 st.owned = disk.owned;
                 st.epoch = disk.epoch;
@@ -87,6 +94,13 @@ pub(super) fn restore(st: &mut State, path: &Path) {
                     }
                     t.info.input_expires_in_ms = 0;
                 }
+                // Validated: the flags only mean something for a local override.
+                let overridden = st
+                    .owned
+                    .as_ref()
+                    .is_some_and(|t| t.info.reason == Some(Reason::LocalOverride));
+                st.reset_pending = reset_pending && overridden;
+                st.audit_pending = audit_pending && overridden;
                 return;
             }
             // Old scalar latch is deliberately ownerless after restart.
@@ -127,6 +141,8 @@ pub(super) fn persist(st: &State, path: &Path) -> std::io::Result<()> {
                 epoch: st.epoch,
                 releases: st.releases.clone(),
                 require_recovery: st.require_recovery,
+                reset_pending: st.reset_pending,
+                audit_pending: st.audit_pending,
             },
         )
         .map_err(std::io::Error::other)?;
@@ -422,11 +438,15 @@ impl ControlHub {
     }
     /// The pressed inputs were reset.
     pub fn resolve_override_reset(&self) {
-        self.state.lock().reset_pending = false;
+        let mut st = self.state.lock();
+        st.reset_pending = false;
+        let _ = self.persist(&st);
     }
     /// The override's audit row was written.
     pub fn resolve_override_audit(&self) {
-        self.state.lock().audit_pending = false;
+        let mut st = self.state.lock();
+        st.audit_pending = false;
+        let _ = self.persist(&st);
     }
     /// Local recovery of a takeover latch (for example after a restart) without
     /// any registered target: clears owner and latch, bumps the epoch so cached
@@ -1027,6 +1047,44 @@ mod tests {
         );
         assert!(restarted.clear_owned_latch().unwrap().is_some());
         assert!(restarted.latched().is_none());
+    }
+    #[test]
+    fn pending_override_work_is_persisted_validated_and_cleared_durably() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("control-latch.json");
+        let open =
+            || ControlHub::with_latch_file(super::super::ControlConfig::default(), path.clone());
+        let hub = open();
+        let t = hub
+            .begin_takeover("peer:alice", &request(), Uuid::now_v7(), 1, true, false)
+            .unwrap();
+        hub.activate(t.info.id, t.info.control_epoch).unwrap();
+        hub.force_interrupt(Reason::LocalOverride).unwrap();
+        assert_eq!(hub.override_pending(), (true, true));
+        assert_eq!(
+            open().override_pending(),
+            (true, true),
+            "kept across a restart"
+        );
+        hub.resolve_override_reset();
+        assert_eq!(open().override_pending(), (false, true));
+        hub.resolve_override_audit();
+        assert_eq!(open().override_pending(), (false, false));
+        // The flags mean nothing without a local override: a tampered file
+        // cannot invent pending work for an ordinary interruption.
+        let other = hub.clear_owned_latch();
+        assert!(other.is_ok());
+        let t2 = hub
+            .begin_takeover("peer:alice", &request(), Uuid::now_v7(), 1, true, true)
+            .unwrap();
+        hub.interrupt(t2.info.id, Reason::Expired);
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(
+            &path,
+            text.replace("\"reset_pending\":false", "\"reset_pending\":true"),
+        )
+        .unwrap();
+        assert_eq!(open().override_pending(), (false, false));
     }
     #[test]
     fn a_release_cancelled_by_a_local_override_can_never_finish() {

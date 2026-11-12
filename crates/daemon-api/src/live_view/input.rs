@@ -149,19 +149,53 @@ pub(crate) async fn input(
     body: Bytes,
 ) -> Result<Json<InputResult>, ApiError> {
     let live = s.live_view();
+    // Cheap authorisation BEFORE queueing, so a device without the grant (or a
+    // foreign session, or a batch for someone else's takeover) can never park a
+    // waiter. The full validation is repeated under the executor below.
+    if !live.allowed(&actor, true) {
+        audit(
+            &s,
+            &actor,
+            "view.denied",
+            serde_json::json!({"reason":"privilege"}),
+        )?;
+        return Err(ApiError::forbidden("screen:input denied"));
+    }
+    live.session(&actor, id)?;
+    let early: InputBatch = parse(&body)?;
+    if !s.hub().takeover().is_some_and(|t| {
+        t.actor == actor.key && t.info.session_id == id && t.info.id == early.takeover_id
+    }) {
+        return Err(ApiError::forbidden("takeover owner and epoch required"));
+    }
     // The executor is held briefly by the takeover activation task, the session
     // reaper and the heartbeat/profile routes. A client that waited for `active`
     // and sends its next batch at once must queue behind them (FIFO) rather than
-    // get a spurious 429; only a genuinely long-held executor is "busy".
-    let _executor = tokio::time::timeout(INPUT_QUEUE_WAIT, live.executor.lock())
-        .await
-        .map_err(|_| {
-            ApiError::new(
-                StatusCode::TOO_MANY_REQUESTS,
-                "input_busy",
-                "input executor busy",
-            )
-        })?;
+    // get a spurious 429; only a genuinely long-held executor, or a full queue
+    // (per session and in total), is "busy". A local Stop wakes every waiter so
+    // that it never waits behind them.
+    let waiter = live.enter_input_queue(id)?;
+    let stopped = live.stop.notified();
+    tokio::pin!(stopped);
+    stopped.as_mut().enable();
+    let executor = tokio::select! {
+        guard = tokio::time::timeout(INPUT_QUEUE_WAIT, live.executor.lock()) => {
+            guard.map_err(|_| {
+                ApiError::new(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "input_busy",
+                    "input executor busy",
+                )
+            })?
+        }
+        () = &mut stopped => {
+            return Err(ApiError::conflict(
+                "input cancelled: the local user stopped the takeover",
+            ));
+        }
+    };
+    drop(waiter);
+    let _executor = executor;
     let (target, generation, _) = live.session(&actor, id)?;
     let batch: InputBatch = match parse(&body) {
         Ok(b) => b,
@@ -282,6 +316,13 @@ pub(crate) async fn input(
     if let Err(e) = audit(&s, &actor, "input.batch_authorized", meta.clone()) {
         let _ = interrupt(&s, &actor, &t, Reason::AuditFailed).await;
         return Err(e);
+    }
+    #[cfg(test)]
+    {
+        let hook = live.input_hook.lock().clone();
+        if let Some(hook) = hook {
+            hook();
+        }
     }
     let mut lifetime = BatchLifetime {
         hub: std::sync::Arc::clone(s.hub()),
