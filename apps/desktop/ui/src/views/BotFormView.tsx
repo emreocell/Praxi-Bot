@@ -19,7 +19,8 @@ import {
   PRESET_CHOICES,
   type PresetChoice
 } from "../lib/botProfile";
-import { AppTile } from "../components/AppTile";
+import { BrandIcon } from "../components/BrandIcon";
+import { brandIcon } from "../lib/brandIcons";
 import { botHasAccess, changedApps, saveBotAndApps } from "../lib/mcpApps";
 import { FAKE_PROVIDER_ID } from "../lib/providers";
 import { type ProvidersView, providersView } from "../lib/providerView";
@@ -497,8 +498,8 @@ export function BotFormView({
                           setAllowed((a) => ({ ...a, [s.name]: e.target.checked }))
                         }
                       />
-                      <AppTile name={s.name} small />
-                      <span className={styles.appName}>{s.name}</span>
+                      <BrandIcon name={s.name} small />
+                      <span className={styles.appName}>{brandIcon(s.name).known ? brandIcon(s.name).name : s.name}</span>
                     </label>
                   </li>
                 ))}

@@ -1,7 +1,9 @@
 import { TriangleAlert } from "lucide-react";
+import { BotAvatar } from "ui";
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import type { Bot } from "../api/types";
+import { botView } from "../lib/botProfile";
 import { type BotScope, toggleBotInScope } from "../lib/mcpApps";
 import formStyles from "./Form.module.css";
 import { Segmented } from "./SettingsUi";
@@ -32,7 +34,7 @@ export function BotAccessPicker({
   allWarning
 }: {
   scope: BotScope;
-  bots: Pick<Bot, "id" | "name">[];
+  bots: (Pick<Bot, "id" | "name"> & Partial<Pick<Bot, "config">>)[];
   onChange: (scope: BotScope) => void;
   single?: boolean;
   texts?: Partial<BotAccessTexts>;
@@ -93,6 +95,7 @@ export function BotAccessPicker({
                         )
                       }
                     />
+                    <BotAvatar bot={b.config === undefined ? { id: b.id, name: b.name } : botView(b as Bot)} size="sm" />
                     <span className={styles.name}>{b.name}</span>
                   </label>
                 </li>

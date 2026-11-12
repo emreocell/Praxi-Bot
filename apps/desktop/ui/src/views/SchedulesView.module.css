@@ -240,3 +240,14 @@
   font-size: var(--font-size-sm);
   color: var(--color-text);
 }
+
+.botCell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.toggle input,
+.radio input {
+  accent-color: var(--color-accent-text);
+}

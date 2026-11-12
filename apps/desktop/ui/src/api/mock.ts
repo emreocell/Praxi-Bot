@@ -61,6 +61,11 @@ const BOTS: Bot[] = [
 
 const previews = ["Haftalık özetin hazır.", "Kaynakları inceliyorum…", "Tasarım dosyalarını düzenledim.", "Devam etmek için onayını bekliyorum."];
 BOTS.forEach((b, i) => { Object.assign((b.config as { bot: object }).bot, { preview: previews[i], state: ["idle", "thinking", "working", "waiting-approval"][i], unread: i === 2 }); });
+const SCHEDULES = [
+  { id: "sch-1", bot_id: ATLAS, name: "Haftalık özet", enabled: true, has_webhook: false, created_at_ms: NOW, last_run_at_ms: NOW - 6 * 86400000, next_run_at_ms: NOW + 86400000, misfire_policy: "skip", spec: { cron: "0 9 * * 1 Europe/Istanbul" }, payload: { kind: "agent_prompt", text: "Geçen haftanın GitHub ve takvim hareketlerinden kısa bir özet hazırla." } },
+  { id: "sch-2", bot_id: NOVA, name: "Kaynak taraması", enabled: true, has_webhook: true, created_at_ms: NOW, last_run_at_ms: null, next_run_at_ms: NOW + 3600000, misfire_policy: "run_once", spec: { every: { seconds: 3600 } }, payload: { kind: "agent_prompt", text: "Takip listesindeki sitelerde yeni içerik var mı bak." } },
+  { id: "sch-3", bot_id: "bot-milo", name: "Yedek kontrolü", enabled: false, has_webhook: false, created_at_ms: NOW, last_run_at_ms: NOW - 86400000, next_run_at_ms: null, misfire_policy: "skip", spec: { cron: "30 22 * * * Europe/Istanbul" }, payload: { kind: "workflow", name: "backup-check", params: {} } }
+] as unknown as import("./types").Schedule[];
 const CHAT_ID = "33333333-3333-4333-8333-333333333333";
 const CHATS: Chat[] = [
   {
@@ -335,9 +340,13 @@ export class MockApiClient extends ApiClient {
         this.messages.set(id, []);
         return ok(created);
       }
-      case "GET /runs":
-      case "GET /approvals":
       case "GET /schedules":
+        return ok(typeof window !== "undefined" && new URLSearchParams(window.location.search).get("screen") === "empty" ? [] : structuredClone(SCHEDULES));
+      case "GET /approvals":
+        return ok(typeof window !== "undefined" && new URLSearchParams(window.location.search).get("screen") === "approval"
+          ? [{ call_id: "mock-rm", run_id: "mock-live", requested_at_ms: Date.now() - 3000, decision: null, tool_name: "shell.run", summary: "drafts/old klasörünü ve içindeki 14 dosyayı sil" }]
+          : []);
+      case "GET /runs":
         return ok([]);
       case "GET /usage":
         return ok(USAGE);

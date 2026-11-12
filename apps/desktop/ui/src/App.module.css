@@ -358,3 +358,10 @@
 .windowActions .iconButton { height: var(--size-titlebar); }
 
 .emptyStateCard { border: none; box-shadow: none; background: transparent; }
+
+.stateIcon { display: inline-flex; align-items: center; justify-content: center; width: var(--space-16); height: var(--space-16); margin-bottom: var(--space-3); border-radius: var(--radius-card); background: var(--color-surface-elevated); color: var(--color-accent-text); }
+.stateIcon svg { width: var(--size-icon-lg); height: var(--size-icon-lg); }
+.stateIconDanger { color: var(--color-danger); }
+.spin { animation: stateSpin 1.2s linear infinite; }
+@keyframes stateSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }

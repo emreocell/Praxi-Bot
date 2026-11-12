@@ -168,7 +168,20 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
     );
     if (client instanceof MockApiClient) {
       setEventsConnected(true);
-      if (new URLSearchParams(window.location.search).get("screen") !== "empty") {
+      const screen = new URLSearchParams(window.location.search).get("screen");
+      if (screen === "approval" || screen === "streaming") {
+        const bot_id = "11111111-1111-4111-8111-111111111111";
+        const chat_id = "33333333-3333-4333-8333-333333333333";
+        const events: GlobalEnvelope["event"][] = [
+          { type: "run_started", run_id: "mock-live", bot_id, chat_id },
+          { type: "message_delta", run_id: "mock-live", text: screen === "approval" ? "Raporu hazırladım. Paylaşmadan önce eski taslakları temizlemem gerekiyor." : "Taslağı oluşturuyorum, önce kaynakları karşılaştırıyorum…" },
+          ...(screen === "approval" ? [
+            { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-rm", tool_name: "shell.run", input: { command: "rm -rf ./drafts/old" } },
+            { type: "approval_needed", run_id: "mock-live", call_id: "mock-rm", tool_name: "shell.run", input: { command: "rm -rf ./drafts/old" }, summary: "drafts/old klasörünü ve içindeki 14 dosyayı sil" }
+          ] as GlobalEnvelope["event"][] : [])
+        ];
+        events.forEach((event, i) => dispatch({ type: "event", env: { v: 1, seq: i + 1, gseq: i + 1, ts_ms: Date.now() - 4000 + i * 300, event } }));
+      } else if (screen !== "empty") {
         const runId = "mock-review-run";
         const events: GlobalEnvelope["event"][] = [
           { type: "run_started", run_id: runId, bot_id: "11111111-1111-4111-8111-111111111111", chat_id: "33333333-3333-4333-8333-333333333333" },

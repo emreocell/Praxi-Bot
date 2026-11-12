@@ -20,6 +20,10 @@ export interface Connection {
  */
 export async function connectDaemon(restart = false): Promise<Connection> {
   if (isMockMode()) {
+    // Review state: the daemon cannot be reached (`?mock=1&screen=offline`).
+    if (new URLSearchParams(window.location.search).get("screen") === "offline") {
+      throw new Error("connect ECONNREFUSED 127.0.0.1:47821");
+    }
     return {
       base_url: MOCK_BASE_URL,
       token: "mock",

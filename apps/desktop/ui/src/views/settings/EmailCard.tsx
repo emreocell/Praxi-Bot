@@ -6,11 +6,14 @@ import {
   Pencil,
   PlugZap,
   Plus,
-  Trash2
+  Trash2,
+  Users
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Card } from "ui";
+import { BotAvatar, Button, Card } from "ui";
+import { BrandIcon } from "../../components/BrandIcon";
+import { botView } from "../../lib/botProfile";
 import type { EmailAccount, EmailTestReport } from "../../api/types";
 import { BotAccessPicker } from "../../components/BotAccessPicker";
 import formStyles from "../../components/Form.module.css";
@@ -403,16 +406,22 @@ function AccountRow({
   const [testing, setTesting] = useState(false);
   const [report, setReport] = useState<EmailTestReport | null>(null);
   const botName = accountBotName(account, bots, t("settingsModal.email.deletedBot"));
+  const boundBot = account.bot ? bots.find((b) => b.id === account.bot) : undefined;
   return (
     <li className={styles.row} data-testid={`email-account-${account.name}`}>
-      <span className={styles.icon} aria-hidden="true">
-        <Mail />
-      </span>
+      {/gmail|google/i.test(account.imap.host) ? (
+        <BrandIcon name="gmail" />
+      ) : (
+        <span className={styles.icon} aria-hidden="true">
+          <Mail />
+        </span>
+      )}
       <div className={styles.main}>
         <div className={styles.title}>
           <span className={styles.name}>{account.name}</span>
           <span className={styles.address}>{account.address}</span>
           <span className={styles.tag}>
+            {boundBot ? <BotAvatar bot={botView(boundBot)} size="xs" /> : <Users aria-hidden="true" />}
             {botName === null
               ? t("settingsModal.email.allBots")
               : t("settingsModal.email.onlyBot", { name: botName })}

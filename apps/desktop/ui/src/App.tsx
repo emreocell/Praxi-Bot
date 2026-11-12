@@ -1,4 +1,4 @@
-import { BellDot, FlaskConical, MessageSquare, Plus, Search, Settings2, Monitor, Minus, Square, X } from "lucide-react";
+import { BellDot, FlaskConical, LoaderCircle, MessageSquare, Plus, Search, ServerOff, Settings2, Monitor, Minus, Square, X } from "lucide-react";
 import { isMockMode } from "./api/mock";
 
 import { useEffect, useState } from "react";
@@ -80,12 +80,14 @@ function AppShell() {
   const { t } = useTranslation();
   const {
     phase,
+    error: daemonError,
     client,
     runs,
     bots,
     chats,
     needs,
-    refreshBots
+    refreshBots,
+    retry
   } = useDaemon();
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [route, setRoute] = useState<Route>({ kind: "home" });
@@ -134,8 +136,18 @@ function AppShell() {
       };
       if (mock) {
         setRoute({ kind: "chat", chatId: "33333333-3333-4333-8333-333333333333", botId: "11111111-1111-4111-8111-111111111111" });
-        if (params.get("screen") === "settings") setSettingsOpen("general");
-        if (params.get("screen") === "apps") setAppsOpen(true);
+        const screen = params.get("screen");
+        if (screen === "settings") setSettingsOpen((params.get("section") ?? "general") as SettingsSectionId);
+        if (screen === "apps") setAppsOpen(true);
+        // Review states of the other routes (mock mode only).
+        const atlas = "11111111-1111-4111-8111-111111111111";
+        if (screen === "onboarding") merged.onboardingCompleted = false;
+        if (screen === "botform") setRoute({ kind: "botForm", botId: atlas });
+        if (screen === "newbot") setRoute({ kind: "botForm" });
+        if (screen === "bot") setRoute({ kind: "bot", botId: atlas });
+        if (screen === "schedules") setRoute({ kind: "schedules" });
+        if (screen === "needs") setRoute({ kind: "needs" });
+        if (screen === "home" || screen === "offline") setRoute({ kind: "home" });
       }
       setSettings(merged);
       if (shouldOpenOnboardingOnStart(merged)) {
@@ -440,7 +452,7 @@ function AppShell() {
             {botSearch !== null ? <input className={styles.botSearch} autoFocus value={botSearch} onChange={e => setBotSearch(e.target.value)} aria-label={t("sidebar.searchBots")} placeholder={t("sidebar.searchBots")} /> : null}
           </SidebarHeader>
           <SidebarSection>
-            {needs.length > 0 ? <SidebarItem active={route.kind === "needs"} onClick={() => setRoute({ kind: "needs" })}><BellDot /><span className={styles.botName}>{t("sidebar.needsYou")}</span><span className={styles.needsBadge} data-testid="needs-you-badge">{needs.length}</span></SidebarItem> : null}
+            {needs.length > 0 ? <SidebarItem active={route.kind === "needs"} onClick={() => setRoute({ kind: "needs" })}><BellDot /><span className={styles.botName}>{t("sidebar.needsYou")}</span><span className={styles.needsBadge} data-testid="needs-you-badge" aria-label={t("sidebar.needsYouCount", { count: needs.length })}>{needs.length}</span></SidebarItem> : null}
             {bots.filter(bot => bot.name.toLowerCase().includes((botSearch ?? "").toLowerCase())).map((bot) => {
               const view = botView(bot);
               const latest = chats.filter(c => c.bot_id === bot.id).sort((a,b) => b.created_at_ms - a.created_at_ms)[0];
@@ -520,52 +532,84 @@ function AppShell() {
         {route.kind === "home" ? (
           <div className={styles.centerPane}>
             <Card padding="lg" className={styles.emptyStateCard}>
-                <div
-                  className={styles.selectedBotContent}
-                  data-testid={phase === "error" ? "daemon-offline-empty-state" : "home-empty-state"}
-                >
-                  <MessageSquare className={styles.emptyIcon} /><h1 className={styles.emptyStateTitle}>
-                    {bots.length === 0
-                      ? t("main.welcomeTitle")
-                      : t("main.selectBotTitle")}
+              {phase === "error" ? (
+                <div className={styles.selectedBotContent} data-testid="daemon-offline-empty-state">
+                  <span className={`${styles.stateIcon} ${styles.stateIconDanger}`}><ServerOff /></span><h1 className={styles.emptyStateTitle}>
+                    {t("main.daemonOfflineTitle")}
                   </h1>
                   <p className={styles.emptyStateDescription}>
-                    {bots.length === 0
-                      ? t("main.welcomeDescription")
-                      : t("main.selectBotDescription")}
+                    {t("main.daemonOfflineDescription")}
                   </p>
+                  {daemonError ? <pre className={styles.errorDetailMono}>{daemonError}</pre> : null}
                   <div className={styles.optionRow}>
-                    {bots.length === 0 ? (
-                      <>
+                    <Button variant="primary" onClick={retry}>
+                      {t("main.daemonRetry")}
+                    </Button>
+                    <Button variant="secondary" onClick={() => handleOpenOnboarding(false)}>
+                      {t("main.runSetupWizard")}
+                    </Button>
+                  </div>
+                </div>
+              ) : phase === "connecting" && bots.length === 0 ? (
+                <div className={styles.selectedBotContent}>
+                  <span className={styles.stateIcon}><LoaderCircle className={styles.spin} /></span><h1 className={styles.emptyStateTitle}>
+                    {t("main.daemonConnectingTitle")}
+                  </h1>
+                  <p className={styles.emptyStateDescription}>
+                    {t("main.daemonConnectingDescription")}
+                  </p>
+                  <Button variant="secondary" onClick={retry}>
+                    {t("main.daemonRetry")}
+                  </Button>
+                </div>
+              ) : (
+                  <div
+                    className={styles.selectedBotContent}
+                    data-testid="home-empty-state"
+                  >
+                    <MessageSquare className={styles.emptyIcon} /><h1 className={styles.emptyStateTitle}>
+                      {bots.length === 0
+                        ? t("main.welcomeTitle")
+                        : t("main.selectBotTitle")}
+                    </h1>
+                    <p className={styles.emptyStateDescription}>
+                      {bots.length === 0
+                        ? t("main.welcomeDescription")
+                        : t("main.selectBotDescription")}
+                    </p>
+                    <div className={styles.optionRow}>
+                      {bots.length === 0 ? (
+                        <>
+                          <Button
+                            variant="primary"
+                            onClick={() => handleOpenOnboarding(false)}
+                          >
+                            {t("main.runSetupWizard")}
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            onClick={() => setRoute({ kind: "botForm" })}
+                          >
+                            <Plus />{t("sidebar.newBot")}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            onClick={() => void refreshBots()}
+                          >
+                            {t("main.refreshBots")}
+                          </Button>
+                        </>
+                      ) : (
                         <Button
                           variant="primary"
-                          onClick={() => handleOpenOnboarding(false)}
-                        >
-                          {t("main.runSetupWizard")}
-                        </Button>
-                        <Button
-                          variant="secondary"
                           onClick={() => setRoute({ kind: "botForm" })}
                         >
                           <Plus />{t("sidebar.newBot")}
                         </Button>
-                        <Button
-                          variant="ghost"
-                          onClick={() => void refreshBots()}
-                        >
-                          {t("main.refreshBots")}
-                        </Button>
-                      </>
-                    ) : (
-                      <Button
-                        variant="primary"
-                        onClick={() => setRoute({ kind: "botForm" })}
-                      >
-                        <Plus />{t("sidebar.newBot")}
-                      </Button>
-                    )}
+                      )}
+                    </div>
                   </div>
-                </div>
+              )}
             </Card>
           </div>
         ) : null}
