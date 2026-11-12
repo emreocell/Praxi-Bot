@@ -586,12 +586,18 @@ impl Replayer {
             label,
             action: action.to_owned(),
         };
-        if highlight {
+        let permit = if highlight {
             gate.admit_action(&request).await
         } else {
             gate.admit_background_action(&request).await
         }
-        .map_err(Stop::Denied)
+        .map_err(Stop::Denied)?;
+        // A pause, takeover or local override that began during admission must
+        // stop the step before it reads or acts on the screen.
+        if let Some(message) = gate.latch_refusal().or_else(|| gate.observation_refused()) {
+            return Err(Stop::Denied(message));
+        }
+        Ok(permit)
     }
 
     async fn run_step(

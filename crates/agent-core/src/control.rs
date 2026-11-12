@@ -201,10 +201,15 @@ impl LoopControl {
         } else {
             gate.admit_background_action(request).await?
         };
-        Ok(ActionPermit::new(permit.needs_observation(), move || {
+        let validator = permit.validator();
+        let epoch = permit.epoch();
+        let wrapped = ActionPermit::new(permit.needs_observation(), move || {
             let _computer = computer;
             drop(permit);
-        }))
+        })
+        .with_validator(validator);
+        wrapped.set_epoch(epoch);
+        Ok(wrapped)
     }
 }
 

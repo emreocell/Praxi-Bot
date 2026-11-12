@@ -45,7 +45,9 @@ use tool_registry::{Tool, ToolRegistry};
 
 pub use browser::{BrowserDriver, BrowserSettings, CdpDriver, Wait};
 pub use checkpoint::{Checkpoint, CheckpointEntry, CheckpointStore};
-pub use control::{ActionPermit, ControlRequest, DesktopControlGate};
+pub use control::{
+    ActionPermit, ControlRequest, DesktopControlGate, OBSERVATION_DISCARDED, PermitValidator,
+};
 pub use desktop::{DesktopSettings, SharedOcr};
 pub use meta::{META_TOOL_NAMES, QUESTION_CARD_KIND, TODO_LIST_KIND, TodoItem, TodoStatus};
 pub use schedule::{
@@ -673,6 +675,37 @@ mod tests {
             panic!()
         };
         assert!(!text.contains("previous action discarded"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn a_browser_observation_that_straddles_a_takeover_never_reaches_the_model() {
+        for (tool, input) in [
+            ("browser_screenshot", serde_json::json!({})),
+            ("browser_wait", serde_json::json!({"idle": true})),
+            ("browser_tabs", serde_json::json!({})),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let registry = ToolRegistry::new();
+            let gate = Arc::new(LatchGate::default());
+            let browser = Arc::new(browser::fake::FakeBrowser::default());
+            let flip = Arc::clone(&gate);
+            *browser.hook.lock() = Some(Arc::new(move |_| {
+                flip.driving
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                flip.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }));
+            let mut config = BuiltinConfig::new(dir.path().into(), Arc::new(AllowAll));
+            config.browser = Some(browser.clone());
+            config.control = Some(gate);
+            let _ = register_builtin_tools(&registry, config);
+            let err = registry
+                .get(tool)
+                .unwrap()
+                .call(&tool_registry::ToolContext::default(), input)
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains("discarded"), "{tool}: {err}");
+        }
     }
 
     #[tokio::test]

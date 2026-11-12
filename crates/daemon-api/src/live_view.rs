@@ -275,13 +275,13 @@ type DenialWindow = (Option<Instant>, BTreeMap<String, u64>);
 /// the next row says how many were folded into the silence before it.
 const DENIAL_AUDIT_WINDOW: Duration = Duration::from_secs(60);
 
-#[allow(clippy::needless_pass_by_value)] // Fixed, ephemeral metadata values are built at each call site.
 tokio::task_local! {
     /// Set by a handler's own denial audit, so that `audit_ingress` does not
     /// count the same rejected request a second time.
     static HANDLER_AUDITED: Arc<std::sync::atomic::AtomicBool>;
 }
 
+#[allow(clippy::needless_pass_by_value)] // Fixed, ephemeral metadata values are built at each call site.
 fn audit(
     s: &AppState,
     actor: &Actor,

@@ -781,7 +781,20 @@ impl ControlHub {
             if let Some(hook) = self.refresh.lock().as_ref() {
                 hook(seq);
             }
-            return Ok(ActionPermit::new(reobserve, move || {
+            let admitted_epoch = self.state.lock().epoch;
+            let checker = Arc::clone(&self);
+            let validator: builtin_tools::PermitValidator = Arc::new(move |permit_epoch| {
+                // At dispatch: a pause / takeover / override that began since
+                // admission, or a changed control state, refuses the action.
+                let st = checker.state.lock();
+                if let Some(message) = st.latched.and_then(super::refused_while) {
+                    return Some(message.to_owned());
+                }
+                (st.epoch != permit_epoch).then(|| {
+                    "The control state changed while this action was being prepared, so it was not performed. Observe again before acting.".to_owned()
+                })
+            });
+            let permit = ActionPermit::new(reobserve, move || {
                 {
                     let mut st = hub.state.lock();
                     st.active_actions = st.active_actions.saturating_sub(1);
@@ -796,7 +809,10 @@ impl ControlHub {
                 if let Some(hook) = hub.refresh.lock().as_ref() {
                     hook(seq);
                 }
-            }));
+            })
+            .with_validator(Some(validator));
+            permit.set_epoch(admitted_epoch);
+            return Ok(permit);
         }
     }
 }
@@ -1247,6 +1263,24 @@ mod tests {
         assert!(hub.latch_refusal().is_some(), "a local override");
         hub.clear_owned_latch().unwrap();
         assert_eq!(hub.latch_refusal(), None);
+    }
+    #[tokio::test]
+    async fn an_admitted_permit_is_refused_at_dispatch_once_control_changes() {
+        let hub = Arc::new(ControlHub::new(super::super::ControlConfig::default()));
+        // Admitted while nothing is latched.
+        let permit = hub.clone().admit_action(action(), &|| {}).await.unwrap();
+        assert!(permit.protect(async { 1 }).await.is_ok());
+        // A Stop / human takeover begins after admission, before dispatch.
+        hub.put_state(ControlMode::Paused);
+        let refused = permit.protect(async { 2 }).await.unwrap_err();
+        assert!(refused.contains("paused"), "{refused}");
+        // Even after it is released the permit is stale: observe again.
+        hub.release();
+        let stale = permit.protect(async { 3 }).await.unwrap_err();
+        assert!(stale.contains("Observe again"), "{stale}");
+        // A permit admitted after the release is fine.
+        let fresh = hub.clone().admit_action(action(), &|| {}).await.unwrap();
+        assert!(fresh.protect(async { 4 }).await.is_ok());
     }
     #[test]
     fn a_release_cancelled_by_a_local_override_can_never_finish() {

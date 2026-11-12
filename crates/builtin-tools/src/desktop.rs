@@ -924,7 +924,24 @@ fn window_line(w: &desktop_api::WindowInfo) -> String {
 }
 
 impl DesktopTool {
+    /// Observation tools discard their result if control changed while they
+    /// ran: a screenshot, an OCR pass or a window list that straddles the start
+    /// of a human takeover never reaches the model.
     async fn run(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
+        let observing = matches!(self.op, Op::ListApps | Op::GetState);
+        let gate = self.shared.control.clone();
+        let epoch = gate.as_ref().map(|g| g.observation_epoch());
+        let text = self.run_inner(run_id, input).await?;
+        if observing
+            && let (Some(gate), Some(epoch)) = (gate, epoch)
+            && (gate.observation_epoch() != epoch || gate.observation_refused().is_some())
+        {
+            return Err(exec_err(crate::control::OBSERVATION_DISCARDED));
+        }
+        Ok(text)
+    }
+
+    async fn run_inner(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
         let sh = &self.shared;
         if matches!(self.op, Op::ListApps | Op::GetState)
             && let Some(message) = sh.control.as_ref().and_then(|g| g.observation_refused())
@@ -1326,6 +1343,8 @@ pub(crate) mod fake {
         pub launched_window_pid: Pid,
         /// Timestamp when `launch()` was called.
         pub launched_at: Mutex<Option<tokio::time::Instant>>,
+        /// Runs inside `screenshot` / `windows` (a takeover landing mid-capture).
+        pub hook: Mutex<Option<Arc<dyn Fn(&str) + Send + Sync>>>,
     }
 
     impl FakeDesktop {
@@ -1343,6 +1362,7 @@ pub(crate) mod fake {
                 launch_window_delay: Some(Duration::ZERO),
                 launched_window_pid: 4242,
                 launched_at: Mutex::new(None),
+                hook: Mutex::new(None),
             }
         }
     }
@@ -1438,6 +1458,10 @@ pub(crate) mod fake {
         }
 
         async fn screenshot(&self, _r: Region, _q: Quality) -> Result<Image, DesktopError> {
+            let hook = self.hook.lock().clone();
+            if let Some(hook) = hook {
+                hook("screenshot");
+            }
             Ok(Image {
                 data: self.screenshot_png.clone(),
                 width: 10,
@@ -1447,6 +1471,10 @@ pub(crate) mod fake {
         }
 
         async fn windows(&self) -> Result<Vec<WindowInfo>, DesktopError> {
+            let hook = self.hook.lock().clone();
+            if let Some(hook) = hook {
+                hook("windows");
+            }
             let mut wins = vec![window(77)];
             if let (Some(at), Some(delay)) = (*self.launched_at.lock(), self.launch_window_delay)
                 && at.elapsed() >= delay
@@ -2056,6 +2084,62 @@ mod tests {
                 Some(m) => Err(m),
                 None => Ok(()),
             }
+        }
+    }
+
+    /// The observation epoch and the "human drives" ban, flipped by a test.
+    #[derive(Default)]
+    struct ObsGate {
+        epoch: std::sync::atomic::AtomicU64,
+        driving: std::sync::atomic::AtomicBool,
+    }
+    impl ObsGate {
+        fn human_takes_over(&self) {
+            self.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.driving
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    #[async_trait]
+    impl DesktopControlGate for ObsGate {
+        fn observation_epoch(&self) -> u64 {
+            self.epoch.load(std::sync::atomic::Ordering::SeqCst)
+        }
+        fn observation_refused(&self) -> Option<String> {
+            self.driving
+                .load(std::sync::atomic::Ordering::SeqCst)
+                .then(|| "the user is controlling (observation paused)".to_owned())
+        }
+        async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn an_observation_that_straddles_a_takeover_never_reaches_the_model() {
+        for (name, input, hook_on) in [
+            (
+                "desktop_get_state",
+                json!({"screenshot": true}),
+                "screenshot",
+            ),
+            ("desktop_list_apps", json!({}), "windows"),
+        ] {
+            let fake = Arc::new(FakeDesktop::new(false));
+            let gate = Arc::new(ObsGate::default());
+            let flip = Arc::clone(&gate);
+            *fake.hook.lock() = Some(Arc::new(move |what| {
+                if what == hook_on {
+                    flip.human_takes_over();
+                }
+            }));
+            let d = tempfile::tempdir().unwrap();
+            let t = tools(fake, None, d.path(), settings(), Some(gate));
+            let err = get(&t, name)
+                .call(&ToolContext::default(), input)
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains("discarded"), "{name}: {err}");
         }
     }
 

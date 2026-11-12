@@ -977,7 +977,27 @@ impl BrowserTool {
         Ok(())
     }
 
+    /// Observation tools discard their result if control changed while they
+    /// ran (a screenshot, a wait or a tab list that straddles a takeover).
     async fn run(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
+        let observing = match self.op {
+            Op::Snapshot | Op::Wait | Op::Screenshot => true,
+            Op::Tabs => input.get("switch_to").is_none_or(Value::is_null),
+            _ => false,
+        };
+        let gate = self.shared.control.clone();
+        let epoch = gate.as_ref().map(|g| g.observation_epoch());
+        let text = self.run_inner(run_id, input).await?;
+        if observing
+            && let (Some(gate), Some(epoch)) = (gate, epoch)
+            && (gate.observation_epoch() != epoch || gate.observation_refused().is_some())
+        {
+            return Err(exec_err(crate::control::OBSERVATION_DISCARDED));
+        }
+        Ok(text)
+    }
+
+    async fn run_inner(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
         let observing = match self.op {
             Op::Snapshot | Op::Wait | Op::Screenshot => true,
             Op::Tabs => input.get("switch_to").is_none_or(Value::is_null),
@@ -1397,11 +1417,17 @@ pub(crate) mod fake {
         pub calls: PMutex<Vec<String>>,
         /// When set, mutating actions go through the desktop control gate.
         pub on_desktop: bool,
+        /// Runs inside every backend call (a human takeover landing mid-call).
+        pub hook: PMutex<Option<Arc<dyn Fn(&str) + Send + Sync>>>,
     }
 
     impl FakeBrowser {
         fn rec(&self, s: &str) -> Result<String, String> {
             self.calls.lock().push(s.to_string());
+            let hook = self.hook.lock().clone();
+            if let Some(hook) = hook {
+                hook(s);
+            }
             if s.contains("e404") {
                 Err("unknown ref e404".into())
             } else {
@@ -1489,7 +1515,7 @@ pub(crate) mod fake {
             full: bool,
             _e: Option<&str>,
         ) -> Result<(Vec<u8>, &'static str), String> {
-            self.calls.lock().push(format!("screenshot:{full}"));
+            let _ = self.rec(&format!("screenshot:{full}"));
             Ok((vec![0xFF, 0xD8, 0xFF], "jpg"))
         }
         async fn eval(&self, js: &str) -> Result<Value, String> {

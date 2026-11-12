@@ -73,7 +73,17 @@ pub struct ActionPermit {
     reobserve: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// The observation epoch this admission (or its last re-validation) saw.
     epoch: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// Asked at the moment of dispatch (`protect`) with the epoch this permit
+    /// was last validated against: `Some(message)` when a pause, a takeover or
+    /// a local override began since, or the control state changed.
+    validator: Option<PermitValidator>,
 }
+
+/// See [`ActionPermit::with_validator`].
+pub type PermitValidator = std::sync::Arc<dyn Fn(u64) -> Option<String> + Send + Sync>;
+
+/// Returned to the model when an observation straddled a change of control.
+pub const OBSERVATION_DISCARDED: &str = "This observation was discarded: the user took control (or the control state changed) while it was being taken, so you must not see it. Do not retry it; wait until they give control back.";
 #[derive(Default)]
 struct PermitInner {
     completion: std::sync::Mutex<Option<Box<dyn FnOnce() + Send + Sync>>>,
@@ -82,6 +92,7 @@ impl ActionPermit {
     #[must_use]
     pub fn new(reobserve: bool, completion: impl FnOnce() + Send + Sync + 'static) -> Self {
         Self {
+            validator: None,
             epoch: std::sync::Arc::default(),
             reobserve: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(reobserve)),
             inner: std::sync::Arc::new(PermitInner {
@@ -98,6 +109,17 @@ impl ActionPermit {
     pub fn observed(&self) {
         self.reobserve
             .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+    /// Attach the check `protect` runs right before it dispatches.
+    #[must_use]
+    pub fn with_validator(mut self, validator: Option<PermitValidator>) -> Self {
+        self.validator = validator;
+        self
+    }
+    /// The dispatch-time check, for wrappers that re-create the permit.
+    #[must_use]
+    pub fn validator(&self) -> Option<PermitValidator> {
+        self.validator.clone()
     }
     /// The observation epoch this permit was last validated against.
     #[must_use]
@@ -122,6 +144,14 @@ impl ActionPermit {
         F: std::future::Future + Send + 'static,
         F::Output: Send + 'static,
     {
+        // The last look before anything reaches the backend: a pause, a human
+        // takeover or a local override that began after admission refuses the
+        // dispatch (nothing is half-applied: this runs before the work starts).
+        if let Some(validator) = &self.validator
+            && let Some(message) = validator(self.epoch())
+        {
+            return Err(message);
+        }
         let hold = std::sync::Arc::clone(&self.inner);
         tokio::spawn(async move {
             let _hold = hold;
