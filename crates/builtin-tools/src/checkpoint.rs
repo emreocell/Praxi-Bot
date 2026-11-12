@@ -437,18 +437,15 @@ fn link_dir_nofollow(meta: &fs::Metadata) -> bool {
 }
 
 fn is_reparse(meta: &fs::Metadata) -> bool {
-    if is_link(meta) {
-        return true;
-    }
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
         const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-        meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        is_link(meta) || meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
     }
     #[cfg(not(windows))]
     {
-        false
+        is_link(meta)
     }
 }
 
