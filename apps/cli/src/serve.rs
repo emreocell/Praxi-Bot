@@ -432,6 +432,21 @@ pub fn load_email_accounts(data_dir: &Path) -> Vec<connector_email::AccountConfi
     Vec::new()
 }
 
+/// Give bots the `schedule_*` tools (limits from `<data_dir>/schedule.toml`).
+/// Create / update / resume always ask the user. A `schedule.toml` that is
+/// broken or nonsensical disables the tools (fail closed): falling back to the
+/// defaults would silently undo limits the user tightened.
+fn register_schedule_tools(data_dir: &Path, state: &AppState) {
+    match daemon_api::load_schedule_limits(data_dir) {
+        Err(e) => eprintln!("warning: schedule tools are disabled: {e}"),
+        Ok(limits) => match state.enable_schedule_tools(limits) {
+            Ok(n) if n == builtin_tools::SCHEDULE_TOOL_NAMES.len() => {}
+            Ok(n) => eprintln!("warning: only {n} schedule tool(s) registered (name clash)"),
+            Err(e) => eprintln!("warning: schedule tools are disabled: {e}"),
+        },
+    }
+}
+
 /// Filename of the optional web tools configuration in `<data_dir>`.
 pub const WEB_FILE: &str = "web.toml";
 
@@ -770,6 +785,7 @@ pub fn serve(
         cfg.allowed_origins.extend(parse_origins(&extra));
     }
     let state = AppState::new(agent, storage, cfg)?;
+    register_schedule_tools(data_dir, &state);
     if let Some(host) = host {
         state.set_provider_host(host);
     }
@@ -934,6 +950,60 @@ id = "unpriced"
 
     // SEC-02 (redaction half): production wiring masks stored secrets, the
     // daemon bearer token and the vault passphrase, and follows later changes.
+    fn schedule_state(dir: &Path) -> (AgentLoop, AppState) {
+        let storage = Arc::new(Storage::open(dir).unwrap());
+        let agent = build_agent_with_redactor(
+            &storage,
+            Providers::unconfigured(),
+            dir,
+            None,
+            production_redactor(&sources(None, None)),
+        );
+        let state =
+            AppState::new(agent.clone(), storage, DaemonConfig::new("daemon-token")).unwrap();
+        (agent, state)
+    }
+
+    #[test]
+    fn serve_wiring_registers_the_schedule_tools() {
+        let dir = tempfile::tempdir().unwrap();
+        let (agent, state) = schedule_state(dir.path());
+        register_schedule_tools(dir.path(), &state);
+        let names = agent.tool_names();
+        for n in builtin_tools::SCHEDULE_TOOL_NAMES {
+            assert!(names.iter().any(|x| x == n), "{n} missing: {names:?}");
+        }
+        assert!(
+            agent
+                .tool_registry()
+                .get("schedule_create")
+                .unwrap()
+                .always_ask()
+        );
+    }
+
+    #[test]
+    fn a_bad_schedule_toml_registers_no_schedule_tools() {
+        for bad in [
+            "max_per_bot = \"many\"",
+            "max_per_bot = 2
+min_interval_secs = 0",
+            "timezone = \"Nope/Zone\"",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("schedule.toml"), bad).unwrap();
+            let (agent, state) = schedule_state(dir.path());
+            register_schedule_tools(dir.path(), &state);
+            assert!(
+                !agent
+                    .tool_names()
+                    .iter()
+                    .any(|n| n.starts_with("schedule_")),
+                "{bad}: tools must stay off"
+            );
+        }
+    }
+
     #[test]
     fn production_redactor_masks_store_token_and_passphrase() {
         let store = Arc::new(MemoryStore::new());

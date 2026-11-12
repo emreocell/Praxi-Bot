@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useState } from "react";
+import { CalendarClock, Clock, ShieldAlert } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import type { Scope } from "../api/types";
@@ -13,6 +14,11 @@ import {
   type TodoListItem,
   type ToolItem
 } from "../state/timeline";
+import {
+  formatFiring,
+  scheduleDetails,
+  type ScheduleApprovalDetails
+} from "../lib/approvalDetails";
 import formStyles from "./Form.module.css";
 import styles from "./ChatCards.module.css";
 
@@ -155,6 +161,71 @@ export interface ApprovalCardProps {
   expiresAtMs?: number;
 }
 
+/** What a bot-made schedule will do, shown before the user approves it. */
+function ScheduleApprovalBody({ d }: { d: ScheduleApprovalDetails }) {
+  const { t, i18n } = useTranslation();
+  const perm = d.permission;
+  return (
+    <div className={styles.scheduleBody} data-testid="approval-schedule">
+      <div className={styles.scheduleRow}>
+        <CalendarClock size={14} aria-hidden="true" />
+        <span className={styles.scheduleWhen}>
+          {d.schedule}
+          {d.timezone ? ` (${d.timezone})` : ""}
+        </span>
+      </div>
+      {d.name ? <p className={styles.bodyLabel}>{d.name}</p> : null}
+      {d.previous ? (
+        <div className={styles.scheduleWas} data-testid="approval-schedule-previous">
+          <span className={styles.bodyLabel}>{t("chat.approval.schedule.was")}</span>
+          <span>
+            {d.previous.name} · {d.previous.schedule}
+            {d.previous.timezone ? ` (${d.previous.timezone})` : ""}
+          </span>
+          <pre className={styles.code}>{d.previous.prompt}</pre>
+        </div>
+      ) : null}
+      {d.prompt ? (
+        <>
+          <span className={styles.bodyLabel}>
+            {d.previous
+              ? t("chat.approval.schedule.promptNew", { count: d.promptChars })
+              : t("chat.approval.schedule.prompt", { count: d.promptChars })}
+          </span>
+          <pre className={styles.code} tabIndex={0}>
+            {d.prompt}
+          </pre>
+        </>
+      ) : null}
+      {d.nextRuns.length > 0 && d.action !== "pause" && d.action !== "delete" ? (
+        <div className={styles.scheduleRow}>
+          <Clock size={14} aria-hidden="true" />
+          <span>
+            {t("chat.approval.schedule.next")}{" "}
+            {d.nextRuns.map((r) => formatFiring(r, i18n.language)).join(" · ")}
+          </span>
+        </div>
+      ) : null}
+      {perm && d.prompt ? (
+        <div className={styles.scheduleRow} data-testid="approval-schedule-permission">
+          <ShieldAlert size={14} aria-hidden="true" />
+          <span>
+            {t("chat.approval.schedule.permission", {
+              level: t(`chat.approval.schedule.level.${perm.level}`, {
+                defaultValue: perm.level
+              })
+            })}
+            {perm.allow.length > 0
+              ? ` ${t("chat.approval.schedule.allowed", { list: perm.allow.join(", ") })}`
+              : ""}
+          </span>
+        </div>
+      ) : null}
+      {d.prompt ? <p className={styles.bodyLabel}>{t("chat.approval.schedule.note")}</p> : null}
+    </div>
+  );
+}
+
 export function ApprovalCard({
   tool,
   onDecide,
@@ -166,6 +237,7 @@ export function ApprovalCard({
   const [reason, setReason] = useState("");
   const outbound = isOutboundSend(tool.name);
   const remaining = useCountdown(expiresAtMs);
+  const schedule = scheduleDetails(tool.details);
 
   const decide = async (
     decision: "approve" | "deny",
@@ -202,13 +274,27 @@ export function ApprovalCard({
           </span>
         ) : null}
       </div>
-      <p className={styles.approvalSummary}>{tool.summary ?? tool.name}</p>
-      <div className={styles.approvalMeta}>
-        <span className={styles.toolName}>{tool.name}</span>
-        <span className={styles.inputSummary}>
-          {summarizeInput(tool.input, 140)}
-        </span>
-      </div>
+      {schedule ? (
+        <>
+          <p className={styles.approvalSummary}>
+            {t(`chat.approval.schedule.title.${schedule.action}`)}
+          </p>
+          <ScheduleApprovalBody d={schedule} />
+          <div className={styles.approvalMeta}>
+            <span className={styles.toolName}>{tool.name}</span>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className={styles.approvalSummary}>{tool.summary ?? tool.name}</p>
+          <div className={styles.approvalMeta}>
+            <span className={styles.toolName}>{tool.name}</span>
+            <span className={styles.inputSummary}>
+              {summarizeInput(tool.input, 140)}
+            </span>
+          </div>
+        </>
+      )}
       <div className={styles.actions}>
         <Button
           size="sm"
@@ -218,22 +304,27 @@ export function ApprovalCard({
         >
           {t("chat.approval.once")}
         </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={disabled}
-          onClick={() => void decide("approve", "this_chat")}
-        >
-          {t("chat.approval.thisChat")}
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={disabled}
-          onClick={() => void decide("approve", "always")}
-        >
-          {t("chat.approval.always")}
-        </Button>
+        {/* The daemon refuses a standing grant for any card with details. */}
+        {tool.details != null ? null : (
+          <>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={disabled}
+              onClick={() => void decide("approve", "this_chat")}
+            >
+              {t("chat.approval.thisChat")}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={disabled}
+              onClick={() => void decide("approve", "always")}
+            >
+              {t("chat.approval.always")}
+            </Button>
+          </>
+        )}
         <Button
           size="sm"
           variant="danger"

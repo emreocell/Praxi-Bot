@@ -185,6 +185,39 @@
   font-size: var(--font-size-xs);
 }
 
+.scheduleBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+}
+
+.scheduleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: var(--space-0);
+}
+
+.scheduleRow > svg {
+  flex-shrink: 0;
+  color: var(--color-warning);
+}
+
+.scheduleWas {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-left: var(--size-border-thick) solid var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.scheduleWhen {
+  font-weight: var(--font-weight-semibold);
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;

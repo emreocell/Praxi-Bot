@@ -140,6 +140,9 @@
           "type": "string",
           "format": "uuid"
         },
+        "details": {
+          "description": "Structured facts the tool supplies for the approval card (for example a schedule's prompt and next firing times), when it has any."
+        },
         "input": true,
         "run_id": {
           "type": "string",

@@ -1905,6 +1905,11 @@ export interface components {
              */
             next_run_at_ms?: number | null;
             /**
+             * @description Who created it: `user`, or `bot` (a bot's schedule tools, after you
+             *     approved it). A bot may change only its own `bot` schedules.
+             */
+            origin: string;
+            /**
              * @description What it does: `{"kind": "agent_prompt", "text": "..."}`,
              *     `{"kind": "workflow", "name": "...", "params": {}}` or
              *     `{"kind": "tool", "name": "...", "input": {}}`.
