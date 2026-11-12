@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/approvals/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Count pending approvals without disclosing decision IDs or payloads. */
+        get: operations["approval_count"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/approvals/{call_id}": {
         parameters: {
             query?: never;
@@ -349,10 +366,13 @@ export interface paths {
          *     `seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without
          *     it the stream covers all runs: the SSE `id` is a daemon-wide, strictly
          *     increasing `gseq` (persisted) and `Last-Event-ID: <gseq>` replays every
-         *     missed event of every run, in order, before going live.  Browsers cannot set
-         *     headers on `EventSource`, so this route (and only this one) also accepts the
-         *     API token as the `token` query parameter (Host / Origin checks still apply;
-         *     the token is compared in constant time; beware that URLs may be logged).
+         *     missed event of every run, in order, before going live. The desktop UI uses
+         *     fetch streaming and Authorization/Last-Event-ID headers. Native `EventSource`
+         *     cannot set headers; only this route accepts the low-privilege CLI token in
+         *     `token` for legacy clients. Management credentials in query parameters are
+         *     rejected. Low-privilege streams omit approval/question decisions; only local
+         *     management receives `control_requested`. Filtering applies to live and replay.
+         *     Host / Origin checks still apply; query URLs may be logged.
          *
          *     The daemon-wide stream (no `run_id`) also carries `schedule_changed` events
          *     (`dto::ScheduleChanged`: `{"type":"schedule_changed","schedule_id","kind"}`,
@@ -433,6 +453,23 @@ export interface paths {
         };
         /** Liveness probe (no auth; still Host / Origin checked). */
         get: operations["health"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/isolation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Isolation observations, accessible with the low-privilege CLI bearer. */
+        get: operations["isolation"];
         put?: never;
         post?: never;
         delete?: never;
@@ -908,6 +945,11 @@ export interface components {
              */
             call_id: string;
         };
+        /** @description Low-privilege status information, without approval IDs or arguments. */
+        ApprovalCount: {
+            /** Format: int64 */
+            pending: number;
+        };
         /** @description A pending or decided tool-call approval. */
         ApprovalDto: {
             /**
@@ -1376,6 +1418,15 @@ export interface components {
             uptime_secs: number;
             /** @description Daemon crate version. */
             version: string;
+        };
+        /** @description Observed daemon isolation state; never contains credentials. */
+        IsolationStatus: {
+            children_scrubbed: boolean;
+            memory_guard: boolean;
+            no_new_privs: boolean;
+            /** @description Praxi does not yet provide a full restricted-token/namespace sandbox. */
+            os_sandbox: boolean;
+            privilege_split: boolean;
         };
         /** @description `GET /v1/events/latest`. */
         LatestCursor: {
@@ -2065,6 +2116,25 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApprovalDto"][];
+                };
+            };
+        };
+    };
+    approval_count: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalCount"];
                 };
             };
         };
@@ -3028,6 +3098,25 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Health"];
+                };
+            };
+        };
+    };
+    isolation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IsolationStatus"];
                 };
             };
         };

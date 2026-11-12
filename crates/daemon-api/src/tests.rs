@@ -79,6 +79,10 @@ fn setup() -> T {
 
 /// `setup` after `prepare` ran on the (still empty) data directory.
 fn setup_with(prepare: impl FnOnce(&std::path::Path)) -> T {
+    setup_with_config(prepare, test_config())
+}
+
+fn setup_with_config(prepare: impl FnOnce(&std::path::Path), cfg: DaemonConfig) -> T {
     let dir = tempfile::tempdir().unwrap();
     prepare(dir.path());
     let storage = Arc::new(Storage::open(dir.path()).unwrap());
@@ -91,7 +95,7 @@ fn setup_with(prepare: impl FnOnce(&std::path::Path)) -> T {
         Providers::single(Arc::new(FakeProvider)),
         LoopConfig::default(),
     );
-    let state = AppState::new(agent.clone(), storage, test_config()).unwrap();
+    let state = AppState::new(agent.clone(), storage, cfg).unwrap();
     state.set_detector(Arc::new(cli_provider::Detector::with_env(
         cli_provider::PathEnv::for_test(dir.path().join("sealed-cli-path")),
     )));
@@ -2481,7 +2485,9 @@ async fn latched_pause_survives_a_daemon_restart() {
 
 #[tokio::test]
 async fn peer_control_state_changes_are_audited_with_the_device_as_actor() {
-    let t = setup();
+    let mut cfg = test_config();
+    cfg.peer_managers.insert("paired-key".into());
+    let t = setup_with_config(|_| {}, cfg);
     for (method, path, body) in [
         (
             Method::PUT,
@@ -2500,7 +2506,7 @@ async fn peer_control_state_changes_are_audited_with_the_device_as_actor() {
             .unwrap();
         req.extensions_mut().insert(crate::PeerIdentity {
             key: "paired-key".into(),
-            role: crate::PeerRole::Phone,
+            role: crate::PeerRole::Desktop,
         });
         req.extensions_mut()
             .insert(crate::peer::PeerName("Alice".into()));
@@ -2514,7 +2520,7 @@ async fn peer_control_state_changes_are_audited_with_the_device_as_actor() {
     let audit = t.state.storage().list_audit(user.id).unwrap();
     let n = audit
         .iter()
-        .filter(|e| format!("{e:?}").contains("phone:Alice"))
+        .filter(|e| format!("{e:?}").contains("desktop:Alice"))
         .count();
     assert_eq!(n, 4, "requested+completed for both calls: {audit:?}");
 }
@@ -2550,7 +2556,9 @@ async fn providers_lists_secret_free_cli_records_without_probing() {
 
 #[tokio::test]
 async fn peer_heartbeats_only_audit_mode_changes_and_explicit_release() {
-    let t = setup();
+    let mut cfg = test_config();
+    cfg.peer_managers.insert("heartbeat-peer".into());
+    let t = setup_with_config(|_| {}, cfg);
     for (body, expected_rows) in [
         (json!({"mode":"paused"}), 2),
         (json!({"mode":"paused"}), 2),
@@ -2566,7 +2574,7 @@ async fn peer_heartbeats_only_audit_mode_changes_and_explicit_release() {
             .unwrap();
         req.extensions_mut().insert(crate::PeerIdentity {
             key: "heartbeat-peer".into(),
-            role: crate::PeerRole::Phone,
+            role: crate::PeerRole::Desktop,
         });
         let response = crate::peer_router(t.state.clone())
             .oneshot(req)

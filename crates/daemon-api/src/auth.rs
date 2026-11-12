@@ -21,7 +21,45 @@ pub(crate) enum Privilege {
     Management,
 }
 
-fn privilege(req: &Request) -> Option<Privilege> {
+/// Peer scope is mandatory in each route declaration. `HostManagement` is
+/// opt-in for a specifically authorized paired Desktop key, never for phones.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PeerScope {
+    Deny,
+    Allow,
+    HostManagement,
+}
+
+/// Ingress-created authority. Never inferred from request bodies or headers
+/// claiming to be a peer. This also scopes live and replayed SSE events.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Principal {
+    LocalCli,
+    LocalManagement,
+    Peer { host_management: bool },
+}
+
+impl Principal {
+    pub(crate) fn is_local_management(self) -> bool {
+        self == Self::LocalManagement
+    }
+    pub(crate) fn may_manage_host(self) -> bool {
+        matches!(
+            self,
+            Self::LocalManagement
+                | Self::Peer {
+                    host_management: true
+                }
+        )
+    }
+    pub(crate) fn may_receive_decisions(self) -> bool {
+        self != Self::LocalCli
+    }
+}
+
+pub(crate) type RouteRule = (&'static str, &'static str, Privilege, PeerScope, PeerScope);
+
+pub(crate) fn route_rule(req: &Request) -> Option<&'static RouteRule> {
     let path = req.extensions().get::<MatchedPath>()?.as_str();
     let method = if req.method() == Method::HEAD {
         "GET"
@@ -30,7 +68,7 @@ fn privilege(req: &Request) -> Option<Privilege> {
     };
     crate::ROUTE_PRIVILEGES
         .iter()
-        .find_map(|(p, m, level)| (*p == path && *m == method).then_some(*level))
+        .find(|(p, m, _, _, _)| *p == path && *m == method)
 }
 
 /// Random memory-only principal for this launch. Never persist it or pass it
@@ -348,7 +386,7 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
 
 /// Request guard, outermost layer: Host check, Origin check, CORS preflight,
 /// then bearer auth (except `GET /v1/health`).
-pub(crate) async fn guard(State(state): State<AppState>, req: Request, next: Next) -> Response {
+pub(crate) async fn guard(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     // DNS-rebinding protection: only loopback host names.
     let host_ok = req
         .headers()
@@ -372,7 +410,7 @@ pub(crate) async fn guard(State(state): State<AppState>, req: Request, next: Nex
     }
     // `GET /v1/health`, and the webhooks, which carry an HMAC of the body
     // instead of the bearer token (the route verifies it).
-    let required = privilege(&req);
+    let required = route_rule(&req).map(|rule| rule.2);
     let public = required == Some(Privilege::Public);
     if !public {
         let presented = match bearer(req.headers()) {
@@ -401,6 +439,11 @@ pub(crate) async fn guard(State(state): State<AppState>, req: Request, next: Nex
                 "desktop-only operation: the api-token credential has no management, approval or control authority; use the desktop app (stop a manually started daemon and let the desktop start it), or an authorized paired device",
             ).into_response(), origin, false);
         }
+        req.extensions_mut().insert(if management {
+            Principal::LocalManagement
+        } else {
+            Principal::LocalCli
+        });
     }
     with_cors(next.run(req).await, origin, false)
 }

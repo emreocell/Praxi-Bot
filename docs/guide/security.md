@@ -150,3 +150,23 @@ is added to that same list. This includes canonical Windows trailing-dot/space
 and alternate-stream names. Normal project files outside the daemon data
 directory retain their usual behavior. These checks do not restrict arbitrary
 shell programs or defend against hard-link aliases created outside the tools.
+
+## Paired-peer authority and event visibility
+
+Pairing alone no longer grants host-configuration management. Every route has
+explicit local, Phone and Desktop scopes. Phone cannot mutate host configuration;
+a paired Desktop needs an explicit operator-authorized key to manage it. Nodes,
+host-role API clients and unclassified routes/methods are denied. Normal paired
+users can still chat and make one-time approval/question decisions; persistent
+grants require host-management authority.
+
+Overlay proceed/refuse is local-management-only even for an authorized remote
+manager. Only local-management SSE streams receive `control_requested` and count
+as the connected local overlay. Low-privilege streams omit approval/question
+notifications and decisions in both replay and live delivery. `bot status` uses
+a count-only endpoint rather than reading approval IDs or arguments.
+
+The desktop UI streams events with fetch and Authorization/Last-Event-ID headers,
+not native EventSource. It never puts the management secret in a URL. Only the
+legacy low-privilege events query-token exception remains; it receives the same
+filtered stream. Other routes do not authenticate query tokens.

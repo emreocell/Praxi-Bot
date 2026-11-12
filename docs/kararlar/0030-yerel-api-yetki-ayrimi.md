@@ -27,7 +27,7 @@ Saldırgan model çıktısını ve onaylanan shell komutunu seçebilir; daemon'u
 | Masaüstü UI | Her sidecar açılışında rastgele 256 bit, yalnız bellek ve anonim stdin borusu | Yönetim, onay, kontrol |
 | Terminalde kullanıcının çalıştırdığı CLI | Kalıcı `api-token` | Durum/liste/sohbet; OS aynı kullanıcıyı bot çocuğundan ayıramaz |
 | Bot shell/MCP/CLI engine çocuğu | Ortamı temizlenmiş süreç; disk token'ını okuyabilir | En çok CLI yetkisi; token dosyasını okumayı engellediğimiz iddia edilmez |
-| Eşleşmiş peer | iroh taşımasının doğruladığı anahtar/rol | Mevcut peer rol kontrolleri; yerel HTTP başlığı peer olamaz |
+| Eşleşmiş peer | iroh taşımasının doğruladığı anahtar/rol | Her route için Phone/Desktop kapsamı; host yönetimi varsayılan kapalı; yerel HTTP başlığı peer olamaz |
 | Telegram | Daemon içindeki bağlayıcı ve kendi eşleşmiş Telegram kullanıcısı | Mevcut kanal kararı; disk token'ına yönetim yetkisi verilmez |
 
 ### OS gerçekte neyi engeller?
@@ -77,8 +77,9 @@ için çözüm değildir. Ayrı UID veya user/mount namespace + sandbox gerekir.
 Önce (1), sonra ölçülüp açık sınırlara sahip (2). (3) bu değişikliğin dışında.
 Kalıcı bearer **yönetim kimliği değildir**. Yanlış/eksik yüksek kimlik
 yetkiyi artırmaz. Bilinmeyen route/metot varsayılan olarak reddedilir.
-Route kayıtları aynı yerde açık yetki sınıfı taşır; OpenAPI kapsam testi yeni
-bir yolun sınıflandırılmadan eklenmesini yakalar. HEAD, GET sınıfını izler.
+Route kayıtları aynı yerde yerel seviye + Phone + Desktop kapsamını zorunlu
+olarak taşır. Yeni metot üç kapsam olmadan derlenmez; kayıt/OpenAPI testi
+yeni yolları ve peer scope metadata'sını da denetler. HEAD, GET sınıfını izler.
 
 ### Yol sınıfları
 
@@ -88,7 +89,8 @@ bir yolun sınıflandırılmadan eklenmesini yakalar. HEAD, GET sınıfını izl
 | CLI | OpenAPI; bot/grant/chat/message/run/usage/policy/provider/schedule/channel/MCP katalog ve araç listelerinin GET'leri; event akışı/cursor/status; chat oluşturma ve mesaj gönderme; run cancel/resume |
 | Yönetim | Bot/grant mutasyonları; approval ve question kararları; run remember; politika yazma; provider detect/reload; tüm control ve gelecekteki view yolları; schedule oluştur/değiştir/sil/run-now; MCP oluştur/değiştir/sil/reconnect; email yolları; secret yazma; Telegram pair-code; gelecekteki pairing/devices/host yönetimi |
 
-Onay listesi salt okunur CLI durum komutuna açıktır; karar verme yetkisi vermez. Email hesap listeleme kişisel
+Onay listesi düşük CLI kimliğine kapalıdır. `GET /v1/approvals/count` yalnız
+bekleyen sayısını verir; `bot status` bunu kullanır. Email hesap listeleme kişisel
 sunucu/hesap yapılandırması içerdiği için yönetim sınıfındadır. Sohbet
 başlatmak araç onaylarını aşmaz; mevcut permission-engine uygulanır. CLI
 kimliği özel sohbetleri okuyabilir, koşu başlatabilir ve durdurabilir: bu
@@ -107,8 +109,8 @@ Eski kurulumun veri dosyaları ve CLI token'ı korunur; masaüstünün başlatt�
 yeni daemon otomatik yeni UI kimliği alır. Kullanıcıdan yeniden eşleşme
 istenmez. Masaüstünün başlatmadığı zaten çalışan daemon'a yalnız düşük
 yetkiyle bağlanılabilir; yönetim için onu kapatıp masaüstünden başlatma
-mesajı gerekir. Başka PID zorla öldürülmez. Headless host'ta eşleşmiş peer
-yolu kullanılmalıdır. `bot approve`, bot/schedule/MCP yönetimi gibi HTTP
+mesajı gerekir. Başka PID zorla öldürülmez. Headless host'ta açıkça yetkilendirilmiş paired Desktop
+yolu kullanılmalıdır (operatör tarafından verilen anahtar allowlist'i). `bot approve`, bot/schedule/MCP yönetimi gibi HTTP
 komutları yerelde desktop-only olur; 403 açık geçiş mesajı verir. Diskte
 doğrudan ayar değiştiren CLI komutları OS kullanıcısının gücünü taşımaya
 devam eder; OS sandbox olmadan bot çocuğunun bunları çağırması önlenemez.
@@ -214,3 +216,35 @@ varsa sınırı belirten warn üretilir.
 Native handle bayrakları ve process DACL API'leri tek küçük `process-guard`
 Windows modülünde toplanır. Bootstrap inheritance testi aynı içerikle oraya
 taşınır; başka crate'te yeni unsafe kod tutulmaz.
+
+## Kart ekleri: peer kapsamları ve karar olayları
+
+39a4683 yalnız yerel bearer seviyelerini ayırıyordu; eski `peer_router` geniş
+rol iznini daraltmıyordu. Bu boşluk kapatılır: her HTTP metodu için aynı
+registry, Phone ve Desktop kapsamını ayrıca zorunlu tutar. Bilinmeyen yol,
+bilinmeyen metot, Node ve Host API rolü her zaman deny olur. Host yapılandırma
+mutasyonları (provider reload/CLI enable, policy, bot/grant, MCP, email, schedule,
+secret ve pairing) Phone için deny; Desktop için yalnız operatörün açıkça
+allowlist'e koyduğu **eşleşmiş** anahtar ile `HostManagement` olur. Rol tek
+başına yetmez; peer'in bildirdiği capabilities veya HTTP başlığı bu hakkı vermez.
+Böylece normal bir paired Desktop'ın varsayılan yetkisi de host yönetimi değildir.
+
+Phone/Desktop sohbet, durum ve tek seferlik onay/question akışını kendi taşıma
+kimliğiyle sürdürebilir. Kalıcı `always`/`always_category` grant oluşturmak ayrıca
+host yönetimi ister. `POST /v1/control/{request_id}` ise allowlist'teki remote
+manager'a bile kapalıdır: yerel overlay proceed/refuse yalnız LocalManagement
+aktörünündür; handler içinde de ikinci kontrol bulunur.
+
+SSE'de `control_requested` yalnız LocalManagement'a gider. Approval-needed,
+approved/denied ve question olayları düşük CLI kimliğine gitmez; paired karar
+kimlikleri kendi izinli onay akışı için bunları alır. Filtre aynı noktada hem
+canlı yayın hem global/run replay için uygulanır; yeni Event varyantı eklenince
+exhaustive match görünürlük kararı verilmeden derlenmez. Düşük veya peer global
+akışı yerel overlay uygulaması bağlıymış gibi subscriber kaydı oluşturamaz.
+
+**UI teknik ayrıntısı:** Yerleşik native `EventSource` başlık ekleyemez, fakat
+Praxi UI bu API'yi kullanmıyor: `subscribeEvents` fetch + ReadableStream ile
+Authorization ve Last-Event-ID başlıklarını her bağlantıda gönderir. UI yüksek
+sırrı URL'ye koymaz. Geriye uyum için yalnız events yolundaki düşük disk-token
+query istisnası kalır; bu akış filtrelidir ve yüksek token query'de reddedilir.
+Diğer yollarda query token kimlik doğrulaması değildir.

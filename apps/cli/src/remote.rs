@@ -22,8 +22,8 @@ fn print_json(out: &mut dyn Write, v: &Value) -> Result<()> {
 /// Unreachable daemon (exit 3) or bad token (exit 4).
 pub async fn status(c: &Client, json_out: bool, out: &mut dyn Write) -> Result<()> {
     let health = c.health().await?;
-    let pending = c.request(Method::GET, "/v1/approvals", None).await?;
-    let pending = pending.as_array().map_or(0, Vec::len);
+    let pending = c.request(Method::GET, "/v1/approvals/count", None).await?;
+    let pending = pending["pending"].as_u64().unwrap_or(0);
     if json_out {
         return print_json(
             out,

@@ -8,7 +8,7 @@ use agent_core::{
 };
 use axum::extract::{FromRequest, Path, Query, Request, State};
 use axum::http::StatusCode;
-use axum::{Json, extract::rejection::JsonRejection};
+use axum::{Extension, Json, extract::rejection::JsonRejection};
 use permission_engine::{Level, Policy, Rule};
 use protocol::{BotId, ChatId, Event, PermissionCategory, RunId, TaskId, ToolCallId};
 use provider_catalog::Usage;
@@ -537,6 +537,19 @@ pub(crate) async fn list_approvals(
     Ok(Json(out))
 }
 
+/// Count pending approvals without disclosing decision IDs or payloads.
+#[utoipa::path(get, path = "/v1/approvals/count", tag = "approvals", security(("bearer" = [])),
+    responses((status = 200, body = crate::dto::ApprovalCount)))]
+pub(crate) async fn approval_count(
+    State(s): State<AppState>,
+) -> Result<Json<crate::dto::ApprovalCount>, ApiError> {
+    let pending = list_approvals(State(s), Query(ApprovalsQuery { run_id: None }))
+        .await?
+        .0
+        .len() as u64;
+    Ok(Json(crate::dto::ApprovalCount { pending }))
+}
+
 /// Approve or deny a pending tool call.
 #[utoipa::path(post, path = "/v1/approvals/{call_id}", tag = "approvals",
     security(("bearer" = [])),
@@ -545,9 +558,18 @@ pub(crate) async fn list_approvals(
     responses((status = 200, body = DecisionResponse), (status = 404, body = ErrorBody)))]
 pub(crate) async fn decide_approval(
     State(s): State<AppState>,
+    Extension(principal): Extension<crate::auth::Principal>,
     Path(call): Path<String>,
     ApiJson(input): ApiJson<DecideApproval>,
 ) -> Result<Json<DecisionResponse>, ApiError> {
+    if matches!(input.decision, Decision::Approve)
+        && matches!(input.scope, Scope::Always | Scope::AlwaysCategory)
+        && !principal.may_manage_host()
+    {
+        return Err(ApiError::forbidden(
+            "persistent grants require host management authority",
+        ));
+    }
     let call_uuid = id(&call)?;
     let call_id = ToolCallId(call_uuid);
     match input.decision {
@@ -803,9 +825,15 @@ pub(crate) async fn put_control_state(
               (status = 404, body = ErrorBody, description = "unknown, answered or timed-out request")))]
 pub(crate) async fn decide_control(
     State(s): State<AppState>,
+    Extension(principal): Extension<crate::auth::Principal>,
     Path(rid): Path<String>,
     ApiJson(input): ApiJson<ControlDecisionInput>,
 ) -> Result<Json<ControlDecisionResponse>, ApiError> {
+    if !principal.is_local_management() {
+        return Err(ApiError::forbidden(
+            "overlay decisions require the local management principal",
+        ));
+    }
     let request_id = id(&rid)?;
     if s.hub().decide(request_id, input.decision, input.reason) {
         Ok(Json(ControlDecisionResponse {

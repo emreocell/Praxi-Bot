@@ -1,5 +1,105 @@
 use super::*;
 
+async fn peer_call(
+    t: &T,
+    role: crate::PeerRole,
+    method: Method,
+    path: &str,
+    body: Value,
+) -> StatusCode {
+    let mut request = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    request.extensions_mut().insert(crate::PeerIdentity {
+        key: "unprivileged-peer".into(),
+        role,
+    });
+    crate::peer_router(t.state.clone())
+        .oneshot(request)
+        .await
+        .unwrap()
+        .status()
+}
+
+#[tokio::test]
+async fn peers_cannot_manage_host_configuration_or_decide_local_overlays_by_default() {
+    let t = setup();
+    for role in [crate::PeerRole::Phone, crate::PeerRole::Desktop] {
+        for (method, path) in [
+            (Method::POST, "/v1/providers/reload"),
+            (Method::POST, "/v1/providers/cli/enable"),
+            (Method::PUT, "/v1/policy"),
+            (Method::POST, "/v1/mcp/servers"),
+            (Method::POST, "/v1/email/accounts"),
+            (Method::POST, "/v1/bots"),
+            (Method::POST, "/v1/schedules"),
+            (
+                Method::POST,
+                "/v1/control/00000000-0000-0000-0000-000000000000",
+            ),
+        ] {
+            assert_eq!(
+                peer_call(&t, role, method, path, json!({})).await,
+                StatusCode::FORBIDDEN,
+                "{role:?} {path}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn low_privilege_sse_omits_approval_events_on_replay() {
+    let t = setup();
+    let (_, chat) = make_chat(&t).await;
+    let run = send_msg(&t, &chat, "call:danger_run {}", "queue").await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (call_id, _) = pending_call(&t).await;
+    assert_eq!(
+        call(
+            &t,
+            Method::POST,
+            &format!("/v1/approvals/{call_id}"),
+            Some(json!({"decision":"approve","scope":"once"}))
+        )
+        .await
+        .status,
+        StatusCode::OK
+    );
+    wait_state(&t, &run, "succeeded").await;
+    let response = send(
+        &t.app,
+        Method::GET,
+        &format!("/v1/events?run_id={run}"),
+        None,
+        &[("authorization", &format!("Bearer {LOW_TOKEN}"))],
+    )
+    .await;
+    let replay = frames(&response.body);
+    assert!(replay.iter().any(|event| event.1 == "run_finished"));
+    for name in [
+        "approval_needed",
+        "tool_call_approved",
+        "tool_call_denied",
+        "control_requested",
+    ] {
+        assert!(
+            !replay.iter().any(|event| event.1 == name),
+            "low credential received {name}"
+        );
+    }
+    assert!(
+        events(&t, &format!("?run_id={run}"), None)
+            .await
+            .iter()
+            .any(|event| event.1 == "approval_needed")
+    );
+}
+
 #[tokio::test]
 async fn isolation_status_reports_observations_without_claiming_a_sandbox() {
     let t = setup();
@@ -44,7 +144,7 @@ fn route_registry_covers_openapi_exactly() {
     described.insert(("/v1/openapi.json".to_owned(), "GET".to_owned()));
     let registered: BTreeSet<_> = crate::ROUTE_PRIVILEGES
         .iter()
-        .map(|(path, method, _)| (path.replace("{*name}", "{name}"), (*method).to_owned()))
+        .map(|(path, method, _, _, _)| (path.replace("{*name}", "{name}"), (*method).to_owned()))
         .collect();
     assert_eq!(
         registered.len(),
@@ -60,7 +160,7 @@ fn route_registry_covers_openapi_exactly() {
 #[tokio::test]
 async fn every_management_method_rejects_the_disk_credential() {
     let t = setup();
-    for (path, method, level) in crate::ROUTE_PRIVILEGES {
+    for (path, method, level, _, _) in crate::ROUTE_PRIVILEGES {
         if *level != crate::auth::Privilege::Management {
             continue;
         }
@@ -232,4 +332,171 @@ async fn shell_stolen_disk_token_cannot_manage_the_daemon() {
     .await;
     assert_eq!(approved.status, StatusCode::OK);
     wait_state(&t, &run, "succeeded").await;
+}
+
+#[tokio::test]
+async fn every_registry_peer_scope_is_enforced_and_unknown_routes_fail_closed() {
+    let t = setup();
+    for (path, method, _, phone, desktop) in crate::ROUTE_PRIVILEGES {
+        let path = path
+            .replace("{id}", "00000000-0000-0000-0000-000000000000")
+            .replace("{call_id}", "x")
+            .replace("{request_id}", "x")
+            .replace("{*name}", "x")
+            .replace("{name}", "x");
+        for (role, scope) in [
+            (crate::PeerRole::Phone, phone),
+            (crate::PeerRole::Desktop, desktop),
+        ] {
+            if *scope != crate::auth::PeerScope::Allow {
+                assert_eq!(
+                    peer_call(&t, role, method.parse().unwrap(), &path, json!({})).await,
+                    StatusCode::FORBIDDEN,
+                    "{role:?} {method} {path}"
+                );
+            }
+        }
+        for role in [crate::PeerRole::Node, crate::PeerRole::Host] {
+            assert_eq!(
+                peer_call(&t, role, method.parse().unwrap(), &path, json!({})).await,
+                StatusCode::FORBIDDEN
+            );
+        }
+    }
+    assert_eq!(
+        peer_call(
+            &t,
+            crate::PeerRole::Desktop,
+            Method::POST,
+            "/v1/new-unclassified",
+            json!({})
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    let doc: Value = serde_json::from_str(&crate::openapi_json()).unwrap();
+    for (path, method, _, phone, desktop) in crate::ROUTE_PRIVILEGES {
+        if *path == "/v1/openapi.json" {
+            continue;
+        }
+        let path = path.replace("{*name}", "{name}");
+        assert_eq!(
+            doc["paths"][&path][method.to_ascii_lowercase()]["x-praxi-peer-scopes"],
+            json!({"phone":format!("{phone:?}"),"desktop":format!("{desktop:?}")})
+        );
+    }
+}
+
+#[tokio::test]
+async fn explicitly_authorized_desktop_can_manage_but_never_decide_local_overlays() {
+    let mut cfg = test_config();
+    cfg.peer_managers.insert("unprivileged-peer".into());
+    let t = setup_with_config(|_| {}, cfg);
+    let bot = json!({"profile_toml":PROFILE});
+    assert_eq!(
+        peer_call(
+            &t,
+            crate::PeerRole::Phone,
+            Method::POST,
+            "/v1/bots",
+            bot.clone()
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        peer_call(&t, crate::PeerRole::Desktop, Method::POST, "/v1/bots", bot).await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        peer_call(
+            &t,
+            crate::PeerRole::Desktop,
+            Method::POST,
+            "/v1/control/00000000-0000-0000-0000-000000000000",
+            json!({"decision":"proceed"})
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn paired_decisions_work_but_persistent_grants_require_host_management() {
+    let t = setup();
+    let (_, chat) = make_chat(&t).await;
+    send_msg(&t, &chat, "call:danger_run {}", "queue").await;
+    let (call_id, run) = pending_call(&t).await;
+    assert_eq!(
+        peer_call(
+            &t,
+            crate::PeerRole::Phone,
+            Method::POST,
+            &format!("/v1/approvals/{call_id}"),
+            json!({"decision":"approve","scope":"always"})
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(pending_call(&t).await.0, call_id);
+    assert_eq!(
+        send(
+            &t.app,
+            Method::GET,
+            "/v1/approvals",
+            None,
+            &[("authorization", &format!("Bearer {LOW_TOKEN}"))]
+        )
+        .await
+        .status,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        send(
+            &t.app,
+            Method::GET,
+            "/v1/approvals/count",
+            None,
+            &[("authorization", &format!("Bearer {LOW_TOKEN}"))]
+        )
+        .await
+        .json()["pending"],
+        1
+    );
+    assert_eq!(
+        peer_call(
+            &t,
+            crate::PeerRole::Phone,
+            Method::POST,
+            &format!("/v1/approvals/{call_id}"),
+            json!({"decision":"approve","scope":"once"})
+        )
+        .await,
+        StatusCode::OK
+    );
+    wait_state(&t, &run, "succeeded").await;
+}
+
+#[tokio::test]
+async fn only_local_management_global_streams_attach_the_overlay_bridge() {
+    let t = setup();
+    let request = Request::builder()
+        .uri("/v1/events")
+        .header("host", "localhost")
+        .header("authorization", format!("Bearer {LOW_TOKEN}"))
+        .body(Body::empty())
+        .unwrap();
+    let low = t.app.clone().oneshot(request).await.unwrap();
+    assert!(!t.state.hub().app_connected());
+    drop(low);
+    let request = Request::builder()
+        .uri("/v1/events")
+        .header("host", "localhost")
+        .header("authorization", format!("Bearer {TOKEN}"))
+        .body(Body::empty())
+        .unwrap();
+    let management = t.app.clone().oneshot(request).await.unwrap();
+    assert!(t.state.hub().app_connected());
+    drop(management);
+    assert!(!t.state.hub().app_connected());
 }
