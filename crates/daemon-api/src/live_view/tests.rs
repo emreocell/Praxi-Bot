@@ -3651,6 +3651,12 @@ async fn an_acquiring_takeover_that_nobody_activates_expires() {
             false,
         )
         .unwrap();
+    // Not expired early: an acquisition legitimately takes a few seconds.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert_eq!(
+        t.state.hub().takeover().unwrap().info.state,
+        ViewState::Acquiring
+    );
     // Keep the session alive (a heartbeat every 10 s, as a live client would).
     for _ in 0..3 {
         tokio::time::sleep(Duration::from_secs(10)).await;
