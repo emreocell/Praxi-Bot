@@ -83,6 +83,8 @@ pub struct ControlHub {
     changed: Notify,
     refresh: Mutex<Option<RefreshHook>>,
     action_seq: std::sync::atomic::AtomicU64,
+    /// Takeover state changes for the global event stream (not replayed).
+    events: tokio::sync::broadcast::Sender<crate::dto::ControlStateChanged>,
 }
 
 /// Counts an open global event stream while it lives.
@@ -132,7 +134,16 @@ impl ControlHub {
             changed: Notify::new(),
             refresh: Mutex::new(None),
             action_seq: std::sync::atomic::AtomicU64::new(0),
+            events: tokio::sync::broadcast::channel(64).0,
         }
+    }
+
+    /// Takeover state notifications (acquired, active, interrupted, released).
+    #[must_use]
+    pub fn subscribe_events(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<crate::dto::ControlStateChanged> {
+        self.events.subscribe()
     }
 
     /// A hub whose latch is persisted in `path` (atomic write) and restored
@@ -618,12 +629,10 @@ mod tests {
         hub.put_state(ControlMode::HumanDriving);
         let again = ControlHub::with_latch_file(fast(), f.clone());
         assert_eq!(again.latched(), Some(ControlMode::HumanDriving));
-        assert!(
-            again.try_release().is_err(),
-            "restart requires explicit ownerless recovery"
-        );
         assert!(f.exists());
-        assert_eq!(hub.release(), Some(ControlMode::HumanDriving));
+        // A latch without a takeover owner is the user's own pause: the local
+        // user can release it after a restart (no view session needed).
+        assert_eq!(again.try_release(), Ok(Some(ControlMode::HumanDriving)));
         assert!(!f.exists());
         assert_eq!(
             ControlHub::with_latch_file(fast(), f.clone()).latched(),

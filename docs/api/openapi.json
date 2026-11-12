@@ -750,6 +750,88 @@
         ]
       }
     },
+    "/v1/control/override": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "`POST /v1/control/override`: the local user's stop. Works against a peer's\ntakeover; the bot stays paused until `release` or `recover`.",
+        "operationId": "local_override",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlStateDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/control/recover": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "`POST /v1/control/recover`: the local user clears a takeover latch (also one\nrestored after a restart) without a registered target or view session. The\nbot resumes with a fresh observation.",
+        "operationId": "local_recover",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlStateDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/control/release": {
       "post": {
         "tags": [
@@ -981,7 +1063,7 @@
           "events"
         ],
         "summary": "Documentation stub for the SSE route (the handler lives in `sse.rs`).",
-        "description": "Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the\nSSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local\n`seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without\nit the stream covers all runs: the SSE `id` is a daemon-wide, strictly\nincreasing `gseq` (persisted) and `Last-Event-ID: <gseq>` replays every\nmissed event of every run, in order, before going live.  Browsers cannot set\nheaders on `EventSource`, so this route (and only this one) also accepts the\nAPI token as the `token` query parameter (Host / Origin checks still apply;\nthe token is compared in constant time; beware that URLs may be logged).\n\nThe daemon-wide stream (no `run_id`) also carries `schedule_changed` events\n(`dto::ScheduleChanged`: `{\"type\":\"schedule_changed\",\"schedule_id\",\"kind\"}`,\nkind `created` / `updated` / `toggled` / `deleted`) when a schedule is changed\nthrough the API.  They have no SSE `id`, are not replayed and are not\nenvelopes: treat them as a hint to refetch `/v1/schedules`.\n\nA replay gap is explicit: `event: gap` has an `id` equal to `to_gseq` and\ndata `{from_gseq, to_gseq, run_id, reason}`; reason is `log_line_missing` or\n`log_unreadable`. It is audited before the cursor passes the missing row.\n`/v1/events/status.sse_gaps_total` (authenticated) counts these notifications since daemon startup.\nAfter three consecutive replay failures (or live-buffer overflow),\n`event: error` carries `{code: \"replay_unavailable\", last_event_id}` and the\nstream closes. This error has no `id`; reconnect with the last received ID.\nRetry delays start at 250 ms and double up to 5 s. Live buffering is limited\nto 1000 events and 4 MiB per subscriber; replay chunks hold at most 2 MiB of serialized events (a single larger event closes the stream with `replay_unavailable`), and at most `max_sse_subscribers` streams (default 16) may be open: further requests get `503`. The desktop currently ignores unknown\nevent names; card 144 can surface gap/error notifications without changing\nthe ordering or cursor contract.\n\nIt likewise carries `mcp_server_changed` events (`mcp::McpServerChanged`:\n`{\"type\":\"mcp_server_changed\",\"name\",\"status\"}`) when an MCP server is\nadded, updated, removed or changes status (connecting / connected / error /\nquarantined ...); same rules: a hint to refetch `/v1/mcp/servers`.",
+        "description": "Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the\nSSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local\n`seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without\nit the stream covers all runs: the SSE `id` is a daemon-wide, strictly\nincreasing `gseq` (persisted) and `Last-Event-ID: <gseq>` replays every\nmissed event of every run, in order, before going live.  Browsers cannot set\nheaders on `EventSource`, so this route (and only this one) also accepts the\nAPI token as the `token` query parameter (Host / Origin checks still apply;\nthe token is compared in constant time; beware that URLs may be logged).\n\nThe daemon-wide stream (no `run_id`) also carries `schedule_changed` events\n(`dto::ScheduleChanged`: `{\"type\":\"schedule_changed\",\"schedule_id\",\"kind\"}`,\nkind `created` / `updated` / `toggled` / `deleted`) when a schedule is changed\nthrough the API.  They have no SSE `id`, are not replayed and are not\nenvelopes: treat them as a hint to refetch `/v1/schedules`.\n\nA replay gap is explicit: `event: gap` has an `id` equal to `to_gseq` and\ndata `{from_gseq, to_gseq, run_id, reason}`; reason is `log_line_missing` or\n`log_unreadable`. It is audited before the cursor passes the missing row.\n`/v1/events/status.sse_gaps_total` (authenticated) counts these notifications since daemon startup.\nAfter three consecutive replay failures (or live-buffer overflow),\n`event: error` carries `{code: \"replay_unavailable\", last_event_id}` and the\nstream closes. This error has no `id`; reconnect with the last received ID.\nRetry delays start at 250 ms and double up to 5 s. Live buffering is limited\nto 1000 events and 4 MiB per subscriber; replay chunks hold at most 2 MiB of serialized events (a single larger event closes the stream with `replay_unavailable`), and at most `max_sse_subscribers` streams (default 16) may be open: further requests get `503`. The desktop currently ignores unknown\nevent names; card 144 can surface gap/error notifications without changing\nthe ordering or cursor contract.\n\nIt likewise carries `mcp_server_changed` events (`mcp::McpServerChanged`:\n`{\"type\":\"mcp_server_changed\",\"name\",\"status\"}`) when an MCP server is\nadded, updated, removed or changes status (connecting / connected / error /\nquarantined ...); same rules: a hint to refetch `/v1/mcp/servers`.\n\nAnd `control_state_changed` events (`dto::ControlStateChanged`:\n`{\"type\":\"control_state_changed\",\"state\",\"owner\",\"target_id\",\"reason\"}`) when\na screen takeover is acquired, becomes active, is interrupted, released or\nrecovered (no ids, epochs, pixels or text); not replayed.",
         "operationId": "events_doc",
         "parameters": [
           {
@@ -2443,6 +2525,55 @@
         ]
       }
     },
+    "/v1/view/privileges/{peer_key}": {
+      "put": {
+        "tags": [
+          "view"
+        ],
+        "summary": "`PUT /v1/view/privileges/{peer_key}`: the local user grants or revokes\n`screen:view` / `screen:input` for one paired device. A paired device has\nneither until granted; revoking interrupts its sessions and takeover.",
+        "operationId": "set_privileges",
+        "parameters": [
+          {
+            "name": "peer_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScreenPrivilegesInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/view/sessions": {
       "post": {
         "tags": [
@@ -3300,6 +3431,46 @@
           "human_driving",
           "paused"
         ]
+      },
+      "ControlStateChanged": {
+        "type": "object",
+        "description": "Data of the `control_state_changed` SSE event of the daemon-wide stream: a\nscreen takeover was acquired, became active, was interrupted, released or\nrecovered. A notification only (refetch `GET /v1/control/state`): no SSE\n`id`, not replayed, not an envelope. It names who and which target, never\ntakeover ids, epochs, pixels, text or keys.",
+        "required": [
+          "type",
+          "state",
+          "owner",
+          "target_id"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "description": "Displayable actor identity (`local-ui:...` or `peer:<key>`)."
+          },
+          "reason": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Reason",
+                "description": "Why the takeover stopped, if it was interrupted."
+              }
+            ]
+          },
+          "state": {
+            "type": "string",
+            "description": "`acquiring`, `active`, `paused`, `released` or `recovered`."
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The target the takeover addressed."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `control_state_changed`."
+          }
+        }
       },
       "ControlStateDto": {
         "type": "object",
@@ -5187,7 +5358,8 @@
           "partial_injection",
           "rate_limited",
           "restart",
-          "persistence_failed"
+          "persistence_failed",
+          "local_override"
         ]
       },
       "RecordHeader": {
@@ -5688,6 +5860,25 @@
           "always",
           "always_category"
         ]
+      },
+      "ScreenPrivilegesInput": {
+        "type": "object",
+        "description": "Body of `PUT /v1/view/privileges/{peer_key}` (local user only).",
+        "required": [
+          "view",
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "boolean",
+            "description": "May take over and drive input (`screen:input`); requires `view`."
+          },
+          "view": {
+            "type": "boolean",
+            "description": "May watch the screen (`screen:view`)."
+          }
+        },
+        "additionalProperties": false
       },
       "SendMessage": {
         "type": "object",

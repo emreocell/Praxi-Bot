@@ -120,6 +120,8 @@ struct Test {
     state: AppState,
     target: Arc<Target>,
     dir: tempfile::TempDir,
+    /// Paired test devices get view+input unless a test turns this off.
+    auto_grant: AtomicBool,
 }
 impl Test {
     fn new() -> Self {
@@ -134,7 +136,12 @@ impl Test {
         let state = AppState::new(agent, storage, crate::DaemonConfig::new(TOKEN)).unwrap();
         let target = Arc::new(Target::new());
         state.live_view().registry.register(target.clone());
-        Self { state, target, dir }
+        Self {
+            state,
+            target,
+            dir,
+            auto_grant: AtomicBool::new(true),
+        }
     }
     fn router(&self, peer: Option<&str>) -> Router {
         if peer.is_some() {
@@ -150,6 +157,16 @@ impl Test {
         path: &str,
         body: Option<Value>,
     ) -> Response {
+        if let Some(key) = peer
+            && self.auto_grant.load(Ordering::SeqCst)
+        {
+            self.state
+                .live_view()
+                .privileges
+                .lock()
+                .entry(format!("peer:{key}"))
+                .or_insert_with(ScreenPrivileges::default);
+        }
         let mut req = Request::builder()
             .method(method)
             .uri(path)
@@ -1032,4 +1049,250 @@ async fn takeover_session_binding_and_text_byte_rate_are_independent_limits() {
         .0,
         StatusCode::TOO_MANY_REQUESTS
     );
+}
+
+#[tokio::test]
+async fn paired_peer_has_no_screen_access_until_the_local_user_grants_it() {
+    let t = Test::new();
+    t.auto_grant.store(false, Ordering::SeqCst);
+    assert_eq!(
+        t.call(Some("alice"), Method::GET, "/v1/view/targets", None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    let create = json!({"target_id":t.target.info().target_id,"profile":"watch","max_width":960,"max_height":600,"codecs":["jpeg"],"client_id":Uuid::now_v7()});
+    assert_eq!(
+        t.call(
+            Some("alice"),
+            Method::POST,
+            "/v1/view/sessions",
+            Some(create.clone())
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    // The local user keeps view and input by default.
+    assert_eq!(
+        t.call(None, Method::GET, "/v1/view/targets", None).await.0,
+        StatusCode::OK
+    );
+    // A peer can never grant itself anything.
+    assert_eq!(
+        t.call(
+            Some("alice"),
+            Method::PUT,
+            "/v1/view/privileges/alice",
+            Some(json!({"view":true,"input":true}))
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        t.call(
+            None,
+            Method::PUT,
+            "/v1/view/privileges/alice",
+            Some(json!({"view":true,"input":false}))
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    let (status, _) = t
+        .call(
+            Some("alice"),
+            Method::POST,
+            "/v1/view/sessions",
+            Some(create),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    // input without view is not a valid grant
+    assert_eq!(
+        t.call(
+            None,
+            Method::PUT,
+            "/v1/view/privileges/alice",
+            Some(json!({"view":false,"input":true}))
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+}
+#[tokio::test]
+async fn local_override_stops_a_peer_takeover_and_keeps_the_bot_paused() {
+    let t = Test::new();
+    let (id, owned, _body) = t.active(Some("alice")).await;
+    let resets = t.target.sink.resets.load(Ordering::SeqCst);
+    // A peer cannot use the override.
+    assert_eq!(
+        t.call(Some("alice"), Method::POST, "/v1/control/override", None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    // The app's Pause works during a peer's takeover.
+    let (status, state) = t
+        .call(
+            None,
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode":"paused","release":false})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    let now = t.state.hub().takeover().unwrap();
+    assert_eq!(now.info.state, ViewState::Paused);
+    assert_eq!(now.info.reason, Some(Reason::LocalOverride));
+    assert_eq!(
+        t.state.hub().latched(),
+        Some(crate::dto::ControlMode::Paused)
+    );
+    assert!(t.target.sink.resets.load(Ordering::SeqCst) > resets);
+    assert!(!t.target.sink.pin.load(Ordering::SeqCst));
+    // The overridden peer can neither drive nor release.
+    assert_ne!(
+        t.call(
+            Some("alice"),
+            Method::POST,
+            &format!("/v1/view/sessions/{id}/input"),
+            Some(Test::batch(&owned, 1))
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_ne!(
+        t.release(Some("alice"), &owned, Uuid::now_v7()).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        t.state.hub().latched(),
+        Some(crate::dto::ControlMode::Paused)
+    );
+}
+#[tokio::test]
+async fn explicit_override_endpoint_stops_a_peer_takeover_too() {
+    let t = Test::new();
+    let (_id, _owned, _body) = t.active(Some("alice")).await;
+    let (status, v) = t
+        .call(None, Method::POST, "/v1/control/override", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(
+        t.state.hub().takeover().unwrap().info.reason,
+        Some(Reason::LocalOverride)
+    );
+    assert!(t.state.hub().latched().is_some());
+}
+#[tokio::test]
+async fn local_recover_clears_a_takeover_latch_without_any_registered_target() {
+    let t = Test::new();
+    let (_id, _owned, _body) = t.active(Some("alice")).await;
+    let target = t.target.info().target_id;
+    t.state.live_view().registry.remove(target);
+    assert_eq!(
+        t.call(Some("alice"), Method::POST, "/v1/control/recover", None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    assert!(t.state.hub().latched().is_some());
+    let (status, v) = t
+        .call(None, Method::POST, "/v1/control/recover", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert!(t.state.hub().latched().is_none());
+    assert!(t.state.hub().takeover().is_none());
+    // Nothing is recorded any more.
+    assert_eq!(
+        t.call(None, Method::POST, "/v1/control/recover", None)
+            .await
+            .0,
+        StatusCode::CONFLICT
+    );
+}
+#[tokio::test]
+async fn pairing_revoke_ends_sessions_and_takeover_of_that_peer_only() {
+    let t = Test::new();
+    let (id, _owned, _body) = t.active(Some("alice")).await;
+    let local = t.session(None).await;
+    let paired: std::collections::BTreeSet<String> = ["peer:bob".to_owned()].into();
+    t.state.reconcile_paired_peers(&paired).await.unwrap();
+    let now = t.state.hub().takeover().unwrap();
+    assert_eq!(now.info.state, ViewState::Paused);
+    assert_eq!(now.info.reason, Some(Reason::Revoked));
+    assert!(
+        t.state.hub().latched().is_some(),
+        "revoke never resumes the bot"
+    );
+    assert!(!t.target.sink.pin.load(Ordering::SeqCst));
+    assert!(!t.state.live_view().sessions.lock().contains_key(&id));
+    assert!(t.state.live_view().sessions.lock().contains_key(&local));
+    // The revoked key has no privileges even if it somehow reconnects.
+    t.auto_grant.store(false, Ordering::SeqCst);
+    assert_eq!(
+        t.call(Some("alice"), Method::GET, "/v1/view/targets", None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+}
+#[tokio::test]
+async fn control_state_shows_who_and_what_but_gives_takeover_ids_only_to_the_owner() {
+    let t = Test::new();
+    let (_id, owned, _body) = t.active(Some("alice")).await;
+    let (_, as_owner) = t
+        .call(Some("alice"), Method::GET, "/v1/control/state", None)
+        .await;
+    assert_eq!(as_owner["takeover"]["id"], json!(owned.id));
+    assert_eq!(
+        as_owner["takeover"]["control_epoch"],
+        json!(owned.control_epoch)
+    );
+    let (_, as_local) = t.call(None, Method::GET, "/v1/control/state", None).await;
+    assert_eq!(as_local["takeover"]["owner"], json!("peer:alice"));
+    assert_eq!(as_local["takeover"]["state"], json!("active"));
+    assert_eq!(as_local["takeover"]["id"], json!(Uuid::nil()));
+    assert_eq!(as_local["takeover"]["session_id"], json!(Uuid::nil()));
+    assert_eq!(as_local["takeover"]["control_epoch"], json!(0));
+    let (_, as_other) = t
+        .call(Some("bob"), Method::GET, "/v1/control/state", None)
+        .await;
+    assert_eq!(as_other["takeover"]["control_epoch"], json!(0));
+}
+#[tokio::test]
+async fn takeover_lifecycle_is_announced_without_ids_pixels_or_text() {
+    let t = Test::new();
+    let mut events = t.state.hub().subscribe_events();
+    let (_id, owned, _body) = t.active(Some("alice")).await;
+    let mut seen = Vec::new();
+    while let Ok(e) = events.try_recv() {
+        seen.push(e);
+    }
+    let states: Vec<_> = seen.iter().map(|e| e.state.as_str()).collect();
+    assert_eq!(states, ["acquiring", "active"]);
+    let (status, _) = t.release(Some("alice"), &owned, Uuid::now_v7()).await;
+    assert_eq!(status, StatusCode::OK);
+    let released = events.try_recv().unwrap();
+    assert_eq!(released.state, "released");
+    assert_eq!(released.owner, "peer:alice");
+    assert_eq!(released.target_id, t.target.info().target_id);
+    // Interrupt and expiry announce the reason.
+    let (_id2, owned2, _b2) = t.active(Some("alice")).await;
+    while events.try_recv().is_ok() {}
+    t.state.hub().interrupt(owned2.id, Reason::Expired);
+    let paused = events.try_recv().unwrap();
+    assert_eq!(
+        (paused.state.as_str(), paused.reason.clone()),
+        ("paused", Some(Reason::Expired))
+    );
+    let json = serde_json::to_string(&paused).unwrap();
+    for forbidden in [owned2.id.to_string(), TEXT_SECRET.to_owned(), "epoch".to_owned()] {
+        assert!(!json.contains(&forbidden), "{json}");
+    }
 }

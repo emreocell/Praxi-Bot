@@ -47,6 +47,9 @@ impl Modify for Security {
         live_view::heartbeat,
         live_view::delete_session,
         live_view::takeover,
+        live_view::local_override,
+        live_view::local_recover,
+        live_view::set_privileges,
         live_view::input::input,
         live_view::stream::frames,
         routes::list_bots,
@@ -102,7 +105,7 @@ impl Modify for Security {
     ),
     components(schemas(
         ::live_view::RecordHeader, ::live_view::FrameMetadata, ::live_view::SourceRect,
-        dto::ReleaseResult, sse::SseStatus, sse::Gap, dto::Health, dto::BotDto, dto::BotInput, dto::ChatDto, dto::CreateChat,
+        dto::ReleaseResult, dto::ControlStateChanged, dto::ScreenPrivilegesInput, sse::SseStatus, sse::Gap, dto::Health, dto::BotDto, dto::BotInput, dto::ChatDto, dto::CreateChat,
         dto::MessageDto, dto::Mode, dto::SendMessage, dto::DeliveryKind, dto::SendResponse,
         dto::ApprovalDto, dto::Decision, dto::Scope, dto::DecideApproval,
         dto::DecisionResponse, dto::RunDto, dto::UsageTotals, dto::BotUsage,
@@ -162,6 +165,11 @@ pub struct ApiDoc;
 /// `{"type":"mcp_server_changed","name","status"}`) when an MCP server is
 /// added, updated, removed or changes status (connecting / connected / error /
 /// quarantined ...); same rules: a hint to refetch `/v1/mcp/servers`.
+///
+/// And `control_state_changed` events (`dto::ControlStateChanged`:
+/// `{"type":"control_state_changed","state","owner","target_id","reason"}`) when
+/// a screen takeover is acquired, becomes active, is interrupted, released or
+/// recovered (no ids, epochs, pixels or text); not replayed.
 #[utoipa::path(get, path = "/v1/events", tag = "events", security(("bearer" = [])),
     params(
         ("run_id" = Option<uuid::Uuid>, Query, description = "Follow only this run; the stream ends after run_finished"),

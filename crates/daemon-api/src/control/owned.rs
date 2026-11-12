@@ -11,6 +11,10 @@ use std::{
 };
 use uuid::Uuid;
 
+fn reason_of(t: &OwnedTakeover) -> Reason {
+    t.info.reason.clone().unwrap_or(Reason::Disconnected)
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct OwnedTakeover {
     pub info: TakeoverInfo,
@@ -57,7 +61,9 @@ pub(super) fn restore(st: &mut State, path: &Path) {
                 st.owned = disk.owned;
                 st.epoch = disk.epoch;
                 st.releases = disk.releases;
-                st.require_recovery = disk.require_recovery || st.latched.is_some();
+                // Only a latch that had a takeover owner needs explicit recovery;
+                // a plain pause is the user's own and stays releasable.
+                st.require_recovery = st.owned.is_some();
                 if let Some(t) = st.owned.as_mut() {
                     t.info.state = ViewState::Paused;
                     t.info.reason = Some(Reason::Restart);
@@ -72,7 +78,8 @@ pub(super) fn restore(st: &mut State, path: &Path) {
                     .filter(|m| super::refused_while(*m).is_some())
                     .unwrap_or(ControlMode::Paused),
             );
-            st.require_recovery = true;
+            // No owner is recorded: the local user may release it.
+            st.require_recovery = false;
         }
         Err(_) => {
             st.latched = Some(ControlMode::Paused);
@@ -200,6 +207,7 @@ impl ControlHub {
         }
         st.persistence_error = false;
         self.changed.notify_waiters();
+        self.emit_state(&owned, "acquiring", None);
         Ok(owned)
     }
     /// Wait for all admitted mutations; admission was already durably closed.
@@ -260,6 +268,11 @@ impl ControlHub {
             }
             return Err(e);
         }
+        let owned = st.owned.clone();
+        drop(st);
+        if let Some(owned) = owned {
+            self.emit_state(&owned, "active", None);
+        }
         Ok(())
     }
     /// # Errors
@@ -317,7 +330,58 @@ impl ControlHub {
                 st.persistence_error = true;
             }
             self.changed.notify_waiters();
+            if let Some(owned) = st.owned.clone() {
+                drop(st);
+                self.emit_state(&owned, "paused", Some(reason_of(&owned)));
+            }
         }
+    }
+    /// The authenticated local user's override: interrupts whatever takeover is
+    /// recorded, in any state, and keeps the bot paused. Never resumes.
+    pub fn force_interrupt(&self, reason: Reason) -> Option<OwnedTakeover> {
+        let owned = self.state.lock().owned.clone()?;
+        self.interrupt(owned.info.id, reason);
+        Some(owned)
+    }
+    /// Local recovery of a takeover latch (for example after a restart) without
+    /// any registered target: clears owner and latch, bumps the epoch so cached
+    /// observations are discarded. `None` when no takeover was recorded.
+    /// # Errors
+    /// Keeps the pause if the durable write fails.
+    pub fn clear_owned_latch(&self) -> Result<Option<OwnedTakeover>, String> {
+        let mut st = self.state.lock();
+        let Some(old) = st.owned.take() else {
+            return Ok(None);
+        };
+        let old_epoch = st.epoch;
+        st.latched = None;
+        st.require_recovery = false;
+        st.epoch = st.epoch.saturating_add(1);
+        if let Err(e) = self.persist(&st) {
+            st.owned = Some(old);
+            st.epoch = old_epoch;
+            st.latched = Some(ControlMode::Paused);
+            st.require_recovery = true;
+            st.persistence_error = true;
+            return Err(e);
+        }
+        st.persistence_error = false;
+        st.registration = None;
+        st.affected_runs.clear();
+        drop(st);
+        self.changed.notify_waiters();
+        self.emit_state(&old, "recovered", None);
+        Ok(Some(old))
+    }
+    /// Fixed-shape notification for the global event stream: who, which target,
+    /// state. No epoch, ids of the takeover, pixels or payloads.
+    fn emit_state(&self, t: &OwnedTakeover, state: &str, reason: Option<Reason>) {
+        let _ = self.events.send(crate::dto::ControlStateChanged::new(
+            state,
+            &t.actor,
+            t.info.target_id,
+            reason,
+        ));
     }
     /// # Errors
     /// Fails closed on ownership/state conflicts, timeouts, or durable write errors.
@@ -451,7 +515,11 @@ impl ControlHub {
         st.persistence_error = false;
         st.registration = None;
         st.affected_runs.clear();
+        drop(st);
         self.changed.notify_waiters();
+        if let Some(old) = &old_owned {
+            self.emit_state(old, "released", None);
+        }
         Ok(())
     }
     pub(super) async fn admit_owned_action(
@@ -646,13 +714,13 @@ mod tests {
         hub.drain(t.info.id, t.info.control_epoch).await.unwrap();
     }
     #[test]
-    fn old_format_corrupt_latch_and_restart_require_privileged_explicit_recovery() {
+    fn old_format_corrupt_latch_and_restart_stay_paused_and_takeover_needs_privileged_recovery() {
         for bytes in [b"\"human_driving\"".as_slice(), b"corrupt".as_slice()] {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("control-latch.json");
             std::fs::write(&path, bytes).unwrap();
             let hub = ControlHub::with_latch_file(super::super::ControlConfig::default(), path);
-            assert!(hub.try_release().is_err());
+            assert!(hub.latched().is_some(), "ownerless latch fails closed");
             let mut req = request();
             assert!(
                 hub.begin_takeover("alice", &req, Uuid::now_v7(), 1, true)
@@ -669,6 +737,60 @@ mod tests {
                     .is_ok()
             );
         }
+    }
+    #[test]
+    fn restored_ownerless_pause_is_releasable_without_any_view_session() {
+        for mode in [ControlMode::Paused, ControlMode::HumanDriving] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("control-latch.json");
+            ControlHub::with_latch_file(super::super::ControlConfig::default(), path.clone())
+                .put_state(mode);
+            let restarted =
+                ControlHub::with_latch_file(super::super::ControlConfig::default(), path.clone());
+            assert_eq!(restarted.latched(), Some(mode));
+            assert_eq!(restarted.try_release(), Ok(Some(mode)));
+            assert!(restarted.latched().is_none());
+            // The compatibility PUT {mode: idle, release: true} works the same way.
+            ControlHub::with_latch_file(super::super::ControlConfig::default(), path.clone())
+                .put_state(mode);
+            let again = ControlHub::with_latch_file(super::super::ControlConfig::default(), path);
+            again.try_apply_state(ControlMode::Idle, true).unwrap();
+            assert!(again.latched().is_none());
+        }
+    }
+    #[test]
+    fn restored_owned_latch_is_cleared_only_by_explicit_local_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("control-latch.json");
+        let hub = ControlHub::with_latch_file(super::super::ControlConfig::default(), path.clone());
+        let t = hub
+            .begin_takeover("peer:phone", &request(), Uuid::now_v7(), 1, false)
+            .unwrap();
+        hub.activate(t.info.id, t.info.control_epoch).unwrap();
+        let restarted = ControlHub::with_latch_file(super::super::ControlConfig::default(), path);
+        assert!(restarted.try_release().is_err());
+        assert!(restarted.try_apply_state(ControlMode::Idle, true).is_err());
+        assert!(restarted.clear_owned_latch().unwrap().is_some());
+        assert!(restarted.latched().is_none() && restarted.takeover().is_none());
+        assert!(restarted.clear_owned_latch().unwrap().is_none());
+    }
+    #[test]
+    fn local_override_interrupts_any_owner_keeps_the_pause_and_never_resumes() {
+        let hub = ControlHub::new(super::super::ControlConfig::default());
+        let t = hub
+            .begin_takeover("peer:phone", &request(), Uuid::now_v7(), 1, false)
+            .unwrap();
+        hub.activate(t.info.id, t.info.control_epoch).unwrap();
+        let before = hub.takeover().unwrap().info.control_epoch;
+        let old = hub.force_interrupt(Reason::LocalOverride).unwrap();
+        assert_eq!(old.info.id, t.info.id);
+        let now = hub.takeover().unwrap();
+        assert_eq!(now.info.state, ViewState::Paused);
+        assert_eq!(now.info.reason, Some(Reason::LocalOverride));
+        assert!(now.info.control_epoch > before, "old epoch is dead");
+        assert_eq!(hub.latched(), Some(ControlMode::Paused));
+        assert!(hub.force_interrupt(Reason::LocalOverride).is_some());
+        assert!(hub.activate(t.info.id, before).is_err());
     }
     #[test]
     fn write_failure_never_activates_or_releases_and_retries_restore_the_same_outbox() {

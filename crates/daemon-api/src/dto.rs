@@ -748,6 +748,55 @@ impl ScheduleChanged {
     }
 }
 
+/// Body of `PUT /v1/view/privileges/{peer_key}` (local user only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenPrivilegesInput {
+    /// May watch the screen (`screen:view`).
+    pub view: bool,
+    /// May take over and drive input (`screen:input`); requires `view`.
+    pub input: bool,
+}
+
+/// Data of the `control_state_changed` SSE event of the daemon-wide stream: a
+/// screen takeover was acquired, became active, was interrupted, released or
+/// recovered. A notification only (refetch `GET /v1/control/state`): no SSE
+/// `id`, not replayed, not an envelope. It names who and which target, never
+/// takeover ids, epochs, pixels, text or keys.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct ControlStateChanged {
+    /// Always `control_state_changed`.
+    #[serde(rename = "type")]
+    pub kind_tag: String,
+    /// `acquiring`, `active`, `paused`, `released` or `recovered`.
+    pub state: String,
+    /// Displayable actor identity (`local-ui:...` or `peer:<key>`).
+    pub owner: String,
+    /// The target the takeover addressed.
+    pub target_id: Uuid,
+    /// Why the takeover stopped, if it was interrupted.
+    pub reason: Option<live_view::Reason>,
+}
+
+impl ControlStateChanged {
+    /// The notification for a takeover state change.
+    #[must_use]
+    pub fn new(
+        state: &str,
+        owner: &str,
+        target_id: Uuid,
+        reason: Option<live_view::Reason>,
+    ) -> Self {
+        Self {
+            kind_tag: "control_state_changed".to_owned(),
+            state: state.to_owned(),
+            owner: owner.to_owned(),
+            target_id,
+            reason,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ReleaseResult {
     pub takeover_id: Uuid,

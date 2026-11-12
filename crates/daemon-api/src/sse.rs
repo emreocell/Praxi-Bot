@@ -129,6 +129,8 @@ struct Feed {
     sched_rx: Option<broadcast::Receiver<ScheduleChanged>>,
     /// `mcp_server_changed` notifications (global stream only).
     mcp_rx: Option<broadcast::Receiver<McpServerChanged>>,
+    /// `control_state_changed` notifications (global stream only).
+    control_rx: Option<broadcast::Receiver<crate::dto::ControlStateChanged>>,
     // ---- both ----
     storage: Arc<Storage>,
     data_dir: PathBuf,
@@ -453,7 +455,12 @@ impl Feed {
             if self.live_closed {
                 return None;
             }
-            let (rx, sched_rx, mcp_rx) = (&mut self.rx, &mut self.sched_rx, &mut self.mcp_rx);
+            let (rx, sched_rx, mcp_rx, control_rx) = (
+                &mut self.rx,
+                &mut self.sched_rx,
+                &mut self.mcp_rx,
+                &mut self.control_rx,
+            );
             let received = tokio::select! {
                 () = self.cancel.cancelled() => return None,
                 r = rx.recv() => r,
@@ -481,6 +488,19 @@ impl Feed {
                     Err(RecvError::Lagged(_)) => continue,
                     Err(RecvError::Closed) => {
                         self.mcp_rx = None;
+                        continue;
+                    }
+                },
+                c = async {
+                    match control_rx {
+                        Some(r) => r.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => match c {
+                    Ok(change) => return Some(Out::Control(change)),
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => {
+                        self.control_rx = None;
                         continue;
                     }
                 },
@@ -514,6 +534,7 @@ enum Out {
     Run(StreamItem),
     Schedule(ScheduleChanged),
     Mcp(McpServerChanged),
+    Control(crate::dto::ControlStateChanged),
     Gap(Gap),
     Unavailable(u64),
 }
@@ -884,6 +905,10 @@ fn event_stream(feed: Feed) -> impl Stream<Item = Result<SseEvent, Infallible>> 
                 .event("mcp_server_changed")
                 .json_data(&change)
                 .unwrap_or_else(|_| SseEvent::default().comment("unserialisable event")),
+            Out::Control(change) => SseEvent::default()
+                .event("control_state_changed")
+                .json_data(&change)
+                .unwrap_or_else(|_| SseEvent::default().comment("unserialisable event")),
         };
         Some((Ok(ev), feed))
     })
@@ -943,6 +968,7 @@ pub(crate) async fn events(
             .is_none()
             .then(|| state.mcp().map(|m| m.subscribe()))
             .flatten(),
+        control_rx: scoped_run.is_none().then(|| state.hub().subscribe_events()),
         storage: state.storage_arc(),
         data_dir: state.data_dir(),
         logs: Arc::default(),
@@ -1255,6 +1281,7 @@ mod tests {
             _slot: None,
             sched_rx: None,
             mcp_rx: None,
+            control_rx: None,
             storage: Arc::clone(&storage),
             data_dir: dir.path().to_owned(),
             logs: Arc::default(),

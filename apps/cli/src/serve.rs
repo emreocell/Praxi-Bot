@@ -883,6 +883,26 @@ pub fn serve(
         };
         let peer =
             crate::peer::start_server(data_dir, *host_mode, *peer_enabled, state.clone()).await?;
+        // A revoked pairing loses screen privileges, live sessions and takeover
+        // within a couple of seconds, wherever the revoke happened.
+        if let Some(net) = peer.clone() {
+            let weak = state.downgrade();
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(Duration::from_secs(2));
+                loop {
+                    tick.tick().await;
+                    let Some(state) = weak.upgrade() else {
+                        return;
+                    };
+                    let paired = net
+                        .devices()
+                        .into_iter()
+                        .map(|d| format!("peer:{}", d.id))
+                        .collect();
+                    let _ = state.reconcile_paired_peers(&paired).await;
+                }
+            });
+        }
         // Connect in the background (a slow `npx` must not delay the listener)
         // and expose `/v1/mcp/*` plus the write-only secrets route.
         // The same live redactor as the agent loop masks MCP diagnostics.

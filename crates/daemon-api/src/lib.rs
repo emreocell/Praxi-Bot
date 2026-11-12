@@ -169,6 +169,26 @@ struct Inner {
 #[derive(Clone)]
 pub struct AppState(Arc<Inner>);
 
+/// A non-owning handle for background tasks that must not keep the daemon alive.
+#[derive(Clone)]
+pub struct WeakAppState(std::sync::Weak<Inner>);
+
+impl WeakAppState {
+    /// The state, unless the daemon is gone.
+    #[must_use]
+    pub fn upgrade(&self) -> Option<AppState> {
+        self.0.upgrade().map(AppState)
+    }
+}
+
+impl AppState {
+    /// See [`WeakAppState`].
+    #[must_use]
+    pub fn downgrade(&self) -> WeakAppState {
+        WeakAppState(Arc::downgrade(&self.0))
+    }
+}
+
 impl AppState {
     /// Build the state.  The (single) local user is the first stored user and
     /// is created when the database has none.
@@ -525,6 +545,9 @@ fn api_routes() -> Router<AppState> {
             )),
         )
         .route("/v1/control/takeover", post(v::takeover))
+        .route("/v1/control/override", post(v::local_override))
+        .route("/v1/control/recover", post(v::local_recover))
+        .route("/v1/view/privileges/{peer_key}", put(v::set_privileges))
         .route("/v1/openapi.json", get(openapi::serve_openapi))
         .route("/v1/bots", get(r::list_bots).post(r::create_bot))
         .route(

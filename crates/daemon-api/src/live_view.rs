@@ -35,18 +35,22 @@ pub const SESSION_TTL: Duration = Duration::from_secs(30);
 pub struct Actor {
     pub(crate) key: String,
     pub(crate) recovery: bool,
+    /// The authenticated local installation (loopback bearer), never a peer.
+    pub(crate) local: bool,
 }
 impl Actor {
     pub(crate) fn local(s: &AppState) -> Self {
         Self {
             key: format!("local-ui:{}", s.user_id()),
             recovery: true,
+            local: true,
         }
     }
     pub(crate) fn peer(p: &crate::PeerIdentity) -> Self {
         Self {
             key: format!("peer:{}", p.key),
             recovery: p.role == crate::PeerRole::Desktop,
+            local: false,
         }
     }
 }
@@ -110,12 +114,21 @@ impl LiveView {
         self.privileges.lock().insert(actor, privileges);
     }
     fn allowed(&self, actor: &Actor, input: bool) -> bool {
+        // The local user may watch and drive by default. A paired device has
+        // neither until the local user grants it, per device.
         let p = self
             .privileges
             .lock()
             .get(&actor.key)
             .copied()
-            .unwrap_or_default();
+            .unwrap_or(if actor.local {
+                ScreenPrivileges::default()
+            } else {
+                ScreenPrivileges {
+                    view: false,
+                    input: false,
+                }
+            });
         p.view && (!input || p.input)
     }
     fn session(&self, actor: &Actor, id: Uuid) -> Result<(Uuid, u64, EffectiveProfile), ApiError> {
@@ -597,6 +610,129 @@ pub(crate) async fn takeover(
     Ok((StatusCode::ACCEPTED, Json(result)))
 }
 
+fn require_local(s: &AppState, actor: &Actor, what: &str) -> Result<(), ApiError> {
+    if actor.local {
+        return Ok(());
+    }
+    audit(
+        s,
+        actor,
+        "view.denied",
+        serde_json::json!({"reason":"local_only","operation":what}),
+    )?;
+    Err(ApiError::forbidden("only the local user may do this"))
+}
+
+/// The local user stops any takeover, whoever owns it: input is invalidated
+/// first (without waiting for the input executor), pressed inputs are reset,
+/// the bot stays paused. A pause without takeover is untouched here.
+async fn override_takeover(
+    s: &AppState,
+    actor: &Actor,
+    reason: Reason,
+) -> Result<Option<OwnedTakeover>, ApiError> {
+    let Some(old) = s.hub().force_interrupt(reason.clone()) else {
+        return Ok(None);
+    };
+    let live = s.live_view();
+    let _executor = live.executor.lock().await;
+    let t = s.hub().takeover().unwrap_or(old.clone());
+    interrupt(s, actor, &t, reason).await?;
+    Ok(Some(old))
+}
+
+/// The app's `PUT /v1/control/state {mode: paused}` while a takeover is owned.
+pub(crate) async fn override_local_pause(s: &AppState, actor: &Actor) -> Result<(), ApiError> {
+    override_takeover(s, actor, Reason::LocalOverride).await?;
+    Ok(())
+}
+
+/// `POST /v1/control/override`: the local user's stop. Works against a peer's
+/// takeover; the bot stays paused until `release` or `recover`.
+#[utoipa::path(post,path="/v1/control/override",tag="control",security(("bearer"=[])),responses((status=200,body=crate::dto::ControlStateDto),(status=403,body=crate::error::ErrorBody)))]
+pub(crate) async fn local_override(
+    State(s): State<AppState>,
+    Extension(actor): Extension<Actor>,
+) -> Result<Json<crate::dto::ControlStateDto>, ApiError> {
+    require_local(&s, &actor, "override")?;
+    override_takeover(&s, &actor, Reason::LocalOverride).await?;
+    Ok(Json(crate::routes::control_state_dto(&s, Some(&actor))))
+}
+
+/// `POST /v1/control/recover`: the local user clears a takeover latch (also one
+/// restored after a restart) without a registered target or view session. The
+/// bot resumes with a fresh observation.
+#[utoipa::path(post,path="/v1/control/recover",tag="control",security(("bearer"=[])),responses((status=200,body=crate::dto::ControlStateDto),(status=403,body=crate::error::ErrorBody),(status=409,body=crate::error::ErrorBody)))]
+pub(crate) async fn local_recover(
+    State(s): State<AppState>,
+    Extension(actor): Extension<Actor>,
+) -> Result<Json<crate::dto::ControlStateDto>, ApiError> {
+    require_local(&s, &actor, "recover")?;
+    override_takeover(&s, &actor, Reason::LocalOverride).await?;
+    let live = s.live_view();
+    let _executor = live.executor.lock().await;
+    audit(
+        &s,
+        &actor,
+        "takeover.recovered",
+        serde_json::json!({"by":"local","reason":"local_recovery"}),
+    )?;
+    let old = s
+        .hub()
+        .clear_owned_latch()
+        .map_err(ApiError::unavailable)?
+        .ok_or_else(|| ApiError::conflict("no takeover is recorded"))?;
+    for mut journal in s.hub().pending_release_notes() {
+        flush_note(&s, &mut journal)?;
+    }
+    // Best effort: the old target may be gone.
+    if let Some(sink) = live
+        .registry
+        .get(old.info.target_id)
+        .and_then(|t| t.input_sink())
+    {
+        let _ = sink.release_pressed_inputs().await;
+        let _ = sink.set_takeover_active(false).await;
+    }
+    Ok(Json(crate::routes::control_state_dto(&s, Some(&actor))))
+}
+
+/// `PUT /v1/view/privileges/{peer_key}`: the local user grants or revokes
+/// `screen:view` / `screen:input` for one paired device. A paired device has
+/// neither until granted; revoking interrupts its sessions and takeover.
+#[utoipa::path(put,path="/v1/view/privileges/{peer_key}",tag="view",security(("bearer"=[])),params(("peer_key"=String,Path)),request_body=crate::dto::ScreenPrivilegesInput,responses((status=204),(status=403,body=crate::error::ErrorBody)))]
+pub(crate) async fn set_privileges(
+    State(s): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(peer_key): Path<String>,
+    body: Bytes,
+) -> Result<StatusCode, ApiError> {
+    require_local(&s, &actor, "privileges")?;
+    let i: crate::dto::ScreenPrivilegesInput = parse(&body)?;
+    if peer_key.is_empty()
+        || peer_key.len() > 128
+        || !peer_key.chars().all(|c| c.is_ascii_alphanumeric())
+        || (i.input && !i.view)
+    {
+        return Err(ApiError::bad_request("invalid device key or privileges"));
+    }
+    audit(
+        &s,
+        &actor,
+        "view.privileges_set",
+        serde_json::json!({"peer":peer_key,"view":i.view,"input":i.input}),
+    )?;
+    s.set_screen_privileges(
+        format!("peer:{peer_key}"),
+        ScreenPrivileges {
+            view: i.view,
+            input: i.input,
+        },
+    )
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Release is serialized with every input event, including key reset and durable outbox.
 #[allow(clippy::too_many_lines)] // One serialized durable release transaction.
 pub(crate) async fn release(
@@ -774,17 +910,66 @@ impl AppState {
         let live = self.live_view();
         let _executor = live.executor.lock().await;
         live.set_privileges(actor_key.clone(), privileges);
+        let actor = Actor {
+            key: actor_key.clone(),
+            recovery: false,
+            local: false,
+        };
         if (!privileges.view || !privileges.input)
             && let Some(t) = self.hub().takeover().filter(|t| t.actor == actor_key)
         {
-            interrupt(
-                self,
-                &Actor {
-                    key: actor_key,
-                    recovery: false,
+            interrupt(self, &actor, &t, Reason::Revoked).await?;
+        }
+        if !privileges.view {
+            let ids: Vec<Uuid> = live
+                .sessions
+                .lock()
+                .iter()
+                .filter(|(_, s)| s.actor == actor_key)
+                .map(|(id, _)| *id)
+                .collect();
+            drop(_executor);
+            for id in ids {
+                end_session(self, &actor, id, Reason::Revoked).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Pairing reconciliation: a `peer:<key>` actor that is no longer paired
+    /// loses its screen privileges, live sessions and takeover immediately.
+    /// Call it periodically with the currently paired keys, or right after a
+    /// revoke. Local identities are never touched.
+    /// # Errors
+    /// Returns an error if a revocation audit cannot be persisted.
+    pub async fn reconcile_paired_peers(
+        &self,
+        paired: &std::collections::BTreeSet<String>,
+    ) -> Result<(), ApiError> {
+        let live = self.live_view();
+        let mut stale: std::collections::BTreeSet<String> = {
+            let sessions = live.sessions.lock();
+            sessions
+                .values()
+                .map(|s| s.actor.clone())
+                .chain(self.hub().takeover().map(|t| t.actor))
+                .filter(|k| k.starts_with("peer:") && !paired.contains(k))
+                .collect()
+        };
+        stale.extend(
+            live.privileges
+                .lock()
+                .iter()
+                .filter(|(k, p)| k.starts_with("peer:") && !paired.contains(*k) && (p.view || p.input))
+                .map(|(k, _)| k.clone()),
+        );
+        for key in stale {
+            self.set_screen_privileges(
+                key,
+                ScreenPrivileges {
+                    view: false,
+                    input: false,
                 },
-                &t,
-                Reason::Revoked,
             )
             .await?;
         }

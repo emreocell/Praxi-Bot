@@ -76,6 +76,8 @@ pub enum Reason {
     RateLimited,
     Restart,
     PersistenceFailed,
+    /// The authenticated local user overrode another actor's takeover.
+    LocalOverride,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

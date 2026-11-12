@@ -707,7 +707,12 @@ pub(crate) async fn usage(
 
 // --------------------------------------------------------------- control
 
-pub(crate) fn control_state_dto(s: &AppState) -> ControlStateDto {
+/// `viewer`: only the takeover owner sees the takeover and epoch ids; everyone
+/// else gets who/what/state, never credentials for the input and release routes.
+pub(crate) fn control_state_dto(
+    s: &AppState,
+    viewer: Option<&crate::live_view::Actor>,
+) -> ControlStateDto {
     let reg = s.hub().registration();
     ControlStateDto {
         mode: reg.map(|(m, _)| m),
@@ -716,7 +721,16 @@ pub(crate) fn control_state_dto(s: &AppState) -> ControlStateDto {
         }),
         app_connected: s.hub().app_connected(),
         latched: s.hub().latched(),
-        takeover: s.hub().takeover().map(|t| t.info),
+        takeover: s.hub().takeover().map(|t| {
+            let mut info = t.info;
+            if viewer.is_none_or(|v| v.key != t.actor) {
+                info.id = uuid::Uuid::nil();
+                info.session_id = uuid::Uuid::nil();
+                info.control_epoch = 0;
+                info.input_expires_in_ms = 0;
+            }
+            info
+        }),
         release: None,
     }
 }
@@ -735,7 +749,7 @@ pub(crate) async fn release_control(
     let mut dto;
     if body.is_empty() {
         s.hub().try_release().map_err(ApiError::conflict)?;
-        dto = control_state_dto(&s);
+        dto = control_state_dto(&s, Some(&actor));
     } else {
         let request: live_view::ReleaseRequest = serde_json::from_slice(&body)
             .map_err(|_| ApiError::bad_request("invalid release request"))?;
@@ -745,7 +759,7 @@ pub(crate) async fn release_control(
             state: "released".into(),
         };
         crate::live_view::release(&s, &actor, request).await?;
-        dto = control_state_dto(&s);
+        dto = control_state_dto(&s, Some(&actor));
         dto.release = Some(result);
     }
     Ok(Json(dto))
@@ -771,8 +785,11 @@ pub(crate) async fn latest_cursor(
 /// The daemon's view of the desktop app's controller registration.
 #[utoipa::path(get, path = "/v1/control/state", tag = "control", security(("bearer" = [])),
     responses((status = 200, body = ControlStateDto)))]
-pub(crate) async fn get_control_state(State(s): State<AppState>) -> Json<ControlStateDto> {
-    Json(control_state_dto(&s))
+pub(crate) async fn get_control_state(
+    State(s): State<AppState>,
+    axum::Extension(actor): axum::Extension<crate::live_view::Actor>,
+) -> Json<ControlStateDto> {
+    Json(control_state_dto(&s, Some(&actor)))
 }
 
 /// Register the desktop app as controller and report its mode (heartbeat: send
@@ -786,12 +803,23 @@ pub(crate) async fn get_control_state(State(s): State<AppState>) -> Json<Control
     responses((status = 200, body = ControlStateDto), (status = 400, body = ErrorBody)))]
 pub(crate) async fn put_control_state(
     State(s): State<AppState>,
+    axum::Extension(actor): axum::Extension<crate::live_view::Actor>,
     ApiJson(input): ApiJson<ControlStateInput>,
 ) -> Result<Json<ControlStateDto>, ApiError> {
+    // The local app's Pause/Stop must work during anybody's takeover: it
+    // overrides the takeover and keeps the pause. Paired peers cannot.
+    if actor.local
+        && !input.release
+        && input.mode == crate::dto::ControlMode::Paused
+        && s.hub().takeover().is_some()
+    {
+        crate::live_view::override_local_pause(&s, &actor).await?;
+        return Ok(Json(control_state_dto(&s, Some(&actor))));
+    }
     s.hub()
         .try_apply_state(input.mode, input.release)
         .map_err(ApiError::conflict)?;
-    Ok(Json(control_state_dto(&s)))
+    Ok(Json(control_state_dto(&s, Some(&actor))))
 }
 
 /// Answer a `control_requested` event: let the action `proceed` (after the
