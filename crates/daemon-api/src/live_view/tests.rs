@@ -1497,6 +1497,22 @@ async fn local_recover_clears_a_takeover_latch_without_any_registered_target() {
     );
 }
 #[tokio::test]
+async fn reconciling_an_unpaired_owner_acts_once_not_every_tick() {
+    let t = Test::new();
+    let (_id, _owned, _body) = t.active(Some("alice")).await;
+    let paired: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    t.state.reconcile_paired_peers(&paired).await.unwrap();
+    let resets = t.target.sink.resets.load(Ordering::SeqCst);
+    let rows = audit_count(&t, "takeover.interrupted");
+    assert_eq!(rows, 1);
+    // The serve loop calls this every 2 s: nothing more may happen.
+    for _ in 0..3 {
+        t.state.reconcile_paired_peers(&paired).await.unwrap();
+    }
+    assert_eq!(t.target.sink.resets.load(Ordering::SeqCst), resets);
+    assert_eq!(audit_count(&t, "takeover.interrupted"), rows);
+}
+#[tokio::test]
 async fn pairing_revoke_ends_sessions_and_takeover_of_that_peer_only() {
     let t = Test::new();
     let (id, _owned, _body) = t.active(Some("alice")).await;
@@ -2405,7 +2421,7 @@ async fn a_local_override_survives_a_daemon_restart_and_a_fresh_grant() {
 }
 
 #[tokio::test]
-async fn the_interrupt_audit_row_records_the_incoming_and_the_effective_reason() {
+async fn an_interruption_the_sticky_override_ignores_changes_and_audits_nothing() {
     let t = Test::new();
     let (id, _owned, _body) = t.active(Some("alice")).await;
     local_override(&t).await;
@@ -2420,11 +2436,17 @@ async fn the_interrupt_audit_row_records_the_incoming_and_the_effective_reason()
         .into_iter()
         .filter(|e| e.action == "takeover.interrupted")
         .collect();
-    let expired = rows
-        .iter()
-        .find(|e| e.detail["reason"] == json!("expired"))
-        .expect("the expiry is audited");
-    assert_eq!(expired.detail["effective_reason"], json!("local_override"));
+    // The override's own row exists; the ignored expiry changed nothing and
+    // therefore writes nothing (a repeated caller must not flood the log).
+    assert!(
+        rows.iter()
+            .any(|e| e.detail["reason"] == json!("local_override")),
+        "the override is audited"
+    );
+    assert!(
+        rows.iter().all(|e| e.detail["reason"] != json!("expired")),
+        "an ignored interruption wrote a row"
+    );
 }
 
 /// The executor is also taken, briefly, by the takeover activation task and the

@@ -459,7 +459,9 @@ impl ControlHub {
         }
     }
     /// Never resumes; the executor also resets keys best effort.
-    pub fn interrupt(&self, id: Uuid, reason: Reason) {
+    /// `true` when this call changed the takeover (the caller then resets
+    /// the target and audits); `false` for a repeat or a sticky local override.
+    pub fn interrupt(&self, id: Uuid, reason: Reason) -> bool {
         let mut st = self.state.lock();
         // Idempotent, and a local override is sticky: while the takeover is
         // paused by the local user, no later interruption (an expired or
@@ -472,7 +474,7 @@ impl ControlHub {
                 && (t.info.reason == Some(Reason::LocalOverride)
                     || t.info.reason.as_ref() == Some(&reason))
         }) {
-            return;
+            return false;
         }
         let invalidating = st
             .owned
@@ -509,7 +511,9 @@ impl ControlHub {
                 drop(st);
                 self.emit_state(&owned, "paused", Some(reason_of(&owned)));
             }
+            return true;
         }
+        false
     }
     /// The authenticated local user's override: interrupts whatever takeover is
     /// recorded, in any state, and keeps the bot paused. Never resumes.

@@ -650,8 +650,24 @@ async fn interrupt(
     t: &OwnedTakeover,
     reason: Reason,
 ) -> Result<(), ApiError> {
-    // Mark input invalid before any fallible reset/audit operation.
-    s.hub().interrupt(t.info.id, reason.clone());
+    // Mark input invalid before any fallible reset/audit operation. A repeat
+    // (same reason, a sticky local override, a stale takeover) changes nothing,
+    // so it resets and audits nothing either: whatever an earlier call left
+    // owed is retried by the daemon, not once more by every caller.
+    if !s.hub().interrupt(t.info.id, reason.clone()) {
+        return Ok(());
+    }
+    settle_interrupted(s, actor, t, reason).await
+}
+
+/// The key reset and the audit row of an interruption the hub already
+/// recorded (by `interrupt`, or by the local Stop's `force_interrupt`).
+async fn settle_interrupted(
+    s: &AppState,
+    actor: &Actor,
+    t: &OwnedTakeover,
+    reason: Reason,
+) -> Result<(), ApiError> {
     let reset_ok = reset_target(s, t).await;
     if reset_ok {
         // Also clears a reset that an earlier interruption still owed.
@@ -1029,7 +1045,7 @@ async fn override_takeover(
     if local && !reset_pending && !audit_pending {
         return reset_confirmed(s, local).map(|()| Some(old));
     }
-    interrupt(s, actor, &t, reason).await?;
+    settle_interrupted(s, actor, &t, reason).await?;
     reset_confirmed(s, local)?;
     Ok(Some(old))
 }
@@ -1546,7 +1562,12 @@ impl AppState {
             sessions
                 .values()
                 .map(|s| s.actor.clone())
-                .chain(self.hub().takeover().map(|t| t.actor))
+                .chain(
+                    self.hub()
+                        .takeover()
+                        .filter(|t| t.info.state != ViewState::Paused)
+                        .map(|t| t.actor),
+                )
                 .filter(|k| k.starts_with("peer:") && !paired.contains(k))
                 .collect()
         };
