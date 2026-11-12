@@ -1152,3 +1152,31 @@ fn swap_failure_restores_renamed_roots_and_secrets() {
     );
     assert_eq!(store.get("a").unwrap().unwrap().expose(), "old");
 }
+
+#[tokio::test]
+async fn all_does_not_carry_agentmail_api_keys_unless_named() {
+    let dir = tempfile::tempdir().unwrap();
+    database(dir.path(), false);
+    let store = MemoryStore::new();
+    store.set("provider/key", "k").unwrap();
+    store.set("email/bot-mail/api_key", "am_key_in_store").unwrap();
+    // Not a managed account secret (extra path segment): still exported.
+    store.set("email/a/b/api_key", "x").unwrap();
+    let mut bytes = Vec::new();
+    let manifest = export(
+        dir.path(),
+        &store,
+        ExportOptions {
+            secrets: SecretSelection::All,
+            ..Default::default()
+        },
+        &mut bytes,
+    )
+    .await
+    .unwrap();
+    assert_eq!(manifest.secret_names, ["email/a/b/api_key", "provider/key"]);
+    assert!(
+        !bytes.windows(15).any(|w| w == b"am_key_in_store"),
+        "an AgentMail key is in the bundle"
+    );
+}
