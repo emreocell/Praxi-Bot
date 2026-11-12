@@ -403,17 +403,17 @@ pub(crate) async fn input(
             }
             result
         });
-        let applied_ok = match tokio::time::timeout(Duration::from_secs(2), &mut work).await {
-            Ok(joined) => matches!(joined, Ok(Ok(()))),
-            Err(_) => {
+        let applied_ok =
+            if let Ok(joined) = tokio::time::timeout(Duration::from_secs(2), &mut work).await {
+                matches!(joined, Ok(Ok(())))
+            } else {
                 // The inject outlived its budget: abort the task (dropping the
-                // backend future, which is why backends must be cancel-safe),
-                // not just detach it. `pending_input` is held by a guard inside
-                // the task, so it stays set until the task has really ended.
+                // backend future, which is why backends must be cancel-safe), not
+                // just detach it. `pending_input` is held by a guard inside the
+                // task, so it stays set until the task has really ended.
                 work.abort();
                 false
-            }
-        };
+            };
         if !applied_ok {
             state = ViewState::Paused;
             break;

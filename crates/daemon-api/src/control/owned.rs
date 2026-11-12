@@ -25,6 +25,7 @@ pub struct OwnedTakeover {
     pub input_deadline: Option<tokio::time::Instant>,
 }
 #[derive(Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)] // Independent, persisted release-progress markers.
 pub struct ReleaseJournal {
     pub takeover_id: Uuid,
     pub epoch: u64,
