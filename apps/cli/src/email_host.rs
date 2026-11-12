@@ -98,8 +98,8 @@ fn probe_status_of(e: &EmailError) -> EmailProbeStatus {
     }
 }
 
-fn api_report(r: Result<(), EmailError>) -> EmailTestReport {
-    let status = match &r {
+fn api_report(r: &Result<(), EmailError>) -> EmailTestReport {
+    let status = match r {
         Ok(()) => EmailProbeStatus::Ok,
         Err(e) => probe_status_of(e),
     };
@@ -607,9 +607,8 @@ impl EmailHost {
             .connector
             .agentmail_for(&key, None)
             .map_err(|e| upstream(&e))?;
-        Ok(api_report(
-            connector_email::MailboxProvider::check(&provider).await,
-        ))
+        let checked = connector_email::MailboxProvider::check(&provider).await;
+        Ok(api_report(&checked))
     }
 }
 
@@ -802,7 +801,7 @@ impl EmailControl for EmailHost {
                 Err(EmailError::Credential(_)) => {
                     Err(invalid("no API key is stored for this account"))
                 }
-                r => Ok(api_report(r)),
+                r => Ok(api_report(&r)),
             };
         }
         match self.connector.probe_saved(name).await {

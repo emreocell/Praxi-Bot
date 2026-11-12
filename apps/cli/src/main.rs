@@ -68,6 +68,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)] // one-shot CLI args, built once
 enum Command {
     /// Interactive first-run setup (or scripted with --provider).
     Setup(SetupCmd),
@@ -225,6 +226,7 @@ enum SchedulesCmd {
 
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)] // one-shot CLI args, built once
+#[allow(clippy::doc_markdown)] // doc comments are the --help text; product names stay plain
 enum EmailCmd {
     /// List the accounts (never shows passwords).
     List,

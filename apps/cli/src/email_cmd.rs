@@ -202,7 +202,7 @@ pub struct AgentmailAdd<'a> {
     pub allowed_senders: &'a [String],
 }
 
-/// The request body of an AgentMail add; the API key is added by the caller.
+/// The request body of an `AgentMail` add; the API key is added by the caller.
 #[must_use]
 pub fn add_agentmail_body(a: &AgentmailAdd<'_>, api_key: &str) -> Value {
     json!({
@@ -216,7 +216,7 @@ pub fn add_agentmail_body(a: &AgentmailAdd<'_>, api_key: &str) -> Value {
     })
 }
 
-/// `bot email add --provider agentmail`: creates the inbox at AgentMail with
+/// `bot email add --provider agentmail`: creates the inbox at `AgentMail` with
 /// the user's own key and prints the new address.
 ///
 /// # Errors

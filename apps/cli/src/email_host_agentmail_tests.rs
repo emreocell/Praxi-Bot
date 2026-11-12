@@ -88,7 +88,7 @@ async fn adding_an_agentmail_account_creates_the_inbox_and_keeps_the_key_in_the_
     assert_eq!(dto.inbox_id.as_deref(), Some("helper@agentmail.to"));
     assert_eq!(dto.bot.as_deref(), Some(BOT_A));
     assert!(dto.password_set);
-    assert!(dto.imap.host.is_empty());
+    assert_eq!(dto.imap.host, "");
 
     let text = toml_of(&f);
     assert!(text.contains("kind = \"agentmail\""), "{text}");
@@ -130,7 +130,7 @@ async fn a_provider_refusal_saves_nothing_and_never_echoes_the_key() {
     };
     assert!(m.contains("rejected the API key"), "{m}");
     assert!(!format!("{e:?}").contains(KEY));
-    assert!(f.host.list().is_empty());
+    assert_eq!(f.host.list().len(), 0);
     assert!(secret(&f, "email/bot-mail/api_key").is_none());
     assert!(!f.dir.path().join(EMAIL_FILE).exists());
 }
@@ -210,7 +210,7 @@ async fn removing_an_account_never_deletes_the_remote_inbox_unless_asked() {
     f.host.add(input("two", None)).await.unwrap();
     f.host.remove_account("two", true).await.unwrap();
     assert_eq!(deletes(&server).await, 1);
-    assert!(f.host.list().is_empty());
+    assert_eq!(f.host.list().len(), 0);
     assert!(secret(&f, "email/two/api_key").is_none());
 }
 
@@ -234,7 +234,7 @@ async fn a_failed_remote_delete_keeps_the_account_and_a_missing_inbox_counts_as_
     assert_eq!(f.host.list().len(), 1, "kept so the user can retry");
     assert!(secret(&f, "email/one/api_key").is_some());
     f.host.remove_account("one", true).await.unwrap();
-    assert!(f.host.list().is_empty());
+    assert_eq!(f.host.list().len(), 0);
 }
 
 #[tokio::test]
