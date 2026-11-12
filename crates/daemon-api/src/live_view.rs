@@ -276,6 +276,12 @@ type DenialWindow = (Option<Instant>, BTreeMap<String, u64>);
 const DENIAL_AUDIT_WINDOW: Duration = Duration::from_secs(60);
 
 #[allow(clippy::needless_pass_by_value)] // Fixed, ephemeral metadata values are built at each call site.
+tokio::task_local! {
+    /// Set by a handler's own denial audit, so that `audit_ingress` does not
+    /// count the same rejected request a second time.
+    static HANDLER_AUDITED: Arc<std::sync::atomic::AtomicBool>;
+}
+
 fn audit(
     s: &AppState,
     actor: &Actor,
@@ -283,6 +289,8 @@ fn audit(
     mut meta: serde_json::Value,
 ) -> Result<(), ApiError> {
     if matches!(event, "view.denied" | "input.batch_rejected") {
+        let _ =
+            HANDLER_AUDITED.try_with(|flag| flag.store(true, std::sync::atomic::Ordering::SeqCst));
         let reason = meta
             .get("reason")
             .and_then(serde_json::Value::as_str)
@@ -853,7 +861,7 @@ pub(crate) fn require_latch_authority(s: &AppState, actor: &Actor) -> Result<(),
     Ok(())
 }
 
-fn require_local(s: &AppState, actor: &Actor, what: &str) -> Result<(), ApiError> {
+pub(crate) fn require_local(s: &AppState, actor: &Actor, what: &str) -> Result<(), ApiError> {
     if actor.local {
         return Ok(());
     }
@@ -1451,8 +1459,12 @@ pub(crate) async fn audit_ingress(
     let sensitive = sensitive_path(request.uri().path());
     let actor = request.extensions().get::<Actor>().cloned();
     let input = request.uri().path().ends_with("/input");
-    let response = next.run(request).await;
+    let handler_audited = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let response = HANDLER_AUDITED
+        .scope(Arc::clone(&handler_audited), next.run(request))
+        .await;
     if sensitive
+        && !handler_audited.load(std::sync::atomic::Ordering::SeqCst)
         && response.status().is_client_error()
         && let Some(actor) = actor
         && audit(

@@ -60,6 +60,15 @@ async fn guard(State(state): State<AppState>, mut req: Request, next: Next) -> R
     if denied {
         return ApiError::forbidden("peer role does not allow this operation").into_response();
     }
+    // `POST /v1/control/{request_id}` answers an overlay question: local only.
+    if req.method() == Method::POST
+        && path
+            .strip_prefix("/v1/control/")
+            .is_some_and(|rest| uuid::Uuid::parse_str(rest).is_ok())
+    {
+        return ApiError::forbidden("only the local user answers overlay questions")
+            .into_response();
+    }
     if crate::live_view::reject_query_credentials(&req) {
         return ApiError::bad_request("URL credentials are forbidden").into_response();
     }

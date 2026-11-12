@@ -3256,3 +3256,174 @@ async fn the_retried_release_audit_row_keeps_the_target_and_counts() {
     assert_eq!(row.detail["target_id"], json!(t.target.info().target_id));
     assert!(row.detail["counts"].is_object(), "{:?}", row.detail);
 }
+
+// ======================= full-state audit, group A =======================
+
+/// A pending overlay question of the hub, as a bot desktop action creates it.
+fn pending_overlay(
+    t: &Test,
+) -> (
+    Uuid,
+    tokio::task::JoinHandle<Result<(), String>>,
+    Arc<tokio::sync::Notify>,
+) {
+    use agent_core::ControlGate as _;
+    t.state.hub().put_state(crate::dto::ControlMode::BotDriving);
+    let request = agent_core::ControlRequest {
+        request_id: Uuid::now_v7(),
+        run_id: protocol::RunId::new(),
+        bot_id: protocol::BotId::new(),
+        rect: None,
+        label: "Save".into(),
+        action: "click".into(),
+    };
+    let id = request.request_id;
+    let published = Arc::new(tokio::sync::Notify::new());
+    let p = Arc::clone(&published);
+    let hub = Arc::clone(t.state.hub());
+    let action =
+        tokio::spawn(async move { hub.before_action(request, &move || p.notify_one()).await });
+    (id, action, published)
+}
+
+#[tokio::test]
+async fn a_paired_peer_cannot_answer_a_control_request() {
+    let t = Test::new();
+    t.auto_grant.store(false, Ordering::SeqCst);
+    grant(&t, "alice", true, true).await;
+    let (request_id, action, published) = pending_overlay(&t);
+    published.notified().await;
+    let path = format!("/v1/control/{request_id}");
+    // A Desktop peer with every grant, one without, and a phone: all refused.
+    let (status, _) = t
+        .call(
+            Some("alice"),
+            Method::POST,
+            &path,
+            Some(json!({"decision":"proceed"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "granted desktop peer");
+    let (status, _) = t
+        .call(
+            Some("stranger"),
+            Method::POST,
+            &path,
+            Some(json!({"decision":"proceed"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "desktop peer without grants");
+    assert_eq!(
+        call_as_phone(
+            &t,
+            "phone",
+            Method::POST,
+            &path,
+            Some(json!({"decision":"proceed"}))
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    assert!(
+        !action.is_finished(),
+        "the action still waits for the local overlay"
+    );
+    // The local overlay still can.
+    let (status, v) = t
+        .call(
+            None,
+            Method::POST,
+            &path,
+            Some(json!({"decision":"proceed"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(action.await.unwrap(), Ok(()));
+}
+
+#[tokio::test]
+async fn a_peer_event_stream_does_not_make_the_app_look_connected() {
+    let t = Test::new();
+    t.auto_grant.store(false, Ordering::SeqCst);
+    let peer = t
+        .response(Some("alice"), Method::GET, "/v1/events", None)
+        .await;
+    assert_eq!(peer.status(), StatusCode::OK);
+    assert!(
+        !t.state.hub().app_connected(),
+        "a peer subscription must not count as the local overlay"
+    );
+    let local = t.response(None, Method::GET, "/v1/events", None).await;
+    assert_eq!(local.status(), StatusCode::OK);
+    assert!(t.state.hub().app_connected(), "the local app does");
+    drop((peer, local));
+}
+
+#[test]
+fn control_requested_events_are_hidden_from_peers_only() {
+    use crate::sse::hidden_from_peer;
+    let event = protocol::Event::ControlRequested(protocol::event::ControlRequested {
+        request_id: Uuid::now_v7(),
+        run_id: protocol::RunId::new(),
+        bot_id: protocol::BotId::new(),
+        rect: None,
+        label: "Save".into(),
+        action: "click".into(),
+    });
+    assert!(hidden_from_peer(
+        false,
+        &crate::sse::test_run_out(event.clone())
+    ));
+    assert!(!hidden_from_peer(true, &crate::sse::test_run_out(event)));
+    let other = protocol::Event::MessageDelta(protocol::event::MessageDelta {
+        run_id: protocol::RunId::new(),
+        text: "hi".into(),
+    });
+    assert!(!hidden_from_peer(false, &crate::sse::test_run_out(other)));
+}
+
+#[tokio::test]
+async fn an_unowned_pause_that_cannot_be_persisted_is_a_503_not_a_409() {
+    let t = Test::new();
+    t.state.hub().set_persist_failure(true);
+    let (status, v) = t
+        .call(
+            None,
+            Method::PUT,
+            "/v1/control/state",
+            Some(json!({"mode":"paused","release":false})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{v}");
+    assert_eq!(
+        t.state.hub().latched(),
+        Some(crate::dto::ControlMode::Paused),
+        "the pause is in force in memory"
+    );
+}
+
+#[tokio::test]
+async fn one_rejected_takeover_counts_as_one_denial() {
+    let t = Test::new();
+    t.auto_grant.store(false, Ordering::SeqCst);
+    grant(&t, "viewer", true, false).await;
+    let session = t.session(Some("viewer")).await;
+    let (status, _) = t
+        .call(
+            Some("viewer"),
+            Method::POST,
+            "/v1/control/takeover",
+            Some(json!({"session_id":session,"request_id":Uuid::now_v7()})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let denials = t.state.live_view().denials.lock();
+    let window = denials
+        .get("peer:viewer|view.denied")
+        .expect("the denial was audited");
+    assert!(
+        window.1.is_empty(),
+        "the handler and the ingress shared one request: {:?}",
+        window.1
+    );
+}

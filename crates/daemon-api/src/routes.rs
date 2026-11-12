@@ -846,7 +846,15 @@ pub(crate) async fn put_control_state(
     }
     s.hub()
         .try_apply_state(input.mode, input.release)
-        .map_err(ApiError::conflict)?;
+        .map_err(|e| {
+            // A failed latch-file write is not a conflict: the pause is in
+            // force in memory and the write is retried.
+            if e == "control persistence failed" {
+                ApiError::unavailable(e)
+            } else {
+                ApiError::conflict(e)
+            }
+        })?;
     Ok(Json(control_state_dto(&s, Some(&actor))))
 }
 
@@ -860,9 +868,14 @@ pub(crate) async fn put_control_state(
               (status = 404, body = ErrorBody, description = "unknown, answered or timed-out request")))]
 pub(crate) async fn decide_control(
     State(s): State<AppState>,
+    axum::Extension(actor): axum::Extension<crate::live_view::Actor>,
     Path(rid): Path<String>,
     ApiJson(input): ApiJson<ControlDecisionInput>,
 ) -> Result<Json<ControlDecisionResponse>, ApiError> {
+    // The overlay question belongs to the local user on this screen: no paired
+    // device may answer it (it would approve a bot action before the local
+    // overlay decides).
+    crate::live_view::require_local(&s, &actor, "control_decision")?;
     let request_id = id(&rid)?;
     if s.hub().decide(request_id, input.decision, input.reason) {
         Ok(Json(ControlDecisionResponse {
