@@ -2186,6 +2186,37 @@ async fn a_failed_key_reset_during_override_is_retried_until_it_succeeds() {
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn the_daemon_retries_an_owed_key_reset_and_audit_row_without_any_session() {
+    let t = Test::new();
+    let (_id, _owned, _body) = t.active(Some("alice")).await;
+    t.target.sink.fail_reset.store(true, Ordering::SeqCst);
+    let db = rusqlite::Connection::open(t.dir.path().join("bot.db")).unwrap();
+    db.execute_batch("CREATE TRIGGER fail_live_audit BEFORE INSERT ON audit_log WHEN NEW.action = 'takeover.interrupted' BEGIN SELECT RAISE(ABORT, 'injected audit failure'); END;").unwrap();
+    let (status, _) = t
+        .call(None, Method::POST, "/v1/control/override", None)
+        .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(t.state.hub().override_pending(), (true, true));
+    // The faults clear. Nobody heartbeats, nobody calls: the daemon itself
+    // finishes the owed work.
+    t.target.sink.fail_reset.store(false, Ordering::SeqCst);
+    db.execute_batch("DROP TRIGGER fail_live_audit").unwrap();
+    tokio::time::sleep(Duration::from_secs(30)).await;
+    assert_eq!(
+        t.state.hub().override_pending(),
+        (false, false),
+        "the owed reset and audit row were never retried"
+    );
+    assert!(
+        t.state
+            .storage()
+            .list_audit(t.state.user_id())
+            .unwrap()
+            .iter()
+            .any(|e| e.action == "takeover.interrupted")
+    );
+}
 #[tokio::test]
 async fn a_viewer_only_peer_flooding_control_state_writes_no_decision_rows() {
     let t = Test::new();

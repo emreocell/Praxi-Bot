@@ -1307,6 +1307,38 @@ async fn retry_owed_reset(s: &AppState) {
     }
 }
 
+/// How often the daemon itself retries work an interruption still owes.
+pub(crate) const OWED_WORK_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Everything an interruption, a release or a failed latch write still owes
+/// (key reset, `takeover.interrupted` / `takeover.released` audit rows, the
+/// latch file) is retried by the daemon on its own, without a session: a
+/// disconnected peer or a closed app must not leave it undone for good.
+/// Cheap when nothing is owed; skipped when the executor is busy (the next
+/// tick retries).
+pub(crate) async fn retry_owed_work(s: &AppState) {
+    let hub = s.hub();
+    let (reset, audit) = hub.override_pending();
+    if !reset && !audit && !hub.persist_dirty() && hub.release_audits_pending().is_empty() {
+        return;
+    }
+    let live = s.live_view();
+    let Ok(_executor) = tokio::time::timeout(BACKEND_CALL_TIMEOUT, live.executor.lock()).await
+    else {
+        return;
+    };
+    let _ = hub.retry_persist();
+    retry_release_audits(s);
+    retry_owed_reset(s).await;
+    if hub.override_pending().1
+        && let Some(t) = hub.takeover()
+        && let Some(reason) = t.info.reason.clone()
+        && audit_interrupted(s, &Actor::local(s), &t, &reason).is_ok()
+    {
+        hub.resolve_override_audit();
+    }
+}
+
 /// Best-effort retry of every owed release audit row (session heartbeats).
 fn retry_release_audits(s: &AppState) {
     for journal in s.hub().release_audits_pending() {

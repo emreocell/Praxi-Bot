@@ -97,6 +97,20 @@ pub(super) fn restore(st: &mut State, path: &Path) {
                 // Only a latch that had a takeover owner needs explicit recovery;
                 // a plain pause is the user's own and stays releasable.
                 st.require_recovery = st.owned.is_some();
+                // Read BEFORE the reason is normalised below: only the
+                // interruptions that can leave pressed keys behind owe a reset
+                // (a tampered flag on any other reason is ignored).
+                let owes_reset = st.owned.as_ref().is_some_and(|t| {
+                    matches!(
+                        t.info.reason,
+                        Some(
+                            Reason::LocalOverride
+                                | Reason::ResetFailed
+                                | Reason::PartialInjection
+                                | Reason::Disconnected
+                        )
+                    )
+                });
                 if let Some(t) = st.owned.as_mut() {
                     t.info.state = ViewState::Paused;
                     // A local override survives a restart: only the local
@@ -112,11 +126,9 @@ pub(super) fn restore(st: &mut State, path: &Path) {
                     .owned
                     .as_ref()
                     .is_some_and(|t| t.info.reason == Some(Reason::LocalOverride));
-                let reset_failed = st
-                    .owned
-                    .as_ref()
-                    .is_some_and(|t| t.info.reason == Some(Reason::ResetFailed));
-                st.reset_pending = reset_pending && (overridden || reset_failed);
+                // The reason was normalised to `Restart` above, so the owed
+                // reset is decided from the reason read before that.
+                st.reset_pending = reset_pending && owes_reset;
                 st.audit_pending = audit_pending && overridden;
                 return;
             }
@@ -1019,6 +1031,28 @@ mod tests {
             assert!(
                 hub.begin_takeover("alice", &req, Uuid::now_v7(), 1, true, true)
                     .is_ok()
+            );
+        }
+    }
+    #[test]
+    fn an_owed_key_reset_survives_a_restart_for_any_interruption_reason() {
+        for reason in [Reason::ResetFailed, Reason::Disconnected] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("control-latch.json");
+            let hub =
+                ControlHub::with_latch_file(super::super::ControlConfig::default(), path.clone());
+            let t = hub
+                .begin_takeover("peer:alice", &request(), Uuid::now_v7(), 1, true, true)
+                .unwrap();
+            hub.activate(t.info.id, t.info.control_epoch).unwrap();
+            hub.interrupt(t.info.id, reason.clone());
+            hub.mark_reset_pending();
+            assert!(hub.override_pending().0);
+            let restarted =
+                ControlHub::with_latch_file(super::super::ControlConfig::default(), path);
+            assert!(
+                restarted.override_pending().0,
+                "{reason:?}: the key reset still owed after the restart was forgotten"
             );
         }
     }

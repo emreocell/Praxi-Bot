@@ -475,6 +475,17 @@ impl AppState {
         if let Ok(runtime) = tokio::runtime::Handle::try_current()
             && let Some(mut receiver) = self.0.refresh_rx.lock().take()
         {
+            let weak_state = self.downgrade();
+            runtime.spawn(async move {
+                // The daemon finishes owed interruption work on its own.
+                loop {
+                    tokio::time::sleep(live_view::OWED_WORK_INTERVAL).await;
+                    let Some(state) = weak_state.upgrade() else {
+                        break;
+                    };
+                    live_view::retry_owed_work(&state).await;
+                }
+            });
             let weak_live = Arc::downgrade(&self.0.live_view);
             runtime.spawn(async move {
                 while receiver.changed().await.is_ok() {
