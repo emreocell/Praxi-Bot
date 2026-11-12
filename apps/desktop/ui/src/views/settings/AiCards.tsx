@@ -2,7 +2,7 @@ import type { TFunction } from "i18next";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
-import { MockApiClient } from "../../api/mock";
+import { MOCK_BASE_URL } from "../../api/mockMode";
 import formStyles from "../../components/Form.module.css";
 import { ModelPicker } from "../../components/ModelPicker";
 import { SettingGroup, SettingRow } from "../../components/SettingsUi";
@@ -23,7 +23,7 @@ function DefaultModelRow() {
   const { client } = useDaemon();
   const { dto, reload } = useProviders();
   const [override, setOverride] = useState<string | null>(null);
-  const mock = client instanceof MockApiClient;
+  const mock = client?.baseUrl === MOCK_BASE_URL;
   const canChange = isTauriRuntime() || mock;
 
   const current = useMemo(() => {

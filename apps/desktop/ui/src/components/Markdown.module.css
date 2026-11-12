@@ -204,3 +204,12 @@
   color: var(--color-code-comment);
   font-style: italic;
 }
+
+.tableWrap { border: var(--size-border) solid var(--color-border); border-radius: var(--radius-card); background: var(--color-surface); }
+.table { width: 100%; font-size: var(--font-size-ui); }
+.table th, .table td { border: none; padding: var(--space-3) var(--space-4); }
+.table tr + tr td { border-top: var(--size-border) solid var(--color-border); }
+.table th { color: var(--color-text-secondary); background: var(--color-surface-elevated); font-weight: var(--font-weight-medium); }
+.codeBlock { border-radius: var(--radius-card); background: var(--color-surface); }
+.codeBar { background: transparent; border-color: var(--color-border); padding: var(--space-2) var(--space-4); }
+.pre { padding: var(--space-3) var(--space-4); font-size: var(--font-size-ui); }

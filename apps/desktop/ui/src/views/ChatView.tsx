@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowUp, Bookmark, MessageSquare, Square, Zap } from "lucide-react";
+import { ArrowLeft, ArrowUp, Bookmark, Square, Zap } from "lucide-react";
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -9,7 +9,8 @@ import {
   useState
 } from "react";
 import { useTranslation } from "react-i18next";
-import { Avatar, Button } from "ui";
+import { BotAvatar, Button } from "ui";
+import { isMockMode } from "../api/mockMode";
 import { ApiError } from "../api/client";
 import type { Message, SendMode } from "../api/types";
 import {
@@ -60,6 +61,7 @@ import styles from "./ChatView.module.css";
 const LIVE_STATES = new Set(["pending", "running", "waiting_approval"]);
 
 type Entry =
+  | { kind: "day"; key: string; ts: number }
   | { kind: "user"; key: string; ts: number; text: string }
   | { kind: "assistant"; key: string; ts: number; text: string; live: boolean }
   | { kind: "item"; key: string; ts: number; item: TimelineItem; runId: string }
@@ -82,12 +84,14 @@ function canOfferRemember(run: RunState): boolean {
 export function ChatView({
   chatId,
   onBack,
+  onOpenBot,
   onSwitchChat,
   showAgentRoute = false,
   sendWith = "enter"
 }: {
   chatId: string;
   onBack: () => void;
+  onOpenBot?: () => void;
   /** Open another chat (after a `/new` turn created one). */
   onSwitchChat?: (chatId: string) => void;
   /** Debug: also show the chip for a plain `Agent` decision at K4. */
@@ -148,6 +152,13 @@ export function ChatView({
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const stickToBottom = useRef(true);
   const [remember, setRemember] = useState<Record<string, RememberState>>({});
+  useEffect(() => {
+    const el = inputRef.current;
+    if (el) {
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, parseFloat(getComputedStyle(el).maxHeight))}px`;
+    }
+  }, [text]);
   const mountedAt = useRef(Date.now());
   const switchedFor = useRef(new Set<string>());
 
@@ -285,7 +296,9 @@ export function ChatView({
       }
     }
     // Array.prototype.sort is stable: equal timestamps keep insertion order.
-    return out.sort((a, b) => a.ts - b.ts);
+    const sorted = out.sort((a, b) => a.ts - b.ts);
+    return sorted.flatMap((entry, index): Entry[] => index === 0 || new Date(entry.ts).toDateString() !== new Date(sorted[index - 1].ts).toDateString()
+      ? [{ kind: "day", key: `day-${entry.key}`, ts: entry.ts }, entry] : [entry]);
   }, [messages, chatRuns, showAgentRoute, remember]);
 
   const lastItem = entries[entries.length - 1];
@@ -471,14 +484,10 @@ export function ChatView({
     }
   };
 
-  const botAvatar = (
-    <Avatar
-      name={view?.name ?? "?"}
-      src={view?.avatar}
-      color={view?.color}
-      size="sm"
-    />
-  );
+  const awaitingApproval = serverLive?.state === "waiting_approval" || chatRuns.some(run => run.finishedMs === undefined && run.items.some(item => item.kind === "tool" && item.status === "awaiting_approval"));
+  const lastFailed = [...chatRuns].reverse()[0]?.error;
+  const avatarState = awaitingApproval ? "waiting-approval" : active ? (lastItem?.kind === "item" && lastItem.item.kind === "tool" ? "working" : "thinking") : lastFailed ? "error" : "idle";
+  const botAvatarFor = (decorative: boolean) => <BotAvatar bot={view ?? { id: chat?.bot_id ?? "unknown", name: "Bot" }} size="sm" state={avatarState} decorative={decorative} />;
 
   const rememberRun = async (runId: string) => {
     if (!client) {
@@ -524,7 +533,7 @@ export function ChatView({
         }
         return (
           <div className={styles.assistantRow}>
-            {botAvatar}
+            {botAvatarFor(false)}
             <div className={styles.assistantBubble}>
               <Markdown text={item.text} />
             </div>
@@ -597,14 +606,22 @@ export function ChatView({
   return (
     <div className={styles.root}>
       <header className={styles.header}>
-        <Button size="sm" variant="ghost" onClick={onBack}>
-          <ArrowLeft />{t("common.back")}
+        <Button size="sm" variant="ghost" title={t("common.back")} aria-label={t("common.back")} onClick={onBack}>
+          <ArrowLeft />
         </Button>
-        {botAvatar}
-        <div className={styles.headerText}>
-          <span className={styles.title}>{chat.title}</span>
-          <span className={styles.subtitle}>{view?.name}</span>
-        </div>
+        <button
+          type="button"
+          className={styles.headerBot}
+          title={t("chat.openBot", { name: view?.name })}
+          aria-label={t("chat.openBot", { name: view?.name })}
+          onClick={onOpenBot}
+        >
+          {botAvatarFor(true)}
+          <span className={styles.headerText}>
+            <span className={styles.title}>{chat.title}</span>
+            <span className={styles.subtitle}>{view?.name}</span>
+          </span>
+        </button>
         {bot ? (
           <ModelPicker
             groups={pickerGroups}
@@ -630,12 +647,14 @@ export function ChatView({
         onScroll={onScroll}
         data-testid="chat-timeline"
       >
-        <div className={styles.timeline}><div className={styles.conversationLabel}>{t("chat.conversationLabel")}</div>
+        <div className={styles.timeline}>
           {entries.length === 0 ? (
-            <div className={styles.emptyConversation}><MessageSquare /><p className={styles.hint}>{t("chat.emptyHint")}</p></div>
+            <div className={styles.emptyConversation}><BotAvatar bot={view ?? { id: "bot", name: "Bot" }} size="hero" /><h1>{t("chat.emptyTitle", { name: view?.name })}</h1><p className={styles.hint}>{t("chat.emptyHint")}</p></div>
           ) : null}
           {entries.map((e) => {
             switch (e.kind) {
+              case "day":
+                return <div key={e.key} className={styles.conversationLabel}>{isMockMode() || new Date(e.ts).toDateString() === new Date().toDateString() ? t("chat.conversationLabel") : new Intl.DateTimeFormat(undefined, { day: "numeric", month: "long" }).format(e.ts)}</div>;
               case "user":
                 return (
                   <div key={e.key} className={styles.userRow}>
@@ -645,7 +664,7 @@ export function ChatView({
               case "assistant":
                 return (
                   <div key={e.key} className={styles.assistantRow}>
-                    {botAvatar}
+                    {botAvatarFor(false)}
                     <div className={styles.assistantBubble}>
                       <Markdown text={e.text} />
                     </div>
@@ -797,7 +816,7 @@ export function ChatView({
             ref={inputRef}
             className={styles.input}
             value={text}
-            rows={2}
+            rows={1}
             placeholder={
               active ? t("chat.placeholderBusy") : t("chat.placeholder")
             }
@@ -813,9 +832,11 @@ export function ChatView({
           <Button
             variant="primary"
             disabled={sending || !text.trim()}
+            title={t("chat.send")}
+            aria-label={t("chat.send")}
             onClick={() => void send()}
           >
-            <ArrowUp />{t("chat.send")}
+            <ArrowUp />
           </Button>
         </div>
       <p className={styles.composerHint}>{t("chat.composerHint")}</p></footer>

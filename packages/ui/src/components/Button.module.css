@@ -47,14 +47,14 @@
 }
 
 .primary {
-  background-color: var(--color-accent);
-  color: var(--color-text-inverse);
-  border-color: var(--color-accent);
+  background-color: var(--color-primary);
+  color: var(--color-primary-contrast);
+  border-color: transparent;
 }
 
 .primary:hover:not(:disabled) {
-  background-color: var(--color-accent-hover);
-  border-color: var(--color-accent-hover);
+  background-color: color-mix(in srgb, var(--color-primary) 88%, var(--color-background));
+  border-color: transparent;
 }
 
 .secondary {

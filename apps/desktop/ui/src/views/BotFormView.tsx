@@ -1,6 +1,6 @@
 import { type ChangeEvent, type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Avatar, Button, Card } from "ui";
+import { BotAvatar, Button, Card } from "ui";
 import {
   type Bot,
   type McpServer,
@@ -19,7 +19,8 @@ import {
   PRESET_CHOICES,
   type PresetChoice
 } from "../lib/botProfile";
-import { AppTile } from "../components/AppTile";
+import { BrandIcon } from "../components/BrandIcon";
+import { brandIcon } from "../lib/brandIcons";
 import { botHasAccess, changedApps, saveBotAndApps } from "../lib/mcpApps";
 import { FAKE_PROVIDER_ID } from "../lib/providers";
 import { type ProvidersView, providersView } from "../lib/providerView";
@@ -289,12 +290,7 @@ export function BotFormView({
           <div className={formStyles.field}>
             <span className={formStyles.label}>{t("botForm.avatar")}</span>
             <div className={formStyles.row}>
-              <Avatar
-                name={draft.name || "?"}
-                src={draft.avatar ?? undefined}
-                color={draft.color}
-                size="lg"
-              />
+              <BotAvatar bot={{ id: botId ?? "new-bot", name: draft.name, color: draft.color, avatar: draft.avatar }} size="lg" />
               <input
                 ref={fileRef}
                 type="file"
@@ -502,8 +498,8 @@ export function BotFormView({
                           setAllowed((a) => ({ ...a, [s.name]: e.target.checked }))
                         }
                       />
-                      <AppTile name={s.name} small />
-                      <span className={styles.appName}>{s.name}</span>
+                      <BrandIcon name={s.name} small />
+                      <span className={styles.appName}>{brandIcon(s.name).known ? brandIcon(s.name).name : s.name}</span>
                     </label>
                   </li>
                 ))}
@@ -552,7 +548,7 @@ export function BotFormView({
         </Card>
 
         {error ? (
-          <p className={formStyles.error} role="alert">
+          <p className={styles.alert} role="alert">
             {error}
           </p>
         ) : null}

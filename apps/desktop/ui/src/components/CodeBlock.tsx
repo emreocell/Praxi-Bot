@@ -57,6 +57,7 @@ export const CodeBlock = memo(function CodeBlock({
           type="button"
           className={styles.copyButton}
           onClick={copy}
+          title={t("chat.md.copy")}
           aria-label={t("chat.md.copy")}
         >
           {copied ? <Check /> : <Copy />}{copied ? t("chat.md.copied") : t("chat.md.copy")}

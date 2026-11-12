@@ -1,13 +1,13 @@
-import { ChevronsUpDown, CircleHelp, Grid2X2, Monitor, Settings2 } from "lucide-react";
+import { CalendarDays, ChevronsUpDown, CircleHelp, Grid2X2, Monitor, Settings2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ComputerTarget } from "../lib/settingsPrefs";
 import styles from "./AccountMenu.module.css";
 
-const ICONS = { settings: Settings2, apps: Grid2X2, computer: Monitor, help: CircleHelp };
+const ICONS = { settings: Settings2, apps: Grid2X2, computer: Monitor, help: CircleHelp, schedules: CalendarDays };
 
 
-export type AccountAction = "settings" | "apps" | "computer" | "help";
+export type AccountAction = "settings" | "apps" | "computer" | "help" | "schedules";
 
 /** Bottom-left account button with a pop-up menu (settings, apps, computer, help). */
 export function AccountMenu({
@@ -63,6 +63,7 @@ export function AccountMenu({
       text: t("account.computer"),
       hint: t(`settingsModal.computer.targets.${computerTarget}.title`)
     },
+    { id: "schedules", text: t("sidebar.schedules") },
     { id: "help", text: t("account.help") }
   ];
 
@@ -93,6 +94,8 @@ export function AccountMenu({
         className={styles.trigger}
         aria-haspopup="menu"
         aria-expanded={open}
+        title={label}
+        aria-label={label}
         data-testid="account-menu"
         onClick={() => setOpen((o) => !o)}
         onKeyDown={(event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); } }}
@@ -100,7 +103,8 @@ export function AccountMenu({
         <span className={styles.avatar} aria-hidden="true">
           {label.slice(0, 1).toUpperCase()}
         </span>
-        <span className={styles.name}>{label}</span><ChevronsUpDown />
+        <span className={styles.name}>{label}</span>
+        <ChevronsUpDown aria-hidden="true" />
       </button>
     </div>
   );

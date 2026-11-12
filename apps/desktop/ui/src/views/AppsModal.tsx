@@ -1,10 +1,12 @@
-import { Blocks, Cable, Check, Plus, Search, Server, Users, X } from "lucide-react";
+import { Cable, Check, Plus, Search, Server, Users, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "ui";
+import { BotAvatar, Button } from "ui";
+import { BrandIcon } from "../components/BrandIcon";
+import { brandIcon } from "../lib/brandIcons";
+import { botView } from "../lib/botProfile";
 import type { McpCatalogEntry, McpServer } from "../api/types";
 import formStyles from "../components/Form.module.css";
-import { AppTile } from "../components/AppTile";
 import { BotAccessPicker } from "../components/BotAccessPicker";
 import { Modal } from "../components/Modal";
 import { Segmented } from "../components/SettingsUi";
@@ -63,10 +65,10 @@ function ConnectedRow({
     server.status === "quarantined";
   return (
     <li className={styles.serverRow} data-testid={`mcp-server-${server.name}`}>
-      <AppTile name={server.name} />
+      <BrandIcon name={server.name} />
       <div className={styles.serverMain}>
         <div className={styles.serverTitle}>
-          <span className={styles.serverName}>{server.name}</span>
+          <span className={styles.serverName}>{brandIcon(server.name).known ? brandIcon(server.name).name : server.name}</span>
           <span className={`${styles.status} ${styles[`tone_${tone}`]}`}>
             <span className={styles.statusDot} aria-hidden="true" />
             {t(`apps.status.${server.status}`)}
@@ -75,18 +77,23 @@ function ConnectedRow({
         <div className={styles.serverMeta}>
           <span>{t("apps.toolCount", { count: server.tool_count })}</span>
           <span aria-hidden="true">·</span>
-          <span>
-            {access.all
-              ? t("apps.botsAll")
-              : access.names.length === 0
-                ? t("apps.botsNone")
-                : t("apps.botsSome", { names: access.names.join(", ") })}
+          <span className={styles.usedBy}>
+            {bots
+              .filter((b) => access.all || server.bots?.includes(b.id))
+              .map((b) => <BotAvatar key={b.id} bot={botView(b)} size="xs" decorative />)}
+            <span className={styles.usedByLabel}>
+              {access.all
+                ? t("apps.botsAll")
+                : access.names.length === 0
+                  ? t("apps.botsNone")
+                  : t("apps.botsSome", { names: access.names.join(", ") })}
+            </span>
           </span>
           <span aria-hidden="true">·</span>
           <span>{server.transport}</span>
         </div>
         {server.error ? (
-          <p className={formStyles.error}>{server.error}</p>
+          <p className={`${formStyles.error} ${styles.connectionError}`} title={server.error}>{server.error}</p>
         ) : null}
       </div>
       <div className={styles.serverActions}>
@@ -194,7 +201,7 @@ function CatalogCard({
   return (
     <li className={styles.card} data-testid={`mcp-catalog-${entry.id}`}>
       <div className={styles.cardHead}>
-        <AppTile name={entry.name} />
+        <BrandIcon name={entry.name} />
         <div className={styles.cardTitle}>
           <span className={styles.serverName}>{entry.name}</span>
           <span className={styles.category}>
@@ -438,8 +445,8 @@ export function AppsModal({
   const categories = useMemo(() => catalogCategories(catalog), [catalog]);
   const shownServers = useMemo(() => filterServers(servers, query), [servers, query]);
   const shownCatalog = useMemo(
-    () => filterCatalog(catalog, query, category),
-    [catalog, query, category]
+    () => filterCatalog(catalog, query, category).sort((a,b) => Number(isConnected(a, servers)) - Number(isConnected(b, servers))),
+    [catalog, query, category, servers]
   );
 
   const run = async (key: string, fn: () => Promise<void>) => {
@@ -476,7 +483,7 @@ export function AppsModal({
         <header className={styles.header}>
           <div className={styles.headTop}>
             <div>
-              <h2 className={styles.title}><Blocks />{t("apps.title")}</h2>
+              <h2 className={styles.title}>{t("apps.title")}</h2>
               <p className={styles.subtitle}>{t("apps.subtitle")}</p>
             </div>
             <div className={styles.headActions}>
@@ -492,6 +499,7 @@ export function AppsModal({
               <button
                 type="button"
                 className={styles.close}
+                title={t("common.close")}
                 aria-label={t("common.close")}
                 onClick={onClose}
               >

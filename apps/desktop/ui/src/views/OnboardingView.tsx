@@ -2,7 +2,7 @@ import { ThemePicker } from "../components/ThemePicker";
 import type { ChangeEvent, CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Avatar, Button, Card, type ThemeMode } from "ui";
+import { BotAvatar, Button, Card, type ThemeMode } from "ui";
 import type { Message, PermissionPreset } from "../api/types";
 import { ApprovalCard, ToolCard } from "../components/ChatCards";
 import formStyles from "../components/Form.module.css";
@@ -1153,12 +1153,7 @@ export function OnboardingView({
             </header>
 
             <div className={formStyles.row}>
-              <Avatar
-                name={botName || "?"}
-                src={botAvatar}
-                color={botColor}
-                size="lg"
-              />
+              <BotAvatar bot={{ id: "new-bot", name: botName, color: botColor, avatar: botAvatar }} size="lg" />
               <div className={`${formStyles.field} ${formStyles.grow}`}>
                 <label className={formStyles.label} htmlFor="onb-bot-name">
                   {t("botForm.name")}
