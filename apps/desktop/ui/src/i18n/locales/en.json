@@ -842,7 +842,8 @@
       "ai": "AI",
       "computer": "Computer",
       "usage": "Usage",
-      "updates": "Updates"
+      "updates": "Updates",
+      "appearance": "Appearance"
     },
     "general": {
       "account": {
@@ -1081,5 +1082,138 @@
   "window": {
     "minimize": "Minimize",
     "maximize": "Maximize / restore"
+  },
+  "theme": {
+    "names": {
+      "obsidian": "Obsidian",
+      "cobalt": "Cobalt",
+      "clay": "Clay",
+      "porcelain": "Porcelain",
+      "moss": "Moss",
+      "raven": "Raven",
+      "navy": "Navy",
+      "wine": "Wine",
+      "graphite": "Graphite",
+      "plum": "Plum",
+      "terminal": "Terminal",
+      "sand": "Sand",
+      "lavender": "Lavender",
+      "mint": "Mint",
+      "rose": "Rose",
+      "sky": "Sky",
+      "midnight": "Midnight blue",
+      "champagne": "Champagne",
+      "copper": "Copper",
+      "storm": "Storm",
+      "neon": "Neon",
+      "race": "Race",
+      "forest": "Forest",
+      "blush": "Blush",
+      "oat": "Oat",
+      "seafoam": "Seafoam",
+      "khaki": "Sand and khaki",
+      "frost": "Frost",
+      "chalk": "Chalk",
+      "custom": "Your own theme"
+    }
+  },
+  "backdrop": {
+    "names": {
+      "ink": "Ink",
+      "aurora": "Aurora",
+      "meadow": "Meadow",
+      "sunset": "Sunset",
+      "night": "Night",
+      "peach": "Peach",
+      "lagoon": "Lagoon",
+      "silk": "Silk",
+      "dawn": "Dawn",
+      "ocean": "Ocean",
+      "lava": "Lava",
+      "pearl": "Pearl",
+      "smoke": "Smoke",
+      "curtain": "Curtain",
+      "reed": "Reeded glass",
+      "reed2": "Reeded rose",
+      "reed3": "Reeded ice",
+      "contour": "Contour",
+      "grid": "Grid",
+      "custom": "Your own image"
+    }
+  },
+  "appearance": {
+    "theme": {
+      "title": "Theme",
+      "description": "Colors for the whole app. Surfaces, lines and muted text are derived from two colors.",
+      "all": "All themes",
+      "system": "Follow system"
+    },
+    "themes": {
+      "modalTitle": "Themes",
+      "done": "Done",
+      "dark": "Dark",
+      "light": "Light",
+      "custom": "Your own theme",
+      "customHint": "Pick two colors, we derive the rest",
+      "customDetail": "Surfaces, lines and muted text are computed automatically.",
+      "background": "Background",
+      "text": "Text",
+      "lowContrast": "Low contrast ({{ratio}}:1). Text needs at least 4.5:1 to stay readable."
+    },
+    "accent": {
+      "title": "Accent",
+      "description": "Highlight color for buttons and active items.",
+      "bot": "Bot color",
+      "botHint": "The accent follows the color of the bot you are talking to.",
+      "theme": "Theme color",
+      "themeHint": "The theme's own accent color.",
+      "fixedHint": "A fixed accent color.",
+      "custom": "Custom color"
+    },
+    "style": {
+      "title": "Style",
+      "description": "How panels, cards and menus are painted.",
+      "solid": "Solid",
+      "glass": "Glass",
+      "line": "Line"
+    },
+    "corners": {
+      "title": "Corners",
+      "description": "How round panels, buttons and cards are.",
+      "sharp": "Sharp",
+      "soft": "Soft",
+      "round": "Round"
+    },
+    "bubbles": {
+      "title": "Chat bubbles",
+      "description": "How messages look in a chat.",
+      "soft": "Filled",
+      "glass": "Glass",
+      "line": "Line",
+      "plain": "Plain text",
+      "own": "My bubble",
+      "tint": "Light",
+      "accent": "Accent",
+      "neutral": "Neutral"
+    },
+    "backdrop": {
+      "title": "Backdrop",
+      "description": "A picture behind the panels. Drawn once, never animated.",
+      "none": "None",
+      "all": "All backdrops",
+      "modalTitle": "Backdrops",
+      "calm": "Calm",
+      "lively": "Lively",
+      "intensity": "Backdrop intensity",
+      "own": "Your own image",
+      "ownHint": "Uses the image from the Background image setting.",
+      "ownChoose": "Choose an image",
+      "groups": {
+        "dotted": "Dotted",
+        "grain": "Grainy",
+        "glass": "Glass and lines",
+        "other": "Other"
+      }
+    }
   }
 }

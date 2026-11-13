@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 import type { SupportedLanguage } from "../../i18n";
 import type { AppSettings } from "../../store/settingsStore";
-import type { ThemeMode } from "ui";
 
 export type SettingsSectionId =
   | "general"
+  | "appearance"
   | "ai"
   | "computer"
   | "usage"
@@ -12,6 +12,7 @@ export type SettingsSectionId =
 
 export const SETTINGS_SECTIONS: readonly SettingsSectionId[] = [
   "general",
+  "appearance",
   "ai",
   "computer",
   "usage",
@@ -35,8 +36,8 @@ export interface CardDef {
 export interface SettingsBridge {
   settings: AppSettings;
   update: (patch: Partial<AppSettings>) => void;
-  onTheme: (mode: ThemeMode) => void;
-  onAccent: (color: string) => void;
+  /** Colour of the bot in view (the accent follows it by default). */
+  botColor?: string;
   onLanguage: (lang: SupportedLanguage) => void;
   onWindowFrame: (on: boolean) => void;
   recordingHotkey: boolean;

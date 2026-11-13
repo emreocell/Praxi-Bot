@@ -2,13 +2,11 @@ import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  applyTheme,
   isReducedMotionPreferred,
-  resolveTheme,
-  subscribeReducedMotion,
-  subscribeSystemTheme
+  subscribeReducedMotion
 } from "ui";
 import { i18n } from "../i18n";
+import { useApplyAppearance } from "../state/useApplyAppearance";
 import {
   type AppSettings,
   DEFAULT_SETTINGS,
@@ -85,21 +83,7 @@ export function OverlayWindow() {
     };
   }, []);
 
-  useEffect(() => {
-    const activeTheme = resolveTheme(settings.themeMode);
-    applyTheme(activeTheme, {
-      accentColor: settings.accentColor
-    });
-
-    if (settings.themeMode === "system") {
-      return subscribeSystemTheme((sysTheme) => {
-        applyTheme(sysTheme, {
-          accentColor: settings.accentColor
-        });
-      });
-    }
-    return undefined;
-  }, [settings.themeMode, settings.accentColor]);
+  useApplyAppearance(settings, undefined, true);
 
   useEffect(() => {
     let rippleCounter = 0;

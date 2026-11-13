@@ -1,8 +1,12 @@
 import { load, type Store } from "@tauri-apps/plugin-store";
-import type { ThemeMode } from "ui";
 import type { PermissionPreset } from "../api/types";
 import { DEFAULT_STOP_HOTKEY, PRODUCT_CONFIG } from "../config/product";
 import type { SupportedLanguage } from "../i18n";
+import {
+  DEFAULT_APPEARANCE,
+  normalizeAppearance,
+  type AppearanceSettings
+} from "../lib/appearance";
 import {
   type ComputerTarget,
   parseComputerTarget,
@@ -10,9 +14,7 @@ import {
   type SendWith
 } from "../lib/settingsPrefs";
 
-export interface AppSettings {
-  themeMode: ThemeMode;
-  accentColor: string;
+export interface AppSettings extends AppearanceSettings {
   backgroundUrl: string;
   backgroundFileName: string;
   backgroundBlur: string;
@@ -48,8 +50,7 @@ export interface AppSettings {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  themeMode: "obsidian",
-  accentColor: "",
+  ...DEFAULT_APPEARANCE,
   backgroundUrl: "",
   backgroundFileName: "",
   backgroundBlur: "0px",
@@ -83,6 +84,9 @@ export function shouldOpenOnboardingOnStart(
 
 const LOCAL_STORAGE_KEY = "desktop_ui_settings";
 
+/** Appearance fields persisted (validated by `normalizeAppearance` on load). */
+const APPEARANCE_KEYS = Object.keys(DEFAULT_APPEARANCE) as (keyof AppearanceSettings)[];
+
 let storeInstancePromise: Promise<Store | null> | null = null;
 
 function isTauriRuntime(): boolean {
@@ -109,11 +113,13 @@ export async function loadSettings(): Promise<AppSettings> {
   const store = await getTauriStore();
   if (store) {
     try {
-      const themeMode =
-        (await store.get<ThemeMode>("themeMode")) ?? DEFAULT_SETTINGS.themeMode;
-      const accentColor =
-        (await store.get<string>("accentColor")) ??
-        DEFAULT_SETTINGS.accentColor;
+      const appearance = normalizeAppearance(
+        Object.fromEntries(
+          await Promise.all(
+            APPEARANCE_KEYS.map(async (k) => [k, await store.get<unknown>(k)] as const)
+          )
+        )
+      );
       const backgroundUrl =
         (await store.get<string>("backgroundUrl")) ??
         DEFAULT_SETTINGS.backgroundUrl;
@@ -181,8 +187,7 @@ export async function loadSettings(): Promise<AppSettings> {
       );
 
       return {
-        themeMode,
-        accentColor,
+        ...appearance,
         backgroundUrl,
         backgroundFileName,
         backgroundBlur,
@@ -219,7 +224,8 @@ export async function loadSettings(): Promise<AppSettings> {
         const parsed = JSON.parse(raw) as Partial<AppSettings>;
         return {
           ...DEFAULT_SETTINGS,
-          ...parsed
+          ...parsed,
+          ...normalizeAppearance(parsed as Record<string, unknown>)
         };
       }
     } catch {
@@ -242,8 +248,7 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
   const store = await getTauriStore();
   if (store) {
     try {
-      await store.set("themeMode", settings.themeMode);
-      await store.set("accentColor", settings.accentColor);
+      for (const k of APPEARANCE_KEYS) await store.set(k, settings[k]);
       await store.set("backgroundUrl", settings.backgroundUrl);
       await store.set("backgroundFileName", settings.backgroundFileName);
       await store.set("backgroundBlur", settings.backgroundBlur);

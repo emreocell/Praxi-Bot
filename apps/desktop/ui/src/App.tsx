@@ -4,19 +4,15 @@ import { isMockMode } from "./api/mockMode";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  applyTheme,
   BotAvatar,
   Button,
   Card,
-  resolveTheme,
   Sidebar,
   SidebarFooter,
   SidebarHeader,
   SidebarItem,
   SidebarLayout,
   SidebarSection,
-  subscribeSystemTheme,
-  type ThemeMode
 } from "ui";
 import styles from "./App.module.css";
 import { BrandIcon } from "./components/BrandIcon";
@@ -28,6 +24,10 @@ import { BOT_COLORS, botView } from "./lib/botProfile";
 import { getAutostart, setAutostart } from "./lib/providers";
 import { ToastProvider } from "./components/Toast";
 import { ControlBridgeHost } from "./state/ControlBridgeHost";
+import { appearanceFromQuery } from "./lib/appearance";
+import { CUSTOM_BACKDROP, NO_BACKDROP } from "./lib/backdropCatalog";
+import { Backdrop, sceneColors } from "./components/Backdrop";
+import { useApplyAppearance } from "./state/useApplyAppearance";
 import { PaletteHost, type PaletteScreen } from "./state/PaletteHost";
 import { ShellBridgeHost } from "./state/ShellBridgeHost";
 import { DaemonProvider, useDaemon } from "./state/DaemonContext";
@@ -113,12 +113,11 @@ function AppShell() {
         return;
       }
       const params = new URLSearchParams(window.location.search);
-      const requestedTheme = params.get("theme");
       const mock = isMockMode();
       const merged: AppSettings = { ...loaded, autostart: osAutostart,
         ...(mock ? { onboardingCompleted: true, language: params.get("lang") === "en" ? "en" as const : "tr" as const } : {}),
-        ...(mock && ["obsidian", "cobalt", "raven", "clay", "system"].includes(requestedTheme ?? "") ? { themeMode: requestedTheme as ThemeMode, accentColor: "" } : {})
       };
+      if (mock) Object.assign(merged, appearanceFromQuery(params, merged));
       if (mock) {
         setRoute({ kind: "chat", chatId: "33333333-3333-4333-8333-333333333333", botId: "11111111-1111-4111-8111-111111111111" });
         const screen = params.get("screen");
@@ -170,38 +169,6 @@ function AppShell() {
       }
     });
   }, []);
-
-  useEffect(() => {
-    const activeTheme = resolveTheme(settings.themeMode);
-    applyTheme(activeTheme, {
-      accentColor: settings.accentColor,
-      background: {
-        url: settings.backgroundUrl,
-        blur: settings.backgroundBlur,
-        dim: settings.backgroundDim
-      }
-    });
-
-    if (settings.themeMode === "system") {
-      return subscribeSystemTheme((systemTheme) => {
-        applyTheme(systemTheme, {
-          accentColor: settings.accentColor,
-          background: {
-            url: settings.backgroundUrl,
-            blur: settings.backgroundBlur,
-            dim: settings.backgroundDim
-          }
-        });
-      });
-    }
-    return undefined;
-  }, [
-    settings.themeMode,
-    settings.accentColor,
-    settings.backgroundUrl,
-    settings.backgroundBlur,
-    settings.backgroundDim
-  ]);
 
   const updateSettings = (patch: Partial<AppSettings>) => {
     setSettings((prev) => {
@@ -255,14 +222,6 @@ function AppShell() {
       .catch(() => {});
   }, [settings.windowFrame]);
 
-  const handleThemeChange = (themeMode: ThemeMode) => {
-    updateSettings({ themeMode });
-  };
-
-  const handleAccentChange = (accentColor: string) => {
-    updateSettings({ accentColor });
-  };
-
   const handleLanguageChange = (language: SupportedLanguage) => {
     void i18n.changeLanguage(language);
     updateSettings({ language });
@@ -312,6 +271,10 @@ function AppShell() {
         ? route.botId
         : undefined;
   const selectedBot = bots.find((bot) => bot.id === routeBotId) ?? bots[0];
+  const { theme: activeTheme, accent: activeAccent } = useApplyAppearance(
+    settings,
+    selectedBot ? botView(selectedBot).color : undefined
+  );
 
   const handleSimulateBotRun = () => {
     const view = selectedBot ? botView(selectedBot) : null;
@@ -421,6 +384,15 @@ function AppShell() {
 
   return (
     <SidebarLayout
+      backdrop={
+        settings.backdrop !== NO_BACKDROP && settings.backdrop !== CUSTOM_BACKDROP ? (
+          <Backdrop
+            scene={settings.backdrop}
+            dim={settings.backdropDim}
+            colors={sceneColors(activeTheme, activeAccent)}
+          />
+        ) : undefined
+      }
       sidebar={
         <Sidebar>
           <SidebarHeader>
@@ -489,7 +461,6 @@ function AppShell() {
             settings={settings}
             onUpdateSettings={updateSettings}
             onLanguageChange={handleLanguageChange}
-            onThemeChange={handleThemeChange}
             onSkip={(currentStep) => {
               updateSettings({
                 onboardingSkipped: true,
@@ -650,8 +621,7 @@ function AppShell() {
         bridge={{
           settings,
           update: updateSettings,
-          onTheme: handleThemeChange,
-          onAccent: handleAccentChange,
+          botColor: selectedBot ? botView(selectedBot).color : undefined,
           onLanguage: handleLanguageChange,
           onWindowFrame: handleWindowFrameChange,
           recordingHotkey,
