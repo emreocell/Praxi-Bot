@@ -19,7 +19,7 @@ import {
   resolveAccent,
   themeFor,
   DEFAULT_CUSTOM_THEME
-} from "./themeModel.ts";
+} from "ui/theme-model";
 
 test("mix blends linearly and weights the second colour", () => {
   assert.equal(mix("#000000", "#ffffff", 0), "#000000");
