@@ -71,6 +71,12 @@ Be realistic about the limits:
 - **The never-list is a safety net, not a sandbox.** It recognises known
   catastrophic patterns; it cannot judge every harmful command. Shell access
   (`shell_run`) is as dangerous as giving someone a terminal.
+- **One approved shell command can reach the daemon.** `shell_run` runs with your
+  user rights. The bearer token file is readable by that user, and the daemon
+  API is on loopback, so a shell command can read the token and call the API
+  (approvals, takeover). The never-list and the file-tool protections raise the
+  bar but are string checks, not a boundary. A real separation of the shell from
+  the daemon credential is planned.
 - **Shell and desktop actions are not undoable.** Only file tools take
   checkpoints.
 - **Unattended runs.** Schedules run without you watching. They pause when an
@@ -97,3 +103,70 @@ Please do not post exploit details in a public issue. The repository does not
 list a dedicated security contact yet (**Planned**); contact the maintainers
 privately through the channel you use to reach them, and keep the report
 confidential until it is fixed.
+
+
+## Live screen privacy and human control
+
+Live-view pixels can contain passwords, OTPs, private documents and notifications.
+They cannot be reliably redacted. A desktop target shares the entire selected
+screen; a browser target shares page content rather than OS dialogs or browser
+chrome. Treat `screen:view` and `screen:input` as separate powerful privileges.
+Human input into a desktop terminal carries full computer authority.
+
+Live-view frames and human input payloads stay in the dedicated memory-only
+transport. They never enter NDJSON/replay, chat attachments, audit, trace,
+telemetry, or model-provider requests. The live-view last-frame cache is never
+an input to screenshot tools. An explicit normal bot screenshot uses its
+existing permission and data path independently. Product-managed persistence is
+prohibited; OS swap/hibernation/dumps and third-party application recordings are
+outside that guarantee.
+
+Input requires the authenticated session owner to hold the active persistent
+global takeover latch, with a valid epoch and current target/frame geometry.
+Disconnect, expiry, revoke and restart invalidate input, reset injected keys best
+effort and retain pause. A legacy release request cannot release an owned
+takeover. A pause that has no takeover owner (your own Pause, also after a
+daemon restart) is released by the local user through the normal release path;
+a takeover latch restored after a restart is cleared by the local user with
+`POST /v1/control/recover`, which needs no view session and no registered
+target. Resume otherwise requires explicit owned release or privileged
+recovery, durable safe continuation notes and successful reset.
+
+You always outrank a paired device. `POST /v1/control/override` (and the app's
+Pause) interrupts any takeover at once, resets pressed keys and keeps the bot
+paused; only the local user can call it. A paired device has no `screen:view` and
+no `screen:input` until you grant them for that device
+(`PUT /v1/view/privileges/{device}`); revoking a pairing, or the grant, ends that
+device's sessions and takeover within seconds. `GET /v1/control/state` shows who
+drives which target and in which state; only the owner also gets the takeover id
+and epoch. The global event stream carries a `control_state_changed`
+notification (who, which target, state, reason; no ids, pixels or text) whenever
+a takeover is acquired, becomes active, is interrupted, released or recovered.
+
+While you drive (`human_driving`), the bot's observation tools are refused too
+(snapshots, screenshots, OCR, tab and window lists): the model must not read what
+you type, such as passwords or one-time codes. A plain pause keeps reads. A bot
+action that waits for your pause or takeover to end waits at most 30 minutes
+(the same bound as a scheduled approval) and then reports that you are still in
+control; the pause itself stays.
+
+The continuation note a takeover leaves in the chat is the only message the
+model receives as a system message from stored history. It has its own role that
+only the daemon writes and exactly one fixed text shape (intervention type, event
+counts, target kind); a stored message with any other text or role is never
+delivered as a system message, and a state-bundle import turns such rows (and any
+unknown role) into the inert `imported_note` role, which is never sent to the
+model; history forwards only an allow-list of roles (user, assistant, the genuine
+control note) and ignores every other value. The daemon's own files (`bot.db`, `schedules.db`, `memory.db` with their
+WAL/SHM/journal, `control-latch.json`, `policy.json`, `host.toml`, `config.toml`,
+`mcp.toml`, `providers.toml`, `web.toml`, the Telegram state files, the
+`peer`, `bots`, `profiles` and `runs` folders and the bearer token) are protected
+from the bot's file tools for reading and writing, including names that differ
+only by a trailing dot or space or by a `:stream` suffix on Windows; skills and
+workflows stay writable because the bot authors them, and a shell command that names them
+always asks for approval. That last rule is damping only: one approved
+`shell_run` still runs as you and can reach those files and the loopback API
+(see below). Audit stores only
+actor/target IDs, event-type counts, sequence ranges, timing and fixed outcomes;
+audit failure denies authorization and suspends input. See the
+[live-view API and integration status](../api/live-view.md).

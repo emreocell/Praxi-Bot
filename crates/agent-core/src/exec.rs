@@ -1000,11 +1000,18 @@ impl TurnExecutor {
         // Approval (if any) happened before this point, so the clock only
         // covers the tool itself.
         let started = std::time::Instant::now();
-        let outcome = tokio::time::timeout(g.tool_timeout, tool.call(&tctx, input)).await;
+        let control = self.sh.control.read().clone();
+        let outcome = crate::control::pause_aware_timeout(
+            g.tool_timeout,
+            control,
+            Arc::clone(&ctx.waiting_computer),
+            tool.call(&tctx, input),
+        )
+        .await;
         let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         let mut self_spilled = false;
         let (text, is_error) = match outcome {
-            Err(_) => (
+            Err(()) => (
                 format!("Error: tool timed out after {:?}", g.tool_timeout),
                 true,
             ),

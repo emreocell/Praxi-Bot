@@ -566,6 +566,8 @@ pub(crate) struct CtxState {
 }
 
 pub(crate) struct RunCtx {
+    pub computer: Arc<tokio::sync::OnceCell<tokio::sync::OwnedSemaphorePermit>>,
+    pub waiting_computer: Arc<AtomicBool>,
     pub run_id: RunId,
     pub chat_id: ChatId,
     pub bot_id: BotId,
@@ -613,6 +615,7 @@ pub(crate) struct Shared {
     pub policy_locked: std::sync::atomic::AtomicBool,
     /// Desktop control bridge (see `control.rs`); `None` = no gate.
     pub control: RwLock<Option<Arc<dyn crate::control::ControlGate>>>,
+    pub computer_slots: Arc<tokio::sync::Semaphore>,
     pub resolver: PermissionResolver,
     pub cfg: LoopConfig,
     pub profiles: RwLock<HashMap<BotId, Arc<BotProfile>>>,
@@ -804,7 +807,18 @@ impl Shared {
                 (profile, pctx.bot_policy.clone(), pctx.initiator, Some(spec))
             }
         };
+        let computer = run
+            .parent_run_id
+            .and_then(|parent| {
+                self.runs
+                    .lock()
+                    .get(&parent)
+                    .map(|ctx| Arc::clone(&ctx.computer))
+            })
+            .unwrap_or_else(|| Arc::new(tokio::sync::OnceCell::new()));
         let ctx = Arc::new(RunCtx {
+            computer,
+            waiting_computer: Arc::new(AtomicBool::new(false)),
             run_id: run.id,
             chat_id,
             bot_id: run.bot_id,

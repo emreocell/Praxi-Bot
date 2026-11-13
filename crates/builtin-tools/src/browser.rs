@@ -22,7 +22,7 @@ use tool_registry::{
     Effect, PermissionCategory, Tool, ToolContext, ToolError, ToolOutput, ToolSpec,
 };
 
-use crate::control::{ControlRequest, DesktopControlGate};
+use crate::control::{ActionPermit, ControlRequest, DesktopControlGate};
 use crate::util::{exec_err, finish_text, parse, save_file, spec};
 
 /// What `browser_wait` waits for.
@@ -40,9 +40,8 @@ pub enum Wait {
 /// text view of what changed.
 #[async_trait]
 pub trait BrowserDriver: Send + Sync {
-    /// Whether the browser window is visible on the user's desktop (then its
-    /// mutating actions go through the desktop control gate).  Headless and
-    /// remote browsers are not.
+    /// Whether a local overlay should highlight mutations. All browser modes
+    /// obey the computer-control admission barrier.
     fn on_desktop(&self) -> bool {
         false
     }
@@ -113,6 +112,8 @@ pub struct BrowserSettings {
     pub profile_dir: Option<PathBuf>,
     /// Where named profiles (`browser_open` `profile`) live.
     pub profiles_root: PathBuf,
+    /// Real bot work/active takeover pins the managed process; watch never does.
+    pub idle_timeout: Duration,
 }
 
 impl BrowserSettings {
@@ -124,6 +125,7 @@ impl BrowserSettings {
             headless: true,
             profile_dir: None,
             profiles_root: data_dir.join("browser-profiles"),
+            idle_timeout: Duration::from_secs(120),
         }
     }
 }
@@ -132,13 +134,21 @@ struct Session {
     browser: Browser,
     page: Page,
     profile: Option<String>,
+    last_work: tokio::time::Instant,
 }
 
 /// [`BrowserDriver`] over Chrome/Edge via `browser-cdp`, launched lazily.
 pub struct CdpDriver {
     settings: BrowserSettings,
-    session: Mutex<Option<Session>>,
+    session: Arc<Mutex<Option<Session>>>,
+    takeover_pin: Arc<std::sync::atomic::AtomicBool>,
+    /// True while a bot run that used the computer is still active.
+    activity: Arc<std::sync::RwLock<Option<ActivityProbe>>>,
+    reaper_started: std::sync::atomic::AtomicBool,
 }
+
+/// Reports whether real bot work is going on (see [`CdpDriver::set_activity_probe`]).
+pub type ActivityProbe = Arc<dyn Fn() -> bool + Send + Sync>;
 
 fn snap_opts(interactive_only: bool) -> SnapshotOptions {
     SnapshotOptions {
@@ -224,7 +234,10 @@ impl CdpDriver {
     pub fn new(settings: BrowserSettings) -> Self {
         Self {
             settings,
-            session: Mutex::new(None),
+            session: Arc::new(Mutex::new(None)),
+            takeover_pin: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            activity: Arc::new(std::sync::RwLock::new(None)),
+            reaper_started: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -261,6 +274,7 @@ impl CdpDriver {
             browser,
             page,
             profile: profile.map(str::to_string),
+            last_work: tokio::time::Instant::now(),
         })
     }
 
@@ -268,7 +282,9 @@ impl CdpDriver {
         &self,
         guard: &'a mut Option<Session>,
         profile: Option<&str>,
+        allow_launch: bool,
     ) -> Result<&'a mut Session, String> {
+        self.start_idle_reaper();
         // A crashed or closed browser must not stay cached until daemon restart.
         if guard
             .as_ref()
@@ -286,9 +302,57 @@ impl CdpDriver {
                 ));
             }
         } else {
+            if !allow_launch {
+                return Err("browser_idle; call browser_open before reading the browser".into());
+            }
             *guard = Some(self.launch_session(profile).await?);
         }
-        Ok(guard.as_mut().expect("session just ensured"))
+        let session = guard.as_mut().expect("session just ensured");
+        session.last_work = tokio::time::Instant::now();
+        Ok(session)
+    }
+
+    /// Adapter hook: watching alone must never call this or `ensure`.
+    pub fn set_takeover_pin(&self, active: bool) {
+        self.takeover_pin
+            .store(active, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// While `probe` returns true (a bot run that used the computer is
+    /// active) the idle reaper keeps the browser and restarts its idle clock;
+    /// watching never counts as activity.
+    pub fn set_activity_probe(&self, probe: ActivityProbe) {
+        if let Ok(mut slot) = self.activity.write() {
+            *slot = Some(probe);
+        }
+    }
+
+    fn start_idle_reaper(&self) {
+        if self
+            .reaper_started
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            return;
+        }
+        let weak_session = Arc::downgrade(&self.session);
+        let pin = Arc::clone(&self.takeover_pin);
+        let activity = Arc::clone(&self.activity);
+        let timeout = self.settings.idle_timeout;
+        tokio::spawn(async move {
+            let mut state = ReapState::default();
+            loop {
+                tokio::time::sleep(
+                    timeout
+                        .min(Duration::from_secs(5))
+                        .max(Duration::from_millis(1)),
+                )
+                .await;
+                let Some(session) = weak_session.upgrade() else {
+                    break;
+                };
+                reap_tick(&session, timeout, &pin, &activity, &mut state).await;
+            }
+        });
     }
 
     /// Close the browser (the next call launches a new one).
@@ -302,17 +366,76 @@ impl CdpDriver {
     const RELAUNCH_LIMIT: u32 = 1;
 }
 
+/// What the idle reaper remembers between ticks.
+#[derive(Default)]
+struct ReapState {
+    /// The previous tick saw a bot run using the computer.
+    was_active: bool,
+}
+
+/// One idle-reaper tick, separated from its timer so tests can drive it with a
+/// paused clock. The browser is kept while a takeover pins it or a bot run that
+/// used the computer is active; the idle clock restarts at the tick that sees
+/// the run end (never earlier, so the browser cannot be closed the instant a
+/// run finishes), and the probe is checked again under the session lock so an
+/// action admitted just before the close is not racing it.
+async fn reap_tick(
+    session: &Mutex<Option<Session>>,
+    timeout: Duration,
+    pin: &std::sync::atomic::AtomicBool,
+    activity: &std::sync::RwLock<Option<ActivityProbe>>,
+    state: &mut ReapState,
+) {
+    let run_active = || {
+        activity
+            .read()
+            .ok()
+            .and_then(|probe| probe.clone())
+            .is_some_and(|probe| probe())
+    };
+    if pin.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let active = run_active();
+    if active || state.was_active {
+        if let Ok(mut slot) = session.try_lock()
+            && let Some(s) = slot.as_mut()
+        {
+            s.last_work = tokio::time::Instant::now();
+        }
+        state.was_active = active;
+        return;
+    }
+    if let Ok(mut slot) = session.try_lock()
+        && slot
+            .as_ref()
+            .is_some_and(|s| s.last_work.elapsed() >= timeout)
+        // An action admitted since the check above holds the computer slot
+        // before it takes this lock, so it is seen here.
+        && !run_active()
+        && let Some(s) = slot.take()
+    {
+        let _ = s.browser.close().await;
+    }
+}
+
 /// Run `$body` against the cached session. A closed browser is replaced inside
 /// `ensure`. A terminal transport error evicts the session and retries once.
 macro_rules! with_session {
-    ($self:expr, $profile:expr, |$sess:ident| $body:block) => {{
+    ($self:expr, $profile:expr, |$sess:ident| $body:block) => {
+        with_session!($self, $profile, true, |$sess| $body)
+    };
+    ($self:expr, $profile:expr, $allow_launch:expr, |$sess:ident| $body:block) => {{
         let mut outcome = None;
         for attempt in 0..=CdpDriver::RELAUNCH_LIMIT {
             let mut guard = $self.session.lock().await;
             let step = {
-                let $sess = $self.ensure(&mut guard, $profile).await?;
+                let $sess = $self.ensure(&mut guard, $profile, $allow_launch).await?;
                 $body
             };
+            if let Some(session) = guard.as_mut() {
+                session.last_work = tokio::time::Instant::now();
+            }
             match step {
                 Ok(value) => {
                     outcome = Some(value);
@@ -360,7 +483,9 @@ impl BrowserDriver for CdpDriver {
 
     async fn snapshot(&self, interactive_only: bool) -> Result<String, String> {
         let opts = snap_opts(interactive_only);
-        let snap = with_session!(self, None, |sess| { sess.page.snapshot(&opts).await })?;
+        let snap = with_session!(self, None, false, |sess| {
+            sess.page.snapshot(&opts).await
+        })?;
         Ok(snap.render())
     }
 
@@ -412,7 +537,9 @@ impl BrowserDriver for CdpDriver {
             Wait::Selector(sel) => WaitCondition::Selector(sel),
             Wait::Idle => WaitCondition::NetworkIdle,
         };
-        let acted = with_session!(self, None, |sess| { sess.page.wait_for(&c, timeout).await })?;
+        let acted = with_session!(self, None, false, |sess| {
+            sess.page.wait_for(&c, timeout).await
+        })?;
         render_action(&acted)
     }
 
@@ -432,7 +559,7 @@ impl BrowserDriver for CdpDriver {
     }
 
     async fn tabs(&self, switch_to: Option<usize>) -> Result<String, String> {
-        with_session!(self, None, |sess| {
+        with_session!(self, None, switch_to.is_some(), |sess| {
             let listed: Result<String, browser_cdp::Error> = async {
                 let pages = sess.browser.pages().await?;
                 if let Some(n) = switch_to {
@@ -475,7 +602,7 @@ impl BrowserDriver for CdpDriver {
             (None, true) => ScreenshotTarget::FullPage,
             (None, false) => ScreenshotTarget::Viewport,
         };
-        let bytes = with_session!(self, None, |sess| {
+        let bytes = with_session!(self, None, false, |sess| {
             sess.page
                 .screenshot(&ScreenshotOptions {
                     target: target.clone(),
@@ -511,6 +638,7 @@ struct Shared {
     driver: Arc<dyn BrowserDriver>,
     data_dir: PathBuf,
     control: Option<Arc<dyn DesktopControlGate>>,
+    observed_epoch: std::sync::atomic::AtomicU64,
 }
 
 /// One browser tool.
@@ -531,6 +659,7 @@ pub fn tools(
         driver,
         data_dir: data_dir.to_path_buf(),
         control,
+        observed_epoch: std::sync::atomic::AtomicU64::new(0),
     });
     let b = PermissionCategory::Browser;
     let ref_prop =
@@ -811,70 +940,325 @@ fn check_open_url(url: &str) -> Result<(), ToolError> {
 impl BrowserTool {
     /// Ask the control gate before a mutating action, when the browser is a
     /// visible window on the user's desktop.
-    async fn gate(&self, run_id: &str, action: &str, label: String) -> Result<(), ToolError> {
-        let Some(gate) = self
-            .shared
-            .control
-            .as_ref()
-            .filter(|_| self.shared.driver.on_desktop())
-        else {
-            return Ok(());
+    async fn gate(
+        &self,
+        run_id: &str,
+        action: &str,
+        label: String,
+    ) -> Result<ActionPermit, ToolError> {
+        let Some(gate) = self.shared.control.as_ref() else {
+            return Ok(ActionPermit::default());
         };
-        gate.before_action(&ControlRequest {
+        let request = ControlRequest {
             run_id: run_id.to_owned(),
             rect: None,
             label,
             action: action.to_owned(),
+        };
+        crate::control::admit_or_inherit(gate.as_ref(), || async {
+            if self.shared.driver.on_desktop() {
+                gate.admit_action(&request).await
+            } else {
+                gate.admit_background_action(&request).await
+            }
         })
         .await
         .map_err(exec_err)
     }
 
+    /// A fresh observation is never taken while a pause, a human takeover or a
+    /// local override is in force: the model must not read the page then.
+    fn refuse_observation_while_latched(&self) -> Result<(), ToolError> {
+        if let Some(gate) = &self.shared.control
+            && let Some(message) = gate.latch_refusal().or_else(|| gate.observation_refused())
+        {
+            return Err(exec_err(message));
+        }
+        Ok(())
+    }
+
+    /// Observation tools discard their result if control changed while they
+    /// ran (a screenshot, a wait or a tab list that straddles a takeover).
     async fn run(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
-        let d = &self.shared.driver;
+        let observing = match self.op {
+            Op::Snapshot | Op::Wait | Op::Screenshot => true,
+            Op::Tabs => input.get("switch_to").is_none_or(Value::is_null),
+            _ => false,
+        };
+        let gate = self.shared.control.clone();
+        let epoch = gate.as_ref().map(|g| g.observation_epoch());
+        let text = self.run_inner(run_id, input).await?;
+        if let (Some(gate), Some(epoch)) = (gate, epoch) {
+            if observing
+                && (gate.observation_epoch() != epoch || gate.observation_refused().is_some())
+            {
+                return Err(exec_err(crate::control::OBSERVATION_DISCARDED));
+            }
+            // An action's own result carries a fresh observation (the refresh
+            // after it, or the re-observation that replaced it): withheld if
+            // the human drives by now. The epoch is not compared here: an
+            // action legitimately waits through a pause and its release.
+            if !observing && gate.observation_refused().is_some() {
+                return Ok(crate::control::OBSERVATION_WITHHELD.to_owned());
+            }
+        }
+        Ok(text)
+    }
+
+    async fn run_inner(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
+        let observing = match self.op {
+            Op::Snapshot | Op::Wait | Op::Screenshot => true,
+            Op::Tabs => input.get("switch_to").is_none_or(Value::is_null),
+            _ => false,
+        };
+        if observing
+            && let Some(message) = self
+                .shared
+                .control
+                .as_ref()
+                .and_then(|g| g.observation_refused())
+        {
+            return Err(exec_err(message));
+        }
+        let d = Arc::clone(&self.shared.driver);
         let text = match self.op {
             Op::Open => {
                 let i: OpenIn = parse(input)?;
                 check_open_url(&i.url)?;
-                self.gate(run_id, "open", i.url.clone()).await?;
-                d.open_opts(
-                    &i.url,
-                    i.profile.as_deref(),
-                    i.dialog.as_deref(),
-                    i.prompt_text.as_deref(),
-                )
-                .await
+                let permit = self.gate(run_id, "open", i.url.clone()).await?;
+                if permit.needs_observation()
+                    || self
+                        .shared
+                        .observed_epoch
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                        != self
+                            .shared
+                            .control
+                            .as_ref()
+                            .map_or(0, |g| g.observation_epoch())
+                {
+                    self.shared.observed_epoch.store(
+                        self.shared
+                            .control
+                            .as_ref()
+                            .map_or(0, |g| g.observation_epoch()),
+                        std::sync::atomic::Ordering::SeqCst,
+                    );
+                    self.refuse_observation_while_latched()?;
+                    let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
+                permit
+                    .protect(async move {
+                        d.open_opts(
+                            &i.url,
+                            i.profile.as_deref(),
+                            i.dialog.as_deref(),
+                            i.prompt_text.as_deref(),
+                        )
+                        .await
+                    })
+                    .await
+                    .map_err(exec_err)?
             }
             Op::Snapshot => {
                 let i: SnapIn = parse(input)?;
-                d.snapshot(i.interactive_only).await
+                let epoch = self
+                    .shared
+                    .control
+                    .as_ref()
+                    .map_or(0, |gate| gate.observation_epoch());
+                let snapshot = d.snapshot(i.interactive_only).await;
+                if self
+                    .shared
+                    .control
+                    .as_ref()
+                    .map_or(0, |gate| gate.observation_epoch())
+                    != epoch
+                {
+                    return Err(exec_err(
+                        "human intervention changed the page during observation; obtain a fresh observation",
+                    ));
+                }
+                if snapshot.is_ok() {
+                    self.shared
+                        .observed_epoch
+                        .store(epoch, std::sync::atomic::Ordering::SeqCst);
+                }
+                snapshot
             }
             Op::Click => {
                 let i: RefIn = parse(input)?;
-                self.gate(run_id, "click", i.r#ref.clone()).await?;
-                d.click_opts(&i.r#ref, i.dialog.as_deref(), i.prompt_text.as_deref())
+                let permit = self.gate(run_id, "click", i.r#ref.clone()).await?;
+                if permit.needs_observation()
+                    || self
+                        .shared
+                        .observed_epoch
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                        != self
+                            .shared
+                            .control
+                            .as_ref()
+                            .map_or(0, |g| g.observation_epoch())
+                {
+                    self.shared.observed_epoch.store(
+                        self.shared
+                            .control
+                            .as_ref()
+                            .map_or(0, |g| g.observation_epoch()),
+                        std::sync::atomic::Ordering::SeqCst,
+                    );
+                    self.refuse_observation_while_latched()?;
+                    let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
+                permit
+                    .protect(async move {
+                        d.click_opts(&i.r#ref, i.dialog.as_deref(), i.prompt_text.as_deref())
+                            .await
+                    })
                     .await
+                    .map_err(exec_err)?
             }
             Op::Fill => {
                 let i: FillIn = parse(input)?;
-                self.gate(run_id, "type", i.r#ref.clone()).await?;
-                d.fill(&i.r#ref, &i.text).await
+                let permit = self.gate(run_id, "type", i.r#ref.clone()).await?;
+                if permit.needs_observation()
+                    || self
+                        .shared
+                        .observed_epoch
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                        != self
+                            .shared
+                            .control
+                            .as_ref()
+                            .map_or(0, |g| g.observation_epoch())
+                {
+                    self.shared.observed_epoch.store(
+                        self.shared
+                            .control
+                            .as_ref()
+                            .map_or(0, |g| g.observation_epoch()),
+                        std::sync::atomic::Ordering::SeqCst,
+                    );
+                    self.refuse_observation_while_latched()?;
+                    let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
+                permit
+                    .protect(async move { d.fill(&i.r#ref, &i.text).await })
+                    .await
+                    .map_err(exec_err)?
             }
             Op::Select => {
                 let i: SelectIn = parse(input)?;
-                self.gate(run_id, "click", i.r#ref.clone()).await?;
-                d.select(&i.r#ref, &i.value).await
+                let permit = self.gate(run_id, "click", i.r#ref.clone()).await?;
+                if permit.needs_observation()
+                    || self
+                        .shared
+                        .observed_epoch
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                        != self
+                            .shared
+                            .control
+                            .as_ref()
+                            .map_or(0, |g| g.observation_epoch())
+                {
+                    self.shared.observed_epoch.store(
+                        self.shared
+                            .control
+                            .as_ref()
+                            .map_or(0, |g| g.observation_epoch()),
+                        std::sync::atomic::Ordering::SeqCst,
+                    );
+                    self.refuse_observation_while_latched()?;
+                    let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
+                permit
+                    .protect(async move { d.select(&i.r#ref, &i.value).await })
+                    .await
+                    .map_err(exec_err)?
             }
             Op::Press => {
                 let i: PressIn = parse(input)?;
-                self.gate(run_id, "key", i.key.clone()).await?;
-                d.press(&i.key).await
+                let permit = self.gate(run_id, "key", i.key.clone()).await?;
+                if permit.needs_observation()
+                    || self
+                        .shared
+                        .observed_epoch
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                        != self
+                            .shared
+                            .control
+                            .as_ref()
+                            .map_or(0, |g| g.observation_epoch())
+                {
+                    self.shared.observed_epoch.store(
+                        self.shared
+                            .control
+                            .as_ref()
+                            .map_or(0, |g| g.observation_epoch()),
+                        std::sync::atomic::Ordering::SeqCst,
+                    );
+                    self.refuse_observation_while_latched()?;
+                    let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
+                permit
+                    .protect(async move { d.press(&i.key).await })
+                    .await
+                    .map_err(exec_err)?
             }
             Op::Scroll => {
                 let i: ScrollIn = parse(input)?;
-                self.gate(run_id, "scroll", i.r#ref.clone().unwrap_or_default())
+                let permit = self
+                    .gate(run_id, "scroll", i.r#ref.clone().unwrap_or_default())
                     .await?;
-                d.scroll(i.r#ref.as_deref(), i.dx, i.dy).await
+                if permit.needs_observation()
+                    || self
+                        .shared
+                        .observed_epoch
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                        != self
+                            .shared
+                            .control
+                            .as_ref()
+                            .map_or(0, |g| g.observation_epoch())
+                {
+                    self.shared.observed_epoch.store(
+                        self.shared
+                            .control
+                            .as_ref()
+                            .map_or(0, |g| g.observation_epoch()),
+                        std::sync::atomic::Ordering::SeqCst,
+                    );
+                    self.refuse_observation_while_latched()?;
+                    let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
+                permit
+                    .protect(async move { d.scroll(i.r#ref.as_deref(), i.dx, i.dy).await })
+                    .await
+                    .map_err(exec_err)?
             }
             Op::Wait => {
                 let i: WaitIn = parse(input)?;
@@ -897,8 +1281,36 @@ impl BrowserTool {
             }
             Op::Back => {
                 let i: BackIn = parse(input)?;
-                self.gate(run_id, "key", "back".to_owned()).await?;
-                d.back_opts(i.dialog.as_deref()).await
+                let permit = self.gate(run_id, "key", "back".to_owned()).await?;
+                if permit.needs_observation()
+                    || self
+                        .shared
+                        .observed_epoch
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                        != self
+                            .shared
+                            .control
+                            .as_ref()
+                            .map_or(0, |g| g.observation_epoch())
+                {
+                    self.shared.observed_epoch.store(
+                        self.shared
+                            .control
+                            .as_ref()
+                            .map_or(0, |g| g.observation_epoch()),
+                        std::sync::atomic::Ordering::SeqCst,
+                    );
+                    self.refuse_observation_while_latched()?;
+                    let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
+                permit
+                    .protect(async move { d.back_opts(i.dialog.as_deref()).await })
+                    .await
+                    .map_err(exec_err)?
             }
             Op::Tabs => {
                 let i: TabsIn = parse(input)?;
@@ -907,9 +1319,39 @@ impl BrowserTool {
                 // Listing shares that spec. The control gate still runs only
                 // for activation: a bare list does not take over the desktop.
                 if let Some(n) = i.switch_to {
-                    self.gate(run_id, "tab", format!("tab {n}")).await?;
+                    let permit = self.gate(run_id, "tab", format!("tab {n}")).await?;
+                    if permit.needs_observation()
+                        || self
+                            .shared
+                            .observed_epoch
+                            .load(std::sync::atomic::Ordering::SeqCst)
+                            != self
+                                .shared
+                                .control
+                                .as_ref()
+                                .map_or(0, |g| g.observation_epoch())
+                    {
+                        self.shared.observed_epoch.store(
+                            self.shared
+                                .control
+                                .as_ref()
+                                .map_or(0, |g| g.observation_epoch()),
+                            std::sync::atomic::Ordering::SeqCst,
+                        );
+                        self.refuse_observation_while_latched()?;
+                        let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                        permit.observed();
+                        return Ok(format!(
+                            "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                        ));
+                    }
+                    permit
+                        .protect(async move { d.tabs(i.switch_to).await })
+                        .await
+                        .map_err(exec_err)?
+                } else {
+                    d.tabs(None).await
                 }
-                d.tabs(i.switch_to).await
             }
             Op::Screenshot => {
                 let i: ShotIn = parse(input)?;
@@ -923,8 +1365,37 @@ impl BrowserTool {
             Op::Eval => {
                 let i: EvalIn = parse(input)?;
                 let label: String = i.js.trim().chars().take(80).collect();
-                self.gate(run_id, "eval", label).await?;
-                d.eval(&i.js).await.map(|v| v.to_string())
+                let permit = self.gate(run_id, "eval", label).await?;
+                if permit.needs_observation()
+                    || self
+                        .shared
+                        .observed_epoch
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                        != self
+                            .shared
+                            .control
+                            .as_ref()
+                            .map_or(0, |g| g.observation_epoch())
+                {
+                    self.shared.observed_epoch.store(
+                        self.shared
+                            .control
+                            .as_ref()
+                            .map_or(0, |g| g.observation_epoch()),
+                        std::sync::atomic::Ordering::SeqCst,
+                    );
+                    self.refuse_observation_while_latched()?;
+                    let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
+                permit
+                    .protect(async move { d.eval(&i.js).await })
+                    .await
+                    .map_err(exec_err)?
+                    .map(|v| v.to_string())
             }
         };
         text.map_err(exec_err)
@@ -948,17 +1419,26 @@ pub(crate) mod fake {
     use super::*;
     use parking_lot::Mutex as PMutex;
 
+    /// A callback a test runs inside a backend call.
+    pub type FakeHook = Arc<dyn Fn(&str) + Send + Sync>;
+
     /// Records calls as `name:args` strings and returns canned text.
     #[derive(Default)]
     pub struct FakeBrowser {
         pub calls: PMutex<Vec<String>>,
         /// When set, mutating actions go through the desktop control gate.
         pub on_desktop: bool,
+        /// Runs inside every backend call (a human takeover landing mid-call).
+        pub hook: PMutex<Option<FakeHook>>,
     }
 
     impl FakeBrowser {
         fn rec(&self, s: &str) -> Result<String, String> {
             self.calls.lock().push(s.to_string());
+            let hook = self.hook.lock().clone();
+            if let Some(hook) = hook {
+                hook(s);
+            }
             if s.contains("e404") {
                 Err("unknown ref e404".into())
             } else {
@@ -1046,7 +1526,7 @@ pub(crate) mod fake {
             full: bool,
             _e: Option<&str>,
         ) -> Result<(Vec<u8>, &'static str), String> {
-            self.calls.lock().push(format!("screenshot:{full}"));
+            let _ = self.rec(&format!("screenshot:{full}"));
             Ok((vec![0xFF, 0xD8, 0xFF], "jpg"))
         }
         async fn eval(&self, js: &str) -> Result<Value, String> {
@@ -1412,6 +1892,69 @@ mod tests {
         assert_eq!(fake.calls.lock().as_slice(), ["tabs:None"]);
     }
 
+    struct HumanDrives;
+
+    #[async_trait]
+    impl DesktopControlGate for HumanDrives {
+        fn observation_refused(&self) -> Option<String> {
+            Some("the user is controlling (observation paused)".into())
+        }
+        async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+            Err("the user has taken control".into())
+        }
+    }
+
+    #[tokio::test]
+    async fn browser_observation_is_refused_while_the_human_drives() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Arc::new(FakeBrowser::default());
+        let t = tools(fake.clone(), dir.path(), Some(Arc::new(HumanDrives)));
+        for (name, input) in [
+            ("browser_snapshot", json!({})),
+            ("browser_screenshot", json!({})),
+            ("browser_tabs", json!({})),
+            ("browser_wait", json!({"idle":true})),
+        ] {
+            let err = get(&t, name)
+                .call(&ToolContext::default(), input)
+                .await
+                .unwrap_err();
+            assert!(
+                err.to_string().contains("observation paused"),
+                "{name}: {err}"
+            );
+        }
+        assert!(fake.calls.lock().is_empty(), "{:?}", fake.calls.lock());
+    }
+
+    #[tokio::test]
+    async fn headless_mutations_all_obey_the_same_control_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Arc::new(FakeBrowser::default());
+        let tools = tools(fake.clone(), dir.path(), Some(Arc::new(RefuseGate)));
+        for (name, input) in [
+            ("browser_open", json!({"url":"https://example.invalid"})),
+            ("browser_click", json!({"ref":"e1"})),
+            ("browser_fill", json!({"ref":"e1","text":"test"})),
+            ("browser_select", json!({"ref":"e1","value":"v"})),
+            ("browser_press", json!({"key":"Enter"})),
+            ("browser_scroll", json!({"dy":1})),
+            ("browser_back", json!({})),
+            ("browser_tabs", json!({"switch_to":2})),
+            ("browser_eval", json!({"js":"1"})),
+        ] {
+            assert!(
+                get(&tools, name)
+                    .call(&ToolContext::default(), input)
+                    .await
+                    .unwrap_err()
+                    .to_string()
+                    .contains("taken control")
+            );
+        }
+        assert!(fake.calls.lock().is_empty());
+    }
+
     fn ws_accept(key: &str) -> String {
         const GUID: &[u8] = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
         let mut data = key.as_bytes().to_vec();
@@ -1769,6 +2312,198 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn read_only_browser_calls_cannot_implicitly_launch_outside_admission() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("launches.txt");
+        let launcher = write_fake_launcher(dir.path(), &log);
+        let driver = CdpDriver::new(BrowserSettings {
+            executable: Some(launcher),
+            ..BrowserSettings::isolated(dir.path())
+        });
+        assert!(
+            driver
+                .snapshot(false)
+                .await
+                .unwrap_err()
+                .contains("browser_idle")
+        );
+        assert!(
+            driver
+                .tabs(None)
+                .await
+                .unwrap_err()
+                .contains("browser_idle")
+        );
+        assert!(
+            driver
+                .screenshot(false, None)
+                .await
+                .unwrap_err()
+                .contains("browser_idle")
+        );
+        assert!(!log.exists());
+    }
+
+    #[tokio::test]
+    async fn watch_does_not_launch_and_takeover_pin_blocks_idle_close() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("launches.txt");
+        let launcher = write_fake_launcher(dir.path(), &log);
+        let driver = CdpDriver::new(BrowserSettings {
+            executable: Some(launcher),
+            idle_timeout: Duration::from_millis(40),
+            ..BrowserSettings::isolated(dir.path())
+        });
+        // A registry/watch has no reason to call the bot-only `ensure` path.
+        assert!(driver.session.lock().await.is_none());
+        assert!(!log.exists());
+        let server = FakeCdp::start();
+        let browser = Browser::connect(&server.url).await.unwrap();
+        let page = browser.first_page().await.unwrap();
+        *driver.session.lock().await = Some(Session {
+            browser,
+            page,
+            profile: None,
+            last_work: tokio::time::Instant::now(),
+        });
+        driver.set_takeover_pin(true);
+        driver.start_idle_reaper();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(driver.session.lock().await.is_some());
+        driver.set_takeover_pin(false);
+        for _ in 0..100 {
+            if driver.session.lock().await.is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(driver.session.lock().await.is_none());
+        assert!(!log.exists(), "watch/idle must not launch a new process");
+        server.kill();
+    }
+
+    /// Deterministic: the tick is driven by hand on a frozen clock (no timers,
+    /// no sleeps), so a slow CI runner cannot change the outcome.
+    #[tokio::test]
+    async fn an_active_bot_run_keeps_the_browser_open_between_steps_then_idle_close_resumes() {
+        async fn tick(driver: &CdpDriver, timeout: Duration, state: &mut ReapState) {
+            reap_tick(
+                &driver.session,
+                timeout,
+                &driver.takeover_pin,
+                &driver.activity,
+                state,
+            )
+            .await;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let driver = CdpDriver::new(BrowserSettings {
+            idle_timeout: Duration::from_millis(40),
+            ..BrowserSettings::isolated(dir.path())
+        });
+        let server = FakeCdp::start();
+        let browser = Browser::connect(&server.url).await.unwrap();
+        let page = browser.first_page().await.unwrap();
+        *driver.session.lock().await = Some(Session {
+            browser,
+            page,
+            profile: None,
+            last_work: tokio::time::Instant::now(),
+        });
+        // Connected over real I/O; from here the clock is frozen and advanced by hand.
+        tokio::time::pause();
+        let run_active = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let probe = Arc::clone(&run_active);
+        driver.set_activity_probe(Arc::new(move || {
+            probe.load(std::sync::atomic::Ordering::SeqCst)
+        }));
+        let timeout = Duration::from_millis(40);
+        let mut state = ReapState::default();
+        // The run is active far longer than the idle timeout (waiting for the
+        // model or an approval between steps): the browser stays.
+        for _ in 0..10 {
+            tokio::time::advance(Duration::from_millis(100)).await;
+            tick(&driver, timeout, &mut state).await;
+            assert!(
+                driver.session.lock().await.is_some(),
+                "idle close must not take the browser from an active run"
+            );
+        }
+        // The run ends. The idle clock starts at the tick that sees it end:
+        // not closed on that tick, nor just before a full timeout after it.
+        // (The run ends 45 ms after the last tick that saw it active: longer
+        // than the idle timeout, but the run was active until just now.)
+        tokio::time::advance(Duration::from_millis(45)).await;
+        run_active.store(false, std::sync::atomic::Ordering::SeqCst);
+        tick(&driver, timeout, &mut state).await;
+        assert!(
+            driver.session.lock().await.is_some(),
+            "not closed on the tick that sees the run end"
+        );
+        tokio::time::advance(Duration::from_millis(39)).await;
+        tick(&driver, timeout, &mut state).await;
+        assert!(driver.session.lock().await.is_some(), "39 ms < 40 ms idle");
+        tokio::time::advance(Duration::from_millis(2)).await;
+        tick(&driver, timeout, &mut state).await;
+        assert!(driver.session.lock().await.is_none(), "idle close resumed");
+        server.kill();
+    }
+
+    #[tokio::test]
+    async fn a_takeover_pin_and_a_run_that_starts_just_before_the_close_keep_the_browser() {
+        let dir = tempfile::tempdir().unwrap();
+        let driver = CdpDriver::new(BrowserSettings {
+            idle_timeout: Duration::from_millis(40),
+            ..BrowserSettings::isolated(dir.path())
+        });
+        let server = FakeCdp::start();
+        let browser = Browser::connect(&server.url).await.unwrap();
+        let page = browser.first_page().await.unwrap();
+        *driver.session.lock().await = Some(Session {
+            browser,
+            page,
+            profile: None,
+            last_work: tokio::time::Instant::now(),
+        });
+        tokio::time::pause();
+        let timeout = Duration::from_millis(40);
+        let mut state = ReapState::default();
+        driver.set_takeover_pin(true);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        reap_tick(
+            &driver.session,
+            timeout,
+            &driver.takeover_pin,
+            &driver.activity,
+            &mut state,
+        )
+        .await;
+        assert!(driver.session.lock().await.is_some(), "pinned");
+        driver.set_takeover_pin(false);
+        // A run admits an action between the first probe and the close: the
+        // probe is read again under the session lock.
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = Arc::clone(&calls);
+        driver.set_activity_probe(Arc::new(move || {
+            // False for the first check, true from then on.
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 1
+        }));
+        reap_tick(
+            &driver.session,
+            timeout,
+            &driver.takeover_pin,
+            &driver.activity,
+            &mut state,
+        )
+        .await;
+        assert!(
+            driver.session.lock().await.is_some(),
+            "a run that became active before the close keeps the browser"
+        );
+        server.kill();
+    }
+
+    #[tokio::test]
     async fn killed_browser_fake_launcher_relaunches_on_next_open() {
         assert_eq!(
             ws_accept("dGhlIHNhbXBsZSBub25jZQ=="),
@@ -1795,6 +2530,7 @@ mod tests {
             browser,
             page,
             profile: None,
+            last_work: tokio::time::Instant::now(),
         });
         let tools = tools(drv, dir.path(), None);
         let err = get(&tools, "browser_open")

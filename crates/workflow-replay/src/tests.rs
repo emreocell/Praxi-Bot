@@ -818,6 +818,47 @@ impl builtin_tools::DesktopControlGate for RefusingControl {
     }
 }
 
+/// Admits, but a pause / takeover / override is in force by the time the step
+/// would read or act: the replay must not touch the screen.
+struct LatchedAdmit;
+
+#[async_trait::async_trait]
+impl builtin_tools::DesktopControlGate for LatchedAdmit {
+    fn latch_refusal(&self) -> Option<String> {
+        Some("The user stopped the bot; do not retry.".into())
+    }
+    async fn before_action(&self, _req: &builtin_tools::ControlRequest) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn a_replay_step_never_reads_or_acts_while_control_is_held_back() {
+    let wf = screen_wf(vec![Step::DesktopAction(DesktopAction {
+        app: None,
+        window_title_pattern: Some("*App".into()),
+        target: Some(desk_loc("button", "OK")),
+        action: DesktopActionKind::Click,
+        value: None,
+        method: None,
+    })]);
+    let desktop = FakeDesktop::new(
+        vec![window(1, "A - App")],
+        vec![node(0, "button", "OK", 10.0, 10.0)],
+    );
+    let mut opts = ReplayOptions::instant();
+    opts.control = Some(Arc::new(LatchedAdmit));
+    let report = Replayer::new(handles(Some(desktop.clone()), None), opts)
+        .replay(&wf, &params(&json!({})), &RecordingGate::default())
+        .await
+        .unwrap();
+    assert!(!report.is_completed());
+    assert!(
+        desktop.actions.lock().is_empty(),
+        "no action was dispatched"
+    );
+}
+
 fn refusing_opts() -> (ReplayOptions, Arc<RefusingControl>) {
     let c = Arc::new(RefusingControl::default());
     let mut o = ReplayOptions::instant();

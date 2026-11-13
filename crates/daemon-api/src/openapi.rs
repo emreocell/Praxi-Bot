@@ -8,7 +8,7 @@ use axum::Json;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
-use crate::{dto, email, email_routes, error, mcp, mcp_routes, routes, sse};
+use crate::{dto, email, email_routes, error, live_view, mcp, mcp_routes, routes, sse};
 
 struct Security;
 
@@ -41,6 +41,17 @@ impl Modify for Security {
     ),
     paths(
         routes::health,
+        live_view::targets,
+        live_view::create_session,
+        live_view::update_session,
+        live_view::heartbeat,
+        live_view::delete_session,
+        live_view::takeover,
+        live_view::local_override,
+        live_view::local_recover,
+        live_view::set_privileges,
+        live_view::input::input,
+        live_view::stream::frames,
         routes::list_bots,
         routes::create_bot,
         routes::get_bot,
@@ -100,7 +111,8 @@ impl Modify for Security {
         events_doc,
     ),
     components(schemas(
-        sse::SseStatus, sse::Gap, dto::Health, dto::BotDto, dto::BotInput, dto::ChatDto, dto::CreateChat,
+        ::live_view::RecordHeader, ::live_view::FrameMetadata, ::live_view::SourceRect,
+        dto::ReleaseResult, dto::ControlStateChanged, dto::ScreenPrivilegesInput, sse::SseStatus, sse::Gap, dto::Health, dto::BotDto, dto::BotInput, dto::ChatDto, dto::CreateChat,
         dto::MessageDto, dto::Mode, dto::SendMessage, dto::DeliveryKind, dto::SendResponse,
         dto::ApprovalDto, dto::Decision, dto::Scope, dto::DecideApproval,
         dto::DecisionResponse, dto::RunDto, dto::UsageTotals, dto::BotUsage,
@@ -121,7 +133,7 @@ impl Modify for Security {
     )),
     modifiers(&Security),
     tags(
-        (name = "meta"), (name = "bots"), (name = "chats"), (name = "approvals"),
+        (name = "view"), (name = "meta"), (name = "bots"), (name = "chats"), (name = "approvals"),
         (name = "runs"), (name = "usage"), (name = "events"), (name = "control"),
         (name = "policy"), (name = "providers"), (name = "schedules"), (name = "channels"),
         (name = "mcp"), (name = "secrets"), (name = "email")
@@ -163,6 +175,11 @@ pub struct ApiDoc;
 /// `{"type":"mcp_server_changed","name","status"}`) when an MCP server is
 /// added, updated, removed or changes status (connecting / connected / error /
 /// quarantined ...); same rules: a hint to refetch `/v1/mcp/servers`.
+///
+/// And `control_state_changed` events (`dto::ControlStateChanged`:
+/// `{"type":"control_state_changed","state","owner","target_id","reason"}`) when
+/// a screen takeover is acquired, becomes active, is interrupted, released or
+/// recovered (no ids, epochs, pixels or text); not replayed.
 #[utoipa::path(get, path = "/v1/events", tag = "events", security(("bearer" = [])),
     params(
         ("run_id" = Option<uuid::Uuid>, Query, description = "Follow only this run; the stream ends after run_finished"),

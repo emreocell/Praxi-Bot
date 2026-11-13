@@ -716,7 +716,12 @@ pub(crate) async fn usage(
 
 // --------------------------------------------------------------- control
 
-fn control_state_dto(s: &AppState) -> ControlStateDto {
+/// `viewer`: only the takeover owner sees the takeover and epoch ids; everyone
+/// else gets who/what/state, never credentials for the input and release routes.
+pub(crate) fn control_state_dto(
+    s: &AppState,
+    viewer: Option<&crate::live_view::Actor>,
+) -> ControlStateDto {
     let reg = s.hub().registration();
     ControlStateDto {
         mode: reg.map(|(m, _)| m),
@@ -725,6 +730,18 @@ fn control_state_dto(s: &AppState) -> ControlStateDto {
         }),
         app_connected: s.hub().app_connected(),
         latched: s.hub().latched(),
+        takeover: s.hub().takeover().map(|t| {
+            let mut info = t.info;
+            if viewer.is_none_or(|v| v.key != t.actor) {
+                info.owner = crate::control::display_label(&t.actor);
+                info.id = uuid::Uuid::nil();
+                info.session_id = uuid::Uuid::nil();
+                info.control_epoch = 0;
+                info.input_expires_in_ms = 0;
+            }
+            info
+        }),
+        release: None,
     }
 }
 
@@ -732,10 +749,33 @@ fn control_state_dto(s: &AppState) -> ControlStateDto {
 /// desktop again.  This is the only way (besides a daemon restart) to end a
 /// pause; heartbeats and a lost app never do.  Idempotent.
 #[utoipa::path(post, path = "/v1/control/release", tag = "control", security(("bearer" = [])),
-    responses((status = 200, body = ControlStateDto)))]
-pub(crate) async fn release_control(State(s): State<AppState>) -> Json<ControlStateDto> {
-    s.hub().release();
-    Json(control_state_dto(&s))
+    request_body = Option<live_view::ReleaseRequest>,
+    responses((status = 200, body = ControlStateDto), (status = 403, body = ErrorBody), (status = 409, body = ErrorBody)))]
+pub(crate) async fn release_control(
+    State(s): State<AppState>,
+    axum::Extension(actor): axum::Extension<crate::live_view::Actor>,
+    body: axum::body::Bytes,
+) -> Result<Json<ControlStateDto>, ApiError> {
+    let mut dto;
+    if body.is_empty() {
+        crate::live_view::require_latch_authority(&s, &actor)?;
+        s.hub()
+            .try_release_as(actor.local)
+            .map_err(ApiError::conflict)?;
+        dto = control_state_dto(&s, Some(&actor));
+    } else {
+        let request: live_view::ReleaseRequest = serde_json::from_slice(&body)
+            .map_err(|_| ApiError::bad_request("invalid release request"))?;
+        let result = crate::dto::ReleaseResult {
+            takeover_id: request.takeover_id,
+            request_id: request.request_id,
+            state: "released".into(),
+        };
+        crate::live_view::release(&s, &actor, request).await?;
+        dto = control_state_dto(&s, Some(&actor));
+        dto.release = Some(result);
+    }
+    Ok(Json(dto))
 }
 
 /// The newest daemon-wide event cursor (`gseq`, `0` = no event yet): what a
@@ -758,8 +798,11 @@ pub(crate) async fn latest_cursor(
 /// The daemon's view of the desktop app's controller registration.
 #[utoipa::path(get, path = "/v1/control/state", tag = "control", security(("bearer" = [])),
     responses((status = 200, body = ControlStateDto)))]
-pub(crate) async fn get_control_state(State(s): State<AppState>) -> Json<ControlStateDto> {
-    Json(control_state_dto(&s))
+pub(crate) async fn get_control_state(
+    State(s): State<AppState>,
+    axum::Extension(actor): axum::Extension<crate::live_view::Actor>,
+) -> Json<ControlStateDto> {
+    Json(control_state_dto(&s, Some(&actor)))
 }
 
 /// Register the desktop app as controller and report its mode (heartbeat: send
@@ -770,13 +813,60 @@ pub(crate) async fn get_control_state(State(s): State<AppState>) -> Json<Control
 /// user's resume), or use `POST /v1/control/release`.
 #[utoipa::path(put, path = "/v1/control/state", tag = "control", security(("bearer" = [])),
     request_body = ControlStateInput,
-    responses((status = 200, body = ControlStateDto), (status = 400, body = ErrorBody)))]
+    responses((status = 200, body = ControlStateDto), (status = 400, body = ErrorBody),
+        (status = 403, body = ErrorBody), (status = 409, body = ErrorBody)))]
 pub(crate) async fn put_control_state(
     State(s): State<AppState>,
+    axum::Extension(actor): axum::Extension<crate::live_view::Actor>,
     ApiJson(input): ApiJson<ControlStateInput>,
-) -> Json<ControlStateDto> {
-    s.hub().apply_state(input.mode, input.release);
-    Json(control_state_dto(&s))
+) -> Result<Json<ControlStateDto>, ApiError> {
+    // The local app owns the controller registration and the latch. A paired
+    // device may touch either only with the local user's explicit input grant:
+    // without it, even reporting a mode or setting a first pause is refused.
+    crate::live_view::require_latch_authority(&s, &actor)?;
+    // The local app's Pause/Stop must work during anybody's takeover: it
+    // overrides the takeover and keeps the pause. Paired peers cannot.
+    let local_pause =
+        actor.local && !input.release && input.mode == crate::dto::ControlMode::Paused;
+    let mut takeover_seen = local_pause && s.hub().takeover().is_some();
+    #[cfg(test)]
+    if local_pause {
+        let hook = s.live_view().put_state_hook.lock().clone();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+    // A takeover can start (or end) between the check and the write: the Stop
+    // is retried against whatever the hub holds now, never lost to a 409.
+    for _ in 0..3 {
+        if takeover_seen || (local_pause && s.hub().takeover().is_some()) {
+            takeover_seen = false;
+            crate::live_view::override_local_pause(&s, &actor).await?;
+            if s.hub().takeover().is_some() {
+                return Ok(Json(control_state_dto(&s, Some(&actor))));
+            }
+            // The takeover ended (a peer's release finished) between the check
+            // and the override: apply the pause the normal way, so it is not
+            // lost and the registration is refreshed.
+        }
+        match s
+            .hub()
+            .try_apply_state_as(input.mode, input.release, actor.local)
+        {
+            Err(e) if local_pause && e == "owned takeover controls the latch" => {}
+            Err(e) => {
+                // A failed latch-file write is not a conflict: the pause is in
+                // force in memory and the write is retried.
+                return Err(if e == "control persistence failed" {
+                    ApiError::unavailable(e)
+                } else {
+                    ApiError::conflict(e)
+                });
+            }
+            Ok(()) => return Ok(Json(control_state_dto(&s, Some(&actor)))),
+        }
+    }
+    Err(ApiError::conflict("owned takeover controls the latch"))
 }
 
 /// Answer a `control_requested` event: let the action `proceed` (after the
@@ -789,9 +879,14 @@ pub(crate) async fn put_control_state(
               (status = 404, body = ErrorBody, description = "unknown, answered or timed-out request")))]
 pub(crate) async fn decide_control(
     State(s): State<AppState>,
+    axum::Extension(actor): axum::Extension<crate::live_view::Actor>,
     Path(rid): Path<String>,
     ApiJson(input): ApiJson<ControlDecisionInput>,
 ) -> Result<Json<ControlDecisionResponse>, ApiError> {
+    // The overlay question belongs to the local user on this screen: no paired
+    // device may answer it (it would approve a bot action before the local
+    // overlay decides).
+    crate::live_view::require_local(&s, &actor, "control_decision")?;
     let request_id = id(&rid)?;
     if s.hub().decide(request_id, input.decision, input.reason) {
         Ok(Json(ControlDecisionResponse {

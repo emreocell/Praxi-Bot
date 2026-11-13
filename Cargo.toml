@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/live-view",
     "crates/agent-core",
     "crates/agent-router",
     "crates/tool-registry",
@@ -56,6 +57,7 @@ unsafe_code = "deny"
 pedantic = "warn"
 
 [workspace.dependencies]
+live-view = { path = "crates/live-view", version = "0.1.0" }
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
 base64 = "0.22"

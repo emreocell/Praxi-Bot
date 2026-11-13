@@ -750,13 +750,13 @@
         ]
       }
     },
-    "/v1/control/release": {
+    "/v1/control/override": {
       "post": {
         "tags": [
           "control"
         ],
-        "summary": "Explicitly release a latched `paused` / `human_driving`: bots may use the\ndesktop again.  This is the only way (besides a daemon restart) to end a\npause; heartbeats and a lost app never do.  Idempotent.",
-        "operationId": "release_control",
+        "summary": "`POST /v1/control/override`: the local user's stop. Works against a peer's\ntakeover; the bot stays paused until `release` or `recover`.",
+        "operationId": "local_override",
         "responses": {
           "200": {
             "description": "",
@@ -764,6 +764,124 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ControlStateDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/control/recover": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "`POST /v1/control/recover`: the local user clears a takeover latch (also one\nrestored after a restart) without a registered target or view session. The\nbot resumes with a fresh observation.",
+        "operationId": "local_recover",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlStateDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/control/release": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Explicitly release a latched `paused` / `human_driving`: bots may use the\ndesktop again.  This is the only way (besides a daemon restart) to end a\npause; heartbeats and a lost app never do.  Idempotent.",
+        "operationId": "release_control",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ReleaseRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlStateDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -834,6 +952,61 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/control/takeover": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "operationId": "takeover",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeoverRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoverAccepted"
                 }
               }
             }
@@ -1340,7 +1513,7 @@
           "events"
         ],
         "summary": "Documentation stub for the SSE route (the handler lives in `sse.rs`).",
-        "description": "Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the\nSSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local\n`seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without\nit the stream covers all runs: the SSE `id` is a daemon-wide, strictly\nincreasing `gseq` (persisted) and `Last-Event-ID: <gseq>` replays every\nmissed event of every run, in order, before going live.  Browsers cannot set\nheaders on `EventSource`, so this route (and only this one) also accepts the\nAPI token as the `token` query parameter (Host / Origin checks still apply;\nthe token is compared in constant time; beware that URLs may be logged).\n\nThe daemon-wide stream (no `run_id`) also carries `schedule_changed` events\n(`dto::ScheduleChanged`: `{\"type\":\"schedule_changed\",\"schedule_id\",\"kind\"}`,\nkind `created` / `updated` / `toggled` / `deleted`) when a schedule is changed\nthrough the API.  They have no SSE `id`, are not replayed and are not\nenvelopes: treat them as a hint to refetch `/v1/schedules`.\n\nA replay gap is explicit: `event: gap` has an `id` equal to `to_gseq` and\ndata `{from_gseq, to_gseq, run_id, reason}`; reason is `log_line_missing` or\n`log_unreadable`. It is audited before the cursor passes the missing row.\n`/v1/events/status.sse_gaps_total` (authenticated) counts these notifications since daemon startup.\nAfter three consecutive replay failures (or live-buffer overflow),\n`event: error` carries `{code: \"replay_unavailable\", last_event_id}` and the\nstream closes. This error has no `id`; reconnect with the last received ID.\nRetry delays start at 250 ms and double up to 5 s. Live buffering is limited\nto 1000 events and 4 MiB per subscriber; replay chunks hold at most 2 MiB of serialized events (a single larger event closes the stream with `replay_unavailable`), and at most `max_sse_subscribers` streams (default 16) may be open: further requests get `503`. The desktop currently ignores unknown\nevent names; card 144 can surface gap/error notifications without changing\nthe ordering or cursor contract.\n\nIt likewise carries `mcp_server_changed` events (`mcp::McpServerChanged`:\n`{\"type\":\"mcp_server_changed\",\"name\",\"status\"}`) when an MCP server is\nadded, updated, removed or changes status (connecting / connected / error /\nquarantined ...); same rules: a hint to refetch `/v1/mcp/servers`.",
+        "description": "Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the\nSSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local\n`seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without\nit the stream covers all runs: the SSE `id` is a daemon-wide, strictly\nincreasing `gseq` (persisted) and `Last-Event-ID: <gseq>` replays every\nmissed event of every run, in order, before going live.  Browsers cannot set\nheaders on `EventSource`, so this route (and only this one) also accepts the\nAPI token as the `token` query parameter (Host / Origin checks still apply;\nthe token is compared in constant time; beware that URLs may be logged).\n\nThe daemon-wide stream (no `run_id`) also carries `schedule_changed` events\n(`dto::ScheduleChanged`: `{\"type\":\"schedule_changed\",\"schedule_id\",\"kind\"}`,\nkind `created` / `updated` / `toggled` / `deleted`) when a schedule is changed\nthrough the API.  They have no SSE `id`, are not replayed and are not\nenvelopes: treat them as a hint to refetch `/v1/schedules`.\n\nA replay gap is explicit: `event: gap` has an `id` equal to `to_gseq` and\ndata `{from_gseq, to_gseq, run_id, reason}`; reason is `log_line_missing` or\n`log_unreadable`. It is audited before the cursor passes the missing row.\n`/v1/events/status.sse_gaps_total` (authenticated) counts these notifications since daemon startup.\nAfter three consecutive replay failures (or live-buffer overflow),\n`event: error` carries `{code: \"replay_unavailable\", last_event_id}` and the\nstream closes. This error has no `id`; reconnect with the last received ID.\nRetry delays start at 250 ms and double up to 5 s. Live buffering is limited\nto 1000 events and 4 MiB per subscriber; replay chunks hold at most 2 MiB of serialized events (a single larger event closes the stream with `replay_unavailable`), and at most `max_sse_subscribers` streams (default 16) may be open: further requests get `503`. The desktop currently ignores unknown\nevent names; card 144 can surface gap/error notifications without changing\nthe ordering or cursor contract.\n\nIt likewise carries `mcp_server_changed` events (`mcp::McpServerChanged`:\n`{\"type\":\"mcp_server_changed\",\"name\",\"status\"}`) when an MCP server is\nadded, updated, removed or changes status (connecting / connected / error /\nquarantined ...); same rules: a hint to refetch `/v1/mcp/servers`.\n\nAnd `control_state_changed` events (`dto::ControlStateChanged`:\n`{\"type\":\"control_state_changed\",\"state\",\"owner\",\"target_id\",\"reason\"}`) when\na screen takeover is acquired, becomes active, is interrupted, released or\nrecovered (no ids, epochs, pixels or text); not replayed.",
         "operationId": "events_doc",
         "parameters": [
           {
@@ -2848,6 +3021,321 @@
         ]
       }
     },
+    "/v1/view/privileges/{peer_key}": {
+      "put": {
+        "tags": [
+          "view"
+        ],
+        "summary": "`PUT /v1/view/privileges/{peer_key}`: the local user grants or revokes\n`screen:view` / `screen:input` for one paired device. A paired device has\nneither until granted; revoking interrupts its sessions and takeover.",
+        "operationId": "set_privileges",
+        "parameters": [
+          {
+            "name": "peer_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScreenPrivilegesInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/view/sessions": {
+      "post": {
+        "tags": [
+          "view"
+        ],
+        "operationId": "create_session",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSession"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInfo"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/view/sessions/{id}": {
+      "delete": {
+        "tags": [
+          "view"
+        ],
+        "operationId": "delete_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "view"
+        ],
+        "operationId": "update_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EffectiveProfile"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/view/sessions/{id}/frames": {
+      "get": {
+        "tags": [
+          "view"
+        ],
+        "operationId": "frames",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/vnd.praxi.live-view.v1": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/view/sessions/{id}/heartbeat": {
+      "put": {
+        "tags": [
+          "view"
+        ],
+        "operationId": "heartbeat",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Heartbeat"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/view/sessions/{id}/input": {
+      "post": {
+        "tags": [
+          "view"
+        ],
+        "operationId": "input",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InputBatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InputResult"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": ""
+          },
+          "429": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/view/targets": {
+      "get": {
+        "tags": [
+          "view"
+        ],
+        "operationId": "targets",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TargetInfo"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/webhooks/{id}": {
       "post": {
         "tags": [
@@ -3128,6 +3616,46 @@
         ],
         "description": "Usage of one bot."
       },
+      "Button": {
+        "type": "string",
+        "enum": [
+          "left",
+          "middle",
+          "right"
+        ]
+      },
+      "Capabilities": {
+        "type": "object",
+        "required": [
+          "view",
+          "input",
+          "codecs"
+        ],
+        "properties": {
+          "codecs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Codec"
+            }
+          },
+          "input": {
+            "type": "boolean"
+          },
+          "reason": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Reason"
+              }
+            ]
+          },
+          "view": {
+            "type": "boolean"
+          }
+        }
+      },
       "CatalogProviderDto": {
         "type": "object",
         "description": "A catalog entry.",
@@ -3195,6 +3723,14 @@
             "description": "`true` when `allow` holds only because of a category grant."
           }
         }
+      },
+      "Cause": {
+        "type": "string",
+        "enum": [
+          "idle",
+          "action",
+          "refresh"
+        ]
       },
       "ChannelDto": {
         "type": "object",
@@ -3274,6 +3810,13 @@
           "signed_in",
           "signed_out",
           "unknown"
+        ]
+      },
+      "Codec": {
+        "type": "string",
+        "enum": [
+          "jpeg",
+          "webp"
         ]
       },
       "ConfiguredProviderDto": {
@@ -3385,6 +3928,46 @@
           "paused"
         ]
       },
+      "ControlStateChanged": {
+        "type": "object",
+        "description": "Data of the `control_state_changed` SSE event of the daemon-wide stream: a\nscreen takeover was acquired, became active, was interrupted, released or\nrecovered. A notification only (refetch `GET /v1/control/state`): no SSE\n`id`, not replayed, not an envelope. It names who and which target, never\ntakeover ids, epochs, pixels, text or keys.",
+        "required": [
+          "type",
+          "state",
+          "owner",
+          "target_id"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "description": "Displayable actor identity (`local-ui:...` or `peer:<key>`)."
+          },
+          "reason": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Reason",
+                "description": "Why the takeover stopped, if it was interrupted."
+              }
+            ]
+          },
+          "state": {
+            "type": "string",
+            "description": "`acquiring`, `active`, `paused`, `released` or `recovered`."
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The target the takeover addressed."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `control_state_changed`."
+          }
+        }
+      },
       "ControlStateDto": {
         "type": "object",
         "description": "The daemon's view of the controller registration.",
@@ -3422,6 +4005,28 @@
               {
                 "$ref": "#/components/schemas/ControlMode",
                 "description": "Last reported mode; `null` when no app is registered (never reported,\nor the heartbeat expired)."
+              }
+            ]
+          },
+          "release": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ReleaseResult",
+                "description": "Idempotent release acknowledgement."
+              }
+            ]
+          },
+          "takeover": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TakeoverInfo",
+                "description": "Owned takeover; restored latches require explicit recovery."
               }
             ]
           }
@@ -3472,6 +4077,47 @@
             "description": "Title (default `New chat`)."
           }
         }
+      },
+      "CreateSession": {
+        "type": "object",
+        "required": [
+          "target_id",
+          "profile",
+          "max_width",
+          "max_height",
+          "codecs",
+          "client_id"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "codecs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Codec"
+            }
+          },
+          "max_height": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "max_width": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "profile": {
+            "$ref": "#/components/schemas/Profile"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
       },
       "DecideApproval": {
         "type": "object",
@@ -3622,6 +4268,57 @@
           },
           "policy": {
             "description": "The profile's own policy as JSON; `null` = the workspace policy applies."
+          }
+        }
+      },
+      "EffectiveProfile": {
+        "type": "object",
+        "required": [
+          "profile",
+          "max_width",
+          "max_height",
+          "quality",
+          "max_fps",
+          "bytes_per_second",
+          "burst_bytes",
+          "codec"
+        ],
+        "properties": {
+          "burst_bytes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "bytes_per_second": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "codec": {
+            "$ref": "#/components/schemas/Codec"
+          },
+          "max_fps": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "max_height": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "max_width": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "profile": {
+            "$ref": "#/components/schemas/Profile"
+          },
+          "quality": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
           }
         }
       },
@@ -4014,6 +4711,78 @@
           }
         }
       },
+      "FrameMetadata": {
+        "type": "object",
+        "required": [
+          "target_id",
+          "generation",
+          "frame_seq",
+          "captured_at_ms",
+          "cause",
+          "codec",
+          "width",
+          "height",
+          "source_rect",
+          "geometry_revision",
+          "repeated"
+        ],
+        "properties": {
+          "action_seq": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "captured_at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cause": {
+            "$ref": "#/components/schemas/Cause"
+          },
+          "codec": {
+            "$ref": "#/components/schemas/Codec"
+          },
+          "frame_seq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "geometry_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "height": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "repeated": {
+            "type": "boolean"
+          },
+          "source_rect": {
+            "$ref": "#/components/schemas/SourceRect"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "Gap": {
         "type": "object",
         "required": [
@@ -4137,6 +4906,286 @@
             "description": "Daemon crate version."
           }
         }
+      },
+      "Heartbeat": {
+        "type": "object",
+        "properties": {
+          "control_epoch": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "takeover_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "HumanAction": {
+        "type": "string",
+        "enum": [
+          "login_completed",
+          "application_opened",
+          "other"
+        ]
+      },
+      "InputBatch": {
+        "type": "object",
+        "required": [
+          "v",
+          "takeover_id",
+          "control_epoch",
+          "generation",
+          "geometry_revision",
+          "first_seq",
+          "events"
+        ],
+        "properties": {
+          "control_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InputEvent"
+            }
+          },
+          "first_seq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "geometry_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "takeover_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "v": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "InputEvent": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "phase",
+              "x",
+              "y",
+              "buttons",
+              "modifiers",
+              "type"
+            ],
+            "properties": {
+              "button": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Button"
+                  }
+                ]
+              },
+              "buttons": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "modifiers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Modifier"
+                }
+              },
+              "phase": {
+                "$ref": "#/components/schemas/PointerPhase"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "pointer"
+                ]
+              },
+              "x": {
+                "type": "number",
+                "format": "double"
+              },
+              "y": {
+                "type": "number",
+                "format": "double"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "x",
+              "y",
+              "delta_x",
+              "delta_y",
+              "modifiers",
+              "type"
+            ],
+            "properties": {
+              "delta_x": {
+                "type": "number",
+                "format": "double"
+              },
+              "delta_y": {
+                "type": "number",
+                "format": "double"
+              },
+              "modifiers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Modifier"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "wheel"
+                ]
+              },
+              "x": {
+                "type": "number",
+                "format": "double"
+              },
+              "y": {
+                "type": "number",
+                "format": "double"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "phase",
+              "code",
+              "key",
+              "location",
+              "repeat",
+              "modifiers",
+              "type"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "location": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "modifiers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Modifier"
+                }
+              },
+              "phase": {
+                "$ref": "#/components/schemas/KeyPhase"
+              },
+              "repeat": {
+                "type": "boolean"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "key"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "text",
+              "type"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "text"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "reset"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "InputResult": {
+        "type": "object",
+        "required": [
+          "accepted_through",
+          "applied_through",
+          "state"
+        ],
+        "properties": {
+          "accepted_through": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "applied_through": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "state": {
+            "$ref": "#/components/schemas/ViewState"
+          }
+        }
+      },
+      "KeyPhase": {
+        "type": "string",
+        "enum": [
+          "down",
+          "up"
+        ]
       },
       "LatestCursor": {
         "type": "object",
@@ -4965,6 +6014,21 @@
           "queue"
         ]
       },
+      "Modifier": {
+        "type": "string",
+        "enum": [
+          "alt",
+          "ctrl",
+          "meta",
+          "shift"
+        ]
+      },
+      "Outcome": {
+        "type": "string",
+        "enum": [
+          "completed"
+        ]
+      },
       "PairCodeDto": {
         "type": "object",
         "description": "A one-time pairing code (`POST /v1/channels/telegram/pair-code`).",
@@ -5025,6 +6089,14 @@
           }
         }
       },
+      "PointerPhase": {
+        "type": "string",
+        "enum": [
+          "move",
+          "down",
+          "up"
+        ]
+      },
       "PolicyDto": {
         "type": "object",
         "description": "The global default permission policy (`GET` / `PUT /v1/policy`).",
@@ -5081,6 +6153,13 @@
           }
         }
       },
+      "Profile": {
+        "type": "string",
+        "enum": [
+          "watch",
+          "live"
+        ]
+      },
       "ProvidersDto": {
         "type": "object",
         "description": "`GET /v1/providers`.",
@@ -5117,6 +6196,225 @@
               "null"
             ],
             "description": "Id of the loop's default provider."
+          }
+        }
+      },
+      "Reason": {
+        "type": "string",
+        "enum": [
+          "browser_idle",
+          "remote_node_live_view",
+          "unsupported",
+          "unavailable",
+          "expired",
+          "revoked",
+          "disconnected",
+          "stale",
+          "geometry_changed",
+          "refresh_pending",
+          "frame_budget_exceeded",
+          "drain_timeout",
+          "audit_failed",
+          "reset_failed",
+          "partial_injection",
+          "rate_limited",
+          "restart",
+          "persistence_failed",
+          "local_override"
+        ]
+      },
+      "RecordHeader": {
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FrameMetadata"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "v",
+                  "session_id",
+                  "sent_at_ms"
+                ],
+                "properties": {
+                  "sent_at_ms": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "v": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "frame"
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "required": [
+              "v",
+              "session_id",
+              "state",
+              "effective_profile",
+              "control_epoch",
+              "input_allowed",
+              "type"
+            ],
+            "properties": {
+              "control_epoch": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "effective_profile": {
+                "$ref": "#/components/schemas/EffectiveProfile"
+              },
+              "input_allowed": {
+                "type": "boolean"
+              },
+              "reason": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Reason"
+                  }
+                ]
+              },
+              "session_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "$ref": "#/components/schemas/ViewState"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "status"
+                ]
+              },
+              "v": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "v",
+              "server_time_ms",
+              "type"
+            ],
+            "properties": {
+              "server_time_ms": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "heartbeat"
+                ]
+              },
+              "v": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              }
+            }
+          }
+        ]
+      },
+      "RecoveryReason": {
+        "type": "string",
+        "enum": [
+          "owner_lost",
+          "device_revoked",
+          "daemon_restart"
+        ]
+      },
+      "ReleaseRequest": {
+        "type": "object",
+        "required": [
+          "takeover_id",
+          "control_epoch",
+          "request_id",
+          "outcome"
+        ],
+        "properties": {
+          "control_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "human_action": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HumanAction"
+              }
+            ]
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/Outcome"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "takeover_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReleaseResult": {
+        "type": "object",
+        "required": [
+          "takeover_id",
+          "request_id",
+          "state"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string"
+          },
+          "takeover_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -5429,6 +6727,25 @@
           "always_category"
         ]
       },
+      "ScreenPrivilegesInput": {
+        "type": "object",
+        "description": "Body of `PUT /v1/view/privileges/{peer_key}` (local user only).",
+        "required": [
+          "view",
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "boolean",
+            "description": "May take over and drive input (`screen:input`); requires `view`."
+          },
+          "view": {
+            "type": "boolean",
+            "description": "May watch the screen (`screen:view`)."
+          }
+        },
+        "additionalProperties": false
+      },
       "SendMessage": {
         "type": "object",
         "description": "`POST /v1/chats/{id}/messages`.",
@@ -5467,6 +6784,114 @@
           }
         }
       },
+      "SessionInfo": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "generation",
+          "effective_profile",
+          "input_capabilities",
+          "stream_url",
+          "expires_in_ms"
+        ],
+        "properties": {
+          "effective_profile": {
+            "$ref": "#/components/schemas/EffectiveProfile"
+          },
+          "expires_in_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "input_capabilities": {
+            "type": "boolean"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stream_url": {
+            "type": "string"
+          }
+        }
+      },
+      "SessionUpdate": {
+        "type": "object",
+        "properties": {
+          "buffered_frames": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "bytes_per_second": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "decode_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "last_rendered_frame_seq": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_height": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "max_width": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "profile": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Profile"
+              }
+            ]
+          },
+          "quality": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "SetSecret": {
         "type": "object",
         "description": "Body of `POST /v1/secrets/{name}`.",
@@ -5477,6 +6902,39 @@
           "value": {
             "type": "string",
             "description": "The secret value.  Write-only: no route returns it."
+          }
+        }
+      },
+      "SourceRect": {
+        "type": "object",
+        "required": [
+          "x",
+          "y",
+          "width",
+          "height",
+          "units"
+        ],
+        "properties": {
+          "height": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "units": {
+            "$ref": "#/components/schemas/Units"
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "x": {
+            "type": "number",
+            "format": "double"
+          },
+          "y": {
+            "type": "number",
+            "format": "double"
           }
         }
       },
@@ -5508,6 +6966,186 @@
             "minimum": 0
           }
         }
+      },
+      "TakeoverAccepted": {
+        "type": "object",
+        "required": [
+          "takeover_id",
+          "state",
+          "control_epoch"
+        ],
+        "properties": {
+          "control_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "state": {
+            "$ref": "#/components/schemas/ViewState"
+          },
+          "takeover_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "TakeoverInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "target_id",
+          "owner",
+          "state",
+          "control_epoch",
+          "input_expires_in_ms"
+        ],
+        "properties": {
+          "control_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "input_expires_in_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "owner": {
+            "type": "string"
+          },
+          "reason": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Reason"
+              }
+            ]
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ViewState"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "TakeoverRequest": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "request_id"
+        ],
+        "properties": {
+          "reacquire_takeover_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "reason": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RecoveryReason"
+              }
+            ]
+          },
+          "recover": {
+            "type": "boolean"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TargetInfo": {
+        "type": "object",
+        "required": [
+          "target_id",
+          "kind",
+          "host_id",
+          "generation",
+          "capabilities"
+        ],
+        "properties": {
+          "bot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/Capabilities"
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "host_id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TargetKind"
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "unavailable_reason": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Reason"
+              }
+            ]
+          }
+        }
+      },
+      "TargetKind": {
+        "type": "string",
+        "enum": [
+          "browser",
+          "desktop"
+        ]
+      },
+      "Units": {
+        "type": "string",
+        "enum": [
+          "physical_px",
+          "css_px"
+        ]
       },
       "UsageSummary": {
         "type": "object",
@@ -5580,6 +7218,17 @@
             "minimum": 0
           }
         }
+      },
+      "ViewState": {
+        "type": "string",
+        "enum": [
+          "watch",
+          "acquiring",
+          "active",
+          "paused",
+          "unavailable",
+          "closed"
+        ]
       }
     },
     "securitySchemes": {
@@ -5591,6 +7240,9 @@
     }
   },
   "tags": [
+    {
+      "name": "view"
+    },
     {
       "name": "meta"
     },

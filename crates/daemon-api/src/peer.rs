@@ -34,6 +34,10 @@ pub const PEER_DENIED_POST_PATHS: &[&str] = &["/v1/providers/cli/enable", "/v1/p
 /// Same API and permissions as loopback, with transport authentication.
 pub fn peer_router(state: AppState) -> Router {
     crate::api_routes()
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::live_view::audit_ingress,
+        ))
         .layer(axum::middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state)
 }
@@ -62,7 +66,13 @@ fn normalize_deny_path(path: &str) -> String {
     out
 }
 
-async fn guard(State(state): State<AppState>, req: Request, next: Next) -> Response {
+/// `POST /v1/control/{request_id}` answers an overlay question: local only.
+fn answers_overlay_question(path: &str) -> bool {
+    path.strip_prefix("/v1/control/")
+        .is_some_and(|rest| uuid::Uuid::parse_str(rest).is_ok())
+}
+
+async fn guard(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     let Some(peer) = req.extensions().get::<PeerIdentity>().cloned() else {
         return ApiError::forbidden("paired peer identity required").into_response();
     };
@@ -86,6 +96,15 @@ async fn guard(State(state): State<AppState>, req: Request, next: Next) -> Respo
     if denied {
         return ApiError::forbidden("peer role does not allow this operation").into_response();
     }
+    if req.method() == Method::POST && answers_overlay_question(&check_path) {
+        return ApiError::forbidden("only the local user answers overlay questions")
+            .into_response();
+    }
+    if crate::live_view::reject_query_credentials(&req) {
+        return ApiError::bad_request("URL credentials are forbidden").into_response();
+    }
+    req.extensions_mut()
+        .insert(crate::live_view::Actor::peer(&peer));
     let (req, control_transition) = if req.method() == Method::PUT && path == "/v1/control/state" {
         let (parts, body) = req.into_parts();
         let Ok(bytes) = axum::body::to_bytes(body, 4096).await else {
@@ -95,7 +114,12 @@ async fn guard(State(state): State<AppState>, req: Request, next: Next) -> Respo
             Ok(input) => input,
             Err(e) => return ApiError::bad_request(e.to_string()).into_response(),
         };
-        let changed = input.release || state.hub().reported_mode() != Some(input.mode);
+        // A device without the input grant is refused by the handler (and that
+        // denial is coalesced there): it must not write a decision row per try.
+        let granted = state
+            .live_view()
+            .allowed(&crate::live_view::Actor::peer(&peer), true);
+        let changed = granted && (input.release || state.hub().reported_mode() != Some(input.mode));
         (
             Request::from_parts(parts, axum::body::Body::from(bytes)),
             changed,
@@ -107,7 +131,17 @@ async fn guard(State(state): State<AppState>, req: Request, next: Next) -> Respo
     // Fail closed if attribution cannot be persisted. The normal approval audit
     // and permission engine remain in place and record the resulting decision.
     let mut audit_actor = None;
+    let refused_control = matches!(
+        path.as_str(),
+        "/v1/control/release"
+            | "/v1/control/takeover"
+            | "/v1/control/override"
+            | "/v1/control/recover"
+    ) && !state
+        .live_view()
+        .allowed(&crate::live_view::Actor::peer(&peer), true);
     if (req.method() == Method::POST
+        && !refused_control
         && (path.starts_with("/v1/approvals/")
             || path.starts_with("/v1/questions/")
             || path.starts_with("/v1/control/")))

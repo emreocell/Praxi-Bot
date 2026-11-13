@@ -699,6 +699,23 @@ pub struct NeverList {
     extra_set: GlobSet,
 }
 
+/// Names of the daemon's bearer token and its control files. A command that
+/// mentions one always needs approval: damping, not a boundary (the name can
+/// be assembled at run time).
+const DAEMON_STATE_NAMES: &[&str] = &[
+    "api-token",
+    "control-latch",
+    "bot.db",
+    "policy.json",
+    "identity.key",
+    "secrets.enc",
+];
+
+fn names_daemon_state(raw_command: &str) -> bool {
+    let lower = raw_command.to_lowercase();
+    DAEMON_STATE_NAMES.iter().any(|name| lower.contains(name))
+}
+
 impl NeverList {
     /// Build a [`NeverList`] from an optional list of additional glob patterns.
     ///
@@ -741,6 +758,7 @@ impl NeverList {
         // The structural check is case-preserving (wrapper options such as
         // `sudo -S` vs `-s` differ); extra glob patterns use the normalised form.
         structural_match(raw_command.trim(), 0)
+            || names_daemon_state(raw_command)
             || self.extra_set.is_match(Self::normalize(raw_command))
     }
 
@@ -768,6 +786,24 @@ mod tests {
     }
 
     // ── Must match ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn matches_commands_that_name_daemon_credentials_or_control_files() {
+        for command in [
+            "cat ~/.praxi/api-token",
+            r"type C:\Users\me\AppData\Roaming\praxi\API-TOKEN",
+            "curl -H \"Authorization: Bearer $(cat $DATA/api-token)\" http://127.0.0.1:1/v1/approvals",
+            "cp control-latch.json /tmp/x",
+            "sqlite3 bot.db 'select * from approvals'",
+            "tar czf x.tgz bot.db-wal",
+            r"Get-Content $env:APPDATA\praxi\policy.json",
+            "sh -c 'cat api-token'",
+        ] {
+            assert!(check(command), "{command}");
+        }
+        assert!(!check("ls /tmp/work"));
+        assert!(!check("cat notes.txt"));
+    }
 
     #[test]
     fn matches_rm_rf_root() {

@@ -129,6 +129,8 @@ struct Feed {
     sched_rx: Option<broadcast::Receiver<ScheduleChanged>>,
     /// `mcp_server_changed` notifications (global stream only).
     mcp_rx: Option<broadcast::Receiver<McpServerChanged>>,
+    /// `control_state_changed` notifications (global stream only).
+    control_rx: Option<broadcast::Receiver<crate::dto::ControlStateChanged>>,
     // ---- both ----
     storage: Arc<Storage>,
     data_dir: PathBuf,
@@ -453,7 +455,12 @@ impl Feed {
             if self.live_closed {
                 return None;
             }
-            let (rx, sched_rx, mcp_rx) = (&mut self.rx, &mut self.sched_rx, &mut self.mcp_rx);
+            let (rx, sched_rx, mcp_rx, control_rx) = (
+                &mut self.rx,
+                &mut self.sched_rx,
+                &mut self.mcp_rx,
+                &mut self.control_rx,
+            );
             let received = tokio::select! {
                 () = self.cancel.cancelled() => return None,
                 r = rx.recv() => r,
@@ -484,6 +491,19 @@ impl Feed {
                         continue;
                     }
                 },
+                c = async {
+                    match control_rx {
+                        Some(r) => r.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => match c {
+                    Ok(change) => return Some(Out::Control(change)),
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => {
+                        self.control_rx = None;
+                        continue;
+                    }
+                },
             };
             match received {
                 Ok(item) => {
@@ -510,10 +530,11 @@ impl Feed {
 }
 
 /// What the stream delivers next.
-enum Out {
+pub(crate) enum Out {
     Run(StreamItem),
     Schedule(ScheduleChanged),
     Mcp(McpServerChanged),
+    Control(crate::dto::ControlStateChanged),
     Gap(Gap),
     Unavailable(u64),
 }
@@ -861,9 +882,31 @@ fn to_sse(item: &StreamItem, scoped: bool) -> SseEvent {
         .unwrap_or_else(|_| SseEvent::default().comment("unserialisable event"))
 }
 
-fn event_stream(feed: Feed) -> impl Stream<Item = Result<SseEvent, Infallible>> {
-    stream::unfold(feed, |mut feed| async move {
-        let ev = match feed.next_item().await? {
+/// Overlay questions are for the local app only: a paired peer must never see
+/// a `control_requested` event (it could answer it).
+pub(crate) fn hidden_from_peer(local: bool, out: &Out) -> bool {
+    !local
+        && matches!(out, Out::Run(item) if matches!(item.envelope.event, protocol::Event::ControlRequested(_)))
+}
+
+#[cfg(test)]
+pub(crate) fn test_run_out(event: protocol::Event) -> Out {
+    Out::Run(StreamItem {
+        gseq: 1,
+        run_id: protocol::RunId::new(),
+        envelope: protocol::Envelope::new(0, event),
+    })
+}
+
+fn event_stream(feed: Feed, local: bool) -> impl Stream<Item = Result<SseEvent, Infallible>> {
+    stream::unfold((feed, local), |(mut feed, local)| async move {
+        let out = loop {
+            let out = feed.next_item().await?;
+            if !hidden_from_peer(local, &out) {
+                break out;
+            }
+        };
+        let ev = match out {
             Out::Run(item) => to_sse(&item, feed.scoped),
             Out::Schedule(change) => SseEvent::default()
                 .event("schedule_changed")
@@ -884,14 +927,19 @@ fn event_stream(feed: Feed) -> impl Stream<Item = Result<SseEvent, Infallible>> 
                 .event("mcp_server_changed")
                 .json_data(&change)
                 .unwrap_or_else(|_| SseEvent::default().comment("unserialisable event")),
+            Out::Control(change) => SseEvent::default()
+                .event("control_state_changed")
+                .json_data(&change)
+                .unwrap_or_else(|_| SseEvent::default().comment("unserialisable event")),
         };
-        Some((Ok(ev), feed))
+        Some((Ok(ev), (feed, local)))
     })
 }
 
 /// `GET /v1/events`.
 pub(crate) async fn events(
     State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<crate::live_view::Actor>,
     Query(q): Query<EventsQuery>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -943,11 +991,14 @@ pub(crate) async fn events(
             .is_none()
             .then(|| state.mcp().map(|m| m.subscribe()))
             .flatten(),
+        control_rx: scoped_run.is_none().then(|| state.hub().subscribe_events()),
         storage: state.storage_arc(),
         data_dir: state.data_dir(),
         logs: Arc::default(),
         cancel: state.shutdown_token(),
-        _app: scoped_run.is_none().then(|| state.hub().subscribe()),
+        // Only the local app counts as the overlay's listener; a paired device
+        // watching events must not make `app_connected()` true.
+        _app: (scoped_run.is_none() && actor.local).then(|| state.hub().subscribe()),
     };
     match cursor {
         Cursor::Run(run, last) => {
@@ -977,7 +1028,7 @@ pub(crate) async fn events(
             feed.delivered = feed.scan;
         }
     }
-    Ok(Sse::new(event_stream(feed)).keep_alive(KeepAlive::default()))
+    Ok(Sse::new(event_stream(feed, actor.local)).keep_alive(KeepAlive::default()))
 }
 
 /// Counters of the SSE machinery (authenticated, unlike `/v1/health`).
@@ -1255,6 +1306,7 @@ mod tests {
             _slot: None,
             sched_rx: None,
             mcp_rx: None,
+            control_rx: None,
             storage: Arc::clone(&storage),
             data_dir: dir.path().to_owned(),
             logs: Arc::default(),

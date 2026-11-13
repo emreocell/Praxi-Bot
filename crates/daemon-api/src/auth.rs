@@ -285,7 +285,7 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
 
 /// Request guard, outermost layer: Host check, Origin check, CORS preflight,
 /// then bearer auth (except `GET /v1/health`).
-pub(crate) async fn guard(State(state): State<AppState>, req: Request, next: Next) -> Response {
+pub(crate) async fn guard(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     // DNS-rebinding protection: only loopback host names.
     let host_ok = req
         .headers()
@@ -325,6 +325,11 @@ pub(crate) async fn guard(State(state): State<AppState>, req: Request, next: Nex
             return with_cors(ApiError::unauthorized().into_response(), origin, false);
         }
     }
+    if crate::live_view::reject_query_credentials(&req) {
+        return ApiError::bad_request("URL credentials are forbidden").into_response();
+    }
+    req.extensions_mut()
+        .insert(crate::live_view::Actor::local(&state));
     with_cors(next.run(req).await, origin, false)
 }
 
@@ -352,7 +357,7 @@ fn with_cors(mut resp: Response, origin: Option<HeaderValue>, preflight: bool) -
     if preflight {
         h.insert(
             header::ACCESS_CONTROL_ALLOW_METHODS,
-            HeaderValue::from_static("GET, POST, PUT, DELETE, OPTIONS"),
+            HeaderValue::from_static("GET, POST, PUT, PATCH, DELETE, OPTIONS"),
         );
         h.insert(
             header::ACCESS_CONTROL_ALLOW_HEADERS,

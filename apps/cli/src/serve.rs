@@ -197,12 +197,24 @@ pub fn build_agent(
 
 /// [`build_agent`] with `redactor` masking secrets before they reach the model,
 /// the stored events and the event stream.
+#[cfg(test)]
 pub fn build_agent_with_redactor(
     storage: &Arc<Storage>,
     providers: Providers,
     data_dir: &Path,
     desktop: Option<Arc<dyn DesktopBackend>>,
     redactor: SharedRedactor,
+) -> AgentLoop {
+    build_agent_with_live_views(storage, providers, data_dir, desktop, redactor, None)
+}
+
+pub fn build_agent_with_live_views(
+    storage: &Arc<Storage>,
+    providers: Providers,
+    data_dir: &Path,
+    desktop: Option<Arc<dyn DesktopBackend>>,
+    redactor: SharedRedactor,
+    view_registry: Option<Arc<live_view::TargetRegistry>>,
 ) -> AgentLoop {
     // Placeholder: `with_builtin_tools` replaces it with the loop's own gate.
     let gate = ResolverGate::new(
@@ -213,6 +225,14 @@ pub fn build_agent_with_redactor(
     );
     let mut tools = BuiltinConfig::new(data_dir.to_path_buf(), Arc::new(gate));
     tools.desktop.clone_from(&desktop);
+    tools.view_registry = view_registry;
+    let host_limits = std::fs::read_to_string(data_dir.join("host.toml")).unwrap_or_default();
+    let (max_computer_runs, idle) = computer_limits(
+        &host_limits,
+        std::env::var("BOT_MAX_COMPUTER_RUNS").ok().as_deref(),
+        std::env::var("BOT_BROWSER_IDLE_SECONDS").ok().as_deref(),
+    );
+    tools.browser_settings.idle_timeout = idle;
     // The discovery threshold is `LoopConfig`'s default (40).
     AgentLoop::new(
         Arc::clone(storage),
@@ -220,6 +240,7 @@ pub fn build_agent_with_redactor(
         providers,
         LoopConfig {
             redactor: Some(redactor),
+            max_computer_runs,
             ..LoopConfig::default()
         },
     )
@@ -234,6 +255,38 @@ pub fn build_agent_with_redactor(
             tools: ToolRegistry::new(),
         },
     )
+}
+
+#[derive(Default, Deserialize)]
+struct ComputerLimitsFile {
+    #[serde(default)]
+    limits: ComputerLimits,
+}
+#[derive(Default, Deserialize)]
+struct ComputerLimits {
+    max_computer_runs: Option<usize>,
+    browser_idle_seconds: Option<u64>,
+}
+fn computer_limits(
+    host: &str,
+    env_runs: Option<&str>,
+    env_idle: Option<&str>,
+) -> (usize, Duration) {
+    let config = toml::from_str::<ComputerLimitsFile>(host)
+        .unwrap_or_default()
+        .limits;
+    let runs = env_runs
+        .and_then(|n| n.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .or(config.max_computer_runs.filter(|n| *n > 0))
+        .unwrap_or(1)
+        .min(64);
+    let idle = env_idle
+        .and_then(|n| n.parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .or(config.browser_idle_seconds.filter(|n| *n > 0))
+        .unwrap_or(120);
+    (runs, Duration::from_secs(idle))
 }
 
 /// Shared/bundled index and per-bot roots. Tool calls resolve their caller's
@@ -701,7 +754,15 @@ pub fn serve(
             redactor: redactor.clone(),
         }) as Arc<dyn SecretStore>
     });
-    let agent = build_agent_with_redactor(&storage, providers, data_dir, desktop, redactor.clone());
+    let views = Arc::new(live_view::TargetRegistry::default());
+    let agent = build_agent_with_live_views(
+        &storage,
+        providers,
+        data_dir,
+        desktop,
+        redactor.clone(),
+        Some(Arc::clone(&views)),
+    );
     // Same registry the loop calls tools from: MCP servers, email and web tools register into it.
     let mcp_tools = agent.tool_registry();
     let email = crate::email_host::start_email(data_dir, &mcp_tools, telegram_store.as_ref())
@@ -714,7 +775,7 @@ pub fn serve(
     if let Ok(extra) = std::env::var(ALLOWED_ORIGINS_ENV) {
         cfg.allowed_origins.extend(parse_origins(&extra));
     }
-    let state = AppState::new(agent, storage, cfg)?;
+    let state = AppState::with_view_registry(agent, storage, cfg, views)?;
     register_schedule_tools(data_dir, &state);
     if let Some(host) = host {
         state.set_provider_host(host);
@@ -740,6 +801,26 @@ pub fn serve(
         };
         let peer =
             crate::peer::start_server(data_dir, *host_mode, *peer_enabled, state.clone()).await?;
+        // A revoked pairing loses screen privileges, live sessions and takeover
+        // within a couple of seconds, wherever the revoke happened.
+        if let Some(net) = peer.clone() {
+            let weak = state.downgrade();
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(Duration::from_secs(2));
+                loop {
+                    tick.tick().await;
+                    let Some(state) = weak.upgrade() else {
+                        return;
+                    };
+                    let paired = net
+                        .devices()
+                        .into_iter()
+                        .map(|d| format!("peer:{}", d.id))
+                        .collect();
+                    let _ = state.reconcile_paired_peers(&paired).await;
+                }
+            });
+        }
         // Connect in the background (a slow `npx` must not delay the listener)
         // and expose `/v1/mcp/*` plus the write-only secrets route.
         // The same live redactor as the agent loop masks MCP diagnostics.
@@ -876,6 +957,27 @@ id = "unpriced"
             passphrase: passphrase.map(ToOwned::to_owned),
             catalog_vars: vec!["ACME_KEY".into()],
         }
+    }
+
+    #[test]
+    fn computer_limits_default_to_small_host_and_environment_overrides_host_file() {
+        assert_eq!(
+            computer_limits("", None, None),
+            (1, Duration::from_secs(120))
+        );
+        let config = "[limits]\nmax_computer_runs=2\nbrowser_idle_seconds=180\n";
+        assert_eq!(
+            computer_limits(config, None, None),
+            (2, Duration::from_secs(180))
+        );
+        assert_eq!(
+            computer_limits(config, Some("1"), Some("30")),
+            (1, Duration::from_secs(30))
+        );
+        assert_eq!(
+            computer_limits("[limits]\nmax_computer_runs=0", Some("0"), Some("bad")),
+            (1, Duration::from_secs(120))
+        );
     }
 
     // SEC-02 (redaction half): production wiring masks stored secrets, the

@@ -1474,6 +1474,7 @@ fn setup_desktop() -> (T, Arc<crate::fake::FakeDesktop>) {
         proceed_timeout: Duration::from_millis(150),
         refuse_timeout: Duration::from_millis(600),
         heartbeat_ttl: Duration::from_secs(5),
+        latch_wait: Duration::from_secs(30 * 60),
     };
     let state = AppState::new(agent.clone(), storage, cfg).unwrap();
     (
@@ -1597,7 +1598,7 @@ fn click_after_state(index: u32) -> String {
 }
 
 #[tokio::test]
-async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
+async fn human_driving_waits_then_discards_stale_click_without_model_retry() {
     let (t, desktop) = setup_desktop();
     let (_, chat) = make_chat(&t).await;
     let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
@@ -1608,6 +1609,23 @@ async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
     assert!(r.contains("dispatched"), "{r}");
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
 
+    // A plain pause keeps reads working.
+    call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "paused"})),
+    )
+    .await;
+    let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
+    assert!(state.contains("Button 2"), "plain pause reads: {state}");
+    call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "idle", "release": true})),
+    )
+    .await;
     // The human takes the wheel: refused at once, nothing is dispatched.
     call(
         &t,
@@ -1616,17 +1634,35 @@ async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
         Some(json!({"mode": "human_driving"})),
     )
     .await;
+    // Observation is refused too: the model must not read what the user types.
     let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
-    assert!(state.contains("Button 2"), "reads are not gated: {state}");
-    let (r, events) = run_and_reply_seen(&t, &chat, &click_after_state(3)).await;
-    assert!(r.contains("taken control of the desktop"), "{r}");
-    // "At once" means no round trip to the app (which would have emitted a
-    // `control_requested` and waited for its answer), not a wall-clock bound.
+    assert!(state.contains("observation paused"), "{state}");
+    assert!(!state.contains("Button 2"), "{state}");
+    // A bot that read the screen before the pause waits while paused; it
+    // cannot observe while the human drives, so the stale-click flow below
+    // runs under a plain pause.
+    call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "idle", "release": true})),
+    )
+    .await;
+    call(
+        &t,
+        Method::PUT,
+        "/v1/control/state",
+        Some(json!({"mode": "paused"})),
+    )
+    .await;
+    let instruction = click_after_state(3);
+    let pending = run_and_reply_seen(&t, &chat, &instruction);
+    tokio::pin!(pending);
     assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, protocol::Event::ControlRequested(_))),
-        "no round trip while the human drives: {events:?}"
+        tokio::time::timeout(Duration::from_millis(100), &mut pending)
+            .await
+            .is_err(),
+        "paused call must wait"
     );
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
 
@@ -1649,6 +1685,16 @@ async fn human_driving_refuses_the_next_bot_click_with_a_clear_message() {
         Some(json!({"mode": "idle", "release": true})),
     )
     .await;
+    let (r, events) = pending.await;
+    assert!(r.contains("previous action discarded"), "{r}");
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, protocol::Event::ControlRequested(_))),
+        "pause should not publish overlays"
+    );
+    assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
+
     assert!(t.state.hub().latched().is_none());
     // Registered but silent: refused after the long timeout (600 ms here).
     let state = run_and_reply(&t, &chat, "call:desktop_get_state {}").await;
@@ -2473,6 +2519,17 @@ async fn latched_pause_survives_a_daemon_restart() {
 #[tokio::test]
 async fn peer_control_state_changes_are_audited_with_the_device_as_actor() {
     let t = setup();
+    // Releasing the user's latch needs an explicit per-device input grant.
+    t.state
+        .set_screen_privileges(
+            "peer:paired-key".into(),
+            crate::live_view::ScreenPrivileges {
+                view: true,
+                input: true,
+            },
+        )
+        .await
+        .unwrap();
     for (method, path, body) in [
         (
             Method::PUT,
@@ -2542,6 +2599,16 @@ async fn providers_lists_secret_free_cli_records_without_probing() {
 #[tokio::test]
 async fn peer_heartbeats_only_audit_mode_changes_and_explicit_release() {
     let t = setup();
+    t.state
+        .set_screen_privileges(
+            "peer:heartbeat-peer".into(),
+            crate::live_view::ScreenPrivileges {
+                view: true,
+                input: true,
+            },
+        )
+        .await
+        .unwrap();
     for (body, expected_rows) in [
         (json!({"mode":"paused"}), 2),
         (json!({"mode":"paused"}), 2),

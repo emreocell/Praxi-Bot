@@ -15,6 +15,8 @@ fake-provider = []
 workspace = true
 
 [dependencies]
+tempfile.workspace = true
+live-view = { workspace = true, features = ["openapi"] }
 agent-core = { path = "../agent-core", version = "0.1.0" }
 async-trait.workspace = true
 builtin-tools = { path = "../builtin-tools", version = "0.1.0" }
@@ -49,6 +51,7 @@ rustix = { version = "1", default-features = false, features = ["fs", "process",
 
 [dev-dependencies]
 rusqlite.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 http-body-util = "0.1"
 tempfile.workspace = true
 tool-registry = { path = "../tool-registry", version = "0.1.0" }

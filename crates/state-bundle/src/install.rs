@@ -85,6 +85,36 @@ fn incompatible_schema(db: &str, found: u32, supported: u32) -> ImportError {
     }
 }
 
+/// Chat history is delivered to the model; only user and assistant messages and
+/// the daemon's own well-formed control note are. Any other imported row (a
+/// system claim, an unknown role, the control-note marker with other text)
+/// becomes the inert `imported_note` role that is never sent to the model, and
+/// is never turned into a user message, which would carry the owner's
+/// authority. Nothing is deleted.
+fn neutralise_system_messages(conn: &Connection) -> rusqlite::Result<()> {
+    let rows: Vec<(String, String, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, role, content FROM messages WHERE role NOT IN ('user', 'assistant', 'tool', ?1)",
+        )?;
+        stmt.query_map([agent_core::control_note::IMPORTED_ROLE], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?
+    };
+    for (id, role, content) in rows {
+        if role == agent_core::control_note::ROLE
+            && agent_core::control_note::is_well_formed(&content)
+        {
+            continue;
+        }
+        conn.execute(
+            "UPDATE messages SET role = ?2 WHERE id = ?1",
+            rusqlite::params![id, agent_core::control_note::IMPORTED_ROLE],
+        )?;
+    }
+    Ok(())
+}
+
 fn prepare_database(path: &Path, db: &str, manifest: &Manifest) -> Result<()> {
     let open = || {
         Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)
@@ -115,6 +145,7 @@ fn prepare_database(path: &Path, db: &str, manifest: &Manifest) -> Result<()> {
                 }
                 other => database_error(db, other),
             })?;
+            neutralise_system_messages(&conn).map_err(|error| database_error(db, error))?;
             drop(conn);
         }
         "schedules.db" => {

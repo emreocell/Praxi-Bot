@@ -29,7 +29,7 @@ use vision::{BoundingBox, OcrEngine};
 
 use protocol::event::ControlRect;
 
-use crate::control::{ControlRequest, DesktopControlGate};
+use crate::control::{ActionPermit, ControlRequest, DesktopControlGate};
 use crate::util::{exec_err, finish_text, parse, save_file, spec};
 
 /// An OCR engine usable from tools.
@@ -95,6 +95,7 @@ const NO_OBSERVATION_MSG: &str = "no observation for this run; call desktop_get_
 // single-flight desktop actions).
 #[derive(Default)]
 struct State {
+    observation_epoch: u64,
     window_id: Option<u64>,
     generation: Option<u64>,
     /// Mark number to absolute screen centre.
@@ -361,6 +362,17 @@ impl Shared {
         })
     }
 
+    /// A fresh observation is never taken while a pause, a human takeover or a
+    /// local override is in force: the model must not read the screen then.
+    fn refuse_observation_while_latched(&self) -> Result<(), ToolError> {
+        if let Some(gate) = &self.control
+            && let Some(message) = gate.latch_refusal().or_else(|| gate.observation_refused())
+        {
+            return Err(exec_err(message));
+        }
+        Ok(())
+    }
+
     /// Ask the control gate (if any) whether this mutating action may run.
     async fn gate(
         &self,
@@ -368,19 +380,20 @@ impl Shared {
         action: &str,
         label: String,
         rect: Option<ControlRect>,
-    ) -> Result<(), ToolError> {
+    ) -> Result<ActionPermit, ToolError> {
         async {
             let Some(gate) = &self.control else {
-                return Ok(());
+                return Ok(ActionPermit::default());
             };
-            gate.before_action(&ControlRequest {
+            let request = ControlRequest {
                 run_id: run_id.to_owned(),
                 rect,
                 label,
                 action: action.to_owned(),
-            })
-            .await
-            .map_err(exec_err)
+            };
+            crate::control::admit_or_inherit(gate.as_ref(), || gate.admit_action(&request))
+                .await
+                .map_err(exec_err)
         }
         .instrument(tracing::info_span!("desktop.gate", run_id, action))
         .await
@@ -408,12 +421,12 @@ impl Shared {
             .ok_or_else(|| exec_err(NO_OBSERVATION_MSG))
     }
 
-    async fn act(&self, action: Action) -> Result<String, ToolError> {
-        let res = self
-            .backend
-            .act(action)
-            .instrument(tracing::info_span!("desktop.act"))
+    async fn act(&self, action: Action, permit: &ActionPermit) -> Result<String, ToolError> {
+        let backend = Arc::clone(&self.backend);
+        let res = permit
+            .protect(async move { backend.act(action).await })
             .await
+            .map_err(exec_err)?
             .map_err(|e| derr(&e))?;
         let mut head = format!("dispatched: {}", res.dispatched);
         if let Some(v) = res.verified {
@@ -430,7 +443,12 @@ impl Shared {
         filter: &ObsFilter,
     ) -> Result<String, ToolError> {
         async {
+            let observation_epoch=self.control.as_ref().map_or(0,|gate|gate.observation_epoch());
             let snap = self.backend.snapshot(scope).await.map_err(|e| derr(&e))?;
+            if self.control.as_ref().map_or(0,|gate|gate.observation_epoch()) != observation_epoch {
+                self.state.lock().map.remove(run_id);
+                return Err(exec_err("human intervention changed the display during observation; obtain a fresh observation"));
+            }
             let rendered_nodes: Vec<_> = if filter.is_active() {
                 snap.nodes
                     .iter()
@@ -446,6 +464,7 @@ impl Shared {
                 let st = states.entry(run_id);
                 st.window_id = Some(snap.window.id);
                 st.generation = Some(snap.generation);
+                st.observation_epoch = observation_epoch;
                 st.marks.clear();
                 st.targets = rendered_nodes
                     .iter()
@@ -905,8 +924,38 @@ fn window_line(w: &desktop_api::WindowInfo) -> String {
 }
 
 impl DesktopTool {
+    /// Observation tools discard their result if control changed while they
+    /// ran: a screenshot, an OCR pass or a window list that straddles the start
+    /// of a human takeover never reaches the model.
     async fn run(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
+        let observing = matches!(self.op, Op::ListApps | Op::GetState);
+        let gate = self.shared.control.clone();
+        let epoch = gate.as_ref().map(|g| g.observation_epoch());
+        let text = self.run_inner(run_id, input).await?;
+        if let (Some(gate), Some(epoch)) = (gate, epoch) {
+            if observing
+                && (gate.observation_epoch() != epoch || gate.observation_refused().is_some())
+            {
+                return Err(exec_err(crate::control::OBSERVATION_DISCARDED));
+            }
+            // An action's own result carries a fresh observation (the refresh
+            // after it, or the re-observation that replaced it): withheld if
+            // the human drives by now. The epoch is not compared here: an
+            // action legitimately waits through a pause and its release.
+            if !observing && gate.observation_refused().is_some() {
+                return Ok(crate::control::OBSERVATION_WITHHELD.to_owned());
+            }
+        }
+        Ok(text)
+    }
+
+    async fn run_inner(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
         let sh = &self.shared;
+        if matches!(self.op, Op::ListApps | Op::GetState)
+            && let Some(message) = sh.control.as_ref().and_then(|g| g.observation_refused())
+        {
+            return Err(exec_err(message));
+        }
         match self.op {
             Op::ListApps => {
                 let wins = sh
@@ -927,8 +976,23 @@ impl DesktopTool {
             }
             Op::Launch => {
                 let i: LaunchIn = parse(input)?;
-                sh.gate(run_id, "launch", i.executable.clone(), None)
+                let permit = sh
+                    .gate(run_id, "launch", i.executable.clone(), None)
                     .await?;
+                if permit.needs_observation()
+                    || sh.state.lock().get(run_id).is_some_and(|s| {
+                        s.observation_epoch
+                            != sh.control.as_ref().map_or(0, |g| g.observation_epoch())
+                    })
+                {
+                    sh.state.lock().map.remove(run_id);
+                    sh.refuse_observation_while_latched()?;
+                    let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
                 let before: HashSet<u64> = sh
                     .backend
                     .windows()
@@ -941,14 +1005,18 @@ impl DesktopTool {
                 // `launch_settle` budget. Zero settle makes the deadline "now":
                 // one sample, no sleep.
                 let deadline = tokio::time::Instant::now() + sh.settings.launch_settle;
-                let pid = sh
-                    .backend
-                    .launch(AppSpec {
-                        executable: i.executable,
-                        args: i.args,
+                let backend = Arc::clone(&sh.backend);
+                let pid = permit
+                    .protect(async move {
+                        backend
+                            .launch(AppSpec {
+                                executable: i.executable,
+                                args: i.args,
+                            })
+                            .await
                     })
-                    .instrument(tracing::info_span!("desktop.act", op = "launch"))
                     .await
+                    .map_err(exec_err)?
                     .map_err(|e| derr(&e))?;
                 let wins = sh.poll_launched_windows(&before, pid, deadline).await?;
                 let mut out = format!("launched pid={pid}\nwindows:\n");
@@ -1013,8 +1081,22 @@ impl DesktopTool {
                 let method = parse_method(i.method.as_deref(), Shared::default_method(r))?;
                 let target = sh.target(run_id, r, i.expect_gen)?;
                 let (label, rect) = sh.describe(run_id, r)?;
-                sh.gate(run_id, "click", label, rect).await?;
-                let head = sh.act(Action::Click { target, method }).await?;
+                let permit = sh.gate(run_id, "click", label, rect).await?;
+                if permit.needs_observation()
+                    || sh.state.lock().get(run_id).is_some_and(|s| {
+                        s.observation_epoch
+                            != sh.control.as_ref().map_or(0, |g| g.observation_epoch())
+                    })
+                {
+                    sh.state.lock().map.remove(run_id);
+                    sh.refuse_observation_while_latched()?;
+                    let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
+                let head = sh.act(Action::Click { target, method }, &permit).await?;
                 sh.settle_and_refresh(run_id, head).await
             }
             Op::Type => {
@@ -1025,14 +1107,31 @@ impl DesktopTool {
                 let r = parse_ref(&i.index)?;
                 let target = sh.target(run_id, r, i.expect_gen)?;
                 let (label, rect) = sh.describe(run_id, r)?;
-                sh.gate(run_id, "type", label, rect).await?;
+                let permit = sh.gate(run_id, "type", label, rect).await?;
+                if permit.needs_observation()
+                    || sh.state.lock().get(run_id).is_some_and(|s| {
+                        s.observation_epoch
+                            != sh.control.as_ref().map_or(0, |g| g.observation_epoch())
+                    })
+                {
+                    sh.state.lock().map.remove(run_id);
+                    sh.refuse_observation_while_latched()?;
+                    let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
                 // Focus the element with a real click, then type into the focus.
-                sh.act(Action::Click {
-                    target,
-                    method: ClickMethod::Global,
-                })
+                sh.act(
+                    Action::Click {
+                        target,
+                        method: ClickMethod::Global,
+                    },
+                    &permit,
+                )
                 .await?;
-                let head = sh.act(Action::TypeText { text: i.text }).await?;
+                let head = sh.act(Action::TypeText { text: i.text }, &permit).await?;
                 sh.settle_and_refresh(run_id, head).await
             }
             Op::SetValue => {
@@ -1043,12 +1142,29 @@ impl DesktopTool {
                 let r = parse_ref(&i.index)?;
                 let target = sh.target(run_id, r, i.expect_gen)?;
                 let (label, rect) = sh.describe(run_id, r)?;
-                sh.gate(run_id, "set_value", label, rect).await?;
-                let head = sh
-                    .act(Action::SetValue {
-                        target,
-                        value: i.value,
+                let permit = sh.gate(run_id, "set_value", label, rect).await?;
+                if permit.needs_observation()
+                    || sh.state.lock().get(run_id).is_some_and(|s| {
+                        s.observation_epoch
+                            != sh.control.as_ref().map_or(0, |g| g.observation_epoch())
                     })
+                {
+                    sh.state.lock().map.remove(run_id);
+                    sh.refuse_observation_while_latched()?;
+                    let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
+                let head = sh
+                    .act(
+                        Action::SetValue {
+                            target,
+                            value: i.value,
+                        },
+                        &permit,
+                    )
                     .await?;
                 sh.settle_and_refresh(run_id, head).await
             }
@@ -1072,15 +1188,32 @@ impl DesktopTool {
                     }
                     None => (keys.join("+"), None),
                 };
-                sh.gate(run_id, "key", label, rect).await?;
-                if let Some(target) = focus_target {
-                    sh.act(Action::Click {
-                        target,
-                        method: ClickMethod::Global,
+                let permit = sh.gate(run_id, "key", label, rect).await?;
+                if permit.needs_observation()
+                    || sh.state.lock().get(run_id).is_some_and(|s| {
+                        s.observation_epoch
+                            != sh.control.as_ref().map_or(0, |g| g.observation_epoch())
                     })
+                {
+                    sh.state.lock().map.remove(run_id);
+                    sh.refuse_observation_while_latched()?;
+                    let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
+                if let Some(target) = focus_target {
+                    sh.act(
+                        Action::Click {
+                            target,
+                            method: ClickMethod::Global,
+                        },
+                        &permit,
+                    )
                     .await?;
                 }
-                let head = sh.act(Action::KeyPress { keys }).await?;
+                let head = sh.act(Action::KeyPress { keys }, &permit).await?;
                 sh.settle_and_refresh(run_id, head).await
             }
             Op::Scroll => {
@@ -1107,13 +1240,30 @@ impl DesktopTool {
                         ));
                     }
                 };
-                sh.gate(run_id, "scroll", label, rect).await?;
-                let head = sh
-                    .act(Action::Scroll {
-                        target,
-                        delta_x: i.dx,
-                        delta_y: i.dy,
+                let permit = sh.gate(run_id, "scroll", label, rect).await?;
+                if permit.needs_observation()
+                    || sh.state.lock().get(run_id).is_some_and(|s| {
+                        s.observation_epoch
+                            != sh.control.as_ref().map_or(0, |g| g.observation_epoch())
                     })
+                {
+                    sh.state.lock().map.remove(run_id);
+                    sh.refuse_observation_while_latched()?;
+                    let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
+                let head = sh
+                    .act(
+                        Action::Scroll {
+                            target,
+                            delta_x: i.dx,
+                            delta_y: i.dy,
+                        },
+                        &permit,
+                    )
                     .await?;
                 sh.settle_and_refresh(run_id, head).await
             }
@@ -1129,9 +1279,24 @@ impl DesktopTool {
                     sh.target(run_id, b, i.expect_gen)?,
                 );
                 let ((la, ra), (lb, rb)) = (sh.describe(run_id, a)?, sh.describe(run_id, b)?);
-                sh.gate(run_id, "drag", format!("{la} to {lb}"), union(ra, rb))
+                let permit = sh
+                    .gate(run_id, "drag", format!("{la} to {lb}"), union(ra, rb))
                     .await?;
-                let head = sh.act(Action::Drag { from, to, method }).await?;
+                if permit.needs_observation()
+                    || sh.state.lock().get(run_id).is_some_and(|s| {
+                        s.observation_epoch
+                            != sh.control.as_ref().map_or(0, |g| g.observation_epoch())
+                    })
+                {
+                    sh.state.lock().map.remove(run_id);
+                    sh.refuse_observation_while_latched()?;
+                    let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
+                    permit.observed();
+                    return Ok(format!(
+                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+                    ));
+                }
+                let head = sh.act(Action::Drag { from, to, method }, &permit).await?;
                 sh.settle_and_refresh(run_id, head).await
             }
         }
@@ -1165,6 +1330,9 @@ pub(crate) mod fake {
     use desktop_api::snapshot::{Image, Pid, Rect, UiNode, WindowInfo};
     use desktop_api::{ActionResult, Capabilities};
 
+    /// A callback a test runs inside a backend call.
+    pub type FakeHook = Arc<dyn Fn(&str) + Send + Sync>;
+
     pub struct FakeDesktop {
         pub actions: Mutex<Vec<Action>>,
         pub generation: Mutex<u64>,
@@ -1186,6 +1354,8 @@ pub(crate) mod fake {
         pub launched_window_pid: Pid,
         /// Timestamp when `launch()` was called.
         pub launched_at: Mutex<Option<tokio::time::Instant>>,
+        /// Runs inside `screenshot` / `windows` (a takeover landing mid-capture).
+        pub hook: Mutex<Option<FakeHook>>,
     }
 
     impl FakeDesktop {
@@ -1203,6 +1373,7 @@ pub(crate) mod fake {
                 launch_window_delay: Some(Duration::ZERO),
                 launched_window_pid: 4242,
                 launched_at: Mutex::new(None),
+                hook: Mutex::new(None),
             }
         }
     }
@@ -1225,6 +1396,10 @@ pub(crate) mod fake {
     #[async_trait]
     impl DesktopBackend for FakeDesktop {
         async fn snapshot(&self, scope: Option<u64>) -> Result<Snapshot, DesktopError> {
+            let hook = self.hook.lock().clone();
+            if let Some(hook) = hook {
+                hook("snapshot");
+            }
             self.scopes.lock().push(scope);
             let win = scope.unwrap_or(77);
             let mut g = self.generation.lock();
@@ -1266,6 +1441,10 @@ pub(crate) mod fake {
         }
 
         async fn act(&self, action: Action) -> Result<ActionResult, DesktopError> {
+            let hook = self.hook.lock().clone();
+            if let Some(hook) = hook {
+                hook("act");
+            }
             let current = *self.generation.lock();
             let lenient = self.lenient_gen;
             let stale = |t: &Target| match t {
@@ -1298,6 +1477,10 @@ pub(crate) mod fake {
         }
 
         async fn screenshot(&self, _r: Region, _q: Quality) -> Result<Image, DesktopError> {
+            let hook = self.hook.lock().clone();
+            if let Some(hook) = hook {
+                hook("screenshot");
+            }
             Ok(Image {
                 data: self.screenshot_png.clone(),
                 width: 10,
@@ -1307,6 +1490,10 @@ pub(crate) mod fake {
         }
 
         async fn windows(&self) -> Result<Vec<WindowInfo>, DesktopError> {
+            let hook = self.hook.lock().clone();
+            if let Some(hook) = hook {
+                hook("windows");
+            }
             let mut wins = vec![window(77)];
             if let (Some(at), Some(delay)) = (*self.launched_at.lock(), self.launch_window_delay)
                 && at.elapsed() >= delay
@@ -1853,6 +2040,199 @@ mod tests {
             ("launch", "notepad.exe")
         );
         assert_eq!(fake.actions.lock().len(), 2, "click + key were dispatched");
+    }
+
+    struct HumanDrives;
+
+    #[async_trait]
+    impl DesktopControlGate for HumanDrives {
+        fn observation_refused(&self) -> Option<String> {
+            Some("the user is controlling (observation paused)".into())
+        }
+        async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+            Err("the user has taken control".into())
+        }
+    }
+
+    #[tokio::test]
+    async fn desktop_observation_is_refused_while_the_human_drives() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let d = tempfile::tempdir().unwrap();
+        let t = tools(
+            fake.clone(),
+            None,
+            d.path(),
+            settings(),
+            Some(Arc::new(HumanDrives)),
+        );
+        let ctx = ToolContext::default();
+        for (name, input) in [
+            ("desktop_get_state", json!({})),
+            ("desktop_get_state", json!({"screenshot": true})),
+            ("desktop_list_apps", json!({})),
+        ] {
+            let err = get(&t, name).call(&ctx, input).await.unwrap_err();
+            assert!(
+                err.to_string().contains("observation paused"),
+                "{name}: {err}"
+            );
+        }
+        assert!(fake.actions.lock().is_empty());
+        // Without a refusing gate the same read works (plain pause keeps reads).
+        let (_d2, free, _gate) = gated(Arc::new(FakeDesktop::new(false)), false);
+        get(&free, "desktop_get_state")
+            .call(&ctx, json!({}))
+            .await
+            .unwrap();
+    }
+
+    /// Latches on demand (a Stop / takeover landing mid-script).
+    #[derive(Default)]
+    struct StopGate {
+        stopped: std::sync::atomic::AtomicBool,
+    }
+    #[async_trait]
+    impl DesktopControlGate for StopGate {
+        fn latch_refusal(&self) -> Option<String> {
+            self.stopped
+                .load(std::sync::atomic::Ordering::SeqCst)
+                .then(|| "The user stopped the bot; do not retry.".to_owned())
+        }
+        async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+            match self.latch_refusal() {
+                Some(m) => Err(m),
+                None => Ok(()),
+            }
+        }
+    }
+
+    /// The observation epoch and the "human drives" ban, flipped by a test.
+    #[derive(Default)]
+    struct ObsGate {
+        epoch: std::sync::atomic::AtomicU64,
+        driving: std::sync::atomic::AtomicBool,
+    }
+    impl ObsGate {
+        fn human_takes_over(&self) {
+            self.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.driving
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    #[async_trait]
+    impl DesktopControlGate for ObsGate {
+        fn observation_epoch(&self) -> u64 {
+            self.epoch.load(std::sync::atomic::Ordering::SeqCst)
+        }
+        fn observation_refused(&self) -> Option<String> {
+            self.driving
+                .load(std::sync::atomic::Ordering::SeqCst)
+                .then(|| "the user is controlling (observation paused)".to_owned())
+        }
+        async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn an_observation_that_straddles_a_takeover_never_reaches_the_model() {
+        for (name, input, hook_on) in [
+            (
+                "desktop_get_state",
+                json!({"screenshot": true}),
+                "screenshot",
+            ),
+            ("desktop_list_apps", json!({}), "windows"),
+        ] {
+            let fake = Arc::new(FakeDesktop::new(false));
+            let gate = Arc::new(ObsGate::default());
+            let flip = Arc::clone(&gate);
+            *fake.hook.lock() = Some(Arc::new(move |what| {
+                if what == hook_on {
+                    flip.human_takes_over();
+                }
+            }));
+            let d = tempfile::tempdir().unwrap();
+            let t = tools(fake, None, d.path(), settings(), Some(gate));
+            let err = get(&t, name)
+                .call(&ToolContext::default(), input)
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains("discarded"), "{name}: {err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_refresh_after_an_action_never_shows_a_screen_taken_during_a_takeover() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let gate = Arc::new(ObsGate::default());
+        let d = tempfile::tempdir().unwrap();
+        let t = tools(fake.clone(), None, d.path(), settings(), Some(gate.clone()));
+        let ctx = ToolContext::default();
+        get(&t, "desktop_get_state")
+            .call(&ctx, json!({}))
+            .await
+            .unwrap();
+        let flip = Arc::clone(&gate);
+        *fake.hook.lock() = Some(Arc::new(move |what| {
+            if what == "act" {
+                flip.human_takes_over();
+            }
+        }));
+        let out = get(&t, "desktop_click")
+            .call(&ctx, json!({"index": 1, "gen": 1}))
+            .await;
+        let shown = match &out {
+            Ok(o) => text(o).clone(),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            !shown.contains("gen="),
+            "a screen captured while the user took over reached the model: {shown}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_script_cannot_launch_or_act_after_a_stop_with_a_cached_permit() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let d = tempfile::tempdir().unwrap();
+        let gate = Arc::new(StopGate::default());
+        let t = tools(fake.clone(), None, d.path(), settings(), Some(gate.clone()));
+        let ctx = ToolContext {
+            run_id: "script-run".into(),
+            ..ToolContext::default()
+        };
+        let action: crate::control::ScriptAction = Arc::default();
+        // The script's first computer action admits and caches the permit.
+        crate::control::scope_action(Arc::clone(&action), async {
+            get(&t, "desktop_get_state")
+                .call(&ctx, json!({}))
+                .await
+                .unwrap();
+            get(&t, "desktop_click")
+                .call(&ctx, json!({"index": 2, "gen": 1}))
+                .await
+                .unwrap();
+        })
+        .await;
+        assert_eq!(fake.actions.lock().len(), 1);
+        gate.stopped
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let actions = fake.actions.lock().len();
+        for (name, input) in [
+            ("desktop_launch", json!({"executable": "notepad.exe"})),
+            ("desktop_click", json!({"index": 2, "gen": 2})),
+            ("desktop_key", json!({"keys": "ctrl+s"})),
+        ] {
+            let err = crate::control::scope_action(Arc::clone(&action), async {
+                get(&t, name).call(&ctx, input).await
+            })
+            .await
+            .unwrap_err();
+            assert!(err.to_string().contains("stopped the bot"), "{name}: {err}");
+        }
+        assert_eq!(fake.actions.lock().len(), actions, "nothing was dispatched");
+        assert!(fake.launched_at.lock().is_none(), "nothing was launched");
     }
 
     #[tokio::test]

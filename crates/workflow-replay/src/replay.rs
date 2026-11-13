@@ -7,7 +7,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use builtin_tools::{
-    BrowserDriver, ControlRequest, DesktopControlGate, GateRequest, ToolGate, Wait, raw_command_for,
+    ActionPermit, BrowserDriver, ControlRequest, DesktopControlGate, GateRequest, ToolGate, Wait,
+    raw_command_for,
 };
 use desktop_api::snapshot::AppSpec;
 use desktop_api::{Action, ClickMethod, DesktopBackend, Snapshot, Target};
@@ -408,9 +409,46 @@ impl Replayer {
                 step_index: u32::try_from(i).unwrap_or(u32::MAX),
                 kind: step.kind_name().to_owned(),
             }));
+            let permit = match step {
+                Step::DesktopAction(_)
+                | Step::BrowserAction(_)
+                | Step::Navigate(_)
+                | Step::Launch(_) => self
+                    .control_gate(
+                        match step {
+                            Step::Navigate(_) => "browser_open",
+                            Step::Launch(_) => "launch",
+                            _ => step.kind_name(),
+                        },
+                        "workflow action".into(),
+                        !matches!(step, Step::BrowserAction(_) | Step::Navigate(_))
+                            || self
+                                .handles
+                                .browser
+                                .as_ref()
+                                .is_some_and(|driver| driver.on_desktop()),
+                    )
+                    .await
+                    .map(Some),
+                _ => Ok(None),
+            };
+            let permit = match permit {
+                Ok(p) => p,
+                Err(stop) => {
+                    return Ok(self.stopped(
+                        wf,
+                        &vars,
+                        reports,
+                        last_output,
+                        i,
+                        stop.into(),
+                        start,
+                    ));
+                }
+            };
             let result = match tokio::time::timeout(
                 self.opts.step_timeout,
-                self.run_step(step, &vars, &types, gate),
+                self.run_step(step, &vars, &types, gate, permit.as_ref()),
             )
             .await
             {
@@ -531,20 +569,35 @@ impl Replayer {
     }
 
     /// Ask the desktop control gate (if any) before a mutating action.
-    async fn control_gate(&self, action: &str, label: String) -> Result<(), Stop> {
+    async fn control_gate(
+        &self,
+        action: &str,
+        label: String,
+        highlight: bool,
+    ) -> Result<ActionPermit, Stop> {
         let Some(gate) = &self.opts.control else {
             return Err(Stop::Denied(format!(
                 "no desktop control gate configured: refusing {action}"
             )));
         };
-        gate.before_action(&ControlRequest {
+        let request = ControlRequest {
             run_id: self.opts.run_id.clone(),
             rect: None,
             label,
             action: action.to_owned(),
-        })
-        .await
-        .map_err(Stop::Denied)
+        };
+        let permit = if highlight {
+            gate.admit_action(&request).await
+        } else {
+            gate.admit_background_action(&request).await
+        }
+        .map_err(Stop::Denied)?;
+        // A pause, takeover or local override that began during admission must
+        // stop the step before it reads or acts on the screen.
+        if let Some(message) = gate.latch_refusal().or_else(|| gate.observation_refused()) {
+            return Err(Stop::Denied(message));
+        }
+        Ok(permit)
     }
 
     async fn run_step(
@@ -553,12 +606,19 @@ impl Replayer {
         vars: &Vars,
         types: &BTreeMap<String, crate::format::ParamType>,
         gate: &dyn ToolGate,
+        permit: Option<&ActionPermit>,
     ) -> Result<Done, Stop> {
         match step {
-            Step::DesktopAction(d) => self.desktop_action(d, vars, gate).await,
-            Step::BrowserAction(b) => self.browser_action(b, vars, gate).await,
+            Step::DesktopAction(d) => {
+                self.desktop_action(d, vars, gate, permit.expect("native step admitted"))
+                    .await
+            }
+            Step::BrowserAction(b) => {
+                self.browser_action(b, vars, gate, permit.expect("native step admitted"))
+                    .await
+            }
             Step::Navigate(n) => {
-                let driver = self.browser()?;
+                let driver = Arc::clone(self.browser()?);
                 let url = template::render(&n.url, vars).map_err(|e| tpl(&e))?;
                 self.authorize(
                     gate,
@@ -568,10 +628,12 @@ impl Replayer {
                     json!({"url": url, "profile": n.profile}),
                 )
                 .await?;
-                self.control_gate("browser_open", url.clone()).await?;
-                let out = driver
-                    .open(&url, n.profile.as_deref())
+                let profile = n.profile.clone();
+                let out = permit
+                    .expect("native step admitted")
+                    .protect(async move { driver.open(&url, profile.as_deref()).await })
                     .await
+                    .map_err(Stop::Failed)?
                     .map_err(Stop::Failed)?;
                 Ok(Done {
                     output: Some(truncate(&out, 2000)),
@@ -579,7 +641,7 @@ impl Replayer {
                 })
             }
             Step::Launch(l) => {
-                let backend = self.desktop()?;
+                let backend = Arc::clone(self.desktop()?);
                 let executable = template::render(&l.executable, vars).map_err(|e| tpl(&e))?;
                 let args = l
                     .args
@@ -595,10 +657,11 @@ impl Replayer {
                     json!({"executable": executable, "args": args}),
                 )
                 .await?;
-                self.control_gate("launch", executable.clone()).await?;
-                let pid = backend
-                    .launch(AppSpec { executable, args })
+                let pid = permit
+                    .expect("native step admitted")
+                    .protect(async move { backend.launch(AppSpec { executable, args }).await })
                     .await
+                    .map_err(Stop::Failed)?
                     .map_err(|e| Stop::Failed(e.to_string()))?;
                 sleep(self.opts.launch_settle).await;
                 Ok(Done {
@@ -751,6 +814,7 @@ impl Replayer {
         d: &DesktopAction,
         vars: &Vars,
         gate: &dyn ToolGate,
+        permit: &ActionPermit,
     ) -> Result<Done, Stop> {
         let backend = self.desktop()?;
         let value = d
@@ -824,21 +888,11 @@ impl Replayer {
             input,
         )
         .await?;
-        self.control_gate(
-            match d.action {
-                DesktopActionKind::Click => "click",
-                DesktopActionKind::Type => "type",
-                DesktopActionKind::SetValue => "set_value",
-                DesktopActionKind::Key => "key",
-            },
-            tool.to_owned(),
-        )
-        .await?;
 
         match d.action {
             DesktopActionKind::Click => {
                 let t = target.ok_or_else(|| Stop::Failed("click without target".into()))?;
-                dispatch(backend, Action::Click { target: t, method }).await?;
+                dispatch(backend, Action::Click { target: t, method }, permit).await?;
             }
             DesktopActionKind::Type => {
                 let t = target.ok_or_else(|| Stop::Failed("type without target".into()))?;
@@ -849,6 +903,7 @@ impl Replayer {
                         target: t,
                         method: ClickMethod::Global,
                     },
+                    permit,
                 )
                 .await?;
                 dispatch(
@@ -856,6 +911,7 @@ impl Replayer {
                     Action::TypeText {
                         text: value.unwrap_or_default(),
                     },
+                    permit,
                 )
                 .await?;
             }
@@ -867,6 +923,7 @@ impl Replayer {
                         target: t,
                         value: value.unwrap_or_default(),
                     },
+                    permit,
                 )
                 .await?;
             }
@@ -878,6 +935,7 @@ impl Replayer {
                             target: t,
                             method: ClickMethod::Global,
                         },
+                        permit,
                     )
                     .await?;
                 }
@@ -890,7 +948,7 @@ impl Replayer {
                 if keys.is_empty() {
                     return Err(Stop::Failed("empty key chord".into()));
                 }
-                dispatch(backend, Action::KeyPress { keys }).await?;
+                dispatch(backend, Action::KeyPress { keys }, permit).await?;
             }
         }
         sleep(self.opts.action_settle).await;
@@ -908,6 +966,7 @@ impl Replayer {
         b: &BrowserAction,
         vars: &Vars,
         gate: &dyn ToolGate,
+        permit: &ActionPermit,
     ) -> Result<Done, Stop> {
         let driver = self.browser()?;
         let value = b
@@ -979,10 +1038,11 @@ impl Replayer {
                 json!({"js": js}),
             )
             .await?;
-            self.control_gate("browser_eval", css.clone()).await?;
-            driver
-                .eval(&js)
+            let driver = Arc::clone(driver);
+            permit
+                .protect(async move { driver.eval(&js).await })
                 .await
+                .map_err(Stop::Failed)?
                 .map(|v| v.to_string())
                 .map_err(Stop::Failed)?
         } else {
@@ -1001,26 +1061,32 @@ impl Replayer {
                 input,
             )
             .await?;
-            self.control_gate(tool, tool.to_owned()).await?;
-            let need = || Stop::Failed("browser step has no target".into());
-            match b.action {
-                BrowserActionKind::Click => driver.click(&r.ok_or_else(need)?).await,
-                BrowserActionKind::Fill => {
-                    driver
-                        .fill(&r.ok_or_else(need)?, value.as_deref().unwrap_or_default())
-                        .await
-                }
-                BrowserActionKind::Select => {
-                    driver
-                        .select(&r.ok_or_else(need)?, value.as_deref().unwrap_or_default())
-                        .await
-                }
-                BrowserActionKind::Press => {
-                    driver.press(value.as_deref().unwrap_or_default()).await
-                }
-                BrowserActionKind::Back => driver.back().await,
-            }
-            .map_err(Stop::Failed)?
+            let need = || "browser step has no target".to_owned();
+            let driver = Arc::clone(driver);
+            let action = b.action;
+            permit
+                .protect(async move {
+                    match action {
+                        BrowserActionKind::Click => driver.click(&r.ok_or_else(need)?).await,
+                        BrowserActionKind::Fill => {
+                            driver
+                                .fill(&r.ok_or_else(need)?, value.as_deref().unwrap_or_default())
+                                .await
+                        }
+                        BrowserActionKind::Select => {
+                            driver
+                                .select(&r.ok_or_else(need)?, value.as_deref().unwrap_or_default())
+                                .await
+                        }
+                        BrowserActionKind::Press => {
+                            driver.press(value.as_deref().unwrap_or_default()).await
+                        }
+                        BrowserActionKind::Back => driver.back().await,
+                    }
+                })
+                .await
+                .map_err(Stop::Failed)?
+                .map_err(Stop::Failed)?
         };
         sleep(self.opts.action_settle).await;
         Ok(Done {
@@ -1154,10 +1220,16 @@ impl Replayer {
     }
 }
 
-async fn dispatch(backend: &Arc<dyn DesktopBackend>, action: Action) -> Result<(), Stop> {
-    let r = backend
-        .act(action)
+async fn dispatch(
+    backend: &Arc<dyn DesktopBackend>,
+    action: Action,
+    permit: &ActionPermit,
+) -> Result<(), Stop> {
+    let backend = Arc::clone(backend);
+    let r = permit
+        .protect(async move { backend.act(action).await })
         .await
+        .map_err(Stop::Failed)?
         .map_err(|e| Stop::Failed(e.to_string()))?;
     if r.dispatched {
         Ok(())

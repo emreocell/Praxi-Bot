@@ -3715,6 +3715,85 @@ fn gate_loop(env: &Env, fake: &Arc<Fake>) -> AgentLoop {
 }
 
 #[tokio::test]
+async fn computer_slot_queues_another_run_and_outlives_a_cancelled_backend_awaiter() {
+    use builtin_tools::DesktopControlGate;
+    let env = setup();
+    let fake = Fake::new(vec![]);
+    let lp = gate_loop(&env, &fake);
+    lp.set_control_gate(Arc::new(TestGate {
+        refuse: false,
+        seen: Mutex::new(vec![]),
+    }));
+    let make_run = || {
+        let now = storage::now_ms();
+        let run = storage::Run {
+            id: protocol::RunId::new(),
+            user_id: env.user,
+            bot_id: env.bot,
+            chat_id: Some(env.chat),
+            kind: "turn".into(),
+            state: "running".into(),
+            error: None,
+            created_at_ms: now,
+            updated_at_ms: now,
+            parent_run_id: None,
+            spec: None,
+        };
+        env.storage.insert_run(&run).unwrap();
+        lp.sh.ctx(&run).unwrap();
+        run.id
+    };
+    let first = make_run();
+    let second = make_run();
+    let gate = Arc::new(crate::control::LoopControl {
+        sh: Arc::downgrade(&lp.sh),
+    });
+    let req = |run: protocol::RunId| builtin_tools::ControlRequest {
+        run_id: run.to_string(),
+        rect: None,
+        label: "fake".into(),
+        action: "click".into(),
+    };
+    let permit = gate.admit_action(&req(first)).await.unwrap();
+    let other = gate.clone();
+    let second_request = req(second);
+    let pending = tokio::spawn(async move { other.admit_action(&second_request).await });
+    for _ in 0..100 {
+        if lp
+            .sh
+            .runs
+            .lock()
+            .get(&second)
+            .unwrap()
+            .waiting_computer
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(!pending.is_finished());
+    lp.sh.runs.lock().remove(&first);
+    assert!(
+        !pending.is_finished(),
+        "dispatched action must keep the root run slot"
+    );
+    drop(permit);
+    let permit = pending.await.unwrap().unwrap();
+    assert!(
+        !lp.sh
+            .runs
+            .lock()
+            .get(&second)
+            .unwrap()
+            .waiting_computer
+            .load(std::sync::atomic::Ordering::SeqCst)
+    );
+    drop(permit);
+    lp.sh.runs.lock().remove(&second);
+}
+
+#[tokio::test]
 async fn control_gate_sees_the_run_and_can_publish_the_request_event() {
     let env = setup();
     let fake = Fake::new(vec![calls(&[("c1", "t.desk", json!({}))]), text("done")]);
@@ -3803,6 +3882,79 @@ async fn control_bridge_fails_closed_for_unknown_runs_and_a_dropped_loop() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn fail_closed_admission_still_admits_direct_and_scheduled_runs() {
+    use builtin_tools::DesktopControlGate as _;
+    let env = setup();
+    let fake = Fake::new(vec![calls(&[("c1", "t.desk", json!({}))]), text("done")]);
+    let lp = gate_loop(&env, &fake);
+    let gate = Arc::new(TestGate {
+        refuse: false,
+        seen: Mutex::new(Vec::new()),
+    });
+    lp.set_control_gate(gate.clone());
+    let bridge = crate::control::LoopControl {
+        sh: Arc::downgrade(&lp.sh),
+    };
+    assert!(!bridge.computer_in_use());
+    // A direct (CLI one-shot style) run is a live run: admitted.
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    // A scheduled run calling the computer tool directly is admitted too.
+    let schedule = protocol::TaskId::new();
+    let scheduled = lp
+        .run_scheduled(env.chat, schedule, tool_work("t.desk"))
+        .unwrap();
+    assert_eq!(lp.wait(scheduled).await.unwrap(), RunState::Succeeded);
+    let seen = gate.seen.lock().clone();
+    assert_eq!(seen.len(), 2, "both runs reached the gate");
+    assert_eq!((seen[0].run_id, seen[1].run_id), (run, scheduled));
+    // Runs end: their computer slot is returned, nothing keeps the browser pinned.
+    assert!(!bridge.computer_in_use());
+}
+
+#[tokio::test]
+async fn an_active_run_that_used_the_computer_holds_the_pin_until_it_ends() {
+    use builtin_tools::DesktopControlGate as _;
+    let env = setup();
+    let fake = Fake::new(vec![]);
+    let lp = gate_loop(&env, &fake);
+    lp.set_control_gate(Arc::new(TestGate {
+        refuse: false,
+        seen: Mutex::new(Vec::new()),
+    }));
+    let bridge = crate::control::LoopControl {
+        sh: Arc::downgrade(&lp.sh),
+    };
+    let now = storage::now_ms();
+    let run = storage::Run {
+        id: protocol::RunId::new(),
+        user_id: env.user,
+        bot_id: env.bot,
+        chat_id: Some(env.chat),
+        kind: "turn".into(),
+        state: "running".into(),
+        error: None,
+        created_at_ms: now,
+        updated_at_ms: now,
+        parent_run_id: None,
+        spec: None,
+    };
+    env.storage.insert_run(&run).unwrap();
+    lp.sh.ctx(&run).unwrap();
+    assert!(!bridge.computer_in_use(), "no computer use yet");
+    drop(
+        bridge
+            .admit_action(&desk_req(run.id.to_string()))
+            .await
+            .unwrap(),
+    );
+    // The action is over, the run is still active: the browser stays pinned.
+    assert!(bridge.computer_in_use());
+    lp.sh.runs.lock().remove(&run.id);
+    assert!(!bridge.computer_in_use(), "the run ended");
 }
 
 #[tokio::test]
@@ -4457,6 +4609,89 @@ async fn policy_deny_after_approval_recheck_does_not_run_the_tool_or_keep_the_gr
         "set_global_policy did not finish after the gate was released",
     )
     .await;
+}
+
+#[tokio::test]
+async fn a_bot_writes_and_reads_its_own_skill_while_the_file_tools_refuse_that_folder() {
+    use tool_registry::{ContentPart, ToolContext};
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path();
+    let gate = builtin_tools::ResolverGate::new(
+        permission_engine::PermissionResolver::new(),
+        permission_engine::Policy::full(),
+        None,
+        protocol::InitiatorKind::Human,
+    );
+    let registry = tool_registry::ToolRegistry::new();
+    let registered = builtin_tools::register_builtin_tools(
+        &registry,
+        builtin_tools::BuiltinConfig::new(data.to_path_buf(), Arc::new(gate)),
+    );
+    assert!(registered > 0);
+    let index = skills::SkillIndex::load_roots(skills::SkillRoots::from_data_dir(data));
+    for tool in skills::tools(&index) {
+        registry.register(tool);
+    }
+    let bot = uuid::Uuid::now_v7().to_string();
+    let ctx = ToolContext {
+        bot_id: Some(bot.clone()),
+        ..ToolContext::default()
+    };
+    let text = |out: &tool_registry::ToolOutput| {
+        out.content
+            .iter()
+            .filter_map(|p| match p {
+                ContentPart::Text { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<String>()
+    };
+    let skill = "---\nname: my-site\ndescription: How to use my-site\n---\nSteps\n";
+    registry
+        .get("skill_write")
+        .unwrap()
+        .call(&ctx, json!({"name": "my-site", "content": skill}))
+        .await
+        .unwrap();
+    let path = data
+        .join("bots")
+        .join(&bot)
+        .join("skills")
+        .join("my-site")
+        .join("SKILL.md");
+    assert!(
+        path.exists(),
+        "skill_write saved under the bot's own folder"
+    );
+    let read = registry
+        .get("skill_read")
+        .unwrap()
+        .call(&ctx, json!({"name": "my-site"}))
+        .await
+        .unwrap();
+    assert!(text(&read).contains("Steps"), "{}", text(&read));
+    // The generic file tools stay out of that folder, for read and write.
+    let err = registry
+        .get("fs_read")
+        .unwrap()
+        .call(&ctx, json!({"path": &path}))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, tool_registry::ToolError::PermissionDenied(_)),
+        "{err}"
+    );
+    let err = registry
+        .get("fs_write")
+        .unwrap()
+        .call(&ctx, json!({"path": &path, "content": "forged"}))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, tool_registry::ToolError::PermissionDenied(_)),
+        "{err}"
+    );
+    assert!(std::fs::read_to_string(&path).unwrap().contains("Steps"));
 }
 
 // ---------- always-ask tools (schedule delegation) ----------

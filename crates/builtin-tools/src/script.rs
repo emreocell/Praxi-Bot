@@ -158,6 +158,7 @@ fn output_to_json(out: &ToolOutput) -> Value {
 /// [`ScriptHost`] that routes script tool calls through the registry with a
 /// permission check on every call.
 pub struct GateHost {
+    action: Option<crate::control::ScriptAction>,
     registry: ToolRegistry,
     gate: Arc<dyn ToolGate>,
     run_id: String,
@@ -179,6 +180,7 @@ impl GateHost {
         bot_id: Option<String>,
     ) -> Self {
         Self {
+            action: None,
             registry,
             gate,
             run_id,
@@ -218,10 +220,12 @@ impl ScriptHost for GateHost {
             max_inline_bytes: self.max_inline_bytes,
             bot_id: self.bot_id.clone(),
         };
-        tool.call(&ctx, input)
-            .await
-            .map(|o| output_to_json(&o))
-            .map_err(|e| e.to_string())
+        let out = if let Some(action) = &self.action {
+            crate::control::scope_action(action.clone(), tool.call(&ctx, input)).await
+        } else {
+            tool.call(&ctx, input).await
+        };
+        out.map(|o| output_to_json(&o)).map_err(|e| e.to_string())
     }
 }
 
@@ -237,12 +241,23 @@ pub struct ScriptTool {
     registry: ToolRegistry,
     gate: Arc<dyn ToolGate>,
     limits: Limits,
+    control: Option<Arc<dyn crate::control::DesktopControlGate>>,
 }
 
 /// Build `script_run`. `registry` is the registry scripts call back into (it may
 /// be the registry this tool is registered in; clones share state).
 #[must_use]
 pub fn tool(registry: ToolRegistry, gate: Arc<dyn ToolGate>, limits: Limits) -> Arc<dyn Tool> {
+    tool_with_control(registry, gate, limits, None)
+}
+
+#[must_use]
+pub fn tool_with_control(
+    registry: ToolRegistry,
+    gate: Arc<dyn ToolGate>,
+    limits: Limits,
+    control: Option<Arc<dyn crate::control::DesktopControlGate>>,
+) -> Arc<dyn Tool> {
     Arc::new(ScriptTool {
         spec: spec(
             SCRIPT_TOOL_NAME,
@@ -257,6 +272,7 @@ pub fn tool(registry: ToolRegistry, gate: Arc<dyn ToolGate>, limits: Limits) -> 
         registry,
         gate,
         limits,
+        control,
     })
 }
 
@@ -272,13 +288,20 @@ impl Tool for ScriptTool {
         if let Some(t) = i.timeout {
             limits.timeout = Duration::from_secs(t).min(limits.timeout);
         }
-        let host = Arc::new(GateHost::new(
+        let mut host = GateHost::new(
             self.registry.clone(),
             self.gate.clone(),
             ctx.run_id.clone(),
             ctx.max_inline_bytes,
             ctx.bot_id.clone(),
-        ));
+        );
+        // Admission is lazy: only a computer tool call inside the script takes
+        // it (one admission for the whole run), so a script that never touches
+        // the computer neither waits for a pause nor holds the computer slot.
+        if self.control.is_some() {
+            host.action = Some(Arc::default());
+        }
+        let host = Arc::new(host);
         // QuickJS is synchronous CPU work: a busy loop would block the async
         // worker (and `tokio::time::timeout` cannot preempt it). Run it on the
         // blocking pool; the engine's interrupt handler enforces the deadline.
