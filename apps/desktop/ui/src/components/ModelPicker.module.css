@@ -142,3 +142,10 @@
 .scroll { max-height: min(calc(var(--size-widget-width) * 1.8), 75vh); }
 .option { min-height: var(--space-8); padding-block: var(--space-1); }
 .groupLabel { padding-top: var(--space-3); }
+
+/* Appearance axes: popovers get a sheen (solid) or frosted glass. */
+.popover { background-image: var(--surface-sheen); }
+:global(:root[data-style="glass"]) .popover {
+  background-color: color-mix(in srgb, var(--color-surface-elevated-opaque) 72%, transparent);
+  backdrop-filter: blur(var(--blur-glass)) saturate(1.5);
+}

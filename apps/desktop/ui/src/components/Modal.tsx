@@ -5,6 +5,9 @@ import styles from "./Modal.module.css";
 const FOCUSABLE =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+/** Open dialogs, topmost last: only the topmost one reacts to Esc / Tab (nested dialogs). */
+const openStack: HTMLElement[] = [];
+
 /**
  * A centered dialog over a dimmed backdrop: Esc and a backdrop click close it,
  * Tab stays inside, and focus returns to where it was when it closes.
@@ -33,10 +36,12 @@ export function Modal({
     }
     const previous = document.activeElement as HTMLElement | null;
     const node = ref.current;
+    if (node) openStack.push(node);
     const appRoot = document.getElementById("root");
     if (appRoot) appRoot.inert = true;
     (node?.querySelector<HTMLElement>("[data-autofocus]") ?? node)?.focus();
     const onKey = (e: KeyboardEvent) => {
+      if (node && openStack[openStack.length - 1] !== node) return;
       if (e.key === "Escape") {
         e.stopPropagation();
         closeRef.current();
@@ -63,6 +68,8 @@ export function Modal({
     document.addEventListener("keydown", onKey, true);
     return () => {
       document.removeEventListener("keydown", onKey, true);
+      const at = node ? openStack.indexOf(node) : -1;
+      if (at >= 0) openStack.splice(at, 1);
       if (appRoot && ![...document.querySelectorAll('[aria-modal="true"]')].some(dialog => dialog !== node)) appRoot.inert = false;
       previous?.focus?.();
     };
