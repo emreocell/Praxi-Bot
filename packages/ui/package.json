@@ -7,13 +7,13 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./tokens.css": "./tokens.css",
-    "./themes/light.json": "./themes/light.json",
-    "./themes/dark.json": "./themes/dark.json"
+    "./theme-model": "./src/themeModel.ts",
+    "./tokens.css": "./tokens.css"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "generate:themes": "node scripts/build-themes.mjs"
+    "generate:themes": "node scripts/build-themes.mjs",
+    "test": "node --test src/themeModel.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.3",
