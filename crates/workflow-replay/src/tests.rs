@@ -430,7 +430,7 @@ async fn success_checks_require_computer_read_admission_before_backend_access() 
             "browser_snapshot",
         ),
     ] {
-        let mut wf = Workflow::new("read admission");
+        let mut wf = Workflow::new("read-admission");
         wf.success_check = Some(check);
         let gate = RecordingGate::denying(tool);
         let rp = Replayer::new(
