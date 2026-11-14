@@ -3738,6 +3738,8 @@ async fn computer_slot_queues_another_run_and_outlives_a_cancelled_backend_await
             updated_at_ms: now,
             parent_run_id: None,
             spec: None,
+            computer_target: None,
+            pause_reason: None,
         };
         env.storage.insert_run(&run).unwrap();
         lp.sh.ctx(&run).unwrap();
@@ -3813,6 +3815,8 @@ async fn computer_slot_is_enforced_without_an_embedder_control_gate() {
             updated_at_ms: now,
             parent_run_id: None,
             spec: None,
+            computer_target: None,
+            pause_reason: None,
         };
         env.storage.insert_run(&run).unwrap();
         lp.sh.ctx(&run).unwrap();
@@ -4016,6 +4020,8 @@ async fn an_active_run_that_used_the_computer_holds_the_pin_until_it_ends() {
         updated_at_ms: now,
         parent_run_id: None,
         spec: None,
+        computer_target: None,
+        pause_reason: None,
     };
     env.storage.insert_run(&run).unwrap();
     lp.sh.ctx(&run).unwrap();
@@ -5304,4 +5310,682 @@ async fn a_multiline_secret_in_the_details_is_refused_like_any_other() {
     while let Ok(item) = rx.try_recv() {
         assert!(!matches!(item.envelope.event, Event::ApprovalNeeded(_)));
     }
+}
+
+// ---------- computer target & waiting_for_pc tests ----------
+
+struct NamedDesktop {
+    label: &'static str,
+    snapshots: Arc<AtomicUsize>,
+}
+
+impl NamedDesktop {
+    fn new(label: &'static str) -> Arc<Self> {
+        Arc::new(Self {
+            label,
+            snapshots: Arc::new(AtomicUsize::new(0)),
+        })
+    }
+}
+
+#[async_trait]
+impl desktop_api::DesktopBackend for NamedDesktop {
+    async fn snapshot(
+        &self,
+        _scope: Option<u64>,
+    ) -> Result<desktop_api::Snapshot, desktop_api::DesktopError> {
+        self.snapshots.fetch_add(1, Ordering::SeqCst);
+        Ok(desktop_api::Snapshot {
+            window: desktop_api::WindowInfo {
+                id: 1,
+                title: format!("window-{}", self.label),
+                pid: 1,
+                bounds: desktop_api::snapshot::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 800.0,
+                    height: 600.0,
+                },
+                focused: true,
+            },
+            nodes: vec![desktop_api::UiNode::new(
+                0,
+                "button",
+                format!("btn-{}", self.label),
+                None,
+                None,
+                vec![],
+            )],
+            generation: 1,
+            quality: desktop_api::TreeQuality::Weak,
+        })
+    }
+
+    async fn act(
+        &self,
+        _action: desktop_api::Action,
+    ) -> Result<desktop_api::ActionResult, desktop_api::DesktopError> {
+        Ok(desktop_api::ActionResult {
+            dispatched: true,
+            verified: Some(true),
+            new_snapshot: None,
+        })
+    }
+
+    async fn screenshot(
+        &self,
+        _region: desktop_api::Region,
+        _quality: desktop_api::Quality,
+    ) -> Result<desktop_api::Image, desktop_api::DesktopError> {
+        Ok(desktop_api::Image {
+            data: vec![0, 1],
+            width: 1,
+            height: 1,
+            mime_type: "image/png".into(),
+        })
+    }
+
+    async fn windows(&self) -> Result<Vec<desktop_api::WindowInfo>, desktop_api::DesktopError> {
+        Ok(vec![])
+    }
+
+    async fn launch(
+        &self,
+        _app: desktop_api::snapshot::AppSpec,
+    ) -> Result<desktop_api::snapshot::Pid, desktop_api::DesktopError> {
+        Ok(42)
+    }
+
+    fn capabilities(&self) -> desktop_api::Capabilities {
+        desktop_api::Capabilities {
+            platform: self.label.into(),
+            accessibility_tree: true,
+            screenshot: true,
+            app_launch: true,
+            has_display: true,
+        }
+    }
+}
+
+struct MockComputerProvider {
+    local: parking_lot::RwLock<Option<Arc<dyn desktop_api::DesktopBackend>>>,
+    pc: parking_lot::RwLock<Option<Arc<dyn desktop_api::DesktopBackend>>>,
+    is_host: bool,
+    browser_available: bool,
+    has_display: bool,
+}
+
+impl computer_target::ComputerProvider for MockComputerProvider {
+    fn local(&self) -> Option<Arc<dyn desktop_api::DesktopBackend>> {
+        self.local.read().clone()
+    }
+
+    fn pc(&self) -> Option<Arc<dyn desktop_api::DesktopBackend>> {
+        self.pc.read().clone()
+    }
+
+    fn is_host(&self) -> bool {
+        self.is_host
+    }
+
+    fn browser_available(&self) -> bool {
+        self.browser_available
+    }
+
+    fn has_display(&self) -> bool {
+        self.has_display
+    }
+
+    fn node(&self, _id: &str) -> Option<Arc<dyn desktop_api::DesktopBackend>> {
+        None
+    }
+}
+
+struct ControlInspectTool {
+    spec: ToolSpec,
+    control: crate::control::LoopControl,
+    seen_headless: Mutex<Vec<Option<bool>>>,
+    seen_window: Mutex<Vec<Option<String>>>,
+}
+
+#[async_trait]
+impl Tool for ControlInspectTool {
+    fn spec(&self) -> &ToolSpec {
+        &self.spec
+    }
+
+    async fn call(&self, ctx: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
+        use builtin_tools::DesktopControlGate as _;
+        let run_id = ctx.run_id.clone();
+        self.seen_headless
+            .lock()
+            .push(self.control.browser_headless_for_run(&run_id));
+        let title = if let Some(b) = self.control.desktop_for_run(&run_id) {
+            Some(b.snapshot(None).await.unwrap().window.title)
+        } else {
+            None
+        };
+        self.seen_window.lock().push(title);
+        Ok(ToolOutput::text("inspected"))
+    }
+}
+
+fn computer_test_tools() -> (Arc<TestTool>, Arc<TestTool>, Arc<TestTool>) {
+    let mut desk = tool("desktop_ping", Effect::Read, "desk ok");
+    desk.spec.category = PermissionCategory::Desktop;
+    let mut browser = tool("browser_ping", Effect::Read, "browser ok");
+    browser.spec.category = PermissionCategory::Browser;
+    let fs = tool("fs_ping", Effect::Read, "fs ok");
+    (Arc::new(desk), Arc::new(browser), Arc::new(fs))
+}
+
+#[tokio::test]
+async fn computer_target_off_hides_tools_and_inherits_to_subagents() {
+    let env = setup();
+    let host_desk = NamedDesktop::new("host");
+    let pc_desk = NamedDesktop::new("pc");
+
+    let (desk_t, browser_t, fs_t) = computer_test_tools();
+    let provider_off = Arc::new(MockComputerProvider {
+        local: parking_lot::RwLock::new(Some(host_desk)),
+        pc: parking_lot::RwLock::new(Some(pc_desk)),
+        is_host: true,
+        browser_available: true,
+        has_display: true,
+    });
+    let fake_off = Fake::new(vec![
+        calls(&[
+            ("c1", "desktop_ping", json!({})),
+            ("c2", "browser_ping", json!({})),
+            ("c3", "fs_ping", json!({})),
+            ("c4", "spawn_subagent", json!({"task": "child work"})),
+        ]),
+        // Child subagent reply:
+        text("child done"),
+        // Parent final reply:
+        text("parent done"),
+    ]);
+    let registry = ToolRegistry::new();
+    registry.register(Arc::clone(&desk_t) as Arc<dyn Tool>);
+    registry.register(Arc::clone(&browser_t) as Arc<dyn Tool>);
+    registry.register(Arc::clone(&fs_t) as Arc<dyn Tool>);
+    let lp = AgentLoop::new(
+        Arc::clone(&env.storage),
+        registry,
+        Providers::single(Arc::clone(&fake_off) as Arc<dyn ChatProvider>),
+        cfg(Policy::full()),
+    )
+    .with_subagents();
+    lp.set_computer_provider(provider_off);
+    lp.add_profile(env.bot, profile("[runtime]\ncomputer = \"off\"\n"));
+
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+
+    let parent_tools = req_tool_names(&fake_off.request(0));
+    assert!(
+        parent_tools.iter().any(|t| t == "fs_ping"),
+        "{parent_tools:?}"
+    );
+    assert!(
+        !parent_tools.iter().any(|t| t == "desktop_ping"),
+        "{parent_tools:?}"
+    );
+    assert!(
+        !parent_tools.iter().any(|t| t == "browser_ping"),
+        "{parent_tools:?}"
+    );
+
+    let child_tools = req_tool_names(&fake_off.request(1));
+    assert!(
+        child_tools.iter().any(|t| t == "fs_ping"),
+        "{child_tools:?}"
+    );
+    assert!(
+        !child_tools.iter().any(|t| t == "desktop_ping"),
+        "{child_tools:?}"
+    );
+    assert!(
+        !child_tools.iter().any(|t| t == "browser_ping"),
+        "{child_tools:?}"
+    );
+
+    assert_eq!(desk_t.count.load(Ordering::SeqCst), 0);
+    assert_eq!(browser_t.count.load(Ordering::SeqCst), 0);
+    assert_eq!(fs_t.count.load(Ordering::SeqCst), 1);
+
+    let parent_final_msgs = tool_messages(&fake_off.request(2));
+    assert!(
+        parent_final_msgs[0].contains("unknown tool"),
+        "{parent_final_msgs:?}"
+    );
+    assert!(
+        parent_final_msgs[1].contains("unknown tool"),
+        "{parent_final_msgs:?}"
+    );
+
+    let stored_parent = env.storage.get_run(run).unwrap().unwrap();
+    assert_eq!(stored_parent.computer_target.as_deref(), Some("off"));
+    let children = env.storage.list_child_runs(run).unwrap();
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].computer_target.as_deref(), Some("off"));
+}
+
+async fn run_computer_probe(
+    env: &Env,
+    computer_toml: &str,
+    provider: Arc<MockComputerProvider>,
+) -> (Vec<String>, Option<bool>, Option<String>, Option<String>) {
+    let (desk_t, browser_t, fs_t) = computer_test_tools();
+    let fake = Fake::new(vec![
+        calls(&[("c1", "inspect_ctrl", json!({}))]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&desk_t), t(&browser_t), t(&fs_t)],
+        profile(&format!("[runtime]\ncomputer = \"{computer_toml}\"\n")),
+        cfg(Policy::full()),
+    );
+    lp.set_computer_provider(provider);
+    let inspect = Arc::new(ControlInspectTool {
+        spec: ToolSpec {
+            name: "inspect_ctrl".into(),
+            description: "inspect".into(),
+            input_schema: json!({"type": "object"}),
+            effect: Effect::Read,
+            category: PermissionCategory::Fs,
+            platforms: vec![Platform::All],
+        },
+        control: crate::control::LoopControl {
+            sh: Arc::downgrade(&lp.sh),
+        },
+        seen_headless: Mutex::new(Vec::new()),
+        seen_window: Mutex::new(Vec::new()),
+    });
+    lp.sh.tools.register(Arc::clone(&inspect) as Arc<dyn Tool>);
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let tools = req_tool_names(&fake.request(0));
+    let headless = inspect.seen_headless.lock().pop().flatten();
+    let window = inspect.seen_window.lock().pop().flatten();
+    let target = env.storage.get_run(run).unwrap().unwrap().computer_target;
+    (tools, headless, window, target)
+}
+
+#[tokio::test]
+async fn computer_target_selects_tools_backend_and_browser_headless_per_resolution() {
+    let env = setup();
+    let host_desk = NamedDesktop::new("host");
+    let pc_desk = NamedDesktop::new("pc");
+
+    // 1. "browser": desktop hidden, browser visible, headless = true.
+    let (br_tools, br_headless, br_win, br_label) = run_computer_probe(
+        &env,
+        "browser",
+        Arc::new(MockComputerProvider {
+            local: parking_lot::RwLock::new(None),
+            pc: parking_lot::RwLock::new(None),
+            is_host: true,
+            browser_available: true,
+            has_display: false,
+        }),
+    )
+    .await;
+    assert!(br_tools.iter().any(|t| t == "browser_ping"), "{br_tools:?}");
+    assert!(
+        !br_tools.iter().any(|t| t == "desktop_ping"),
+        "{br_tools:?}"
+    );
+    assert_eq!(br_headless, Some(true));
+    assert_eq!(br_win, None);
+    assert_eq!(br_label.as_deref(), Some("browser"));
+
+    // 2. "host" with display: desktop + browser visible, headless = false, desktop = host.
+    let (host_tools, host_headless, host_win, host_label) = run_computer_probe(
+        &env,
+        "host",
+        Arc::new(MockComputerProvider {
+            local: parking_lot::RwLock::new(Some(host_desk)),
+            pc: parking_lot::RwLock::new(Some(pc_desk.clone())),
+            is_host: true,
+            browser_available: true,
+            has_display: true,
+        }),
+    )
+    .await;
+    assert!(
+        host_tools.iter().any(|t| t == "desktop_ping"),
+        "{host_tools:?}"
+    );
+    assert!(
+        host_tools.iter().any(|t| t == "browser_ping"),
+        "{host_tools:?}"
+    );
+    assert_eq!(host_headless, Some(false));
+    assert_eq!(host_win.as_deref(), Some("window-host"));
+    assert_eq!(host_label.as_deref(), Some("host"));
+
+    // 3. "pc": desktop = pc backend, headless = true, browser follows provider availability.
+    let (pc_tools, pc_headless, pc_win, pc_label) = run_computer_probe(
+        &env,
+        "pc",
+        Arc::new(MockComputerProvider {
+            local: parking_lot::RwLock::new(Some(NamedDesktop::new("local"))),
+            pc: parking_lot::RwLock::new(Some(pc_desk)),
+            is_host: true,
+            browser_available: true,
+            has_display: true,
+        }),
+    )
+    .await;
+    assert!(pc_tools.iter().any(|t| t == "desktop_ping"), "{pc_tools:?}");
+    assert!(pc_tools.iter().any(|t| t == "browser_ping"), "{pc_tools:?}");
+    assert_eq!(pc_headless, Some(true));
+    assert_eq!(pc_win.as_deref(), Some("window-pc"));
+    assert_eq!(pc_label.as_deref(), Some("pc"));
+}
+
+#[tokio::test]
+async fn script_inner_call_respects_computer_target_disablement() {
+    let env = setup();
+    let code = "try { await tools.call('desktop_ping', {}); return 'ran'; } catch (e) { return 'blocked: ' + e; }";
+    let fake = Fake::new(vec![
+        calls(&[("c1", "script_run", json!({ "code": code }))]),
+        text("ok"),
+    ]);
+    let mut desk = tool("desktop_ping", Effect::Read, "ran");
+    desk.spec.category = PermissionCategory::Desktop;
+    let desk = Arc::new(desk);
+
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&desk)],
+        profile("[runtime]\ncomputer = \"off\"\n"),
+        cfg(Policy::full()),
+    )
+    .with_builtin_tools(builtin_cfg(&env, Arc::new(NoGate)));
+    lp.set_computer_provider(Arc::new(MockComputerProvider {
+        local: parking_lot::RwLock::new(Some(NamedDesktop::new("local"))),
+        pc: parking_lot::RwLock::new(None),
+        is_host: true,
+        browser_available: true,
+        has_display: true,
+    }));
+
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(desk.count.load(Ordering::SeqCst), 0);
+    let msg = tool_messages(&fake.request(1)).join("\n");
+    assert!(msg.contains("blocked:"), "{msg}");
+}
+
+#[tokio::test]
+async fn waiting_for_pc_pauses_cancels_and_resumes_when_pc_comes_online() {
+    let env = setup();
+    let provider = Arc::new(MockComputerProvider {
+        local: parking_lot::RwLock::new(None),
+        pc: parking_lot::RwLock::new(None),
+        is_host: true,
+        browser_available: false,
+        has_display: false,
+    });
+    let fake = Fake::new(vec![
+        calls(&[("c1", "inspect_ctrl", json!({}))]),
+        text("pc completed"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile("[runtime]\ncomputer = \"pc\"\n"),
+        cfg(Policy::full()),
+    );
+    lp.set_computer_provider(provider.clone());
+    let inspect = Arc::new(ControlInspectTool {
+        spec: ToolSpec {
+            name: "inspect_ctrl".into(),
+            description: "inspect".into(),
+            input_schema: json!({"type": "object"}),
+            effect: Effect::Read,
+            category: PermissionCategory::Fs,
+            platforms: vec![Platform::All],
+        },
+        control: crate::control::LoopControl {
+            sh: Arc::downgrade(&lp.sh),
+        },
+        seen_headless: Mutex::new(Vec::new()),
+        seen_window: Mutex::new(Vec::new()),
+    });
+    lp.sh.tools.register(Arc::clone(&inspect) as Arc<dyn Tool>);
+
+    // Run 1: PC offline -> pauses in waiting_for_pc, then user cancels it.
+    let mut rx = lp.subscribe();
+    let run1 = lp.run_turn(env.chat, "wait then cancel").unwrap();
+    assert_eq!(lp.wait(run1).await.unwrap(), RunState::Paused);
+    let stored1 = env.storage.get_run(run1).unwrap().unwrap();
+    assert_eq!(stored1.state, "paused");
+    assert_eq!(
+        stored1.pause_reason.as_deref(),
+        Some(computer_target::WAIT_FOR_PC_REASON)
+    );
+    assert_eq!(stored1.computer_target.as_deref(), Some("pc"));
+    assert_eq!(
+        fake.n_requests(),
+        0,
+        "model must not run while waiting for PC"
+    );
+
+    lp.cancel(run1).unwrap();
+    let Event::RunFinished(finished) = until(
+        &mut rx,
+        |e| matches!(e, Event::RunFinished(f) if f.run_id == run1),
+    )
+    .await
+    else {
+        unreachable!()
+    };
+    assert!(
+        finished
+            .error
+            .as_deref()
+            .is_some_and(|e| e.to_ascii_lowercase().contains("cancel")),
+        "{:?}",
+        finished.error
+    );
+    let stored1 = env.storage.get_run(run1).unwrap().unwrap();
+    assert_eq!(stored1.state, "cancelled");
+    assert_eq!(stored1.pause_reason, None);
+
+    // Run 2: PC offline -> pauses; then PC comes online -> resume_waiting_for_pc finishes it.
+    let run2 = lp.run_turn(env.chat, "wait then resume").unwrap();
+    assert_eq!(lp.wait(run2).await.unwrap(), RunState::Paused);
+    let pc_desk = NamedDesktop::new("pc-live");
+    *provider.pc.write() = Some(pc_desk.clone());
+    assert_eq!(lp.resume_waiting_for_pc().await, vec![run2]);
+    assert_eq!(lp.wait(run2).await.unwrap(), RunState::Succeeded);
+
+    let stored2 = env.storage.get_run(run2).unwrap().unwrap();
+    assert_eq!(stored2.state, "succeeded");
+    assert_eq!(stored2.pause_reason, None);
+    assert_eq!(stored2.computer_target.as_deref(), Some("pc"));
+    assert_eq!(
+        *inspect.seen_window.lock(),
+        vec![Some("window-pc-live".into())]
+    );
+    assert_eq!(pc_desk.snapshots.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn waiting_for_pc_timeout_marks_run_failed_and_emits_error() {
+    let env = setup();
+    let provider = Arc::new(MockComputerProvider {
+        local: parking_lot::RwLock::new(None),
+        pc: parking_lot::RwLock::new(None),
+        is_host: true,
+        browser_available: false,
+        has_display: false,
+    });
+    let mut config = cfg(Policy::full());
+    config.wait_for_pc_timeout = Duration::from_millis(60);
+    let fake = Fake::new(vec![text("never reached")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile("[runtime]\ncomputer = \"pc\"\n"),
+        config,
+    );
+    lp.set_computer_provider(provider);
+
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "timeout test").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Paused);
+
+    let mut saw_timeout_err = false;
+    let finished_err = loop {
+        match until(&mut rx, |e| {
+            matches!(e, Event::Error(err) if err.run_id == run)
+                || matches!(e, Event::RunFinished(f) if f.run_id == run)
+        })
+        .await
+        {
+            Event::Error(err) if err.run_id == run && err.message.contains("timed out") => {
+                assert!(!err.recoverable);
+                saw_timeout_err = true;
+            }
+            Event::RunFinished(f) if f.run_id == run => break f.error,
+            _ => {}
+        }
+    };
+    assert!(saw_timeout_err, "expected timeout Error event");
+    assert!(
+        finished_err
+            .as_deref()
+            .is_some_and(|m| m.contains("timed out")),
+        "{finished_err:?}"
+    );
+
+    let stored = env.storage.get_run(run).unwrap().unwrap();
+    assert_eq!(stored.state, "failed");
+    assert_eq!(stored.pause_reason, None);
+    assert!(
+        stored
+            .error
+            .as_deref()
+            .is_some_and(|m| m.contains("timed out")),
+        "{:?}",
+        stored.error
+    );
+    assert_eq!(fake.n_requests(), 0);
+}
+
+#[tokio::test]
+async fn computer_resolution_stays_fixed_across_resume() {
+    let env = setup();
+    let host_desk = NamedDesktop::new("host-fixed");
+    let pc_desk = NamedDesktop::new("pc-later");
+    let provider = Arc::new(MockComputerProvider {
+        local: parking_lot::RwLock::new(Some(host_desk)),
+        pc: parking_lot::RwLock::new(None),
+        is_host: true,
+        browser_available: true,
+        has_display: true,
+    });
+    let mut write_tool = tool("fs_gate", Effect::Write, "written");
+    write_tool.spec.category = PermissionCategory::Fs;
+    let write_tool = Arc::new(write_tool);
+
+    let fake = Fake::new(vec![
+        calls(&[("c1", "fs_gate", json!({}))]),
+        calls(&[("c2", "inspect_ctrl", json!({}))]),
+        text("all done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&write_tool)],
+        profile("[runtime]\ncomputer = \"auto\"\n"),
+        cfg(Policy::approve_destructive()),
+    );
+    lp.set_computer_provider(provider.clone());
+    let inspect = Arc::new(ControlInspectTool {
+        spec: ToolSpec {
+            name: "inspect_ctrl".into(),
+            description: "inspect".into(),
+            input_schema: json!({"type": "object"}),
+            effect: Effect::Read,
+            category: PermissionCategory::Fs,
+            platforms: vec![Platform::All],
+        },
+        control: crate::control::LoopControl {
+            sh: Arc::downgrade(&lp.sh),
+        },
+        seen_headless: Mutex::new(Vec::new()),
+        seen_window: Mutex::new(Vec::new()),
+    });
+    lp.sh.tools.register(Arc::clone(&inspect) as Arc<dyn Tool>);
+
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "fix target across restart").unwrap();
+    until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await;
+    assert_eq!(
+        env.storage
+            .get_run(run)
+            .unwrap()
+            .unwrap()
+            .computer_target
+            .as_deref(),
+        Some("host")
+    );
+
+    // Pause and simulate restart + PC coming online in the meantime.
+    lp.shutdown(Duration::from_millis(500)).await;
+    *provider.pc.write() = Some(pc_desk);
+
+    let lp2 = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&write_tool)],
+        profile("[runtime]\ncomputer = \"auto\"\n"),
+        cfg(Policy::full()),
+    );
+    lp2.set_computer_provider(provider);
+    let inspect2 = Arc::new(ControlInspectTool {
+        spec: inspect.spec.clone(),
+        control: crate::control::LoopControl {
+            sh: Arc::downgrade(&lp2.sh),
+        },
+        seen_headless: Mutex::new(Vec::new()),
+        seen_window: Mutex::new(Vec::new()),
+    });
+    lp2.sh
+        .tools
+        .register(Arc::clone(&inspect2) as Arc<dyn Tool>);
+    lp2.recover().unwrap();
+    lp2.resume(run).unwrap();
+    assert_eq!(lp2.wait(run).await.unwrap(), RunState::Succeeded);
+
+    assert_eq!(
+        env.storage
+            .get_run(run)
+            .unwrap()
+            .unwrap()
+            .computer_target
+            .as_deref(),
+        Some("host")
+    );
+    assert_eq!(
+        *inspect2.seen_window.lock(),
+        vec![Some("window-host-fixed".into())],
+        "resumed run must keep its original 'host' desktop rather than switching to newly online 'pc'"
+    );
 }

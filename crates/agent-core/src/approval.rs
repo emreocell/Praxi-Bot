@@ -898,7 +898,7 @@ impl ToolGate for LoopGate {
             .get(&run_id)
             .cloned()
             .ok_or("script has no active run")?;
-        if !ctx.profile.tool_visible(&req.tool) {
+        if !ctx.profile.tool_visible(&req.tool) || !ctx.profile.category_visible(req.category) {
             return Err(format!("unknown tool: {}", req.tool));
         }
         let result = match sh.decide(&ctx, &req.tool, req.effect, req.category, &req.input) {

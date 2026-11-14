@@ -1050,6 +1050,8 @@ mod tests {
                     updated_at_ms: 0,
                     parent_run_id: None,
                     spec: None,
+                    computer_target: None,
+                    pause_reason: None,
                 })
                 .unwrap();
             let mut step = tool_step(

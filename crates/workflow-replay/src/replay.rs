@@ -641,7 +641,7 @@ impl Replayer {
                 })
             }
             Step::Launch(l) => {
-                let backend = Arc::clone(self.desktop()?);
+                let backend = self.desktop()?;
                 let executable = template::render(&l.executable, vars).map_err(|e| tpl(&e))?;
                 let args = l
                     .args
@@ -726,18 +726,36 @@ impl Replayer {
         }
     }
 
-    fn desktop(&self) -> Result<&Arc<dyn DesktopBackend>, Stop> {
+    fn desktop(&self) -> Result<Arc<dyn DesktopBackend>, Stop> {
+        if let Some(d) = self
+            .opts
+            .control
+            .as_ref()
+            .and_then(|c| c.desktop_for_run(&self.opts.run_id))
+        {
+            return Ok(d);
+        }
         self.handles
             .desktop
-            .as_ref()
+            .clone()
             .ok_or_else(|| Stop::Missing("no desktop backend".into()))
     }
 
     fn browser(&self) -> Result<&Arc<dyn BrowserDriver>, Stop> {
-        self.handles
+        let driver = self
+            .handles
             .browser
             .as_ref()
-            .ok_or_else(|| Stop::Missing("no browser driver".into()))
+            .ok_or_else(|| Stop::Missing("no browser driver".into()))?;
+        if let Some(headless) = self
+            .opts
+            .control
+            .as_ref()
+            .and_then(|c| c.browser_headless_for_run(&self.opts.run_id))
+        {
+            driver.set_headless(headless);
+        }
+        Ok(driver)
     }
 
     async fn call_tool(&self, name: &str, input: Value, gate: &dyn ToolGate) -> Result<Done, Stop> {
@@ -816,7 +834,7 @@ impl Replayer {
         gate: &dyn ToolGate,
         permit: &ActionPermit,
     ) -> Result<Done, Stop> {
-        let backend = self.desktop()?;
+        let backend = &self.desktop()?;
         let value = d
             .value
             .as_ref()
@@ -1200,7 +1218,7 @@ impl Replayer {
                 window_title_pattern,
                 contains,
             } => {
-                let backend = self
+                let backend = &self
                     .desktop()
                     .map_err(|_| "no desktop backend".to_owned())?;
                 let needle = template::render(contains, vars).map_err(|e| e.to_string())?;

@@ -17,6 +17,8 @@ async-trait.workspace = true
 base64.workspace = true
 builtin-tools = { path = "../builtin-tools", version = "0.1.0" }
 cli-provider.workspace = true
+computer-target = { path = "../computer-target", version = "0.1.0" }
+desktop-api = { path = "../desktop-api", version = "0.1.0" }
 futures.workspace = true
 globset.workspace = true
 memory-store = { path = "../memory-store", version = "0.1.0" }

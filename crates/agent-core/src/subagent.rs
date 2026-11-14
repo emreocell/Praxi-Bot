@@ -387,6 +387,12 @@ impl TurnExecutor {
                 Some(serde_json::to_value(&spec).map_err(|e| e.to_string())?),
             )
             .map_err(|e| e.to_string())?;
+        let _ = sh
+            .storage
+            .set_run_computer_target(id, Some(ctx.resolved_computer.label.as_str()));
+        sh.run_computers
+            .lock()
+            .insert(id, ctx.resolved_computer.clone());
         Ok((id, false))
     }
 

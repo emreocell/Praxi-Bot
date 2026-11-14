@@ -293,6 +293,8 @@ mod tests {
             updated_at_ms: 1,
             parent_run_id: None,
             spec: None,
+            computer_target: None,
+            pause_reason: None,
         };
         storage.insert_run(&run).unwrap();
         let profile = BotProfile::from_toml_str(
