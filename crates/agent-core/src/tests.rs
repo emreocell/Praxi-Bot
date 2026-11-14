@@ -3794,6 +3794,92 @@ async fn computer_slot_queues_another_run_and_outlives_a_cancelled_backend_await
 }
 
 #[tokio::test]
+async fn computer_slot_is_enforced_without_an_embedder_control_gate() {
+    use builtin_tools::DesktopControlGate;
+    let env = setup();
+    let fake = Fake::new(vec![]);
+    let lp = gate_loop(&env, &fake);
+    let make_run = || {
+        let now = storage::now_ms();
+        let run = storage::Run {
+            id: protocol::RunId::new(),
+            user_id: env.user,
+            bot_id: env.bot,
+            chat_id: Some(env.chat),
+            kind: "turn".into(),
+            state: "running".into(),
+            error: None,
+            created_at_ms: now,
+            updated_at_ms: now,
+            parent_run_id: None,
+            spec: None,
+        };
+        env.storage.insert_run(&run).unwrap();
+        lp.sh.ctx(&run).unwrap();
+        run.id
+    };
+    let mut events = lp.subscribe();
+    let first = make_run();
+    let second = make_run();
+    let gate = Arc::new(crate::control::LoopControl {
+        sh: Arc::downgrade(&lp.sh),
+    });
+    let req = |run: protocol::RunId| builtin_tools::ControlRequest {
+        run_id: run.to_string(),
+        rect: None,
+        label: "fake".into(),
+        action: "click".into(),
+    };
+    let permit = gate.admit_action(&req(first)).await.unwrap();
+    let other = gate.clone();
+    let second_request = req(second);
+    let pending = tokio::spawn(async move { other.admit_action(&second_request).await });
+    for _ in 0..100 {
+        if lp
+            .sh
+            .runs
+            .lock()
+            .get(&second)
+            .unwrap()
+            .waiting_computer
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(!pending.is_finished());
+    let mut waiting_notice = false;
+    while let Ok(item) = events.try_recv() {
+        if let Event::MessageDelta(delta) = item.envelope.event {
+            waiting_notice |= delta.run_id == second && delta.text.contains("Waiting for computer");
+        }
+    }
+    assert!(
+        waiting_notice,
+        "a queued computer run must have a visible waiting message"
+    );
+    lp.sh.runs.lock().remove(&first);
+    assert!(
+        !pending.is_finished(),
+        "dispatched action must keep the root run slot"
+    );
+    drop(permit);
+    let permit = pending.await.unwrap().unwrap();
+    assert!(
+        !lp.sh
+            .runs
+            .lock()
+            .get(&second)
+            .unwrap()
+            .waiting_computer
+            .load(std::sync::atomic::Ordering::SeqCst)
+    );
+    drop(permit);
+    lp.sh.runs.lock().remove(&second);
+}
+
+#[tokio::test]
 async fn control_gate_sees_the_run_and_can_publish_the_request_event() {
     let env = setup();
     let fake = Fake::new(vec![calls(&[("c1", "t.desk", json!({}))]), text("done")]);

@@ -279,7 +279,9 @@ fn computer_limits(
         .and_then(|n| n.parse::<usize>().ok())
         .filter(|n| *n > 0)
         .or(config.max_computer_runs.filter(|n| *n > 0))
-        .unwrap_or(1)
+        .unwrap_or_else(|| {
+            browser_cdp::host::default_computer_runs(browser_cdp::host::total_ram_bytes())
+        })
         .min(64);
     let idle = env_idle
         .and_then(|n| n.parse::<u64>().ok())
@@ -296,25 +298,7 @@ pub fn load_skills(data_dir: &Path) -> SkillIndex {
     SkillIndex::load_roots(SkillRoots::from_data_dir(data_dir))
 }
 
-/// The desktop backend of the real daemon: Windows UI Automation on Windows,
-/// none elsewhere (yet).  `BOT_DESKTOP=off` disables it.
-#[must_use]
-pub fn local_desktop(warn: &mut dyn FnMut(&str)) -> Option<Arc<dyn DesktopBackend>> {
-    if matches!(
-        std::env::var("BOT_DESKTOP").as_deref(),
-        Ok("off" | "0" | "false")
-    ) {
-        return None;
-    }
-    #[cfg(windows)]
-    match desktop_windows::WindowsBackend::new() {
-        Ok(b) => return Some(Arc::new(b)),
-        Err(e) => warn(&format!("desktop tools disabled: {e}")),
-    }
-    #[cfg(not(windows))]
-    let _ = warn;
-    None
-}
+pub use crate::host_runtime::local_desktop;
 
 /// Environment variable with extra allowed browser origins (comma separated).
 pub const ALLOWED_ORIGINS_ENV: &str = "BOT_ALLOWED_ORIGINS";
@@ -963,7 +947,10 @@ id = "unpriced"
     fn computer_limits_default_to_small_host_and_environment_overrides_host_file() {
         assert_eq!(
             computer_limits("", None, None),
-            (1, Duration::from_secs(120))
+            (
+                browser_cdp::host::default_computer_runs(browser_cdp::host::total_ram_bytes()),
+                Duration::from_secs(120)
+            )
         );
         let config = "[limits]\nmax_computer_runs=2\nbrowser_idle_seconds=180\n";
         assert_eq!(
@@ -976,7 +963,10 @@ id = "unpriced"
         );
         assert_eq!(
             computer_limits("[limits]\nmax_computer_runs=0", Some("0"), Some("bad")),
-            (1, Duration::from_secs(120))
+            (
+                browser_cdp::host::default_computer_runs(browser_cdp::host::total_ram_bytes()),
+                Duration::from_secs(120)
+            )
         );
     }
 

@@ -55,9 +55,13 @@ workflow-replay = { path = "../../crates/workflow-replay", version = "0.1.0" }
 desktop-windows = { path = "../../crates/desktop-windows", version = "0.1.0" }
 
 [dev-dependencies]
+desktop-linux = { path = "../../crates/desktop-linux", version = "0.1.0" }
 wiremock.workspace = true
 daemon-api = { path = "../../crates/daemon-api", version = "0.1.0", features = ["fake-provider"] }
 tempfile.workspace = true
 
 [lints]
 workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+desktop-linux = { path = "../../crates/desktop-linux", version = "0.1.0" }

@@ -8,6 +8,7 @@ mod commands;
 mod doctor;
 mod email_cmd;
 mod email_host;
+mod host_runtime;
 mod mcp_host;
 mod peer;
 mod presets;

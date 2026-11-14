@@ -833,11 +833,15 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
+ "rustix",
  "serde",
  "serde_json",
  "similar",
+ "sysinfo",
  "tokio",
  "tokio-tungstenite",
+ "tracing",
+ "x11rb",
 ]
 
 [[package]]
@@ -1236,6 +1240,7 @@ dependencies = [
  "connector-email",
  "daemon-api",
  "desktop-api",
+ "desktop-linux",
  "desktop-windows",
  "dialoguer",
  "fs4",
@@ -1736,6 +1741,7 @@ dependencies = [
  "agent-core",
  "async-trait",
  "axum",
+ "browser-cdp",
  "builtin-tools",
  "chrono",
  "chrono-tz",
@@ -4946,6 +4952,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "desktop-api",
+ "desktop-linux",
  "desktop-windows",
  "peer-network",
  "storage",

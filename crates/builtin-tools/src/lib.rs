@@ -74,7 +74,7 @@ pub struct BuiltinConfig {
     pub ocr: Option<SharedOcr>,
     /// Desktop timing settings.
     pub desktop_settings: DesktopSettings,
-    /// Browser driver. `None` uses a lazily launched [`CdpDriver`] with `browser_settings`.
+    /// Browser driver. `None` lazily creates per-bot drivers with `browser_settings`.
     pub browser: Option<Arc<dyn BrowserDriver>>,
     /// Settings for the default [`CdpDriver`].
     pub browser_settings: BrowserSettings,
@@ -99,7 +99,7 @@ pub struct BuiltinConfig {
 }
 
 impl BuiltinConfig {
-    /// A config with defaults: isolated headless browser, default script limits,
+    /// A config with defaults: headless per-bot browser, default script limits,
     /// no desktop backend, no OCR, no email connector and no web tools.
     #[must_use]
     pub fn new(data_dir: PathBuf, gate: Arc<dyn ToolGate>) -> Self {
@@ -150,16 +150,15 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
             cfg.control.clone(),
         ));
     }
-    let driver: Arc<dyn BrowserDriver> = if let Some(driver) = cfg.browser {
-        driver
+    if let Some(driver) = cfg.browser {
+        all.extend(browser::tools(driver, &cfg.data_dir, cfg.control.clone()));
     } else {
-        let cdp = CdpDriver::new(cfg.browser_settings);
-        if let Some(gate) = cfg.control.clone() {
-            cdp.set_activity_probe(Arc::new(move || gate.computer_in_use()));
-        }
-        Arc::new(cdp)
-    };
-    all.extend(browser::tools(driver, &cfg.data_dir, cfg.control.clone()));
+        all.extend(browser::managed_tools(
+            cfg.browser_settings,
+            &cfg.data_dir,
+            cfg.control.clone(),
+        ));
+    }
     all.extend(files::tools_bounded(
         &cfg.data_dir,
         &cfg.fs_allowed_roots,
