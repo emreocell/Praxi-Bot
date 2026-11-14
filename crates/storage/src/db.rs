@@ -378,7 +378,7 @@ impl Storage {
     /// Fails on SQLite errors.
     pub fn insert_run(&self, r: &Run) -> Result<()> {
         self.conn().execute(
-            "INSERT INTO runs (id, user_id, bot_id, chat_id, kind, state, error, created_at_ms, updated_at_ms, parent_run_id, spec_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO runs (id, user_id, bot_id, chat_id, kind, state, error, created_at_ms, updated_at_ms, parent_run_id, spec_json, computer_target, pause_reason) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 r.id.to_string(),
                 r.user_id.to_string(),
@@ -391,6 +391,8 @@ impl Storage {
                 r.updated_at_ms,
                 r.parent_run_id.map(|p| p.to_string()),
                 r.spec.as_ref().map(serde_json::to_string).transpose()?,
+                r.computer_target,
+                r.pause_reason,
             ],
         )?;
         Ok(())
@@ -450,19 +452,64 @@ impl Storage {
     }
 
     /// Set a run's state (and error text).  Transition legality is the
-    /// caller's responsibility.
+    /// caller's responsibility. Transitions out of `paused` clear `pause_reason`.
     ///
     /// # Errors
     /// Fails on SQLite errors or if the run does not exist.
     pub fn update_run_state(&self, id: RunId, state: &str, error: Option<&str>) -> Result<()> {
         let n = self.conn().execute(
-            "UPDATE runs SET state = ?2, error = ?3, updated_at_ms = ?4 WHERE id = ?1",
+            "UPDATE runs SET state = ?2, error = ?3, updated_at_ms = ?4, pause_reason = CASE WHEN ?2 = 'paused' THEN pause_reason ELSE NULL END WHERE id = ?1",
             params![id.to_string(), state, error, now_ms()],
         )?;
         if n == 0 {
             return Err(StorageError::NotFound(format!("run {id}")));
         }
         Ok(())
+    }
+
+    /// Record the resolved computer target label (`pc`, `host`, `browser`,
+    /// `off`) fixed at run start.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors or if the run does not exist.
+    pub fn set_run_computer_target(&self, id: RunId, target: Option<&str>) -> Result<()> {
+        let n = self.conn().execute(
+            "UPDATE runs SET computer_target = ?2, updated_at_ms = ?3 WHERE id = ?1",
+            params![id.to_string(), target, now_ms()],
+        )?;
+        if n == 0 {
+            return Err(StorageError::NotFound(format!("run {id}")));
+        }
+        Ok(())
+    }
+
+    /// Update the pause reason on a paused run (e.g. `waiting_for_pc`).
+    ///
+    /// # Errors
+    /// Fails on SQLite errors or if the run does not exist.
+    pub fn set_run_pause_reason(&self, id: RunId, reason: Option<&str>) -> Result<()> {
+        let n = self.conn().execute(
+            "UPDATE runs SET pause_reason = ?2, updated_at_ms = ?3 WHERE id = ?1",
+            params![id.to_string(), reason, now_ms()],
+        )?;
+        if n == 0 {
+            return Err(StorageError::NotFound(format!("run {id}")));
+        }
+        Ok(())
+    }
+
+    /// List all runs currently in `paused` state with the given `pause_reason`.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn list_paused_runs_with_reason(&self, reason: &str) -> Result<Vec<Run>> {
+        let conn = self.conn();
+        let mut st = conn.prepare(&format!(
+            "{RUN_SELECT} WHERE state = 'paused' AND pause_reason = ?1 ORDER BY id"
+        ))?;
+        Ok(st
+            .query_map([reason], run_row)?
+            .collect::<rusqlite::Result<_>>()?)
     }
 
     // ---- run_steps ----
@@ -734,7 +781,7 @@ impl Storage {
     }
 }
 
-const RUN_SELECT: &str = "SELECT id, user_id, bot_id, chat_id, kind, state, error, created_at_ms, updated_at_ms, parent_run_id, spec_json FROM runs";
+const RUN_SELECT: &str = "SELECT id, user_id, bot_id, chat_id, kind, state, error, created_at_ms, updated_at_ms, parent_run_id, spec_json, computer_target, pause_reason FROM runs";
 const STEP_SELECT: &str = "SELECT id, run_id, user_id, idx, name, input_json, idempotent, retry_json, status, attempt, output_json, error, started_at_ms, finished_at_ms FROM run_steps";
 const APPROVAL_SELECT: &str = "SELECT id, user_id, run_id, step_id, summary, decision, requested_at_ms, decided_at_ms FROM approvals";
 
@@ -791,6 +838,8 @@ fn run_row(r: &Row<'_>) -> rusqlite::Result<Run> {
         updated_at_ms: r.get(8)?,
         parent_run_id: opt_uuid_at(r, 9)?.map(RunId),
         spec: opt_json_at(r, 10)?,
+        computer_target: r.get(11)?,
+        pause_reason: r.get(12)?,
     })
 }
 
@@ -895,6 +944,8 @@ mod tests {
             updated_at_ms: 4,
             parent_run_id: None,
             spec: None,
+            computer_target: None,
+            pause_reason: None,
         };
         f.st.insert_run(&r).unwrap();
         r
@@ -1205,5 +1256,62 @@ mod tests {
         }
         let st = Storage::open(dir.path()).unwrap();
         assert_eq!(st.get_user(user.id).unwrap().unwrap(), user);
+    }
+
+    #[test]
+    fn computer_target_and_pause_reason_persist_and_clear() {
+        let dir = tempfile::tempdir().unwrap();
+        let run_id;
+        {
+            let st = Storage::open(dir.path()).unwrap();
+            let u = User {
+                id: UserId::new(),
+                name: "u".into(),
+                created_at_ms: 1,
+            };
+            st.insert_user(&u).unwrap();
+            let b = Bot {
+                id: BotId::new(),
+                user_id: u.id,
+                name: "b".into(),
+                config: json!({}),
+                created_at_ms: 1,
+            };
+            st.insert_bot(&b).unwrap();
+            let r = Run {
+                id: RunId::new(),
+                user_id: u.id,
+                bot_id: b.id,
+                chat_id: None,
+                kind: "turn".into(),
+                state: "queued".into(),
+                error: None,
+                created_at_ms: 2,
+                updated_at_ms: 2,
+                parent_run_id: None,
+                spec: None,
+                computer_target: None,
+                pause_reason: None,
+            };
+            run_id = r.id;
+            st.insert_run(&r).unwrap();
+            st.set_run_computer_target(run_id, Some("pc")).unwrap();
+            st.update_run_state(run_id, "paused", None).unwrap();
+            st.set_run_pause_reason(run_id, Some("waiting_for_pc"))
+                .unwrap();
+            assert_eq!(
+                st.list_paused_runs_with_reason("waiting_for_pc")
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
+        let st = Storage::open(dir.path()).unwrap();
+        let got = st.get_run(run_id).unwrap().unwrap();
+        assert_eq!(got.computer_target.as_deref(), Some("pc"));
+        assert_eq!(got.pause_reason.as_deref(), Some("waiting_for_pc"));
+        st.update_run_state(run_id, "running", None).unwrap();
+        let running = st.get_run(run_id).unwrap().unwrap();
+        assert_eq!(running.pause_reason, None);
     }
 }

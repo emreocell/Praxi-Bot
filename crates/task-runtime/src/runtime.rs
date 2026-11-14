@@ -128,6 +128,8 @@ impl Runtime {
             updated_at_ms: now,
             parent_run_id: parent,
             spec,
+            computer_target: None,
+            pause_reason: None,
         };
         self.storage.insert_run(&run)?;
         Ok(run.id)
@@ -156,6 +158,41 @@ impl Runtime {
         }
         self.transition(run_id, RunState::Running, None)?;
         self.drive(run_id, None).await
+    }
+
+    /// Move a `Queued` run into `Paused` with an optional durable
+    /// `pause_reason` (for example `waiting_for_pc`) before executing any step.
+    ///
+    /// # Errors
+    /// Fails if the run is not `Queued` or on storage errors.
+    pub fn pause_queued(&self, run_id: RunId, reason: Option<&str>) -> Result<RunState> {
+        let state = self.state(run_id)?;
+        if state != RunState::Queued {
+            return Err(RuntimeError::IllegalTransition {
+                from: state,
+                to: RunState::Paused,
+            });
+        }
+        self.transition(run_id, RunState::Running, None)?;
+        self.transition(run_id, RunState::Paused, None)?;
+        self.storage.set_run_pause_reason(run_id, reason)?;
+        Ok(RunState::Paused)
+    }
+
+    /// Transition an idle `Paused` run to `Failed` with an error message
+    /// (for example after waiting-for-PC times out).
+    ///
+    /// # Errors
+    /// Fails if the run is not `Paused` or on storage errors.
+    pub fn fail_paused(&self, run_id: RunId, error: &str) -> Result<RunState> {
+        let state = self.state(run_id)?;
+        if state != RunState::Paused {
+            return Err(RuntimeError::IllegalTransition {
+                from: state,
+                to: RunState::Failed,
+            });
+        }
+        self.transition(run_id, RunState::Failed, Some(error))
     }
 
     /// Explicitly resume a `Paused` run.  An interrupted idempotent step is
@@ -837,5 +874,31 @@ mod tests {
         let run = rt.create_run(u, b, None, "turn").unwrap();
         rt.cancel(run).unwrap();
         assert_eq!(rt.state(run).unwrap(), RunState::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn pause_queued_and_fail_paused_preserve_and_clear_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        let (st, u, b) = setup(dir.path());
+        let rt = Runtime::new(st.clone(), Arc::new(Fake::new(vec![spec("a", true)])));
+        let run1 = rt.create_run(u, b, None, "turn").unwrap();
+        assert_eq!(
+            rt.pause_queued(run1, Some("waiting_for_pc")).unwrap(),
+            RunState::Paused
+        );
+        let row = st.get_run(run1).unwrap().unwrap();
+        assert_eq!(row.pause_reason.as_deref(), Some("waiting_for_pc"));
+        assert_eq!(rt.resume(run1).await.unwrap(), RunState::Succeeded);
+        assert_eq!(st.get_run(run1).unwrap().unwrap().pause_reason, None);
+
+        let run2 = rt.create_run(u, b, None, "turn").unwrap();
+        rt.pause_queued(run2, Some("waiting_for_pc")).unwrap();
+        assert_eq!(
+            rt.fail_paused(run2, "pc timeout").unwrap(),
+            RunState::Failed
+        );
+        let row2 = st.get_run(run2).unwrap().unwrap();
+        assert_eq!(row2.error.as_deref(), Some("pc timeout"));
+        assert_eq!(row2.pause_reason, None);
     }
 }

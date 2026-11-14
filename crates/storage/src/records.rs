@@ -93,6 +93,11 @@ pub struct Run {
     /// Spawn parameters of a subagent run (task, limits, ...); `None` for
     /// top-level runs.
     pub spec: Option<Value>,
+    /// Resolved computer target label (`pc`, `host`, `browser`, `off`), fixed
+    /// at run start.
+    pub computer_target: Option<String>,
+    /// Why a run is in `paused` state (e.g. `waiting_for_pc`).
+    pub pause_reason: Option<String>,
 }
 
 /// One persisted step of a run.
