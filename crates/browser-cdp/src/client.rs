@@ -392,7 +392,7 @@ impl CdpClient {
                     }
                 }
                 closed.store(true, Ordering::SeqCst);
-                let _ = close_tx.send(true);
+                close_tx.send_replace(true);
                 if let Ok(sinks) = screencast_sinks.lock() {
                     for slot in sinks.values() {
                         slot.notify();
@@ -592,7 +592,7 @@ async fn exchange<S: MessageSink<Message, Error = WsError> + Unpin>(
 impl Drop for CdpClient {
     fn drop(&mut self) {
         self.closed.store(true, Ordering::SeqCst);
-        let _ = self.close_tx.send(true);
+        self.close_tx.send_replace(true);
         self.reader.abort();
     }
 }

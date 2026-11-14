@@ -472,6 +472,8 @@ impl PressedKey {
 
 #[derive(Default)]
 struct HeldInputs {
+    // A capture failure must not discard the session still owing an input reset.
+    binding: Option<SessionBinding>,
     buttons: u8,
     last_css: Option<(f64, f64)>,
     keys: Vec<PressedKey>,
@@ -658,11 +660,7 @@ impl AdapterCore {
     async fn stop_all(&self, return_to_idle: bool) -> Result<(), ViewError> {
         let _ctrl = self.ctrl_lock.lock().await;
         self.stop_worker_locked().await;
-        if let Err(err) = self.release_inputs_inner().await
-            && !return_to_idle
-        {
-            return Err(err);
-        }
+        self.release_inputs_inner().await?;
         self.set_takeover_pin(false);
         self.watch_tx.send_replace(None);
         if return_to_idle && let Ok(mut state) = self.state.lock() {
@@ -707,12 +705,16 @@ impl AdapterCore {
 
     async fn release_inputs_inner(&self) -> Result<(), ViewError> {
         let _io = self.input_io_lock.lock().await;
-        let Some(binding) = self.binding_if_alive() else {
-            let mut held = self.held.lock().map_err(|_| ViewError::Unavailable)?;
-            held.buttons = 0;
-            held.keys.clear();
-            return Ok(());
+        let binding = {
+            let held = self.held.lock().map_err(|_| ViewError::Unavailable)?;
+            if held.buttons == 0 && held.keys.is_empty() {
+                return Ok(());
+            }
+            held.binding.clone().ok_or(ViewError::Unavailable)?
         };
+        if !binding.is_alive() {
+            return Err(ViewError::Unavailable);
+        }
         self.release_inputs_with_binding(&binding).await
     }
 
@@ -759,9 +761,6 @@ impl AdapterCore {
                                 format!("input release target lost: {err}"),
                                 true,
                             );
-                            let mut held = self.held.lock().map_err(|_| ViewError::Unavailable)?;
-                            held.buttons = 0;
-                            held.keys.clear();
                             return Err(ViewError::Unavailable);
                         }
                         had_failure = true;
@@ -807,9 +806,6 @@ impl AdapterCore {
                             format!("input release target lost: {err}"),
                             true,
                         );
-                        let mut held = self.held.lock().map_err(|_| ViewError::Unavailable)?;
-                        held.buttons = 0;
-                        held.keys.clear();
                         return Err(ViewError::Unavailable);
                     }
                     had_failure = true;
@@ -922,6 +918,22 @@ impl BrowserViewTarget {
     }
 
     fn bind_page_inner(&self, page: &Page, bump_gen: bool) -> Result<(), ViewError> {
+        let _ctrl = self
+            .core
+            .ctrl_lock
+            .try_lock()
+            .map_err(|_| ViewError::Unavailable)?;
+        let _io = self
+            .core
+            .input_io_lock
+            .try_lock()
+            .map_err(|_| ViewError::Unavailable)?;
+        {
+            let held = self.core.held.lock().map_err(|_| ViewError::Unavailable)?;
+            if held.buttons != 0 || !held.keys.is_empty() {
+                return Err(ViewError::Unavailable);
+            }
+        }
         if !page.is_alive() {
             return Err(ViewError::Unavailable);
         }
@@ -934,14 +946,11 @@ impl BrowserViewTarget {
             {
                 return Err(ViewError::Unavailable);
             }
-            let stale_worker = if let Some(worker) = state.worker.as_ref() {
-                if !worker.stop_requested.load(Ordering::SeqCst) {
-                    return Err(ViewError::Unavailable);
-                }
-                state.worker.take()
-            } else {
-                None
-            };
+            // A stop request is not completion: the old worker still owns its
+            // registration and can publish/clear frames until teardown finishes.
+            if state.worker.is_some() {
+                return Err(ViewError::Unavailable);
+            }
             if bump_gen {
                 state.generation = state.generation.saturating_add(1);
             } else if state.generation == 0 {
@@ -965,7 +974,7 @@ impl BrowserViewTarget {
             state.refresh_pending = false;
             state.stale = false;
             state.last_error = None;
-            (binding, (finished, stale_worker))
+            (binding, finished)
         };
         drop(stale_workers);
 
@@ -1033,8 +1042,7 @@ impl BrowserViewTarget {
                 };
             };
             let finished = prune_finished_worker_locked(&mut state);
-            let (transitioned, notify) =
-                reconcile_dead_binding_locked(&mut state, "target closed");
+            let (transitioned, notify) = reconcile_dead_binding_locked(&mut state, "target closed");
             let status = BrowserViewStatus {
                 generation: state.generation,
                 geometry_revision: state.geometry_revision,
@@ -1094,8 +1102,7 @@ impl ViewTarget for BrowserViewTarget {
                 };
             };
             let finished = prune_finished_worker_locked(&mut state);
-            let (transitioned, notify) =
-                reconcile_dead_binding_locked(&mut state, "target closed");
+            let (transitioned, notify) = reconcile_dead_binding_locked(&mut state, "target closed");
 
             let (view, input, reason) = match &state.lifecycle {
                 LifecycleState::Idle => (false, false, Some(Reason::BrowserIdle)),
@@ -2246,10 +2253,6 @@ impl BrowserInputSink {
                 format!("input target lost: {err}"),
                 true,
             );
-            if let Ok(mut h) = self.core.held.lock() {
-                h.buttons = 0;
-                h.keys.clear();
-            }
             ViewError::Unavailable
         } else {
             // Reset held state cleanly on transient input error.
@@ -2309,6 +2312,7 @@ impl InputSink for BrowserInputSink {
                     held.last_css = Some((cx, cy));
                     match phase {
                         PointerPhase::Down => {
+                            held.binding = Some(binding.clone());
                             held.buttons |= btn_bit;
                             held.buttons | *buttons
                         }
@@ -2339,11 +2343,8 @@ impl InputSink for BrowserInputSink {
                 match res {
                     Ok(_) => {
                         if *phase == PointerPhase::Up {
-                            let mut held = self
-                                .core
-                                .held
-                                .lock()
-                                .map_err(|_| ViewError::Unavailable)?;
+                            let mut held =
+                                self.core.held.lock().map_err(|_| ViewError::Unavailable)?;
                             held.buttons &= !btn_bit;
                         }
                         Ok(())
@@ -2367,11 +2368,7 @@ impl InputSink for BrowserInputSink {
                 let dy = delta_y.clamp(-WHEEL_DELTA_CLAMP, WHEEL_DELTA_CLAMP);
                 let mod_mask = modifiers_to_cdp(modifiers);
                 {
-                    let mut held = self
-                        .core
-                        .held
-                        .lock()
-                        .map_err(|_| ViewError::Unavailable)?;
+                    let mut held = self.core.held.lock().map_err(|_| ViewError::Unavailable)?;
                     held.last_css = Some((cx, cy));
                 }
                 let res = send_cdp(
@@ -2410,11 +2407,8 @@ impl InputSink for BrowserInputSink {
                     location: *location,
                 };
                 if *phase == KeyPhase::Down {
-                    let mut held = self
-                        .core
-                        .held
-                        .lock()
-                        .map_err(|_| ViewError::Unavailable)?;
+                    let mut held = self.core.held.lock().map_err(|_| ViewError::Unavailable)?;
+                    held.binding = Some(binding.clone());
                     if !held.keys.contains(&pk) {
                         held.keys.push(pk.clone());
                     }
@@ -2436,11 +2430,8 @@ impl InputSink for BrowserInputSink {
                 match res {
                     Ok(()) => {
                         if *phase == KeyPhase::Up {
-                            let mut held = self
-                                .core
-                                .held
-                                .lock()
-                                .map_err(|_| ViewError::Unavailable)?;
+                            let mut held =
+                                self.core.held.lock().map_err(|_| ViewError::Unavailable)?;
                             held.keys.retain(|x| x != &pk);
                         }
                         Ok(())

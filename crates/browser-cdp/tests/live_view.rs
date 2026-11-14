@@ -126,13 +126,20 @@ impl FakeServerState {
     }
 
     async fn wait_for_method_count(&self, method: &str, target_count: usize) {
-        loop {
-            let notified = self.cmd_notify.notified();
-            if self.count_method(method) >= target_count {
-                return;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let notified = self.cmd_notify.notified();
+                // Register before checking: notify_waiters does not retain a permit.
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if self.count_method(method) >= target_count {
+                    return;
+                }
+                notified.await;
             }
-            notified.await;
-        }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting for {target_count} {method} commands"));
     }
 }
 
@@ -281,6 +288,10 @@ fn build_reply(state: &FakeServerState, id: u64, method: &str, params: &Value) -
         });
     }
 
+    if method == "Target.getTargetInfo" {
+        return target_info_reply(state, id, params);
+    }
+
     let result = match method {
         "Target.createTarget" => {
             let n = state.next_target.fetch_add(1, Ordering::SeqCst) + 1;
@@ -318,33 +329,6 @@ fn build_reply(state: &FakeServerState, id: u64, method: &str, params: &Value) -
                 .collect();
             json!({ "targetInfos": infos })
         }
-        "Target.getTargetInfo" => {
-            let tid = params
-                .get("targetId")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let attached = state
-                .attached_targets
-                .lock()
-                .expect("attached lock")
-                .iter()
-                .any(|(t, _)| t == tid);
-            if !attached {
-                return json!({
-                    "id": id,
-                    "error": { "code": -32602, "message": "No target with given id found" }
-                });
-            }
-            json!({
-                "targetInfo": {
-                    "targetId": tid,
-                    "type": "page",
-                    "title": tid,
-                    "url": "https://example.test/",
-                    "attached": true
-                }
-            })
-        }
         "Target.closeTarget" => {
             if let Some(tid) = params.get("targetId").and_then(Value::as_str) {
                 state
@@ -380,6 +364,28 @@ fn build_reply(state: &FakeServerState, id: u64, method: &str, params: &Value) -
         "id": id,
         "result": result,
     })
+}
+
+fn target_info_reply(state: &FakeServerState, id: u64, params: &Value) -> Value {
+    let tid = params
+        .get("targetId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let attached = state
+        .attached_targets
+        .lock()
+        .expect("attached lock")
+        .iter()
+        .any(|(t, _)| t == tid);
+    if !attached {
+        return json!({ "id": id, "error": {
+            "code": -32602, "message": "No target with given id found"
+        }});
+    }
+    json!({ "id": id, "result": { "targetInfo": {
+        "targetId": tid, "type": "page", "title": tid,
+        "url": "https://example.test/", "attached": true
+    }}})
 }
 
 fn minimal_jpeg(width: u16, height: u16, extra_pad_bytes: usize) -> Vec<u8> {
@@ -920,16 +926,16 @@ async fn verify_watch_cold_start_and_action_bypass(
     )
 }
 
-async fn verify_stale_timeout_and_live_emission_gating(
+async fn verify_stale_timeout_and_action_refresh(
     server: &FakeCdpServer,
     view: &BrowserViewTarget,
     page: &browser_cdp::Page,
     src: &Arc<dyn live_view::FrameSource>,
     sub: &mut FrameSubscription,
-    sess: &str,
     clock: &ManualClock,
     saved: (u64, u64),
 ) {
+    let sess = page.session_id();
     // Let 750ms new-paint timeout expire with no frame -> stale + repeated preserves metadata.
     src.request_refresh(88).await.expect("request_refresh 88");
     server
@@ -952,7 +958,22 @@ async fn verify_stale_timeout_and_live_emission_gating(
     assert!(view.status().refresh_pending);
     assert_eq!(view.info().capabilities.reason, Some(Reason::Stale));
 
-    // Fresh frame clears stale; then a Page action triggers `Cause::Action` refresh.
+    // The timeout closes the watch window. Wait for its stop reply before advancing
+    // to the next window (and beyond the watch emission gate).
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while view.status().stops_sent < 4 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("stale watch window stopped");
+    clock.advance(Duration::from_secs(3));
+    server
+        .state
+        .wait_for_method_count("Page.startScreencast", 5)
+        .await;
+
+    // A fresh frame in the next window clears stale; a Page action then refreshes.
     let stops2 = server.state.count_method("Page.stopScreencast");
     server.state.send_screencast_frame(
         sess,
@@ -1005,7 +1026,15 @@ async fn verify_stale_timeout_and_live_emission_gating(
         .state
         .wait_for_method_count("Page.startScreencast", starts_nav + 1)
         .await;
+}
 
+async fn verify_live_emission_gating(
+    server: &FakeCdpServer,
+    view: &BrowserViewTarget,
+    src: &Arc<dyn live_view::FrameSource>,
+    sess: &str,
+    clock: &ManualClock,
+) {
     // Live mode `max_fps = 2` (500ms emission gating) ACKs all 6 burst frames without blocking.
     let mut live_prof = EffectiveProfile::live();
     live_prof.max_fps = 2;
@@ -1074,10 +1103,9 @@ async fn watch_live_timings_action_refresh_stale_and_emission_gating() {
     let saved =
         verify_watch_cold_start_and_action_bypass(&server, &view, &src, &mut sub, &sess, &clock)
             .await;
-    verify_stale_timeout_and_live_emission_gating(
-        &server, &view, &page, &src, &mut sub, &sess, &clock, saved,
-    )
-    .await;
+    verify_stale_timeout_and_action_refresh(&server, &view, &page, &src, &mut sub, &clock, saved)
+        .await;
+    verify_live_emission_gating(&server, &view, &src, &sess, &clock).await;
     assert_eq!(
         server.state.capture_screenshot_calls.load(Ordering::SeqCst),
         0
@@ -1462,8 +1490,8 @@ async fn spawn_parent_and_grandchild(pid_file: &PathBuf) -> (tokio::process::Chi
 
     #[cfg(windows)]
     {
-        let _ = pid_file;
         use sysinfo::{Pid, ProcessesToUpdate, System};
+        let _ = pid_file;
         let mut child = tokio::process::Command::new("cmd")
             .args(["/c", "ping -n 60 127.0.0.1 >nul"])
             .spawn()
@@ -1741,7 +1769,99 @@ async fn release_pressed_inputs_keeps_failed_button_and_key_for_retry() {
 }
 
 #[tokio::test]
-async fn page_drop_and_broadcast_lag_mark_view_unavailable() {
+async fn owed_input_reset_survives_capture_failure_and_prevents_rebinding() {
+    let server = FakeCdpServer::start().await;
+    let browser = Browser::connect(&server.ws_url()).await.expect("connect");
+    let page = browser.new_page("about:blank").await.expect("page");
+    let next_page = browser.new_page("about:blank").await.expect("next page");
+    let view = BrowserViewTarget::new_idle(BrowserViewConfig::default());
+    view.attach_page(&page).expect("attach");
+    let sink = view.input_sink().expect("input sink");
+    let sub = view
+        .frame_source()
+        .subscribe(EffectiveProfile::watch())
+        .await
+        .expect("subscribe");
+    sink.inject(&InputEvent::Key {
+        phase: KeyPhase::Down,
+        code: "ShiftLeft".into(),
+        key: "Shift".into(),
+        location: 1,
+        repeat: false,
+        modifiers: vec![Modifier::Shift],
+    })
+    .await
+    .expect("shift down");
+
+    *server.state.start_screencast_error.lock().unwrap() =
+        Some((-32001, "capture session failed".into()));
+    view.request_refresh_action(1).await.expect("refresh");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while view.info().capabilities.view || view.status().worker_running {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("capture worker exited");
+    assert!(matches!(
+        view.attach_page(&next_page),
+        Err(ViewError::Unavailable)
+    ));
+
+    server.state.fail_next_method.lock().unwrap().insert(
+        "Input.dispatchKeyEvent".into(),
+        (-32000, "transient release failure".into()),
+    );
+    assert!(matches!(
+        view.detach_to_idle().await,
+        Err(ViewError::PartialInjection)
+    ));
+    assert_eq!(view.info().unavailable_reason, Some(Reason::Unavailable));
+    server.state.clear_commands();
+    sink.release_pressed_inputs()
+        .await
+        .expect("retry on original session");
+    let commands = server.state.commands();
+    let up = commands
+        .iter()
+        .find(|c| c.method == "Input.dispatchKeyEvent")
+        .expect("key up retried");
+    assert_eq!(up.params["type"], "keyUp");
+    assert_eq!(up.params["code"], "ShiftLeft");
+    assert_eq!(up.session_id.as_deref(), Some(page.session_id()));
+    drop(sub);
+    view.attach_page(&next_page)
+        .expect("reattach only after confirmed reset");
+}
+
+#[tokio::test]
+async fn target_loss_does_not_confirm_an_unreleased_input_reset() {
+    let server = FakeCdpServer::start().await;
+    let browser = Browser::connect(&server.ws_url()).await.expect("connect");
+    let page = browser.new_page("about:blank").await.expect("page");
+    let view = page.live_view(BrowserViewConfig::default());
+    let sink = view.input_sink().expect("input sink");
+    sink.inject(&InputEvent::Key {
+        phase: KeyPhase::Down,
+        code: "ShiftLeft".into(),
+        key: "Shift".into(),
+        location: 1,
+        repeat: false,
+        modifiers: vec![Modifier::Shift],
+    })
+    .await
+    .expect("shift down");
+    drop(page);
+    for _ in 0..2 {
+        assert!(matches!(
+            sink.release_pressed_inputs().await,
+            Err(ViewError::Unavailable)
+        ));
+    }
+}
+
+#[tokio::test]
+async fn page_drop_marks_view_unavailable_and_stops_worker() {
     // Part A: Dropping `Page` while `BrowserViewTarget` is stored cleanly closes view & worker.
     let server = FakeCdpServer::start().await;
     let browser = Browser::connect(&server.ws_url()).await.expect("connect");
@@ -1785,8 +1905,11 @@ async fn page_drop_and_broadcast_lag_mark_view_unavailable() {
     assert!(info_dropped.generation >= 2);
     assert!(view.input_sink().is_none());
     assert!(sub.frames.borrow().is_none());
+}
 
-    // Part B: Lagged broadcast ring where `Target.targetDestroyed` is overwritten still detects loss via `Target.getTargetInfo`.
+#[tokio::test]
+async fn broadcast_lag_rechecks_target_and_detects_overwritten_close() {
+    // Lagged broadcast ring still detects loss via `Target.getTargetInfo`.
     let lag_server = FakeCdpServer::start().await;
     let small_ring_cfg = CdpClientConfig {
         event_buffer_bytes: CdpClientConfig::default().max_event_bytes * 2,
@@ -1799,15 +1922,21 @@ async fn page_drop_and_broadcast_lag_mark_view_unavailable() {
         .send("Target.createTarget", json!({ "url": "about:blank" }))
         .await
         .expect("createTarget");
-    let target_id = target_res["targetId"].as_str().expect("targetId").to_string();
+    let target_id = target_res["targetId"]
+        .as_str()
+        .expect("targetId")
+        .to_string();
     let page_lag = Page::attach(client, &target_id).await.expect("attach page");
     let sess_lag = page_lag.session_id().to_string();
     let view_lag = page_lag.live_view(BrowserViewConfig::default());
 
     let reached = Arc::new(Notify::new());
     let release = Arc::new(Notify::new());
-    *lag_server.state.hold_next_method.lock().unwrap() =
-        Some(("Target.getTargetInfo".into(), reached.clone(), release.clone()));
+    *lag_server.state.hold_next_method.lock().unwrap() = Some((
+        "Target.getTargetInfo".into(),
+        reached.clone(),
+        release.clone(),
+    ));
 
     // Overflow the 2-slot broadcast ring so `watch` hits `RecvError::Lagged` and queries `Target.getTargetInfo`.
     for i in 0..8 {
@@ -1866,7 +1995,7 @@ async fn worker_self_exit_clears_handle_and_allows_reattach_without_detach_to_id
     let target = BrowserViewTarget::new_idle(BrowserViewConfig::default());
     target.attach_page(&page_1).expect("attach page 1");
     let src = target.frame_source();
-    let mut sub1 = src
+    let sub1 = src
         .subscribe(EffectiveProfile::watch())
         .await
         .expect("subscribe 1");
