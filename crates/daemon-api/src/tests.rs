@@ -25,6 +25,7 @@ use crate::{AppState, DaemonConfig, router};
 mod email;
 mod mcp;
 mod schedules;
+mod web;
 
 const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
