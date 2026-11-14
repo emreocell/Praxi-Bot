@@ -156,6 +156,12 @@
   white-space: nowrap;
 }
 
+.optionSub {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
 .option > svg:last-child {
   width: var(--size-icon-sm);
   height: var(--size-icon-sm);

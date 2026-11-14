@@ -28,23 +28,23 @@ const NOW = 1_750_000_000_000;
 const ATLAS = "11111111-1111-4111-8111-111111111111";
 const NOVA = "22222222-2222-4222-8222-222222222222";
 
-function bot(id: string, name: string, color: string, model: string): Bot {
+function bot(id: string, name: string, color: string, shape: string, model: string): Bot {
   return {
     id,
     name,
     created_at_ms: NOW,
     config: {
-      bot: { id: name.toLowerCase(), name, color, persona: "" },
+      bot: { id: name.toLowerCase(), name, color, shape, persona: "" },
       models: { executor: model, planner: model, classifier: model }
     }
   };
 }
 
 const BOTS: Bot[] = [
-  bot(ATLAS, "Atlas", "#9D9AE8", "anthropic/claude-sonnet-5-5"),
-  bot(NOVA, "Nova", "#57BAA4", "gemini/gemini-2.5-flash"),
-  bot("bot-milo", "Milo", "#E4B75C", "openai/gpt-4.1"),
-  bot("bot-ember", "Ember", "#DC8D76", "ollama/qwen3:8b")
+  bot(ATLAS, "Atlas", "#9D9AE8", "cloud", "anthropic/claude-sonnet-5-5"),
+  bot(NOVA, "Nova", "#57BAA4", "diamond", "gemini/gemini-2.5-flash"),
+  bot("bot-milo", "Milo", "#E4B75C", "cube", "openai/gpt-4.1"),
+  bot("bot-ember", "Ember", "#DC8D76", "flower", "ollama/qwen3:8b")
 ];
 
 const previews = ["Haftalık özetin hazır.", "Kaynakları inceliyorum…", "Tasarım dosyalarını düzenledim.", "Devam etmek için onayını bekliyorum."];
