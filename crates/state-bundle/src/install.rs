@@ -115,12 +115,37 @@ fn neutralise_system_messages(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// Every run must be reachable from a root within the runtime's depth limit.
+/// A bounded SQLite traversal rejects cycles without recursing through imported
+/// data on the Rust stack (the runtime reconstructs parent contexts recursively).
+fn validate_run_ancestry(conn: &Connection) -> Result<()> {
+    let invalid: bool = conn
+        .query_row(
+            "WITH RECURSIVE ancestry(id, depth) AS (\
+                SELECT id, 0 FROM runs WHERE parent_run_id IS NULL \
+                UNION ALL \
+                SELECT child.id, parent.depth + 1 FROM runs AS child \
+                JOIN ancestry AS parent ON child.parent_run_id = parent.id \
+                WHERE parent.depth < ?1\
+             ) SELECT EXISTS(SELECT 1 FROM runs WHERE NOT EXISTS(\
+                SELECT 1 FROM ancestry WHERE ancestry.id = runs.id\
+             ))",
+            [agent_core::MAX_SUBAGENT_DEPTH],
+            |row| row.get(0),
+        )
+        .map_err(|error| database_error("bot.db", error))?;
+    if invalid {
+        return Err(database_error("bot.db", "cyclic or excessive run ancestry"));
+    }
+    Ok(())
+}
+
 fn prepare_database(path: &Path, db: &str, manifest: &Manifest) -> Result<()> {
     let open = || {
         Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)
             .map_err(|error| database_error(db, error))
     };
-    let mut conn = open()?;
+    let conn = open()?;
     let found =
         storage::migrate::current_version(&conn).map_err(|error| database_error(db, error))?;
     if db == "bot.db" && found != manifest.schema_version
@@ -133,18 +158,15 @@ fn prepare_database(path: &Path, db: &str, manifest: &Manifest) -> Result<()> {
     }
     match db {
         "bot.db" => {
-            let integrity: String = conn
-                .query_row("PRAGMA quick_check", [], |row| row.get(0))
-                .map_err(|error| database_error(db, error))?;
-            if integrity != "ok" {
-                return Err(database_error(db, integrity));
-            }
-            storage::migrate::migrate(&mut conn).map_err(|error| match error {
+            drop(conn);
+            storage::Storage::validate_and_migrate(path).map_err(|error| match error {
                 storage::StorageError::SchemaTooNew { found, supported } => {
                     incompatible_schema(db, found, supported)
                 }
                 other => database_error(db, other),
             })?;
+            let conn = open()?;
+            validate_run_ancestry(&conn)?;
             neutralise_system_messages(&conn).map_err(|error| database_error(db, error))?;
             drop(conn);
         }
