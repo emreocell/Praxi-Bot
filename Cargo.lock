@@ -831,13 +831,16 @@ dependencies = [
 name = "browser-cdp"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
  "futures-util",
+ "live-view",
  "serde",
  "serde_json",
  "similar",
  "tokio",
  "tokio-tungstenite",
+ "uuid",
 ]
 
 [[package]]

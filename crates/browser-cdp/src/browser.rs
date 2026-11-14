@@ -2,6 +2,7 @@
 //! Browser lifecycle: launch Chrome/Edge with an isolated profile, or attach to a running one.
 
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -31,6 +32,7 @@ pub struct Browser {
     client: Arc<CdpClient>,
     endpoint: String,
     child: Option<Child>,
+    own_process_group: bool,
     /// Temporary profile directory we created and must delete.
     owned_profile: Option<PathBuf>,
 }
@@ -56,12 +58,23 @@ impl Browser {
         // A stale file from a previous run would point at a dead port.
         let _ = tokio::fs::remove_file(profile.join("DevToolsActivePort")).await;
 
-        let mut child = Command::new(&exe)
-            .args(launch::build_args(&opts, &profile))
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .kill_on_drop(true)
+        let mut cmd = Command::new(&exe);
+        cmd.args(launch::build_args(&opts, &profile))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        #[cfg(unix)]
+        let own_process_group = {
+            // Put Chromium and all renderer/GPU/utility children in an isolated process group
+            // so closing/idling can reap the entire tree safely.
+            cmd.process_group(0);
+            true
+        };
+        #[cfg(not(unix))]
+        let own_process_group = false;
+
+        let mut child = cmd
             .spawn()
             .map_err(|e| Error::Launch(format!("{}: {e}", exe.display())))?;
 
@@ -75,10 +88,12 @@ impl Browser {
                 client,
                 endpoint,
                 child: Some(child),
+                own_process_group,
                 owned_profile: owned,
             }),
             Err(e) => {
-                let _ = child.kill().await;
+                let pid = child.id();
+                terminate_and_reap_process_tree(&mut child, pid, own_process_group).await;
                 if let Some(p) = owned {
                     let _ = tokio::fs::remove_dir_all(p).await;
                 }
@@ -95,6 +110,23 @@ impl Browser {
             client: CdpClient::connect(&ws).await?,
             endpoint: ws,
             child: None,
+            own_process_group: false,
+            owned_profile: None,
+        })
+    }
+
+    /// Connect to a CDP endpoint while assuming ownership of an already-spawned child process tree.
+    pub async fn connect_with_owned_child(
+        endpoint: &str,
+        child: Child,
+        own_process_group: bool,
+    ) -> Result<Self> {
+        let ws = launch::resolve_endpoint(endpoint).await?;
+        Ok(Self {
+            client: CdpClient::connect(&ws).await?,
+            endpoint: ws,
+            child: Some(child),
+            own_process_group,
             owned_profile: None,
         })
     }
@@ -107,6 +139,16 @@ impl Browser {
     /// The underlying CDP connection.
     pub fn client(&self) -> &Arc<CdpClient> {
         &self.client
+    }
+
+    /// True once the browser's CDP connection has closed.
+    pub fn is_closed(&self) -> bool {
+        self.client.is_closed()
+    }
+
+    /// Stop all active live-view captures running over this browser's CDP connection.
+    pub async fn stop_live_views(&self) {
+        let _ = tokio::time::timeout(Duration::from_secs(2), self.client.stop_active_views()).await;
     }
 
     /// `Browser.getVersion` result (product, protocol version, user agent).
@@ -169,16 +211,25 @@ impl Browser {
         }
     }
 
-    /// Close the browser. Launched browsers are terminated and their temporary profile removed;
-    /// attached browsers are left running.
+    /// Close the browser. Stops any active live-view captures first, closes the browser,
+    /// terminates and reaps the owned process tree, and removes any temporary profile.
     pub async fn close(mut self) -> Result<()> {
+        self.stop_live_views().await;
         if let Some(mut child) = self.child.take() {
-            let _ = self.client.send("Browser.close", json!({})).await;
-            if tokio::time::timeout(Duration::from_secs(5), child.wait())
+            let pid = child.id();
+            if !self.client.is_closed() {
+                let _ = self
+                    .client
+                    .send_with_timeout(None, "Browser.close", json!({}), Duration::from_secs(3))
+                    .await;
+            }
+            if tokio::time::timeout(Duration::from_secs(3), child.wait())
                 .await
                 .is_err()
             {
-                let _ = child.kill().await;
+                terminate_and_reap_process_tree(&mut child, pid, self.own_process_group).await;
+            } else if self.own_process_group {
+                terminate_and_reap_process_tree(&mut child, pid, true).await;
             }
         }
         if let Some(p) = self.owned_profile.take() {
@@ -194,9 +245,90 @@ impl Browser {
     }
 }
 
+async fn terminate_and_reap_process_tree(
+    child: &mut Child,
+    pid: Option<u32>,
+    own_process_group: bool,
+) {
+    let still_running = child.try_wait().ok().flatten().is_none();
+    #[cfg(unix)]
+    if own_process_group && let Some(pgid) = pid.filter(|p| *p > 1) {
+        let mut kill_pg = Command::new("/bin/kill");
+        kill_pg
+            .arg("-KILL")
+            .arg("--")
+            .arg(format!("-{pgid}"))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        if let Ok(mut k) = kill_pg.spawn() {
+            let _ = tokio::time::timeout(Duration::from_secs(2), k.wait()).await;
+        }
+    }
+    #[cfg(windows)]
+    if still_running && let Some(p) = pid.filter(|p| *p > 0) {
+        let _ = own_process_group;
+        let mut tk = Command::new("taskkill");
+        tk.args(["/F", "/T", "/PID", &p.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        if let Ok(mut k) = tk.spawn() {
+            let _ = tokio::time::timeout(Duration::from_secs(3), k.wait()).await;
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = own_process_group;
+    #[cfg(not(any(unix, windows)))]
+    let _ = (still_running, pid, own_process_group);
+
+    if still_running {
+        let _ = child.kill().await;
+    }
+    let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
+}
+
+fn terminate_process_tree_blocking(child: &mut Child, own_process_group: bool) {
+    let pid = child.id();
+    let still_running = child.try_wait().ok().flatten().is_none();
+    #[cfg(unix)]
+    if own_process_group && let Some(pgid) = pid.filter(|p| *p > 1) {
+        let _ = std::process::Command::new("/bin/kill")
+            .arg("-KILL")
+            .arg("--")
+            .arg(format!("-{pgid}"))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(windows)]
+    if still_running && let Some(p) = pid.filter(|p| *p > 0) {
+        let _ = own_process_group;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &p.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(not(unix))]
+    let _ = own_process_group;
+    #[cfg(not(any(unix, windows)))]
+    let _ = (still_running, pid, own_process_group);
+
+    if still_running {
+        let _ = child.start_kill();
+    }
+    let _ = child.try_wait();
+}
+
 impl Drop for Browser {
     fn drop(&mut self) {
-        // `kill_on_drop` terminates the process; clean the profile on a best-effort basis.
+        if let Some(mut child) = self.child.take() {
+            terminate_process_tree_blocking(&mut child, self.own_process_group);
+        }
+        // Clean any temporary profile directory on a best-effort basis.
         if let Some(p) = self.owned_profile.take() {
             std::thread::spawn(move || {
                 for _ in 0..10 {
