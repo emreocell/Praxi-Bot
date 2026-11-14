@@ -1,20 +1,28 @@
 import { ApiClient, ApiError } from "./client.ts";
 import { MOCK_MCP_CATALOG } from "./mockCatalog.ts";
+import { MockLiveViewService } from "./mockLiveView.ts";
 import type {
   Bot,
   Chat,
   ConfiguredProviderDto,
+  ControlModeName,
+  CreateSessionInput,
   DetectedProviderDto,
   EmailAccount,
   EmailAccountInput,
+  InputBatch,
   McpServer,
   McpServerConfig,
   McpTool,
   Message,
   PolicyDto,
   ProvidersDto,
+  ReleaseRequest,
+  SessionUpdate,
+  TakeoverRequest,
   UsageSummary,
-  GlobalEnvelope
+  GlobalEnvelope,
+  ViewHeartbeat
 } from "./types.ts";
 
 import { isMockMode, MOCK_BASE_URL } from "./mockMode.ts";
@@ -283,6 +291,7 @@ export class MockApiClient extends ApiClient {
   readonly chats: Chat[] = structuredClone([...CHATS, ...BOTS.slice(1).map((b,i) => ({ id: `mock-chat-${i}`, chat_id: `mock-chat-${i}`, bot_id: b.id, title: previews[i+1], created_at_ms: NOW }))]);
   readonly messages = new Map<string, Message[]>();
   readonly secrets = new Map<string, number>();
+  private readonly liveView = new MockLiveViewService();
   readonly emailAccounts: EmailAccount[] = [
     {
       name: "personal",
@@ -357,6 +366,13 @@ export class MockApiClient extends ApiClient {
         bots: null
       }
     ];
+  }
+
+  override async openViewFrameStream(
+    sessionId: string,
+    signal?: AbortSignal
+  ): Promise<Response> {
+    return this.liveView.openStream(sessionId, signal);
   }
 
   protected override async request<T>(
@@ -523,9 +539,88 @@ export class MockApiClient extends ApiClient {
       case "PUT /mcp":
       case "DELETE /mcp":
         return ok(this.mcp(method, seg, opts.body));
+      case "GET /view":
+      case "POST /view":
+      case "PATCH /view":
+      case "PUT /view":
+      case "DELETE /view":
+        return ok(await this.view(method, seg, opts.body));
+      case "GET /control":
+      case "PUT /control":
+      case "POST /control":
+        return ok(this.control(method, seg, opts.body));
       default:
         throw new ApiError(404, "not_found", `mock: ${method} ${path}`);
     }
+  }
+
+  private async view(
+    method: string,
+    seg: string[],
+    body: unknown
+  ): Promise<unknown> {
+    const [, sub, id, action] = seg;
+    if (sub === "targets" && method === "GET") {
+      return this.liveView.listTargets();
+    }
+    if (sub === "privileges" && method === "PUT" && id) {
+      return undefined;
+    }
+    if (sub === "sessions") {
+      if (!id && method === "POST") {
+        return this.liveView.createSession(body as CreateSessionInput);
+      }
+      if (id && !action) {
+        if (method === "PATCH") {
+          return this.liveView.updateSession(id, body as SessionUpdate);
+        }
+        if (method === "DELETE") {
+          this.liveView.deleteSession(id);
+          return undefined;
+        }
+      }
+      if (id && action === "heartbeat" && method === "PUT") {
+        this.liveView.heartbeatSession(id, body as ViewHeartbeat);
+        return undefined;
+      }
+      if (id && action === "input" && method === "POST") {
+        return await this.liveView.sendInput(id, body as InputBatch);
+      }
+    }
+    throw new ApiError(404, "not_found", `mock view: ${method} /${seg.join("/")}`);
+  }
+
+  private control(method: string, seg: string[], body: unknown): unknown {
+    const [, sub] = seg;
+    if (sub === "state") {
+      if (method === "GET") {
+        return this.liveView.getControlState();
+      }
+      if (method === "PUT") {
+        const input = (body ?? {}) as {
+          mode: ControlModeName;
+          release?: boolean;
+        };
+        return this.liveView.putControlState(input.mode, Boolean(input.release));
+      }
+    }
+    if (sub === "takeover" && method === "POST") {
+      return this.liveView.requestTakeover(body as TakeoverRequest);
+    }
+    if (sub === "release" && method === "POST") {
+      return this.liveView.releaseControl(body as ReleaseRequest | undefined);
+    }
+    if (sub === "override" && method === "POST") {
+      return this.liveView.overrideControl();
+    }
+    if (sub === "recover" && method === "POST") {
+      return this.liveView.recoverControl();
+    }
+    if (sub && method === "POST") {
+      const verdict = (body ?? {}) as { decision?: string };
+      return { request_id: sub, decision: verdict.decision ?? "proceed" };
+    }
+    throw new ApiError(404, "not_found", `mock control: ${method} /${seg.join("/")}`);
   }
 
   private email(method: string, seg: string[], body: unknown): unknown {

@@ -44,6 +44,8 @@ import { BOT_COLORS, botView } from "./lib/botProfile";
 import { getAutostart, setAutostart } from "./lib/providers";
 import { ToastProvider } from "./components/Toast";
 import { ControlBridgeHost } from "./state/ControlBridgeHost";
+import { LiveViewProvider, useLiveView } from "./state/LiveViewContext";
+import { LiveViewer } from "./views/LiveViewer";
 import { appearanceFromQuery } from "./lib/appearance";
 import { createDebounced } from "./lib/debounce";
 import { CUSTOM_BACKDROP, NO_BACKDROP } from "./lib/backdropCatalog";
@@ -110,6 +112,7 @@ function AppShell() {
     refreshBots,
     retry
   } = useDaemon();
+  const { setThumbnailDemand, overrideStop } = useLiveView();
   const [settings, setSettings] = useState<AppSettings>(() => loadSettingsSync() ?? DEFAULT_SETTINGS);
   const [route, setRoute] = useState<Route>({ kind: "home" });
   const [controlState, setControlState] = useState<ControlSnapshot>(
@@ -125,7 +128,13 @@ function AppShell() {
   const { servers: appServers } = useMcp(true);
   const [helpOpen, setHelpOpen] = useState(false);
   const [layout, setLayout] = useState<ShellLayout>(loadShellLayout);
-  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(() => {
+    if (!isMockMode() || typeof window === "undefined") {
+      return false;
+    }
+    const q = new URLSearchParams(window.location.search);
+    return q.get("lv") === "panel" || q.get("panel") === "1";
+  });
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const chipRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
@@ -277,6 +286,7 @@ function AppShell() {
       const activeHotkey = controlState.stopHotkey || settings.stopHotkey;
       if (matchesHotkeyEvent(event, activeHotkey)) {
         event.preventDefault();
+        void overrideStop();
         void stopBotRun().then(setControlState);
       }
     };
@@ -285,7 +295,7 @@ function AppShell() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [recordingHotkey, controlState.stopHotkey, settings.stopHotkey]);
+  }, [recordingHotkey, controlState.stopHotkey, settings.stopHotkey, overrideStop]);
 
   // Native title bar on / off (Tauri window decorations; no-op in a browser).
   useEffect(() => {
@@ -407,6 +417,10 @@ function AppShell() {
   const mini = isMiniRail(layout.rail);
   const botInView = selectedBot !== undefined && (route.kind === "chat" || route.kind === "bot" || (route.kind === "botForm" && Boolean(route.botId)));
   const panelVisible = panelOpen && botInView;
+
+  useEffect(() => {
+    setThumbnailDemand(panelVisible, selectedBot?.id ?? null);
+  }, [panelVisible, selectedBot?.id, setThumbnailDemand]);
   const panelWidth = Math.min(layout.panel, panelMax(viewportWidth, layout.rail));
   const togglePanel = () => setPanelOpen((open) => !open);
   const panelBotView = selectedBot ? botView(selectedBot) : undefined;
@@ -449,7 +463,10 @@ function AppShell() {
           <Button
             variant="danger"
             size="sm"
-            onClick={() => void stopBotRun().then(setControlState)}
+            onClick={() => {
+              void overrideStop();
+              void stopBotRun().then(setControlState);
+            }}
           >
             {t("widget.stop")}
           </Button>
@@ -809,6 +826,7 @@ function AppShell() {
           handleOpenOnboarding(false);
         }}
       />
+      <LiveViewer />
     </SidebarLayout>
   );
 }
@@ -817,8 +835,10 @@ export function App() {
   return (
     <ToastProvider>
       <DaemonProvider>
-        <ControlBridgeHost />
-        <AppShell />
+        <LiveViewProvider>
+          <ControlBridgeHost />
+          <AppShell />
+        </LiveViewProvider>
       </DaemonProvider>
     </ToastProvider>
   );

@@ -11,26 +11,53 @@ import {
   stopBotRun,
   subscribeOverlayEvents
 } from "../overlay/events";
+import type { ComputerTarget } from "../lib/settingsPrefs";
+import { DEFAULT_SETTINGS, loadSettings } from "../store/settingsStore";
 import { useDaemon } from "./DaemonContext";
-import { ControlBridge, HEARTBEAT_MS } from "./controlBridge";
+import {
+  ControlBridge,
+  HEARTBEAT_MS,
+  resolveTargetScope
+} from "./controlBridge";
+import { useLiveView } from "./LiveViewContext";
 
 /**
- * Connects the daemon to the on-screen overlay (task 017b).  Renders nothing;
- * it exists only in the native app, where the overlay windows live.
+ * Connects the daemon to the on-screen overlay (task 017b) and live-view
+ * panel overlay (task 173). Renders nothing; registers native bridge hooks
+ * only in the Tauri desktop runtime.
  */
 export function ControlBridgeHost() {
   const { t } = useTranslation();
   const { client, bots, onDaemonEvent } = useDaemon();
+  const { targets, selectedTarget, showPanelAction, registerBridge } =
+    useLiveView();
+
   const botsRef = useRef(bots);
   botsRef.current = bots;
-  const startingStep = t("control.starting");
-  const stepRef = useRef(startingStep);
-  stepRef.current = startingStep;
+  const targetsRef = useRef(targets);
+  targetsRef.current = targets;
+  const selectedRef = useRef(selectedTarget);
+  selectedRef.current = selectedTarget;
+  const computerTargetRef = useRef<ComputerTarget>(DEFAULT_SETTINGS.computerTarget);
+  const stepRef = useRef(t("control.starting"));
+  stepRef.current = t("control.starting");
 
   useEffect(() => {
     if (!client || !isTauriRuntime()) {
+      registerBridge(null);
       return undefined;
     }
+    let alive = true;
+    const refreshComputerTarget = () => {
+      void loadSettings()
+        .then((s) => {
+          if (alive) {
+            computerTargetRef.current = s.computerTarget;
+          }
+        })
+        .catch(() => {});
+    };
+    refreshComputerTarget();
     const bridge = new ControlBridge({
       client,
       native: {
@@ -42,6 +69,17 @@ export function ControlBridgeHost() {
           await stopBotRun();
         },
         click: overlayClick
+      },
+      resolveTargetScope: ({ runId, botId }) =>
+        resolveTargetScope({
+          runId,
+          botId,
+          targets: targetsRef.current,
+          selectedTarget: selectedRef.current,
+          computerTarget: computerTargetRef.current
+        }),
+      panelOverlay: {
+        showAction: showPanelAction
       },
       botMeta: (id) => {
         const bot = botsRef.current.find((b) => b.id === id);
@@ -61,24 +99,25 @@ export function ControlBridgeHost() {
       },
       now: () => Date.now()
     });
+    registerBridge(bridge);
     const offEvents = onDaemonEvent((env) => void bridge.handleEvent(env));
     const offState = subscribeOverlayEvents({
       onControlStateChanged: (snap) =>
         void bridge.onNativeState(snap.mode as ControlMode),
-      onSettingsUpdated: () => {}
+      onSettingsUpdated: refreshComputerTarget
     });
-    // Register as controller now (with the mode the state machine is in) and
-    // keep the heartbeat going.
     void getControlState()
       .then((snap) => bridge.onNativeState(snap.mode))
       .catch(() => bridge.heartbeat());
     const beat = window.setInterval(() => void bridge.heartbeat(), HEARTBEAT_MS);
     return () => {
+      alive = false;
+      registerBridge(null);
       offEvents();
       offState();
       window.clearInterval(beat);
     };
-  }, [client, onDaemonEvent]);
+  }, [client, onDaemonEvent, registerBridge, showPanelAction]);
 
   return null;
 }

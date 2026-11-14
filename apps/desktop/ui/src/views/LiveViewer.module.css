@@ -1,0 +1,340 @@
+.backdrop {
+  position: fixed;
+  inset: var(--space-0);
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-background);
+  color: var(--color-text);
+}
+
+:global(:root[data-style="glass"]) .backdrop {
+  background-color: color-mix(in srgb, var(--color-background) 92%, transparent);
+  backdrop-filter: blur(var(--blur-glass)) saturate(1.25);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: var(--size-border) solid var(--color-border);
+  background-color: var(--color-surface);
+  background-image: var(--surface-sheen);
+  flex-shrink: 0;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: var(--space-0);
+  flex: 1;
+}
+
+.targetPicker {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: var(--space-0);
+}
+
+.select {
+  max-width: 100%;
+  height: var(--space-8);
+  padding: var(--space-0) var(--space-3);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-elevated);
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.stateBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--space-8);
+  padding: var(--space-0) var(--space-3);
+  border-radius: var(--radius-pill);
+  border: var(--size-border) solid var(--color-border);
+  background-color: var(--color-surface-elevated);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+}
+
+.stateDot {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-text-faint);
+}
+
+.stateBadge[data-tone="watch"] .stateDot {
+  background-color: var(--color-success);
+}
+
+.stateBadge[data-tone="active"],
+.stateBadge[data-tone="acquiring"] {
+  border-color: var(--color-accent);
+  background-color: var(--color-accent-subtle);
+  color: var(--color-accent-text);
+}
+
+.stateBadge[data-tone="active"] .stateDot,
+.stateBadge[data-tone="acquiring"] .stateDot {
+  background-color: var(--color-accent);
+}
+
+.stateBadge[data-tone="paused"] {
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+}
+
+.stateBadge[data-tone="paused"] .stateDot {
+  background-color: var(--color-warning);
+}
+
+.noticeBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-5);
+  border-bottom: var(--size-border) solid var(--color-border);
+  background-color: color-mix(in srgb, var(--color-surface) 70%, transparent);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.noticeLeft {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.errorInline {
+  color: var(--color-danger);
+  font-weight: var(--font-weight-medium);
+}
+
+.stageArea {
+  position: relative;
+  flex: 1;
+  min-height: var(--space-0);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5) var(--space-6) var(--space-10);
+  gap: var(--space-3);
+}
+
+.stageFrame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-card);
+  border: var(--size-border) solid var(--color-border);
+  background-color: var(--color-surface);
+  overflow: hidden;
+}
+
+.stageFrame[data-active="true"] {
+  border-color: var(--color-accent);
+}
+
+.stageSurface {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+  touch-action: none;
+}
+
+.stageSurface[data-interactive="true"] {
+  cursor: crosshair;
+}
+
+.stageImg {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  user-select: none;
+}
+
+.imeCapture {
+  position: fixed;
+  opacity: 0;
+  pointer-events: none;
+  width: var(--space-1);
+  height: var(--space-1);
+}
+
+.focusOverlayBar {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  border: var(--size-border) solid var(--color-border-strong);
+  background-color: color-mix(in srgb, var(--color-background) 88%, transparent);
+  font-size: var(--font-size-xs);
+  color: var(--color-text);
+}
+
+.tabToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: calc(var(--space-1) / 2) var(--space-2);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.tabToggle[aria-pressed="true"] {
+  border-color: var(--color-accent);
+  background-color: var(--color-accent-subtle);
+  color: var(--color-accent-text);
+}
+
+.actionBox {
+  position: absolute;
+  border: var(--size-border-thick) solid var(--color-accent);
+  border-radius: var(--radius-md);
+  background-color: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  pointer-events: none;
+}
+
+.actionTag {
+  position: absolute;
+  top: calc(var(--space-6) * -1);
+  left: var(--space-0);
+  padding: calc(var(--space-1) / 2) var(--space-2);
+  border-radius: var(--radius-md);
+  background-color: var(--color-accent);
+  color: var(--color-accent-contrast);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.emptyStage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-8);
+  text-align: center;
+  max-width: calc(var(--space-10) * 11);
+  color: var(--color-text-secondary);
+}
+
+.emptyTitle {
+  margin: var(--space-0);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.emptyBody {
+  margin: var(--space-0);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.bottomDock {
+  position: fixed;
+  left: 50%;
+  bottom: var(--space-5);
+  transform: translateX(-50%);
+  z-index: 46;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
+  border: var(--size-border) solid var(--color-border-strong);
+  background-color: var(--color-surface-elevated);
+  background-image: var(--surface-sheen);
+  box-shadow: var(--shadow-overlay);
+  max-width: 92vw;
+}
+
+:global(:root[data-style="glass"]) .bottomDock {
+  background-color: color-mix(in srgb, var(--color-surface-elevated) 84%, transparent);
+  backdrop-filter: blur(var(--blur-glass)) saturate(1.45);
+}
+
+.dockStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+}
+
+.outcomeSelect {
+  height: var(--space-8);
+  padding: var(--space-0) var(--space-2);
+  border-radius: var(--radius-md);
+  border: var(--size-border) solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.dockActions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.iconBtn {
+  display: inline-grid;
+  place-items: center;
+  width: var(--space-8);
+  height: var(--space-8);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.iconBtn:hover {
+  background-color: var(--color-surface-elevated);
+  color: var(--color-text);
+}
