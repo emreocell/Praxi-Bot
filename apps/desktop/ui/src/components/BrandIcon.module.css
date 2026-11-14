@@ -4,10 +4,3 @@
 .small { width: var(--space-6); height: var(--space-6); border-radius: 25%; font-size: var(--font-size-xs); }
 
 .tile > img { width: 64%; height: 64%; object-fit: contain; }
-
-/* Bare mark: the logo itself, no tile. */
-.bare { --bare-size: var(--size-icon-lg); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: var(--bare-size); height: var(--bare-size); color: var(--color-text); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); }
-.bare > svg { width: 100%; height: 100%; fill: var(--brand-color); }
-.bare > svg:global(.lucide) { fill: none; stroke: var(--color-text-secondary); }
-.bare > img { width: 100%; height: 100%; object-fit: contain; }
-.bare > span { color: var(--brand-color); }
