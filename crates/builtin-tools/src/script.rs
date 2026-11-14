@@ -307,8 +307,12 @@ impl Tool for ScriptTool {
         // blocking pool; the engine's interrupt handler enforces the deadline.
         let handle = tokio::runtime::Handle::current();
         let code = i.code;
+        let cancel = tokio_util::sync::CancellationToken::new();
+        // Dropping a JoinHandle detaches a blocking task. Signal the worker
+        // explicitly when the outer tool future is cancelled or times out.
+        let _cancel_on_drop = cancel.clone().drop_guard();
         let joined = tokio::task::spawn_blocking(move || {
-            handle.block_on(ScriptRuntime::run(&code, host, limits))
+            handle.block_on(ScriptRuntime::run_cancellable(&code, host, limits, cancel))
         })
         .await;
         let result = match joined {
@@ -340,6 +344,39 @@ mod tests {
     use super::*;
     use parking_lot::Mutex;
     use permission_engine::{Level, Rule};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::Notify;
+
+    struct WaitingEffect {
+        spec: ToolSpec,
+        entered: Notify,
+        release: Notify,
+        dropped: Arc<Notify>,
+        effects: AtomicUsize,
+    }
+
+    struct CallDrop(Arc<Notify>);
+
+    impl Drop for CallDrop {
+        fn drop(&mut self) {
+            self.0.notify_one();
+        }
+    }
+
+    #[async_trait]
+    impl Tool for WaitingEffect {
+        fn spec(&self) -> &ToolSpec {
+            &self.spec
+        }
+
+        async fn call(&self, _ctx: &ToolContext, _input: Value) -> Result<ToolOutput, ToolError> {
+            let _drop = CallDrop(Arc::clone(&self.dropped));
+            self.entered.notify_one();
+            self.release.notified().await;
+            self.effects.fetch_add(1, Ordering::SeqCst);
+            Ok(ToolOutput::text("effect committed"))
+        }
+    }
 
     struct Echo {
         spec: ToolSpec,
@@ -400,6 +437,42 @@ mod tests {
             .unwrap()
             .call(&ToolContext::default(), json!({"code": code}))
             .await
+    }
+
+    #[tokio::test]
+    async fn dropping_script_call_cancels_in_flight_tool() {
+        let (reg, _gate, _calls) = setup(vec![]);
+        let effect = Arc::new(WaitingEffect {
+            spec: spec(
+                "delayed_effect",
+                "d",
+                json!({"type":"object"}),
+                Effect::Write,
+                PermissionCategory::Fs,
+            ),
+            entered: Notify::new(),
+            release: Notify::new(),
+            dropped: Arc::new(Notify::new()),
+            effects: AtomicUsize::new(0),
+        });
+        reg.register(effect.clone());
+        let call = tokio::spawn(async move {
+            run(&reg, "return await tools.call('delayed_effect', {});").await
+        });
+        tokio::time::timeout(Duration::from_secs(5), effect.entered.notified())
+            .await
+            .expect("script did not enter its inner tool");
+        call.abort();
+        assert!(call.await.unwrap_err().is_cancelled());
+        let dropped = tokio::time::timeout(Duration::from_secs(2), effect.dropped.notified()).await;
+        // Always release a detached old worker so a failing test can shut
+        // its runtime down without waiting for the full script deadline.
+        effect.release.notify_one();
+        assert!(
+            dropped.is_ok(),
+            "inner tool outlived the cancelled script call"
+        );
+        assert_eq!(effect.effects.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
