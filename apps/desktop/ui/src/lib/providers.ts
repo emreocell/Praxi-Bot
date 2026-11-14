@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "../overlay/events";
+import { canManageProviders, PROVIDERS_LOCAL_ONLY, type ProviderManagementTarget } from "./providerConnection";
 
 /**
  * Changing providers (adding a key to the OS keychain, choosing the default)
@@ -28,9 +29,12 @@ interface CliArgs {
   apiKey?: string;
 }
 
-async function providersCli(args: CliArgs): Promise<CliResult> {
+async function providersCli(args: CliArgs, target: ProviderManagementTarget): Promise<CliResult> {
   if (!isTauriRuntime()) {
     throw new Error("providers_unavailable_outside_tauri");
+  }
+  if (!canManageProviders(target)) {
+    throw new Error(PROVIDERS_LOCAL_ONLY);
   }
   return invoke<CliResult>("providers_cli", { ...args });
 }
@@ -41,19 +45,20 @@ export function addProvider(args: {
   baseUrl?: string;
   model?: string;
   apiKey?: string;
-}): Promise<CliResult> {
-  return providersCli({ action: "add", ...args });
+}, target: ProviderManagementTarget): Promise<CliResult> {
+  return providersCli({ action: "add", ...args }, target);
 }
 
-export function testProvider(id: string): Promise<CliResult> {
-  return providersCli({ action: "test", id });
+export function testProvider(id: string, target: ProviderManagementTarget): Promise<CliResult> {
+  return providersCli({ action: "test", id }, target);
 }
 
 export function setDefaultProvider(
   id: string,
+  target: ProviderManagementTarget,
   model?: string
 ): Promise<CliResult> {
-  return providersCli({ action: "default", id, model });
+  return providersCli({ action: "default", id, model }, target);
 }
 
 export async function getAutostart(): Promise<boolean> {

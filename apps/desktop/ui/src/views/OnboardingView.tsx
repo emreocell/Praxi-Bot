@@ -20,6 +20,7 @@ import {
   setDefaultProvider,
   testProvider
 } from "../lib/providers";
+import { canManageProviders, PROVIDERS_LOCAL_ONLY } from "../lib/providerConnection";
 import {
   type OnboardingPresetGroup,
   providerRoleDefaults,
@@ -114,6 +115,8 @@ export function OnboardingView({
     restartDaemon
   } = useDaemon();
   const native = isTauriRuntime();
+  const providerTarget = { connection: conn, baseUrl: client?.baseUrl };
+  const canManage = native && canManageProviders(providerTarget);
   const fakeAvailable = Boolean(conn?.fake_provider);
 
   const [step, setStep] = useState<number>(() =>
@@ -352,8 +355,8 @@ export function OnboardingView({
       return true;
     }
 
-    if (!native) {
-      setTestErrorMsg(t("onboarding.step2.nativeWarning"));
+    if (!canManage) {
+      setTestErrorMsg(t("settings.providers.localDaemonOnly"));
       return false;
     }
 
@@ -370,7 +373,7 @@ export function OnboardingView({
         baseUrl: customUrl || undefined,
         model: providerModel.trim() || roleDefaults.defaultModel,
         apiKey: apiKey.trim() || undefined
-      });
+      }, providerTarget);
       if (res.code !== 0) {
         setTestErrorMsg((res.stderr || res.stdout).trim());
         return false;
@@ -385,6 +388,7 @@ export function OnboardingView({
 
       await setDefaultProvider(
         resolvedProviderId,
+        providerTarget,
         providerModel.trim() || roleDefaults.defaultModel
       ).catch(() => {});
 
@@ -405,7 +409,8 @@ export function OnboardingView({
       );
       return true;
     } catch (e) {
-      setTestErrorMsg(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setTestErrorMsg(message === PROVIDERS_LOCAL_ONLY ? t("settings.providers.localDaemonOnly") : message);
       return false;
     } finally {
       setProviderBusy(false);
@@ -440,8 +445,8 @@ export function OnboardingView({
       return;
     }
 
-    if (!native) {
-      setTestErrorMsg(t("onboarding.step2.nativeWarning"));
+    if (!canManage) {
+      setTestErrorMsg(t("settings.providers.localDaemonOnly"));
       return;
     }
 
@@ -452,7 +457,7 @@ export function OnboardingView({
 
     setProviderBusy(true);
     try {
-      const res = await testProvider(resolvedProviderId);
+      const res = await testProvider(resolvedProviderId, providerTarget);
       const detail = (res.code === 0 ? res.stdout : res.stderr || res.stdout).trim();
       if (res.code === 0) {
         setTestSuccessMsg(t("onboarding.step2.testOk", { detail }));
@@ -952,7 +957,7 @@ export function OnboardingView({
               {presetGroup !== "fake" ? (
                 <Button
                   variant="secondary"
-                  disabled={providerBusy}
+                  disabled={providerBusy || !canManage}
                   onClick={() => void saveCurrentProvider()}
                 >
                   {providerBusy
@@ -962,7 +967,7 @@ export function OnboardingView({
               ) : null}
               <Button
                 variant="secondary"
-                disabled={providerBusy}
+                disabled={providerBusy || (presetGroup !== "fake" && !canManage)}
                 onClick={() => void handleTestProvider()}
                 data-testid="onboarding-test-provider"
               >
@@ -971,6 +976,10 @@ export function OnboardingView({
                   : t("onboarding.step2.testButton")}
               </Button>
             </div>
+
+            {presetGroup !== "fake" && !canManage ? (
+              <p className={formStyles.hint}>{t("settings.providers.localDaemonOnly")}</p>
+            ) : null}
 
             {providerSavedMsg ? (
               <p className={formStyles.hint} role="status">

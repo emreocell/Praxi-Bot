@@ -93,6 +93,7 @@
       "title": "Model sağlayıcıları",
       "description": "API anahtarları işletim sistemi anahtarlığında saklanır. Değişiklikleri arka plan servisi yeniden başlatmadan alır.",
       "nativeOnly": "Sağlayıcı yönetimi masaüstü uygulamasında kullanılabilir.",
+      "localDaemonOnly": "Sağlayıcı kurulumu, bu uygulamanın başlattığı yerel daemon için kullanılabilir. Diğer bağlantılarda sağlayıcıları daemon'un çalıştığı bilgisayarda yönetin.",
       "none": "Henüz sağlayıcı yapılandırılmadı.",
       "default": "Varsayılan",
       "disabled": "Devre dışı",

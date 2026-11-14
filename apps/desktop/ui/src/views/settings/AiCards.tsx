@@ -7,6 +7,7 @@ import { useToast } from "../../components/Toast";
 import { modelGroups } from "../../lib/modelPicker";
 import { defaultModelRef } from "../../lib/providerView";
 import { setDefaultProvider } from "../../lib/providers";
+import { canManageProviders, PROVIDERS_LOCAL_ONLY } from "../../lib/providerConnection";
 import { isTauriRuntime } from "../../overlay/events";
 import { useDaemon } from "../../state/DaemonContext";
 import { useProviders } from "../../state/useProviders";
@@ -20,11 +21,12 @@ import type { CardDef } from "./types";
 function DefaultModelRow() {
   const { t } = useTranslation();
   const toast = useToast();
-  const { client } = useDaemon();
+  const { client, conn } = useDaemon();
   const { dto, reload } = useProviders();
   const [override, setOverride] = useState<string | null>(null);
   const mock = client?.baseUrl === MOCK_BASE_URL;
-  const canChange = isTauriRuntime() || mock;
+  const providerTarget = { connection: conn, baseUrl: client?.baseUrl };
+  const canChange = (isTauriRuntime() && canManageProviders(providerTarget)) || mock;
 
   const current = useMemo(() => defaultModelRef(dto), [dto]);
   const groups = useMemo(() => modelGroups(dto, current), [dto, current]);
@@ -38,15 +40,16 @@ function DefaultModelRow() {
       return;
     }
     try {
-      const r = await setDefaultProvider(provider, model);
+      const r = await setDefaultProvider(provider, providerTarget, model);
       if (r.code !== 0) {
         throw new Error((r.stderr || r.stdout).trim());
       }
-      await client?.reloadProviders().catch(() => undefined);
+      await client?.reloadProviders();
       await reload();
       toast.show(t("modelPicker.switchedDefault", { model: ref }), "success");
     } catch (e) {
-      toast.show(e instanceof Error ? e.message : String(e), "danger");
+      const message = e instanceof Error ? e.message : String(e);
+      toast.show(message === PROVIDERS_LOCAL_ONLY ? t("settings.providers.localDaemonOnly") : message, "danger");
     }
   };
 
@@ -61,7 +64,7 @@ function DefaultModelRow() {
           <span className={pageStyles.sub}>
             {canChange
               ? t("settingsModal.ai.defaultModel.description")
-              : t("settings.providers.nativeOnly")}
+              : t("settings.providers.localDaemonOnly")}
           </span>
         </div>
         <ModelPicker
