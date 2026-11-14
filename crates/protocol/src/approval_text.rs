@@ -73,6 +73,32 @@ pub fn scrub(raw: &str, keep_lines: bool) -> String {
         .collect()
 }
 
+/// True when [`scrub`] would drop a character. A card that used [`scrub`] on
+/// this text would show something other than the string that is sent.
+#[must_use]
+pub fn hides_characters(raw: &str) -> bool {
+    scrub(raw, true) != raw
+}
+
+/// `raw` with hidden and control characters written out as `<U+XXXX>`.
+///
+/// Newlines and tabs follow `keep_lines`, as in [`scrub`]. Every other
+/// character stays visible, so the card cannot be shorter than the text.
+#[must_use]
+pub fn reveal_hidden(raw: &str, keep_lines: bool) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for c in raw.chars() {
+        if c == '\n' || c == '\t' {
+            out.push(if keep_lines { c } else { ' ' });
+        } else if is_hidden(c) || c.is_control() {
+            out.push_str(&format!("<U+{:04X}>", u32::from(c)));
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn s(v: &Value, key: &str) -> String {
     scrub(
         v.get(key).and_then(Value::as_str).unwrap_or_default(),
@@ -332,18 +358,40 @@ fn defang_urls(text: &str) -> String {
 /// Reason, sources, host and payload use the same quoted layout as a schedule
 /// prompt. Control characters are stripped first. The daemon summary is added
 /// by the caller, after this block, so it stays last.
+fn egress_show(raw: &str, keep_lines: bool) -> String {
+    defang_urls(&reveal_hidden(raw, keep_lines))
+}
+
 fn egress_text(details: &Value) -> Option<String> {
     let egress = egress_value(details)?;
-    let reason = defang_urls(&raw_prompt(egress, "reason"));
-    let host = defang_urls(&raw_prompt(egress, "host"));
-    let payload = defang_urls(&raw_prompt(egress, "payload"));
+    let reason = egress_show(
+        egress
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        true,
+    );
+    let host = egress_show(
+        egress
+            .get("host")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        true,
+    );
+    let payload = egress_show(
+        egress
+            .get("payload")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        true,
+    );
     let reads: Vec<String> = egress
         .get("read")
         .and_then(Value::as_array)
         .map(|a| {
             a.iter()
                 .filter_map(Value::as_str)
-                .map(|r| defang_urls(&scrub(r, false)))
+                .map(|r| egress_show(r, false))
                 .filter(|r| !r.is_empty())
                 .collect()
         })
@@ -680,5 +728,27 @@ mod tests {
         assert_eq!(chunks.concat(), emoji);
         let multi = "é".repeat(7);
         assert_eq!(chunk_text(&multi, 3).concat(), multi);
+    }
+
+    #[test]
+    fn egress_text_shows_hidden_characters_instead_of_deleting_them() {
+        let payload = format!("weather{}", '\u{E0041}');
+        let details = json!({
+            "kind": "egress",
+            "reason": "read a file",
+            "read": ["file notes.txt"],
+            "host": "configured-search-provider",
+            "payload": payload,
+            "payload_kind": "query"
+        });
+        let text = describe_details(&details).unwrap();
+        assert!(text.contains("U+E0041"), "{text}");
+        assert!(!text.contains('\u{E0041}'), "{text}");
+        assert!(
+            !text.contains("(7 characters)"),
+            "the count must include the hidden character, not the scrubbed text: {text}"
+        );
+        assert!(hides_characters(&payload));
+        assert!(!hides_characters("weather"));
     }
 }
