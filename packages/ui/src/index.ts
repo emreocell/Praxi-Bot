@@ -17,12 +17,14 @@ export {
   SidebarItem,
   SidebarLayout,
   SidebarSection,
+  SidePanel,
   type SidebarFooterProps,
   type SidebarHeaderProps,
   type SidebarItemProps,
   type SidebarLayoutProps,
   type SidebarProps,
-  type SidebarSectionProps
+  type SidebarSectionProps,
+  type SidePanelProps
 } from "./components/Sidebar";
 export {
   accentAfterThemeChange,

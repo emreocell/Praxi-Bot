@@ -8,21 +8,22 @@
   align-items: center;
   gap: var(--space-2);
   max-width: calc(var(--size-widget-width) * 0.8);
-  min-height: var(--size-control-sm);
+  min-height: var(--space-8);
   padding: var(--space-1) var(--space-3);
-  border: var(--size-border) solid var(--color-border);
-  border-radius: var(--radius-md);
+  border: none;
+  border-radius: var(--radius-pill);
   background-color: var(--color-surface-elevated);
-  color: var(--color-text);
+  color: var(--color-text-secondary);
   font-family: inherit;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-ui);
   font-weight: var(--font-weight-medium);
   cursor: pointer;
-  transition: border-color var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
-.trigger:hover:not(:disabled) {
-  border-color: var(--color-accent);
+.trigger:hover:not(:disabled),
+.trigger[aria-expanded="true"] {
+  background-color: var(--color-surface-active);
+  color: var(--color-text);
 }
 
 .trigger:focus-visible {
@@ -35,47 +36,58 @@
   cursor: default;
 }
 
+.trigger > svg:last-child {
+  color: var(--color-text-faint);
+}
+
 .triggerText {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.popover {
-  position: absolute;
-  top: calc(100% + var(--space-1));
-  right: var(--space-0);
-  z-index: 40;
-  width: calc(var(--size-widget-width) * 0.9);
-  max-width: 90vw;
+/* ── popover content (the surface itself is the generic Popover) ── */
+.search {
   display: flex;
-  flex-direction: column;
-  border: var(--size-border) solid var(--color-border-strong);
-  border-radius: var(--radius-card);
-  background-color: var(--color-surface-elevated);
-  box-shadow: var(--shadow-overlay);
-  overflow: hidden;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-1);
+  border-radius: calc(var(--radius-md) * 1.25);
+  background-color: color-mix(in srgb, var(--color-text) 6%, transparent);
+  color: var(--color-text-faint);
 }
 
-.search {
-  padding: var(--space-3);
+.search > svg {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+}
+
+.search input {
+  flex: 1;
+  min-width: var(--space-0);
+  padding: var(--space-0);
   border: none;
-  border-bottom: var(--size-border) solid var(--color-border);
-  background-color: transparent;
+  background: none;
   color: var(--color-text);
   font-family: inherit;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-ui);
 }
 
-.search:focus-visible {
+.search input:focus-visible {
   outline: none;
-  box-shadow: inset 0 calc(-1 * var(--size-border-thick)) 0 var(--color-accent);
+}
+
+.search:focus-within {
+  box-shadow: 0 0 0 var(--size-border-thick) color-mix(in srgb, var(--color-accent) 55%, transparent);
 }
 
 .scroll {
-  max-height: calc(var(--size-widget-width) * 0.9);
+  flex: 1;
+  min-height: var(--space-0);
+  max-height: min(calc(var(--size-widget-width) * 1.5), 62vh);
   overflow-y: auto;
-  padding: var(--space-1);
+  padding-bottom: var(--space-1);
 }
 
 .group {
@@ -84,26 +96,40 @@
 }
 
 .groupLabel {
-  padding: var(--space-2) var(--space-3) var(--space-1);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3) var(--space-1);
   font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: var(--letter-spacing-wide);
-  text-transform: uppercase;
-  color: var(--color-text-muted);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.group:first-child .groupLabel {
+  padding-top: var(--space-2);
+}
+
+.groupNote {
+  color: var(--color-text-faint);
+  font-weight: var(--font-weight-regular);
+}
+
+.groupNote::before {
+  content: "· ";
 }
 
 .option {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  gap: var(--space-3);
+  min-height: var(--space-8);
+  padding: var(--space-1) var(--space-3);
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: calc(var(--radius-md) * 1.25);
   background: none;
   color: var(--color-text);
   font-family: inherit;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-ui);
   text-align: left;
   cursor: pointer;
 }
@@ -114,38 +140,85 @@
   background-color: var(--color-surface-active);
 }
 
+.option:focus-visible {
+  box-shadow: inset 0 0 0 var(--size-border-thick) var(--color-focus);
+}
+
 .optionActive {
-  background-color: var(--color-accent-subtle);
+  color: var(--color-accent-text);
 }
 
 .optionText {
+  flex: 1;
+  min-width: var(--space-0);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.option > svg:last-child {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+}
+
 .empty {
   margin: var(--space-0);
   padding: var(--space-4);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-ui);
   color: var(--color-text-muted);
   text-align: center;
 }
 
-.trigger { border: none; border-radius: var(--radius-pill); min-height: var(--space-8); background: var(--color-surface-elevated); font-size: var(--font-size-ui); }
-.popover { width: calc(var(--size-widget-width) * 0.9); border-color: var(--color-border); border-radius: var(--radius-modal); top: calc(100% + var(--space-2)); }
-.scroll { max-height: calc(var(--size-widget-width) * 1.5); padding: var(--space-2); }
-.groupLabel { display: flex; align-items: center; gap: var(--space-2); text-transform: none; letter-spacing: 0; padding-top: var(--space-4); }
-.option { font-size: var(--font-size-ui); min-height: var(--space-10); padding-left: var(--space-10); }
-.optionActive { background: var(--color-surface-active); }
+/* thinking level */
+.effort {
+  padding: var(--space-3) var(--space-2) var(--space-1);
+}
 
-.scroll { max-height: min(calc(var(--size-widget-width) * 1.8), 75vh); }
-.option { min-height: var(--space-8); padding-block: var(--space-1); }
-.groupLabel { padding-top: var(--space-3); }
+.effortLabel {
+  display: block;
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
 
-/* Appearance axes: popovers get a sheen (solid) or frosted glass. */
-.popover { background-image: var(--surface-sheen); }
-:global(:root[data-style="glass"]) .popover {
-  background-color: color-mix(in srgb, var(--color-surface-elevated-opaque) 72%, transparent);
-  backdrop-filter: blur(var(--blur-glass)) saturate(1.5);
+.seg {
+  display: flex;
+  gap: calc(var(--space-1) / 2);
+  padding: calc(var(--space-1) * 0.75);
+  border-radius: var(--radius-pill);
+  background-color: color-mix(in srgb, var(--color-text) 6%, transparent);
+}
+
+.seg button {
+  flex: 1;
+  height: var(--size-control-sm);
+  padding: 0 var(--space-3);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.seg button:hover {
+  color: var(--color-text);
+}
+
+.seg button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 var(--size-border-thick) var(--color-focus);
+}
+
+.seg .segOn {
+  background-color: var(--color-surface-active);
+  color: var(--color-text);
+  box-shadow: 0 var(--size-border) calc(var(--space-1) * 0.75) var(--color-shadow);
+}
+
+:global(:root[data-style="line"]) .seg .segOn {
+  background-color: var(--color-text);
+  color: var(--color-background);
 }
