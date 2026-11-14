@@ -294,12 +294,7 @@ pub fn telegram_runtime(
         }
         if let Some(leader) = leader {
             cfg.on_conflict = Some(Arc::new(move || {
-                let leader = leader.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = leader.telegram_conflict().await {
-                        eprintln!("host conflict: {e}");
-                    }
-                });
+                leader.telegram_conflict();
             }));
         }
         Some(cfg)

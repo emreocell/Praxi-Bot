@@ -389,7 +389,7 @@ async fn telegram_conflict_preserves_ownership_and_scheduler_and_emits_reason() 
     t.state.leader().start().await.unwrap();
     let before = t.state.leader().config();
     let mut events = t.state.leader().subscribe();
-    t.state.leader().telegram_conflict().await.unwrap();
+    t.state.leader().telegram_conflict();
     assert_eq!(t.state.leader().config(), before);
     assert_eq!(HostConfig::load(t._dir.path()).unwrap(), before);
     assert!(t.state.scheduler().is_ok());
@@ -403,7 +403,7 @@ async fn telegram_conflict_preserves_ownership_and_scheduler_and_emits_reason() 
 async fn host_notifications_reach_the_global_sse_stream_without_replay_ids() {
     let t = setup();
     let mut body = super::open_global(&t, None).await;
-    t.state.leader().telegram_conflict().await.unwrap();
+    t.state.leader().telegram_conflict();
     let frames = super::read_until(&mut body, |frames| {
         frames.iter().any(|frame| frame.1 == "host_conflict")
     })
@@ -660,20 +660,22 @@ async fn malicious_peer_epoch_is_rejected_and_force_recovers_from_ceiling() {
             .unwrap();
         assert_eq!(t.state.leader().config(), HostConfig::default());
     }
-    t.state
-        .leader()
-        .transition_to(HostConfig {
-            epoch: crate::host::EPOCH_CEILING,
-            state: HostState::Standby,
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-    assert!(t.state.leader().activate(false).await.is_err());
-    let recovered = t.state.leader().activate(true).await.unwrap();
-    assert_eq!(recovered.state, HostState::Active);
-    assert_eq!(recovered.epoch, crate::host::EPOCH_CEILING);
-    assert_eq!(HostConfig::load(t._dir.path()).unwrap(), recovered);
+    for stored_epoch in [crate::host::EPOCH_CEILING, u64::try_from(i64::MAX).unwrap()] {
+        t.state
+            .leader()
+            .transition_to(HostConfig {
+                epoch: stored_epoch,
+                state: HostState::Standby,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(t.state.leader().activate(false).await.is_err());
+        let recovered = t.state.leader().activate(true).await.unwrap();
+        assert_eq!(recovered.state, HostState::Active);
+        assert_eq!(recovered.epoch, crate::host::EPOCH_CEILING);
+        assert_eq!(HostConfig::load(t._dir.path()).unwrap(), recovered);
+    }
     t.state.stop_components().await;
 }
 

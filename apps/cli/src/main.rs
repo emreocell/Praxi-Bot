@@ -1118,13 +1118,14 @@ mod tests {
             vec!["invite", "--role", "phone"],
             vec!["invite", "--role", "desktop"],
             vec!["invite", "--role", "node"],
+            vec!["invite", "--role", "host"],
             vec!["join", "bot-pair:TEST"],
             vec!["revoke", "key"],
         ] {
             let cli = Cli::try_parse_from(["bot", "host"].into_iter().chain(args)).unwrap();
             assert!(matches!(cli.command, Some(Command::Host { .. })));
         }
-        assert!(Cli::try_parse_from(["bot", "host", "invite", "--role", "host"]).is_err());
+        assert!(Cli::try_parse_from(["bot", "host", "invite", "--role", "admin"]).is_err());
         assert!(Cli::try_parse_from(["bot", "host", "join"]).is_err());
     }
 

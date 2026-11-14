@@ -278,7 +278,7 @@ impl LeaderControl {
         let audit = self.audit(
             actor,
             action,
-            serde_json::json!({"previous": previous, "next": next, "phase": "requested"}),
+            &serde_json::json!({"previous": previous, "next": next, "phase": "requested"}),
         );
         if next.runs_components() {
             audit?;
@@ -326,7 +326,7 @@ impl LeaderControl {
         Ok(next)
     }
 
-    fn audit(&self, actor: &str, action: &str, detail: serde_json::Value) -> Result<(), ApiError> {
+    fn audit(&self, actor: &str, action: &str, detail: &serde_json::Value) -> Result<(), ApiError> {
         let state = self
             .0
             .state
@@ -488,7 +488,7 @@ impl LeaderControl {
             self.audit(
                 actor,
                 "host.activate",
-                serde_json::json!({"next":next,"phase":"requested","no_change":true}),
+                &serde_json::json!({"next":next,"phase":"requested","no_change":true}),
             )?;
             return Ok(next);
         }
@@ -560,16 +560,13 @@ impl LeaderControl {
     }
 
     /// Notify after a terminal Telegram conflict; only the channel stops.
-    /// # Errors
-    /// Kept fallible for callers; no ownership persistence is performed.
-    pub async fn telegram_conflict(&self) -> Result<(), ApiError> {
+    pub fn telegram_conflict(&self) {
         self.emit_conflict("telegram_409", None);
-        Ok(())
     }
 }
 
-fn actor(peer: &Option<Extension<crate::PeerIdentity>>) -> String {
-    peer.as_ref().map_or_else(
+fn actor(peer: Option<&Extension<crate::PeerIdentity>>) -> String {
+    peer.map_or_else(
         || "local".into(),
         |p| {
             format!(
@@ -727,9 +724,9 @@ pub(crate) async fn invite(
         return Err(ApiError::bad_request("ttl_secs must be between 1 and 1800"));
     }
     s.leader().audit(
-        &actor(&peer),
+        &actor(peer.as_ref()),
         "host.invite",
-        serde_json::json!({"role":input.role,"ttl_secs":ttl,"phase":"requested"}),
+        &serde_json::json!({"role":input.role,"ttl_secs":ttl,"phase":"requested"}),
     )?;
     s.leader().admit_invite()?;
     let invite = net
@@ -767,9 +764,9 @@ pub(crate) async fn revoke(
         return Err(ApiError::forbidden("phones may revoke only phone devices"));
     }
     s.leader().audit(
-        &actor(&peer),
+        &actor(peer.as_ref()),
         "host.revoke",
-        serde_json::json!({"target":key.to_string(),"phase":"requested"}),
+        &serde_json::json!({"target":key.to_string(),"phase":"requested"}),
     )?;
     if !net.revoke(&key).map_err(ApiError::internal)? {
         return Err(ApiError::not_found("device"));
@@ -782,7 +779,7 @@ pub(crate) async fn standby(
     State(s): State<AppState>,
     peer: Option<Extension<crate::PeerIdentity>>,
 ) -> Result<Json<HostConfig>, ApiError> {
-    s.leader().standby_as(&actor(&peer)).await.map(Json)
+    s.leader().standby_as(&actor(peer.as_ref())).await.map(Json)
 }
 
 #[utoipa::path(post, operation_id = "host_activate", path = "/v1/host/activate", tag = "host", security(("bearer" = [])), request_body = ActivateInput, responses((status = 200, body = HostConfig), (status = 409, body = crate::error::ErrorBody)))]
@@ -792,7 +789,7 @@ pub(crate) async fn activate(
     ApiJson(input): ApiJson<ActivateInput>,
 ) -> Result<Json<HostConfig>, ApiError> {
     s.leader()
-        .activate_as(input.force, &actor(&peer))
+        .activate_as(input.force, &actor(peer.as_ref()))
         .await
         .map(Json)
 }
@@ -803,9 +800,9 @@ pub(crate) async fn update(
     peer: Option<Extension<crate::PeerIdentity>>,
 ) -> Result<StatusCode, ApiError> {
     s.leader().audit(
-        &actor(&peer),
+        &actor(peer.as_ref()),
         "host.update",
-        serde_json::json!({"phase":"requested","unit":UPDATE_UNIT}),
+        &serde_json::json!({"phase":"requested","unit":UPDATE_UNIT}),
     )?;
     if std::env::consts::OS != "linux" || s.leader().config().mode != HostMode::Host {
         return Err(ApiError::conflict(
