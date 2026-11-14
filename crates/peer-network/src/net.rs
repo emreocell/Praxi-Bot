@@ -545,9 +545,13 @@ impl PeerNetwork {
                     capabilities,
                     addr: Some(addr),
                     paired_at: now_secs(),
+                    pairing_generation: String::new(),
                 };
-                self.inner.store.upsert(device.clone())?;
-                Ok(device)
+                self.inner.store.upsert(device)?;
+                self.inner
+                    .store
+                    .get(&id)
+                    .ok_or_else(|| PeerError::UnknownDevice(key_to_string(&id)))
             }
         }
     }
@@ -570,6 +574,18 @@ impl PeerNetwork {
             }
         });
         self.inner.peer_leaders.lock().remove(peer);
+        if removed {
+            let _ = self.inner.events.send(PeerEvent {
+                peer: *peer,
+                leader: None,
+                event: Event {
+                    kind: "revoked".into(),
+                    ts_ms: now_secs() * 1000,
+                    data: Value::Null,
+                    leader: None,
+                },
+            });
+        }
         Ok(removed)
     }
 
@@ -796,6 +812,7 @@ fn decide_pairing(inner: &Inner, remote: PublicKey, req: PairRequest) -> PairRes
         capabilities: req.capabilities,
         addr: Some(addr),
         paired_at: now_secs(),
+        pairing_generation: String::new(),
     };
     if let Err(e) = inner.store.upsert(device) {
         return rejected(

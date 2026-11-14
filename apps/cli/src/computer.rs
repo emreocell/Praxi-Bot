@@ -8,15 +8,14 @@
 //!   paused with `waiting_for_pc`.
 
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use agent_core::{AgentLoop, ComputerProvider};
+use computer_target::{ComputerDesktop, ComputerNode};
 use desktop_api::DesktopBackend;
 use parking_lot::RwLock;
-use peer_network::{Device, PeerNetwork, RemoteDesktop, Role, key_from_string};
+use peer_network::{Device, PeerNetwork, RemoteDesktop, Role, key_from_string, key_to_string};
 use tokio::sync::broadcast::error::RecvError;
 
 const MONITOR_POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -26,6 +25,8 @@ struct CachedRemote {
     id: String,
     name: String,
     role: Role,
+    pairing_generation: String,
+    capabilities: Vec<String>,
     backend: Arc<dyn DesktopBackend>,
 }
 
@@ -38,7 +39,6 @@ pub struct CliComputerProvider {
     net: Option<PeerNetwork>,
     remotes: RwLock<HashMap<String, CachedRemote>>,
     active_pc_id: RwLock<Option<String>>,
-    refresh_gate: tokio::sync::Mutex<()>,
 }
 
 impl CliComputerProvider {
@@ -60,7 +60,6 @@ impl CliComputerProvider {
             net,
             remotes: RwLock::new(HashMap::new()),
             active_pc_id: RwLock::new(None),
-            refresh_gate: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -80,14 +79,13 @@ impl CliComputerProvider {
         let Some(net) = &self.net else {
             return;
         };
-        let _guard = self.refresh_gate.lock().await;
         let devices = net.devices();
         let mut online_candidates = Vec::new();
         for d in devices {
             let Ok(pk) = d.public_key() else {
                 continue;
             };
-            if is_pc_candidate(&d) && net.is_connected(&pk) {
+            if is_remote_desktop_candidate(&d) && net.is_connected(&pk) {
                 online_candidates.push((d, pk));
             }
         }
@@ -95,7 +93,11 @@ impl CliComputerProvider {
         // Drop any cached remotes whose peer disconnected or was unpaired.
         {
             let mut remotes = self.remotes.write();
-            remotes.retain(|id, _| online_candidates.iter().any(|(d, _)| &d.id == id));
+            remotes.retain(|id, cached| {
+                online_candidates
+                    .iter()
+                    .any(|(d, _)| &d.id == id && cached.matches(d))
+            });
         }
 
         // Connect on demand for newly connected PC peers.
@@ -103,7 +105,17 @@ impl CliComputerProvider {
             if self.remotes.read().contains_key(&device.id) {
                 continue;
             }
-            if let Ok(remote) = RemoteDesktop::connect(net, pk).await {
+            if let Ok(Ok(remote)) =
+                tokio::time::timeout(Duration::from_secs(2), RemoteDesktop::connect(net, pk)).await
+            {
+                // Pairing/capabilities may have changed while RPC was in flight.
+                if !net.device(pk).is_some_and(|d| {
+                    d.pairing_generation == device.pairing_generation
+                        && d.capabilities == device.capabilities
+                        && d.role == device.role
+                }) {
+                    continue;
+                }
                 let backend: Arc<dyn DesktopBackend> = Arc::new(remote);
                 self.remotes.write().insert(
                     device.id.clone(),
@@ -111,6 +123,8 @@ impl CliComputerProvider {
                         id: device.id.clone(),
                         name: device.name.clone(),
                         role: device.role,
+                        pairing_generation: device.pairing_generation.clone(),
+                        capabilities: device.capabilities.clone(),
                         backend,
                     },
                 );
@@ -126,7 +140,7 @@ impl CliComputerProvider {
             .active_pc_id
             .read()
             .as_ref()
-            .is_some_and(|id| remotes.contains_key(id));
+            .is_some_and(|id| remotes.get(id).is_some_and(|r| r.role == Role::Desktop));
         if current_still_valid {
             return;
         }
@@ -134,19 +148,32 @@ impl CliComputerProvider {
         // deterministically by id.
         let best = remotes
             .values()
-            .min_by_key(|r| (u8::from(r.role != Role::Desktop), r.id.clone()))
+            .filter(|r| r.role == Role::Desktop)
+            .min_by_key(|r| r.id.clone())
             .map(|r| r.id.clone());
         *self.active_pc_id.write() = best;
     }
 
-    fn peer_connected(&self, id: &str) -> bool {
-        let Some(net) = &self.net else {
-            return true;
-        };
-        let Ok(pk) = key_from_string(id) else {
-            return false;
-        };
-        net.is_connected(&pk)
+    fn cached_target(&self, id: &str) -> Option<ComputerDesktop> {
+        let cached = self.remotes.read().get(id).cloned()?;
+        if let Some(net) = &self.net {
+            let pk = key_from_string(id).ok()?;
+            if !net.is_connected(&pk) || !net.device(&pk).is_some_and(|d| cached.matches(&d)) {
+                return None;
+            }
+        }
+        Some(ComputerDesktop {
+            node: ComputerNode {
+                id: cached.id,
+                name: cached.name,
+            },
+            backend: cached.backend,
+        })
+    }
+
+    fn invalidate(&self, id: &str) {
+        self.remotes.write().remove(id);
+        self.select_active_pc();
     }
 }
 
@@ -155,13 +182,27 @@ impl ComputerProvider for CliComputerProvider {
         self.local_desktop.clone()
     }
 
-    fn pc(&self) -> Option<Arc<dyn DesktopBackend>> {
-        let active = self.active_pc_id.read().clone()?;
-        let cached = self.remotes.read().get(&active).cloned()?;
-        if !self.peer_connected(&cached.id) {
-            return None;
+    fn local_node(&self) -> ComputerNode {
+        ComputerNode {
+            id: "local".into(),
+            name: std::env::var("COMPUTERNAME")
+                .or_else(|_| std::env::var("HOSTNAME"))
+                .unwrap_or_else(|_| "Local computer".into()),
         }
-        Some(cached.backend)
+    }
+
+    fn pc(&self) -> Option<Arc<dyn DesktopBackend>> {
+        self.pc_target().map(|d| d.backend)
+    }
+
+    fn pc_target(&self) -> Option<ComputerDesktop> {
+        let active = self.active_pc_id.read().clone()?;
+        let target = self.cached_target(&active)?;
+        (self.remotes.read().get(&active)?.role == Role::Desktop).then_some(target)
+    }
+
+    fn pc_network_enabled(&self) -> bool {
+        self.net.is_some()
     }
 
     fn is_host(&self) -> bool {
@@ -177,38 +218,30 @@ impl ComputerProvider for CliComputerProvider {
     }
 
     fn node(&self, id: &str) -> Option<Arc<dyn DesktopBackend>> {
-        let wanted_key = key_from_string(id).ok();
-        let cached = {
-            let remotes = self.remotes.read();
-            if let Some(exact) = remotes.get(id) {
-                Some(exact.clone())
-            } else {
-                remotes
-                    .values()
-                    .find(|r| {
-                        r.id.eq_ignore_ascii_case(id)
-                            || r.name == id
-                            || wanted_key
-                                .as_ref()
-                                .is_some_and(|k| key_from_string(&r.id).ok().as_ref() == Some(k))
-                    })
-                    .cloned()
-            }
-        }?;
-        if !self.peer_connected(&cached.id) {
-            return None;
-        }
-        Some(cached.backend)
+        self.node_target(id).map(|d| d.backend)
     }
 
-    fn prepare(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        Box::pin(async {
-            self.refresh_all().await;
-        })
+    fn node_target(&self, id: &str) -> Option<ComputerDesktop> {
+        // Exact canonical key only. Display names are untrusted and non-unique.
+        let pk = key_from_string(id).ok()?;
+        if key_to_string(&pk) != id {
+            return None;
+        }
+        self.cached_target(id)
     }
 }
 
-fn is_pc_candidate(d: &Device) -> bool {
+impl CachedRemote {
+    fn matches(&self, device: &Device) -> bool {
+        self.id == device.id
+            && self.pairing_generation == device.pairing_generation
+            && self.role == device.role
+            && self.capabilities == device.capabilities
+            && self.name == device.name
+    }
+}
+
+fn is_remote_desktop_candidate(d: &Device) -> bool {
     let has_desktop_cap = d.capabilities.iter().any(|c| c == "desktop");
     match d.role {
         // Companion desktop app pairs with Role::Desktop; allow empty legacy caps too.
@@ -240,7 +273,16 @@ pub fn spawn_peer_monitor(
             tokio::select! {
                 ev = rx.recv() => {
                     match ev {
-                        Ok(_) | Err(RecvError::Lagged(_)) => {
+                        Ok(event) => {
+                            if matches!(event.event.kind.as_str(), "paired" | "revoked") {
+                                provider.invalidate(&key_to_string(&event.peer));
+                            }
+                            if weak_state.upgrade().is_none() { break; }
+                            provider.refresh_all().await;
+                            let _ = agent.resume_waiting_for_pc().await;
+                        }
+                        Err(RecvError::Lagged(_)) => {
+                            provider.remotes.write().clear();
                             if weak_state.upgrade().is_none() {
                                 break;
                             }
@@ -421,21 +463,37 @@ mod tests {
             capabilities: caps.into_iter().map(str::to_owned).collect(),
             addr: None,
             paired_at: 1,
+            pairing_generation: "test".into(),
         };
 
-        assert!(is_pc_candidate(&make_device(Role::Desktop, vec![])));
-        assert!(is_pc_candidate(&make_device(
+        assert!(is_remote_desktop_candidate(&make_device(
+            Role::Desktop,
+            vec![]
+        )));
+        assert!(is_remote_desktop_candidate(&make_device(
             Role::Desktop,
             vec!["desktop"]
         )));
-        assert!(is_pc_candidate(&make_device(
+        assert!(is_remote_desktop_candidate(&make_device(
             Role::Node,
             vec!["desktop", "browser"]
         )));
-        assert!(!is_pc_candidate(&make_device(Role::Node, vec![])));
-        assert!(!is_pc_candidate(&make_device(Role::Node, vec!["browser"])));
-        assert!(!is_pc_candidate(&make_device(Role::Phone, vec!["desktop"])));
-        assert!(!is_pc_candidate(&make_device(Role::Host, vec!["desktop"])));
+        assert!(!is_remote_desktop_candidate(&make_device(
+            Role::Node,
+            vec![]
+        )));
+        assert!(!is_remote_desktop_candidate(&make_device(
+            Role::Node,
+            vec!["browser"]
+        )));
+        assert!(!is_remote_desktop_candidate(&make_device(
+            Role::Phone,
+            vec!["desktop"]
+        )));
+        assert!(!is_remote_desktop_candidate(&make_device(
+            Role::Host,
+            vec!["desktop"]
+        )));
 
         let vps_no_pc = CliComputerProvider::new(true, None, None).with_capabilities(false, true);
         let auto_res = resolve(&ComputerTarget::Auto, &vps_no_pc);
@@ -444,7 +502,14 @@ mod tests {
         assert!(!auto_res.wait_for_pc);
 
         let pc_res = resolve(&ComputerTarget::Pc, &vps_no_pc);
-        assert!(pc_res.wait_for_pc);
+        assert!(!pc_res.wait_for_pc);
+        assert!(
+            pc_res
+                .unavailable_reason
+                .as_deref()
+                .unwrap()
+                .contains("networking is disabled")
+        );
 
         let local_app = CliComputerProvider::new(false, Some(FakePcDesktop::new("local")), None)
             .with_capabilities(true, false);
@@ -452,6 +517,63 @@ mod tests {
         assert_eq!(pc_local.label, ComputerLabel::Pc);
         assert!(pc_local.desktop.is_some());
         assert!(!pc_local.wait_for_pc);
+    }
+
+    fn cached(id: &str, name: &str, role: Role) -> CachedRemote {
+        CachedRemote {
+            id: id.into(),
+            name: name.into(),
+            role,
+            pairing_generation: "pair-1".into(),
+            capabilities: vec!["desktop".into()],
+            backend: FakePcDesktop::new("cached"),
+        }
+    }
+
+    #[test]
+    fn duplicate_names_never_select_nodes_and_pc_excludes_server_nodes() {
+        let provider = CliComputerProvider::new(true, None, None);
+        let a = "00".repeat(32);
+        let b = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a".to_owned();
+        key_from_string(&a).unwrap();
+        key_from_string(&b).unwrap();
+        provider
+            .remotes
+            .write()
+            .insert(a.clone(), cached(&a, "same-name", Role::Node));
+        provider
+            .remotes
+            .write()
+            .insert(b.clone(), cached(&b, "same-name", Role::Desktop));
+        provider.select_active_pc();
+        assert_eq!(provider.pc_target().unwrap().node.id, b);
+        assert!(provider.node("same-name").is_none());
+        assert!(provider.node(&b.to_uppercase()).is_none());
+        assert_eq!(provider.node_target(&a).unwrap().node.id, a);
+        assert_eq!(provider.node_target(&b).unwrap().node.id, b);
+        provider.remotes.write().remove(&b);
+        provider.select_active_pc();
+        assert!(provider.pc().is_none(), "server node is not a PC");
+    }
+
+    #[test]
+    fn cached_remote_rejects_new_pairing_and_capability_change() {
+        let cached = cached("key", "PC", Role::Desktop);
+        let mut device = Device {
+            id: "key".into(),
+            name: "PC".into(),
+            role: Role::Desktop,
+            capabilities: vec!["desktop".into()],
+            addr: None,
+            paired_at: 1,
+            pairing_generation: "pair-1".into(),
+        };
+        assert!(cached.matches(&device));
+        device.pairing_generation = "pair-2".into();
+        assert!(!cached.matches(&device));
+        device.pairing_generation = "pair-1".into();
+        device.capabilities.push("browser".into());
+        assert!(!cached.matches(&device));
     }
 
     fn setup_pc_host_harness(
@@ -555,13 +677,13 @@ mod tests {
     ) -> (Arc<FakePcDesktop>, PeerNetwork, tokio::task::JoinHandle<()>) {
         let backend = FakePcDesktop::new(label);
         let pc_net = PeerNetwork::start(
-            loopback_peer_cfg(pc_peer_dir, Role::Node, "my-pc", vec!["desktop"]),
+            loopback_peer_cfg(pc_peer_dir, Role::Desktop, "my-pc", vec!["desktop"]),
             Some(Arc::new(DesktopRpcHandler::new(backend.clone()))),
         )
         .await
         .unwrap();
         if pair {
-            let invite = host_net.create_invite(Role::Node).await;
+            let invite = host_net.create_invite(Role::Desktop).await;
             pc_net
                 .pair(&PairTicket::parse(&invite.ticket).unwrap())
                 .await
@@ -659,5 +781,55 @@ mod tests {
         drop(state);
         pc_net2.shutdown().await;
         host_net.shutdown().await;
+    }
+    #[tokio::test]
+    async fn two_pcs_with_duplicate_names_keep_keys_and_selection_distinct() {
+        let dir = tempfile::tempdir().unwrap();
+        let net = PeerNetwork::start(
+            loopback_peer_cfg(&dir.path().join("host"), Role::Host, "host", vec![]),
+            None,
+        )
+        .await
+        .unwrap();
+        let provider =
+            CliComputerProvider::new(true, None, Some(net.clone())).with_capabilities(false, true);
+        let (_, a, ha) = start_pc_peer(&net, &dir.path().join("a"), "A", true).await;
+        let a_id = key_to_string(&a.id());
+        for _ in 0..200 {
+            provider.refresh_all().await;
+            if provider.pc().is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let original = resolve(&ComputerTarget::Pc, &provider);
+        assert_eq!(original.node.unwrap().id, a_id);
+        assert!(!original.browser, "remote PC cannot use the host browser");
+        let (_, b, hb) = start_pc_peer(&net, &dir.path().join("b"), "B", true).await;
+        let b_id = key_to_string(&b.id());
+        for _ in 0..200 {
+            provider.refresh_all().await;
+            if provider.node_target(&b_id).is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert_eq!(provider.pc_target().unwrap().node.id, a_id);
+        assert_eq!(provider.node_target(&b_id).unwrap().node.id, b_id);
+        assert!(provider.node("my-pc").is_none());
+        ha.abort();
+        a.shutdown().await;
+        for _ in 0..200 {
+            provider.refresh_all().await;
+            if provider.pc_target().is_some_and(|d| d.node.id == b_id) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(provider.node_target(&a_id).is_none());
+        assert_eq!(provider.pc_target().unwrap().node.id, b_id);
+        hb.abort();
+        b.shutdown().await;
+        net.shutdown().await;
     }
 }
