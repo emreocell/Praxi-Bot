@@ -916,7 +916,7 @@ async fn failing_closing_call_still_fails_the_run() {
     assert!(!lp.stopped_by_guard(run).unwrap());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn tool_timeout_becomes_an_error_result() {
     let env = setup();
     let mut slow = tool("t.slow", Effect::Read, "late");
@@ -1275,7 +1275,7 @@ async fn non_retryable_errors_are_not_retried() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn model_call_timeout_covers_a_hanging_provider() {
     let env = setup();
     let fake = Fake::new(vec![Reply::Hang, text("never")]);
@@ -1459,7 +1459,7 @@ async fn schedule_runs_never_skip_the_money_floor_even_with_a_full_policy_and_gr
     lp.cancel(run2).unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn scheduled_run_pauses_when_nobody_answers_the_approval() {
     let env = setup();
     let w = Arc::new(tool("t.write", Effect::Write, "written"));
@@ -1493,7 +1493,7 @@ async fn scheduled_run_pauses_when_nobody_answers_the_approval() {
     assert!(lp.sh.active.lock().get(&env.chat).is_none());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn human_runs_wait_for_approvals_beyond_the_schedule_timeout() {
     let env = setup();
     let w = Arc::new(tool("t.write", Effect::Write, "written"));
@@ -4302,7 +4302,7 @@ async fn approving_a_shell_call_after_shell_is_denied_does_not_run_or_grant() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn retry_after_beyond_budget_is_one_request_and_surfaces_rate_limited() {
     let env = setup();
     let fake = Fake::new(vec![
@@ -4332,7 +4332,7 @@ async fn retry_after_beyond_budget_is_one_request_and_surfaces_rate_limited() {
     assert!(err.contains("rate limited"), "{err}");
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn retry_after_within_budget_waits_then_retries_once() {
     let env = setup();
     let fake = Fake::new(vec![
@@ -4342,12 +4342,12 @@ async fn retry_after_within_budget_waits_then_retries_once() {
     let mut config = cfg(Policy::full());
     config.model_retry.max_attempts = 2;
     // The outer backoff is much longer than Retry-After. Honouring the header
-    // finishes well inside 3s; using the backoff does not.
+    // finishes well inside 3s of virtual time; using the backoff does not.
     config.model_retry.initial_backoff_ms = 5_000;
     config.model_retry.multiplier = 1;
     config.model_retry.max_backoff_ms = 5_000;
     let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
-    let started = std::time::Instant::now();
+    let started = tokio::time::Instant::now();
     let run = lp.run_turn(env.chat, "hi").unwrap();
     let state = tokio::time::timeout(Duration::from_secs(3), lp.wait(run))
         .await

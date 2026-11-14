@@ -265,7 +265,7 @@ mod tests {
             Ok(())
         }
     }
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn human_pause_does_not_consume_tool_budget_and_remains_cancellable() {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let waiting = Arc::new(std::sync::atomic::AtomicBool::new(false));
