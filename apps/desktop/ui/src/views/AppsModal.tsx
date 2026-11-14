@@ -1,4 +1,4 @@
-import { Cable, Check, Plus, Search, Server, Users, X } from "lucide-react";
+import { Check, ChevronDown, Search, Server, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, Button } from "ui";
@@ -19,7 +19,6 @@ import {
   botScope,
   botSelection,
   saveServerScope,
-  catalogCategories,
   connectCatalogEntry,
   customServerConfig,
   filterCatalog,
@@ -36,14 +35,24 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-function ConnectedRow({
+/** Most bot faces shown next to an app; the rest collapse into "+n". */
+const MAX_FACES = 4;
+
+/**
+ * A connected app: bare logo, name, the bots that use it, state.  "Manage"
+ * (on hover / focus, always while open or broken) opens bot access,
+ * reconnect and disconnect below the row.
+ */
+function ConnectedCell({
   server,
+  description,
   busy,
   onReconnect,
   onDisconnect,
   onSaveBots
 }: {
   server: McpServer;
+  description?: string;
   busy: boolean;
   onReconnect: () => void;
   onDisconnect: () => void;
@@ -52,7 +61,7 @@ function ConnectedRow({
   const { t } = useTranslation();
   const { bots } = useDaemon();
   const [confirm, setConfirm] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const [open, setOpen] = useState(false);
   const [scope, setScope] = useState<BotScope>(() => botScope(server));
   // The scope the editor opened with: the saved diff is against this, not
   // against whatever the live server says at click time.
@@ -63,106 +72,111 @@ function ConnectedRow({
     server.status === "error" ||
     server.status === "disconnected" ||
     server.status === "quarantined";
+  const users = bots.filter((b) => access.all || server.bots?.includes(b.id));
+  const usedBy = access.all
+    ? t("apps.botsAll")
+    : access.names.length === 0
+      ? t("apps.botsNone")
+      : t("apps.botsSome", { names: access.names.join(", ") });
+  const known = brandIcon(server.name);
+  const panelId = `mcp-manage-${server.name}`;
   return (
-    <li className={styles.serverRow} data-testid={`mcp-server-${server.name}`}>
-      <BrandIcon name={server.name} />
-      <div className={styles.serverMain}>
-        <div className={styles.serverTitle}>
-          <span className={styles.serverName}>{brandIcon(server.name).known ? brandIcon(server.name).name : server.name}</span>
-          <span className={`${styles.status} ${styles[`tone_${tone}`]}`}>
-            <span className={styles.statusDot} aria-hidden="true" />
-            {t(`apps.status.${server.status}`)}
-          </span>
-        </div>
-        <div className={styles.serverMeta}>
-          <span>{t("apps.toolCount", { count: server.tool_count })}</span>
-          <span aria-hidden="true">·</span>
-          <span className={styles.usedBy}>
-            {bots
-              .filter((b) => access.all || server.bots?.includes(b.id))
-              .map((b) => <BotAvatar key={b.id} bot={botView(b)} size="xs" decorative />)}
-            <span className={styles.usedByLabel}>
-              {access.all
-                ? t("apps.botsAll")
-                : access.names.length === 0
-                  ? t("apps.botsNone")
-                  : t("apps.botsSome", { names: access.names.join(", ") })}
+    <li
+      className={`${styles.cell} ${open ? styles.cellOpen : ""}`}
+      data-testid={`mcp-server-${server.name}`}
+    >
+      <div className={styles.cellRow}>
+        <BrandIcon name={server.name} bare size={26} />
+        <div className={styles.cellText}>
+          <b className={styles.cellName}>
+            <span className={styles.cellTitle}>{known.known ? known.name : server.name}</span>
+            <span className={styles.faces} title={usedBy}>
+              {users.slice(0, MAX_FACES).map((b) => (
+                <BotAvatar key={b.id} bot={botView(b)} size="xs" decorative />
+              ))}
+              {users.length > MAX_FACES ? (
+                <span className={styles.more}>+{users.length - MAX_FACES}</span>
+              ) : null}
             </span>
-          </span>
-          <span aria-hidden="true">·</span>
-          <span>{server.transport}</span>
+          </b>
+          <small className={styles.cellSub}>
+            {description ?? t("apps.toolCount", { count: server.tool_count })}
+            {" · "}
+            {usedBy}
+          </small>
         </div>
-        {server.error ? (
-          <p className={`${formStyles.error} ${styles.connectionError}`} title={server.error}>{server.error}</p>
-        ) : null}
-      </div>
-      <div className={styles.serverActions}>
-        <Button
-          size="sm"
-          variant="ghost"
-          active={editing}
-          disabled={busy}
-          data-testid={`mcp-access-${server.name}`}
+        <span className={`${styles.state} ${styles[`tone_${tone}`]}`}>
+          {tone === "ok" ? <Check aria-hidden="true" /> : <span className={styles.dot} aria-hidden="true" />}
+          {t(`apps.status.${server.status}`)}
+        </span>
+        <button
+          type="button"
+          className={`${styles.manage} ${needsReconnect ? styles.manageShown : ""}`}
+          aria-expanded={open}
+          aria-controls={panelId}
+          data-testid={`mcp-manage-${server.name}`}
           onClick={() => {
-            setBaseline(botScope(server));
-            setScope(botSelection(botScope(server), bots));
-            setEditing((e) => !e);
+            if (!open) {
+              setBaseline(botScope(server));
+              setScope(botSelection(botScope(server), bots));
+            }
+            setConfirm(false);
+            setOpen((o) => !o);
           }}
         >
-          <Users />{t("apps.access.edit")}
-        </Button>
-        {needsReconnect ? (
-          <Button size="sm" variant="secondary" disabled={busy} onClick={onReconnect}>
-            {t("apps.reconnect")}
-          </Button>
-        ) : null}
-        {confirm ? (
-          <>
-            <Button
-              size="sm"
-              variant="danger"
-              disabled={busy}
-              onClick={() => {
-                setConfirm(false);
-                onDisconnect();
-              }}
-            >
-              {t("apps.disconnectConfirm")}
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setConfirm(false)}>
-              {t("common.cancel")}
-            </Button>
-          </>
-        ) : (
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={busy}
-            onClick={() => setConfirm(true)}
-          >
-            <Cable />{t("apps.disconnect")}
-          </Button>
-        )}
+          {t("apps.manage")}
+          <ChevronDown aria-hidden="true" />
+        </button>
       </div>
-      {editing ? (
-        <div className={styles.accessPanel}>
+      {server.error ? (
+        <p className={styles.cellError} title={server.error}>{server.error}</p>
+      ) : null}
+      {open ? (
+        <div className={styles.panel} id={panelId}>
+          <span className={styles.panelLabel}>{t("apps.access.label")}</span>
           <BotAccessPicker scope={scope} bots={bots} onChange={setScope} />
-          <div className={styles.formActions}>
+          <div className={styles.actions}>
             <Button
               size="sm"
               variant="primary"
               disabled={busy}
               data-testid={`mcp-access-save-${server.name}`}
               onClick={() => {
-                setEditing(false);
+                setOpen(false);
                 onSaveBots(baseline, scope);
               }}
             >
               {t("apps.access.save")}
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
-              {t("common.cancel")}
-            </Button>
+            {needsReconnect ? (
+              <Button size="sm" variant="secondary" disabled={busy} onClick={onReconnect}>
+                {t("apps.reconnect")}
+              </Button>
+            ) : null}
+            <span className={styles.grow} />
+            {confirm ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirm(false);
+                    setOpen(false);
+                    onDisconnect();
+                  }}
+                >
+                  {t("apps.disconnectConfirm")}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setConfirm(false)}>
+                  {t("common.cancel")}
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setConfirm(true)}>
+                {t("apps.disconnect")}
+              </Button>
+            )}
           </div>
         </div>
       ) : null}
@@ -170,13 +184,12 @@ function ConnectedRow({
   );
 }
 
-function CatalogCard({
+/** A catalog app: one click connects; apps that need a key ask for it right under the row. */
+function DiscoverCell({
   entry,
-  connected,
   onConnect
 }: {
   entry: McpCatalogEntry;
-  connected: boolean;
   onConnect: (values: Record<string, string>) => Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -199,40 +212,37 @@ function CatalogCard({
   const complete = secrets.every((s) => (values[s.name] ?? "").trim() !== "");
 
   return (
-    <li className={styles.card} data-testid={`mcp-catalog-${entry.id}`}>
-      <div className={styles.cardHead}>
-        <BrandIcon name={entry.name} />
-        <div className={styles.cardTitle}>
-          <span className={styles.serverName}>{entry.name}</span>
-          <span className={styles.category}>
-            {t(`apps.categories.${entry.category}`, {
-              defaultValue: entry.category
-            })}
-          </span>
+    <li
+      className={`${styles.cell} ${asking ? styles.cellOpen : ""}`}
+      data-testid={`mcp-catalog-${entry.id}`}
+    >
+      <div className={styles.cellRow}>
+        <BrandIcon name={entry.name} bare size={26} />
+        <div className={styles.cellText}>
+          <b className={styles.cellName}>
+            <span className={styles.cellTitle}>{entry.name}</span>
+          </b>
+          <small className={styles.cellSub} title={entry.description}>{entry.description}</small>
         </div>
-        {connected ? (
-          <span className={styles.connectedTag}><Check />{t("apps.connected")}</span>
-        ) : (
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={busy || asking}
-            onClick={() => {
-              if (secrets.length === 0) {
-                void submit({});
-              } else {
-                setAsking(true);
-              }
-            }}
-          >
-            <Plus />{t("apps.connect")}
-          </Button>
-        )}
+        <button
+          type="button"
+          className={styles.connect}
+          disabled={busy || asking}
+          aria-label={t("apps.connectApp", { name: entry.name })}
+          onClick={() => {
+            if (secrets.length === 0) {
+              void submit({});
+            } else {
+              setAsking(true);
+            }
+          }}
+        >
+          {t("apps.connect")}
+        </button>
       </div>
-      <p className={styles.cardDesc}>{entry.description}</p>
-      {asking && !connected ? (
+      {asking ? (
         <form
-          className={styles.secretForm}
+          className={styles.panel}
           onSubmit={(e) => {
             e.preventDefault();
             if (complete) {
@@ -268,7 +278,7 @@ function CatalogCard({
             </div>
           ))}
           <p className={formStyles.hint}>{t("apps.secretHint")}</p>
-          <div className={styles.formActions}>
+          <div className={styles.actions}>
             <Button type="submit" size="sm" variant="primary" disabled={!complete || busy}>
               {t("apps.connectNow")}
             </Button>
@@ -415,8 +425,8 @@ function CustomServerForm({
 }
 
 /**
- * "Uygulamalar": connected MCP servers and a one-click catalog.  Advanced users
- * add a custom stdio / http server from the "MCP servers" button.
+ * "Uygulamalar": search, Connected and Discover.  Apps connect in one click;
+ * "Your own MCP server" adds a custom stdio / http server.
  */
 export function AppsModal({
   open,
@@ -430,24 +440,25 @@ export function AppsModal({
   const { client } = useDaemon();
   const { servers, catalog, loading, error, reload } = useMcp(open);
   const [query, setQuery] = useState("");
-  const [category, setCategory] = useState(ALL_CATEGORIES);
   const [advanced, setAdvanced] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
       setQuery("");
-      setCategory(ALL_CATEGORIES);
       setAdvanced(false);
     }
   }, [open]);
 
-  const categories = useMemo(() => catalogCategories(catalog), [catalog]);
   const shownServers = useMemo(() => filterServers(servers, query), [servers, query]);
   const shownCatalog = useMemo(
-    () => filterCatalog(catalog, query, category).sort((a,b) => Number(isConnected(a, servers)) - Number(isConnected(b, servers))),
-    [catalog, query, category, servers]
+    () =>
+      filterCatalog(catalog, query, ALL_CATEGORIES).filter(
+        (entry) => !isConnected(entry, servers)
+      ),
+    [catalog, query, servers]
   );
+  const describe = (name: string) => catalog.find((c) => c.id === name)?.description;
 
   const run = async (key: string, fn: () => Promise<void>) => {
     setBusy(key);
@@ -478,63 +489,39 @@ export function AppsModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} label={t("apps.title")}>
+    <Modal open={open} onClose={onClose} label={t("apps.title")} size="apps">
       <div className={styles.root}>
-        <header className={styles.header}>
-          <div className={styles.headTop}>
-            <div>
-              <h2 className={styles.title}>{t("apps.title")}</h2>
-              <p className={styles.subtitle}>{t("apps.subtitle")}</p>
-            </div>
-            <div className={styles.headActions}>
-              <Button
-                size="sm"
-                variant="secondary"
-                active={advanced}
-                data-testid="apps-advanced"
-                onClick={() => setAdvanced((a) => !a)}
-              >
-                <Server />{t("apps.mcpServers")}
-              </Button>
-              <button
-                type="button"
-                className={styles.close}
-                title={t("common.close")}
-                aria-label={t("common.close")}
-                onClick={onClose}
-              >
-                <X />
-              </button>
-            </div>
+        <header className={styles.top}>
+          <div className={styles.find}>
+            <Search aria-hidden="true" />
+            <input
+              type="search"
+              data-autofocus
+              value={query}
+              placeholder={t("apps.search")}
+              aria-label={t("apps.search")}
+              onChange={(e) => setQuery(e.target.value)}
+            />
           </div>
-          {advanced ? null : (
-            <>
-              <div className={styles.searchWrap}><Search /><input
-                className={styles.search}
-                type="search"
-                data-autofocus
-                value={query}
-                placeholder={t("apps.search")}
-                aria-label={t("apps.search")}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-              </div><div className={styles.chips} role="group" aria-label={t("apps.categoriesLabel")}>
-                {[ALL_CATEGORIES, ...categories].map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    aria-pressed={category === c}
-                    className={[styles.chip, category === c ? styles.chipActive : ""]
-                      .filter(Boolean)
-                      .join(" ")}
-                    onClick={() => setCategory(c)}
-                  >
-                    {t(`apps.categories.${c}`, { defaultValue: c })}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
+          <button
+            type="button"
+            className={`${styles.pill} ${advanced ? styles.pillOn : ""}`}
+            aria-pressed={advanced}
+            data-testid="apps-advanced"
+            onClick={() => setAdvanced((a) => !a)}
+          >
+            <Server aria-hidden="true" />
+            {t("apps.mcpServers")}
+          </button>
+          <button
+            type="button"
+            className={styles.close}
+            title={t("common.close")}
+            aria-label={t("common.close")}
+            onClick={onClose}
+          >
+            <X />
+          </button>
         </header>
 
         <div className={styles.body}>
@@ -566,13 +553,14 @@ export function AppsModal({
           ) : (
             <>
               {shownServers.length > 0 ? (
-                <section className={styles.section}>
-                  <h3 className={styles.sectionLabel}>{t("apps.connectedSection")}</h3>
-                  <ul className={styles.serverList}>
+                <section className={styles.section} aria-labelledby="apps-connected-h">
+                  <h3 className={styles.sectionLabel} id="apps-connected-h">{t("apps.connectedSection")}</h3>
+                  <ul className={styles.grid}>
                     {shownServers.map((s) => (
-                      <ConnectedRow
+                      <ConnectedCell
                         key={s.name}
                         server={s}
+                        description={describe(s.name)}
                         busy={busy === s.name}
                         onReconnect={() =>
                           void run(s.name, async () => {
@@ -609,19 +597,18 @@ export function AppsModal({
                 </section>
               ) : null}
 
-              <section className={styles.section}>
-                <h3 className={styles.sectionLabel}>{t("apps.catalogSection")}</h3>
+              <section className={styles.section} aria-labelledby="apps-discover-h">
+                <h3 className={styles.sectionLabel} id="apps-discover-h">{t("apps.catalogSection")}</h3>
                 {shownCatalog.length === 0 ? (
-                  <p className={styles.empty}><Search />
+                  <p className={styles.empty}><Search aria-hidden="true" />
                     {loading ? t("apps.loading") : t("apps.noResults")}
                   </p>
                 ) : (
                   <ul className={styles.grid}>
                     {shownCatalog.map((entry) => (
-                      <CatalogCard
+                      <DiscoverCell
                         key={entry.id}
                         entry={entry}
-                        connected={isConnected(entry, servers)}
                         onConnect={(values) => connect(entry, values)}
                       />
                     ))}

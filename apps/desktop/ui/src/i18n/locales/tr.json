@@ -747,9 +747,8 @@
   },
   "apps": {
     "title": "Uygulamalar",
-    "subtitle": "Uygulamalarını bir kez bağla. Hangi botların kullanacağını sen seç.",
-    "search": "Uygulama ve sunucu ara",
-    "mcpServers": "Özel MCP sunucusu",
+    "search": "Uygulamalarda ara",
+    "mcpServers": "Kendi MCP sunucun",
     "categoriesLabel": "Kategoriler",
     "categories": {
       "all": "Tümü",
@@ -797,8 +796,8 @@
     "connectedToast": "{{name}} bağlandı",
     "disconnectedToast": "{{name}} bağlantısı kesildi",
     "missingSecret": "Gerekli tüm gizli anahtarları girin.",
-    "connectedSection": "Bağlı uygulamalar",
-    "catalogSection": "Katalog",
+    "connectedSection": "Bağlı",
+    "catalogSection": "Keşfet",
     "loading": "Katalog yükleniyor…",
     "noResults": "Eşleşen sunucu yok.",
     "custom": {
@@ -815,7 +814,11 @@
       "url": "Sunucu URL’si",
       "errUrl": "Geçerli bir HTTP URL’si girin.",
       "add": "Sunucu ekle"
-    }
+    },
+    "manage": "Yönet",
+    "close": "Kapat",
+    "usedBy": "Kullananlar",
+    "connectApp": "{{name}} uygulamasını bağla"
   },
   "help": {
     "title": "Klavye kısayolları",
@@ -869,36 +872,45 @@
     "ai": {
       "defaultModel": {
         "title": "Varsayılan model",
-        "description": "Botta model seçili değilse kullanılır."
+        "description": "Botta model seçili değilse kullanılır.",
+        "heading": "Varsayılan"
       },
       "keys": {
-        "title": "Sağlayıcı API anahtarları",
-        "description": "Yalnızca yazılır; işletim sistemi anahtarlığında saklanır.",
-        "none": "Henüz sağlayıcı yüklenmedi.",
-        "inputLabel": "{{provider}} için API anahtarı",
-        "replace": "Anahtarı değiştir",
-        "placeholder": "API anahtarını yapıştır",
-        "saved": "{{provider}} anahtarı kaydedildi"
+        "title": "API anahtarıyla ekle",
+        "description": "Anahtarlar sistem anahtarlığında saklanır ve bir daha gösterilmez.",
+        "placeholder": "Anahtarı yapıştır. Sağlayıcıyı biz tanırız.",
+        "saved": "{{provider}} anahtarı kaydedildi",
+        "pasteLabel": "API anahtarı",
+        "addTo": "{{provider}} için ekle",
+        "add": "Ekle",
+        "providers": "Sağlayıcı",
+        "stored": "Anahtar kayıtlı",
+        "compatible": "OpenAI uyumlu sunucu",
+        "unknown": "Bu anahtarın hangi sağlayıcıya ait olduğunu anlayamadık. Aşağıdan birini seç."
       },
       "detected": {
-        "title": "Algılanan hesaplar",
-        "description": "PATH üzerinde bulunan kodlama araçları. Praxi oturum dosyalarını okumadan CLI programını doğrudan çalıştırır.",
+        "title": "Bu bilgisayarda bulunanlar",
+        "description": "Kurulu yapay zekâ araçlarını kendimiz buluruz. Açtıkların model listesinde görünür; anahtar girmen gerekmez.",
         "termsNotice": "Sağlayıcınızın abonelik koşulları geçerlidir; etkinleştirmeden önce otomatik kullanıma izin verildiğini doğrulayın.",
-        "refresh": "Yenile",
+        "refresh": "Yeniden tara",
         "retry": "Yeniden dene",
-        "enable": "Etkinleştir",
-        "enabled": "Etkin",
         "enabledToast": "{{name}} etkinleştirildi.",
         "notInstalled": "Kurulu değil",
-        "signInHint": "Oturum açmak için terminalde {{command}} çalıştırın",
         "codexUnconfinable": "Algılandı, ancak bu sürümde güvenli biçimde çalıştırılamıyor.",
         "notRunnable": "Algılandı, bu sürümde çalıştırılamaz",
         "detectError": "Kurulu kodlama araçları denetlenemedi.",
         "offline": "Algılanan kodlama araçlarını görmek için daemon'a bağlanın.",
         "authSignedIn": "Oturum açık",
         "authSignedOut": "Oturum kapalı",
-        "authUnknown": "Bilinmiyor"
-      }
+        "authUnknown": "Bilinmiyor",
+        "ready": "hazır",
+        "foundSignInNeeded": "bulundu, giriş gerekli",
+        "signIn": "Giriş yap",
+        "signInIn": "Terminalde çalıştır:",
+        "install": "Kur",
+        "toggle": "{{name}} kullan"
+      },
+      "advanced": "Gelişmiş sağlayıcı ayarları"
     },
     "computer": {
       "soon": "Yakında",
@@ -1215,5 +1227,10 @@
         "other": "Diğer"
       }
     }
+  },
+  "quota": {
+    "title": "Kalan kota",
+    "remaining": "{{label}}: %{{pct}} kaldı",
+    "resets": "Yenilenme: {{when}}"
   }
 }
