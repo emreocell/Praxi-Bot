@@ -19,6 +19,10 @@ use crate::{ApiError, AppState, WeakAppState, routes::ApiJson};
 
 pub const INSTALL_URL: &str =
     "https://github.com/emreocell/Praxi-Bot/releases/latest/download/install-linux.sh";
+/// Epochs stay representable in TOML and bounded even for compromised peers.
+/// At the ceiling, explicit force reuses the ceiling; equal owners still stop both.
+pub const EPOCH_CEILING: u64 = 1_000_000_000;
+pub const MAX_PEER_EPOCH_ADVANCE: u64 = 4096;
 pub const UPDATE_UNIT: &str = "praxi-update.service";
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -351,6 +355,7 @@ impl LeaderControl {
                 if let Ok(key) = peer_network::key_from_string(&device.id)
                     && let Some(info) = net.peer_leader(&key)
                 {
+                    if !acceptable_peer_epoch(next.epoch, info.epoch) { continue; }
                     highest = highest.max(info.epoch);
                     known |= info.state == LeaderState::Active && info.epoch >= next.epoch;
                 }
@@ -358,12 +363,13 @@ impl LeaderControl {
         }
         if known && !force {
             return Err(ApiError::conflict(
-                "a known leader may still be active; use force to run here from the last local data",
+                "a known leader (possibly a stale record) may still be active; use force to run here from the last local data; schedules may run twice",
             ));
         }
-        next.epoch = highest
-            .checked_add(1)
-            .ok_or_else(|| ApiError::conflict("leader epoch exhausted"))?;
+        if highest >= EPOCH_CEILING && !force {
+            return Err(ApiError::conflict("leader epoch ceiling reached; explicit force required"));
+        }
+        next.epoch = highest.saturating_add(1).min(EPOCH_CEILING);
         next.state = HostState::Active;
         next.leader = None;
         if next.mode == HostMode::Client {
@@ -378,7 +384,7 @@ impl LeaderControl {
     pub async fn observe(&self, peer: &str, info: LeaderInfo) -> Result<(), ApiError> {
         let _transition = self.0.transition.lock().await;
         let mut next = self.config();
-        if info.state != LeaderState::Active || info.epoch < next.epoch {
+        if !acceptable_peer_epoch(next.epoch, info.epoch) || info.state != LeaderState::Active || info.epoch < next.epoch {
             return Ok(());
         }
         let conflict = info.epoch == next.epoch && next.state == HostState::Active;
@@ -397,6 +403,24 @@ impl LeaderControl {
         Ok(())
     }
 
+    /// Apply a conflict notification only for two active, equal-epoch owners.
+    /// The caller must authenticate the sender as a Desktop or Host first.
+    /// # Errors
+    /// Returns ownership persistence or component shutdown errors.
+    pub async fn observe_conflict(&self, peer: &str, info: LeaderInfo) -> Result<(), ApiError> {
+        let _transition = self.0.transition.lock().await;
+        let mut next = self.config();
+        if next.state != HostState::Active || info.state != LeaderState::Active
+            || info.epoch != next.epoch || !acceptable_peer_epoch(next.epoch, info.epoch) {
+            return Ok(());
+        }
+        next.state = HostState::Standby;
+        next.leader = Some(peer.into());
+        self.apply(next).await?;
+        self.emit_conflict("equal_epoch", Some(peer.into()));
+        Ok(())
+    }
+
     pub fn emit_conflict(&self, reason: &str, peer: Option<String>) {
         let event = HostConflict { reason: reason.into(), peer, epoch: self.config().epoch, notification: "Another installation is running this bot. Choose the active installation before resuming.".into() };
         let _ = self.0.events.send(HostEvent::HostConflict(event));
@@ -409,6 +433,10 @@ impl LeaderControl {
         self.emit_conflict("telegram_409", None);
         Ok(())
     }
+}
+
+fn acceptable_peer_epoch(local: u64, remote: u64) -> bool {
+    remote <= EPOCH_CEILING && remote <= local.saturating_add(MAX_PEER_EPOCH_ADVANCE)
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

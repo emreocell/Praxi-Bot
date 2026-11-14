@@ -555,3 +555,35 @@ async fn higher_epoch_records_leader_without_losing_fresh_import_eligibility() {
     assert_eq!(config.leader.as_deref(), Some(peer.as_str()));
     t.state.stop_components().await;
 }
+
+#[tokio::test]
+async fn malicious_peer_epoch_is_rejected_and_force_recovers_from_ceiling() {
+    let t = setup();
+    let peer = peer_network::identity::load_or_create_secret_key(&t._dir.path().join("peer.key")).unwrap().public().to_string();
+    for epoch in [u64::MAX, crate::host::EPOCH_CEILING + 1, crate::host::MAX_PEER_EPOCH_ADVANCE + 1] {
+        t.state.leader().observe(&peer, LeaderInfo { epoch, state: LeaderState::Active }).await.unwrap();
+        assert_eq!(t.state.leader().config(), HostConfig::default());
+    }
+    t.state.leader().transition_to(HostConfig { epoch: crate::host::EPOCH_CEILING, state: HostState::Standby, ..Default::default() }).await.unwrap();
+    assert!(t.state.leader().activate(false).await.is_err());
+    let recovered = t.state.leader().activate(true).await.unwrap();
+    assert_eq!(recovered.state, HostState::Active);
+    assert_eq!(recovered.epoch, crate::host::EPOCH_CEILING);
+    assert_eq!(HostConfig::load(t._dir.path()).unwrap(), recovered);
+    t.state.stop_components().await;
+}
+
+#[tokio::test]
+async fn conflict_notifications_require_active_sender_and_active_local_owner() {
+    let peer_dir = tempfile::tempdir().unwrap();
+    let peer = peer_network::identity::load_or_create_secret_key(&peer_dir.path().join("peer.key")).unwrap().public().to_string();
+    for local in [HostState::Fresh, HostState::Standby, HostState::Active] {
+        for remote in [LeaderState::Fresh, LeaderState::Standby, LeaderState::Active] {
+            let t = setup_with(|data| {
+                HostConfig { mode: HostMode::Host, state: local, epoch: 3, ..Default::default() }.save(data).unwrap();
+            });
+            t.state.leader().observe_conflict(&peer, LeaderInfo { epoch: 3, state: remote }).await.unwrap();
+            assert_eq!(t.state.leader().config().state, if local == HostState::Active && remote == LeaderState::Active { HostState::Standby } else { local });
+        }
+    }
+}

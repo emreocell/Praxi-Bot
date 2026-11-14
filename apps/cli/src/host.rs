@@ -158,9 +158,8 @@ fn watch_peers_with_config(
                     if !net.device(&event.peer).is_some_and(|d| matches!(d.role, Role::Host | Role::Desktop)) { continue; }
                     let Some(state) = weak.upgrade() else { break; };
                     if event.event.kind == "host_conflict" {
-                        if event.leader.is_some_and(|i| i.epoch == state.leader().config().epoch) {
-                            if let Err(e) = state.leader().standby().await { eprintln!("host standby: {e}"); }
-                            state.leader().emit_conflict("equal_epoch", Some(event.peer.to_string()));
+                        if let Some(info) = event.leader {
+                            if let Err(e) = state.leader().observe_conflict(&event.peer.to_string(), info).await { eprintln!("host conflict: {e}"); }
                         }
                         continue;
                     }
