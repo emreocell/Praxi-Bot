@@ -712,9 +712,6 @@ impl AdapterCore {
             }
             held.binding.clone().ok_or(ViewError::Unavailable)?
         };
-        if !binding.is_alive() {
-            return Err(ViewError::Unavailable);
-        }
         self.release_inputs_with_binding(&binding).await
     }
 
@@ -726,6 +723,12 @@ impl AdapterCore {
         let (mut buttons, last_css, keys) = snapshot;
         if buttons == 0 && keys.is_empty() {
             return Ok(());
+        }
+        // Page::drop also sets target_closed without closing the actual tab.
+        // Only a closed transport or a CDP session-gone reply proves that an
+        // owed up can no longer affect a page. Otherwise try the original session.
+        if binding.client.is_closed() {
+            return self.clear_dead_session_inputs();
         }
 
         let mut had_failure = false;
@@ -761,7 +764,7 @@ impl AdapterCore {
                                 format!("input release target lost: {err}"),
                                 true,
                             );
-                            return Err(ViewError::Unavailable);
+                            return self.clear_dead_session_inputs();
                         }
                         had_failure = true;
                     }
@@ -806,7 +809,7 @@ impl AdapterCore {
                             format!("input release target lost: {err}"),
                             true,
                         );
-                        return Err(ViewError::Unavailable);
+                        return self.clear_dead_session_inputs();
                     }
                     had_failure = true;
                 }
@@ -818,6 +821,12 @@ impl AdapterCore {
         } else {
             Ok(())
         }
+    }
+
+    // Call only while holding input_io_lock, after confirming session/transport loss.
+    fn clear_dead_session_inputs(&self) -> Result<(), ViewError> {
+        *self.held.lock().map_err(|_| ViewError::Unavailable)? = HeldInputs::default();
+        Ok(())
     }
 }
 
@@ -1159,7 +1168,14 @@ impl ViewTarget for BrowserViewTarget {
 
     fn input_sink(&self) -> Option<Arc<dyn InputSink>> {
         let attached = self.core.binding_if_alive().is_some();
-        attached.then(|| self.input_sink.clone() as Arc<dyn InputSink>)
+        // Keep cleanup reachable after target/capture loss. inject still checks
+        // the live binding; capabilities remain unavailable for new input.
+        let reset_owed = self
+            .core
+            .held
+            .lock()
+            .map_or(true, |held| held.buttons != 0 || !held.keys.is_empty());
+        (attached || reset_owed).then(|| self.input_sink.clone() as Arc<dyn InputSink>)
     }
 }
 
@@ -1367,8 +1383,12 @@ impl FrameSource for BrowserFrameSource {
 
     async fn set_profile(&self, profile: EffectiveProfile) -> Result<(), ViewError> {
         validate_profile(&profile)?;
+        let _ctrl = self.core.ctrl_lock.lock().await;
         let Some(_binding) = self.core.binding_if_alive() else {
-            return Err(ViewError::Unavailable);
+            self.core.stop_worker_locked().await;
+            self.core.release_inputs_inner().await?;
+            self.core.set_takeover_pin(false);
+            return Ok(());
         };
         let (worker, finished) = {
             let mut state = self.core.state.lock().map_err(|_| ViewError::Unavailable)?;
@@ -2664,6 +2684,200 @@ fn windows_vk_for_dom_key(code: &str, key: &str) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn open_binding() -> (SessionBinding, JoinHandle<()>) {
+        use futures_util::{SinkExt, StreamExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (target_tx, target_close_rx) = watch::channel(false);
+        let server = tokio::spawn(async move {
+            let _target_tx = target_tx;
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            while let Some(Ok(message)) = ws.next().await {
+                if let Ok(text) = message.to_text() {
+                    let command: Value = serde_json::from_str(text).unwrap();
+                    ws.send(tokio_tungstenite::tungstenite::Message::text(
+                        json!({"id":command["id"],"result":{"sessionId":"next-session"}})
+                            .to_string(),
+                    ))
+                    .await
+                    .unwrap();
+                }
+            }
+        });
+        let client = CdpClient::connect(&format!("ws://{addr}")).await.unwrap();
+        (
+            SessionBinding {
+                client_close_rx: client.subscribe_closed(),
+                client,
+                session_id: "guard-session".into(),
+                target_closed: Arc::new(AtomicBool::new(false)),
+                target_close_notify: Arc::new(Notify::new()),
+                target_close_rx,
+            },
+            server,
+        )
+    }
+
+    #[tokio::test]
+    async fn closed_client_clears_held_inputs_and_allows_a_new_page_binding() {
+        let (binding, server) = open_binding().await;
+        let target = BrowserViewTarget::new_idle(BrowserViewConfig::default());
+        *target.core.held.lock().unwrap() = HeldInputs {
+            binding: Some(binding.clone()),
+            buttons: 1,
+            keys: vec![PressedKey {
+                code: "ShiftLeft".into(),
+                key: "Shift".into(),
+                location: 1,
+            }],
+            ..HeldInputs::default()
+        };
+        server.abort();
+        let _ = server.await;
+        let mut closed = binding.client.subscribe_closed();
+        tokio::time::timeout(Duration::from_secs(2), closed.wait_for(|&closed| closed))
+            .await
+            .unwrap()
+            .unwrap();
+        target
+            .core
+            .release_inputs_inner()
+            .await
+            .expect("closed transport is reset");
+        {
+            let held = target.core.held.lock().unwrap();
+            assert_eq!(held.buttons, 0);
+            assert_eq!(held.keys, []);
+            assert!(held.binding.is_none());
+        }
+        let (next_binding, next_server) = open_binding().await;
+        let page = Page::attach(next_binding.client.clone(), "next-target")
+            .await
+            .unwrap();
+        target
+            .attach_page(&page)
+            .expect("dead held state cannot block rebind");
+        next_server.abort();
+    }
+
+    #[tokio::test]
+    async fn set_profile_on_idle_or_dead_binding_stops_leftover_worker() {
+        for dead_binding in [false, true] {
+            let (binding, server) = open_binding().await;
+            binding.target_closed.store(true, Ordering::SeqCst);
+            let target = BrowserViewTarget::new_idle(BrowserViewConfig::default());
+            let stop_requested = Arc::new(AtomicBool::new(false));
+            let wakeup = Arc::new(Notify::new());
+            let worker_stop = stop_requested.clone();
+            let worker_wakeup = wakeup.clone();
+            let (stopped, completed) = oneshot::channel();
+            let join = tokio::spawn(async move {
+                stop_wait(&worker_stop, &worker_wakeup).await;
+                assert!(worker_stop.load(Ordering::SeqCst));
+                let _ = stopped.send(());
+            });
+            {
+                let mut state = target.core.state.lock().unwrap();
+                if dead_binding {
+                    state.lifecycle = LifecycleState::Attached(binding.clone());
+                }
+                state.active_profile = Some(Profile::Live);
+                state.worker = Some(WorkerHandle {
+                    binding_session: binding.session_id.clone(),
+                    stop_requested,
+                    wakeup,
+                    shared: Arc::default(),
+                    join: Some(join),
+                });
+            }
+            target
+                .frame_source()
+                .set_profile(EffectiveProfile::watch())
+                .await
+                .unwrap();
+            completed
+                .await
+                .expect("leftover worker was stopped and joined");
+            let state = target.core.state.lock().unwrap();
+            assert!(state.worker.is_none());
+            assert!(state.active_profile.is_none());
+            server.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn worker_exit_guard_clears_handle_and_profile_waiter_on_abort_without_status() {
+        let (binding, server) = open_binding().await;
+        let target = BrowserViewTarget::new_idle(BrowserViewConfig::default());
+        let core = target.core.clone();
+        let shared = Arc::new(WorkerShared::default());
+        let stop_requested = Arc::new(AtomicBool::new(false));
+        let wakeup = Arc::new(Notify::new());
+        let reg = binding
+            .client
+            .register_screencast_sink(Some(&binding.session_id));
+        {
+            let mut state = core.state.lock().unwrap();
+            state.lifecycle = LifecycleState::Attached(binding.clone());
+            state.active_profile = Some(Profile::Live);
+            state.refresh_pending = true;
+            state.worker = Some(WorkerHandle {
+                binding_session: binding.session_id.clone(),
+                stop_requested: stop_requested.clone(),
+                wakeup: wakeup.clone(),
+                shared: shared.clone(),
+                join: None,
+            });
+        }
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let worker_core = core.clone();
+        let worker_shared = shared.clone();
+        let worker = tokio::spawn(async move {
+            let started_at = worker_core.config.clock.now();
+            let mut run = Box::pin(run_screencast_worker(
+                worker_core,
+                binding,
+                reg,
+                EffectiveProfile::live(),
+                LIVE_EVERY_NTH_FRAME,
+                started_at,
+                stop_requested,
+                wakeup,
+                worker_shared,
+            ));
+            // Poll the real worker into its wait before aborting it. This bypasses
+            // normal teardown, so only WorkerExitGuard can clear the handle.
+            std::future::poll_fn(|cx| {
+                assert!(run.as_mut().poll(cx).is_pending());
+                std::task::Poll::Ready(())
+            })
+            .await;
+            let _ = entered_tx.send(());
+            run.await;
+        });
+        entered_rx.await.unwrap();
+        let (reply, result) = oneshot::channel();
+        *shared.pending_profile.lock().unwrap() = Some(PendingProfileAck {
+            profile: EffectiveProfile::watch(),
+            reply,
+        });
+        worker.abort();
+        assert!(worker.await.unwrap_err().is_cancelled());
+        // Read raw state: status/info/attach would prune a finished handle.
+        {
+            let state = core.state.lock().unwrap();
+            assert!(
+                state.worker.is_none(),
+                "exit guard must remove its own handle"
+            );
+            assert!(state.active_profile.is_none());
+            assert!(!state.refresh_pending);
+        }
+        assert!(matches!(result.await, Ok(Err(ViewError::Unavailable))));
+        server.abort();
+    }
 
     #[tokio::test]
     async fn release_inputs_returns_unavailable_when_held_lock_poisoned() {

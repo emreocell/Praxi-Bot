@@ -1835,7 +1835,7 @@ async fn owed_input_reset_survives_capture_failure_and_prevents_rebinding() {
 }
 
 #[tokio::test]
-async fn target_loss_does_not_confirm_an_unreleased_input_reset() {
+async fn page_drop_releases_owed_inputs_on_the_original_open_session() {
     let server = FakeCdpServer::start().await;
     let browser = Browser::connect(&server.ws_url()).await.expect("connect");
     let page = browser.new_page("about:blank").await.expect("page");
@@ -1851,13 +1851,108 @@ async fn target_loss_does_not_confirm_an_unreleased_input_reset() {
     })
     .await
     .expect("shift down");
+    sink.inject(&InputEvent::Pointer {
+        phase: PointerPhase::Down,
+        x: 0.5,
+        y: 0.5,
+        button: Some(Button::Left),
+        buttons: 1,
+        modifiers: vec![Modifier::Shift],
+    })
+    .await
+    .expect("button down");
+    let session_id = page.session_id().to_string();
     drop(page);
-    for _ in 0..2 {
-        assert!(matches!(
-            sink.release_pressed_inputs().await,
-            Err(ViewError::Unavailable)
-        ));
+    assert!(!browser.client().is_closed());
+    assert!(!view.info().capabilities.input);
+    let cleanup = view.input_sink().expect("owed reset remains reachable");
+    assert!(matches!(
+        cleanup.inject(&InputEvent::Text { text: "x".into() }).await,
+        Err(ViewError::Unavailable)
+    ));
+    server.state.clear_commands();
+    // A transient up failure must remain retryable even after Page::drop.
+    server.state.fail_next_method.lock().unwrap().insert(
+        "Input.dispatchKeyEvent".into(),
+        (-32000, "transient release failure".into()),
+    );
+    assert!(matches!(
+        cleanup.release_pressed_inputs().await,
+        Err(ViewError::PartialInjection)
+    ));
+    cleanup
+        .release_pressed_inputs()
+        .await
+        .expect("retry owed up");
+    let commands = server.state.commands();
+    let ups: Vec<_> = commands
+        .iter()
+        .filter(|c| c.method.starts_with("Input."))
+        .collect();
+    assert_eq!(ups.len(), 3, "one mouse up and two key-up attempts");
+    assert!(
+        ups.iter()
+            .all(|c| c.session_id.as_deref() == Some(&session_id))
+    );
+    assert_eq!(ups[0].params["type"], "mouseReleased");
+    assert_eq!(ups[0].params["button"], "left");
+    for up in &ups[1..] {
+        assert_eq!(up.params["type"], "keyUp");
+        assert_eq!(up.params["code"], "ShiftLeft");
     }
+    server.state.clear_commands();
+    cleanup
+        .release_pressed_inputs()
+        .await
+        .expect("idempotent reset");
+    view.frame_source()
+        .set_profile(EffectiveProfile::watch())
+        .await
+        .expect("unavailable profile is idle");
+    assert!(server.state.commands().is_empty(), "no ups remain owed");
+}
+
+#[tokio::test]
+async fn session_gone_clears_held_inputs_and_allows_a_new_page_binding() {
+    let server = FakeCdpServer::start().await;
+    let browser = Browser::connect(&server.ws_url()).await.expect("connect");
+    let page = browser.new_page("about:blank").await.expect("page");
+    let next_page = browser.new_page("about:blank").await.expect("next page");
+    let view = BrowserViewTarget::new_idle(BrowserViewConfig::default());
+    view.attach_page(&page).expect("attach");
+    let sink = view.input_sink().expect("sink");
+    sink.inject(&InputEvent::Key {
+        phase: KeyPhase::Down,
+        code: "ShiftLeft".into(),
+        key: "Shift".into(),
+        location: 1,
+        repeat: false,
+        modifiers: vec![Modifier::Shift],
+    })
+    .await
+    .expect("shift down");
+    drop(page);
+    server.state.clear_commands();
+    server.state.fail_next_method.lock().unwrap().insert(
+        "Input.dispatchKeyEvent".into(),
+        (-32001, "Session with given id not found".into()),
+    );
+    view.input_sink()
+        .expect("cleanup sink")
+        .release_pressed_inputs()
+        .await
+        .expect("dead session is reset");
+    assert_eq!(server.state.count_method("Input.dispatchKeyEvent"), 1);
+    sink.release_pressed_inputs()
+        .await
+        .expect("no dead keys retained");
+    assert_eq!(server.state.count_method("Input.dispatchKeyEvent"), 1);
+    view.frame_source()
+        .set_profile(EffectiveProfile::watch())
+        .await
+        .expect("dead profile reset");
+    view.attach_page(&next_page)
+        .expect("held state no longer blocks binding");
 }
 
 #[tokio::test]
@@ -2084,7 +2179,7 @@ async fn worker_self_exit_clears_handle_and_allows_reattach_without_detach_to_id
 }
 
 #[tokio::test]
-async fn live_cold_start_boost_wakes_immediately_on_target_close_without_cached_frame() {
+async fn target_close_during_live_cold_start_boost_stops_worker_without_cached_frame() {
     let server = FakeCdpServer::start().await;
     let browser = Browser::connect(&server.ws_url()).await.expect("connect");
     let page = browser.new_page("about:blank").await.expect("page");
