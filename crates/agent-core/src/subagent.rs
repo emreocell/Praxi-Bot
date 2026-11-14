@@ -40,7 +40,7 @@ use crate::shared::{ModelOut, RunCtx, STEP_MODEL, Shared, kind_for};
 /// Name of the tool.
 pub(crate) const SPAWN_SUBAGENT: &str = "spawn_subagent";
 /// A run at this depth may not spawn (top-level = 0, child = 1, grandchild = 2).
-pub(crate) const MAX_DEPTH: u32 = 2;
+pub const MAX_DEPTH: u32 = 2;
 /// Children one run may have running at once.
 pub(crate) const MAX_CHILDREN: usize = 3;
 /// `max_steps` of a child that does not ask for another value.

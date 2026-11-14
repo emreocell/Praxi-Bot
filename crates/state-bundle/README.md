@@ -148,6 +148,12 @@ old secret values all precede target writes. Import rewrites host `mode` and
 epoch, and removes the source's `leader`. Other host settings are retained.
 Explicit activation/epoch advancement is the handover caller's responsibility.
 
+The primary database must also contain the tables and columns used by storage,
+with valid foreign-key references. Its run ancestry must be rooted, acyclic and
+within the agent runtime's existing subagent depth limit (root 0, maximum 2).
+These checks run only on staged imports, before installation; ordinary database
+opening is unchanged. Valid older schemas are migrated before these checks.
+
 The install phase has no async cancellation points. Original values are retained
 in memory for secret rollback; old portable roots and DB sidecars are renamed
 into `<data>/backup-<unix-ts>/`, then staged roots are renamed into place.

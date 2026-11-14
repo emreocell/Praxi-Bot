@@ -581,6 +581,147 @@ async fn secondary_schema_version_without_tables_is_rejected() {
 }
 
 #[tokio::test]
+async fn incomplete_primary_schema_preserves_destination() {
+    for damage in [
+        "DROP TABLE bots",
+        "ALTER TABLE runs RENAME COLUMN state TO missing_state",
+    ] {
+        let source = tempfile::tempdir().unwrap();
+        database(source.path(), false);
+        let conn = Connection::open(source.path().join("bot.db")).unwrap();
+        conn.execute_batch(damage).unwrap();
+        assert_eq!(
+            conn.query_row("PRAGMA quick_check", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+        drop(conn);
+        let bytes = bundle(source.path()).await;
+        assert_invalid_primary_preserves_destination(&bytes, damage).await;
+    }
+}
+
+async fn assert_invalid_primary_preserves_destination(bytes: &[u8], fixture: &str) {
+    let target = tempfile::tempdir().unwrap();
+    database(target.path(), true);
+    let original = fs::read(target.path().join("bot.db")).unwrap();
+    let store = MemoryStore::new();
+    store.set("existing", "untouched").unwrap();
+    let result = import(
+        target.path(),
+        &store,
+        bytes,
+        ImportOptions {
+            replace: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(
+        matches!(result, Err(ImportError::InvalidDatabase { ref db, .. }) if db == "bot.db"),
+        "invalid primary state was not rejected ({fixture}): {result:?}"
+    );
+    assert_eq!(fs::read(target.path().join("bot.db")).unwrap(), original);
+    assert_eq!(
+        store.get("existing").unwrap().unwrap().expose(),
+        "untouched"
+    );
+    assert!(!target.path().join("import-staging").exists());
+    assert!(!fs::read_dir(target.path()).unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("backup-")
+    }));
+}
+
+fn runs_with_parents(dir: &Path, parents: &[Option<usize>]) -> Vec<protocol::RunId> {
+    database(dir, true);
+    let conn = Connection::open(dir.join("bot.db")).unwrap();
+    // Construct corrupt source rows as an external/older writer could; import
+    // must reject them before touching the valid destination.
+    conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+    let ids: Vec<_> = parents.iter().map(|_| protocol::RunId::new()).collect();
+    let missing = protocol::RunId::new();
+    for (index, (id, parent)) in ids.iter().zip(parents).enumerate() {
+        let parent = parent.map(|p| ids.get(p).unwrap_or(&missing).to_string());
+        let kind = if parent.is_some() {
+            "turn:subagent"
+        } else {
+            "turn"
+        };
+        let spec = parent.as_ref().map(|_| {
+            serde_json::json!({
+                "task": "fixture", "context": "", "tools": null, "model_role": null,
+                "max_steps": 15, "token_budget": 1000, "depth": index,
+                "spawn_key": format!("fixture-{index}")
+            })
+            .to_string()
+        });
+        conn.execute(
+            "INSERT INTO runs (id, user_id, bot_id, chat_id, kind, state, created_at_ms, \
+             updated_at_ms, parent_run_id, spec_json) VALUES (?1, \
+             '00000000-0000-0000-0000-000000000001', \
+             '00000000-0000-0000-0000-000000000002', \
+             '00000000-0000-0000-0000-000000000003', ?2, 'paused', 1, 1, ?3, ?4)",
+            rusqlite::params![id.to_string(), kind, parent, spec],
+        )
+        .unwrap();
+    }
+    ids
+}
+
+fn ancestry_chain(depth: u32) -> Vec<Option<usize>> {
+    (0..=usize::try_from(depth).unwrap())
+        .map(|index| index.checked_sub(1))
+        .collect()
+}
+
+#[tokio::test]
+async fn invalid_primary_run_ancestry_preserves_destination() {
+    for (fixture, parents) in [
+        ("self parent", vec![Some(0)]),
+        ("mutual cycle", vec![Some(1), Some(0)]),
+        ("missing parent", vec![Some(99)]),
+        (
+            "too deep",
+            ancestry_chain(agent_core::MAX_SUBAGENT_DEPTH + 1),
+        ),
+    ] {
+        let source = tempfile::tempdir().unwrap();
+        runs_with_parents(source.path(), &parents);
+        let bytes = bundle(source.path()).await;
+        assert_invalid_primary_preserves_destination(&bytes, fixture).await;
+    }
+}
+
+#[tokio::test]
+async fn primary_run_ancestry_at_depth_limit_round_trips() {
+    let source = tempfile::tempdir().unwrap();
+    let ids = runs_with_parents(
+        source.path(),
+        &ancestry_chain(agent_core::MAX_SUBAGENT_DEPTH),
+    );
+    let bytes = bundle(source.path()).await;
+    let target = tempfile::tempdir().unwrap();
+    import(
+        target.path(),
+        &MemoryStore::new(),
+        bytes.as_slice(),
+        ImportOptions::default(),
+    )
+    .await
+    .unwrap();
+    let store = storage::Storage::open(target.path()).unwrap();
+    for (index, id) in ids.iter().enumerate() {
+        let run = store.get_run(*id).unwrap().unwrap();
+        assert_eq!(run.parent_run_id, index.checked_sub(1).map(|p| ids[p]));
+        assert_eq!(run.state, "paused");
+    }
+}
+
+#[tokio::test]
 async fn caps_apply_to_stream_entries_and_trailing_padding() {
     let dir = tempfile::tempdir().unwrap();
     database(dir.path(), false);

@@ -46,6 +46,7 @@ pub use shared::{
     MessageMode, Providers, ScheduleWork, SkillHintFn, SkillHints, StreamItem, build_providers,
     schedule_id_of,
 };
+pub use subagent::MAX_DEPTH as MAX_SUBAGENT_DEPTH;
 
 /// Audit-log action recording an "always allow" grant rule for a bot.
 pub(crate) const AUDIT_GRANT_ALWAYS: &str = "grant.always";

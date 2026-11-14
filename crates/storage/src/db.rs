@@ -65,6 +65,50 @@ pub struct Storage {
 }
 
 impl Storage {
+    /// Validate and migrate an existing staged database without creating it.
+    /// Checks the columns used by this repository and foreign-key consistency;
+    /// a schema version and SQLite page integrity alone do not establish either.
+    /// Normal [`Self::open`] behavior is unchanged.
+    ///
+    /// # Errors
+    /// Fails on corruption, an incompatible schema, or migration errors.
+    pub fn validate_and_migrate(path: impl AsRef<Path>) -> Result<u32> {
+        let mut conn =
+            Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+        let integrity: String = conn.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+        if integrity != "ok" {
+            return Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
+                Some(integrity),
+            )
+            .into());
+        }
+        migrate::migrate(&mut conn)?;
+        for select in [
+            "SELECT id, name, created_at_ms FROM users",
+            "SELECT id, user_id, name, config_json, created_at_ms FROM bots",
+            "SELECT id, user_id, bot_id, title, created_at_ms FROM chats",
+            "SELECT id, user_id, chat_id, run_id, role, content, created_at_ms FROM messages",
+            RUN_SELECT,
+            STEP_SELECT,
+            APPROVAL_SELECT,
+            "SELECT id, user_id, run_id, actor, action, detail_json, ts_ms FROM audit_log",
+            "SELECT gseq, run_id, seq FROM event_index",
+        ] {
+            conn.prepare(select)?;
+        }
+        if conn.prepare("PRAGMA foreign_key_check")?.exists([])? {
+            return Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY),
+                Some("database contains invalid foreign-key references".into()),
+            )
+            .into());
+        }
+        migrate::current_version(&conn)
+    }
+
     /// Open (creating if needed) `<data_dir>/bot.db`, enable WAL + foreign
     /// keys and run pending migrations.
     ///
