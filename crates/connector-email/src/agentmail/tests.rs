@@ -629,6 +629,129 @@ async fn list_new_returns_inbound_mail_oldest_first_with_a_cursor() {
 }
 
 #[tokio::test]
+async fn list_new_drains_same_timestamp_pages_before_advancing_the_watermark() {
+    let server = MockServer::start().await;
+    let start = "2026-11-12T09:00:00Z";
+    let boundary = "2026-11-12T10:00:00Z";
+    Mock::given(method("GET"))
+        .respond_with(move |request: &wiremock::Request| {
+            let query: std::collections::HashMap<_, _> = request.url.query_pairs().collect();
+            let body = if query.get("after").map(std::convert::AsRef::as_ref) == Some(start) {
+                if query.get("page_token").map(std::convert::AsRef::as_ref)
+                    == Some("next-boundary-page")
+                {
+                    json!({"messages": [
+                        msg_json("m3", boundary, "c@example.com", &["received"]),
+                        msg_json("m4", "2026-11-12T10:01:00Z", "d@example.com", &["received"])
+                    ]})
+                } else {
+                    json!({"next_page_token":"next-boundary-page", "messages": [
+                        msg_json("m1", boundary, "a@example.com", &["received"]),
+                        msg_json("m2", boundary, "b@example.com", &["received"])
+                    ]})
+                }
+            } else {
+                json!({"messages": []})
+            };
+            ResponseTemplate::new(200).set_body_json(body)
+        })
+        .mount(&server)
+        .await;
+    let provider = bound(&server);
+    let first = provider.list_new(Some(start), 2).await.unwrap();
+    let second = provider
+        .list_new(first.next_cursor.as_deref(), 2)
+        .await
+        .unwrap();
+    let ids: Vec<_> = first
+        .messages
+        .iter()
+        .chain(&second.messages)
+        .map(|message| message.id.as_deref().unwrap())
+        .collect();
+    assert_eq!(ids, ["m1", "m2", "m3", "m4"]);
+    assert_eq!(second.next_cursor.as_deref(), Some("2026-11-12T10:01:00Z"));
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn list_new_retains_the_watermark_when_the_last_page_is_empty() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(|request: &wiremock::Request| {
+            let body = if request
+                .url
+                .query_pairs()
+                .any(|(key, _)| key == "page_token")
+            {
+                json!({"messages": []})
+            } else {
+                json!({"next_page_token":"empty-last-page", "messages": [
+                    msg_json("m1", "2026-11-12T10:00:00Z", "a@example.com", &["received"])
+                ]})
+            };
+            ResponseTemplate::new(200).set_body_json(body)
+        })
+        .mount(&server)
+        .await;
+    let provider = bound(&server);
+    let first = provider
+        .list_new(Some("2026-11-12T09:00:00Z"), 1)
+        .await
+        .unwrap();
+    let last = provider
+        .list_new(first.next_cursor.as_deref(), 1)
+        .await
+        .unwrap();
+    assert_eq!(last.messages.len(), 0);
+    assert_eq!(last.next_cursor.as_deref(), Some("2026-11-12T10:00:00Z"));
+}
+
+#[tokio::test]
+async fn list_new_rejects_malformed_or_oversized_page_cursors_before_http() {
+    let server = MockServer::start().await;
+    let valid_time = "2026-11-12T09:00:00Z";
+    for cursor in [
+        format!(
+            "agentmail-page-v1:{}",
+            json!({"after":valid_time,"newest":valid_time,"page_token":"x".repeat(4097)})
+        ),
+        format!(
+            "agentmail-page-v1:{}",
+            json!({"after":"not-a-time","newest":valid_time,"page_token":"ok"})
+        ),
+        format!(
+            "agentmail-page-v1:{}",
+            json!({"after":valid_time,"newest":valid_time,"page_token":"bad\nvalue"})
+        ),
+        format!("agentmail-page-v1:{}", "x".repeat(16 * 1024)),
+    ] {
+        assert!(matches!(
+            bound(&server).list_new(Some(&cursor), 1).await,
+            Err(EmailError::Input(_))
+        ));
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn list_new_rejects_an_oversized_provider_page_token() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "messages": [], "next_page_token": "x".repeat(4097)
+        })))
+        .mount(&server)
+        .await;
+    assert!(matches!(
+        bound(&server)
+            .list_new(Some("2026-11-12T09:00:00Z"), 1)
+            .await,
+        Err(EmailError::Provider(ProviderError::BadResponse))
+    ));
+}
+
+#[tokio::test]
 async fn list_new_without_a_cursor_keeps_the_cursor_when_nothing_is_new() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

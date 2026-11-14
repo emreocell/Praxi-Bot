@@ -38,6 +38,9 @@ pub const MAX_ID_LEN: usize = 320;
 
 /// Page size limit of the list endpoint (filtered requests are capped at 100).
 const MAX_LIMIT: usize = 100;
+const PAGE_CURSOR_PREFIX: &str = "agentmail-page-v1:";
+const MAX_PAGE_TOKEN: usize = 4096;
+const MAX_PAGE_CURSOR: usize = 16 * 1024;
 /// Automatic attempts for an idempotent create.
 const CREATE_ATTEMPTS: u32 = 3;
 /// Longest pause taken for a `Retry-After` before retrying a create.
@@ -97,6 +100,41 @@ fn valid_cursor(c: &str) -> bool {
 
 fn epoch(ts: &str) -> Option<i64> {
     mail_parser::DateTime::parse_rfc3339(ts).map(|d| d.to_timestamp())
+}
+
+/// Keep the original query watermark while draining a provider page sequence.
+/// Only after its final page may a timestamp become the next polling cursor.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PageCursor {
+    after: String,
+    newest: String,
+    page_token: String,
+}
+
+fn valid_page_token(token: &str) -> bool {
+    !token.is_empty()
+        && token.len() <= MAX_PAGE_TOKEN
+        && token.bytes().all(|b| b.is_ascii_graphic())
+}
+
+fn page_cursor(cursor: Option<&str>) -> Result<Option<PageCursor>, EmailError> {
+    let Some(cursor) = cursor else {
+        return Ok(None);
+    };
+    if valid_cursor(cursor) {
+        return Ok(None);
+    }
+    if cursor.len() <= MAX_PAGE_CURSOR
+        && let Some(encoded) = cursor.strip_prefix(PAGE_CURSOR_PREFIX)
+        && let Ok(page) = serde_json::from_str::<PageCursor>(encoded)
+        && valid_cursor(&page.after)
+        && valid_cursor(&page.newest)
+        && valid_page_token(&page.page_token)
+    {
+        return Ok(Some(page));
+    }
+    Err(EmailError::Input("invalid cursor".into()))
 }
 
 /// The user's `AgentMail` API key. `Debug` never shows it.
@@ -185,6 +223,10 @@ impl AgentMailProvider {
     }
 
     async fn list(&self, query: &[(&str, String)]) -> Result<Vec<MessageWire>, EmailError> {
+        Ok(self.list_page(query).await?.messages)
+    }
+
+    async fn list_page(&self, query: &[(&str, String)]) -> Result<ListWire, EmailError> {
         let inbox = self.inbox_id()?;
         let v = self
             .call(
@@ -195,7 +237,7 @@ impl AgentMailProvider {
                 &[],
             )
             .await?;
-        Ok(parse::<ListWire>(v)?.messages)
+        parse(v)
     }
 
     /// Validate what will be sent before any request is made.
@@ -351,27 +393,47 @@ impl MailboxProvider for AgentMailProvider {
         cursor: Option<&str>,
         limit: usize,
     ) -> Result<NewMessages, EmailError> {
-        if let Some(c) = cursor
-            && !valid_cursor(c)
-        {
-            return Err(EmailError::Input("invalid cursor".into()));
-        }
+        let page = page_cursor(cursor)?;
+        let after = page.as_ref().map(|p| p.after.as_str()).or(cursor);
         let mut query = vec![("limit", limit.clamp(1, MAX_LIMIT).to_string())];
-        if let Some(c) = cursor {
+        if let Some(c) = after {
             query.push(("ascending", "true".to_owned()));
             query.push(("after", c.to_owned()));
         }
-        let mut raw = self.list(&query).await?;
+        if let Some(p) = &page {
+            query.push(("page_token", p.page_token.clone()));
+        }
+        let listed = self.list_page(&query).await?;
+        let mut raw = listed.messages;
         if cursor.is_none() {
             raw.reverse(); // newest-first from the provider, oldest-first for us
         }
-        let newest = raw
-            .iter()
-            .filter_map(|m| m.timestamp.as_deref())
+        let newest = page
+            .as_ref()
+            .map(|p| p.newest.as_str())
+            .into_iter()
+            .chain(raw.iter().filter_map(|m| m.timestamp.as_deref()))
+            .filter(|t| valid_cursor(t))
             .filter_map(|t| epoch(t).map(|e| (e, t)))
             .max_by_key(|(e, _)| *e)
             .map(|(_, t)| t.to_owned())
-            .or_else(|| cursor.map(str::to_owned));
+            .or_else(|| after.map(str::to_owned));
+        let next_cursor = if let (Some(after), Some(token)) = (after, listed.next_page_token) {
+            if !valid_page_token(&token) {
+                return Err(ProviderError::BadResponse.into());
+            }
+            let continuation = PageCursor {
+                after: after.to_owned(),
+                newest: newest.clone().unwrap_or_else(|| after.to_owned()),
+                page_token: token,
+            };
+            Some(format!(
+                "{PAGE_CURSOR_PREFIX}{}",
+                serde_json::to_string(&continuation).map_err(|_| ProviderError::BadResponse)?
+            ))
+        } else {
+            newest
+        };
         let own = self.address();
         let messages = raw
             .iter()
@@ -380,7 +442,7 @@ impl MailboxProvider for AgentMailProvider {
             .collect();
         Ok(NewMessages {
             messages,
-            next_cursor: newest,
+            next_cursor,
         })
     }
 
