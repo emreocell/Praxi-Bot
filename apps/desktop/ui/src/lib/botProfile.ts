@@ -62,7 +62,15 @@ export const BOT_TEMPLATES: readonly BotTemplate[] = [
 
 export const AUTONOMY_LEVELS: readonly AutonomyLevel[] = ["ask", "balanced", "auto"] as const;
 
-/** Map simple 3-way autonomy to an existing daemon permission preset. */
+/**
+ * Map simple 3-way autonomy to an existing daemon permission preset.
+ *
+ * Note: `read-and-draft` and `approve-destructive` both set `Ask` on every
+ * category in `permission-engine` (`read_tools_skip_ask` lets `Effect::Read`
+ * tools run without prompting, while all writes/fetches/drafts/sends/commands
+ * ask). `full` sets `Allow` on every category except `Money`, never-list
+ * commands, and `always_ask` schedule actions.
+ */
 export function autonomyToPreset(level: AutonomyLevel): PermissionPreset {
   switch (level) {
     case "ask":
@@ -298,5 +306,39 @@ export function botView(bot: Bot): BotView {
     color: d.color,
     avatar: d.avatar ?? undefined,
     executor: formatModelRef(d.executor)
+  };
+}
+
+/** Fields edited in Onboarding Step 4; shared by the preview and save path. */
+export interface OnboardingBotFields {
+  name: string;
+  color: string;
+  avatar?: string;
+  persona: string;
+  executor: ModelRef;
+  planner: ModelRef;
+  classifier: ModelRef;
+  preset: PermissionPreset;
+}
+
+/**
+ * Build the `BotDraft` used by Onboarding Step 4 so the preview `<BotAvatar>`
+ * and `configFromDraft` agree on `shape` and `color`.
+ */
+export function onboardingBotDraft(
+  existing: Bot | undefined,
+  fields: OnboardingBotFields
+): BotDraft {
+  const base = draftFromBot(existing);
+  return {
+    ...base,
+    name: fields.name.trim(),
+    color: fields.color,
+    avatar: fields.avatar ?? null,
+    persona: fields.persona,
+    executor: fields.executor,
+    planner: fields.planner,
+    classifier: fields.classifier,
+    preset: fields.preset
   };
 }
