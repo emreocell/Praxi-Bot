@@ -1,24 +1,21 @@
-.root {
-  position: relative;
-  width: 100%;
-}
-
 .trigger {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-3);
-  width: 100%;
-  padding: var(--space-2);
+  gap: var(--space-2);
+  min-width: var(--space-0);
+  padding: var(--space-1) var(--space-3) var(--space-1) var(--space-1);
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-pill);
   background: none;
   color: var(--color-text);
   font-family: inherit;
+  font-weight: var(--font-weight-medium);
   text-align: left;
   cursor: pointer;
 }
 
-.trigger:hover {
+.trigger:hover,
+.trigger[aria-expanded="true"] {
   background-color: var(--color-surface-elevated);
 }
 
@@ -29,58 +26,126 @@
 
 .avatar {
   flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--size-avatar-sm);
-  height: var(--size-avatar-sm);
+  display: inline-grid;
+  place-items: center;
+  width: calc(var(--space-8) - var(--space-1));
+  height: calc(var(--space-8) - var(--space-1));
   border-radius: var(--radius-pill);
-  background-color: var(--color-surface-active);
-  color: var(--color-text);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-bold);
+  background: linear-gradient(135deg, var(--color-accent), color-mix(in srgb, var(--color-accent) 35%, var(--color-surface-elevated)));
+  color: var(--color-accent-contrast);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  font-style: normal;
+}
+
+.avatarLg {
+  width: calc(var(--space-8) + var(--space-2));
+  height: calc(var(--space-8) + var(--space-2));
+  font-size: var(--font-size-md);
 }
 
 .name {
-  flex: 1;
   min-width: var(--space-0);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-ui);
 }
 
+/* ── menu content (surface = generic Popover) ── */
 .menu {
-  position: absolute;
-  bottom: calc(100% + var(--space-1));
-  left: var(--space-0);
-  right: var(--space-0);
-  z-index: 30;
+  padding: var(--space-2);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-3);
+}
+
+.headText {
+  min-width: var(--space-0);
   display: flex;
   flex-direction: column;
-  padding: var(--space-1);
-  border: var(--size-border) solid var(--color-border-strong);
-  border-radius: var(--radius-card);
-  background-color: var(--color-surface-elevated);
-  box-shadow: var(--shadow-overlay);
+}
+
+.headText b {
+  font-weight: var(--font-weight-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headText small {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.quick {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: calc(var(--space-1) * 1.5);
+  margin-bottom: var(--space-2);
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--space-1) * 1.5);
+  padding: var(--space-3) var(--space-1) var(--space-2);
+  border: none;
+  border-radius: calc(var(--radius-card) * 1.1);
+  background-color: color-mix(in srgb, var(--color-text) 5%, transparent);
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) ease-out,
+    color var(--motion-duration-fast) ease-out,
+    transform var(--motion-duration-fast) ease-out;
+}
+
+.tile > svg {
+  color: var(--color-accent-text);
+}
+
+.tile:hover,
+.tile:focus-visible {
+  outline: none;
+  background-color: var(--color-surface-active);
+  color: var(--color-text);
+  transform: translateY(calc(var(--size-border) * -1));
+}
+
+.tile:focus-visible {
+  box-shadow: inset 0 0 0 var(--size-border-thick) var(--color-focus);
 }
 
 .item {
-  flex-wrap: wrap;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  gap: var(--space-3);
+  height: var(--space-10);
+  padding: 0 var(--space-3);
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: calc(var(--radius-md) * 1.25);
   background: none;
   color: var(--color-text);
   font-family: inherit;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-ui);
   text-align: left;
   cursor: pointer;
+}
+
+.item > svg {
+  color: var(--color-text-muted);
+}
+
+.item > span {
+  flex: 1;
 }
 
 .item:hover,
@@ -89,20 +154,15 @@
   background-color: var(--color-surface-active);
 }
 
-.hint {
-  width: 100%; padding-left: calc(var(--size-icon-sm) + var(--space-2));
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
+.item:focus-visible {
+  box-shadow: inset 0 0 0 var(--size-border-thick) var(--color-focus);
 }
 
-.root { width: 100%; }
-.avatar { width: var(--space-8); height: var(--space-8); font-weight: var(--font-weight-medium); }
-.menu { width: calc(var(--size-sidebar-width) - var(--space-8)); right: auto; bottom: calc(100% + var(--space-3)); padding: var(--space-2); border-color: var(--color-border); }
-.item { min-height: var(--space-10); }
-
-/* Appearance axes: popovers get a sheen (solid) or frosted glass. */
-.menu { background-image: var(--surface-sheen); }
-:global(:root[data-style="glass"]) .menu {
-  background-color: color-mix(in srgb, var(--color-surface-elevated-opaque) 72%, transparent);
-  backdrop-filter: blur(var(--blur-glass)) saturate(1.5);
+.item kbd {
+  padding: var(--size-border) calc(var(--space-1) * 1.5);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: color-mix(in srgb, var(--color-text) 4%, transparent);
+  color: var(--color-text-muted);
+  font: var(--font-weight-medium) var(--font-size-xs) var(--font-mono);
 }
