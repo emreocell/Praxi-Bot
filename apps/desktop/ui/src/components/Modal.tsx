@@ -1,13 +1,12 @@
 import { type ReactNode, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { createModalStack } from "../lib/modalStack";
+import { layerStack as modalStack } from "../lib/modalStack";
 import styles from "./Modal.module.css";
 
 const FOCUSABLE =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-/** Only the topmost open dialog reacts to Esc / Tab (nested dialogs). */
-const modalStack = createModalStack();
+/** Only the topmost open layer (dialog or popover) reacts to Esc / Tab. */
 
 /**
  * A centered dialog over a dimmed backdrop: Esc and a backdrop click close it,

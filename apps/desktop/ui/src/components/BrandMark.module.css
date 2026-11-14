@@ -1,0 +1,41 @@
+/* Bare brand logo (card 198-B): the glyph itself, never on a tile. */
+.mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--brand-color);
+}
+
+.mark > svg {
+  width: 100%;
+  height: 100%;
+  fill: var(--brand-color);
+}
+
+.mark > img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+
+/* Near-black logos read as text on dark themes, near-white ones on light themes. */
+.mark[data-tone="dark"] > svg {
+  fill: light-dark(var(--brand-color), var(--color-text));
+}
+
+.mark[data-tone="light"] > svg {
+  fill: light-dark(var(--color-text), var(--brand-color));
+}
+
+.mono {
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+  color: var(--color-text-muted);
+  letter-spacing: 0;
+}
+
+.mark > svg:global(.lucide) {
+  fill: none;
+}
