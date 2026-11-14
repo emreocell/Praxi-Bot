@@ -23,32 +23,39 @@ these tools. For a bot with its own `[tools] allow` list, add `"web_*"` (see
 
 ## Search backend
 
-Without configuration, search uses DuckDuckGo (its HTML endpoint, no account or
-key). You can add better backends in `<data_dir>/web.toml`. Backends are tried
-in this order and the first that answers wins:
+Without configuration, search uses a keyless fallback chain (`duckduckgo` → `duckduckgo_lite` → `bing`), requiring no account or API key. If an upstream returns a bot challenge or rate limit, that backend enters a short cooldown and `web_search` falls through to the next configured backend.
+
+You can configure backends, priority order, API keys, and run a live probe either in **Settings → Web search** in the desktop app or in `<data_dir>/web.toml`. Backends are tried in configured priority order and the first that returns results wins (default order):
 
 1. a [SearXNG](https://docs.searxng.org/) instance you run (`searxng_url`),
-2. Brave Search (`brave_key`),
-3. DuckDuckGo (on unless you turn it off).
+2. Brave Search API (`brave_key`),
+3. Tavily Search API (`tavily_key`),
+4. DuckDuckGo HTML (`duckduckgo`, default `true`),
+5. DuckDuckGo Lite (`duckduckgo_lite`, default `true`),
+6. Bing HTML (`bing`, default `true`).
 
 ```toml
 [search]
 searxng_url = "http://127.0.0.1:8080"   # your own instance; it may be local/private
 brave_key = "web/brave"                 # NAME of a secret, never the key itself
+tavily_key = "web/tavily"               # NAME of a secret, never the key itself
 duckduckgo = true                       # keyless fallback (default true)
+duckduckgo_lite = true                  # keyless fallback (default true)
+bing = true                             # keyless fallback (default true)
+order = ["searxng", "brave", "tavily", "duckduckgo", "duckduckgo_lite", "bing"]
 
 [http]
-timeout_secs = 20            # whole request
+timeout_secs = 20            # whole request (search backends are capped at 8s each)
 connect_timeout_secs = 8
 max_bytes = 5242880          # response body cap (at most 64 MiB)
 max_redirects = 5            # at most 10
 ```
 
-Every key is optional. Store the Brave key in the secret store, then reference
-it by name:
+Every key is optional. Store Brave or Tavily keys in the secret store (or enter them in Settings → Web search, which stores them write-only), then reference the secret name in `web.toml`:
 
 ```sh
 bot secrets set web/brave
+bot secrets set web/tavily
 ```
 
 A broken `web.toml` (a typo, a bad value) never stops the daemon: it logs a
@@ -61,12 +68,7 @@ automatically yet; delete old ones by hand if they pile up.
 
 ## Privacy
 
-Search queries go to the search provider you chose (DuckDuckGo, Brave, or your
-own SearXNG), and fetched URLs go to the sites they point at, from your
-machine's IP address. Requests carry a `User-Agent: Praxi-Bot/<version>
-(web-tools)` header; nothing else identifying your computer is sent. If that matters
-to you, point `searxng_url` at an instance you control or remove the `web_*`
-tools from a bot's `allow` list.
+Search queries go to the configured backend that handles them (your SearXNG instance, Brave, Tavily, DuckDuckGo, or Bing), and fetched URLs go to the sites they point at, from your machine's IP address. Page fetches (`web_extract`, `web_feed`, `web_sitemap`, `web_metadata`) carry a `User-Agent: Praxi-Bot/<version> (web-tools)` header, while HTML search requests use standard browser `User-Agent` / `Accept` headers so search engines do not serve bot challenges. If query privacy matters to you, point `searxng_url` at an instance you control or remove the `web_*` tools from a bot's `allow` list.
 
 ## Safety
 
