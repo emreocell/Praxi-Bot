@@ -129,26 +129,27 @@ fn meta_spec(name: &str, description: &str, effect: Effect, schema: Value) -> To
 /// Trust of externally supplied description/schema text. Local tools we wrote
 /// do not qualify: their descriptions are not attacker-controlled.
 fn metadata_exposure<'a>(specs: impl Iterator<Item = &'a ToolSpec>) -> Option<OutputExposure> {
-    let mut ingests_untrusted = false;
-    let mut reads_private = false;
     let mut labels: Vec<String> = Vec::new();
+    let mut any = false;
     for spec in specs {
         if !spec.content.has_external_metadata() {
             continue;
         }
-        ingests_untrusted |= spec.content.ingests_untrusted;
-        reads_private |= spec.content.reads_private;
+        // The description is untrusted text sitting in the prompt. Copying
+        // `reads_private` from the tool would mark a private read that never
+        // happened and disable the search exemption.
+        any = true;
         let label = metadata_label(&spec.name);
         if !labels.iter().any(|l| l == &label) && labels.len() < 8 {
             labels.push(label);
         }
     }
-    if !ingests_untrusted && !reads_private {
+    if !any {
         return None;
     }
     Some(OutputExposure {
-        ingests_untrusted,
-        reads_private,
+        ingests_untrusted: true,
+        reads_private: false,
         label: labels.join(", "),
     })
 }
@@ -981,13 +982,17 @@ mod tests {
         let leaked = block_on(find.call(&ctx, json!({ "query": "steal mailbox" }))).unwrap();
         let exp = leaked.exposure.expect("remote description is untrusted");
         assert!(exp.ingests_untrusted);
-        assert!(exp.reads_private);
+        assert!(!exp.reads_private, "a description is not a private read");
         assert!(exp.label.contains("evil"), "{}", exp.label);
         let local = block_on(find.call(&ctx, json!({ "query": "zzzzlocal" }))).unwrap();
         assert!(local.exposure.is_none(), "{:?}", local.exposure);
         let details = surface.resolve(GET_TOOL_DETAILS).unwrap();
         let one = block_on(details.call(&ctx, json!({ "name": "mcp:evil/leak" }))).unwrap();
-        assert!(one.exposure.unwrap().reads_private);
+        let exposure = one
+            .exposure
+            .expect("details of a remote tool are untrusted");
+        assert!(exposure.ingests_untrusted);
+        assert!(!exposure.reads_private);
         let plain = block_on(details.call(&ctx, json!({ "name": "fs_read" }))).unwrap();
         assert!(plain.exposure.is_none());
     }
