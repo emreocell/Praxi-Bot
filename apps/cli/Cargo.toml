@@ -16,6 +16,10 @@ path = "src/main.rs"
 fake-provider = ["daemon-api/fake-provider"]
 
 [dependencies]
+flate2 = "1"
+tar = "0.4"
+sha2 = "0.10"
+tempfile.workspace = true
 live-view.workspace = true
 peer-network = { path = "../../crates/peer-network", version = "0.1.0" }
 remote-api = { path = "../../crates/remote-api", version = "0.1.0", features = ["server"] }

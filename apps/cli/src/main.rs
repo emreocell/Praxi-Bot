@@ -15,6 +15,7 @@ mod presets;
 mod prompt;
 mod remote;
 mod serve;
+mod update;
 mod wizard;
 
 use std::path::PathBuf;
@@ -107,6 +108,8 @@ enum Command {
         #[arg(long, default_value_t = 10)]
         shutdown_grace: u64,
     },
+    /// Update the Linux installation (restart is explicit).
+    SelfUpdate(update::UpdateArgs),
     /// Show daemon status (also verifies the API token).
     Status,
     /// Send a message to a bot and stream the answer.
@@ -527,6 +530,7 @@ fn run() -> Result<()> {
     match command {
         Command::Serve { .. } => return run_serve(&cli, command, &data_dir),
         Command::Doctor(c) => return run_doctor(&cli, c, &data_dir),
+        Command::SelfUpdate(args) => return update::run(args),
         Command::Status
         | Command::Chat { .. }
         | Command::Bots { .. }
@@ -586,7 +590,8 @@ fn run() -> Result<()> {
             }
             SecretsCmd::Delete { name } => commands::secrets_delete(store, name),
         },
-        Command::Doctor(_)
+        Command::SelfUpdate(_)
+        | Command::Doctor(_)
         | Command::Serve { .. }
         | Command::Status
         | Command::Chat { .. }
@@ -1063,6 +1068,20 @@ fn run_setup(c: &SetupCmd, env: &SetupEnv<'_>) -> Result<()> {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn self_update_flags_parse_and_rollback_conflicts_are_rejected() {
+        let cli =
+            Cli::try_parse_from(["bot", "self-update", "--version", "1.2.3", "--check"]).unwrap();
+        assert!(
+            matches!(cli.command, Some(Command::SelfUpdate(update::UpdateArgs { check: true, version: Some(v), .. })) if v == "1.2.3")
+        );
+        assert!(Cli::try_parse_from(["bot", "self-update", "--rollback", "--check"]).is_err());
+        assert!(
+            Cli::try_parse_from(["bot", "self-update", "--rollback", "--version", "1.0.0"])
+                .is_err()
+        );
+    }
 
     #[test]
     fn cli_definition_is_valid() {
