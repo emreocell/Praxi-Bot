@@ -38,3 +38,13 @@
 .padding-lg {
   padding: var(--space-6);
 }
+
+/* Appearance axes: cards get a sheen (solid) or frosted glass. */
+.card { background-image: var(--surface-sheen); }
+
+:global(:root[data-style="glass"]) .card {
+  backdrop-filter: blur(var(--blur-glass)) saturate(1.5);
+  box-shadow:
+    inset 0 var(--size-border) 0 color-mix(in srgb, var(--color-text) 10%, transparent),
+    var(--shadow-card);
+}

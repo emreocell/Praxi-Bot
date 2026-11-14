@@ -1,0 +1,27 @@
+.root {
+  position: absolute;
+  inset: var(--space-0);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* The theme background laid over the scene: the "Calm - Lively" slider. */
+.root::after {
+  content: "";
+  position: absolute;
+  inset: var(--space-0);
+  background-color: var(--color-background);
+  opacity: var(--backdrop-dim);
+}
+
+.thumb {
+  display: block;
+  width: 100%;
+  height: 100%;
+}

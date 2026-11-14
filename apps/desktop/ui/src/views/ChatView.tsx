@@ -627,6 +627,7 @@ export function ChatView({
             groups={pickerGroups}
             value={view?.executor ?? ""}
             disabled={!client}
+            thinking
             onPick={(ref) => void pickModel(ref)}
           />
         ) : null}

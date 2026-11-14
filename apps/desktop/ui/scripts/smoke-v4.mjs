@@ -66,10 +66,16 @@ try {
   await evaluate('[...document.querySelectorAll("[role=option]")].find(b=>b.innerText.includes("gpt-4.1")).click()'); await delay(250);
   await check('model choice persists through profile update', 'document.querySelector("[data-testid=model-picker]").innerText.includes("gpt-4.1")');
   await navigate('theme=clay&screen=settings');
-  await check('settings grouped and theme swatches retained', 'document.querySelectorAll("[data-theme-preview]").length === 4 && document.querySelector("[role=dialog]").innerText.includes("Davranış")');
+  await check('settings grouped', 'document.querySelector("[role=dialog]").innerText.includes("Davranış")');
   await check('modal makes background inert', 'document.getElementById("root").inert');
+  await evaluate('document.querySelector("[data-testid=settings-nav-appearance]").click()'); await delay(150);
+  await check('appearance shows the five favourite themes', 'document.querySelectorAll("[role=dialog] [data-theme-preview]").length === 5');
+  await evaluate('document.querySelector("[role=dialog] [aria-haspopup=dialog]").click()'); await delay(300);
+  await check('plus tile opens the themes modal with every theme', 'document.querySelectorAll("[role=dialog][aria-label=Temalar] [data-theme-preview]").length === 29');
   await evaluate('[...document.querySelectorAll("[data-theme-preview]")].find(n=>n.dataset.themePreview==="raven").closest("button").click()'); await delay(100);
-  await check('theme swatch updates active theme', 'document.documentElement.dataset.theme === "raven"');
+  await check('theme tile updates active theme', 'document.documentElement.dataset.theme === "raven"');
+  await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' }); await delay(150);
+  await check('Escape closes only the themes modal', 'document.querySelectorAll("[role=dialog]").length === 1 && document.getElementById("root").inert');
   await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' }); await delay(100);
   await check('Escape closes modal and restores app', '!document.querySelector("[role=dialog]") && !document.getElementById("root").inert');
   await navigate('theme=clay&screen=apps');

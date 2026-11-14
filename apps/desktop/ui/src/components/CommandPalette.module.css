@@ -90,3 +90,10 @@
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
 }
+
+/* Appearance axes: popovers get a sheen (solid) or frosted glass. */
+.dialog { background-image: var(--surface-sheen); }
+:global(:root[data-style="glass"]) .dialog {
+  background-color: color-mix(in srgb, var(--color-surface-elevated-opaque) 72%, transparent);
+  backdrop-filter: blur(var(--blur-glass)) saturate(1.5);
+}

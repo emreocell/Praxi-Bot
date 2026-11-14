@@ -1,95 +1,65 @@
-import { CalendarDays, ChevronsUpDown, CircleHelp, Grid2X2, Monitor, Settings2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { CalendarClock, CircleHelp, Download, Gauge, Palette, Settings2, Sparkles, type LucideIcon } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ComputerTarget } from "../lib/settingsPrefs";
 import styles from "./AccountMenu.module.css";
+import { Popover } from "./Popover";
 
-const ICONS = { settings: Settings2, apps: Grid2X2, computer: Monitor, help: CircleHelp, schedules: CalendarDays };
+export type AccountAction =
+  | "appearance"
+  | "ai"
+  | "usage"
+  | "settings"
+  | "schedules"
+  | "updates"
+  | "help"
+  | "apps"
+  | "computer";
 
+const QUICK: ReadonlyArray<{ id: AccountAction; icon: LucideIcon; key: string }> = [
+  { id: "appearance", icon: Palette, key: "account.appearance" },
+  { id: "ai", icon: Sparkles, key: "account.ai" },
+  { id: "usage", icon: Gauge, key: "account.usage" }
+];
 
-export type AccountAction = "settings" | "apps" | "computer" | "help" | "schedules";
+const ROWS: ReadonlyArray<{ id: AccountAction; icon: LucideIcon; key: string; kbd?: string }> = [
+  { id: "settings", icon: Settings2, key: "account.settings", kbd: "account.shortcutSettings" },
+  { id: "schedules", icon: CalendarClock, key: "sidebar.schedules" },
+  { id: "updates", icon: Download, key: "account.updates" },
+  { id: "help", icon: CircleHelp, key: "account.help" }
+];
 
-/** Bottom-left account button with a pop-up menu (settings, apps, computer, help). */
+/**
+ * Bottom-left profile button (avatar and name) with its menu: three quick tiles, then
+ * settings, scheduled tasks, updates and help.  The menu is a portal popover, so it may reach
+ * outside a narrow rail.  `compact` = icon-only rail.
+ */
 export function AccountMenu({
   name,
   computerTarget,
+  compact = false,
   onAction
 }: {
   name: string;
   computerTarget: ComputerTarget;
+  compact?: boolean;
   onAction: (action: AccountAction) => void;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const root = useRef<HTMLDivElement | null>(null);
+  const trigger = useRef<HTMLButtonElement | null>(null);
   const label = name.trim() || t("account.defaultName");
-
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    root.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
-    const onDown = (e: MouseEvent) => {
-      if (root.current && !root.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setOpen(false);
-        root.current?.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')?.focus();
-      } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
-        e.preventDefault();
-        const items = [...(root.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])];
-        const index = items.indexOf(document.activeElement as HTMLButtonElement);
-        const next = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (index + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
-        items[next]?.focus();
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  const items: ReadonlyArray<{ id: AccountAction; text: string; hint?: string }> = [
-    { id: "settings", text: t("account.settings") },
-    { id: "apps", text: t("account.apps") },
-    {
-      id: "computer",
-      text: t("account.computer"),
-      hint: t(`settingsModal.computer.targets.${computerTarget}.title`)
-    },
-    { id: "schedules", text: t("sidebar.schedules") },
-    { id: "help", text: t("account.help") }
-  ];
+  const initial = label.slice(0, 1).toUpperCase();
+  const close = useCallback(() => setOpen(false), []);
+  const run = (id: AccountAction) => {
+    setOpen(false);
+    onAction(id);
+  };
 
   return (
-    <div className={styles.root} ref={root}>
-      {open ? (
-        <div className={styles.menu} role="menu" aria-label={label}>
-          {items.map((i) => { const ItemIcon = ICONS[i.id]; return (
-            <button
-              key={i.id}
-              type="button"
-              role="menuitem"
-              className={styles.item}
-              data-testid={`account-${i.id}`}
-              onClick={() => {
-                setOpen(false);
-                onAction(i.id);
-              }}
-            >
-              <ItemIcon /><span>{i.text}</span>
-              {i.hint ? <span className={styles.hint}>{i.hint}</span> : null}
-            </button>
-          ); })}
-        </div>
-      ) : null}
+    <>
       <button
+        ref={trigger}
         type="button"
         className={styles.trigger}
         aria-haspopup="menu"
@@ -98,14 +68,44 @@ export function AccountMenu({
         aria-label={label}
         data-testid="account-menu"
         onClick={() => setOpen((o) => !o)}
-        onKeyDown={(event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); } }}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            setOpen(true);
+          }
+        }}
       >
         <span className={styles.avatar} aria-hidden="true">
-          {label.slice(0, 1).toUpperCase()}
+          {initial}
         </span>
-        <span className={styles.name}>{label}</span>
-        <ChevronsUpDown aria-hidden="true" />
+        {compact ? null : <span className={styles.name}>{label}</span>}
       </button>
-    </div>
+      <Popover open={open} anchor={trigger} onClose={close} placement="top-start" label={label} width={272} className={styles.menu}>
+        <div className={styles.head}>
+          <span className={`${styles.avatar} ${styles.avatarLg}`} aria-hidden="true">
+            {initial}
+          </span>
+          <div className={styles.headText}>
+            <b>{label}</b>
+            <small>{t(`settingsModal.computer.targets.${computerTarget}.title`)}</small>
+          </div>
+        </div>
+        <div className={styles.quick}>
+          {QUICK.map(({ id, icon: Icon, key }) => (
+            <button key={id} type="button" role="menuitem" className={styles.tile} data-testid={`account-${id}`} onClick={() => run(id)}>
+              <Icon aria-hidden="true" />
+              <span>{t(key)}</span>
+            </button>
+          ))}
+        </div>
+        {ROWS.map(({ id, icon: Icon, key, kbd }) => (
+          <button key={id} type="button" role="menuitem" className={styles.item} data-testid={`account-${id}`} onClick={() => run(id)}>
+            <Icon aria-hidden="true" />
+            <span>{t(key)}</span>
+            {kbd ? <kbd>{t(kbd)}</kbd> : null}
+          </button>
+        ))}
+      </Popover>
+    </>
   );
 }

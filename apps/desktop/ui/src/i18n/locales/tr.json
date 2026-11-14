@@ -743,7 +743,12 @@
     "apps": "Uygulamalar",
     "computer": "Bilgisayar",
     "help": "Yardım",
-    "localComputer": "Bu bilgisayar"
+    "localComputer": "Bu bilgisayar",
+    "appearance": "Görünüm",
+    "ai": "Yapay zekâ",
+    "usage": "Kullanım",
+    "updates": "Güncellemeler",
+    "shortcutSettings": "Ctrl ,"
   },
   "apps": {
     "title": "Uygulamalar",
@@ -830,7 +835,14 @@
     "search": "Model ara",
     "empty": "Eşleşen model yok.",
     "switched": "{{model}} modeline geçildi",
-    "switchedDefault": "Varsayılan model {{model}} olarak ayarlandı"
+    "switchedDefault": "Varsayılan model {{model}} olarak ayarlandı",
+    "thinking": "Düşünme",
+    "levels": {
+      "low": "Düşük",
+      "medium": "Orta",
+      "high": "Yüksek",
+      "max": "Maks"
+    }
   },
   "settingsModal": {
     "title": "Ayarlar",
@@ -842,7 +854,8 @@
       "ai": "Yapay zeka",
       "computer": "Bilgisayar",
       "usage": "Kullanım",
-      "updates": "Güncellemeler"
+      "updates": "Güncellemeler",
+      "appearance": "Görünüm"
     },
     "general": {
       "account": {
@@ -1081,5 +1094,151 @@
   "window": {
     "minimize": "Küçült",
     "maximize": "Büyüt / geri yükle"
+  },
+  "theme": {
+    "names": {
+      "obsidian": "Obsidyen",
+      "cobalt": "Kobalt",
+      "clay": "Kil",
+      "porcelain": "Porselen",
+      "moss": "Yosun",
+      "raven": "Kuzgun",
+      "navy": "Lacivert",
+      "wine": "Şarap",
+      "graphite": "Grafit",
+      "plum": "Erik",
+      "terminal": "Terminal",
+      "sand": "Kum",
+      "lavender": "Lavanta",
+      "mint": "Nane",
+      "rose": "Gül",
+      "sky": "Gök",
+      "midnight": "Gece laciverti",
+      "champagne": "Şampanya",
+      "copper": "Bakır",
+      "storm": "Fırtına",
+      "neon": "Neon",
+      "race": "Yarış",
+      "forest": "Orman",
+      "blush": "Pudra",
+      "oat": "Yulaf",
+      "seafoam": "Deniz köpüğü",
+      "khaki": "Kum ve haki",
+      "frost": "Buz",
+      "chalk": "Tebeşir",
+      "custom": "Kendi teman"
+    }
+  },
+  "backdrop": {
+    "names": {
+      "ink": "Mürekkep",
+      "aurora": "Aurora",
+      "meadow": "Çayır",
+      "sunset": "Gün batımı",
+      "night": "Gece",
+      "peach": "Şeftali",
+      "lagoon": "Lagün",
+      "silk": "İpek",
+      "dawn": "Şafak",
+      "ocean": "Okyanus",
+      "lava": "Lav",
+      "pearl": "Sedef",
+      "smoke": "Duman",
+      "curtain": "Perde",
+      "reed": "Şeritli cam",
+      "reed2": "Şeritli gül",
+      "reed3": "Şeritli buz",
+      "contour": "Kontur",
+      "grid": "Izgara",
+      "custom": "Kendi görselin"
+    }
+  },
+  "appearance": {
+    "theme": {
+      "title": "Tema",
+      "description": "Tüm uygulamanın renkleri. Yüzeyler, çizgiler ve soluk metin iki renkten türetilir.",
+      "all": "Tüm temalar",
+      "system": "Sistemi izle"
+    },
+    "themes": {
+      "modalTitle": "Temalar",
+      "done": "Bitti",
+      "dark": "Koyu",
+      "light": "Açık",
+      "custom": "Kendi teman",
+      "customHint": "İki renk seç, gerisini biz türetiriz",
+      "customDetail": "Yüzeyler, çizgiler ve soluk metin otomatik hesaplanır.",
+      "background": "Zemin",
+      "text": "Yazı",
+      "lowContrast": "Kontrast düşük ({{ratio}}:1). Metnin okunur kalması için en az 4,5:1 gerekir."
+    },
+    "accent": {
+      "title": "Vurgu",
+      "description": "Düğmelerin ve etkin öğelerin vurgu rengi.",
+      "bot": "Botun rengi",
+      "botHint": "Vurgu rengi, konuştuğun botun rengini izler.",
+      "theme": "Temanın rengi",
+      "themeHint": "Temanın kendi vurgu rengi.",
+      "fixedHint": "Sabit vurgu rengi.",
+      "custom": "Özel renk"
+    },
+    "style": {
+      "title": "Stil",
+      "description": "Paneller, kartlar ve menüler nasıl boyanır.",
+      "solid": "Düz",
+      "glass": "Cam",
+      "line": "Çizgi"
+    },
+    "corners": {
+      "title": "Köşeler",
+      "description": "Panellerin, düğmelerin ve kartların yuvarlaklığı.",
+      "sharp": "Keskin",
+      "soft": "Yumuşak",
+      "round": "Yuvarlak"
+    },
+    "bubbles": {
+      "title": "Balonlar",
+      "description": "Sohbette mesajların görünümü.",
+      "soft": "Dolu",
+      "glass": "Cam",
+      "line": "Çizgi",
+      "plain": "Düz metin",
+      "own": "Benim balonum",
+      "tint": "Hafif",
+      "accent": "Vurgu",
+      "neutral": "Nötr"
+    },
+    "backdrop": {
+      "title": "Arka plan",
+      "description": "Panellerin arkasında bir resim. Bir kez çizilir, hareket etmez.",
+      "none": "Yok",
+      "all": "Tüm arka planlar",
+      "modalTitle": "Arka planlar",
+      "calm": "Sakin",
+      "lively": "Canlı",
+      "intensity": "Arka plan canlılığı",
+      "own": "Kendi görselin",
+      "ownHint": "Arka plan görseli ayarındaki resmi kullanır.",
+      "ownChoose": "Görsel seç",
+      "groups": {
+        "dotted": "Noktalı",
+        "grain": "Grenli",
+        "glass": "Cam ve çizgi",
+        "other": "Diğer"
+      }
+    }
+  },
+  "shell": {
+    "railGrip": "Kenar şeridini boyutlandır (ok tuşları)",
+    "panelGrip": "Bot panelini boyutlandır (ok tuşları)"
+  },
+  "botPanel": {
+    "toggle": "Bot paneli",
+    "close": "Paneli kapat",
+    "settings": "Bot ayarları",
+    "profile": "Bot profili",
+    "chats": "Sohbetler",
+    "noChats": "Henüz sohbet yok.",
+    "untitled": "Yeni sohbet"
   }
 }

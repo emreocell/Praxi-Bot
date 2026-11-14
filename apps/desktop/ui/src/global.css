@@ -47,3 +47,10 @@ input::placeholder, textarea::placeholder { color: var(--color-text-muted); opac
 }
 
 :root[data-theme="clay"] body, :root[data-theme="clay"] main { background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' opacity='.025' filter='url(%23n)'/%3E%3C/svg%3E"); }
+
+/* No colour transitions until the first appearance paint (no dark-to-light flash on start). */
+:root[data-booting] *, :root[data-booting] *::before, :root[data-booting] *::after { transition: none !important; }
+
+/* Column resize in progress (rail / bot panel grips): no text selection, no transitions. */
+:root[data-resizing] { user-select: none; cursor: col-resize; }
+:root[data-resizing] * { transition: none !important; }
