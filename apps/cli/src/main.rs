@@ -14,6 +14,7 @@ mod presets;
 mod prompt;
 mod remote;
 mod serve;
+mod web_host;
 mod wizard;
 
 use std::path::PathBuf;

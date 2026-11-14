@@ -480,7 +480,7 @@ fn check_schedule_tools(dir: &Path) -> Check {
 }
 
 /// Time the `--online` web search probe may take.
-const WEB_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
+const WEB_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// `web tools`: which search backends are configured, and with `--online`
 /// whether a live search answers. A failing probe is a warning, never a fail:
@@ -488,19 +488,22 @@ const WEB_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 fn check_web(env: &DoctorEnv<'_>) -> Check {
     const N: &str = "web search";
     let (file, mut notes) = crate::serve::load_web_file(env.data_dir);
-    // The doctor holds the store by reference only: copy the one Brave key into
-    // a throwaway in-memory store for the probe.
+    // The doctor holds the store by reference only: copy the Brave / Tavily keys
+    // into a throwaway in-memory store for the probe.
     let mem: std::sync::Arc<dyn SecretStore> =
         std::sync::Arc::new(secret_store::MemoryStore::new());
-    let mut brave_missing = false;
-    if let (Some(name), Ok((s, _))) = (file.search.brave_key.as_deref(), &env.store) {
-        match s.get(name) {
-            Ok(Some(v)) => {
-                let _ = mem.set(name, v.expose());
+    let mut copy_secret = |label: &str, key_name: Option<&str>| {
+        if let (Some(name), Ok((s, _))) = (key_name, &env.store) {
+            match s.get(name) {
+                Ok(Some(v)) => {
+                    let _ = mem.set(name, v.expose());
+                }
+                _ => notes.push(format!("{label} key secret not found")),
             }
-            _ => brave_missing = true,
         }
-    }
+    };
+    copy_secret("brave", file.search.brave_key.as_deref());
+    copy_secret("tavily", file.search.tavily_key.as_deref());
     let cfg = crate::serve::web_tools_config(
         env.data_dir,
         &file,
@@ -509,9 +512,6 @@ fn check_web(env: &DoctorEnv<'_>) -> Check {
         &mut notes,
     );
     let backends = crate::serve::web_backend_summary(&cfg);
-    if brave_missing {
-        notes.push("brave key secret not found".into());
-    }
     let detail = |extra: String| {
         let mut d = format!("backends: {backends}");
         if !extra.is_empty() {
@@ -524,7 +524,7 @@ fn check_web(env: &DoctorEnv<'_>) -> Check {
         }
         d
     };
-    let hint = "see docs/guide/web.md; edit <data_dir>/web.toml";
+    let hint = "configure Brave, Tavily, or SearXNG in Settings -> Web search or <data_dir>/web.toml (see docs/guide/web.md)";
     if !env.online {
         let c = Check::ok(N, detail("not probed".into()));
         return if notes.is_empty() {
@@ -1117,6 +1117,8 @@ id = "m1"
                     "[search]
 searxng_url = \"{}\"
 duckduckgo = false
+duckduckgo_lite = false
+bing = false
 ",
                     server.uri()
                 ),
