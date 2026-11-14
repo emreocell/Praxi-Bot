@@ -285,10 +285,16 @@ mod tests {
     struct StartupCounter(Arc<std::sync::atomic::AtomicUsize>);
     #[async_trait::async_trait]
     impl daemon_api::ChannelControl for StartupCounter {
-        fn start(&self) { self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst); }
+        fn start(&self) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
         async fn stop(&self) {}
-        fn info(&self) -> daemon_api::dto::ChannelDto { panic!("unused") }
-        fn create_pair_code(&self) -> std::result::Result<daemon_api::dto::PairCodeDto, String> { panic!("unused") }
+        fn info(&self) -> daemon_api::dto::ChannelDto {
+            panic!("unused")
+        }
+        fn create_pair_code(&self) -> std::result::Result<daemon_api::dto::PairCodeDto, String> {
+            panic!("unused")
+        }
     }
 
     #[tokio::test]
@@ -298,7 +304,16 @@ mod tests {
         let (a, a_net) = daemon(a_dir.path(), 0).await;
         let (b, b_net) = daemon(b_dir.path(), 4).await;
         let invite = a_net.create_invite(Role::Desktop).await;
-        b_net.pair(&PairTicket::parse(&invite.ticket).unwrap()).await.unwrap();
+        b_net
+            .pair(&PairTicket::parse(&invite.ticket).unwrap())
+            .await
+            .unwrap();
+        // Reopen the same identity, pairing store and stale active host.toml.
+        a.shutdown_token().cancel();
+        a_net.shutdown().await;
+        drop(a_net);
+        drop(a);
+        let (a, a_net) = daemon(a_dir.path(), 0).await;
         let starts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         a.add_channel(Arc::new(StartupCounter(starts.clone())));
         // Persisted active configuration is loaded before the transport has a verdict.
@@ -308,10 +323,19 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(starts.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert!(!startup.is_finished());
-        let heartbeat = HeartbeatConfig { interval: Duration::from_millis(50), initial_backoff: Duration::from_millis(10), max_backoff: Duration::from_millis(100), connect_timeout: Duration::from_secs(2) };
+        let heartbeat = HeartbeatConfig {
+            interval: Duration::from_millis(50),
+            initial_backoff: Duration::from_millis(10),
+            max_backoff: Duration::from_millis(100),
+            connect_timeout: Duration::from_secs(2),
+        };
         watch_peers_with_config(&a, a_net.clone(), heartbeat);
         watch_peers_with_config(&b, b_net.clone(), heartbeat);
-        tokio::time::timeout(Duration::from_secs(12), startup).await.unwrap().unwrap().unwrap();
+        tokio::time::timeout(Duration::from_secs(12), startup)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
         assert_eq!(a.leader().config().state, HostState::Standby);
         assert_eq!(starts.load(std::sync::atomic::Ordering::SeqCst), 0);
         a.shutdown_token().cancel();

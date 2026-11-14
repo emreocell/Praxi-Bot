@@ -195,7 +195,9 @@ impl TelegramRuntime {
 impl ChannelControl for TelegramRuntime {
     fn start(&self) {
         let mut channel = self.channel.lock();
-        if channel.as_ref().is_none_or(|c| c.status() != channel_telegram::ChannelStatus::Running)
+        if channel
+            .as_ref()
+            .is_none_or(|c| c.status() != channel_telegram::ChannelStatus::Running)
             && let Some(config) = &self.config
         {
             match TelegramChannel::start(config.clone(), self.client.clone()) {
@@ -211,11 +213,14 @@ impl ChannelControl for TelegramRuntime {
     fn info(&self) -> ChannelDto {
         let channel = self.channel.lock();
         ChannelDto {
-            status: Some(match channel.as_ref().map(TelegramChannel::status) {
-                Some(channel_telegram::ChannelStatus::Running) => "running",
-                Some(channel_telegram::ChannelStatus::Conflict) => "conflict",
-                _ => "stopped",
-            }.into()),
+            status: Some(
+                match channel.as_ref().map(TelegramChannel::status) {
+                    Some(channel_telegram::ChannelStatus::Running) => "running",
+                    Some(channel_telegram::ChannelStatus::Conflict) => "conflict",
+                    _ => "stopped",
+                }
+                .into(),
+            ),
             id: "telegram".into(),
             configured: self.configured,
             enabled: self.enabled,
@@ -312,4 +317,58 @@ pub fn telegram_runtime(
             SecretValue::new(daemon_token),
         )),
     })
+}
+
+#[cfg(test)]
+mod conflict_status_tests {
+    use super::*;
+    use std::{
+        sync::atomic::{AtomicUsize, Ordering},
+        time::Duration,
+    };
+    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+    #[tokio::test]
+    async fn terminal_conflict_is_visible_through_runtime_info_and_can_restart() {
+        let server = MockServer::start().await;
+        let polls = Arc::new(AtomicUsize::new(0));
+        let count = polls.clone();
+        Mock::given(method("POST"))
+            .respond_with(move |_: &wiremock::Request| {
+                if count.fetch_add(1, Ordering::SeqCst) < 4 {
+                    ResponseTemplate::new(409).set_body_json(json!({"ok":false,"error_code":409}))
+                } else {
+                    ResponseTemplate::new(200).set_body_json(json!({"ok":true,"result":[]}))
+                }
+            })
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let mut config =
+            TelegramConfig::with_in_memory_token("test-token").with_api_base_url(server.uri());
+        config.conflict_backoff = Duration::from_millis(1);
+        let runtime = TelegramRuntime {
+            configured: true,
+            enabled: true,
+            data_dir: dir.path().into(),
+            channel: parking_lot::Mutex::new(None),
+            config: Some(config),
+            client: Arc::new(HttpDaemonClient::new(
+                "http://127.0.0.1:1",
+                SecretValue::new("local-token"),
+            )),
+        };
+        runtime.start();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while runtime.info().status.as_deref() != Some("conflict") {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!runtime.info().running);
+        runtime.start();
+        assert_eq!(runtime.info().status.as_deref(), Some("running"));
+        runtime.shutdown().await;
+    }
 }

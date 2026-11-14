@@ -1367,6 +1367,8 @@ export interface components {
             paired_users: number;
             /** @description The channel is running inside this daemon. */
             running: boolean;
+            /** @description Polling lifecycle, including a persistent Telegram conflict notification. */
+            status?: string | null;
         };
         /** @description A chat thread. */
         ChatDto: {
@@ -1869,6 +1871,7 @@ export interface components {
             leader: string | null;
             /**
              * @default {
+             *       "browser_idle_seconds": null,
              *       "max_computer_runs": null
              *     }
              */
@@ -1916,6 +1919,11 @@ export interface components {
             ttl_secs?: number | null;
         };
         HostLimits: {
+            /**
+             * Format: int64
+             * @default null
+             */
+            browser_idle_seconds: number | null;
             /** @default null */
             max_computer_runs: number | null;
         };

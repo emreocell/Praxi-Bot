@@ -4136,6 +4136,13 @@
           "running": {
             "type": "boolean",
             "description": "The channel is running inside this daemon."
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Polling lifecycle, including a persistent Telegram conflict notification."
           }
         }
       },
@@ -5334,6 +5341,7 @@
               }
             ],
             "default": {
+              "browser_idle_seconds": null,
               "max_computer_runs": null
             }
           },
@@ -5353,8 +5361,7 @@
             ],
             "default": "active"
           }
-        },
-        "additionalProperties": false
+        }
       },
       "HostConflict": {
         "type": "object",
@@ -5481,6 +5488,15 @@
       "HostLimits": {
         "type": "object",
         "properties": {
+          "browser_idle_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "default": null,
+            "minimum": 0
+          },
           "max_computer_runs": {
             "type": [
               "integer",
@@ -5489,8 +5505,7 @@
             "default": null,
             "minimum": 0
           }
-        },
-        "additionalProperties": false
+        }
       },
       "HostMode": {
         "type": "string",

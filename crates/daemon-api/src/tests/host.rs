@@ -299,7 +299,12 @@ async fn phone_can_manage_ownership_but_cannot_import_handover_or_write_secrets(
 }
 
 async fn attach_network(t: &T) -> PeerNetwork {
+    attach_network_as(t, peer_network::Role::Desktop).await
+}
+
+async fn attach_network_as(t: &T, role: peer_network::Role) -> PeerNetwork {
     let mut config = PeerConfig::new(t._dir.path().join("peer"));
+    config.local_role = role;
     config.relay = RelayConfig::Disabled;
     config.bind_addr = Some("127.0.0.1:0".parse().unwrap());
     let net = PeerNetwork::start(config, None).await.unwrap();
@@ -388,7 +393,9 @@ async fn telegram_conflict_preserves_ownership_and_scheduler_and_emits_reason() 
     assert_eq!(t.state.leader().config(), before);
     assert_eq!(HostConfig::load(t._dir.path()).unwrap(), before);
     assert!(t.state.scheduler().is_ok());
-    assert!(matches!(events.recv().await.unwrap(), HostEvent::HostConflict(c) if c.reason == "telegram_409"));
+    assert!(
+        matches!(events.recv().await.unwrap(), HostEvent::HostConflict(c) if c.reason == "telegram_409")
+    );
     t.state.stop_components().await;
 }
 
@@ -497,7 +504,10 @@ fn main_format_host_limits_and_unknown_keys_survive_ownership_roundtrip() {
     assert_eq!(config.limits.browser_idle_seconds, Some(180));
     config.state = HostState::Standby;
     config.save(dir.path()).unwrap();
-    let saved: toml::Table = std::fs::read_to_string(dir.path().join("host.toml")).unwrap().parse().unwrap();
+    let saved: toml::Table = std::fs::read_to_string(dir.path().join("host.toml"))
+        .unwrap()
+        .parse()
+        .unwrap();
     let before: toml::Table = original.parse().unwrap();
     assert_eq!(saved["limits"], before["limits"]);
     assert_eq!(saved["future_setting"], before["future_setting"]);
@@ -505,11 +515,21 @@ fn main_format_host_limits_and_unknown_keys_survive_ownership_roundtrip() {
 }
 
 async fn phone_request(t: &T, method: Method, path: &str, body: Option<Value>) -> StatusCode {
-    let request = Request::builder().method(method).uri(path)
+    let request = Request::builder()
+        .method(method)
+        .uri(path)
         .header("content-type", "application/json")
-        .extension(crate::PeerIdentity { key: "phone-key".into(), role: crate::PeerRole::Phone })
-        .body(body.map_or_else(Body::empty, |v| Body::from(v.to_string()))).unwrap();
-    crate::peer_router(t.state.clone()).oneshot(request).await.unwrap().status()
+        .extension(crate::PeerIdentity {
+            key: "phone-key".into(),
+            role: crate::PeerRole::Phone,
+        })
+        .body(body.map_or_else(Body::empty, |v| Body::from(v.to_string())))
+        .unwrap();
+    crate::peer_router(t.state.clone())
+        .oneshot(request)
+        .await
+        .unwrap()
+        .status()
 }
 
 #[tokio::test]
@@ -517,24 +537,66 @@ async fn phone_cannot_mint_privileged_invites() {
     let t = setup();
     let net = attach_network(&t).await;
     for role in ["desktop", "host", "node"] {
-        assert_eq!(phone_request(&t, Method::POST, "/v1/host/invite", Some(json!({"role":role}))).await, StatusCode::FORBIDDEN);
+        assert_eq!(
+            phone_request(
+                &t,
+                Method::POST,
+                "/v1/host/invite",
+                Some(json!({"role":role}))
+            )
+            .await,
+            StatusCode::FORBIDDEN
+        );
     }
-    assert_eq!(phone_request(&t, Method::POST, "/v1/host/invite", Some(json!({"role":"phone"}))).await, StatusCode::OK);
+    assert_eq!(
+        phone_request(
+            &t,
+            Method::POST,
+            "/v1/host/invite",
+            Some(json!({"role":"phone"}))
+        )
+        .await,
+        StatusCode::OK
+    );
     net.shutdown().await;
 }
 
 #[tokio::test]
 async fn phone_cannot_revoke_non_phone_devices() {
-    for role in [peer_network::Role::Desktop, peer_network::Role::Host, peer_network::Role::Node, peer_network::Role::Phone] {
+    for role in [
+        peer_network::Role::Desktop,
+        peer_network::Role::Host,
+        peer_network::Role::Node,
+        peer_network::Role::Phone,
+    ] {
         let t = setup();
         let other = setup();
         let net = attach_network(&t).await;
-        let other_net = attach_network(&other).await;
+        let other_net = attach_network_as(&other, role).await;
         let invite = net.create_invite(role).await;
-        other_net.pair(&peer_network::PairTicket::parse(&invite.ticket).unwrap()).await.unwrap();
-        let status = phone_request(&t, Method::DELETE, &format!("/v1/host/devices/{}", other_net.id()), None).await;
-        assert_eq!(status, if role == peer_network::Role::Phone { StatusCode::NO_CONTENT } else { StatusCode::FORBIDDEN });
-        assert_eq!(net.device(&other_net.id()).is_some(), role != peer_network::Role::Phone);
+        other_net
+            .pair(&peer_network::PairTicket::parse(&invite.ticket).unwrap())
+            .await
+            .unwrap();
+        let status = phone_request(
+            &t,
+            Method::DELETE,
+            &format!("/v1/host/devices/{}", other_net.id()),
+            None,
+        )
+        .await;
+        assert_eq!(
+            status,
+            if role == peer_network::Role::Phone {
+                StatusCode::NO_CONTENT
+            } else {
+                StatusCode::FORBIDDEN
+            }
+        );
+        assert_eq!(
+            net.device(&other_net.id()).is_some(),
+            role != peer_network::Role::Phone
+        );
         net.shutdown().await;
         other_net.shutdown().await;
     }
@@ -543,10 +605,29 @@ async fn phone_cannot_revoke_non_phone_devices() {
 #[tokio::test]
 async fn higher_epoch_records_leader_without_losing_fresh_import_eligibility() {
     let t = setup_with(|data| {
-        HostConfig { mode: HostMode::Host, state: HostState::Fresh, ..Default::default() }.save(data).unwrap();
+        HostConfig {
+            mode: HostMode::Host,
+            state: HostState::Fresh,
+            ..Default::default()
+        }
+        .save(data)
+        .unwrap();
     });
-    let peer = peer_network::identity::load_or_create_secret_key(&t._dir.path().join("peer.key")).unwrap().public().to_string();
-    t.state.leader().observe(&peer, LeaderInfo { epoch: 8, state: LeaderState::Active }).await.unwrap();
+    let peer = peer_network::identity::load_or_create_secret_key(&t._dir.path().join("peer.key"))
+        .unwrap()
+        .public()
+        .to_string();
+    t.state
+        .leader()
+        .observe(
+            &peer,
+            LeaderInfo {
+                epoch: 8,
+                state: LeaderState::Active,
+            },
+        )
+        .await
+        .unwrap();
     let config = HostConfig::load(t._dir.path()).unwrap();
     assert_eq!(config.state, HostState::Fresh);
     assert_eq!(config.epoch, 8);
@@ -557,12 +638,37 @@ async fn higher_epoch_records_leader_without_losing_fresh_import_eligibility() {
 #[tokio::test]
 async fn malicious_peer_epoch_is_rejected_and_force_recovers_from_ceiling() {
     let t = setup();
-    let peer = peer_network::identity::load_or_create_secret_key(&t._dir.path().join("peer.key")).unwrap().public().to_string();
-    for epoch in [u64::MAX, crate::host::EPOCH_CEILING + 1, crate::host::MAX_PEER_EPOCH_ADVANCE + 1] {
-        t.state.leader().observe(&peer, LeaderInfo { epoch, state: LeaderState::Active }).await.unwrap();
+    let peer = peer_network::identity::load_or_create_secret_key(&t._dir.path().join("peer.key"))
+        .unwrap()
+        .public()
+        .to_string();
+    for epoch in [
+        u64::MAX,
+        crate::host::EPOCH_CEILING + 1,
+        crate::host::MAX_PEER_EPOCH_ADVANCE + 1,
+    ] {
+        t.state
+            .leader()
+            .observe(
+                &peer,
+                LeaderInfo {
+                    epoch,
+                    state: LeaderState::Active,
+                },
+            )
+            .await
+            .unwrap();
         assert_eq!(t.state.leader().config(), HostConfig::default());
     }
-    t.state.leader().transition_to(HostConfig { epoch: crate::host::EPOCH_CEILING, state: HostState::Standby, ..Default::default() }).await.unwrap();
+    t.state
+        .leader()
+        .transition_to(HostConfig {
+            epoch: crate::host::EPOCH_CEILING,
+            state: HostState::Standby,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
     assert!(t.state.leader().activate(false).await.is_err());
     let recovered = t.state.leader().activate(true).await.unwrap();
     assert_eq!(recovered.state, HostState::Active);
@@ -574,14 +680,45 @@ async fn malicious_peer_epoch_is_rejected_and_force_recovers_from_ceiling() {
 #[tokio::test]
 async fn conflict_notifications_require_active_sender_and_active_local_owner() {
     let peer_dir = tempfile::tempdir().unwrap();
-    let peer = peer_network::identity::load_or_create_secret_key(&peer_dir.path().join("peer.key")).unwrap().public().to_string();
+    let peer = peer_network::identity::load_or_create_secret_key(&peer_dir.path().join("peer.key"))
+        .unwrap()
+        .public()
+        .to_string();
     for local in [HostState::Fresh, HostState::Standby, HostState::Active] {
-        for remote in [LeaderState::Fresh, LeaderState::Standby, LeaderState::Active] {
+        for remote in [
+            LeaderState::Fresh,
+            LeaderState::Standby,
+            LeaderState::Active,
+        ] {
             let t = setup_with(|data| {
-                HostConfig { mode: HostMode::Host, state: local, epoch: 3, ..Default::default() }.save(data).unwrap();
+                HostConfig {
+                    mode: HostMode::Host,
+                    state: local,
+                    epoch: 3,
+                    ..Default::default()
+                }
+                .save(data)
+                .unwrap();
             });
-            t.state.leader().observe_conflict(&peer, LeaderInfo { epoch: 3, state: remote }).await.unwrap();
-            assert_eq!(t.state.leader().config().state, if local == HostState::Active && remote == LeaderState::Active { HostState::Standby } else { local });
+            t.state
+                .leader()
+                .observe_conflict(
+                    &peer,
+                    LeaderInfo {
+                        epoch: 3,
+                        state: remote,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                t.state.leader().config().state,
+                if local == HostState::Active && remote == LeaderState::Active {
+                    HostState::Standby
+                } else {
+                    local
+                }
+            );
         }
     }
 }
@@ -593,7 +730,10 @@ async fn boot_peer_verification_blocks_scheduler_and_automatic_admission() {
     let net = attach_network(&t).await;
     let other_net = attach_network(&other).await;
     let invite = net.create_invite(peer_network::Role::Desktop).await;
-    other_net.pair(&peer_network::PairTicket::parse(&invite.ticket).unwrap()).await.unwrap();
+    other_net
+        .pair(&peer_network::PairTicket::parse(&invite.ticket).unwrap())
+        .await
+        .unwrap();
     t.state.leader().set_network(net.clone());
     t.state.start_leader_components().unwrap();
     assert!(t.state.scheduler().is_err());
@@ -607,20 +747,64 @@ async fn ownership_and_device_actions_audit_actor_state_and_epoch_without_ticket
     let t = setup();
     let other = setup();
     let net = attach_network(&t).await;
-    let other_net = attach_network(&other).await;
-    assert_eq!(phone_request(&t, Method::POST, "/v1/host/standby", None).await, StatusCode::OK);
-    assert_eq!(phone_request(&t, Method::POST, "/v1/host/activate", Some(json!({"force":true}))).await, StatusCode::OK);
-    let invite = call(&t, Method::POST, "/v1/host/invite", Some(json!({"role":"phone"}))).await.json();
-    other_net.pair(&peer_network::PairTicket::parse(invite["ticket"].as_str().unwrap()).unwrap()).await.unwrap();
-    assert_eq!(phone_request(&t, Method::DELETE, &format!("/v1/host/devices/{}", other_net.id()), None).await, StatusCode::NO_CONTENT);
-    assert_eq!(call(&t, Method::POST, "/v1/host/update", None).await.status, StatusCode::CONFLICT);
+    let other_net = attach_network_as(&other, peer_network::Role::Phone).await;
+    assert_eq!(
+        phone_request(&t, Method::POST, "/v1/host/standby", None).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        phone_request(
+            &t,
+            Method::POST,
+            "/v1/host/activate",
+            Some(json!({"force":true}))
+        )
+        .await,
+        StatusCode::OK
+    );
+    let invite = call(
+        &t,
+        Method::POST,
+        "/v1/host/invite",
+        Some(json!({"role":"phone"})),
+    )
+    .await
+    .json();
+    other_net
+        .pair(&peer_network::PairTicket::parse(invite["ticket"].as_str().unwrap()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        phone_request(
+            &t,
+            Method::DELETE,
+            &format!("/v1/host/devices/{}", other_net.id()),
+            None
+        )
+        .await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        call(&t, Method::POST, "/v1/host/update", None).await.status,
+        StatusCode::CONFLICT
+    );
     let audit = t.state.storage().list_audit(t.state.user_id()).unwrap();
-    for (action, actor) in [("host.standby","phone:phone-key"),("host.activate","phone:phone-key"),("host.invite","local"),("host.revoke","phone:phone-key"),("host.update","local")] {
+    for (action, actor) in [
+        ("host.standby", "phone:phone-key"),
+        ("host.activate", "phone:phone-key"),
+        ("host.invite", "local"),
+        ("host.revoke", "phone:phone-key"),
+        ("host.update", "local"),
+    ] {
         let row = audit.iter().find(|r| r.action == action).unwrap();
         assert_eq!(row.actor, actor);
         assert!(row.detail["previous_state"].is_string());
         assert!(row.detail["new_epoch"].is_u64());
-        assert!(!row.detail.to_string().contains(invite["ticket"].as_str().unwrap()));
+        assert!(
+            !row.detail
+                .to_string()
+                .contains(invite["ticket"].as_str().unwrap())
+        );
         if action == "host.activate" {
             assert_eq!(row.detail["previous_state"], "standby");
             assert_eq!(row.detail["new_state"], "active");
@@ -651,20 +835,35 @@ impl crate::ChannelControl for FailedStartupProbe {
     async fn stop(&self) {
         *self.observed.lock().unwrap() = Some(HostConfig::load(&self.data).unwrap().state);
     }
-    fn info(&self) -> crate::dto::ChannelDto { panic!("unused") }
-    fn create_pair_code(&self) -> Result<crate::dto::PairCodeDto, String> { panic!("unused") }
+    fn info(&self) -> crate::dto::ChannelDto {
+        panic!("unused")
+    }
+    fn create_pair_code(&self) -> Result<crate::dto::PairCodeDto, String> {
+        panic!("unused")
+    }
 }
 
 #[tokio::test]
 async fn failed_activation_has_durable_standby_before_rollback() {
     let t = setup_with(|data| {
-        HostConfig { state: HostState::Standby, ..Default::default() }.save(data).unwrap();
+        HostConfig {
+            state: HostState::Standby,
+            ..Default::default()
+        }
+        .save(data)
+        .unwrap();
     });
     std::fs::create_dir(t._dir.path().join("schedules.db")).unwrap();
     let observed = Arc::new(std::sync::Mutex::new(None));
-    t.state.add_channel(Arc::new(FailedStartupProbe { data: t._dir.path().into(), observed: observed.clone() }));
+    t.state.add_channel(Arc::new(FailedStartupProbe {
+        data: t._dir.path().into(),
+        observed: observed.clone(),
+    }));
     assert!(t.state.leader().activate(true).await.is_err());
     assert_eq!(*observed.lock().unwrap(), Some(HostState::Standby));
-    assert_eq!(HostConfig::load(t._dir.path()).unwrap().state, HostState::Standby);
+    assert_eq!(
+        HostConfig::load(t._dir.path()).unwrap().state,
+        HostState::Standby
+    );
     assert_eq!(t.state.leader().config().state, HostState::Standby);
 }

@@ -3493,14 +3493,21 @@ async fn telegram_409_clears_on_second_poll_without_stopping_channel() {
             } else {
                 ResponseTemplate::new(200).set_body_json(json!({"ok":true,"result":[]}))
             }
-        }).mount(&server).await;
+        })
+        .mount(&server)
+        .await;
     let mut config = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
-        .with_api_base_url(server.uri()).with_poll_backoff(Duration::from_millis(1));
+        .with_api_base_url(server.uri())
+        .with_poll_backoff(Duration::from_millis(1));
     config.conflict_backoff = Duration::from_millis(1);
     let channel = TelegramChannel::start(config, Arc::new(FakeDaemon::new(vec![]))).unwrap();
     tokio::time::timeout(Duration::from_secs(3), async {
-        while polls.load(Ordering::SeqCst) < 3 { tokio::task::yield_now().await; }
-    }).await.unwrap();
+        while polls.load(Ordering::SeqCst) < 3 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
     assert_eq!(channel.status(), crate::ChannelStatus::Running);
     channel.shutdown().await;
 }
