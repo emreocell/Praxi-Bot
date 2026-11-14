@@ -752,9 +752,8 @@
   },
   "apps": {
     "title": "Apps",
-    "subtitle": "Connect your apps once. Choose which bots can use them.",
-    "search": "Search apps and servers",
-    "mcpServers": "Custom MCP server",
+    "search": "Search apps",
+    "mcpServers": "Your own MCP server",
     "categoriesLabel": "Categories",
     "categories": {
       "all": "All",
@@ -802,8 +801,8 @@
     "connectedToast": "{{name}} connected",
     "disconnectedToast": "{{name}} disconnected",
     "missingSecret": "Enter every required secret.",
-    "connectedSection": "Connected apps",
-    "catalogSection": "Catalog",
+    "connectedSection": "Connected",
+    "catalogSection": "Discover",
     "loading": "Loading catalog…",
     "noResults": "No matching servers.",
     "custom": {
@@ -820,7 +819,11 @@
       "url": "Server URL",
       "errUrl": "Enter a valid HTTP URL.",
       "add": "Add server"
-    }
+    },
+    "manage": "Manage",
+    "close": "Close",
+    "usedBy": "Used by",
+    "connectApp": "Connect {{name}}"
   },
   "help": {
     "title": "Keyboard shortcuts",
@@ -881,36 +884,45 @@
     "ai": {
       "defaultModel": {
         "title": "Default model",
-        "description": "Used when a bot has no model set."
+        "description": "Used when a bot has no model set.",
+        "heading": "Default"
       },
       "keys": {
-        "title": "Provider API keys",
-        "description": "Write-only; stored in the OS keychain.",
-        "none": "No providers loaded.",
-        "inputLabel": "API key for {{provider}}",
-        "replace": "Replace key",
-        "placeholder": "Paste API key",
-        "saved": "Saved key for {{provider}}"
+        "title": "Add with an API key",
+        "description": "Keys are stored in your system keychain and never shown again.",
+        "placeholder": "Paste a key. We recognise the provider.",
+        "saved": "Saved key for {{provider}}",
+        "pasteLabel": "API key",
+        "addTo": "Add to {{provider}}",
+        "add": "Add",
+        "providers": "Provider",
+        "stored": "A key is stored",
+        "compatible": "OpenAI-compatible server",
+        "unknown": "We cannot tell which provider this key is for. Choose one below."
       },
       "detected": {
-        "title": "Detected accounts",
-        "description": "Coding CLIs found on your PATH. Praxi invokes the CLI binary without reading login files.",
+        "title": "Found on this computer",
+        "description": "We find installed AI tools ourselves. The ones you turn on show up in the model list, no key needed.",
         "termsNotice": "Your vendor plan terms apply; verify automated CLI use is permitted before enabling.",
-        "refresh": "Refresh",
+        "refresh": "Rescan",
         "retry": "Retry",
-        "enable": "Enable",
-        "enabled": "Enabled",
         "enabledToast": "{{name}} enabled.",
         "notInstalled": "Not installed",
-        "signInHint": "Run {{command}} in terminal",
         "codexUnconfinable": "Detected, but cannot be run safely in this version.",
         "notRunnable": "Detected, not runnable in this version",
         "detectError": "Could not check installed coding tools.",
         "offline": "Connect to the daemon to inspect detected coding tools.",
         "authSignedIn": "Signed in",
         "authSignedOut": "Signed out",
-        "authUnknown": "Unknown"
-      }
+        "authUnknown": "Unknown",
+        "ready": "ready",
+        "foundSignInNeeded": "found, sign-in needed",
+        "signIn": "Sign in",
+        "signInIn": "Run in a terminal:",
+        "install": "Install",
+        "toggle": "Use {{name}}"
+      },
+      "advanced": "Advanced provider settings"
     },
     "computer": {
       "soon": "Soon",
@@ -1227,6 +1239,11 @@
         "other": "Other"
       }
     }
+  },
+  "quota": {
+    "title": "Quota left",
+    "remaining": "{{label}}: {{pct}}% left",
+    "resets": "Resets {{when}}"
   },
   "shell": {
     "railGrip": "Resize sidebar (arrow keys)",
