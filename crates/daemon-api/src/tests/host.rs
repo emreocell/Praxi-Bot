@@ -613,6 +613,9 @@ async fn higher_epoch_records_leader_without_losing_fresh_import_eligibility() {
         .save(data)
         .unwrap();
     });
+    // A metadata-only heartbeat must not start components or consume fresh
+    // even when starting the scheduler would fail.
+    std::fs::create_dir(t._dir.path().join("schedules.db")).unwrap();
     let peer = peer_network::identity::load_or_create_secret_key(&t._dir.path().join("peer.key"))
         .unwrap()
         .public()
@@ -629,6 +632,7 @@ async fn higher_epoch_records_leader_without_losing_fresh_import_eligibility() {
         .await
         .unwrap();
     let config = HostConfig::load(t._dir.path()).unwrap();
+    assert!(t.state.scheduler().is_err());
     assert_eq!(config.state, HostState::Fresh);
     assert_eq!(config.epoch, 8);
     assert_eq!(config.leader.as_deref(), Some(peer.as_str()));

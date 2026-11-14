@@ -280,6 +280,21 @@ impl LeaderControl {
             action,
             &serde_json::json!({"previous": previous, "next": next, "phase": "requested"}),
         );
+        if previous.state == HostState::Fresh && next.state == HostState::Fresh {
+            // Learning a leader does not activate this empty handover target.
+            // In particular, component startup/rollback must never consume fresh.
+            audit?;
+            next.save(&self.0.data).map_err(ApiError::internal)?;
+            *self.0.config.lock() = next.clone();
+            if let Some(net) = self.network() {
+                net.set_leader_info(Some(next.wire()));
+            }
+            let _ = self
+                .0
+                .events
+                .send(HostEvent::HostStateChanged(next.clone()));
+            return Ok(next);
+        }
         if next.runs_components() {
             audit?;
             // Keep a durable idle checkpoint until startup and the final save
