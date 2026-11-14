@@ -29,6 +29,11 @@ fn config(data: &Path, host: bool) -> Result<(PeerConfig, Option<bool>)> {
     Ok((cfg, enabled))
 }
 
+pub fn is_enabled(data: &Path, host: bool, force: bool) -> Result<bool> {
+    let (_, enabled) = config(data, host)?;
+    Ok(force || enabled.unwrap_or(host))
+}
+
 pub async fn start_server(
     data: &Path,
     host: bool,
