@@ -23,7 +23,7 @@ export function Modal({
   onClose: () => void;
   /** Accessible name of the dialog. */
   label: string;
-  size?: "md" | "lg" | "apps";
+  size?: "sm" | "md" | "lg" | "apps";
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -93,9 +93,7 @@ export function Modal({
     >
       <div
         ref={ref}
-        className={[styles.dialog, size === "md" ? styles.md : size === "apps" ? styles.apps : styles.lg].join(
-          " "
-        )}
+        className={[styles.dialog, styles[size]].join(" ")}
         role="dialog"
         aria-modal="true"
         aria-label={label}

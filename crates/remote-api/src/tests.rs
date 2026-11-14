@@ -18,6 +18,12 @@ use storage::Storage;
 use tool_registry::ToolRegistry;
 use tower::ServiceExt;
 
+mod auth;
+mod daemon;
+mod loss;
+mod streams;
+mod view;
+
 fn config(dir: &std::path::Path, name: &str, role: Role) -> PeerConfig {
     let mut cfg = PeerConfig::new(dir.join(name));
     cfg.relay = RelayConfig::Disabled;
@@ -38,6 +44,25 @@ fn state(dir: &std::path::Path) -> AppState {
         agent,
         storage,
         DaemonConfig::new("server-secret-never-on-client"),
+    )
+    .unwrap()
+}
+fn state_with_registry(
+    dir: &std::path::Path,
+    registry: Arc<live_view::TargetRegistry>,
+) -> AppState {
+    let storage = Arc::new(Storage::open(dir).unwrap());
+    let agent = AgentLoop::new(
+        storage.clone(),
+        ToolRegistry::new(),
+        Providers::single(Arc::new(daemon_api::fake::FakeProvider)),
+        LoopConfig::default(),
+    );
+    AppState::with_view_registry(
+        agent,
+        storage,
+        DaemonConfig::new("server-secret-never-on-client"),
+        registry,
     )
     .unwrap()
 }
@@ -214,7 +239,7 @@ async fn proxy_guard_and_credential_stripping() {
         request(
             &proxy,
             reqwest::Method::GET,
-            "/v1/events?%74oken=hidden&token=local&keep=yes"
+            "/v1/events?%74oken=hidden&token=local&TOKEN=up&Token=x&keep=yes"
         )
         .header("Connection", "x-hop")
         .header("x-hop", "secret")

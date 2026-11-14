@@ -310,6 +310,7 @@ fn spawn_simulated_bot_run(
     let bot = bot_override.unwrap_or_else(|| BotRunMeta {
         bot_id: "atlas".to_string(),
         bot_name: "Atlas".to_string(),
+        bot_shape: Some("cloud".to_string()),
         bot_avatar: None,
         bot_color: Some("#3b82f6".to_string()),
         bot_initials: Some("AT".to_string()),

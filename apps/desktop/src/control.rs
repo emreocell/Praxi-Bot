@@ -67,6 +67,8 @@ pub struct BotRunMeta {
     pub bot_id: String,
     pub bot_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub bot_shape: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub bot_avatar: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bot_color: Option<String>,
@@ -1161,6 +1163,7 @@ mod tests {
         BotRunMeta {
             bot_id: "atlas".to_string(),
             bot_name: "Atlas".to_string(),
+            bot_shape: Some("cloud".to_string()),
             bot_avatar: None,
             bot_color: Some("#3b82f6".to_string()),
             bot_initials: Some("AT".to_string()),
@@ -1425,5 +1428,35 @@ mod tests {
         assert!(parse_hotkey("Escape").is_err());
         assert!(parse_hotkey("Ctrl+Alt").is_err());
         assert!(parse_hotkey("").is_err());
+    }
+
+    #[test]
+    fn bot_run_meta_preserves_explicit_bot_shape_across_serde_and_snapshot() {
+        // `bot-cube-0` hashes to `cube` in `fallbackBotShape`, so storing `heart`
+        // proves the explicit shape survives IPC instead of falling back to the hash.
+        let incoming = serde_json::json!({
+            "botId": "bot-cube-0",
+            "botName": "HeartBot",
+            "botShape": "heart",
+            "botColor": "#4c8dff"
+        });
+        let meta: BotRunMeta =
+            serde_json::from_value(incoming).expect("BotRunMeta should deserialize botShape");
+        assert_eq!(meta.bot_shape.as_deref(), Some("heart"));
+
+        let mut sm = ControlStateMachine::new();
+        let snap = sm.start_run(meta, "Working");
+        let out = serde_json::to_value(&snap).expect("ControlSnapshot should serialize");
+        assert_eq!(out["bot"]["botShape"], "heart");
+        assert_eq!(out["bot"]["botId"], "bot-cube-0");
+
+        let legacy: BotRunMeta = serde_json::from_value(serde_json::json!({
+            "botId": "legacy-id",
+            "botName": "Legacy"
+        }))
+        .expect("legacy BotRunMeta without botShape should deserialize");
+        assert!(legacy.bot_shape.is_none());
+        let legacy_json = serde_json::to_value(&legacy).expect("legacy serialize");
+        assert!(legacy_json.get("botShape").is_none());
     }
 }
