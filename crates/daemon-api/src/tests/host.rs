@@ -13,6 +13,7 @@ fn ownership_roundtrip_defaults_and_validation() {
         epoch: 42,
         limits: crate::host::HostLimits {
             max_computer_runs: Some(2),
+            ..Default::default()
         },
         ..HostConfig::default()
     };
@@ -489,4 +490,20 @@ async fn fresh_host_can_run_without_claiming_equal_epoch_active_ownership() {
     assert_eq!(t.state.leader().config().state, HostState::Fresh);
     assert!(t.state.scheduler().is_ok());
     t.state.stop_components().await;
+}
+
+#[test]
+fn main_format_host_limits_and_unknown_keys_survive_ownership_roundtrip() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = "future_setting='keep'\n[limits]\nmax_computer_runs=2\nbrowser_idle_seconds=180\nfuture_limit=7\n";
+    std::fs::write(dir.path().join("host.toml"), original).unwrap();
+    let mut config = HostConfig::load(dir.path()).unwrap();
+    assert_eq!(config.limits.browser_idle_seconds, Some(180));
+    config.state = HostState::Standby;
+    config.save(dir.path()).unwrap();
+    let saved: toml::Table = std::fs::read_to_string(dir.path().join("host.toml")).unwrap().parse().unwrap();
+    let before: toml::Table = original.parse().unwrap();
+    assert_eq!(saved["limits"], before["limits"]);
+    assert_eq!(saved["future_setting"], before["future_setting"]);
+    assert_eq!(HostConfig::load(dir.path()).unwrap(), config);
 }

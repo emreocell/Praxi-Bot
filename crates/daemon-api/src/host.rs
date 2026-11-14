@@ -40,13 +40,14 @@ pub enum HostState {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct HostLimits {
     pub max_computer_runs: Option<usize>,
+    pub browser_idle_seconds: Option<u64>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct HostConfig {
     pub mode: HostMode,
     pub state: HostState,
@@ -97,11 +98,29 @@ impl HostConfig {
         self.validate()?;
         std::fs::create_dir_all(data)?;
         let mut file = tempfile::NamedTempFile::new_in(data)?;
-        file.write_all(
-            toml::to_string_pretty(self)
-                .map_err(std::io::Error::other)?
-                .as_bytes(),
-        )?;
+        // Ownership updates must preserve settings written by other versions/modules.
+        let path = data.join("host.toml");
+        let mut root: toml::Table = match std::fs::read_to_string(&path) {
+            Ok(text) => toml::from_str(&text).map_err(std::io::Error::other)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => toml::Table::new(),
+            Err(e) => return Err(e),
+        };
+        let typed = toml::Table::try_from(self).map_err(std::io::Error::other)?;
+        for key in ["mode", "state", "epoch", "leader"] {
+            root.remove(key);
+            if let Some(value) = typed.get(key) {
+                root.insert(key.into(), value.clone());
+            }
+        }
+        let limits = root.entry("limits").or_insert_with(|| toml::Value::Table(toml::Table::new()));
+        let limits = limits.as_table_mut().ok_or_else(|| std::io::Error::other("limits must be a table"))?;
+        for key in ["max_computer_runs", "browser_idle_seconds"] {
+            limits.remove(key);
+            if let Some(value) = typed.get("limits").and_then(|v| v.get(key)) {
+                limits.insert(key.into(), value.clone());
+            }
+        }
+        file.write_all(toml::to_string_pretty(&root).map_err(std::io::Error::other)?.as_bytes())?;
         file.as_file().sync_all()?;
         file.persist(data.join("host.toml")).map_err(|e| e.error)?;
         #[cfg(unix)]
