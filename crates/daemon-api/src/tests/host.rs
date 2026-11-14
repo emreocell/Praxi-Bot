@@ -603,3 +603,33 @@ async fn boot_peer_verification_blocks_scheduler_and_automatic_admission() {
     net.shutdown().await;
     other_net.shutdown().await;
 }
+
+#[tokio::test]
+async fn ownership_and_device_actions_audit_actor_state_and_epoch_without_tickets() {
+    let t = setup();
+    let other = setup();
+    let net = attach_network(&t).await;
+    let other_net = attach_network(&other).await;
+    assert_eq!(phone_request(&t, Method::POST, "/v1/host/standby", None).await, StatusCode::OK);
+    assert_eq!(phone_request(&t, Method::POST, "/v1/host/activate", Some(json!({"force":true}))).await, StatusCode::OK);
+    let invite = call(&t, Method::POST, "/v1/host/invite", Some(json!({"role":"phone"}))).await.json();
+    other_net.pair(&peer_network::PairTicket::parse(invite["ticket"].as_str().unwrap()).unwrap()).await.unwrap();
+    assert_eq!(phone_request(&t, Method::DELETE, &format!("/v1/host/devices/{}", other_net.id()), None).await, StatusCode::NO_CONTENT);
+    assert_eq!(call(&t, Method::POST, "/v1/host/update", None).await.status, StatusCode::CONFLICT);
+    let audit = t.state.storage().list_audit(t.state.user_id()).unwrap();
+    for (action, actor) in [("host.standby","phone:phone-key"),("host.activate","phone:phone-key"),("host.invite","local"),("host.revoke","phone:phone-key"),("host.update","local")] {
+        let row = audit.iter().find(|r| r.action == action).unwrap();
+        assert_eq!(row.actor, actor);
+        assert!(row.detail["previous_state"].is_string());
+        assert!(row.detail["new_epoch"].is_u64());
+        assert!(!row.detail.to_string().contains(invite["ticket"].as_str().unwrap()));
+        if action == "host.activate" {
+            assert_eq!(row.detail["previous_state"], "standby");
+            assert_eq!(row.detail["new_state"], "active");
+            assert_eq!(row.detail["new_epoch"], 1);
+        }
+    }
+    t.state.stop_components().await;
+    net.shutdown().await;
+    other_net.shutdown().await;
+}

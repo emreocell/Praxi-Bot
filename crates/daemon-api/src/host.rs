@@ -244,7 +244,7 @@ impl LeaderControl {
         }
     }
 
-    async fn apply(&self, next: HostConfig) -> Result<HostConfig, ApiError> {
+    async fn apply(&self, next: HostConfig, actor: &str, action: &str) -> Result<HostConfig, ApiError> {
         let state = self
             .0
             .state
@@ -253,7 +253,10 @@ impl LeaderControl {
         if state.shutdown_token().is_cancelled() {
             return Err(ApiError::unavailable("daemon stopped"));
         }
+        let previous = self.config();
+        let audit = self.audit(actor, action, serde_json::json!({"previous": previous, "next": next, "phase": "requested"}));
         if next.runs_components() {
+            audit?;
             next.save(&self.0.data).map_err(ApiError::internal)?;
             *self.0.config.lock() = next.clone();
             if let Some(net) = self.network() {
@@ -290,8 +293,17 @@ impl LeaderControl {
                 .events
                 .send(HostEvent::HostStateChanged(next.clone()));
             saved.map_err(ApiError::internal)?;
+            audit?;
         }
         Ok(next)
+    }
+
+    fn audit(&self, actor: &str, action: &str, detail: serde_json::Value) -> Result<(), ApiError> {
+        let state = self.0.state.upgrade().ok_or_else(|| ApiError::unavailable("daemon stopped"))?;
+        let config = self.config();
+        state.storage().append_audit(state.user_id(), None, actor, action,
+            &serde_json::json!({"previous_state":config.state,"previous_epoch":config.epoch,"new_state":detail.get("next").and_then(|n| n.get("state")).unwrap_or(&serde_json::json!(config.state)),"new_epoch":detail.get("next").and_then(|n| n.get("epoch")).unwrap_or(&serde_json::json!(config.epoch)),"detail":detail}))
+            .map(|_| ()).map_err(ApiError::internal)
     }
 
     /// Linearize a synchronous automatic-run admission with ownership changes.
@@ -358,23 +370,31 @@ impl LeaderControl {
             ));
         }
         self.0.verifying.store(false, Ordering::SeqCst);
-        self.apply(next).await
+        self.apply(next, "local", "host.handover").await
     }
 
     /// Stop automatic components and persist standby ownership.
     /// # Errors
     /// Returns persistence errors or an unavailable daemon. Components still stop on write failure.
     pub async fn standby(&self) -> Result<HostConfig, ApiError> {
+        self.standby_as("local").await
+    }
+
+    async fn standby_as(&self, actor: &str) -> Result<HostConfig, ApiError> {
         let _transition = self.0.transition.lock().await;
         let mut next = self.config();
         next.state = HostState::Standby;
-        self.apply(next).await
+        self.apply(next, actor, "host.standby").await
     }
 
     /// Explicitly take ownership with an epoch above all known epochs.
     /// # Errors
     /// Rejects unforced takeover of a known leader, exhausted epochs and persistence/startup failures.
     pub async fn activate(&self, force: bool) -> Result<HostConfig, ApiError> {
+        self.activate_as(force, "local").await
+    }
+
+    async fn activate_as(&self, force: bool, actor: &str) -> Result<HostConfig, ApiError> {
         let _transition = self.0.transition.lock().await;
         let mut next = self.config();
         let mut highest = next.epoch;
@@ -409,7 +429,7 @@ impl LeaderControl {
         if next.mode == HostMode::Client {
             next.mode = HostMode::Standalone;
         }
-        self.apply(next).await
+        self.apply(next, actor, "host.activate").await
     }
 
     /// Apply authenticated daemon heartbeat metadata. There is no automatic takeover.
@@ -428,7 +448,7 @@ impl LeaderControl {
             }
             next.epoch = info.epoch;
             next.leader = Some(peer.into());
-            let result = self.apply(next).await;
+            let result = self.apply(next, &format!("peer:{peer}"), "host.observe").await;
             if conflict {
                 self.emit_conflict("equal_epoch", Some(peer.into()));
             }
@@ -450,7 +470,7 @@ impl LeaderControl {
         }
         next.state = HostState::Standby;
         next.leader = Some(peer.into());
-        self.apply(next).await?;
+        self.apply(next, &format!("peer:{peer}"), "host.conflict").await?;
         self.emit_conflict("equal_epoch", Some(peer.into()));
         Ok(())
     }
@@ -467,6 +487,13 @@ impl LeaderControl {
         self.emit_conflict("telegram_409", None);
         Ok(())
     }
+}
+
+fn actor(peer: &Option<Extension<crate::PeerIdentity>>) -> String {
+    peer.as_ref().map_or_else(|| "local".into(), |p| format!("{}:{}", match p.role {
+        crate::PeerRole::Phone => "phone", crate::PeerRole::Desktop => "desktop",
+        crate::PeerRole::Host => "host", crate::PeerRole::Node => "node",
+    }, p.key))
 }
 
 fn acceptable_peer_epoch(local: u64, remote: u64) -> bool {
@@ -605,6 +632,7 @@ pub(crate) async fn invite(
     if ttl == 0 || ttl > 1800 {
         return Err(ApiError::bad_request("ttl_secs must be between 1 and 1800"));
     }
+    s.leader().audit(&actor(&peer), "host.invite", serde_json::json!({"role":input.role,"ttl_secs":ttl,"phase":"requested"}))?;
     s.leader().admit_invite()?;
     let invite = net
         .create_invite_with_ttl(input.role.peer_role(), Duration::from_secs(ttl))
@@ -645,6 +673,7 @@ pub(crate) async fn revoke(
     {
         return Err(ApiError::forbidden("phones may revoke only phone devices"));
     }
+    s.leader().audit(&actor(&peer), "host.revoke", serde_json::json!({"target":key.to_string(),"phase":"requested"}))?;
     if !net.revoke(&key).map_err(ApiError::internal)? {
         return Err(ApiError::not_found("device"));
     }
@@ -652,20 +681,22 @@ pub(crate) async fn revoke(
 }
 
 #[utoipa::path(post, operation_id = "host_standby", path = "/v1/host/standby", tag = "host", security(("bearer" = [])), responses((status = 200, body = HostConfig)))]
-pub(crate) async fn standby(State(s): State<AppState>) -> Result<Json<HostConfig>, ApiError> {
-    s.leader().standby().await.map(Json)
+pub(crate) async fn standby(State(s): State<AppState>, peer: Option<Extension<crate::PeerIdentity>>) -> Result<Json<HostConfig>, ApiError> {
+    s.leader().standby_as(&actor(&peer)).await.map(Json)
 }
 
 #[utoipa::path(post, operation_id = "host_activate", path = "/v1/host/activate", tag = "host", security(("bearer" = [])), request_body = ActivateInput, responses((status = 200, body = HostConfig), (status = 409, body = crate::error::ErrorBody)))]
 pub(crate) async fn activate(
     State(s): State<AppState>,
+    peer: Option<Extension<crate::PeerIdentity>>,
     ApiJson(input): ApiJson<ActivateInput>,
 ) -> Result<Json<HostConfig>, ApiError> {
-    s.leader().activate(input.force).await.map(Json)
+    s.leader().activate_as(input.force, &actor(&peer)).await.map(Json)
 }
 
 #[utoipa::path(post, operation_id = "host_update", path = "/v1/host/update", tag = "host", security(("bearer" = [])), responses((status = 202), (status = 409, body = crate::error::ErrorBody)))]
-pub(crate) async fn update(State(s): State<AppState>) -> Result<StatusCode, ApiError> {
+pub(crate) async fn update(State(s): State<AppState>, peer: Option<Extension<crate::PeerIdentity>>) -> Result<StatusCode, ApiError> {
+    s.leader().audit(&actor(&peer), "host.update", serde_json::json!({"phase":"requested","unit":UPDATE_UNIT}))?;
     if std::env::consts::OS != "linux" || s.leader().config().mode != HostMode::Host {
         return Err(ApiError::conflict(
             "updates require Linux host mode and the praxi-update.service unit",
