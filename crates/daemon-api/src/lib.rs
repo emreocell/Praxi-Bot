@@ -31,6 +31,8 @@ mod routes;
 mod schedule;
 mod schedule_tools;
 mod sse;
+pub mod web;
+mod web_routes;
 
 #[cfg(test)]
 mod schedule_tools_tests;
@@ -64,6 +66,7 @@ pub use mcp::{McpControl, McpControlError};
 pub use openapi::openapi_json;
 pub use policy::{PolicyLoadError, load_policy, validate_policy};
 pub use schedule_tools::{ScheduleLimits, load_schedule_limits};
+pub use web::{WebControl, WebControlError};
 
 /// Default TCP port of `bot serve`.
 pub const DEFAULT_PORT: u16 = 47821;
@@ -163,6 +166,10 @@ struct Inner {
     email: OnceLock<Arc<dyn EmailControl>>,
     /// Bounds concurrent "test connection" calls (see `email_routes`).
     email_tests: Arc<tokio::sync::Semaphore>,
+    /// Web search settings management (see [`AppState::set_web`]).
+    web: OnceLock<Arc<dyn WebControl>>,
+    /// Bounds concurrent web search probes (see `web_routes`).
+    web_tests: Arc<tokio::sync::Semaphore>,
     /// Write-only secret sink of `POST /v1/secrets/{name}`.
     secrets: OnceLock<Arc<dyn secret_store::SecretStore>>,
     /// `schedules.db`, opened on first use.
@@ -292,6 +299,8 @@ impl AppState {
             mcp: OnceLock::new(),
             email: OnceLock::new(),
             email_tests: Arc::new(tokio::sync::Semaphore::new(EMAIL_TESTS_AT_ONCE)),
+            web: OnceLock::new(),
+            web_tests: Arc::new(tokio::sync::Semaphore::new(EMAIL_TESTS_AT_ONCE)),
             secrets: OnceLock::new(),
             schedules: parking_lot::Mutex::new(None),
             policy_lock: parking_lot::Mutex::new(()),
@@ -322,6 +331,12 @@ impl AppState {
         let _ = self.0.email.set(email);
     }
 
+    /// Enable `/v1/web/search*` with the embedder web-search manager (call once,
+    /// before [`serve`]; a second call is ignored).
+    pub fn set_web(&self, web: Arc<dyn WebControl>) {
+        let _ = self.0.web.set(web);
+    }
+
     /// Enable `POST /v1/secrets/{name}` (write-only) over `store` (call once;
     /// a second call is ignored).
     pub fn set_secret_store(&self, store: Arc<dyn secret_store::SecretStore>) {
@@ -336,6 +351,10 @@ impl AppState {
         self.0.email.get().cloned()
     }
 
+    pub(crate) fn web(&self) -> Option<Arc<dyn WebControl>> {
+        self.0.web.get().cloned()
+    }
+
     /// A slot for one connection test, or `429`: tests dial out to hosts the
     /// caller names, so only a couple may run at once.
     pub(crate) fn email_test_permit(
@@ -348,6 +367,21 @@ impl AppState {
                     axum::http::StatusCode::TOO_MANY_REQUESTS,
                     "too_many_requests",
                     "too many connection tests are running; try again in a moment",
+                )
+            })
+    }
+
+    /// A slot for one live web search probe, or `429`.
+    pub(crate) fn web_test_permit(
+        &self,
+    ) -> Result<tokio::sync::OwnedSemaphorePermit, error::ApiError> {
+        Arc::clone(&self.0.web_tests)
+            .try_acquire_owned()
+            .map_err(|_| {
+                error::ApiError::new(
+                    axum::http::StatusCode::TOO_MANY_REQUESTS,
+                    "too_many_requests",
+                    "too many web search probes are running; try again in a moment",
                 )
             })
     }
@@ -617,6 +651,7 @@ fn api_routes() -> Router<AppState> {
     use live_view as v;
     use mcp_routes as m;
     use routes as r;
+    use web_routes as w;
     Router::new()
         .route("/v1/health", get(r::health))
         .route("/v1/view/targets", get(v::targets))
@@ -722,6 +757,11 @@ fn api_routes() -> Router<AppState> {
             post(e::test_email_account),
         )
         .route("/v1/email/test", post(e::test_email_draft))
+        .route(
+            "/v1/web/search",
+            get(w::get_web_search).put(w::update_web_search),
+        )
+        .route("/v1/web/search/test", post(w::test_web_search))
         .route("/v1/secrets/{*name}", post(m::set_secret))
         .route("/v1/events", get(sse::events))
 }

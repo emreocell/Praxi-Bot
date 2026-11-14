@@ -501,8 +501,20 @@ fn check_schedule_tools(dir: &Path) -> Check {
     }
 }
 
-/// Time the `--online` web search probe may take.
-const WEB_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
+/// Budget for the `--online` web search probe: must exceed the sequential
+/// worst-case of per-backend search timeouts (including redirect hops) so
+/// later fallbacks (such as Bing) run and structured backend errors surface
+/// instead of an outer timeout.
+fn web_probe_timeout(cfg: &web_tools::WebToolsConfig, backend_count: usize) -> Duration {
+    let per_hop = cfg.http.timeout.min(web_tools::DEFAULT_SEARCH_TIMEOUT);
+    let hops_per_backend =
+        u32::try_from(cfg.http.max_redirects.saturating_add(1).max(1)).unwrap_or(u32::MAX);
+    let count = u32::try_from(backend_count.max(1)).unwrap_or(u32::MAX);
+    per_hop
+        .saturating_mul(hops_per_backend)
+        .saturating_mul(count)
+        .saturating_add(Duration::from_secs(5))
+}
 
 /// `web tools`: which search backends are configured, and with `--online`
 /// whether a live search answers. A failing probe is a warning, never a fail:
@@ -510,19 +522,22 @@ const WEB_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 fn check_web(env: &DoctorEnv<'_>) -> Check {
     const N: &str = "web search";
     let (file, mut notes) = crate::serve::load_web_file(env.data_dir);
-    // The doctor holds the store by reference only: copy the one Brave key into
-    // a throwaway in-memory store for the probe.
+    // The doctor holds the store by reference only: copy the Brave / Tavily keys
+    // into a throwaway in-memory store for the probe.
     let mem: std::sync::Arc<dyn SecretStore> =
         std::sync::Arc::new(secret_store::MemoryStore::new());
-    let mut brave_missing = false;
-    if let (Some(name), Ok((s, _))) = (file.search.brave_key.as_deref(), &env.store) {
-        match s.get(name) {
-            Ok(Some(v)) => {
-                let _ = mem.set(name, v.expose());
+    let mut copy_secret = |label: &str, key_name: Option<&str>| {
+        if let (Some(name), Ok((s, _))) = (key_name, &env.store) {
+            match s.get(name) {
+                Ok(Some(v)) => {
+                    let _ = mem.set(name, v.expose());
+                }
+                _ => notes.push(format!("{label} key secret not found")),
             }
-            _ => brave_missing = true,
         }
-    }
+    };
+    copy_secret("brave", file.search.brave_key.as_deref());
+    copy_secret("tavily", file.search.tavily_key.as_deref());
     let cfg = crate::serve::web_tools_config(
         env.data_dir,
         &file,
@@ -531,9 +546,6 @@ fn check_web(env: &DoctorEnv<'_>) -> Check {
         &mut notes,
     );
     let backends = crate::serve::web_backend_summary(&cfg);
-    if brave_missing {
-        notes.push("brave key secret not found".into());
-    }
     let detail = |extra: String| {
         let mut d = format!("backends: {backends}");
         if !extra.is_empty() {
@@ -546,7 +558,7 @@ fn check_web(env: &DoctorEnv<'_>) -> Check {
         }
         d
     };
-    let hint = "see docs/guide/web.md; edit <data_dir>/web.toml";
+    let hint = "configure Brave, Tavily, or SearXNG in Settings -> Web search or <data_dir>/web.toml (see docs/guide/web.md)";
     if !env.online {
         let c = Check::ok(N, detail("not probed".into()));
         return if notes.is_empty() {
@@ -559,7 +571,7 @@ fn check_web(env: &DoctorEnv<'_>) -> Check {
             .hint(hint)
         };
     }
-    match probe_web_search(cfg) {
+    match probe_web_search(&cfg) {
         Ok(backend) => {
             let c = Check::ok(N, detail(format!("{backend} answered")));
             if notes.is_empty() {
@@ -577,10 +589,14 @@ fn check_web(env: &DoctorEnv<'_>) -> Check {
 }
 
 /// Run one live search through the configured backends; the answering backend's name.
-fn probe_web_search(cfg: web_tools::WebToolsConfig) -> std::result::Result<String, String> {
+fn probe_web_search(cfg: &web_tools::WebToolsConfig) -> std::result::Result<String, String> {
     let reg = tool_registry::ToolRegistry::new();
-    web_tools::register(&reg, cfg).map_err(|e| e.to_string())?;
+    web_tools::register(&reg, cfg.clone()).map_err(|e| e.to_string())?;
     let tool = reg.get("web_search").ok_or("web_search not registered")?;
+    let backend_count = tool.spec().input_schema["properties"]["backend"]["enum"]
+        .as_array()
+        .map_or(0, Vec::len);
+    let timeout = web_probe_timeout(cfg, backend_count);
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -588,7 +604,7 @@ fn probe_web_search(cfg: web_tools::WebToolsConfig) -> std::result::Result<Strin
     rt.block_on(async {
         let ctx = tool_registry::ToolContext::default();
         let call = tool.call(&ctx, json!({"query": "praxi", "limit": 1}));
-        let out = tokio::time::timeout(WEB_PROBE_TIMEOUT, call)
+        let out = tokio::time::timeout(timeout, call)
             .await
             .map_err(|_| "timed out".to_string())?
             .map_err(|e| e.to_string())?;
@@ -1139,6 +1155,8 @@ id = "m1"
                     "[search]
 searxng_url = \"{}\"
 duckduckgo = false
+duckduckgo_lite = false
+bing = false
 ",
                     server.uri()
                 ),
@@ -1151,5 +1169,72 @@ duckduckgo = false
             assert_eq!(c.status, status, "{}", c.detail);
             assert!(c.detail.contains(word), "{}", c.detail);
         }
+    }
+
+    #[test]
+    fn web_probe_timeout_covers_all_backends_and_redirects_to_reach_fallback() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let def = web_tools::WebToolsConfig::default();
+        let expected_floor = web_tools::DEFAULT_SEARCH_TIMEOUT
+            .saturating_mul(u32::try_from(def.http.max_redirects + 1).unwrap())
+            .saturating_mul(3);
+        assert!(
+            web_probe_timeout(&def, 3) > expected_floor,
+            "probe budget must exceed enabled_backends * DEFAULT_SEARCH_TIMEOUT * (max_redirects + 1)"
+        );
+
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let server = rt.block_on(async {
+            let s = MockServer::start().await;
+            // First two keyless backends stall past per-backend timeout (60ms);
+            // the third (bing) answers cleanly.
+            Mock::given(method("GET"))
+                .and(path("/html/"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_delay(Duration::from_millis(200))
+                        .set_body_string("<html></html>"),
+                )
+                .mount(&s)
+                .await;
+            Mock::given(method("GET"))
+                .and(path("/lite/"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_delay(Duration::from_millis(200))
+                        .set_body_string("<html></html>"),
+                )
+                .mount(&s)
+                .await;
+            Mock::given(method("GET"))
+                .and(path("/search"))
+                .respond_with(ResponseTemplate::new(200).set_body_raw(
+                    b"<ol id=\"b_results\"><li class=\"b_algo\"><h2><a href=\"https://example.org/\">Hit</a></h2></li></ol>".to_vec(),
+                    "text/html",
+                ))
+                .mount(&s)
+                .await;
+            s
+        });
+        let mut cfg = web_tools::WebToolsConfig {
+            policy: std::sync::Arc::new(web_tools::DefaultUrlPolicy {
+                block_loopback: false,
+                ..web_tools::DefaultUrlPolicy::default()
+            }),
+            ..web_tools::WebToolsConfig::default()
+        };
+        cfg.http.timeout = Duration::from_millis(60);
+        cfg.http.max_redirects = 0;
+        cfg.search.duckduckgo_endpoint = Some(format!("{}/html/", server.uri()));
+        cfg.search.duckduckgo_lite_endpoint = Some(format!("{}/lite/", server.uri()));
+        cfg.search.bing_endpoint = Some(format!("{}/search", server.uri()));
+        let answered = probe_web_search(&cfg).expect("bing fallback should answer");
+        assert_eq!(answered, "bing");
     }
 }
