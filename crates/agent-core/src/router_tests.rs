@@ -248,15 +248,31 @@ async fn stop_command_cancels_the_run_that_carries_it() {
     let (run, state) = turn(&lp, env.chat, "/stop").await;
     assert_eq!(state, RunState::Cancelled);
     assert_eq!(script.n("fake/m"), 0, "no model call");
-    let d = decided(&drain(&mut rx));
+    let events = drain(&mut rx);
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, Event::ToolCallRequested(_))),
+        "no tool call"
+    );
+    let d = decided(&events);
     assert_eq!(d.len(), 1);
     assert_eq!(d[0].level, "K0");
     assert_eq!(d[0].route["kind"], "command");
     assert_eq!(d[0].route["name"], "stop");
-    // The decision is the audit record of the first step.
-    let first = &env.storage.list_steps(run).unwrap()[0];
-    assert_eq!(first.input["route"]["level"], "K0");
-    assert_eq!(first.input["route"]["route"]["name"], "stop");
+    // The route cancels during planning. No new step may be started after
+    // that request; its decision remains durable in the event journal.
+    assert_eq!(env.storage.list_steps(run).unwrap().len(), 0);
+    let journal: Vec<_> = storage::read_event_log(env.dir.path(), run)
+        .unwrap()
+        .into_iter()
+        .map(|envelope| envelope.event)
+        .collect();
+    let logged = decided(&journal);
+    assert_eq!(logged.len(), 1);
+    assert_eq!(logged[0].level, "K0");
+    assert_eq!(logged[0].route["kind"], "command");
+    assert_eq!(logged[0].route["name"], "stop");
 }
 
 #[tokio::test]
