@@ -1,3 +1,4 @@
+import { FolderOpen } from "lucide-react";
 import type { CSSProperties } from "react";
 import { brandIcon } from "../lib/brandIcons";
 import styles from "./BrandMark.module.css";
@@ -19,6 +20,13 @@ export function BrandMark({ name, size = 16 }: { name: string; size?: number }) 
     return (
       <span className={styles.mark} style={style} aria-hidden="true">
         <img src={`/brands/${key}.svg`} alt="" draggable={false} />
+      </span>
+    );
+  }
+  if (key === "filesystem") {
+    return (
+      <span className={styles.mark} style={{ ...style, color: "var(--color-text-muted)" }} aria-hidden="true">
+        <FolderOpen />
       </span>
     );
   }

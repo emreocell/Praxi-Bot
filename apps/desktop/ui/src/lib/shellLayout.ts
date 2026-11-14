@@ -47,15 +47,19 @@ export function railWidthFromPointer(x: number, pad = 0): number {
   return Math.round(Math.min(RAIL_MAX, Math.max(RAIL_MIN, w)));
 }
 
-/** Largest panel width the window allows. */
-export function panelMax(viewportWidth: number): number {
-  return Math.max(PANEL_MIN, Math.round(viewportWidth * PANEL_MAX_FRACTION));
+/** The chat keeps at least this much room next to the rail and the panel. */
+export const MAIN_MIN = 320;
+
+/** Largest panel width the window allows, leaving the chat `MAIN_MIN` next to the rail. */
+export function panelMax(viewportWidth: number, rail = 0): number {
+  const byShare = Math.round(viewportWidth * PANEL_MAX_FRACTION);
+  return Math.max(PANEL_MIN, Math.min(byShare, viewportWidth - rail - MAIN_MIN));
 }
 
 /** Panel width for a pointer at `x`, measured from the window's right edge. */
-export function panelWidthFromPointer(x: number, viewportWidth: number, pad = 0): number {
+export function panelWidthFromPointer(x: number, viewportWidth: number, pad = 0, rail = 0): number {
   const w = viewportWidth - x - pad;
-  return Math.round(Math.min(panelMax(viewportWidth), Math.max(PANEL_MIN, w)));
+  return Math.round(Math.min(panelMax(viewportWidth, rail), Math.max(PANEL_MIN, w)));
 }
 
 /** Keyboard step on the rail grip: -1 narrows (snapping to icons), +1 widens. */
@@ -65,8 +69,8 @@ export function stepRail(width: number, dir: -1 | 1): number {
 }
 
 /** Keyboard step on the panel grip: +1 widens, -1 narrows. */
-export function stepPanel(width: number, dir: -1 | 1, viewportWidth: number): number {
-  return Math.round(Math.min(panelMax(viewportWidth), Math.max(PANEL_MIN, width + dir * 16)));
+export function stepPanel(width: number, dir: -1 | 1, viewportWidth: number, rail = 0): number {
+  return Math.round(Math.min(panelMax(viewportWidth, rail), Math.max(PANEL_MIN, width + dir * 16)));
 }
 
 /** Coerce stored values: unknown shapes fall back to the defaults, numbers are clamped. */

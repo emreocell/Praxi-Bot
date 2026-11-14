@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent, type PointerEvent } from "react";
 import styles from "./ResizeGrip.module.css";
 
 /**
@@ -28,32 +28,43 @@ export function ResizeGrip({
 }) {
   const frame = useRef<number | null>(null);
   const pending = useRef(0);
+  const active = useRef(false);
 
   const flush = () => {
     frame.current = null;
     onDrag(pending.current);
   };
 
+  /** Ends a drag however it ended (release, cancel, lost capture, unmount). */
+  const end = (commit: boolean) => {
+    if (frame.current !== null) {
+      cancelAnimationFrame(frame.current);
+      frame.current = null;
+      if (commit) onDrag(pending.current);
+    }
+    if (active.current) {
+      active.current = false;
+      delete document.documentElement.dataset.resizing;
+    }
+  };
+
+  const endRef = useRef(end);
+  endRef.current = end;
+  useEffect(() => () => endRef.current(false), []);
+
   const down = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
+    active.current = true;
     document.documentElement.dataset.resizing = "true";
   };
   const move = (e: PointerEvent<HTMLDivElement>) => {
-    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    if (!active.current) return;
     pending.current = e.clientX;
     if (frame.current === null) frame.current = requestAnimationFrame(flush);
   };
-  const up = (e: PointerEvent<HTMLDivElement>) => {
-    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-    e.currentTarget.releasePointerCapture(e.pointerId);
-    if (frame.current !== null) {
-      cancelAnimationFrame(frame.current);
-      flush();
-    }
-    delete document.documentElement.dataset.resizing;
-  };
+  const up = () => end(true);
   const key = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
       e.preventDefault();
@@ -75,6 +86,7 @@ export function ResizeGrip({
       onPointerMove={move}
       onPointerUp={up}
       onPointerCancel={up}
+      onLostPointerCapture={up}
       onKeyDown={key}
     />
   );

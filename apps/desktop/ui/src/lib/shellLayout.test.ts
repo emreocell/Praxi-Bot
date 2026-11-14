@@ -58,3 +58,11 @@ test("rail tiers decide what the apps pill shows", () => {
   assert.equal(railTier(380), "wide");
   assert.equal(railTier(440), "wide");
 });
+
+test("the panel leaves the chat room next to a wide rail", () => {
+  assert.equal(panelMax(900, 440), 260); // 900 - 440 - 320 < 260: the floor wins
+  assert.equal(panelMax(1200, 264), 616);
+  assert.equal(panelMax(1400, 264), 816);
+  assert.equal(panelWidthFromPointer(0, 1200, 0, 264), 616);
+  assert.equal(stepPanel(616, 1, 1200, 264), 616);
+});

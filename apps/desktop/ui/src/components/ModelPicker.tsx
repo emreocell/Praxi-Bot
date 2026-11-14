@@ -153,12 +153,28 @@ export function ModelPicker({
             <span className={styles.effortLabel} id="thinking-level-label">
               {t("modelPicker.thinking")}
             </span>
-            <div className={styles.seg} role="radiogroup" aria-labelledby="thinking-level-label">
+            <div
+              className={styles.seg}
+              role="radiogroup"
+              aria-labelledby="thinking-level-label"
+              onKeyDown={(e) => {
+                const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+                if (!step) return;
+                e.preventDefault();
+                const i = THINKING_LEVELS.indexOf(level);
+                const next = THINKING_LEVELS[(i + step + THINKING_LEVELS.length) % THINKING_LEVELS.length];
+                if (next) {
+                  setLevel(next);
+                  e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')[THINKING_LEVELS.indexOf(next)]?.focus();
+                }
+              }}
+            >
               {THINKING_LEVELS.map((l) => (
                 <button
                   key={l}
                   type="button"
                   role="radio"
+                  tabIndex={l === level ? 0 : -1}
                   aria-checked={l === level}
                   className={l === level ? styles.segOn : undefined}
                   onClick={() => setLevel(l)}

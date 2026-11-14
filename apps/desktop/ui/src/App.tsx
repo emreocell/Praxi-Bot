@@ -28,6 +28,7 @@ import {
   railTier,
   railWidthFromPointer,
   RAIL_MAX,
+  RAIL_MIN,
   RAIL_MINI,
   PANEL_MIN,
   saveShellLayout,
@@ -133,10 +134,20 @@ function AppShell() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
   // Remember the column widths (after a pause, so a drag writes once).
+  const layoutRef = useRef(layout);
   useEffect(() => {
+    layoutRef.current = layout;
     const timer = setTimeout(() => saveShellLayout(layout), 200);
     return () => clearTimeout(timer);
   }, [layout]);
+  useEffect(() => {
+    const flush = () => saveShellLayout(layoutRef.current);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, []);
   const setRail = useCallback((rail: number) => setLayout((l) => (l.rail === rail ? l : { ...l, rail })), []);
   const setPanelWidth = useCallback((panel: number) => setLayout((l) => (l.panel === panel ? l : { ...l, panel })), []);
   const gridPad = () => (document.documentElement.dataset.float === "on" ? 12 : 0);
@@ -394,9 +405,9 @@ function AppShell() {
   const openNeeds = () => setRoute({ kind: "needs" });
 
   const mini = isMiniRail(layout.rail);
-  const botInView = selectedBot !== undefined && (route.kind === "chat" || route.kind === "bot" || route.kind === "botForm");
+  const botInView = selectedBot !== undefined && (route.kind === "chat" || route.kind === "bot" || (route.kind === "botForm" && Boolean(route.botId)));
   const panelVisible = panelOpen && botInView;
-  const panelWidth = Math.min(layout.panel, panelMax(viewportWidth));
+  const panelWidth = Math.min(layout.panel, panelMax(viewportWidth, layout.rail));
   const togglePanel = () => setPanelOpen((open) => !open);
   const panelBotView = selectedBot ? botView(selectedBot) : undefined;
   const panelChats = selectedBot
@@ -504,9 +515,9 @@ function AppShell() {
             label={t("shell.panelGrip")}
             value={panelWidth}
             min={PANEL_MIN}
-            max={panelMax(viewportWidth)}
-            onDrag={(x) => setPanelWidth(panelWidthFromPointer(x, window.innerWidth, gridPad()))}
-            onStep={(dir) => setPanelWidth(stepPanel(panelWidth, dir === -1 ? 1 : -1, window.innerWidth))}
+            max={panelMax(viewportWidth, layout.rail)}
+            onDrag={(x) => setPanelWidth(panelWidthFromPointer(x, window.innerWidth, gridPad(), layout.rail))}
+            onStep={(dir) => setPanelWidth(stepPanel(panelWidth, dir === -1 ? 1 : -1, window.innerWidth, layout.rail))}
           />
           {selectedBot && panelBotView ? (
             <BotPanel
@@ -540,14 +551,14 @@ function AppShell() {
             <div className={styles.brand}>
               <b className={styles.brandName}>{PRODUCT_CONFIG.appName}</b>
               <div className={styles.topActions}>
-                <button className={styles.iconButton} title={t("sidebar.searchBots")} aria-label={t("sidebar.searchBots")} onClick={() => setBotSearch(botSearch === null ? "" : null)}><Search /></button>
+                <button className={styles.iconButton} title={t("sidebar.searchBots")} aria-label={t("sidebar.searchBots")} onClick={() => { if (mini) setRail(RAIL_MIN); setBotSearch(botSearch === null || mini ? "" : null); }}><Search /></button>
                 <button className={styles.iconButton} title={t("sidebar.newBot")} aria-label={t("sidebar.newBot")} onClick={() => setRoute({ kind: "botForm" })}><Plus /></button>
               </div>
             </div>
             {botSearch !== null && !mini ? <input className={styles.botSearch} autoFocus value={botSearch} onChange={e => setBotSearch(e.target.value)} aria-label={t("sidebar.searchBots")} placeholder={t("sidebar.searchBots")} /> : null}
           </SidebarHeader>
           <SidebarSection>
-            {needs.length > 0 ? <SidebarItem className={styles.railItem} active={route.kind === "needs"} title={t("sidebar.needsYou")} onClick={() => setRoute({ kind: "needs" })}><BellDot /><span className={`${styles.botName} ${styles.railText}`}>{t("sidebar.needsYou")}</span><span className={styles.needsBadge} data-testid="needs-you-badge" aria-label={t("sidebar.needsYouCount", { count: needs.length })}>{needs.length}</span></SidebarItem> : null}
+            {needs.length > 0 ? <SidebarItem className={styles.railItem} active={route.kind === "needs"} title={t("sidebar.needsYou")} aria-label={mini ? t("sidebar.needsYouCount", { count: needs.length }) : undefined} onClick={() => setRoute({ kind: "needs" })}><BellDot /><span className={`${styles.botName} ${styles.railText}`}>{t("sidebar.needsYou")}</span><span className={styles.needsBadge} data-testid="needs-you-badge" aria-label={t("sidebar.needsYouCount", { count: needs.length })}>{needs.length}</span></SidebarItem> : null}
             {bots.filter(bot => bot.name.toLowerCase().includes((botSearch ?? "").toLowerCase())).map((bot) => {
               const view = botView(bot);
               const latest = chats.filter(c => c.bot_id === bot.id).sort((a,b) => b.created_at_ms - a.created_at_ms)[0];
@@ -555,7 +566,7 @@ function AppShell() {
               const live = runs.find(r => r.bot_id === bot.id && ["running", "pending", "waiting_approval"].includes(r.state));
               const state = needs.some(n => n.botId === bot.id) || live?.state === "waiting_approval" ? "waiting-approval" : live ? "working" : isMockMode() ? config.bot?.state : "idle";
               const avatarState = state === "thinking" || state === "working" || state === "waiting-approval" || state === "error" ? state : "idle";
-              return <SidebarItem key={bot.id} className={styles.railItem} active={routeBotId === bot.id} title={view.name} onClick={() => latest ? openChat(latest.id) : setRoute({ kind: "bot", botId: bot.id })}>
+              return <SidebarItem key={bot.id} className={styles.railItem} active={routeBotId === bot.id} title={view.name} aria-label={mini ? view.name : undefined} onClick={() => latest ? openChat(latest.id) : setRoute({ kind: "bot", botId: bot.id })}>
                 <BotAvatar bot={view} size="md" state={avatarState} decorative />
                 <div className={`${styles.botMeta} ${styles.railText}`}><span className={styles.botName}>{view.name}</span><span className={styles.botRole}>{(isMockMode() ? config.bot?.preview : undefined) ?? latest?.title ?? t("bots.newChat")}</span></div>
               </SidebarItem>;
