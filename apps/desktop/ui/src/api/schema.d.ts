@@ -1738,6 +1738,10 @@ export interface components {
         };
         /** @description `GET /v1/health`. */
         Health: {
+            /** @description HTTP API compatibility version. */
+            api_version: string;
+            /** @description Capabilities of this host; probes never launch a browser. */
+            host: components["schemas"]["HostInfo"];
             /** @description `ok` when ready for inference, or `setup_required` before provider setup. */
             status: string;
             /**
@@ -1753,6 +1757,18 @@ export interface components {
             control_epoch?: number | null;
             /** Format: uuid */
             takeover_id?: string | null;
+        };
+        /** @description Host capabilities, independent of provider readiness. */
+        HostInfo: {
+            arch: string;
+            has_browser: boolean;
+            has_display: boolean;
+            os: string;
+            /**
+             * Format: int64
+             * @description Physical memory in MiB (1024 * 1024 bytes).
+             */
+            total_ram_mb: number;
         };
         /** @enum {string} */
         HumanAction: "login_completed" | "application_opened" | "other";

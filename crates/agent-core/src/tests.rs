@@ -918,7 +918,7 @@ async fn failing_closing_call_still_fails_the_run() {
     assert!(!lp.stopped_by_guard(run).unwrap());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn tool_timeout_becomes_an_error_result() {
     let env = setup();
     let mut slow = tool("t.slow", Effect::Read, "late");
@@ -1277,7 +1277,7 @@ async fn non_retryable_errors_are_not_retried() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn model_call_timeout_covers_a_hanging_provider() {
     let env = setup();
     let fake = Fake::new(vec![Reply::Hang, text("never")]);
@@ -1461,7 +1461,7 @@ async fn schedule_runs_never_skip_the_money_floor_even_with_a_full_policy_and_gr
     lp.cancel(run2).unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn scheduled_run_pauses_when_nobody_answers_the_approval() {
     let env = setup();
     let w = Arc::new(tool("t.write", Effect::Write, "written"));
@@ -1495,7 +1495,7 @@ async fn scheduled_run_pauses_when_nobody_answers_the_approval() {
     assert!(lp.sh.active.lock().get(&env.chat).is_none());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn human_runs_wait_for_approvals_beyond_the_schedule_timeout() {
     let env = setup();
     let w = Arc::new(tool("t.write", Effect::Write, "written"));
@@ -3796,6 +3796,81 @@ async fn computer_slot_queues_another_run_and_outlives_a_cancelled_backend_await
 }
 
 #[tokio::test]
+async fn computer_slot_is_enforced_without_an_embedder_control_gate() {
+    use builtin_tools::DesktopControlGate;
+    let env = setup();
+    let fake = Fake::new(vec![]);
+    let lp = gate_loop(&env, &fake);
+    let make_run = || {
+        let now = storage::now_ms();
+        let run = storage::Run {
+            id: protocol::RunId::new(),
+            user_id: env.user,
+            bot_id: env.bot,
+            chat_id: Some(env.chat),
+            kind: "turn".into(),
+            state: "running".into(),
+            error: None,
+            created_at_ms: now,
+            updated_at_ms: now,
+            parent_run_id: None,
+            spec: None,
+        };
+        env.storage.insert_run(&run).unwrap();
+        lp.sh.ctx(&run).unwrap();
+        run.id
+    };
+    let mut events = lp.subscribe();
+    let first = make_run();
+    let second = make_run();
+    let gate = Arc::new(crate::control::LoopControl {
+        sh: Arc::downgrade(&lp.sh),
+    });
+    let req = |run: protocol::RunId| builtin_tools::ControlRequest {
+        run_id: run.to_string(),
+        rect: None,
+        label: "fake".into(),
+        action: "click".into(),
+    };
+    let permit = gate.admit_action(&req(first)).await.unwrap();
+    let other = gate.clone();
+    let second_request = req(second);
+    let pending = tokio::spawn(async move { other.admit_action(&second_request).await });
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let item = events.recv().await.unwrap();
+            if let Event::MessageDelta(delta) = item.envelope.event
+                && delta.run_id == second
+                && delta.text.contains("Waiting for computer")
+            {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("a queued computer run must emit a visible waiting message");
+    assert!(!pending.is_finished());
+    lp.sh.runs.lock().remove(&first);
+    assert!(
+        !pending.is_finished(),
+        "dispatched action must keep the root run slot"
+    );
+    drop(permit);
+    let permit = pending.await.unwrap().unwrap();
+    assert!(
+        !lp.sh
+            .runs
+            .lock()
+            .get(&second)
+            .unwrap()
+            .waiting_computer
+            .load(std::sync::atomic::Ordering::SeqCst)
+    );
+    drop(permit);
+    lp.sh.runs.lock().remove(&second);
+}
+
+#[tokio::test]
 async fn control_gate_sees_the_run_and_can_publish_the_request_event() {
     let env = setup();
     let fake = Fake::new(vec![calls(&[("c1", "t.desk", json!({}))]), text("done")]);
@@ -4304,7 +4379,7 @@ async fn approving_a_shell_call_after_shell_is_denied_does_not_run_or_grant() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn retry_after_beyond_budget_is_one_request_and_surfaces_rate_limited() {
     let env = setup();
     let fake = Fake::new(vec![
@@ -4334,7 +4409,7 @@ async fn retry_after_beyond_budget_is_one_request_and_surfaces_rate_limited() {
     assert!(err.contains("rate limited"), "{err}");
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn retry_after_within_budget_waits_then_retries_once() {
     let env = setup();
     let fake = Fake::new(vec![
@@ -4344,12 +4419,12 @@ async fn retry_after_within_budget_waits_then_retries_once() {
     let mut config = cfg(Policy::full());
     config.model_retry.max_attempts = 2;
     // The outer backoff is much longer than Retry-After. Honouring the header
-    // finishes well inside 3s; using the backoff does not.
+    // finishes well inside 3s of virtual time; using the backoff does not.
     config.model_retry.initial_backoff_ms = 5_000;
     config.model_retry.multiplier = 1;
     config.model_retry.max_backoff_ms = 5_000;
     let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
-    let started = std::time::Instant::now();
+    let started = tokio::time::Instant::now();
     let run = lp.run_turn(env.chat, "hi").unwrap();
     let state = tokio::time::timeout(Duration::from_secs(3), lp.wait(run))
         .await

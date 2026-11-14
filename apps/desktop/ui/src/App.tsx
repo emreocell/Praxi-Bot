@@ -760,7 +760,6 @@ function AppShell() {
             key={route.chatId}
             chatId={route.chatId}
             onBack={() => setRoute({ kind: "bot", botId: route.botId })}
-            onOpenBot={() => setPanelOpen(true)}
             onSwitchChat={openChat}
             showAgentRoute={settings.showAgentRoute}
             sendWith={settings.sendWith}

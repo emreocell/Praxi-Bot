@@ -15,8 +15,36 @@ pub struct Health {
     pub status: String,
     /// Daemon crate version.
     pub version: String,
+    /// HTTP API compatibility version.
+    pub api_version: String,
+    /// Capabilities of this host; probes never launch a browser.
+    pub host: HostInfo,
     /// Seconds since the daemon started.
     pub uptime_secs: u64,
+}
+
+/// Host capabilities, independent of provider readiness.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct HostInfo {
+    pub os: String,
+    pub arch: String,
+    pub has_display: bool,
+    pub has_browser: bool,
+    /// Physical memory in MiB (1024 * 1024 bytes).
+    pub total_ram_mb: u64,
+}
+
+impl HostInfo {
+    #[must_use]
+    pub fn detect() -> Self {
+        Self {
+            os: std::env::consts::OS.into(),
+            arch: std::env::consts::ARCH.into(),
+            has_display: browser_cdp::host::has_display(),
+            has_browser: browser_cdp::find_browser().is_ok(),
+            total_ram_mb: browser_cdp::host::total_ram_bytes() / (1024 * 1024),
+        }
+    }
 }
 
 /// A bot.

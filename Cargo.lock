@@ -833,11 +833,16 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
+ "rustix",
  "serde",
  "serde_json",
  "similar",
+ "sysinfo",
  "tokio",
  "tokio-tungstenite",
+ "tracing",
+ "windows 0.62.2",
+ "x11rb",
 ]
 
 [[package]]
@@ -1236,8 +1241,10 @@ dependencies = [
  "connector-email",
  "daemon-api",
  "desktop-api",
+ "desktop-linux",
  "desktop-windows",
  "dialoguer",
+ "flate2",
  "fs4",
  "futures-util",
  "live-view",
@@ -1252,8 +1259,10 @@ dependencies = [
  "secret-store",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "skills",
  "storage",
+ "tar",
  "tempfile",
  "tokio",
  "toml 0.8.2",
@@ -1736,6 +1745,7 @@ dependencies = [
  "agent-core",
  "async-trait",
  "axum",
+ "browser-cdp",
  "builtin-tools",
  "chrono",
  "chrono-tz",
@@ -4944,8 +4954,10 @@ dependencies = [
 name = "node-agent"
 version = "0.1.0"
 dependencies = [
+ "browser-cdp",
  "clap",
  "desktop-api",
+ "desktop-linux",
  "desktop-windows",
  "peer-network",
  "storage",

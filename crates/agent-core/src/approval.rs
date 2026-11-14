@@ -901,7 +901,7 @@ impl ToolGate for LoopGate {
         if !ctx.profile.tool_visible(&req.tool) {
             return Err(format!("unknown tool: {}", req.tool));
         }
-        match sh.decide(&ctx, &req.tool, req.effect, req.category, &req.input) {
+        let result = match sh.decide(&ctx, &req.tool, req.effect, req.category, &req.input) {
             Decision::Allow => Ok(()),
             Decision::Deny => Err(format!(
                 "permission denied: {} is not allowed by policy",
@@ -930,6 +930,14 @@ impl ToolGate for LoopGate {
                     )
                 })
             }
+        };
+        result?;
+        if matches!(
+            req.category,
+            PermissionCategory::Desktop | PermissionCategory::Browser
+        ) {
+            crate::control::acquire_computer_slot(&sh, &ctx).await?;
         }
+        Ok(())
     }
 }

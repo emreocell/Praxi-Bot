@@ -291,6 +291,7 @@
       "sendTitle": "Senin adına gönderilsin mi?",
       "countdown": "{{seconds}} sn içinde otomatik reddedilir",
       "once": "Bir kez izin ver",
+      "sendOnce": "Gönder",
       "thisChat": "Bu sohbet",
       "always": "Her zaman",
       "deny": "Reddet",
@@ -371,7 +372,233 @@
     "conversationLabel": "Bugün",
     "composerHint": "Göndermek için Enter · Komutlar için / · Bot seçmek için @",
     "openBot": "{{name}} ayrıntılarını aç",
-    "emptyTitle": "Birlikte ne yapalım?"
+    "emptyTitle": "Birlikte ne yapalım?",
+    "emptyGreeting": "Merhaba, ben {{name}}",
+    "emptySub": "Bir şey sor ya da hazır bir işle başla.",
+    "starters": {
+      "research": "Araştır",
+      "summarize": "Özetle",
+      "plan": "Planla",
+      "email": "E-posta yaz",
+      "calendar": "Takvime bak",
+      "code": "Kodu incele",
+      "remind": "Hatırlat"
+    },
+    "chain": {
+      "thought": "{{duration}} düşündü",
+      "working": "Adım adım ilerliyor",
+      "details": "Ayrıntılar",
+      "problems_one": "{{count}} adım başarısız",
+      "problems_other": "{{count}} adım başarısız"
+    },
+    "duration": {
+      "seconds_one": "{{count}} saniye",
+      "seconds_other": "{{count}} saniye",
+      "minutes_one": "{{count}} dakika",
+      "minutes_other": "{{count}} dakika"
+    },
+    "menu": {
+      "navigate": "gezin",
+      "select": "seç",
+      "close": "kapat"
+    },
+    "step": {
+      "web_search": {
+        "running": "Web'de aranıyor",
+        "done": "Web'de arandı",
+        "failed": "Web'de aranamadı"
+      },
+      "web_read": {
+        "running": "Sayfa okunuyor",
+        "done": "Sayfa okundu",
+        "failed": "Sayfa okunamadı"
+      },
+      "doc_read": {
+        "running": "Belge okunuyor",
+        "done": "Belge okundu",
+        "failed": "Belge okunamadı"
+      },
+      "fs_read": {
+        "running": "Dosya okunuyor",
+        "done": "Dosya okundu",
+        "failed": "Dosya okunamadı"
+      },
+      "fs_write": {
+        "running": "Dosya yazılıyor",
+        "done": "Dosya yazıldı",
+        "failed": "Dosya yazılamadı"
+      },
+      "fs_move": {
+        "running": "Dosya taşınıyor",
+        "done": "Dosya taşındı",
+        "failed": "Dosya taşınamadı"
+      },
+      "fs_delete": {
+        "running": "Dosya siliniyor",
+        "done": "Dosya silindi",
+        "failed": "Dosya silinmedi"
+      },
+      "fs_list": {
+        "running": "Klasöre bakılıyor",
+        "done": "Klasöre bakıldı",
+        "failed": "Klasöre bakılamadı"
+      },
+      "fs_search": {
+        "running": "Dosyalarda aranıyor",
+        "done": "Dosyalarda arandı",
+        "failed": "Dosyalarda aranamadı"
+      },
+      "shell": {
+        "running": "Komut çalıştırılıyor",
+        "done": "Komut çalıştırıldı",
+        "failed": "Komut çalıştırılmadı"
+      },
+      "browser_open": {
+        "running": "Sayfa açılıyor",
+        "done": "Sayfa açıldı",
+        "failed": "Sayfa açılmadı"
+      },
+      "browser_click": {
+        "running": "Sayfada tıklanıyor",
+        "done": "Sayfada tıklandı",
+        "failed": "Sayfada tıklanmadı"
+      },
+      "browser_fill": {
+        "running": "Alan dolduruluyor",
+        "done": "Alan dolduruldu",
+        "failed": "Alan doldurulmadı"
+      },
+      "browser_eval": {
+        "running": "Tarayıcıda betik çalıştırılıyor",
+        "done": "Tarayıcıda betik çalıştırıldı",
+        "failed": "Tarayıcıda betik çalıştırılmadı"
+      },
+      "browser_press": {
+        "running": "Tarayıcıda tuşa basılıyor",
+        "done": "Tarayıcıda tuşa basıldı",
+        "failed": "Tarayıcıda tuşa basılmadı"
+      },
+      "browser_select": {
+        "running": "Seçenek seçiliyor",
+        "done": "Seçenek seçildi",
+        "failed": "Seçenek seçilmedi"
+      },
+      "browser_view": {
+        "running": "Sayfaya bakılıyor",
+        "done": "Sayfaya bakıldı",
+        "failed": "Sayfaya bakılamadı"
+      },
+      "desktop_pointer": {
+        "running": "Fare kullanılıyor",
+        "done": "Fare kullanıldı",
+        "failed": "Fare kullanılmadı"
+      },
+      "desktop_type": {
+        "running": "Bilgisayarda yazılıyor",
+        "done": "Bilgisayarda yazıldı",
+        "failed": "Bilgisayarda yazılmadı"
+      },
+      "desktop_key": {
+        "running": "Bilgisayarda tuşa basılıyor",
+        "done": "Bilgisayarda tuşa basıldı",
+        "failed": "Bilgisayarda tuşa basılmadı"
+      },
+      "desktop_set": {
+        "running": "Alan ayarlanıyor",
+        "done": "Alan ayarlandı",
+        "failed": "Alan ayarlanmadı"
+      },
+      "desktop_launch": {
+        "running": "Uygulama açılıyor",
+        "done": "Uygulama açıldı",
+        "failed": "Uygulama açılmadı"
+      },
+      "desktop_look": {
+        "running": "Bilgisayara bakılıyor",
+        "done": "Bilgisayara bakıldı",
+        "failed": "Bilgisayara bakılamadı"
+      },
+      "skill_write": {
+        "running": "Beceri yazılıyor",
+        "done": "Beceri yazıldı",
+        "failed": "Beceri yazılmadı"
+      },
+      "skill_look": {
+        "running": "Beceriye bakılıyor",
+        "done": "Beceriye bakıldı",
+        "failed": "Beceriye bakılamadı"
+      },
+      "workflow": {
+        "running": "İş akışı çalıştırılıyor",
+        "done": "İş akışı çalıştırıldı",
+        "failed": "İş akışı çalıştırılmadı"
+      },
+      "todo": {
+        "running": "Plan güncelleniyor",
+        "done": "Plan güncellendi",
+        "failed": "Plan güncellenemedi"
+      },
+      "schedule_create": {
+        "running": "Yinelenen görev oluşturuluyor",
+        "done": "Yinelenen görev oluşturuldu",
+        "failed": "Yinelenen görev oluşturulmadı"
+      },
+      "schedule_update": {
+        "running": "Yinelenen görev değiştiriliyor",
+        "done": "Yinelenen görev değiştirildi",
+        "failed": "Yinelenen görev değiştirilmedi"
+      },
+      "schedule_delete": {
+        "running": "Yinelenen görev siliniyor",
+        "done": "Yinelenen görev silindi",
+        "failed": "Yinelenen görev silinmedi"
+      },
+      "schedule_list": {
+        "running": "Yinelenen görevlere bakılıyor",
+        "done": "Yinelenen görevlere bakıldı",
+        "failed": "Yinelenen görevlere bakılamadı"
+      },
+      "email_send": {
+        "running": "E-posta gönderiliyor",
+        "done": "E-posta gönderildi",
+        "failed": "E-posta gönderilmedi"
+      },
+      "email_draft": {
+        "running": "E-posta taslağı hazırlanıyor",
+        "done": "E-posta taslağı hazırlandı",
+        "failed": "E-posta taslağı hazırlanmadı"
+      },
+      "email_read": {
+        "running": "E-postalar okunuyor",
+        "done": "E-postalar okundu",
+        "failed": "E-postalar okunamadı"
+      },
+      "email_mark": {
+        "running": "E-postanın okundu durumu değiştiriliyor",
+        "done": "E-postanın okundu durumu değişti",
+        "failed": "E-postanın okundu durumu değişmedi"
+      },
+      "agent": {
+        "running": "Yardımcıya devrediliyor",
+        "done": "Yardımcıya devredildi",
+        "failed": "Yardımcıya devredilmedi"
+      },
+      "ask": {
+        "running": "Sana soruluyor",
+        "done": "Sana soruldu",
+        "failed": "Sana sorulamadı"
+      },
+      "mcp": {
+        "running": "{{app}} kullanılıyor ({{action}})",
+        "done": "{{app}} kullanıldı ({{action}})",
+        "failed": "{{app}} tamamlanamadı ({{action}})"
+      },
+      "generic": {
+        "running": "{{name}} çalıştırılıyor",
+        "done": "{{name}} çalıştırıldı",
+        "failed": "{{name}} tamamlanamadı"
+      }
+    }
   },
   "botForm": {
     "apps": {
@@ -752,9 +979,8 @@
   },
   "apps": {
     "title": "Uygulamalar",
-    "subtitle": "Uygulamalarını bir kez bağla. Hangi botların kullanacağını sen seç.",
-    "search": "Uygulama ve sunucu ara",
-    "mcpServers": "Özel MCP sunucusu",
+    "search": "Uygulamalarda ara",
+    "mcpServers": "Kendi MCP sunucun",
     "categoriesLabel": "Kategoriler",
     "categories": {
       "all": "Tümü",
@@ -802,8 +1028,8 @@
     "connectedToast": "{{name}} bağlandı",
     "disconnectedToast": "{{name}} bağlantısı kesildi",
     "missingSecret": "Gerekli tüm gizli anahtarları girin.",
-    "connectedSection": "Bağlı uygulamalar",
-    "catalogSection": "Katalog",
+    "connectedSection": "Bağlı",
+    "catalogSection": "Keşfet",
     "loading": "Katalog yükleniyor…",
     "noResults": "Eşleşen sunucu yok.",
     "custom": {
@@ -820,7 +1046,11 @@
       "url": "Sunucu URL’si",
       "errUrl": "Geçerli bir HTTP URL’si girin.",
       "add": "Sunucu ekle"
-    }
+    },
+    "manage": "Yönet",
+    "close": "Kapat",
+    "usedBy": "Kullananlar",
+    "connectApp": "{{name}} uygulamasını bağla"
   },
   "help": {
     "title": "Klavye kısayolları",
@@ -881,36 +1111,45 @@
     "ai": {
       "defaultModel": {
         "title": "Varsayılan model",
-        "description": "Botta model seçili değilse kullanılır."
+        "description": "Botta model seçili değilse kullanılır.",
+        "heading": "Varsayılan"
       },
       "keys": {
-        "title": "Sağlayıcı API anahtarları",
-        "description": "Yalnızca yazılır; işletim sistemi anahtarlığında saklanır.",
-        "none": "Henüz sağlayıcı yüklenmedi.",
-        "inputLabel": "{{provider}} için API anahtarı",
-        "replace": "Anahtarı değiştir",
-        "placeholder": "API anahtarını yapıştır",
-        "saved": "{{provider}} anahtarı kaydedildi"
+        "title": "API anahtarıyla ekle",
+        "description": "Anahtarlar sistem anahtarlığında saklanır ve bir daha gösterilmez.",
+        "placeholder": "Anahtarı yapıştır. Sağlayıcıyı biz tanırız.",
+        "saved": "{{provider}} anahtarı kaydedildi",
+        "pasteLabel": "API anahtarı",
+        "addTo": "{{provider}} için ekle",
+        "add": "Ekle",
+        "providers": "Sağlayıcı",
+        "stored": "Anahtar kayıtlı",
+        "compatible": "OpenAI uyumlu sunucu",
+        "unknown": "Bu anahtarın hangi sağlayıcıya ait olduğunu anlayamadık. Aşağıdan birini seç."
       },
       "detected": {
-        "title": "Algılanan hesaplar",
-        "description": "PATH üzerinde bulunan kodlama araçları. Praxi oturum dosyalarını okumadan CLI programını doğrudan çalıştırır.",
+        "title": "Bu bilgisayarda bulunanlar",
+        "description": "Kurulu yapay zekâ araçlarını kendimiz buluruz. Açtıkların model listesinde görünür; anahtar girmen gerekmez.",
         "termsNotice": "Sağlayıcınızın abonelik koşulları geçerlidir; etkinleştirmeden önce otomatik kullanıma izin verildiğini doğrulayın.",
-        "refresh": "Yenile",
+        "refresh": "Yeniden tara",
         "retry": "Yeniden dene",
-        "enable": "Etkinleştir",
-        "enabled": "Etkin",
         "enabledToast": "{{name}} etkinleştirildi.",
         "notInstalled": "Kurulu değil",
-        "signInHint": "Oturum açmak için terminalde {{command}} çalıştırın",
         "codexUnconfinable": "Algılandı, ancak bu sürümde güvenli biçimde çalıştırılamıyor.",
         "notRunnable": "Algılandı, bu sürümde çalıştırılamaz",
         "detectError": "Kurulu kodlama araçları denetlenemedi.",
         "offline": "Algılanan kodlama araçlarını görmek için daemon'a bağlanın.",
         "authSignedIn": "Oturum açık",
         "authSignedOut": "Oturum kapalı",
-        "authUnknown": "Bilinmiyor"
-      }
+        "authUnknown": "Bilinmiyor",
+        "ready": "hazır",
+        "foundSignInNeeded": "bulundu, giriş gerekli",
+        "signIn": "Giriş yap",
+        "signInIn": "Terminalde çalıştır:",
+        "install": "Kur",
+        "toggle": "{{name}} kullan"
+      },
+      "advanced": "Gelişmiş sağlayıcı ayarları"
     },
     "computer": {
       "soon": "Yakında",
@@ -1275,6 +1514,11 @@
         "other": "Diğer"
       }
     }
+  },
+  "quota": {
+    "title": "Kalan kota",
+    "remaining": "{{label}}: %{{pct}} kaldı",
+    "resets": "Yenilenme: {{when}}"
   },
   "shell": {
     "railGrip": "Kenar şeridini boyutlandır (ok tuşları)",
