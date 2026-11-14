@@ -270,6 +270,40 @@ mod platform {
     }
 }
 
+/// Run `test_name` in its own process when this one is shared with other tests.
+///
+/// Returns `true` when the caller should execute the body. On Linux a
+/// `fork` copies every file descriptor, and `SOCK_CLOEXEC` drops the listening
+/// socket only at `exec`. A sibling test's `Command::spawn` therefore shows up
+/// in the `/proc/*/fd` scan for a moment, and [`trusted`] with
+/// [`Expect::Child`] rejects the port because it is no longer a single pid.
+///
+/// That extra pid is not ignored in production. The child can `accept` on the
+/// inherited socket and would receive the bearer token. "ppid is us" and
+/// "short-lived" do not make that safe. Re-executing the check alone removes
+/// the sibling without widening [`trusted`].
+#[cfg(test)]
+#[must_use]
+pub(crate) fn enter_isolated(test_name: &str) -> bool {
+    if std::env::var_os("PRAXI_LISTENER_ISOLATED").is_some() {
+        return true;
+    }
+    let exe = std::env::current_exe().unwrap_or_else(|e| panic!("current_exe: {e}"));
+    let output = std::process::Command::new(exe)
+        .args([test_name, "--exact", "--test-threads=1"])
+        .env("PRAXI_LISTENER_ISOLATED", "1")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap_or_else(|e| panic!("re-exec {test_name}: {e}"));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success() && stdout.contains("ok. 1 passed"),
+        "isolated {test_name} failed\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,6 +324,9 @@ mod tests {
 
     #[test]
     fn resolves_our_own_listener() {
+        if !super::enter_isolated("listener::tests::resolves_our_own_listener") {
+            return;
+        }
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = l.local_addr().unwrap().port();
         let me = std::process::id();
@@ -299,5 +336,85 @@ mod tests {
         assert!(verify(port, Expect::Child(me)).is_ok());
         // A listener that is not the expected child is refused.
         assert!(verify(port, Expect::Child(me.wrapping_add(1))).is_err());
+    }
+
+    /// The fork/exec window is real: a child stopped before `exec` still holds
+    /// the listening socket, and that set must not satisfy [`Expect::Child`].
+    /// `nanosleep` is async-signal-safe; `thread::sleep` after `fork` is not.
+    #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+    #[test]
+    #[allow(unsafe_code)]
+    fn forked_child_inherits_the_listener_and_stays_untrusted() {
+        use std::os::unix::process::CommandExt;
+
+        #[repr(C)]
+        struct Timespec {
+            tv_sec: std::os::raw::c_long,
+            tv_nsec: std::os::raw::c_long,
+        }
+        unsafe extern "C" {
+            fn nanosleep(req: *const Timespec, rem: *mut Timespec) -> i32;
+        }
+        struct Reap(Option<std::process::Child>);
+        impl Drop for Reap {
+            fn drop(&mut self) {
+                if let Some(mut child) = self.0.take() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+            }
+        }
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let me = std::process::id();
+        let mut cmd = std::process::Command::new("sleep");
+        cmd.arg("60");
+        unsafe {
+            cmd.pre_exec(|| {
+                let mut req = Timespec {
+                    tv_sec: 30,
+                    tv_nsec: 0,
+                };
+                let mut rem = Timespec {
+                    tv_sec: 0,
+                    tv_nsec: 0,
+                };
+                while nanosleep(&req, &mut rem) != 0 {
+                    if rem.tv_sec == 0 && rem.tv_nsec == 0 {
+                        break;
+                    }
+                    req = rem;
+                    rem = Timespec {
+                        tv_sec: 0,
+                        tv_nsec: 0,
+                    };
+                }
+                Ok(())
+            });
+        }
+        let child = cmd.spawn().unwrap();
+        let child_pid = child.id();
+        let mut reap = Reap(Some(child));
+        let started = std::time::Instant::now();
+        let pids = loop {
+            let pids = platform::listener_pids(port).unwrap();
+            if pids.contains(&me) && pids.contains(&child_pid) {
+                break pids;
+            }
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(5),
+                "child {child_pid} never showed the inherited socket: {pids:?}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert!(
+            !trusted(&pids, Expect::Child(me), |_| true),
+            "an inherited listener must not pass the exact-child check: {pids:?}"
+        );
+        if let Some(mut child) = reap.0.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
