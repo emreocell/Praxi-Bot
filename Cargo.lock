@@ -6528,6 +6528,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "iroh",
+ "live-view",
  "peer-network",
  "reqwest 0.12.28",
  "serde_json",
@@ -6538,6 +6539,7 @@ dependencies = [
  "tool-registry",
  "tower",
  "url",
+ "uuid",
 ]
 
 [[package]]
