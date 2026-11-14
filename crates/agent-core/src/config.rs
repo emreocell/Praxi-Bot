@@ -120,6 +120,10 @@ struct RedactorInner {
     /// Values registered by hand (`register`); they survive a refresh.
     pinned: parking_lot::Mutex<Vec<String>>,
     refresher: RwLock<Option<RedactorRefreshFn>>,
+    #[cfg(test)]
+    before_replace_publish: parking_lot::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    #[cfg(test)]
+    register_contended: parking_lot::Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 /// A [`Redactor`] that can be replaced while the loop runs (secrets are added
@@ -163,10 +167,18 @@ impl SharedRedactor {
 
     /// Replace the redactor atomically (pinned values are kept).
     pub fn replace(&self, mut r: Redactor) {
-        for v in self.0.pinned.lock().iter() {
+        // Serialize copying and publication with registration. Releasing this
+        // lock before the swap could overwrite a just-registered value.
+        let pinned = self.0.pinned.lock();
+        for v in pinned.iter() {
             add_with_variants(&mut r, v);
         }
+        #[cfg(test)]
+        if let Some(hook) = self.0.before_replace_publish.lock().take() {
+            hook();
+        }
         *self.0.redactor.write() = r;
+        drop(pinned);
     }
 
     /// Mask `value` (and its encoded forms) from now on, immediately and
@@ -176,7 +188,15 @@ impl SharedRedactor {
             return;
         }
         {
+            #[cfg(not(test))]
             let mut pinned = self.0.pinned.lock();
+            #[cfg(test)]
+            let mut pinned = self.0.pinned.try_lock().unwrap_or_else(|| {
+                if let Some(hook) = self.0.register_contended.lock().take() {
+                    hook();
+                }
+                self.0.pinned.lock()
+            });
             if !pinned.iter().any(|p| p == value) {
                 pinned.push(value.to_owned());
             }
@@ -341,6 +361,54 @@ impl Default for LoopConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concurrent_refresh_cannot_forget_a_newly_registered_secret() {
+        use std::sync::mpsc;
+        use std::thread;
+
+        let handle = SharedRedactor::default();
+        let secret = "new-credential-with-no-key-shaped-prefix";
+        let (copied_tx, copied_rx) = mpsc::channel();
+        let (publish_tx, publish_rx) = mpsc::channel();
+        // Pause a real replace after it has copied the pinned values, before
+        // publication. This forces the exact refresh/registration interleave.
+        *handle.0.before_replace_publish.lock() = Some(Box::new(move || {
+            copied_tx.send(()).unwrap();
+            publish_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        }));
+        let (progress_tx, progress_rx) = mpsc::channel();
+        let blocked_tx = progress_tx.clone();
+        *handle.0.register_contended.lock() = Some(Box::new(move || {
+            // A correct refresh serializes registration until it publishes.
+            // Signal contention so the test needs no sleep or race lottery.
+            blocked_tx.send(()).unwrap();
+        }));
+        thread::scope(|scope| {
+            let refreshing = handle.clone();
+            let refresh = scope.spawn(move || refreshing.replace(Redactor::new()));
+            copied_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            let registering = handle.clone();
+            let registration = scope.spawn(move || {
+                registering.register(secret);
+                // In the broken implementation registration can finish while
+                // replace is paused; the old snapshot then loses the secret.
+                let _ = progress_tx.send(());
+            });
+            progress_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            publish_tx.send(()).unwrap();
+            refresh.join().unwrap();
+            registration.join().unwrap();
+        });
+        assert!(handle.contains_secret(secret));
+        assert_eq!(handle.redact(secret), secret_store::REDACTED);
+        for variant in secret_variants(secret) {
+            assert!(handle.contains_secret(&variant), "variant was forgotten");
+        }
+        // Registration remains pinned across later refreshes as well.
+        handle.replace(Redactor::new());
+        assert!(handle.contains_secret(secret));
+    }
 
     #[test]
     fn cost_splits_cached_tokens() {
