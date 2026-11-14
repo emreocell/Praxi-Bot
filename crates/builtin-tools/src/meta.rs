@@ -116,6 +116,7 @@ fn json_output(summary: String, data: Value) -> ToolOutput {
             ContentPart::Text { text: summary },
         ],
         spill: None,
+        exposure: None,
     }
 }
 

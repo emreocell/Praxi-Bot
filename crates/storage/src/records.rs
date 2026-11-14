@@ -65,6 +65,12 @@ pub struct Message {
     pub content: String,
     /// Creation time.
     pub created_at_ms: i64,
+    /// The context that produced this message had untrusted content.
+    pub exposure_untrusted: bool,
+    /// The context that produced this message had private content.
+    pub exposure_private: bool,
+    /// Source labels captured with [`Self::exposure_untrusted`].
+    pub exposure_sources: Vec<String>,
 }
 
 /// A durable run (one bot turn or scheduled job).

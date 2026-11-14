@@ -62,6 +62,11 @@ pub struct ContentClass {
     /// deserialized without an explicit declaration.
     #[serde(default)]
     declared: bool,
+    /// The description and input schema were supplied from outside the daemon
+    /// (a remote MCP server, an `OpenAPI` document). Showing that metadata to
+    /// the model ingests untrusted text, whether or not the tool is called.
+    #[serde(default)]
+    external_metadata: bool,
 }
 
 impl Default for ContentClass {
@@ -80,7 +85,15 @@ impl ContentClass {
             reads_private,
             egress,
             declared: true,
+            external_metadata: false,
         }
+    }
+
+    /// This spec's description and schema are attacker-controlled text.
+    #[must_use]
+    pub const fn with_external_metadata(mut self) -> Self {
+        self.external_metadata = true;
+        self
     }
 
     /// No untrusted ingestion, no private read, no egress.
@@ -136,6 +149,7 @@ impl ContentClass {
             reads_private: true,
             egress: true,
             declared: false,
+            external_metadata: false,
         }
     }
 
@@ -143,6 +157,12 @@ impl ContentClass {
     #[must_use]
     pub const fn is_declared(self) -> bool {
         self.declared
+    }
+
+    /// Description and schema come from outside the daemon.
+    #[must_use]
+    pub const fn has_external_metadata(self) -> bool {
+        self.external_metadata
     }
 }
 

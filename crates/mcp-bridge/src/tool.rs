@@ -57,7 +57,8 @@ pub(crate) fn spec_of(config: &McpServerConfig, tool: &McpTool) -> ToolSpec {
         platforms: vec![Platform::All],
         // MCP results are untrusted. They are private unless the server is
         // marked public, and they are egress unless the server is local-only.
-        content: ContentClass::declared(true, !config.public_content, !config.local_only),
+        content: ContentClass::declared(true, !config.public_content, !config.local_only)
+            .with_external_metadata(),
     }
 }
 
@@ -178,6 +179,7 @@ pub(crate) fn into_output(result: CallToolResult) -> Result<ToolOutput, ToolErro
     Ok(ToolOutput {
         content: parts,
         spill: None,
+        exposure: None,
     })
 }
 

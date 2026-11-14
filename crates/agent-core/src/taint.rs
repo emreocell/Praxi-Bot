@@ -3,10 +3,78 @@
 //!
 //! Bits are only ever set. A later tool, a subagent, or a resume of the same
 //! run can add sources; nothing clears them.
+//!
+//! Whether a tool ran, and which class of content that put in context, is a
+//! fact the daemon records when the call happens. Rebuilding a run reads those
+//! facts. It does not look at the tool list the model can see right now, and
+//! it does not look at the bytes the tool returned.
 
 use permission_engine::ContentExposure;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tool_registry::ContentClass;
+use tool_registry::{ContentClass, OutputExposure};
+
+/// Trusted record of one execution, stored with the step that produced it.
+///
+/// `ran` is true only when the daemon started the tool and kept the result.
+/// A denial, an unknown name, or invalid arguments are `ran: false`. The
+/// result text is never consulted.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct ExecFact {
+    pub ran: bool,
+    #[serde(default)]
+    pub ingests_untrusted: bool,
+    #[serde(default)]
+    pub reads_private: bool,
+    #[serde(default)]
+    pub label: String,
+}
+
+impl ExecFact {
+    pub(crate) fn ran(class: ContentClass, label: impl Into<String>) -> Self {
+        Self {
+            ran: true,
+            ingests_untrusted: class.ingests_untrusted,
+            reads_private: class.reads_private,
+            label: label.into(),
+        }
+    }
+
+    /// The tool did not start. Reconstruction must not invent a class.
+    pub(crate) fn did_not_run() -> Self {
+        Self {
+            ran: false,
+            ingests_untrusted: false,
+            reads_private: false,
+            label: String::new(),
+        }
+    }
+
+    /// Discovery (or another tool) reported trust that is not its own spec.
+    pub(crate) fn from_exposure(exposure: &OutputExposure, fallback_label: &str) -> Self {
+        let label = if exposure.label.is_empty() {
+            fallback_label.to_owned()
+        } else {
+            exposure.label.clone()
+        };
+        Self {
+            ran: true,
+            ingests_untrusted: exposure.ingests_untrusted,
+            reads_private: exposure.reads_private,
+            label,
+        }
+    }
+
+    fn class(&self) -> ContentClass {
+        ContentClass::declared(self.ingests_untrusted, self.reads_private, false)
+    }
+
+    fn apply(&self, taint: &mut ContentTaint) {
+        if self.ran {
+            taint.note(self.class(), &self.label);
+        }
+    }
+}
 
 /// How many source labels an approval card lists. Older reads stay in the
 /// bits; the card names the most recent distinct ones that still fit.
@@ -33,6 +101,16 @@ impl ContentTaint {
         self.push_label(label);
     }
 
+    /// A label for the card, without changing the bits. Used when a stored
+    /// message already carries the bits and we only need the name.
+    pub(crate) fn note_label(&mut self, label: &str) {
+        self.push_label(label);
+    }
+
+    pub(crate) fn sources(&self) -> &[String] {
+        &self.sources
+    }
+
     /// Union with taint inherited from a parent run or from stored history.
     pub(crate) fn inherit(&mut self, other: &Self) {
         self.exposure.inherit(other.exposure);
@@ -55,16 +133,14 @@ impl ContentTaint {
 
 /// Fold one persisted step into `taint`.
 ///
-/// `class_of` resolves the tool that actually ran (`use_tool` included) to its
-/// declared class. A missing tool is skipped: it cannot be shown to have
-/// returned content. Permission denials are skipped too; a tool error after
-/// the call started is not, because the result text is already in the step.
+/// Tool results, CLI executions stored on a model step, and external tool
+/// metadata contribute only through [`ExecFact`]s written at the time. Result
+/// text and the current tool surface are not inputs.
 pub(crate) fn observe_history_step(
     taint: &mut ContentTaint,
     name: &str,
     input: &Value,
     output: Option<&Value>,
-    class_of: &mut dyn FnMut(&str, &Value) -> Option<ContentClass>,
 ) {
     match name {
         "user_message" => {
@@ -77,77 +153,51 @@ pub(crate) fn observe_history_step(
         }
         "workflow" => {
             let Some(out) = output else { return };
-            let note = out["note"].as_str().unwrap_or_default();
-            // The early "could not be replayed" failure never put a report in
-            // front of the model.
-            if note.starts_with("The saved workflow could not be replayed") {
+            // New rows carry an explicit fact. Older rows (from before that
+            // field existed) still use the structural summary/final_text keys,
+            // never a prefix of the note text.
+            if out.get("exposure").is_some() {
+                if let Some(fact) = out.get("exposure").and_then(parse_fact) {
+                    fact.apply(taint);
+                }
                 return;
             }
             if out.get("summary").is_some() || out.get("final_text").is_some() {
                 taint.note(ContentClass::untrusted_private(), "workflow replay");
             }
         }
+        "model" => {
+            let Some(out) = output else { return };
+            apply_fact_list(taint, out.get("executed"));
+            apply_fact_list(taint, out.get("metadata"));
+        }
         "tools" => {
-            let calls = input["calls"].as_array().cloned().unwrap_or_default();
-            let results = output
-                .and_then(|o| o["results"].as_array())
-                .cloned()
-                .unwrap_or_default();
-            for call in calls {
-                let id = call["id"].as_str().unwrap_or_default();
-                let Some(result) = results.iter().find(|r| r["id"].as_str() == Some(id)) else {
-                    continue;
-                };
-                let text = result["text"].as_str().unwrap_or_default();
-                if !ran_result(text) {
-                    continue;
+            let Some(results) = output.and_then(|o| o["results"].as_array()) else {
+                return;
+            };
+            for result in results {
+                if let Some(fact) = result.get("fact").and_then(parse_fact) {
+                    fact.apply(taint);
                 }
-                let tool = call["name"].as_str().unwrap_or_default();
-                let args = call["arguments"].as_str().unwrap_or("{}");
-                let parsed: Value = serde_json::from_str(args).unwrap_or(Value::Null);
-                let Some(class) = class_of(tool, &parsed) else {
-                    continue;
-                };
-                // The closure resolves `use_tool` to the target. Ask it for the
-                // name it classified so the label matches that tool.
-                let (eff_name, eff_input) = effective_call(tool, &parsed);
-                taint.note(class, &source_label(&eff_name, &eff_input));
             }
         }
         _ => {}
     }
 }
 
-/// A stored result that means the tool actually started.
-///
-/// Policy and user denials never put tool output in context. An `Error:` from
-/// the tool itself did run, so it still taints.
-fn ran_result(text: &str) -> bool {
-    let t = text.trim_start();
-    if t.starts_with("Permission denied") {
-        return false;
-    }
-    if t.starts_with("Error: unknown tool") || t.starts_with("Error: invalid JSON") {
-        return false;
-    }
-    if t.starts_with("[interrupted:") {
-        return false;
-    }
-    true
+fn parse_fact(value: &Value) -> Option<ExecFact> {
+    serde_json::from_value(value.clone()).ok()
 }
 
-/// `use_tool` hides the target name and input. Everyone else is itself.
-fn effective_call(name: &str, input: &Value) -> (String, Value) {
-    if name == "use_tool" {
-        let target = input
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or(name)
-            .to_owned();
-        let inner = input.get("input").cloned().unwrap_or_else(|| json!({}));
-        return (target, inner);
+fn apply_fact_list(taint: &mut ContentTaint, value: Option<&Value>) {
+    let Some(list) = value.and_then(Value::as_array) else {
+        return;
+    };
+    for item in list {
+        if let Some(fact) = parse_fact(item) {
+            fact.apply(taint);
+        }
     }
-    (name.to_owned(), input.clone())
 }
 
 /// Short label for the approval card: `file <path>`, `mailbox <folder>`,
@@ -191,6 +241,9 @@ pub(crate) fn source_label(name: &str, input: &Value) -> String {
 }
 
 /// Destination host, the exact outgoing text, and which kind of text it is.
+///
+/// Every field the call actually transmits is in the text. A projection that
+/// keeps only the first recipient, or only the query, is not used.
 pub(crate) fn egress_payload(name: &str, input: &Value) -> (String, String, &'static str) {
     let str_field = |key: &str| {
         input
@@ -201,45 +254,154 @@ pub(crate) fn egress_payload(name: &str, input: &Value) -> (String, String, &'st
     };
     if let Some(server) = name.strip_prefix("mcp:") {
         let server = server.split('/').next().unwrap_or("mcp").to_owned();
-        return (server, input.to_string(), "body");
+        return (server, render_fields(input), "body");
     }
     match name {
-        "web_search" => (
-            search_host(input.get("backend").and_then(Value::as_str)),
-            str_field("query"),
-            "query",
-        ),
+        "web_search" => {
+            let mut payload = str_field("query");
+            // `language` and `limit` are query parameters on at least one
+            // configured backend. `backend` selects which host is called.
+            for (key, kind) in [("language", "str"), ("limit", "num"), ("backend", "str")] {
+                if let Some(extra) = field_text(input, key, kind) {
+                    payload.push('\n');
+                    payload.push_str(key);
+                    payload.push_str(": ");
+                    payload.push_str(&extra);
+                }
+            }
+            (
+                search_host(input.get("backend").and_then(Value::as_str)),
+                payload,
+                "query",
+            )
+        }
         "web_extract" | "web_feed" | "web_sitemap" | "web_metadata" | "browser_open" => {
             let url = str_field("url");
             let host = host_of_url(&url);
+            // The URL is the request line, query string included. Other keys
+            // on these tools are local (how much of the reply to keep).
             (host, url, "url")
         }
         "email_send" | "email_draft" => {
-            let to = first_addr(input.get("to"));
-            let host = domain_of_addr(&to);
-            let body = format!(
-                "To: {to}\nSubject: {}\n\n{}",
-                str_field("subject"),
-                str_field("body")
-            );
+            let to = all_addrs(input.get("to"));
+            let cc = all_addrs(input.get("cc"));
+            let bcc = all_addrs(input.get("bcc"));
+            let mut everyone = to.clone();
+            everyone.extend(cc.iter().cloned());
+            everyone.extend(bcc.iter().cloned());
+            let host = domains_of(&everyone);
+            let mut body = String::new();
+            push_addrs(&mut body, "To", &to);
+            push_addrs(&mut body, "Cc", &cc);
+            push_addrs(&mut body, "Bcc", &bcc);
+            let account = str_field("account");
+            if !account.is_empty() {
+                body.push_str("Account: ");
+                body.push_str(&account);
+                body.push('\n');
+            }
+            body.push_str("Subject: ");
+            body.push_str(&str_field("subject"));
+            body.push_str("\n\n");
+            body.push_str(&str_field("body"));
             (host, body, "body")
         }
-        "shell_run" => ("the shell".to_owned(), str_field("command"), "body"),
-        "script_run" => ("a script".to_owned(), str_field("code"), "body"),
-        "browser_fill" | "browser_type" => ("the browser".to_owned(), str_field("text"), "body"),
+        "email_search" | "email_read" | "email_mark_read" | "email_list_folders" => {
+            let account = str_field("account");
+            let host = if account.is_empty() {
+                "the mailbox".to_owned()
+            } else {
+                format!("mailbox {account}")
+            };
+            (host, render_fields(input), "body")
+        }
+        "shell_run" => ("the shell".to_owned(), render_fields(input), "body"),
+        "script_run" => ("a script".to_owned(), render_fields(input), "body"),
+        "browser_fill" | "browser_press" | "browser_select" | "browser_click"
+        | "browser_scroll" | "browser_tabs" | "browser_back" => {
+            ("the browser".to_owned(), render_fields(input), "body")
+        }
         "browser_eval" => ("the browser".to_owned(), str_field("js"), "body"),
         "schedule_create" | "schedule_update" | "schedule_resume" => (
             "this bot's scheduler".to_owned(),
             str_field("prompt"),
             "body",
         ),
+        other if other.starts_with("desktop_") => {
+            ("the desktop".to_owned(), render_fields(input), "body")
+        }
         _ => {
             if let Some(url) = input.get("url").and_then(Value::as_str) {
-                (host_of_url(url), url.to_owned(), "url")
+                (host_of_url(url), render_fields(input), "url")
             } else {
-                (name.to_owned(), input.to_string(), "body")
+                (name.to_owned(), render_fields(input), "body")
             }
         }
+    }
+}
+
+/// Every object field, in the order the call carried them.
+fn render_fields(input: &Value) -> String {
+    let Some(obj) = input.as_object() else {
+        return input.to_string();
+    };
+    if obj.is_empty() {
+        return String::new();
+    }
+    obj.iter()
+        .map(|(k, v)| format!("{k}: {v}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn field_text(input: &Value, key: &str, kind: &str) -> Option<String> {
+    let value = input.get(key)?;
+    if kind == "num" {
+        return value.as_i64().map(|n| n.to_string()).or_else(|| {
+            value
+                .as_u64()
+                .map(|n| n.to_string())
+                .or_else(|| value.as_f64().map(|n| n.to_string()))
+        });
+    }
+    value.as_str().filter(|s| !s.is_empty()).map(str::to_owned)
+}
+
+fn all_addrs(value: Option<&Value>) -> Vec<String> {
+    match value {
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        Some(Value::String(s)) if !s.is_empty() => vec![s.clone()],
+        _ => Vec::new(),
+    }
+}
+
+fn push_addrs(out: &mut String, label: &str, addrs: &[String]) {
+    if addrs.is_empty() {
+        return;
+    }
+    out.push_str(label);
+    out.push_str(": ");
+    out.push_str(&addrs.join(", "));
+    out.push('\n');
+}
+
+fn domains_of(addrs: &[String]) -> String {
+    let mut domains = Vec::new();
+    for addr in addrs {
+        let domain = domain_of_addr(addr);
+        if !domains.contains(&domain) {
+            domains.push(domain);
+        }
+    }
+    if domains.is_empty() {
+        "unknown".to_owned()
+    } else {
+        domains.join(", ")
     }
 }
 
@@ -261,14 +423,6 @@ fn host_of_url(url: &str) -> String {
         "unknown".to_owned()
     } else {
         host.to_owned()
-    }
-}
-
-fn first_addr(value: Option<&Value>) -> String {
-    match value {
-        Some(Value::Array(a)) => a.first().and_then(Value::as_str).unwrap_or("").to_owned(),
-        Some(Value::String(s)) => s.clone(),
-        _ => String::new(),
     }
 }
 

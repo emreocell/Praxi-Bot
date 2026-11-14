@@ -253,6 +253,7 @@ fn finish_text(ctx: &ToolContext, spill_dir: Option<&Path>, text: String) -> Too
                 mime_type: "text/markdown".into(),
                 size_bytes: text.len() as u64,
             }),
+            exposure: None,
         }
     } else {
         inline.push_str("\n...[output truncated]");
@@ -343,6 +344,7 @@ fn json_out(source: &str, mut data: Value) -> ToolOutput {
     ToolOutput {
         content: vec![ContentPart::Json { data }],
         spill: None,
+        exposure: None,
     }
 }
 
@@ -406,6 +408,7 @@ impl WebTool {
                 },
             ],
             spill: None,
+            exposure: None,
         })
     }
 

@@ -2,6 +2,7 @@
 
 use std::fmt::Write as _;
 
+use protocol::{ChatId, RunId};
 use provider_catalog::{Message, MessageRole, ToolCall};
 use serde_json::{Value, json};
 use storage::{Run, RunStep, Storage};
@@ -77,6 +78,63 @@ const MAX_HISTORY_BYTES: usize = 64 * 1024;
 const HISTORY_OMITTED_NOTE: &str = "Some older conversation exchanges were omitted to keep history bounded. \
 They remain in storage; do not infer their contents. A summary of older history is a follow-up if needed.";
 
+/// Messages from earlier turns that [`build_messages`] will place in context,
+/// after the same bound and the same drop of a leading assistant fragment.
+fn messages_in_context(
+    storage: &Storage,
+    chat: ChatId,
+    exclude_run: Option<RunId>,
+) -> Result<(Vec<storage::Message>, bool), storage::StorageError> {
+    let (history, omitted) = storage.list_messages_bounded(
+        chat,
+        exclude_run,
+        MAX_HISTORY_MESSAGES,
+        MAX_HISTORY_BYTES,
+    )?;
+    let start = history
+        .iter()
+        .position(|m| m.role == "user")
+        .unwrap_or(history.len());
+    Ok((
+        history.into_iter().skip(start).collect(),
+        omitted || start > 0,
+    ))
+}
+
+/// Provenance of chat messages that will be in the model context.
+///
+/// A message the history bound leaves out is not included: its bytes are not
+/// in front of the model. A message the bound keeps contributes the bits and
+/// labels stored with it, so compaction does not strip provenance from text
+/// that is still there.
+pub(crate) struct ChatProvenance {
+    pub exposure: permission_engine::ContentExposure,
+    pub sources: Vec<String>,
+}
+
+pub(crate) fn chat_provenance(
+    storage: &Storage,
+    chat: ChatId,
+    exclude_run: Option<RunId>,
+) -> ChatProvenance {
+    let mut exposure = permission_engine::ContentExposure::clean();
+    let mut sources = Vec::new();
+    let Ok((messages, _)) = messages_in_context(storage, chat, exclude_run) else {
+        return ChatProvenance { exposure, sources };
+    };
+    for m in messages {
+        if m.exposure_untrusted || m.exposure_private {
+            exposure.observe(m.exposure_untrusted, m.exposure_private);
+        }
+        for label in m.exposure_sources {
+            if !label.is_empty() && !sources.iter().any(|s| s == &label) && sources.len() < 8 {
+                sources.push(label);
+            }
+        }
+    }
+    ChatProvenance { exposure, sources }
+}
+
 fn append_chat_history(
     storage: &Storage,
     run: &Run,
@@ -85,22 +143,11 @@ fn append_chat_history(
     let Some(chat) = run.chat_id else {
         return Ok(());
     };
-    let (history, omitted) = storage.list_messages_bounded(
-        chat,
-        Some(run.id),
-        MAX_HISTORY_MESSAGES,
-        MAX_HISTORY_BYTES,
-    )?;
-    // A bounded suffix may start with an assistant response whose user
-    // message was outside the window. Drop that incomplete exchange.
-    let start = history
-        .iter()
-        .position(|m| m.role == "user")
-        .unwrap_or(history.len());
-    if omitted || start > 0 {
+    let (history, omitted) = messages_in_context(storage, chat, Some(run.id))?;
+    if omitted {
         out.push(Message::text(MessageRole::System, HISTORY_OMITTED_NOTE));
     }
-    for m in history.into_iter().skip(start) {
+    for m in history {
         match m.role.as_str() {
             "user" => out.push(Message::text(MessageRole::User, m.content)),
             "assistant" => out.push(Message::text(MessageRole::Assistant, m.content)),
@@ -489,6 +536,9 @@ mod tests {
                     role: if i % 2 == 0 { "user" } else { "assistant" }.into(),
                     content: format!("old message {i}"),
                     created_at_ms: i64::from(i),
+                    exposure_untrusted: false,
+                    exposure_private: false,
+                    exposure_sources: Vec::new(),
                 })
                 .unwrap();
         }
@@ -555,6 +605,9 @@ mod tests {
                     role: role.into(),
                     content: text.into(),
                     created_at_ms: i64::from(i),
+                    exposure_untrusted: false,
+                    exposure_private: false,
+                    exposure_sources: Vec::new(),
                 })
                 .unwrap();
         }

@@ -121,6 +121,7 @@ impl Tool for ProcessList {
         Ok(ToolOutput {
             content: vec![ContentPart::Json { data }],
             spill: None,
+            exposure: None,
         })
     }
 }

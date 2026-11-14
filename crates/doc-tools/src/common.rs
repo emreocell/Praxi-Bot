@@ -35,6 +35,7 @@ impl Reply {
                 ContentPart::Json { data: self.data },
             ],
             spill: None,
+            exposure: None,
         }
     }
 }

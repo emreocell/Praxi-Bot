@@ -935,6 +935,9 @@ impl AgentLoop {
             role: "user".to_owned(),
             content: self.sh.redact(text.to_owned()),
             created_at_ms: now_ms(),
+            exposure_untrusted: false,
+            exposure_private: false,
+            exposure_sources: Vec::new(),
         })?;
         Ok(())
     }
@@ -1083,6 +1086,7 @@ impl AgentLoop {
             // to memory extraction: mask it as a whole (a secret split across
             // streamed deltas is only whole here).
             let text = self.sh.redact(text);
+            let exposure = ctx.as_ref().map(|c| c.taint.lock().clone());
             let _ = self.sh.storage.insert_message(&DbMessage {
                 id: Uuid::now_v7(),
                 user_id: run.user_id,
@@ -1091,6 +1095,9 @@ impl AgentLoop {
                 role: "assistant".to_owned(),
                 content: text.clone(),
                 created_at_ms: now_ms(),
+                exposure_untrusted: exposure.as_ref().is_some_and(|t| t.exposure.untrusted),
+                exposure_private: exposure.as_ref().is_some_and(|t| t.exposure.private),
+                exposure_sources: exposure.map(|t| t.sources().to_vec()).unwrap_or_default(),
             });
             self.enqueue_memory(run, &text);
         }

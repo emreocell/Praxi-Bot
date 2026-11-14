@@ -1505,6 +1505,9 @@ fn flush_note(s: &AppState, journal: &mut ReleaseJournal) -> Result<(), ApiError
                 role: agent_core::control_note::ROLE.into(),
                 content: journal.summary.clone(),
                 created_at_ms: storage::now_ms(),
+                exposure_untrusted: false,
+                exposure_private: false,
+                exposure_sources: Vec::new(),
             })?;
         }
     }

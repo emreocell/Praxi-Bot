@@ -24,6 +24,9 @@ struct Host {
     sh: Arc<Shared>,
     run: Run,
     approved: parking_lot::Mutex<Vec<CliApproval>>,
+    /// Facts for tool calls this CLI turn ran. The runtime does not persist a
+    /// tools step for them; they ride on the model step instead.
+    executed: parking_lot::Mutex<Vec<crate::taint::ExecFact>>,
 }
 #[async_trait]
 impl TurnHost for Host {
@@ -64,13 +67,21 @@ impl TurnHost for Host {
                 .map(|i| approvals.remove(i))
         };
         match exec.exec_tools_approved(&self.run, &step, approval).await {
-            Ok(v) => ToolReply {
-                text: v["results"][0]["text"]
-                    .as_str()
-                    .unwrap_or("tool failed")
-                    .into(),
-                is_error: v["results"][0]["is_error"].as_bool().unwrap_or(true),
-            },
+            Ok(v) => {
+                if let Some(fact) = v["results"][0]["fact"].as_object()
+                    && let Ok(fact) =
+                        serde_json::from_value(serde_json::Value::Object(fact.clone()))
+                {
+                    self.executed.lock().push(fact);
+                }
+                ToolReply {
+                    text: v["results"][0]["text"]
+                        .as_str()
+                        .unwrap_or("tool failed")
+                        .into(),
+                    is_error: v["results"][0]["is_error"].as_bool().unwrap_or(true),
+                }
+            }
             Err(_) => ToolReply {
                 text: "tool execution failed".into(),
                 is_error: true,
@@ -187,6 +198,7 @@ impl TurnExecutor {
                 sh: self.sh.clone(),
                 run: run.clone(),
                 approved: parking_lot::Mutex::new(Vec::new()),
+                executed: parking_lot::Mutex::new(Vec::new()),
             },
             text: parking_lot::Mutex::new(String::new()),
         });
@@ -223,6 +235,7 @@ impl TurnExecutor {
         .await
         .map_err(|_| xe("CLI turn timed out"))?
         .map_err(|e| cli_exec_error(engine, &e))?;
+        let executed = std::mem::take(&mut *host.inner.executed.lock());
         Ok(ModelOut {
             text: self.sh.redact(host.text.lock().clone()),
             model: req.model.0.clone(),
@@ -233,6 +246,7 @@ impl TurnExecutor {
                 cache_write_tokens: None,
             }),
             finish: "Stop".into(),
+            executed,
             ..ModelOut::default()
         })
     }
@@ -345,12 +359,138 @@ mod tests {
                 sh: lp.sh.clone(),
                 run,
                 approved: parking_lot::Mutex::new(Vec::new()),
+                executed: parking_lot::Mutex::new(Vec::new()),
             };
             let reply = host.call("test.read", json!({})).await;
             assert_eq!(reply.is_error, !allow);
             assert_eq!(t.count.load(Ordering::SeqCst), usize::from(allow));
         }
     }
+
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn a_cli_child_read_is_recorded_and_gates_the_parent() {
+        use crate::tests::with_class;
+        use tool_registry::{ContentClass, Effect, PermissionCategory, Tool};
+
+        let env = setup();
+        let read = std::sync::Arc::new(with_class(
+            "fs_read",
+            Effect::Read,
+            PermissionCategory::Fs,
+            ContentClass::untrusted_private(),
+            "Permission denied: secret notes",
+        ));
+        let search = std::sync::Arc::new(with_class(
+            "web_search",
+            Effect::Read,
+            PermissionCategory::Browser,
+            ContentClass::untrusted_egress(),
+            "sent",
+        ));
+        let registry = ToolRegistry::new();
+        registry.register(std::sync::Arc::clone(&read) as std::sync::Arc<dyn Tool>);
+        registry.register(std::sync::Arc::clone(&search) as std::sync::Arc<dyn Tool>);
+        let lp = crate::AgentLoop::new(
+            env.storage.clone(),
+            registry,
+            crate::Providers::single(std::sync::Arc::new(UnusedHttp)),
+            cfg(Policy::full()),
+        );
+        lp.add_profile(env.bot, profile(""));
+        let parent_id = lp.run_turn(env.chat, "hi").unwrap();
+        lp.wait(parent_id).await.unwrap();
+        let parent_run = env.storage.get_run(parent_id).unwrap().unwrap();
+        let now = storage::now_ms();
+        let child_id = protocol::RunId::new();
+        env.storage
+            .insert_run(&storage::Run {
+                id: child_id,
+                user_id: env.user,
+                bot_id: env.bot,
+                chat_id: Some(env.chat),
+                kind: "turn:subagent".into(),
+                state: "succeeded".into(),
+                error: None,
+                created_at_ms: now,
+                updated_at_ms: now,
+                parent_run_id: Some(parent_id),
+                spec: Some(json!({
+                    "task": "read",
+                    "context": "",
+                    "tools": ["fs_read"],
+                    "max_steps": 4,
+                    "token_budget": 0,
+                    "depth": 1,
+                    "spawn_key": "0:c1"
+                })),
+            })
+            .unwrap();
+        let child = env.storage.get_run(child_id).unwrap().unwrap();
+        let host = Host {
+            sh: lp.sh.clone(),
+            run: child,
+            approved: parking_lot::Mutex::new(Vec::new()),
+            executed: parking_lot::Mutex::new(Vec::new()),
+        };
+        let reply = host.call("fs_read", json!({"path": "secret.txt"})).await;
+        assert!(!reply.is_error, "{}", reply.text);
+        assert!(
+            reply.text.starts_with("Permission denied"),
+            "{}",
+            reply.text
+        );
+        let facts = host.executed.lock().clone();
+        assert!(facts[0].ran && facts[0].reads_private, "{facts:?}");
+        assert!(
+            !lp.sh
+                .ctx(&parent_run)
+                .unwrap()
+                .taint
+                .lock()
+                .exposure
+                .private
+        );
+        env.storage
+            .insert_step(&storage::RunStep {
+                id: uuid::Uuid::now_v7(),
+                run_id: child_id,
+                user_id: env.user,
+                idx: 0,
+                name: "model".into(),
+                input: json!({}),
+                idempotent: false,
+                retry: None,
+                status: "succeeded".into(),
+                attempt: 1,
+                output: Some(json!({
+                    "text": "ok",
+                    "finish": "Stop",
+                    "executed": facts,
+                })),
+                error: None,
+                started_at_ms: now,
+                finished_at_ms: Some(now),
+            })
+            .unwrap();
+        // The tool is gone from the current surface. The stored fact is enough.
+        assert!(lp.sh.tools.unregister("fs_read"));
+        lp.sh.runs.lock().clear();
+        let parent_run = env.storage.get_run(parent_id).unwrap().unwrap();
+        let ctx = lp.sh.ctx(&parent_run).unwrap();
+        assert!(ctx.taint.lock().exposure.private);
+        let decision = lp.sh.decide(
+            &ctx,
+            "web_search",
+            Effect::Read,
+            PermissionCategory::Browser,
+            &json!({"query": "q"}),
+        );
+        assert!(decision.is_ask(), "{decision:?}");
+        assert_eq!(read.count.load(Ordering::SeqCst), 1);
+        assert_eq!(search.count.load(Ordering::SeqCst), 0);
+    }
+
     struct UnusedHttp;
     #[async_trait]
     impl provider_catalog::ChatProvider for UnusedHttp {

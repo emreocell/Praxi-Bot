@@ -343,17 +343,18 @@ impl TurnExecutor {
         }
         let state = self.wait_child(&rt, run.id, child).await?;
         let (text, is_error) = self.child_result(child, state);
-        // The child's answer is now in the parent's context. The child's own
-        // run context is usually already dropped, so rebuild from its steps
-        // (and from any subagent it spawned).
-        crate::shared::absorb_run_history(
-            &mut ctx.taint.lock(),
-            sh,
-            &ctx.profile,
-            ctx.bot_id,
-            child,
-            0,
-        );
+        // Copy the live exposure first. CLI calls and a child that is about
+        // to drop its context are already on this value; the step scan below
+        // covers a restart, where the context is already gone.
+        let live = sh
+            .runs
+            .lock()
+            .get(&child)
+            .map(|child_ctx| child_ctx.taint.lock().clone());
+        if let Some(live) = live {
+            ctx.taint.lock().inherit(&live);
+        }
+        crate::shared::absorb_run_history(&mut ctx.taint.lock(), sh, child, 0);
         if adopted && state.is_terminal() {
             // No `conclude` ran for a child that finished before the restart.
             let ev = finished_event(child, run.id, state.as_str(), &text, Some(call));

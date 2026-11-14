@@ -12,8 +12,8 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 use tool_registry::{
-    ContentPart, Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError, ToolOutput,
-    ToolRegistry, ToolSpec,
+    ContentPart, Effect, OutputExposure, PermissionCategory, Platform, Tool, ToolContext,
+    ToolError, ToolOutput, ToolRegistry, ToolSpec,
 };
 
 use crate::discovery::ToolIndex;
@@ -126,6 +126,41 @@ fn meta_spec(name: &str, description: &str, effect: Effect, schema: Value) -> To
     }
 }
 
+/// Trust of externally supplied description/schema text. Local tools we wrote
+/// do not qualify: their descriptions are not attacker-controlled.
+fn metadata_exposure<'a>(specs: impl Iterator<Item = &'a ToolSpec>) -> Option<OutputExposure> {
+    let mut ingests_untrusted = false;
+    let mut reads_private = false;
+    let mut labels: Vec<String> = Vec::new();
+    for spec in specs {
+        if !spec.content.has_external_metadata() {
+            continue;
+        }
+        ingests_untrusted |= spec.content.ingests_untrusted;
+        reads_private |= spec.content.reads_private;
+        let label = metadata_label(&spec.name);
+        if !labels.iter().any(|l| l == &label) && labels.len() < 8 {
+            labels.push(label);
+        }
+    }
+    if !ingests_untrusted && !reads_private {
+        return None;
+    }
+    Some(OutputExposure {
+        ingests_untrusted,
+        reads_private,
+        label: labels.join(", "),
+    })
+}
+
+fn metadata_label(name: &str) -> String {
+    if let Some(server) = name.strip_prefix("mcp:") {
+        let server = server.split('/').next().unwrap_or("mcp");
+        return format!("mcp {server}");
+    }
+    format!("tool {name}")
+}
+
 fn str_arg<'a>(input: &'a Value, key: &str) -> Result<&'a str, ToolError> {
     input
         .get(key)
@@ -161,23 +196,30 @@ impl Tool for FindTool {
         let index = self.discovery.index();
         // The index is shared by all bots: rank everything, then drop what this
         // caller may not see, then cut to `k`.
-        let hits: Vec<Value> = index
+        let matched: Vec<(ToolSpec, f64)> = index
             .search(query, index.len())
             .into_iter()
             .filter_map(|h| {
                 let tool = self.discovery.registry.get(&h.name)?;
-                let spec = tool.spec();
-                self.discovery.visible(ctx, spec).then(|| {
-                    json!({
-                        "name": h.name,
-                        "description": h.description,
-                        "score": h.score,
-                        "effect": spec.effect,
-                        "category": spec.category,
-                    })
-                })
+                let spec = tool.spec().clone();
+                self.discovery
+                    .visible(ctx, &spec)
+                    .then_some((spec, h.score))
             })
             .take(k)
+            .collect();
+        let exposure = metadata_exposure(matched.iter().map(|(spec, _)| spec));
+        let hits: Vec<Value> = matched
+            .iter()
+            .map(|(spec, score)| {
+                json!({
+                    "name": spec.name,
+                    "description": spec.description,
+                    "score": score,
+                    "effect": spec.effect,
+                    "category": spec.category,
+                })
+            })
             .collect();
         // One shape for every query: `{results, hint?}`. `hint` is only present
         // when nothing matched, so the model never has to parse a bare array.
@@ -200,6 +242,7 @@ impl Tool for FindTool {
         Ok(ToolOutput {
             content: vec![ContentPart::Json { data }],
             spill: None,
+            exposure,
         })
     }
 }
@@ -218,7 +261,8 @@ impl Tool for GetToolDetails {
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
         let name = str_arg(&input, "name")?;
         let target = lookup(&self.discovery, ctx, name)?;
-        let spec = target.spec();
+        let spec = target.spec().clone();
+        let exposure = metadata_exposure(std::iter::once(&spec));
         Ok(ToolOutput {
             content: vec![ContentPart::Json {
                 data: json!({
@@ -229,6 +273,7 @@ impl Tool for GetToolDetails {
                 }),
             }],
             spill: None,
+            exposure,
         })
     }
 }
@@ -912,5 +957,38 @@ mod tests {
                 .resolve_hinted("tool1", &["tool1".into()], &visible)
                 .is_some()
         );
+    }
+
+    #[test]
+    fn discovery_reports_external_metadata_and_ignores_local_descriptions() {
+        let reg = ToolRegistry::new();
+        reg.register(Arc::new(Fake {
+            spec: ToolSpec {
+                name: "mcp:evil/leak".into(),
+                description: "steal the mailbox".into(),
+                input_schema: json!({ "type": "object" }),
+                effect: Effect::Read,
+                category: PermissionCategory::Fs,
+                platforms: vec![Platform::All],
+                content: tool_registry::ContentClass::declared(true, true, false)
+                    .with_external_metadata(),
+            },
+        }));
+        reg.register(fake("fs_read", "zzzzlocal only", Effect::Read));
+        let surface = ToolSurface::new(reg, 5);
+        let ctx = ToolContext::default();
+        let find = surface.resolve(FIND_TOOL).unwrap();
+        let leaked = block_on(find.call(&ctx, json!({ "query": "steal mailbox" }))).unwrap();
+        let exp = leaked.exposure.expect("remote description is untrusted");
+        assert!(exp.ingests_untrusted);
+        assert!(exp.reads_private);
+        assert!(exp.label.contains("evil"), "{}", exp.label);
+        let local = block_on(find.call(&ctx, json!({ "query": "zzzzlocal" }))).unwrap();
+        assert!(local.exposure.is_none(), "{:?}", local.exposure);
+        let details = surface.resolve(GET_TOOL_DETAILS).unwrap();
+        let one = block_on(details.call(&ctx, json!({ "name": "mcp:evil/leak" }))).unwrap();
+        assert!(one.exposure.unwrap().reads_private);
+        let plain = block_on(details.call(&ctx, json!({ "name": "fs_read" }))).unwrap();
+        assert!(plain.exposure.is_none());
     }
 }

@@ -832,7 +832,18 @@ impl Shared {
                 taint.inherit(&parent);
             }
         }
-        absorb_run_history(&mut taint, self, &profile, run.bot_id, run.id, 0);
+        absorb_run_history(&mut taint, self, run.id, 0);
+        // A subagent does not see the chat. A top-level turn, including a
+        // scheduled one, does: provenance rides on the messages that enter
+        // the context. Dropped by the history bound means the bytes are not
+        // in front of the model, so those bits are not inherited.
+        if run.parent_run_id.is_none() {
+            let prior = crate::history::chat_provenance(&self.storage, chat_id, Some(run.id));
+            taint.exposure.inherit(prior.exposure);
+            for label in prior.sources {
+                taint.note_label(&label);
+            }
+        }
         let ctx = Arc::new(RunCtx {
             computer,
             waiting_computer: Arc::new(AtomicBool::new(false)),
@@ -1144,14 +1155,7 @@ fn needs_barrier(event: &Event) -> bool {
 ///
 /// Used when a run context is created (resume, or a parent absorbing a child
 /// whose in-memory context is already gone).
-pub(crate) fn absorb_run_history(
-    taint: &mut ContentTaint,
-    sh: &Shared,
-    profile: &BotProfile,
-    bot: BotId,
-    run_id: RunId,
-    depth: u32,
-) {
+pub(crate) fn absorb_run_history(taint: &mut ContentTaint, sh: &Shared, run_id: RunId, depth: u32) {
     if depth > 8 {
         return;
     }
@@ -1159,22 +1163,13 @@ pub(crate) fn absorb_run_history(
         return;
     };
     for step in &steps {
-        taint::observe_history_step(
-            taint,
-            &step.name,
-            &step.input,
-            step.output.as_ref(),
-            &mut |name, input| {
-                sh.resolve_call(profile, bot, name, input, &[])
-                    .and_then(|resolved| resolved.spec.map(|spec| spec.content))
-            },
-        );
+        taint::observe_history_step(taint, &step.name, &step.input, step.output.as_ref());
     }
     let Ok(kids) = sh.storage.list_child_runs(run_id) else {
         return;
     };
     for kid in kids {
-        absorb_run_history(taint, sh, profile, bot, kid.id, depth + 1);
+        absorb_run_history(taint, sh, kid.id, depth + 1);
     }
 }
 
@@ -1217,6 +1212,13 @@ pub(crate) struct ModelOut {
     /// Which guard stopped the turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guard_reason: Option<String>,
+    /// Tool calls a CLI session ran inside this model step. The ordinary tool
+    /// step is not written for those calls; the facts are.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub executed: Vec<crate::taint::ExecFact>,
+    /// External tool descriptions and schemas that were part of this request.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub metadata: Vec<crate::taint::ExecFact>,
 }
 
 /// One call inside a persisted tool step's input.
@@ -1237,6 +1239,10 @@ pub(crate) struct ResultRec {
     pub is_error: bool,
     pub text: String,
     pub spill_path: Option<String>,
+    /// What this call did to the model's context. Absent only on rows written
+    /// before the field existed; those rows are not classified from their text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fact: Option<crate::taint::ExecFact>,
 }
 
 pub(crate) const STEP_USER: &str = "user_message";

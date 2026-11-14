@@ -91,7 +91,7 @@ impl Fake {
             requests: Mutex::new(Vec::new()),
         })
     }
-    fn request(&self, i: usize) -> ChatRequest {
+    pub(crate) fn request(&self, i: usize) -> ChatRequest {
         self.requests.lock()[i].clone()
     }
     fn n_requests(&self) -> usize {
@@ -147,6 +147,9 @@ pub(crate) struct TestTool {
     pub(crate) self_spill: Option<PathBuf>,
     /// `Some(ids)`: only these bots may see the tool (like an MCP server's `bots`).
     pub(crate) bots: Option<Vec<String>>,
+    /// Trust of text this tool puts in context, when it is not the spec class.
+    /// Discovery sets this from the tools it actually returned.
+    pub(crate) exposure: Option<tool_registry::OutputExposure>,
 }
 
 pub(crate) fn tool(name: &str, effect: Effect, output: &str) -> TestTool {
@@ -182,6 +185,7 @@ pub(crate) fn with_class(
         output: output.to_owned(),
         self_spill: None,
         bots: None,
+        exposure: None,
     }
 }
 
@@ -214,9 +218,12 @@ impl Tool for TestTool {
                     mime_type: "text/plain".into(),
                     size_bytes: self.output.len() as u64,
                 }),
+                exposure: self.exposure.clone(),
             });
         }
-        Ok(ToolOutput::text(self.output.clone()))
+        let mut out = ToolOutput::text(self.output.clone());
+        out.exposure = self.exposure.clone();
+        Ok(out)
     }
 }
 
@@ -337,7 +344,7 @@ pub(crate) async fn until(
     }
 }
 
-fn tool_messages(req: &ChatRequest) -> Vec<String> {
+pub(crate) fn tool_messages(req: &ChatRequest) -> Vec<String> {
     req.messages
         .iter()
         .filter(|m| m.role == MessageRole::Tool)
@@ -620,7 +627,8 @@ async fn web_fetch_asks_by_default_and_a_tool_grant_removes_the_prompt() {
         assert!(tool_messages(&fake.request(1))[0].contains("blocked"));
     }
 
-    // "Always allow this tool" for web_extract: the next call does not ask.
+    // The fetches above left the page in this chat. A later fetch still asks,
+    // and a standing grant is not what answers that ask.
     let fake = Fake::new(vec![
         calls(&[("c1", "web_extract", url.clone())]),
         text("one"),
@@ -634,17 +642,19 @@ async fn web_fetch_asks_by_default_and_a_tool_grant_removes_the_prompt() {
     else {
         unreachable!()
     };
-    lp.approve(a.call_id, ApprovalScope::Always, env.user)
+    lp.approve(a.call_id, ApprovalScope::Once, env.user)
         .unwrap();
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    // The page is now in the chat, so the next fetch is egress after a read.
+    // A tool grant does not waive that ask.
+    let mut rx = lp.subscribe();
     let run2 = lp.run_turn(env.chat, "second").unwrap();
-    assert_eq!(lp.wait(run2).await.unwrap(), RunState::Succeeded);
-    assert_eq!(
-        env.storage.list_approvals(run2).unwrap().len(),
-        0,
-        "a tool-level grant removes the prompt"
-    );
-    assert!(tool_messages(&fake.request(3))[0].contains("blocked"));
+    let Event::ApprovalNeeded(a) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(a.tool_name, "web_extract");
+    lp.cancel(run2).unwrap();
 }
 
 #[tokio::test]

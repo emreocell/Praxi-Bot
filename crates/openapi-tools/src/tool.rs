@@ -254,7 +254,7 @@ fn tool_spec(op: &Operation, api: &ApiSpec, category: PermissionCategory) -> Too
         platforms: vec![Platform::All],
         // Every operation contacts the API host (egress) and the response can
         // be both private account data and untrusted third-party text.
-        content: ContentClass::all(),
+        content: ContentClass::all().with_external_metadata(),
     }
 }
 
@@ -676,6 +676,7 @@ impl Tool for OpenApiTool {
                 data: Value::Object(out),
             }],
             spill: None,
+            exposure: None,
         })
     }
 }

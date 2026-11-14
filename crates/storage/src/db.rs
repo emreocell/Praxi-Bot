@@ -280,7 +280,7 @@ impl Storage {
     /// Fails on SQLite errors.
     pub fn insert_message(&self, m: &Message) -> Result<()> {
         self.conn().execute(
-            "INSERT INTO messages (id, user_id, chat_id, run_id, role, content, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO messages (id, user_id, chat_id, run_id, role, content, created_at_ms, exposure_untrusted, exposure_private, exposure_sources) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 m.id.to_string(),
                 m.user_id.to_string(),
@@ -288,7 +288,10 @@ impl Storage {
                 m.run_id.map(|r| r.to_string()),
                 m.role,
                 m.content,
-                m.created_at_ms
+                m.created_at_ms,
+                i64::from(m.exposure_untrusted),
+                i64::from(m.exposure_private),
+                serde_json::to_string(&m.exposure_sources)?,
             ],
         )?;
         Ok(())
@@ -302,7 +305,7 @@ impl Storage {
         Ok(self
             .conn()
             .query_row(
-                "SELECT id, user_id, chat_id, run_id, role, content, created_at_ms FROM messages WHERE id = ?1",
+                "SELECT id, user_id, chat_id, run_id, role, content, created_at_ms, exposure_untrusted, exposure_private, exposure_sources FROM messages WHERE id = ?1",
                 [id.to_string()],
                 message_row,
             )
@@ -316,7 +319,7 @@ impl Storage {
     pub fn list_messages(&self, chat_id: ChatId) -> Result<Vec<Message>> {
         let conn = self.conn();
         let mut st = conn.prepare(
-            "SELECT id, user_id, chat_id, run_id, role, content, created_at_ms FROM messages WHERE chat_id = ?1 ORDER BY created_at_ms, id",
+            "SELECT id, user_id, chat_id, run_id, role, content, created_at_ms, exposure_untrusted, exposure_private, exposure_sources FROM messages WHERE chat_id = ?1 ORDER BY created_at_ms, id",
         )?;
         Ok(st
             .query_map([chat_id.to_string()], message_row)?
@@ -344,7 +347,7 @@ impl Storage {
     ) -> Result<(Vec<Message>, bool)> {
         let conn = self.conn();
         let mut st = conn.prepare(
-            "SELECT id, user_id, chat_id, run_id, role, content, created_at_ms, length(CAST(content AS BLOB)) \
+            "SELECT id, user_id, chat_id, run_id, role, content, created_at_ms, exposure_untrusted, exposure_private, exposure_sources, length(CAST(content AS BLOB)) \
              FROM messages WHERE chat_id = ?1 AND (?2 IS NULL OR run_id IS NULL OR run_id <> ?2) \
              ORDER BY created_at_ms DESC, id DESC LIMIT ?3",
         )?;
@@ -358,7 +361,7 @@ impl Storage {
         let mut used = 0usize;
         let mut omitted = false;
         while let Some(row) = rows.next()? {
-            let bytes = usize::try_from(row.get::<_, i64>(7)?).map_err(|e| conv_err(7, e))?;
+            let bytes = usize::try_from(row.get::<_, i64>(10)?).map_err(|e| conv_err(10, e))?;
             if messages.len() == max_messages || bytes > max_bytes.saturating_sub(used) {
                 omitted = true;
                 break;
@@ -775,6 +778,9 @@ fn message_row(r: &Row<'_>) -> rusqlite::Result<Message> {
         role: r.get(4)?,
         content: r.get(5)?,
         created_at_ms: r.get(6)?,
+        exposure_untrusted: r.get::<_, i64>(7)? != 0,
+        exposure_private: r.get::<_, i64>(8)? != 0,
+        exposure_sources: serde_json::from_str(&r.get::<_, String>(9)?).unwrap_or_default(),
     })
 }
 
@@ -918,6 +924,9 @@ mod tests {
             role: "user".into(),
             content: "hi".into(),
             created_at_ms: 5,
+            exposure_untrusted: false,
+            exposure_private: false,
+            exposure_sources: Vec::new(),
         };
         f.st.insert_message(&m).unwrap();
         assert_eq!(f.st.get_message(m.id).unwrap().unwrap(), m);
@@ -954,6 +963,9 @@ mod tests {
                 content: format!("message {i}"),
                 // Equal timestamps exercise the deterministic id tie-break.
                 created_at_ms: 10,
+                exposure_untrusted: false,
+                exposure_private: false,
+                exposure_sources: Vec::new(),
             })
             .unwrap();
         }
@@ -992,6 +1004,9 @@ mod tests {
                 role: "user".into(),
                 content: "é🙂".into(),
                 created_at_ms: i64::from(i),
+                exposure_untrusted: false,
+                exposure_private: false,
+                exposure_sources: Vec::new(),
             })
             .unwrap();
         }

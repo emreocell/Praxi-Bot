@@ -1056,6 +1056,80 @@ impl ChatProvider for Counting {
     }
 }
 
+#[tokio::test]
+async fn a_child_read_the_parent_surface_cannot_resolve_still_gates_egress() {
+    let env = setup();
+    let read = Arc::new(with_class(
+        "fs_read",
+        Effect::Read,
+        PermissionCategory::Fs,
+        ContentClass::untrusted_private(),
+        "Permission denied: secret notes",
+    ));
+    let search = Arc::new(with_class(
+        "web_search",
+        Effect::Read,
+        PermissionCategory::Browser,
+        ContentClass::untrusted_egress(),
+        "sent",
+    ));
+    let tools = vec![
+        Arc::clone(&read) as Arc<dyn Tool>,
+        Arc::clone(&search) as Arc<dyn Tool>,
+    ];
+    let brain = Brain::new(|req| {
+        if is_child(req) {
+            if results(req).is_empty() {
+                call(&[("k1", "fs_read", json!({"path": "secret.txt"}))])
+            } else {
+                say("done")
+            }
+        } else if results(req).is_empty() {
+            call(&[(
+                "p1",
+                "spawn_subagent",
+                json!({"task": "read the file", "tools": ["fs_read"]}),
+            )])
+        } else if results(req).len() == 1 {
+            call(&[("p2", "web_search", json!({"query": "q"}))])
+        } else {
+            say("done")
+        }
+    });
+    let lp = make(
+        &env.storage,
+        env.bot,
+        &brain,
+        &tools,
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let mut rx = lp.subscribe();
+    let parent = lp.run_turn(env.chat, "go").unwrap();
+    let event = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await;
+    let Event::ApprovalNeeded(a) = event else {
+        unreachable!()
+    };
+    assert_eq!(a.tool_name, "web_search");
+    assert_eq!(read.count.load(Ordering::SeqCst), 1);
+    assert_eq!(search.count.load(Ordering::SeqCst), 0);
+    let kids = children(&env, parent);
+    assert_eq!(kids.len(), 1);
+    let fact = env.storage.list_steps(kids[0].id).unwrap();
+    let tools_step = fact.iter().find(|s| s.name == "tools").unwrap();
+    let recorded = &tools_step.output.as_ref().unwrap()["results"][0];
+    assert!(
+        recorded["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Permission denied"),
+        "{recorded}"
+    );
+    assert_eq!(recorded["fact"]["ran"], true, "{recorded}");
+    assert_eq!(recorded["fact"]["reads_private"], true, "{recorded}");
+    lp.cancel(parent).unwrap();
+}
+
 /// A real model spawns two subagents in one turn.  Run by hand:
 /// `GEMINI_API_KEY=... cargo test -p agent-core live_ -- --ignored --nocapture`
 /// (the key is read from the environment by the provider, never printed).

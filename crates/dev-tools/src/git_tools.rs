@@ -600,6 +600,7 @@ fn json_out(data: Value) -> ToolOutput {
     ToolOutput {
         content: vec![ContentPart::Json { data }],
         spill: None,
+        exposure: None,
     }
 }
 

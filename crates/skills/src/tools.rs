@@ -160,6 +160,7 @@ fn list_output(index: &SkillIndex) -> ToolOutput {
             ContentPart::Text { text },
         ],
         spill: None,
+        exposure: None,
     }
 }
 
@@ -196,6 +197,7 @@ impl Tool for SkillTool {
                         ContentPart::Text { text },
                     ],
                     spill: None,
+                    exposure: None,
                 })
             }
             Op::Write => {

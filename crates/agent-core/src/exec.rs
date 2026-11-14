@@ -41,6 +41,13 @@ pub(crate) struct TurnExecutor {
     pub sh: Arc<Shared>,
 }
 
+/// Class captured when the call was resolved, before the tool ran.
+struct PlannedClass {
+    ingests_untrusted: bool,
+    reads_private: bool,
+    label: String,
+}
+
 enum Slot {
     Done {
         text: String,
@@ -54,6 +61,7 @@ enum Slot {
         /// Set when the call was approved. [`ExecPermit::commit`] runs under
         /// the policy mutex immediately before the tool is invoked.
         permit: Option<ExecPermit>,
+        class: PlannedClass,
     },
     /// A `spawn_subagent` call, executed by the loop itself.
     Spawn {
@@ -467,6 +475,13 @@ impl TurnExecutor {
         } else {
             self.sh.model_specs(&ctx.profile, ctx.bot_id, &hints.tools)
         };
+        // Descriptions and schemas of external tools are in this request.
+        // Recorded now, and again on the step output so a restart does not
+        // ask the current tool list whether they were shown.
+        let metadata = metadata_facts(&specs);
+        for fact in &metadata {
+            fact_note(&ctx, fact);
+        }
         let note = guard_reason
             .as_deref()
             .map(|r| GUARD_NOTE.replace("{reason}", r));
@@ -493,7 +508,8 @@ impl TurnExecutor {
         req.temperature = self.sh.cfg.temperature;
 
         if primary.starts_with("cli:") {
-            let out = self.exec_cli(run, &req, &specs, cancel).await?;
+            let mut out = self.exec_cli(run, &req, &specs, cancel).await?;
+            out.metadata = metadata;
             self.audit_usage(&ctx, &out);
             return serde_json::to_value(out).map_err(xe);
         }
@@ -558,6 +574,7 @@ impl TurnExecutor {
             };
             return Err(xe(message));
         };
+        out.metadata = metadata;
         if let Some(reason) = guard_reason {
             // Tools were disabled: ignore anything the model still tried to call.
             out.tool_calls.clear();
@@ -827,6 +844,18 @@ impl TurnExecutor {
             let is_spawn = resolved.name == crate::subagent::SPAWN_SUBAGENT;
             let spawn_input = resolved.input.clone();
             let tool = resolved.tool;
+            let class = match &resolved.spec {
+                Some(spec) => PlannedClass {
+                    ingests_untrusted: spec.content.ingests_untrusted,
+                    reads_private: spec.content.reads_private,
+                    label: taint::source_label(&resolved.name, &resolved.input),
+                },
+                None => PlannedClass {
+                    ingests_untrusted: false,
+                    reads_private: false,
+                    label: String::new(),
+                },
+            };
             let slot = if matches!(decision, Decision::Deny) && carried.is_none() {
                 self.sh.emit(
                     &ctx,
@@ -884,6 +913,7 @@ impl TurnExecutor {
                         call: call_uuid,
                         meta,
                         permit: Some(permit),
+                        class,
                     },
                     Err(reason) => Slot::Done {
                         text: user_denied(reason),
@@ -897,6 +927,7 @@ impl TurnExecutor {
                     call: call_uuid,
                     meta,
                     permit: carried,
+                    class,
                 }
             };
             let slot = match slot {
@@ -916,46 +947,64 @@ impl TurnExecutor {
         // Reads batched by `pending_tools` run concurrently; everything else is a single call.
         let ctx_ref: &RunCtx = &ctx;
         let outcomes = futures::future::join_all(slots.into_iter().zip(calls.iter().cloned()).map(
-            |(slot, call)| {
-                let hints = hints.clone();
-                async move {
-                    match slot {
-                        Slot::Done { text, is_error } => (text, is_error, None, false),
-                        Slot::Spawn {
-                            input,
-                            call: call_id,
-                            model_call_id,
-                            permit,
-                        } => {
-                            if let Err(reason) = commit_or_deny(permit) {
-                                return (user_denied(reason), true, None, false);
-                            }
-                            let (t, e, d) = self
-                                .run_subagent(run, ctx_ref, call_id, &model_call_id, input)
-                                .await;
-                            (t, e, d, false)
+            |(slot, _call)| async move {
+                let not_run = taint::ExecFact::did_not_run();
+                match slot {
+                    Slot::Done { text, is_error } => (text, is_error, None, false, not_run),
+                    Slot::Spawn {
+                        input,
+                        call: call_id,
+                        model_call_id,
+                        permit,
+                    } => {
+                        if let Err(reason) = commit_or_deny(permit) {
+                            return (user_denied(reason), true, None, false, not_run);
                         }
-                        Slot::Run {
-                            tool,
-                            input,
-                            call: call_id,
-                            meta,
-                            permit,
-                        } => {
-                            // Re-check under the policy mutex immediately before the
-                            // call. A deny that landed after approval does not run the
-                            // tool and does not keep a grant (`commit` stores it).
-                            if let Err(reason) = commit_or_deny(permit) {
-                                return (user_denied(reason), true, None, false);
-                            }
-                            let out = self
-                                .run_tool(run, ctx_ref, call_id, &tool, input, meta)
-                                .await;
-                            // The result is in the model context even when the tool
-                            // returned an error. A denial before this point is not.
-                            self.note_executed(ctx_ref, &hints, &call.name, &call.arguments);
-                            out
+                        let (t, e, d) = self
+                            .run_subagent(run, ctx_ref, call_id, &model_call_id, input)
+                            .await;
+                        // The child's own steps carry its exposure. This row
+                        // is the spawn call, which does not itself ingest.
+                        (t, e, d, false, not_run)
+                    }
+                    Slot::Run {
+                        tool,
+                        input,
+                        call: call_id,
+                        meta,
+                        permit,
+                        class,
+                    } => {
+                        // Re-check under the policy mutex immediately before the
+                        // call. A deny that landed after approval does not run the
+                        // tool and does not keep a grant (`commit` stores it).
+                        if let Err(reason) = commit_or_deny(permit) {
+                            return (user_denied(reason), true, None, false, not_run);
                         }
+                        let (text, is_error, duration_ms, self_spilled, exposure) = self
+                            .run_tool(run, ctx_ref, call_id, &tool, input, meta)
+                            .await;
+                        // The result is in the model context even when the tool
+                        // returned an error. A denial before this point is not.
+                        // The class was captured at resolution time. Output
+                        // exposure, when the tool set one, replaces it: that
+                        // is how discovery carries the metadata it actually
+                        // returned. Neither value is read from the result text.
+                        let fact = match &exposure {
+                            Some(exposure) => {
+                                taint::ExecFact::from_exposure(exposure, &class.label)
+                            }
+                            None => taint::ExecFact::ran(
+                                tool_registry::ContentClass::declared(
+                                    class.ingests_untrusted,
+                                    class.reads_private,
+                                    false,
+                                ),
+                                class.label,
+                            ),
+                        };
+                        fact_note(ctx_ref, &fact);
+                        (text, is_error, duration_ms, self_spilled, fact)
                     }
                 }
             },
@@ -964,7 +1013,7 @@ impl TurnExecutor {
 
         let g = &self.sh.cfg.guards;
         let mut results = Vec::with_capacity(calls.len());
-        for ((call, call_uuid), (text, is_error, duration_ms, self_spilled)) in
+        for ((call, call_uuid), (text, is_error, duration_ms, self_spilled, fact)) in
             calls.iter().zip(uuids).zip(outcomes)
         {
             let text = self.sh.redact(text);
@@ -1000,6 +1049,7 @@ impl TurnExecutor {
                 is_error,
                 text,
                 spill_path,
+                fact: Some(fact),
             });
         }
         Ok(json!({ "results": results }))
@@ -1013,7 +1063,13 @@ impl TurnExecutor {
         tool: &Arc<dyn Tool>,
         input: Value,
         meta: bool,
-    ) -> (String, bool, Option<u64>, bool) {
+    ) -> (
+        String,
+        bool,
+        Option<u64>,
+        bool,
+        Option<tool_registry::OutputExposure>,
+    ) {
         let g = &self.sh.cfg.guards;
         let tctx = ToolContext {
             run_id: run.id.to_string(),
@@ -1033,6 +1089,10 @@ impl TurnExecutor {
         .await;
         let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         let mut self_spilled = false;
+        let exposure = match &outcome {
+            Ok(Ok(out)) => out.exposure.clone(),
+            _ => None,
+        };
         let (text, is_error) = match outcome {
             Err(()) => (
                 format!("Error: tool timed out after {:?}", g.tool_timeout),
@@ -1045,22 +1105,7 @@ impl TurnExecutor {
                 (render_output(&out), false)
             }
         };
-        (text, is_error, Some(duration_ms), self_spilled)
-    }
-
-    /// The tool ran (or failed after starting). Record what its class says
-    /// entered the context, using the resolved target of `use_tool`.
-    fn note_executed(&self, ctx: &RunCtx, hints: &[String], name: &str, arguments: &str) {
-        let input: Value = serde_json::from_str(arguments).unwrap_or(Value::Null);
-        let Some(resolved) = self
-            .sh
-            .resolve_call(&ctx.profile, ctx.bot_id, name, &input, hints)
-        else {
-            return;
-        };
-        let Some(spec) = resolved.spec else { return };
-        let label = taint::source_label(&resolved.name, &resolved.input);
-        ctx.taint.lock().note(spec.content, &label);
+        (text, is_error, Some(duration_ms), self_spilled, exposure)
     }
 
     /// Turn the structured output of a `Meta` tool into events: a todo list
@@ -1161,6 +1206,26 @@ impl TurnExecutor {
             )
         }
     }
+}
+
+fn fact_note(ctx: &RunCtx, fact: &taint::ExecFact) {
+    if !fact.ran {
+        return;
+    }
+    ctx.taint.lock().note(
+        tool_registry::ContentClass::declared(fact.ingests_untrusted, fact.reads_private, false),
+        &fact.label,
+    );
+}
+
+/// External descriptions and schemas included in `specs`, as they were at
+/// request time.
+fn metadata_facts(specs: &[ToolSpec]) -> Vec<taint::ExecFact> {
+    specs
+        .iter()
+        .filter(|spec| spec.content.has_external_metadata())
+        .map(|spec| taint::ExecFact::ran(spec.content, taint::source_label(&spec.name, &json!({}))))
+        .collect()
 }
 
 /// Largest `output_preview` of a `tool_call_completed` event, in bytes.
