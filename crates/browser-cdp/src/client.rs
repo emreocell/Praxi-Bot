@@ -16,7 +16,7 @@ use futures_util::{Sink as MessageSink, SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::{Value, json, value::RawValue};
 use tokio::net::TcpStream;
-use tokio::sync::{Mutex, Notify, broadcast, oneshot};
+use tokio::sync::{Mutex, Notify, broadcast, oneshot, watch};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Error as WsError;
@@ -300,6 +300,7 @@ pub struct CdpClient {
     screencast_sinks: ScreencastSinks,
     active_views: StdMutex<Vec<Weak<ViewStopHookFn>>>,
     closed: Arc<AtomicBool>,
+    close_tx: watch::Sender<bool>,
     reader: JoinHandle<()>,
     limits: CdpClientConfig,
     rejected_events: Arc<AtomicU64>,
@@ -343,6 +344,7 @@ impl CdpClient {
         let screencast_sinks: ScreencastSinks = Arc::new(StdMutex::new(HashMap::new()));
         let active_views = StdMutex::new(Vec::new());
         let closed = Arc::new(AtomicBool::new(false));
+        let (close_tx, _) = watch::channel(false);
         let rejected_events = Arc::new(AtomicU64::new(0));
         let rejected_screencast_events = Arc::new(AtomicU64::new(0));
         let unsubscribed_screencast_events = Arc::new(AtomicU64::new(0));
@@ -352,6 +354,7 @@ impl CdpClient {
             let events = events.clone();
             let screencast_sinks = screencast_sinks.clone();
             let closed = closed.clone();
+            let close_tx = close_tx.clone();
             let limits = limits.clone();
             let rejected_events = rejected_events.clone();
             let rejected_screencast_events = rejected_screencast_events.clone();
@@ -389,6 +392,7 @@ impl CdpClient {
                     }
                 }
                 closed.store(true, Ordering::SeqCst);
+                let _ = close_tx.send(true);
                 if let Ok(sinks) = screencast_sinks.lock() {
                     for slot in sinks.values() {
                         slot.notify();
@@ -415,6 +419,7 @@ impl CdpClient {
             screencast_sinks,
             active_views,
             closed,
+            close_tx,
             reader,
             limits,
             rejected_events,
@@ -494,6 +499,11 @@ impl CdpClient {
     /// True once the websocket has closed.
     pub fn is_closed(&self) -> bool {
         self.closed.load(Ordering::SeqCst)
+    }
+
+    /// Subscribe to websocket closure as a level-triggered watch receiver.
+    pub(crate) fn subscribe_closed(&self) -> watch::Receiver<bool> {
+        self.close_tx.subscribe()
     }
 
     /// Send a command on the browser session.
@@ -581,6 +591,8 @@ async fn exchange<S: MessageSink<Message, Error = WsError> + Unpin>(
 
 impl Drop for CdpClient {
     fn drop(&mut self) {
+        self.closed.store(true, Ordering::SeqCst);
+        let _ = self.close_tx.send(true);
         self.reader.abort();
     }
 }

@@ -54,6 +54,105 @@ const MOD_CTRL: u32 = 2;
 const MOD_META: u32 = 4;
 const MOD_SHIFT: u32 = 8;
 
+/// Deterministic manual clock usable in [`BrowserViewConfig`] for timing tests without
+/// mutating global Tokio time (so real loopback TCP sockets stay responsive).
+#[derive(Clone, Debug)]
+pub struct ManualClock {
+    tx: watch::Sender<Duration>,
+}
+
+impl Default for ManualClock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ManualClock {
+    /// Construct a manual clock starting at virtual offset `0`.
+    #[must_use]
+    pub fn new() -> Self {
+        let (tx, _) = watch::channel(Duration::ZERO);
+        Self { tx }
+    }
+
+    /// Return the current virtual elapsed offset.
+    #[must_use]
+    pub fn elapsed(&self) -> Duration {
+        *self.tx.borrow()
+    }
+
+    /// Advance the virtual clock by `delta`, waking all pending `sleep_until` futures whose
+    /// deadline has been reached or passed.
+    pub fn advance(&self, delta: Duration) {
+        self.tx.send_modify(|cur| {
+            *cur = cur.saturating_add(delta);
+        });
+    }
+}
+
+/// Clock source used for screencast scheduling, idle grace windows, heartbeats, and frame timestamps.
+#[derive(Clone, Debug, Default)]
+pub enum ViewClock {
+    /// Real monotonic clock (`tokio::time::Instant`).
+    #[default]
+    System,
+    /// Deterministic virtual clock controlled via [`ManualClock::advance`].
+    Manual(ManualClock),
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ClockInstant {
+    System(Instant),
+    Manual(Duration),
+}
+
+impl ClockInstant {
+    fn saturating_add(self, delta: Duration) -> Self {
+        match self {
+            Self::System(t) => Self::System(t + delta),
+            Self::Manual(d) => Self::Manual(d.saturating_add(delta)),
+        }
+    }
+
+    fn elapsed_since(self, now: Self) -> Duration {
+        match (now, self) {
+            (Self::System(n), Self::System(t)) => n.saturating_duration_since(t),
+            (Self::Manual(n), Self::Manual(t)) => n.saturating_sub(t),
+            _ => Duration::ZERO,
+        }
+    }
+
+    fn is_earlier_than(self, other: Self) -> bool {
+        match (self, other) {
+            (Self::System(a), Self::System(b)) => a < b,
+            (Self::Manual(a), Self::Manual(b)) => a < b,
+            _ => false,
+        }
+    }
+}
+
+impl ViewClock {
+    fn now(&self) -> ClockInstant {
+        match self {
+            Self::System => ClockInstant::System(Instant::now()),
+            Self::Manual(m) => ClockInstant::Manual(m.elapsed()),
+        }
+    }
+
+    async fn sleep_until(&self, deadline: ClockInstant) {
+        match (self, deadline) {
+            (Self::System, ClockInstant::System(t)) => {
+                tokio::time::sleep_until(t).await;
+            }
+            (Self::Manual(m), ClockInstant::Manual(target)) => {
+                let mut rx = m.tx.subscribe();
+                let _ = rx.wait_for(|&now| now >= target).await;
+            }
+            _ => tokio::time::sleep(Duration::ZERO).await,
+        }
+    }
+}
+
 /// Optional host callback invoked whenever interactive takeover starts or stops.
 pub type TakeoverPinHook = Arc<dyn Fn(bool) + Send + Sync>;
 
@@ -85,6 +184,8 @@ pub struct BrowserViewConfig {
     pub stop_timeout: Duration,
     /// Optional hook wired to driver takeover pinning (e.g. `CdpDriver::set_takeover_pin`).
     pub takeover_pin: Option<TakeoverPinHook>,
+    /// Clock used for screencast scheduling windows and timestamps (defaults to real time).
+    pub clock: ViewClock,
 }
 
 impl std::fmt::Debug for BrowserViewConfig {
@@ -101,6 +202,7 @@ impl std::fmt::Debug for BrowserViewConfig {
             .field("live_heartbeat_interval", &self.live_heartbeat_interval)
             .field("stop_timeout", &self.stop_timeout)
             .field("has_takeover_pin", &self.takeover_pin.is_some())
+            .field("clock", &self.clock)
             .finish()
     }
 }
@@ -119,6 +221,7 @@ impl Default for BrowserViewConfig {
             live_heartbeat_interval: Duration::from_millis(1000),
             stop_timeout: Duration::from_millis(500),
             takeover_pin: None,
+            clock: ViewClock::System,
         }
     }
 }
@@ -251,12 +354,63 @@ struct SessionBinding {
     session_id: String,
     target_closed: Arc<AtomicBool>,
     target_close_notify: StateNotify,
+    target_close_rx: watch::Receiver<bool>,
+    client_close_rx: watch::Receiver<bool>,
 }
 
 impl SessionBinding {
     fn is_alive(&self) -> bool {
         !self.client.is_closed() && !self.target_closed.load(Ordering::SeqCst)
     }
+
+    async fn wait_closed(&mut self) {
+        if !self.is_alive() {
+            return;
+        }
+        let target_notify = self.target_close_notify.clone();
+        tokio::select! {
+            biased;
+            _ = self.target_close_rx.wait_for(|&closed| closed) => {}
+            _ = self.client_close_rx.wait_for(|&closed| closed) => {}
+            () = target_notify.notified() => {}
+        }
+    }
+}
+
+fn prune_finished_worker_locked(state: &mut InnerState) -> Option<WorkerHandle> {
+    if state
+        .worker
+        .as_ref()
+        .is_some_and(|w| w.join.as_ref().is_some_and(JoinHandle::is_finished))
+    {
+        return state.worker.take();
+    }
+    None
+}
+
+fn reconcile_dead_binding_locked(
+    state: &mut InnerState,
+    detail: &str,
+) -> (bool, Option<StateNotify>) {
+    prune_finished_worker_locked(state);
+    if let LifecycleState::Attached(binding) = &state.lifecycle
+        && !binding.is_alive()
+    {
+        state.generation = state.generation.saturating_add(1);
+        state.active_profile = None;
+        state.refresh_pending = false;
+        state.stale = false;
+        state.last_error = Some(detail.to_string());
+        state.lifecycle = LifecycleState::Unavailable {
+            reason: Reason::Unavailable,
+        };
+        let notify = state.worker.as_ref().map(|w| {
+            w.stop_requested.store(true, Ordering::SeqCst);
+            w.wakeup.clone()
+        });
+        return (true, notify);
+    }
+    (false, None)
 }
 
 enum LifecycleState {
@@ -346,7 +500,7 @@ struct InnerState {
 struct AdapterCore {
     config: BrowserViewConfig,
     anchor_wall: SystemTime,
-    anchor_instant: Instant,
+    anchor_instant: ClockInstant,
     state: StdMutex<InnerState>,
     ctrl_lock: AsyncMutex<()>,
     input_io_lock: AsyncMutex<()>,
@@ -363,7 +517,9 @@ impl AdapterCore {
             .anchor_wall
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
-        let elapsed_ms = u64::try_from(self.anchor_instant.elapsed().as_millis()).unwrap_or(0);
+        let now = self.config.clock.now();
+        let elapsed_ms =
+            u64::try_from(self.anchor_instant.elapsed_since(now).as_millis()).unwrap_or(0);
         base_ms.saturating_add(elapsed_ms)
     }
 
@@ -398,13 +554,43 @@ impl AdapterCore {
         geom
     }
 
-    fn mark_unavailable(&self, reason: Reason, detail: String, bump_generation: bool) {
-        self.watch_tx.send_replace(None);
-        let notify = {
+    fn reconcile_dead_binding(&self, detail: &str) {
+        let (transitioned, notify, finished) = {
             let Ok(mut state) = self.state.lock() else {
                 return;
             };
-            if bump_generation {
+            let finished = prune_finished_worker_locked(&mut state);
+            let (transitioned, notify) = reconcile_dead_binding_locked(&mut state, detail);
+            (transitioned, notify, finished)
+        };
+        drop(finished);
+        if transitioned {
+            self.watch_tx.send_replace(None);
+            if let Some(notify) = notify {
+                notify.notify_one();
+            }
+            self.set_takeover_pin(false);
+        }
+    }
+
+    fn mark_unavailable(&self, reason: Reason, detail: String, bump_generation: bool) {
+        self.mark_unavailable_inner(reason, detail, bump_generation, None);
+    }
+
+    fn mark_unavailable_inner(
+        &self,
+        reason: Reason,
+        detail: String,
+        bump_generation: bool,
+        exiting_worker: Option<&Arc<WorkerShared>>,
+    ) {
+        self.watch_tx.send_replace(None);
+        let (notify, cleared_worker, finished_worker) = {
+            let Ok(mut state) = self.state.lock() else {
+                return;
+            };
+            let finished_worker = prune_finished_worker_locked(&mut state);
+            if bump_generation && !matches!(state.lifecycle, LifecycleState::Unavailable { .. }) {
                 state.generation = state.generation.saturating_add(1);
             }
             state.active_profile = None;
@@ -412,11 +598,25 @@ impl AdapterCore {
             state.stale = false;
             state.last_error = Some(detail);
             state.lifecycle = LifecycleState::Unavailable { reason };
-            state.worker.as_ref().map(|w| {
+            let cleared_worker = match exiting_worker {
+                Some(shared)
+                    if state
+                        .worker
+                        .as_ref()
+                        .is_some_and(|w| Arc::ptr_eq(&w.shared, shared)) =>
+                {
+                    state.worker.take()
+                }
+                _ => None,
+            };
+            let notify = state.worker.as_ref().map(|w| {
                 w.stop_requested.store(true, Ordering::SeqCst);
                 w.wakeup.clone()
-            })
+            });
+            (notify, cleared_worker, finished_worker)
         };
+        drop(finished_worker);
+        drop(cleared_worker);
         if let Some(notify) = notify {
             notify.notify_one();
         }
@@ -436,11 +636,23 @@ impl AdapterCore {
     }
 
     fn binding_if_alive(&self) -> Option<SessionBinding> {
-        let state = self.state.lock().ok()?;
-        match &state.lifecycle {
-            LifecycleState::Attached(binding) if binding.is_alive() => Some(binding.clone()),
-            _ => None,
+        let (binding, transitioned, notify) = {
+            let mut state = self.state.lock().ok()?;
+            let (transitioned, notify) = reconcile_dead_binding_locked(&mut state, "target closed");
+            let binding = match &state.lifecycle {
+                LifecycleState::Attached(binding) if binding.is_alive() => Some(binding.clone()),
+                _ => None,
+            };
+            (binding, transitioned, notify)
+        };
+        if transitioned {
+            self.watch_tx.send_replace(None);
+            if let Some(notify) = notify {
+                notify.notify_one();
+            }
+            self.set_takeover_pin(false);
         }
+        binding
     }
 
     async fn stop_all(&self, return_to_idle: bool) -> Result<(), ViewError> {
@@ -496,10 +708,9 @@ impl AdapterCore {
     async fn release_inputs_inner(&self) -> Result<(), ViewError> {
         let _io = self.input_io_lock.lock().await;
         let Some(binding) = self.binding_if_alive() else {
-            if let Ok(mut held) = self.held.lock() {
-                held.buttons = 0;
-                held.keys.clear();
-            }
+            let mut held = self.held.lock().map_err(|_| ViewError::Unavailable)?;
+            held.buttons = 0;
+            held.keys.clear();
             return Ok(());
         };
         self.release_inputs_with_binding(&binding).await
@@ -507,9 +718,7 @@ impl AdapterCore {
 
     async fn release_inputs_with_binding(&self, binding: &SessionBinding) -> Result<(), ViewError> {
         let snapshot = {
-            let Ok(held) = self.held.lock() else {
-                return Ok(());
-            };
+            let held = self.held.lock().map_err(|_| ViewError::Unavailable)?;
             (held.buttons, held.last_css, held.keys.clone())
         };
         let (mut buttons, last_css, keys) = snapshot;
@@ -521,7 +730,7 @@ impl AdapterCore {
         let (rx, ry) = last_css.unwrap_or((0.0, 0.0));
         for (bit, name) in [(1_u8, "left"), (2_u8, "right"), (4_u8, "middle")] {
             if buttons & bit != 0 {
-                buttons &= !bit;
+                let remaining = buttons & !bit;
                 let res = send_cdp(
                     &binding.client,
                     &binding.session_id,
@@ -531,17 +740,32 @@ impl AdapterCore {
                         "x": rx,
                         "y": ry,
                         "button": name,
-                        "buttons": buttons,
+                        "buttons": remaining,
                         "clickCount": 1,
                         "modifiers": 0,
                     }),
                 )
                 .await;
-                if let Ok(mut held) = self.held.lock() {
-                    held.buttons &= !bit;
-                }
-                if res.is_err() && !binding.client.is_closed() {
-                    had_failure = true;
+                match res {
+                    Ok(_) => {
+                        buttons = remaining;
+                        let mut held = self.held.lock().map_err(|_| ViewError::Unavailable)?;
+                        held.buttons &= !bit;
+                    }
+                    Err(err) => {
+                        if is_session_gone(&err, &binding.client) {
+                            self.mark_unavailable(
+                                Reason::Unavailable,
+                                format!("input release target lost: {err}"),
+                                true,
+                            );
+                            let mut held = self.held.lock().map_err(|_| ViewError::Unavailable)?;
+                            held.buttons = 0;
+                            held.keys.clear();
+                            return Err(ViewError::Unavailable);
+                        }
+                        had_failure = true;
+                    }
                 }
             }
         }
@@ -558,7 +782,7 @@ impl AdapterCore {
         }
         let mut mod_mask = current_modifier_mask(&mods);
         for key in non_mods.into_iter().chain(mods) {
-            mod_mask &= !key_modifier_bit(&key.key, &key.code);
+            let next_mod_mask = mod_mask & !key_modifier_bit(&key.key, &key.code);
             let res = dispatch_key_cdp(
                 &binding.client,
                 &binding.session_id,
@@ -567,14 +791,29 @@ impl AdapterCore {
                 &key.key,
                 key.location,
                 false,
-                mod_mask,
+                next_mod_mask,
             )
             .await;
-            if let Ok(mut held) = self.held.lock() {
-                held.keys.retain(|k| k != &key);
-            }
-            if res.is_err() && !binding.client.is_closed() {
-                had_failure = true;
+            match res {
+                Ok(()) => {
+                    mod_mask = next_mod_mask;
+                    let mut held = self.held.lock().map_err(|_| ViewError::Unavailable)?;
+                    held.keys.retain(|k| k != &key);
+                }
+                Err(err) => {
+                    if is_session_gone(&err, &binding.client) {
+                        self.mark_unavailable(
+                            Reason::Unavailable,
+                            format!("input release target lost: {err}"),
+                            true,
+                        );
+                        let mut held = self.held.lock().map_err(|_| ViewError::Unavailable)?;
+                        held.buttons = 0;
+                        held.keys.clear();
+                        return Err(ViewError::Unavailable);
+                    }
+                    had_failure = true;
+                }
             }
         }
 
@@ -615,11 +854,12 @@ impl BrowserViewTarget {
     #[must_use]
     pub fn new_idle(config: BrowserViewConfig) -> Arc<Self> {
         let initial_gen = config.initial_generation;
+        let anchor_instant = config.clock.now();
         let (watch_tx, _) = watch::channel(None);
         let core = Arc::new(AdapterCore {
             config,
             anchor_wall: SystemTime::now(),
-            anchor_instant: Instant::now(),
+            anchor_instant,
             state: StdMutex::new(InnerState {
                 lifecycle: LifecycleState::Idle,
                 reattach_policy: ReattachPolicy::IdleSlot,
@@ -685,27 +925,39 @@ impl BrowserViewTarget {
         if !page.is_alive() {
             return Err(ViewError::Unavailable);
         }
-        let binding = {
+        let (binding, stale_workers) = {
             let mut state = self.core.state.lock().map_err(|_| ViewError::Unavailable)?;
+            let finished = prune_finished_worker_locked(&mut state);
+            let _ = reconcile_dead_binding_locked(&mut state, "target closed");
             if state.reattach_policy == ReattachPolicy::SingleTab
                 && matches!(state.lifecycle, LifecycleState::Unavailable { .. })
             {
                 return Err(ViewError::Unavailable);
             }
-            if state.worker.is_some() {
-                return Err(ViewError::Unavailable);
-            }
+            let stale_worker = if let Some(worker) = state.worker.as_ref() {
+                if !worker.stop_requested.load(Ordering::SeqCst) {
+                    return Err(ViewError::Unavailable);
+                }
+                state.worker.take()
+            } else {
+                None
+            };
             if bump_gen {
                 state.generation = state.generation.saturating_add(1);
             } else if state.generation == 0 {
                 state.generation = 1;
             }
-            let (target_closed, target_close_notify) = page.live_view_close_signal();
+            let (target_closed, target_close_notify, target_close_rx) =
+                page.live_view_close_signal();
+            let client = page.client().clone();
+            let client_close_rx = client.subscribe_closed();
             let binding = SessionBinding {
-                client: page.client().clone(),
+                client,
                 session_id: page.session_id().to_string(),
                 target_closed,
                 target_close_notify,
+                target_close_rx,
+                client_close_rx,
             };
             state.lifecycle = LifecycleState::Attached(binding.clone());
             state.geometry = None;
@@ -713,8 +965,9 @@ impl BrowserViewTarget {
             state.refresh_pending = false;
             state.stale = false;
             state.last_error = None;
-            binding
+            (binding, (finished, stale_worker))
         };
+        drop(stale_workers);
 
         if let Ok(anchor) = self.core.stop_hook_anchor.lock()
             && let Some(hook) = anchor.as_ref()
@@ -729,6 +982,13 @@ impl BrowserViewTarget {
             }
         });
         page.register_live_view_action_hook(&hook);
+        let weak_core_close = Arc::downgrade(&self.core);
+        let close_hook: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            if let Some(core) = weak_core_close.upgrade() {
+                core.reconcile_dead_binding("target closed");
+            }
+        });
+        page.register_live_view_close_hook(&close_hook);
         Ok(())
     }
 
@@ -752,42 +1012,57 @@ impl BrowserViewTarget {
     /// Read a snapshot of diagnostic status counters (never contains pixel bytes or typed text).
     #[must_use]
     pub fn status(&self) -> BrowserViewStatus {
-        let Ok(state) = self.core.state.lock() else {
-            return BrowserViewStatus {
-                generation: 0,
-                geometry_revision: 0,
-                active_profile: None,
-                refresh_pending: false,
-                stale: false,
-                takeover_active: false,
-                frames_emitted: 0,
-                frames_dropped: 0,
-                acks_sent: 0,
-                acks_failed: 0,
-                starts_sent: 0,
-                stops_sent: 0,
-                worker_running: false,
-                last_error: Some("view lock poisoned".into()),
-                geometry: None,
+        let (status, transitioned, notify, finished) = {
+            let Ok(mut state) = self.core.state.lock() else {
+                return BrowserViewStatus {
+                    generation: 0,
+                    geometry_revision: 0,
+                    active_profile: None,
+                    refresh_pending: false,
+                    stale: false,
+                    takeover_active: false,
+                    frames_emitted: 0,
+                    frames_dropped: 0,
+                    acks_sent: 0,
+                    acks_failed: 0,
+                    starts_sent: 0,
+                    stops_sent: 0,
+                    worker_running: false,
+                    last_error: Some("view lock poisoned".into()),
+                    geometry: None,
+                };
             };
+            let finished = prune_finished_worker_locked(&mut state);
+            let (transitioned, notify) =
+                reconcile_dead_binding_locked(&mut state, "target closed");
+            let status = BrowserViewStatus {
+                generation: state.generation,
+                geometry_revision: state.geometry_revision,
+                active_profile: state.active_profile.clone(),
+                refresh_pending: state.refresh_pending,
+                stale: state.stale,
+                takeover_active: state.takeover_active,
+                frames_emitted: state.frames_emitted,
+                frames_dropped: state.frames_dropped,
+                acks_sent: state.acks_sent,
+                acks_failed: state.acks_failed,
+                starts_sent: state.starts_sent,
+                stops_sent: state.stops_sent,
+                worker_running: state.worker.is_some(),
+                last_error: state.last_error.clone(),
+                geometry: state.geometry,
+            };
+            (status, transitioned, notify, finished)
         };
-        BrowserViewStatus {
-            generation: state.generation,
-            geometry_revision: state.geometry_revision,
-            active_profile: state.active_profile.clone(),
-            refresh_pending: state.refresh_pending,
-            stale: state.stale,
-            takeover_active: state.takeover_active,
-            frames_emitted: state.frames_emitted,
-            frames_dropped: state.frames_dropped,
-            acks_sent: state.acks_sent,
-            acks_failed: state.acks_failed,
-            starts_sent: state.starts_sent,
-            stops_sent: state.stops_sent,
-            worker_running: state.worker.is_some(),
-            last_error: state.last_error.clone(),
-            geometry: state.geometry,
+        drop(finished);
+        if transitioned {
+            self.core.watch_tx.send_replace(None);
+            if let Some(notify) = notify {
+                notify.notify_one();
+            }
+            self.core.set_takeover_pin(false);
         }
+        status
     }
 
     /// Human-readable input limitation note (viewport-only; no browser chrome or OS dialogs).
@@ -800,55 +1075,75 @@ impl BrowserViewTarget {
 #[async_trait]
 impl ViewTarget for BrowserViewTarget {
     fn info(&self) -> TargetInfo {
-        let Ok(state) = self.core.state.lock() else {
-            return TargetInfo {
+        let (info, transitioned, notify, finished) = {
+            let Ok(mut state) = self.core.state.lock() else {
+                return TargetInfo {
+                    target_id: self.core.config.target_id,
+                    kind: TargetKind::Browser,
+                    host_id: self.core.config.host_id.clone(),
+                    bot_id: self.core.config.bot_id,
+                    run_id: self.core.config.run_id,
+                    generation: 0,
+                    capabilities: Capabilities {
+                        view: false,
+                        input: false,
+                        codecs: vec![Codec::Jpeg],
+                        reason: Some(Reason::Unavailable),
+                    },
+                    unavailable_reason: Some(Reason::Unavailable),
+                };
+            };
+            let finished = prune_finished_worker_locked(&mut state);
+            let (transitioned, notify) =
+                reconcile_dead_binding_locked(&mut state, "target closed");
+
+            let (view, input, reason) = match &state.lifecycle {
+                LifecycleState::Idle => (false, false, Some(Reason::BrowserIdle)),
+                LifecycleState::Attached(binding) if binding.is_alive() => {
+                    let reason = if state.stale {
+                        Some(Reason::Stale)
+                    } else if state.refresh_pending {
+                        Some(Reason::RefreshPending)
+                    } else {
+                        None
+                    };
+                    (true, true, reason)
+                }
+                LifecycleState::Attached(_) | LifecycleState::Unavailable { .. } => {
+                    let reason = match &state.lifecycle {
+                        LifecycleState::Unavailable { reason } => reason.clone(),
+                        _ => Reason::Unavailable,
+                    };
+                    (false, false, Some(reason))
+                }
+            };
+
+            let info = TargetInfo {
                 target_id: self.core.config.target_id,
                 kind: TargetKind::Browser,
                 host_id: self.core.config.host_id.clone(),
                 bot_id: self.core.config.bot_id,
                 run_id: self.core.config.run_id,
-                generation: 0,
+                generation: state.generation,
                 capabilities: Capabilities {
-                    view: false,
-                    input: false,
+                    view,
+                    input,
                     codecs: vec![Codec::Jpeg],
-                    reason: Some(Reason::Unavailable),
+                    reason: reason.clone(),
                 },
-                unavailable_reason: Some(Reason::Unavailable),
+                unavailable_reason: (!view).then_some(reason.unwrap_or(Reason::Unavailable)),
             };
+            (info, transitioned, notify, finished)
         };
-
-        let (view, input, reason) = match &state.lifecycle {
-            LifecycleState::Idle => (false, false, Some(Reason::BrowserIdle)),
-            LifecycleState::Attached(binding) if binding.is_alive() => {
-                let reason = if state.stale {
-                    Some(Reason::Stale)
-                } else if state.refresh_pending {
-                    Some(Reason::RefreshPending)
-                } else {
-                    None
-                };
-                (true, true, reason)
+        drop(finished);
+        if transitioned {
+            self.core.watch_tx.send_replace(None);
+            if let Some(notify) = notify {
+                notify.notify_one();
             }
-            LifecycleState::Attached(_) => (false, false, Some(Reason::Unavailable)),
-            LifecycleState::Unavailable { reason } => (false, false, Some(reason.clone())),
-        };
-
-        TargetInfo {
-            target_id: self.core.config.target_id,
-            kind: TargetKind::Browser,
-            host_id: self.core.config.host_id.clone(),
-            bot_id: self.core.config.bot_id,
-            run_id: self.core.config.run_id,
-            generation: state.generation,
-            capabilities: Capabilities {
-                view,
-                input,
-                codecs: vec![Codec::Jpeg],
-                reason: reason.clone(),
-            },
-            unavailable_reason: (!view).then_some(reason.unwrap_or(Reason::Unavailable)),
+            self.core.set_takeover_pin(false);
         }
+        info
     }
 
     fn frame_source(&self) -> Arc<dyn FrameSource> {
@@ -905,19 +1200,23 @@ impl Drop for SubscribeCancelGuard {
 }
 
 fn enqueue_refresh(core: &Arc<AdapterCore>, action_seq: u64) -> Result<(), ViewError> {
-    let wakeup = {
+    let (wakeup, finished) = {
         let mut state = core.state.lock().map_err(|_| ViewError::Unavailable)?;
+        let finished = prune_finished_worker_locked(&mut state);
         match &state.lifecycle {
             LifecycleState::Attached(b) if b.is_alive() => {}
             LifecycleState::Attached(_) => {
                 drop(state);
-                core.mark_unavailable(Reason::Unavailable, "target closed".into(), true);
+                drop(finished);
+                core.reconcile_dead_binding("target closed");
                 return Err(ViewError::Unavailable);
             }
             _ => return Err(ViewError::Unavailable),
         }
         let wakeup = {
             let Some(worker) = &state.worker else {
+                drop(state);
+                drop(finished);
                 return Ok(());
             };
             if let Ok(mut pending) = worker.shared.pending_refresh.lock() {
@@ -926,8 +1225,9 @@ fn enqueue_refresh(core: &Arc<AdapterCore>, action_seq: u64) -> Result<(), ViewE
             worker.wakeup.clone()
         };
         state.refresh_pending = true;
-        wakeup
+        (wakeup, finished)
     };
+    drop(finished);
     wakeup.notify_one();
     Ok(())
 }
@@ -939,25 +1239,21 @@ impl FrameSource for BrowserFrameSource {
         let _ctrl = self.core.ctrl_lock.lock().await;
 
         let Some(binding) = self.core.binding_if_alive() else {
-            if let Ok(state) = self.core.state.lock()
-                && let LifecycleState::Attached(_) = &state.lifecycle
-            {
-                drop(state);
-                self.core
-                    .mark_unavailable(Reason::Unavailable, "target closed".into(), true);
-            }
             return Err(ViewError::Unavailable);
         };
 
         // Check whether an active worker for this session is already running cleanly.
-        let existing_worker = {
-            let state = self.core.state.lock().map_err(|_| ViewError::Unavailable)?;
-            state.worker.as_ref().and_then(|w| {
+        let (existing_worker, finished) = {
+            let mut state = self.core.state.lock().map_err(|_| ViewError::Unavailable)?;
+            let finished = prune_finished_worker_locked(&mut state);
+            let existing = state.worker.as_ref().and_then(|w| {
                 (!w.stop_requested.load(Ordering::SeqCst)
                     && w.binding_session == binding.session_id)
                     .then(|| (w.shared.clone(), w.wakeup.clone()))
-            })
+            });
+            (existing, finished)
         };
+        drop(finished);
 
         if let Some((shared, wakeup)) = existing_worker {
             let (tx, rx) = oneshot::channel();
@@ -1010,28 +1306,36 @@ impl FrameSource for BrowserFrameSource {
             return Err(ViewError::Unavailable);
         }
 
-        if let Ok(mut state) = self.core.state.lock() {
+        {
+            let mut state = self.core.state.lock().map_err(|_| ViewError::Unavailable)?;
+            let _ = prune_finished_worker_locked(&mut state);
+            if !matches!(&state.lifecycle, LifecycleState::Attached(b) if b.is_alive() && b.session_id == binding.session_id)
+            {
+                drop(state);
+                cancel_guard.binding = None;
+                return Err(ViewError::Unavailable);
+            }
             state.starts_sent = state.starts_sent.saturating_add(1);
             state.active_profile = Some(profile.profile.clone());
             state.last_error = None;
-        }
 
-        let stop_requested = Arc::new(AtomicBool::new(false));
-        let wakeup = Arc::new(Notify::new());
-        let shared = Arc::new(WorkerShared::default());
+            let stop_requested = Arc::new(AtomicBool::new(false));
+            let wakeup = Arc::new(Notify::new());
+            let shared = Arc::new(WorkerShared::default());
+            let started_at = self.core.config.clock.now();
 
-        let join = tokio::spawn(run_screencast_worker(
-            self.core.clone(),
-            binding.clone(),
-            reg,
-            profile,
-            initial_nth,
-            stop_requested.clone(),
-            wakeup.clone(),
-            shared.clone(),
-        ));
+            let join = tokio::spawn(run_screencast_worker(
+                self.core.clone(),
+                binding.clone(),
+                reg,
+                profile,
+                initial_nth,
+                started_at,
+                stop_requested.clone(),
+                wakeup.clone(),
+                shared.clone(),
+            ));
 
-        if let Ok(mut state) = self.core.state.lock() {
             state.worker = Some(WorkerHandle {
                 binding_session: binding.session_id,
                 stop_requested,
@@ -1059,14 +1363,17 @@ impl FrameSource for BrowserFrameSource {
         let Some(_binding) = self.core.binding_if_alive() else {
             return Err(ViewError::Unavailable);
         };
-        let worker = {
-            let state = self.core.state.lock().map_err(|_| ViewError::Unavailable)?;
-            state
+        let (worker, finished) = {
+            let mut state = self.core.state.lock().map_err(|_| ViewError::Unavailable)?;
+            let finished = prune_finished_worker_locked(&mut state);
+            let worker = state
                 .worker
                 .as_ref()
                 .filter(|w| !w.stop_requested.load(Ordering::SeqCst))
-                .map(|w| (w.shared.clone(), w.wakeup.clone()))
+                .map(|w| (w.shared.clone(), w.wakeup.clone()));
+            (worker, finished)
         };
+        drop(finished);
         let Some((shared, wakeup)) = worker else {
             return Ok(());
         };
@@ -1227,7 +1534,7 @@ fn is_session_gone(err: &Error, client: &CdpClient) -> bool {
 
 struct PendingRefreshState {
     action_seq: u64,
-    deadline: Instant,
+    deadline: ClockInstant,
 }
 
 #[derive(Clone, Copy)]
@@ -1247,22 +1554,22 @@ struct WorkerState {
     screencast_running: bool,
     window_got_fresh: bool,
     window_idle_boosted: bool,
-    window_opened_at: Instant,
-    next_watch_tick: Option<Instant>,
+    window_opened_at: ClockInstant,
+    next_watch_tick: Option<ClockInstant>,
     next_frame_seq: u64,
     cached_frame: Option<Arc<Frame>>,
-    last_emit_at: Option<Instant>,
-    last_heartbeat_at: Option<Instant>,
+    last_emit_at: Option<ClockInstant>,
+    last_heartbeat_at: Option<ClockInstant>,
     pending_emit: Option<DecodedScreencastFrame>,
     pending_refresh: Option<PendingRefreshState>,
     consecutive_faults: u32,
 }
 
 impl WorkerState {
-    fn earliest_timer(&self) -> Option<(Instant, TimerReason)> {
-        let mut best: Option<(Instant, TimerReason)> = None;
-        let mut consider = |when: Instant, reason: TimerReason| {
-            if best.is_none_or(|(b, _)| when < b) {
+    fn earliest_timer(&self) -> Option<(ClockInstant, TimerReason)> {
+        let mut best: Option<(ClockInstant, TimerReason)> = None;
+        let mut consider = |when: ClockInstant, reason: TimerReason| {
+            if best.is_none_or(|(b, _)| when.is_earlier_than(b)) {
                 best = Some((when, reason));
             }
         };
@@ -1273,8 +1580,8 @@ impl WorkerState {
 
         if self.pending_emit.is_some() {
             let ready_at = match self.last_emit_at {
-                Some(t) => t + min_emit_interval(&self.profile),
-                None => Instant::now(),
+                Some(t) => t.saturating_add(min_emit_interval(&self.profile)),
+                None => self.core.config.clock.now(),
             };
             consider(ready_at, TimerReason::EmitGate);
         }
@@ -1286,7 +1593,8 @@ impl WorkerState {
                     && self.pending_refresh.is_none()
                 {
                     consider(
-                        self.window_opened_at + self.core.config.watch_idle_grace,
+                        self.window_opened_at
+                            .saturating_add(self.core.config.watch_idle_grace),
                         TimerReason::WatchIdleGrace,
                     );
                 } else if !self.screencast_running
@@ -1303,7 +1611,8 @@ impl WorkerState {
                     && self.pending_refresh.is_none()
                 {
                     consider(
-                        self.window_opened_at + self.core.config.watch_idle_grace,
+                        self.window_opened_at
+                            .saturating_add(self.core.config.watch_idle_grace),
                         TimerReason::WatchIdleGrace,
                     );
                 } else if self.cached_frame.is_some() && self.pending_refresh.is_none() {
@@ -1312,7 +1621,7 @@ impl WorkerState {
                         .or(self.last_emit_at)
                         .unwrap_or(self.window_opened_at);
                     consider(
-                        base + self.core.config.live_heartbeat_interval,
+                        base.saturating_add(self.core.config.live_heartbeat_interval),
                         TimerReason::LiveHeartbeat,
                     );
                 }
@@ -1424,7 +1733,7 @@ impl WorkerState {
             return;
         }
         self.cached_frame = Some(frame.clone());
-        let now = Instant::now();
+        let now = self.core.config.clock.now();
         self.last_emit_at = Some(now);
         self.last_heartbeat_at = Some(now);
         self.core.watch_tx.send_replace(Some(frame));
@@ -1453,7 +1762,7 @@ impl WorkerState {
             payload: prev.payload.clone(),
         });
         self.cached_frame = Some(frame.clone());
-        let now = Instant::now();
+        let now = self.core.config.clock.now();
         self.last_emit_at = Some(now);
         self.last_heartbeat_at = Some(now);
         self.core.watch_tx.send_replace(Some(frame));
@@ -1467,6 +1776,34 @@ impl WorkerState {
     }
 }
 
+struct WorkerExitGuard {
+    core: Arc<AdapterCore>,
+    shared: Arc<WorkerShared>,
+}
+
+impl Drop for WorkerExitGuard {
+    fn drop(&mut self) {
+        let cleared_worker = if let Ok(mut state) = self.core.state.lock()
+            && state
+                .worker
+                .as_ref()
+                .is_some_and(|w| Arc::ptr_eq(&w.shared, &self.shared))
+        {
+            state.active_profile = None;
+            state.refresh_pending = false;
+            state.worker.take()
+        } else {
+            None
+        };
+        drop(cleared_worker);
+        if let Ok(mut pending) = self.shared.pending_profile.lock()
+            && let Some(req) = pending.take()
+        {
+            let _ = req.reply.send(Err(ViewError::Unavailable));
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_screencast_worker(
     core: Arc<AdapterCore>,
@@ -1474,11 +1811,15 @@ async fn run_screencast_worker(
     reg: ScreencastRegistration,
     initial_profile: EffectiveProfile,
     initial_nth: u32,
+    started_at: ClockInstant,
     stop_requested: Arc<AtomicBool>,
     wakeup: StateNotify,
     shared: Arc<WorkerShared>,
 ) {
-    let now = Instant::now();
+    let _exit_guard = WorkerExitGuard {
+        core: core.clone(),
+        shared: shared.clone(),
+    };
     let mut ws = WorkerState {
         core,
         binding,
@@ -1487,12 +1828,12 @@ async fn run_screencast_worker(
         screencast_running: true,
         window_got_fresh: false,
         window_idle_boosted: false,
-        window_opened_at: now,
+        window_opened_at: started_at,
         next_watch_tick: None,
         next_frame_seq: 0,
         cached_frame: None,
         last_emit_at: None,
-        last_heartbeat_at: Some(now),
+        last_heartbeat_at: Some(started_at),
         pending_emit: None,
         pending_refresh: None,
         consecutive_faults: 0,
@@ -1548,9 +1889,10 @@ async fn run_screencast_worker(
                         state.frames_dropped = state.frames_dropped.saturating_add(1);
                     }
                 } else {
-                    let gate_open = ws
-                        .last_emit_at
-                        .is_none_or(|t| t.elapsed() >= min_emit_interval(&ws.profile));
+                    let gate_now = ws.core.config.clock.now();
+                    let gate_open = ws.last_emit_at.is_none_or(|t| {
+                        t.elapsed_since(gate_now) >= min_emit_interval(&ws.profile)
+                    });
                     if gate_open && ws.pending_emit.is_none() {
                         ws.publish_fresh(frame, Cause::Idle, None);
                     } else if ws.pending_emit.replace(frame).is_some()
@@ -1599,7 +1941,12 @@ async fn run_screencast_worker(
             ws.window_got_fresh = false;
             ws.pending_refresh = Some(PendingRefreshState {
                 action_seq,
-                deadline: Instant::now() + ws.core.config.new_paint_timeout,
+                deadline: ws
+                    .core
+                    .config
+                    .clock
+                    .now()
+                    .saturating_add(ws.core.config.new_paint_timeout),
             });
             if let Err(err) = ws.ensure_screencast(REFRESH_EVERY_NTH_FRAME).await {
                 break Some(err);
@@ -1607,16 +1954,25 @@ async fn run_screencast_worker(
             continue;
         }
 
+        // Re-check closure immediately before parking so concurrent teardown signals are never lost.
+        if stop_requested.load(Ordering::SeqCst) || !ws.binding.is_alive() {
+            if !ws.binding.is_alive() && !stop_requested.load(Ordering::SeqCst) {
+                break Some("CDP page session closed or crashed".into());
+            }
+            break None;
+        }
+
         // 3. Wait for next event: slot frame, wakeup, target closed, or earliest timer.
         let timer = ws.earliest_timer();
+        let clock = ws.core.config.clock.clone();
         match timer {
             Some((deadline, reason)) => {
                 tokio::select! {
                     biased;
                     () = stop_wait(&stop_requested, &wakeup) => {},
-                    () = ws.binding.target_close_notify.notified() => {},
+                    () = ws.binding.wait_closed() => {},
                     () = reg.slot().notified() => {},
-                    () = tokio::time::sleep_until(deadline) => {
+                    () = clock.sleep_until(deadline) => {
                         if let Err(err) = handle_timer(&mut ws, reason).await {
                             break Some(err);
                         }
@@ -1627,7 +1983,7 @@ async fn run_screencast_worker(
                 tokio::select! {
                     biased;
                     () = stop_wait(&stop_requested, &wakeup) => {},
-                    () = ws.binding.target_close_notify.notified() => {},
+                    () = ws.binding.wait_closed() => {},
                     () = reg.slot().notified() => {},
                 }
             }
@@ -1646,13 +2002,26 @@ async fn run_screencast_worker(
     }
 
     if let Some(reason) = failure_reason {
-        ws.core.mark_unavailable(Reason::Unavailable, reason, true);
+        ws.core
+            .mark_unavailable_inner(Reason::Unavailable, reason, true, Some(&shared));
     } else {
         ws.core.watch_tx.send_replace(None);
-        if let Ok(mut state) = ws.core.state.lock() {
+        let cleared_worker = if let Ok(mut state) = ws.core.state.lock() {
             state.active_profile = None;
             state.refresh_pending = false;
-        }
+            if state
+                .worker
+                .as_ref()
+                .is_some_and(|w| Arc::ptr_eq(&w.shared, &shared))
+            {
+                state.worker.take()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        drop(cleared_worker);
     }
 }
 
@@ -1667,7 +2036,13 @@ async fn finish_post_frame_capture(ws: &mut WorkerState) -> Result<(), String> {
     match ws.profile.profile {
         Profile::Watch => {
             ws.stop_screencast().await?;
-            ws.next_watch_tick = Some(Instant::now() + ws.core.config.watch_window_interval);
+            ws.next_watch_tick = Some(
+                ws.core
+                    .config
+                    .clock
+                    .now()
+                    .saturating_add(ws.core.config.watch_window_interval),
+            );
         }
         Profile::Live => {
             if ws.current_nth != LIVE_EVERY_NTH_FRAME {
@@ -1686,7 +2061,7 @@ async fn apply_profile_change(
     ws.profile = new_profile;
     ws.window_got_fresh = false;
     ws.window_idle_boosted = false;
-    ws.window_opened_at = Instant::now();
+    ws.window_opened_at = ws.core.config.clock.now();
     ws.next_watch_tick = None;
     if let Ok(mut state) = ws.core.state.lock() {
         state.active_profile = Some(profile_kind.clone());
@@ -1756,18 +2131,24 @@ async fn handle_timer(ws: &mut WorkerState, reason: TimerReason) -> Result<(), S
                     // Initial cold watch on a static page: temporarily use `everyNthFrame = 1`
                     // so Chrome emits frame #1 cleanly without waiting forever.
                     ws.ensure_screencast(REFRESH_EVERY_NTH_FRAME).await?;
-                    ws.window_opened_at = Instant::now();
+                    ws.window_opened_at = ws.core.config.clock.now();
                 } else {
                     // Static already-cached page in Watch: re-emit cached frame without waking encoder.
+                    let now = ws.core.config.clock.now();
                     if ws
                         .last_emit_at
-                        .is_none_or(|t| t.elapsed() >= min_emit_interval(&ws.profile))
+                        .is_none_or(|t| t.elapsed_since(now) >= min_emit_interval(&ws.profile))
                     {
                         ws.publish_repeated_idle(false);
                     }
                     ws.stop_screencast().await?;
-                    ws.next_watch_tick =
-                        Some(Instant::now() + ws.core.config.watch_window_interval);
+                    ws.next_watch_tick = Some(
+                        ws.core
+                            .config
+                            .clock
+                            .now()
+                            .saturating_add(ws.core.config.watch_window_interval),
+                    );
                 }
             } else if ws.profile.profile == Profile::Watch && ws.window_idle_boosted {
                 // Even `everyNthFrame = 1` yielded no frame within grace; avoid spinning Chrome.
@@ -1775,7 +2156,13 @@ async fn handle_timer(ws: &mut WorkerState, reason: TimerReason) -> Result<(), S
                     state.stale = true;
                 }
                 ws.stop_screencast().await?;
-                ws.next_watch_tick = Some(Instant::now() + ws.core.config.watch_window_interval);
+                ws.next_watch_tick = Some(
+                    ws.core
+                        .config
+                        .clock
+                        .now()
+                        .saturating_add(ws.core.config.watch_window_interval),
+                );
             } else if ws.profile.profile == Profile::Live && !ws.window_idle_boosted {
                 ws.window_idle_boosted = true;
                 if ws.cached_frame.is_none() {
@@ -1787,7 +2174,7 @@ async fn handle_timer(ws: &mut WorkerState, reason: TimerReason) -> Result<(), S
             ws.next_watch_tick = None;
             ws.window_got_fresh = false;
             ws.window_idle_boosted = false;
-            ws.window_opened_at = Instant::now();
+            ws.window_opened_at = ws.core.config.clock.now();
             ws.ensure_screencast(WATCH_EVERY_NTH_FRAME).await?;
         }
         TimerReason::LiveHeartbeat => {
@@ -1859,15 +2246,17 @@ impl BrowserInputSink {
                 format!("input target lost: {err}"),
                 true,
             );
-            let _ = self.core.held.lock().map(|mut h| {
+            if let Ok(mut h) = self.core.held.lock() {
                 h.buttons = 0;
                 h.keys.clear();
-            });
+            }
             ViewError::Unavailable
         } else {
             // Reset held state cleanly on transient input error.
-            let _ = self.core.release_inputs_with_binding(binding).await;
-            ViewError::PartialInjection
+            match self.core.release_inputs_with_binding(binding).await {
+                Err(ViewError::Unavailable) => ViewError::Unavailable,
+                _ => ViewError::PartialInjection,
+            }
         }
     }
 }
@@ -1949,9 +2338,12 @@ impl InputSink for BrowserInputSink {
 
                 match res {
                     Ok(_) => {
-                        if *phase == PointerPhase::Up
-                            && let Ok(mut held) = self.core.held.lock()
-                        {
+                        if *phase == PointerPhase::Up {
+                            let mut held = self
+                                .core
+                                .held
+                                .lock()
+                                .map_err(|_| ViewError::Unavailable)?;
                             held.buttons &= !btn_bit;
                         }
                         Ok(())
@@ -1974,7 +2366,12 @@ impl InputSink for BrowserInputSink {
                 let dx = delta_x.clamp(-WHEEL_DELTA_CLAMP, WHEEL_DELTA_CLAMP);
                 let dy = delta_y.clamp(-WHEEL_DELTA_CLAMP, WHEEL_DELTA_CLAMP);
                 let mod_mask = modifiers_to_cdp(modifiers);
-                if let Ok(mut held) = self.core.held.lock() {
+                {
+                    let mut held = self
+                        .core
+                        .held
+                        .lock()
+                        .map_err(|_| ViewError::Unavailable)?;
                     held.last_css = Some((cx, cy));
                 }
                 let res = send_cdp(
@@ -2012,11 +2409,15 @@ impl InputSink for BrowserInputSink {
                     key: key.clone(),
                     location: *location,
                 };
-                if *phase == KeyPhase::Down
-                    && let Ok(mut held) = self.core.held.lock()
-                    && !held.keys.contains(&pk)
-                {
-                    held.keys.push(pk.clone());
+                if *phase == KeyPhase::Down {
+                    let mut held = self
+                        .core
+                        .held
+                        .lock()
+                        .map_err(|_| ViewError::Unavailable)?;
+                    if !held.keys.contains(&pk) {
+                        held.keys.push(pk.clone());
+                    }
                 }
 
                 let mod_mask = modifiers_to_cdp(modifiers);
@@ -2034,9 +2435,12 @@ impl InputSink for BrowserInputSink {
 
                 match res {
                     Ok(()) => {
-                        if *phase == KeyPhase::Up
-                            && let Ok(mut held) = self.core.held.lock()
-                        {
+                        if *phase == KeyPhase::Up {
+                            let mut held = self
+                                .core
+                                .held
+                                .lock()
+                                .map_err(|_| ViewError::Unavailable)?;
                             held.keys.retain(|x| x != &pk);
                         }
                         Ok(())
@@ -2263,5 +2667,56 @@ fn windows_vk_for_dom_key(code: &str, key: &str) -> u32 {
                 }
             }
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn release_inputs_returns_unavailable_when_held_lock_poisoned() {
+        let target = BrowserViewTarget::new_idle(BrowserViewConfig::default());
+        let core = target.core.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = core.held.lock().expect("lock held");
+            panic!("poison held mutex");
+        })
+        .join();
+        assert!(target.core.held.is_poisoned());
+        let idle_res = target.core.release_inputs_inner().await;
+        assert!(
+            matches!(idle_res, Err(ViewError::Unavailable)),
+            "expected Unavailable on poisoned held lock when idle, got {idle_res:?}"
+        );
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let server_task = tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                let _ws = tokio_tungstenite::accept_async(stream).await;
+                std::future::pending::<()>().await;
+            }
+        });
+        let client = CdpClient::connect(&format!("ws://127.0.0.1:{port}"))
+            .await
+            .expect("connect");
+        let (_tx, target_close_rx) = watch::channel(false);
+        let binding = SessionBinding {
+            client_close_rx: client.subscribe_closed(),
+            client,
+            session_id: "sess-poison".into(),
+            target_closed: Arc::new(AtomicBool::new(false)),
+            target_close_notify: Arc::new(Notify::new()),
+            target_close_rx,
+        };
+        let attached_res = target.core.release_inputs_with_binding(&binding).await;
+        assert!(
+            matches!(attached_res, Err(ViewError::Unavailable)),
+            "expected Unavailable on poisoned held lock while attached, got {attached_res:?}"
+        );
+        server_task.abort();
     }
 }

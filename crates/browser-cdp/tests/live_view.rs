@@ -9,9 +9,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
 use browser_cdp::{
-    BROWSER_INPUT_LIMITATION, Browser, BrowserViewConfig, BrowserViewTarget,
-    DEFAULT_MAX_SCREENCAST_EVENT_BYTES, DEFAULT_MAX_SCREENCAST_IMAGE_BYTES, LaunchOptions,
-    ViewportGeometry,
+    BROWSER_INPUT_LIMITATION, Browser, BrowserViewConfig, BrowserViewTarget, CdpClient,
+    CdpClientConfig, DEFAULT_MAX_SCREENCAST_EVENT_BYTES, DEFAULT_MAX_SCREENCAST_IMAGE_BYTES,
+    LaunchOptions, ManualClock, Page, ViewClock, ViewportGeometry,
 };
 use futures_util::{SinkExt, StreamExt};
 use live_view::{
@@ -70,6 +70,21 @@ impl FakeServerState {
     }
 
     fn send_event(&self, session_id: Option<&str>, method: &str, params: &Value) {
+        if method == "Target.targetDestroyed"
+            && let Some(tid) = params.get("targetId").and_then(Value::as_str)
+        {
+            self.attached_targets
+                .lock()
+                .expect("attached lock")
+                .retain(|(t, _)| t != tid);
+        } else if method == "Target.detachedFromTarget" {
+            let sid = params.get("sessionId").and_then(Value::as_str);
+            let tid = params.get("targetId").and_then(Value::as_str);
+            self.attached_targets
+                .lock()
+                .expect("attached lock")
+                .retain(|(t, s)| Some(s.as_str()) != sid && Some(t.as_str()) != tid);
+        }
         let mut msg = json!({
             "method": method,
             "params": params,
@@ -302,6 +317,43 @@ fn build_reply(state: &FakeServerState, id: u64, method: &str, params: &Value) -
                 })
                 .collect();
             json!({ "targetInfos": infos })
+        }
+        "Target.getTargetInfo" => {
+            let tid = params
+                .get("targetId")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let attached = state
+                .attached_targets
+                .lock()
+                .expect("attached lock")
+                .iter()
+                .any(|(t, _)| t == tid);
+            if !attached {
+                return json!({
+                    "id": id,
+                    "error": { "code": -32602, "message": "No target with given id found" }
+                });
+            }
+            json!({
+                "targetInfo": {
+                    "targetId": tid,
+                    "type": "page",
+                    "title": tid,
+                    "url": "https://example.test/",
+                    "attached": true
+                }
+            })
+        }
+        "Target.closeTarget" => {
+            if let Some(tid) = params.get("targetId").and_then(Value::as_str) {
+                state
+                    .attached_targets
+                    .lock()
+                    .expect("attached lock")
+                    .retain(|(t, _)| t != tid);
+            }
+            json!({ "success": true })
         }
         "Page.getLayoutMetrics" => state.layout_metrics.lock().expect("layout lock").clone(),
         "Page.getFrameTree" => json!({
@@ -778,6 +830,7 @@ async fn verify_watch_cold_start_and_action_bypass(
     src: &Arc<dyn live_view::FrameSource>,
     sub: &mut FrameSubscription,
     sess: &str,
+    clock: &ManualClock,
 ) -> (u64, u64) {
     server
         .state
@@ -793,7 +846,7 @@ async fn verify_watch_cold_start_and_action_bypass(
 
     // Static cold page emits nothing within 200ms watch_idle_grace -> falls back once to everyNthFrame=1.
     pump_tasks().await;
-    tokio::time::advance(Duration::from_millis(210)).await;
+    clock.advance(Duration::from_millis(210));
     server
         .state
         .wait_for_method_count("Page.startScreencast", 2)
@@ -823,7 +876,7 @@ async fn verify_watch_cold_start_and_action_bypass(
         .await;
 
     // During 1.5s of the 3s Watch wait, no background startScreencast fires.
-    tokio::time::advance(Duration::from_millis(1500)).await;
+    clock.advance(Duration::from_millis(1500));
     pump_tasks().await;
     assert_eq!(server.state.count_method("Page.startScreencast"), 2);
 
@@ -874,6 +927,7 @@ async fn verify_stale_timeout_and_live_emission_gating(
     src: &Arc<dyn live_view::FrameSource>,
     sub: &mut FrameSubscription,
     sess: &str,
+    clock: &ManualClock,
     saved: (u64, u64),
 ) {
     // Let 750ms new-paint timeout expire with no frame -> stale + repeated preserves metadata.
@@ -883,7 +937,7 @@ async fn verify_stale_timeout_and_live_emission_gating(
         .wait_for_method_count("Page.startScreencast", 4)
         .await;
     pump_tasks().await;
-    tokio::time::advance(Duration::from_millis(760)).await;
+    clock.advance(Duration::from_millis(760));
 
     sub.frames
         .changed()
@@ -966,9 +1020,22 @@ async fn verify_stale_timeout_and_live_emission_gating(
             &minimal_jpeg(1280, 720, 200),
             &default_meta(1280.0, 720.0),
         );
-        tokio::time::advance(Duration::from_millis(5)).await;
+        clock.advance(Duration::from_millis(5));
         pump_tasks().await;
     }
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if view.status().acks_sent >= acks_before + 6
+                && server.state.count_method("Page.screencastFrameAck") >= 6
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("all 6 burst ACKs dispatched");
 
     assert!(view.status().acks_sent >= acks_before + 6);
     assert!(server.state.count_method("Page.screencastFrameAck") >= 6);
@@ -980,18 +1047,20 @@ async fn verify_stale_timeout_and_live_emission_gating(
     assert!(view.status().frames_dropped >= 4);
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn watch_live_timings_action_refresh_stale_and_emission_gating() {
     let server = FakeCdpServer::start().await;
     let browser = Browser::connect(&server.ws_url()).await.expect("connect");
     let page = browser.new_page("about:blank").await.expect("page");
     let sess = page.session_id().to_string();
+    let clock = ManualClock::new();
 
     let cfg = BrowserViewConfig {
         new_paint_timeout: Duration::from_millis(750),
         watch_idle_grace: Duration::from_millis(200),
         watch_window_interval: Duration::from_secs(3),
         live_heartbeat_interval: Duration::from_millis(1000),
+        clock: ViewClock::Manual(clock.clone()),
         ..BrowserViewConfig::default()
     };
     let view = page.live_view(cfg);
@@ -1003,9 +1072,10 @@ async fn watch_live_timings_action_refresh_stale_and_emission_gating() {
         .expect("subscribe");
 
     let saved =
-        verify_watch_cold_start_and_action_bypass(&server, &view, &src, &mut sub, &sess).await;
+        verify_watch_cold_start_and_action_bypass(&server, &view, &src, &mut sub, &sess, &clock)
+            .await;
     verify_stale_timeout_and_live_emission_gating(
-        &server, &view, &page, &src, &mut sub, &sess, saved,
+        &server, &view, &page, &src, &mut sub, &sess, &clock, saved,
     )
     .await;
     assert_eq!(
@@ -1362,14 +1432,11 @@ fn is_pid_alive(pid: u32) -> bool {
 
 #[cfg(windows)]
 fn is_pid_alive(pid: u32) -> bool {
-    let filter = format!("PID eq {pid}");
-    std::process::Command::new("tasklist")
-        .args(["/FI", &filter, "/NH", "/FO", "CSV"])
-        .output()
-        .is_ok_and(|o| {
-            let s = String::from_utf8_lossy(&o.stdout);
-            s.contains(&format!("\"{pid}\""))
-        })
+    use sysinfo::{Pid, ProcessesToUpdate, System};
+    let mut sys = System::new();
+    let target = Pid::from_u32(pid);
+    sys.refresh_processes(ProcessesToUpdate::Some(&[target]), true);
+    sys.process(target).is_some()
 }
 
 async fn spawn_parent_and_grandchild(pid_file: &PathBuf) -> (tokio::process::Child, u32, bool) {
@@ -1395,31 +1462,30 @@ async fn spawn_parent_and_grandchild(pid_file: &PathBuf) -> (tokio::process::Chi
 
     #[cfg(windows)]
     {
-        let script = format!(
-            "$p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c','ping -n 60 127.0.0.1 >nul' -PassThru -WindowStyle Hidden; \
-             [System.IO.File]::WriteAllText('{}', [string]$p.Id); \
-             Start-Sleep -Seconds 60",
-            pid_file.display().to_string().replace('\'', "''")
-        );
-        let child = tokio::process::Command::new("powershell")
-            .args([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                &script,
-            ])
+        let _ = pid_file;
+        use sysinfo::{Pid, ProcessesToUpdate, System};
+        let mut child = tokio::process::Command::new("cmd")
+            .args(["/c", "ping -n 60 127.0.0.1 >nul"])
             .spawn()
-            .expect("spawn powershell + cmd grandchild");
-        for _ in 0..80 {
-            if let Ok(txt) = tokio::fs::read_to_string(pid_file).await
-                && let Ok(gpid) = txt.trim().parse::<u32>()
+            .expect("spawn cmd + ping grandchild");
+        let parent_pid = Pid::from_u32(child.id().expect("cmd pid"));
+        let mut sys = System::new();
+        for _ in 0..200 {
+            sys.refresh_processes(ProcessesToUpdate::All, true);
+            if let Some((pid, _)) = sys
+                .processes()
+                .iter()
+                .find(|(_, proc_info)| proc_info.parent() == Some(parent_pid))
             {
-                return (child, gpid, false);
+                return (child, pid.as_u32(), false);
+            }
+            if child.try_wait().ok().flatten().is_some() {
+                break;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        panic!("grandchild pid file never written on windows");
+        let _ = child.kill().await;
+        panic!("grandchild ping process never spawned on windows");
     }
 }
 
@@ -1578,4 +1644,396 @@ async fn live_chrome_screencast_zoom_scroll_turkish_and_close() {
     let _ = src.stop().await;
     drop(sub);
     browser.close().await.expect("clean close");
+}
+
+#[tokio::test]
+async fn release_pressed_inputs_keeps_failed_button_and_key_for_retry() {
+    let server = FakeCdpServer::start().await;
+    let browser = Browser::connect(&server.ws_url()).await.expect("connect");
+    let page = browser.new_page("about:blank").await.expect("page");
+    let view = page.live_view(BrowserViewConfig::default());
+    let sink = view.input_sink().expect("input sink");
+
+    sink.inject(&InputEvent::Pointer {
+        phase: PointerPhase::Down,
+        x: 0.5,
+        y: 0.5,
+        button: Some(Button::Left),
+        buttons: 1,
+        modifiers: vec![],
+    })
+    .await
+    .expect("mouse down");
+    sink.inject(&InputEvent::Key {
+        phase: KeyPhase::Down,
+        code: "ControlLeft".into(),
+        key: "Control".into(),
+        location: 1,
+        repeat: false,
+        modifiers: vec![Modifier::Ctrl],
+    })
+    .await
+    .expect("ctrl down");
+    sink.inject(&InputEvent::Key {
+        phase: KeyPhase::Down,
+        code: "KeyC".into(),
+        key: "c".into(),
+        location: 0,
+        repeat: false,
+        modifiers: vec![Modifier::Ctrl],
+    })
+    .await
+    .expect("key c down");
+
+    {
+        let mut fail = server
+            .state
+            .fail_next_method
+            .lock()
+            .expect("fail_next_method lock");
+        fail.insert(
+            "Input.dispatchMouseEvent".into(),
+            (-32000, "transient mouse release error".into()),
+        );
+        fail.insert(
+            "Input.dispatchKeyEvent".into(),
+            (-32000, "transient key release error".into()),
+        );
+    }
+
+    let first_release = sink.release_pressed_inputs().await;
+    assert!(
+        matches!(first_release, Err(ViewError::PartialInjection)),
+        "expected PartialInjection when key-up and button-up fail transiently, got {first_release:?}"
+    );
+    assert!(
+        view.info().capabilities.view,
+        "transient release failure must keep view alive"
+    );
+
+    // Retry must still release both `left` mouse button and `KeyC` (while `ControlLeft` succeeded earlier).
+    server.state.clear_commands();
+    sink.release_pressed_inputs()
+        .await
+        .expect("retry release_pressed_inputs succeeds");
+
+    let cmds = server.state.commands();
+    let released_mouse: Vec<_> = cmds
+        .iter()
+        .filter(|c| c.method == "Input.dispatchMouseEvent" && c.params["type"] == "mouseReleased")
+        .collect();
+    assert_eq!(released_mouse.len(), 1);
+    assert_eq!(released_mouse[0].params["button"], "left");
+
+    let key_ups: Vec<_> = cmds
+        .iter()
+        .filter(|c| c.method == "Input.dispatchKeyEvent" && c.params["type"] == "keyUp")
+        .collect();
+    assert_eq!(key_ups.len(), 1, "only KeyC should remain for retry");
+    assert_eq!(key_ups[0].params["code"], "KeyC");
+
+    // Third call should be a clean no-op with zero CDP dispatches.
+    server.state.clear_commands();
+    sink.release_pressed_inputs()
+        .await
+        .expect("idempotent empty release");
+    assert!(server.state.commands().is_empty());
+}
+
+#[tokio::test]
+async fn page_drop_and_broadcast_lag_mark_view_unavailable() {
+    // Part A: Dropping `Page` while `BrowserViewTarget` is stored cleanly closes view & worker.
+    let server = FakeCdpServer::start().await;
+    let browser = Browser::connect(&server.ws_url()).await.expect("connect");
+    let page = browser.new_page("about:blank").await.expect("page");
+    let sess = page.session_id().to_string();
+    let view = page.live_view(BrowserViewConfig::default());
+    let mut sub = view
+        .frame_source()
+        .subscribe(EffectiveProfile::live())
+        .await
+        .expect("subscribe");
+    server
+        .state
+        .wait_for_method_count("Page.startScreencast", 1)
+        .await;
+    server.state.send_screencast_frame(
+        &sess,
+        1,
+        &minimal_jpeg(640, 480, 0),
+        &default_meta(640.0, 480.0),
+    );
+    sub.frames.changed().await.expect("cached frame arrived");
+    assert!(sub.frames.borrow().is_some());
+
+    drop(page);
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if !view.info().capabilities.view && !view.status().worker_running {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("Page::drop closes view and stops worker cleanly");
+
+    let info_dropped = view.info();
+    assert!(!info_dropped.capabilities.view);
+    assert_eq!(info_dropped.unavailable_reason, Some(Reason::Unavailable));
+    assert!(info_dropped.generation >= 2);
+    assert!(view.input_sink().is_none());
+    assert!(sub.frames.borrow().is_none());
+
+    // Part B: Lagged broadcast ring where `Target.targetDestroyed` is overwritten still detects loss via `Target.getTargetInfo`.
+    let lag_server = FakeCdpServer::start().await;
+    let small_ring_cfg = CdpClientConfig {
+        event_buffer_bytes: CdpClientConfig::default().max_event_bytes * 2,
+        ..CdpClientConfig::default()
+    };
+    let client = CdpClient::connect_with_config(&lag_server.ws_url(), small_ring_cfg)
+        .await
+        .expect("connect small broadcast ring");
+    let target_res = client
+        .send("Target.createTarget", json!({ "url": "about:blank" }))
+        .await
+        .expect("createTarget");
+    let target_id = target_res["targetId"].as_str().expect("targetId").to_string();
+    let page_lag = Page::attach(client, &target_id).await.expect("attach page");
+    let sess_lag = page_lag.session_id().to_string();
+    let view_lag = page_lag.live_view(BrowserViewConfig::default());
+
+    let reached = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    *lag_server.state.hold_next_method.lock().unwrap() =
+        Some(("Target.getTargetInfo".into(), reached.clone(), release.clone()));
+
+    // Overflow the 2-slot broadcast ring so `watch` hits `RecvError::Lagged` and queries `Target.getTargetInfo`.
+    for i in 0..8 {
+        lag_server.state.send_event(
+            Some(&sess_lag),
+            "Runtime.consoleAPICalled",
+            &json!({ "type": "log", "args": [{ "value": i }] }),
+        );
+    }
+    tokio::time::timeout(Duration::from_secs(2), reached.notified())
+        .await
+        .expect("watch hit Lagged and invoked Target.getTargetInfo");
+
+    // While `Target.getTargetInfo` reply is held, destroy target + overflow again before releasing.
+    lag_server.state.send_event(
+        None,
+        "Target.targetDestroyed",
+        &json!({ "targetId": target_id }),
+    );
+    for i in 0..8 {
+        lag_server.state.send_event(
+            Some(&sess_lag),
+            "Runtime.consoleAPICalled",
+            &json!({ "type": "log", "args": [{ "value": 100 + i }] }),
+        );
+    }
+    release.notify_one();
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if !view_lag.info().capabilities.view {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("lagged watcher verified target loss cleanly");
+    assert!(
+        lag_server.state.count_method("Target.getTargetInfo") >= 1,
+        "expected Target.getTargetInfo fallback after broadcast Lagged"
+    );
+}
+
+#[tokio::test]
+async fn worker_self_exit_clears_handle_and_allows_reattach_without_detach_to_idle() {
+    let server = FakeCdpServer::start().await;
+    let browser = Browser::connect(&server.ws_url()).await.expect("connect");
+    let page_1 = browser.new_page("about:blank").await.expect("page 1");
+    let page_2 = browser.new_page("about:blank").await.expect("page 2");
+    let page_3 = browser.new_page("about:blank").await.expect("page 3");
+    let sess_1 = page_1.session_id().to_string();
+    let sess_2 = page_2.session_id().to_string();
+    let sess_3 = page_3.session_id().to_string();
+
+    let target = BrowserViewTarget::new_idle(BrowserViewConfig::default());
+    target.attach_page(&page_1).expect("attach page 1");
+    let src = target.frame_source();
+    let mut sub1 = src
+        .subscribe(EffectiveProfile::watch())
+        .await
+        .expect("subscribe 1");
+
+    // Drive 5 consecutive malformed screencast frames to trigger `MAX_CONSECUTIVE_FRAME_FAULTS` self-exit.
+    let bad_dims = minimal_jpeg(1921, 100, 0);
+    for fault_idx in 1..=5_usize {
+        server
+            .state
+            .wait_for_method_count("Page.startScreencast", fault_idx)
+            .await;
+        server.state.send_screencast_frame(
+            &sess_1,
+            fault_idx as u64,
+            &bad_dims,
+            &default_meta(1921.0, 100.0),
+        );
+    }
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if !target.info().capabilities.view && !target.status().worker_running {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("worker self-exited after 5 bad frames and cleared worker handle");
+    assert_eq!(target.info().unavailable_reason, Some(Reason::Unavailable));
+    assert!(!target.status().worker_running);
+    drop(sub1);
+
+    // Reattaching `IdleSlot` directly to `page_2` must succeed WITHOUT calling `detach_to_idle`.
+    target
+        .attach_page(&page_2)
+        .expect("attach_page succeeds without detach_to_idle after 5-fault self-exit");
+    let mut sub2 = src
+        .subscribe(EffectiveProfile::watch())
+        .await
+        .expect("subscribe 2");
+    let starts_after_2 = server.state.count_method("Page.startScreencast");
+    server.state.send_screencast_frame(
+        &sess_2,
+        10,
+        &minimal_jpeg(800, 600, 0),
+        &default_meta(800.0, 600.0),
+    );
+    sub2.frames.changed().await.expect("frame 2 arrives");
+    assert!(sub2.frames.borrow().is_some());
+
+    // Now simulate `-32001` worker self-exit inside `run_screencast_worker`, then reattach `page_3`.
+    *server.state.start_screencast_error.lock().unwrap() =
+        Some((-32001, "Session with given id not found".into()));
+    let _ = src.request_refresh(42).await;
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if !target.info().capabilities.view && !target.status().worker_running {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("worker self-exited on -32001 and cleared worker handle");
+    assert!(!target.status().worker_running);
+    assert!(server.state.count_method("Page.startScreencast") >= starts_after_2);
+    *server.state.start_screencast_error.lock().unwrap() = None;
+    drop(sub2);
+
+    target
+        .attach_page(&page_3)
+        .expect("attach_page succeeds without detach_to_idle after -32001 self-exit");
+    let mut sub3 = src
+        .subscribe(EffectiveProfile::watch())
+        .await
+        .expect("subscribe 3");
+    server.state.send_screencast_frame(
+        &sess_3,
+        20,
+        &minimal_jpeg(800, 600, 0),
+        &default_meta(800.0, 600.0),
+    );
+    sub3.frames.changed().await.expect("frame 3 arrives");
+    assert!(sub3.frames.borrow().is_some());
+}
+
+#[tokio::test]
+async fn live_cold_start_boost_wakes_immediately_on_target_close_without_cached_frame() {
+    let server = FakeCdpServer::start().await;
+    let browser = Browser::connect(&server.ws_url()).await.expect("connect");
+    let page = browser.new_page("about:blank").await.expect("page");
+    let sess = page.session_id().to_string();
+    let target_id = page.target_id().to_string();
+    let clock = ManualClock::new();
+
+    let cfg = BrowserViewConfig {
+        watch_idle_grace: Duration::from_millis(200),
+        clock: ViewClock::Manual(clock.clone()),
+        ..BrowserViewConfig::default()
+    };
+    let view = page.live_view(cfg);
+    let _sub = view
+        .frame_source()
+        .subscribe(EffectiveProfile::live())
+        .await
+        .expect("subscribe live");
+    server
+        .state
+        .wait_for_method_count("Page.startScreencast", 1)
+        .await;
+
+    // Hold the cold-start idle-boost `Page.startScreencast` (`everyNthFrame = 1`) mid-flight so
+    // `Target.targetDestroyed` fires while the worker is NOT parked in `select!`, and after
+    // completing the boost with no cached frame (`earliest_timer() == None`), the worker still exits.
+    let reached = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    *server.state.hold_next_method.lock().unwrap() = Some((
+        "Page.startScreencast".into(),
+        reached.clone(),
+        release.clone(),
+    ));
+
+    clock.advance(Duration::from_millis(210));
+    tokio::time::timeout(Duration::from_secs(2), reached.notified())
+        .await
+        .expect("worker entered cold-start boost startScreencast");
+
+    server.state.send_event(
+        None,
+        "Target.targetDestroyed",
+        &json!({ "targetId": target_id }),
+    );
+    // Give Page watcher a beat to process `Target.targetDestroyed` BEFORE releasing `startScreencast`,
+    // matching the race where close signal fires while worker is unparked.
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    release.notify_one();
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if !view.status().worker_running
+                && view.info().unavailable_reason == Some(Reason::Unavailable)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("live cold-start worker exited cleanly without parking forever");
+
+    // Verify ScreencastRegistration dropped by sending a screencast frame after exit.
+    let unsub_before = browser.client().unsubscribed_screencast_event_count();
+    server.state.send_screencast_frame(
+        &sess,
+        99,
+        &minimal_jpeg(640, 480, 0),
+        &default_meta(640.0, 480.0),
+    );
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if browser.client().unsubscribed_screencast_event_count() > unsub_before {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("screencast sink unregistered on worker exit");
 }

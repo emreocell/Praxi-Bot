@@ -45,7 +45,8 @@ pub use error::{Error, Result};
 pub use launch::{LaunchOptions, find_browser};
 pub use live_view::{
     BROWSER_INPUT_LIMITATION, BrowserFrameSource, BrowserInputSink, BrowserViewConfig,
-    BrowserViewStatus, BrowserViewTarget, TakeoverPinHook, ViewportGeometry,
+    BrowserViewStatus, BrowserViewTarget, ManualClock, TakeoverPinHook, ViewClock,
+    ViewportGeometry,
 };
 pub use page::{DialogAction, DialogInfo, DialogOptions, Page};
 pub use snapshot::{RefEntry, RefMap, SnapNode, Snapshot, SnapshotOptions, build_snapshot};

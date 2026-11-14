@@ -99,7 +99,6 @@ pub(crate) fn default_accepts_dialog(kind: &str) -> bool {
 }
 
 /// Shared with the background event watcher.
-#[derive(Default)]
 pub(crate) struct Shared {
     /// Frame id -> flattened session of out-of-process iframes.
     pub oopif: StdMutex<HashMap<String, String>>,
@@ -122,10 +121,36 @@ pub(crate) struct Shared {
     pub target_closed: Arc<AtomicBool>,
     /// Signaled whenever `target_closed` transitions to `true`.
     pub target_close_notify: Arc<Notify>,
+    /// Level-triggered broadcast of `target_closed` transitions for zero-lost-wakeup listeners.
+    pub target_close_tx: tokio::sync::watch::Sender<bool>,
+    /// Hooks notified synchronously when `target_closed` transitions to `true`.
+    pub live_view_close_hooks: StdMutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
     /// Hooks notified on main-frame navigation or completed page actions.
     pub live_view_action_hooks: StdMutex<Vec<std::sync::Weak<dyn Fn() + Send + Sync>>>,
     /// Strong owner anchors removed if/when needed; callers hold their own `Arc` or register strong hooks.
     pub live_view_strong_hooks: StdMutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
+}
+
+impl Default for Shared {
+    fn default() -> Self {
+        let (target_close_tx, _) = tokio::sync::watch::channel(false);
+        Self {
+            oopif: StdMutex::default(),
+            ready: StdMutex::default(),
+            inflight: StdMutex::default(),
+            dialogs: StdMutex::default(),
+            dialog_policy: StdMutex::default(),
+            snap_rounds: AtomicU64::default(),
+            last_net: StdMutex::default(),
+            nav_gen: AtomicU64::default(),
+            target_closed: Arc::default(),
+            target_close_notify: Arc::default(),
+            target_close_tx,
+            live_view_close_hooks: StdMutex::default(),
+            live_view_action_hooks: StdMutex::default(),
+            live_view_strong_hooks: StdMutex::default(),
+        }
+    }
 }
 
 /// Geometry and ownership of a frame, kept for coordinate translation.
@@ -158,6 +183,7 @@ pub struct Page {
 
 impl Drop for Page {
     fn drop(&mut self) {
+        mark_target_closed(&self.shared);
         self.watcher.abort();
     }
 }
@@ -222,11 +248,34 @@ impl Page {
         BrowserViewTarget::from_page(self, config)
     }
 
-    pub(crate) fn live_view_close_signal(&self) -> (Arc<AtomicBool>, Arc<Notify>) {
+    pub(crate) fn live_view_close_signal(
+        &self,
+    ) -> (
+        Arc<AtomicBool>,
+        Arc<Notify>,
+        tokio::sync::watch::Receiver<bool>,
+    ) {
         (
             self.shared.target_closed.clone(),
             self.shared.target_close_notify.clone(),
+            self.shared.target_close_tx.subscribe(),
         )
+    }
+
+    pub(crate) fn register_live_view_close_hook(&self, hook: &Arc<dyn Fn() + Send + Sync>) {
+        if self.shared.target_closed.load(Ordering::SeqCst) {
+            hook();
+            return;
+        }
+        if let Ok(mut hooks) = self.shared.live_view_close_hooks.lock() {
+            if hooks.len() >= 16 {
+                hooks.remove(0);
+            }
+            hooks.push(Arc::clone(hook));
+        }
+        if self.shared.target_closed.load(Ordering::SeqCst) {
+            notify_close_hooks(&self.shared);
+        }
     }
 
     pub(crate) fn register_live_view_action_hook(&self, hook: &Arc<dyn Fn() + Send + Sync>) {
@@ -726,10 +775,32 @@ async fn watch(
     shared: Arc<Shared>,
     client: Option<Arc<CdpClient>>,
 ) {
+    let mut client_closed = client.as_ref().map(|c| c.subscribe_closed());
     loop {
-        let ev = match rx.recv().await {
+        if client.as_ref().is_some_and(|c| c.is_closed()) {
+            mark_target_closed(&shared);
+            return;
+        }
+        let recv_res = tokio::select! {
+            biased;
+            closed = wait_client_closed(&mut client_closed), if client_closed.is_some() => {
+                if closed {
+                    mark_target_closed(&shared);
+                    return;
+                }
+                continue;
+            }
+            res = rx.recv() => res,
+        };
+        let ev = match recv_res {
             Ok(ev) => ev,
-            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Lagged(_)) => {
+                if !verify_target_attached(client.as_deref(), &target_id).await {
+                    mark_target_closed(&shared);
+                    return;
+                }
+                continue;
+            }
             Err(broadcast::error::RecvError::Closed) => {
                 mark_target_closed(&shared);
                 return;
@@ -742,11 +813,13 @@ async fn watch(
                         || ev.params["targetId"].as_str() == Some(target_id.as_str()) =>
                 {
                     mark_target_closed(&shared);
+                    return;
                 }
                 "Target.targetDestroyed" | "Target.targetCrashed"
                     if ev.params["targetId"].as_str() == Some(target_id.as_str()) =>
                 {
                     mark_target_closed(&shared);
+                    return;
                 }
                 _ => {}
             }
@@ -861,9 +934,58 @@ async fn watch(
     }
 }
 
+async fn wait_client_closed(rx: &mut Option<tokio::sync::watch::Receiver<bool>>) -> bool {
+    let Some(rx) = rx.as_mut() else {
+        std::future::pending::<()>().await;
+        return false;
+    };
+    if *rx.borrow_and_update() {
+        return true;
+    }
+    let _ = rx.wait_for(|&closed| closed).await;
+    true
+}
+
+async fn verify_target_attached(client: Option<&CdpClient>, target_id: &str) -> bool {
+    let Some(client) = client else {
+        return false;
+    };
+    if client.is_closed() {
+        return false;
+    }
+    let Ok(Ok(res)) = tokio::time::timeout(
+        Duration::from_secs(2),
+        client.send("Target.getTargetInfo", json!({"targetId": target_id})),
+    )
+    .await
+    else {
+        return false;
+    };
+    let info = &res["targetInfo"];
+    info["targetId"].as_str() == Some(target_id) && info["attached"].as_bool() != Some(false)
+}
+
 fn mark_target_closed(shared: &Shared) {
     shared.target_closed.store(true, Ordering::SeqCst);
-    shared.target_close_notify.notify_waiters();
+    shared.target_close_tx.send_if_modified(|closed| {
+        let was = *closed;
+        *closed = true;
+        !was
+    });
+    shared.target_close_notify.notify_one();
+    notify_close_hooks(shared);
+}
+
+fn notify_close_hooks(shared: &Shared) {
+    let callbacks: Vec<Arc<dyn Fn() + Send + Sync>> = shared
+        .live_view_close_hooks
+        .lock()
+        .ok()
+        .map(|mut hooks| hooks.drain(..).collect())
+        .unwrap_or_default();
+    for cb in callbacks {
+        cb();
+    }
 }
 
 fn notify_action_hooks(shared: &Shared) {
