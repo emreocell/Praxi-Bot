@@ -12,29 +12,34 @@ import {
   useMemo,
   useRef,
   useState,
-  type CompositionEvent,
-  type KeyboardEvent,
-  type PointerEvent,
-  type WheelEvent
+  type FocusEvent
 } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import type { HumanAction, TargetInfo } from "../api/types";
 import {
-  clampButtonsMask,
-  classifyKeyDown,
-  classifyKeyUp,
   computeContainedImageRect,
-  domButtonToInputButton,
-  extractModifiers,
-  mapClientPointToNormalized,
-  normalizeWheelDelta
+  mapClientPointToNormalized
 } from "../lib/liveViewInput";
-import { canSendLiveInput, summarizeTarget } from "../lib/liveViewState";
+import {
+  createStageController,
+  focusLeftScope,
+  type StageDeps
+} from "../lib/liveViewStage";
+import {
+  canSendLiveInput,
+  isControlBusy,
+  isActivelyOwningTakeover,
+  summarizeTarget
+} from "../lib/liveViewState";
+import { layerStack } from "../lib/modalStack";
 import { useDaemon } from "../state/DaemonContext";
 import { useLiveView } from "../state/LiveViewContext";
 import styles from "./LiveViewer.module.css";
+
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 function targetOptionLabel(
   tInfo: TargetInfo,
@@ -57,7 +62,7 @@ function targetOptionLabel(
 
 export function LiveViewer() {
   const { t } = useTranslation();
-  const { bots } = useDaemon();
+  const { bots, needs } = useDaemon();
   const {
     targets,
     selectedTarget,
@@ -96,7 +101,15 @@ export function LiveViewer() {
   const imgRef = useRef<HTMLImageElement | null>(null);
   const imeInputRef = useRef<HTMLTextAreaElement | null>(null);
   const doneButtonRef = useRef<HTMLButtonElement | null>(null);
-  const activePointerIdRef = useRef<number | null>(null);
+  const stageDepsRef = useRef<StageDeps | null>(null);
+  // Handler objects are stable (pointer/key bookkeeping lives in the
+  // controller); the latest deps are read through the ref so they never go stale.
+  const stageController = useMemo(
+    () => createStageController(() => stageDepsRef.current as StageDeps),
+    []
+  );
+  const backdropRef = useRef<HTMLDivElement | null>(null);
+  const layerSeqRef = useRef(0);
 
   const botNames = useMemo(
     () => new Map(bots.map((b) => [b.id, b.name])),
@@ -126,13 +139,20 @@ export function LiveViewer() {
   const inputGate = canSendLiveInput(state, Date.now());
   const isInteractive = inputGate.ok;
 
+  const isInteractiveRef = useRef(isInteractive);
+  isInteractiveRef.current = isInteractive;
+  const captureTabRef = useRef(captureTab);
+  captureTabRef.current = captureTab;
+  const stageBoxRef = useRef(stageBox);
+  stageBoxRef.current = stageBox;
+
   useEffect(() => {
     if (!isInteractive) {
-      activePointerIdRef.current = null;
+      stageController.reset();
       setStageFocused(false);
       setCaptureTab(false);
     }
-  }, [isInteractive]);
+  }, [isInteractive, stageController]);
 
   // Allow Escape to close viewer only when not actively driving remote screen.
   useEffect(() => {
@@ -142,7 +162,7 @@ export function LiveViewer() {
     const onGlobalKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape" && !e.shiftKey && !isInteractive && !stageFocused) {
         e.preventDefault();
-        closeViewer();
+        void closeViewer();
       }
     };
     window.addEventListener("keydown", onGlobalKey);
@@ -170,197 +190,70 @@ export function LiveViewer() {
     [state.latestFrame]
   );
 
-  const handlePointerDown = (e: PointerEvent<HTMLDivElement>) => {
-    if (!isInteractive) {
-      return;
-    }
-    const btn = domButtonToInputButton(e.button);
-    if (!btn) {
-      return;
-    }
-    const pt = mapPointer(e.clientX, e.clientY, false);
-    if (!pt) {
-      return;
-    }
-    e.preventDefault();
-    imeInputRef.current?.focus({ preventScroll: true });
-    setStageFocused(true);
-    activePointerIdRef.current = e.pointerId;
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch {
-      // synthetic/untrusted pointer events in tests may not carry native capture
-    }
-    enqueueInput({
-      type: "pointer",
-      phase: "down",
-      x: pt.x,
-      y: pt.y,
-      button: btn,
-      buttons: clampButtonsMask(e.buttons),
-      modifiers: extractModifiers(e)
-    });
-  };
-
-  const handlePointerMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (!isInteractive) {
-      return;
-    }
-    const dragging = activePointerIdRef.current === e.pointerId;
-    const pt = mapPointer(e.clientX, e.clientY, dragging);
-    if (!pt) {
-      return;
-    }
-    enqueueInput({
-      type: "pointer",
-      phase: "move",
-      x: pt.x,
-      y: pt.y,
-      button: null,
-      buttons: clampButtonsMask(e.buttons),
-      modifiers: extractModifiers(e)
-    });
-  };
-
-  const handlePointerUp = (e: PointerEvent<HTMLDivElement>) => {
-    if (!isInteractive) {
-      return;
-    }
-    const btn = domButtonToInputButton(e.button);
-    if (!btn) {
-      return;
-    }
-    const dragging = activePointerIdRef.current === e.pointerId;
-    const pt = mapPointer(e.clientX, e.clientY, dragging);
-    if (dragging) {
-      activePointerIdRef.current = null;
-      try {
-        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-          e.currentTarget.releasePointerCapture(e.pointerId);
-        }
-      } catch {
-        // ignore release error
-      }
-    }
-    if (!pt) {
-      return;
-    }
-    enqueueInput({
-      type: "pointer",
-      phase: "up",
-      x: pt.x,
-      y: pt.y,
-      button: btn,
-      buttons: clampButtonsMask(e.buttons),
-      modifiers: extractModifiers(e)
-    });
-  };
-
-  const handleWheel = (e: WheelEvent<HTMLDivElement>) => {
-    if (!isInteractive) {
-      return;
-    }
-    const pt = mapPointer(e.clientX, e.clientY, false);
-    if (!pt) {
-      return;
-    }
-    enqueueInput({
-      type: "wheel",
-      x: pt.x,
-      y: pt.y,
-      delta_x: normalizeWheelDelta(e.deltaX, e.deltaMode, stageBox.w || 800),
-      delta_y: normalizeWheelDelta(e.deltaY, e.deltaMode, stageBox.h || 600),
-      modifiers: extractModifiers(e)
-    });
-  };
-
   const exitKeyboardFocus = () => {
     resetInputState(true);
     setStageFocused(false);
     doneButtonRef.current?.focus();
   };
 
-  const handleStageKeyDown = (
-    e: KeyboardEvent<HTMLDivElement | HTMLTextAreaElement>
-  ) => {
-    if (!isInteractive) {
-      return;
+  stageDepsRef.current = {
+    isInteractive: () => isInteractiveRef.current,
+    captureTab: () => captureTabRef.current,
+    mapPointer,
+    stageSize: () => stageBoxRef.current,
+    enqueue: enqueueInput,
+    resetInput: () => resetInputState(true),
+    focusIme: () => imeInputRef.current?.focus({ preventScroll: true }),
+    markFocused: setStageFocused,
+    exitKeyboardFocus,
+    setComposing,
+    clearImeBuffer: () => setImeBuffer("")
+  };
+
+  // Register as a layer so a Modal/Popover opened above (z-index 50/60) keeps
+  // Esc/Tab to itself, and trap Tab inside the viewer while it is topmost.
+  if (viewerOpen && layerSeqRef.current === 0) {
+    layerSeqRef.current = layerStack.next();
+  }
+  if (!viewerOpen) {
+    layerSeqRef.current = 0;
+  }
+  useEffect(() => {
+    if (!viewerOpen) {
+      return undefined;
     }
-    // Never trap keyboard-only users: Shift+Escape always exits stage to Bitirdim.
-    if (e.shiftKey && e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      exitKeyboardFocus();
-      return;
-    }
-    if (e.key === "Tab" && !captureTab) {
-      return;
-    }
-    const events = classifyKeyDown(
-      {
-        code: e.code,
-        key: e.key,
-        location: e.location,
-        repeat: e.repeat,
-        altKey: e.altKey,
-        ctrlKey: e.ctrlKey,
-        metaKey: e.metaKey,
-        shiftKey: e.shiftKey,
-        isComposing: e.nativeEvent.isComposing
-      },
-      e.nativeEvent.isComposing
-    );
-    if (events.length > 0) {
-      e.preventDefault();
-      for (const ev of events) {
-        enqueueInput(ev);
+    const seq = layerSeqRef.current;
+    layerStack.add(seq);
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      const node = backdropRef.current;
+      if (e.key !== "Tab" || !node || !layerStack.isTop(seq)) {
+        return;
       }
-    }
-  };
-
-  const handleStageKeyUp = (
-    e: KeyboardEvent<HTMLDivElement | HTMLTextAreaElement>
-  ) => {
-    if (!isInteractive) {
-      return;
-    }
-    if (e.key === "Tab" && !captureTab) {
-      return;
-    }
-    const events = classifyKeyUp(
-      {
-        code: e.code,
-        key: e.key,
-        location: e.location,
-        repeat: false,
-        altKey: e.altKey,
-        ctrlKey: e.ctrlKey,
-        metaKey: e.metaKey,
-        shiftKey: e.shiftKey,
-        isComposing: e.nativeEvent.isComposing
-      },
-      e.nativeEvent.isComposing
-    );
-    if (events.length > 0) {
-      e.preventDefault();
-      for (const ev of events) {
-        enqueueInput(ev);
+      const items = [...node.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      if (items.length === 0) {
+        e.preventDefault();
+        return;
       }
-    }
-  };
-
-  const handleCompositionStart = () => {
-    setComposing(true);
-  };
-
-  const handleCompositionEnd = (e: CompositionEvent<HTMLTextAreaElement>) => {
-    setComposing(false);
-    const composed = e.data;
-    setImeBuffer("");
-    if (isInteractive && composed) {
-      enqueueInput({ type: "text", text: composed });
-    }
-  };
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (!node.contains(active)) {
+        e.preventDefault();
+        first.focus();
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      layerStack.remove(seq);
+    };
+  }, [viewerOpen]);
 
   if (!viewerOpen || typeof document === "undefined") {
     return null;
@@ -375,17 +268,23 @@ export function LiveViewer() {
       ? state.takeover.owner
       : null;
 
-  const tone = state.disconnected
+  const tone = state.disconnected || state.streamStale
     ? "paused"
     : state.viewState === "unavailable" || !selectedTarget
       ? "unavailable"
       : state.viewState;
 
+  const controlBusy = isControlBusy(state);
+  const ownsActive =
+    isActivelyOwningTakeover(state) && state.viewState === "active";
+
   const badgeLabel = isReleasing
     ? t("liveView.states.finishing")
     : state.disconnected
       ? t("liveView.states.disconnected")
-      : t(`liveView.states.${state.viewState}`);
+      : state.streamStale
+        ? t("liveView.states.stale")
+        : t(`liveView.states.${state.viewState}`);
 
   const contained =
     state.latestFrame && stageBox.w > 0 && stageBox.h > 0
@@ -446,13 +345,16 @@ export function LiveViewer() {
       aria-modal="true"
       aria-label={t("liveView.title")}
       data-testid="live-viewer"
+      ref={backdropRef}
     >
       <header className={styles.header}>
         <div className={styles.headerLeft}>
           <Button
             variant="ghost"
             size="sm"
-            onClick={closeViewer}
+            onClick={() => void closeViewer()}
+            disabled={isReleasing}
+            title={ownsActive ? t("liveView.releaseOnClose") : undefined}
             data-testid="live-viewer-close"
           >
             <ArrowLeft />
@@ -466,6 +368,8 @@ export function LiveViewer() {
               aria-label={t("liveView.targetsLabel")}
               data-testid="live-viewer-target-select"
               value={selectedTarget?.target_id ?? ""}
+              disabled={controlBusy}
+              title={controlBusy ? t("liveView.targetLocked") : undefined}
               onChange={(e) => selectTarget(e.target.value)}
             >
               {targets.length === 0 ? (
@@ -531,14 +435,39 @@ export function LiveViewer() {
         </span>
         {state.lastError ? (
           <span className={styles.errorInline} role="alert">
-            {state.lastError.message}
+            {t(`liveView.errors.${state.lastError.code}`, {
+              defaultValue: t(`liveView.reasons.${state.lastError.code}`, {
+                defaultValue: t("liveView.errors.generic")
+              })
+            })}
           </span>
+        ) : state.disconnected ? (
+          <span className={styles.errorInline}>{t("liveView.reconnecting")}</span>
         ) : state.needsResync ? (
           <span className={styles.errorInline}>
             {t("liveView.reasons.resync_required")}
           </span>
         ) : null}
       </div>
+
+      {needs.length > 0 ? (
+        <div
+          className={styles.approvalBar}
+          role="status"
+          data-testid="live-viewer-approvals"
+        >
+          <span>{t("liveView.approvalsWaiting", { count: needs.length })}</span>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={isReleasing}
+            onClick={() => void closeViewer()}
+            data-testid="live-viewer-approvals-open"
+          >
+            {t("liveView.reviewApprovals")}
+          </Button>
+        </div>
+      ) : null}
 
       <div className={styles.stageArea}>
         <div
@@ -563,34 +492,22 @@ export function LiveViewer() {
                         : t("botPanel.computer")
                     })
               }
-              onFocus={() => {
+              onFocus={(e: FocusEvent<HTMLDivElement>) => {
                 if (isInteractive) {
                   setStageFocused(true);
-                  imeInputRef.current?.focus({ preventScroll: true });
+                  if (e.target === e.currentTarget) {
+                    imeInputRef.current?.focus({ preventScroll: true });
+                  }
                 }
               }}
-              onBlur={(e) => {
-                if (
-                  e.relatedTarget !== imeInputRef.current &&
-                  e.relatedTarget !== stageRef.current
-                ) {
+              onBlur={(e: FocusEvent<HTMLDivElement>) => {
+                if (focusLeftScope(e.relatedTarget, stageRef.current)) {
                   setStageFocused(false);
+                  stageController.reset();
                   resetInputState(true);
                 }
               }}
-              onPointerDown={handlePointerDown}
-              onMouseDown={(e) => {
-                if (isInteractive) {
-                  e.preventDefault();
-                  imeInputRef.current?.focus({ preventScroll: true });
-                }
-              }}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onPointerCancel={handlePointerUp}
-              onWheel={handleWheel}
-              onKeyDown={handleStageKeyDown}
-              onKeyUp={handleStageKeyUp}
+              {...stageController.stage}
             >
               <img
                 ref={imgRef}
@@ -612,35 +529,21 @@ export function LiveViewer() {
                   tabIndex={-1}
                   value={imeBuffer}
                   onChange={(e) => setImeBuffer(e.target.value)}
-                  onCompositionStart={handleCompositionStart}
-                  onCompositionEnd={handleCompositionEnd}
-                  onKeyDown={handleStageKeyDown}
-                  onKeyUp={handleStageKeyUp}
-                  onFocus={() => {
-                    if (isInteractive) {
-                      setStageFocused(true);
-                    }
-                  }}
-                  onBlur={(e) => {
-                    if (
-                      e.relatedTarget !== stageRef.current &&
-                      e.relatedTarget !== imeInputRef.current
-                    ) {
-                      setStageFocused(false);
-                      resetInputState(true);
-                    }
-                  }}
+                  {...stageController.ime}
                 />
               ) : null}
 
               {isInteractive && stageFocused ? (
-                <div className={styles.focusOverlayBar}>
+                <div
+                  className={styles.focusOverlayBar}
+                  data-testid="live-viewer-focus-bar"
+                  {...stageController.toolbar}
+                >
                   <span>{t("liveView.focusTrapHint")}</span>
                   <button
                     type="button"
                     className={styles.tabToggle}
                     aria-pressed={captureTab}
-                    onMouseDown={(e) => e.stopPropagation()}
                     onClick={() => setCaptureTab((v) => !v)}
                   >
                     {t("liveView.captureTab")}
@@ -648,7 +551,6 @@ export function LiveViewer() {
                   <button
                     type="button"
                     className={styles.tabToggle}
-                    onMouseDown={(e) => e.stopPropagation()}
                     onClick={exitKeyboardFocus}
                   >
                     {t("liveView.releaseFocus")}
@@ -698,7 +600,7 @@ export function LiveViewer() {
       </div>
 
       <div className={styles.bottomDock} data-testid="live-view-bar">
-        {state.viewState === "active" || isReleasing ? (
+        {ownsActive || isReleasing ? (
           <>
             <span className={styles.dockStatus}>
               {isReleasing

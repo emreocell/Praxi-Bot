@@ -288,7 +288,11 @@ function AppShell() {
       const activeHotkey = controlState.stopHotkey || settings.stopHotkey;
       if (matchesHotkeyEvent(event, activeHotkey)) {
         event.preventDefault();
-        void overrideStop();
+        // Plain Stop stays independent: the daemon-wide override latch is only
+        // used while a screen takeover is held (never on key repeat).
+        if (!event.repeat) {
+          void overrideStop({ onlyIfControlled: true });
+        }
         void stopBotRun().then(setControlState);
       }
     };
@@ -467,7 +471,7 @@ function AppShell() {
             variant="danger"
             size="sm"
             onClick={() => {
-              void overrideStop();
+              void overrideStop({ onlyIfControlled: true });
               void stopBotRun().then(setControlState);
             }}
           >

@@ -1629,7 +1629,8 @@
       "paused": "Duraklatıldı",
       "unavailable": "Kullanılamıyor",
       "closed": "Kapalı",
-      "disconnected": "Bağlantı kesildi"
+      "disconnected": "Bağlantı kesildi",
+      "stale": "Yeni kare gelmiyor"
     },
     "panelSummary": {
       "watch": "Açık · Canlı izleniyor",
@@ -1661,6 +1662,18 @@
       "local_override": "Yerel olarak durduruldu. Hazır olduğunuzda duraklatmayı kaldırın.",
       "stream_stale": "Yakın zamanda yeni kare veya kalp atışı gelmedi; girdi güvenli şekilde kilitlendi.",
       "resync_required": "Ekran geometrisi veya sıra güncellendi; son kare ile eşzamanlanıyor."
-    }
+    },
+    "targetLocked": "Ekran hedefini değiştirmeden önce kontrolü geri verin (Bitirdim).",
+    "approvalsWaiting": "Sohbette kararınızı bekleyen {{count}} öğe var.",
+    "reviewApprovals": "Yanıtlamak için sohbete dön",
+    "errors": {
+      "generic": "İstek başarısız oldu. Bağlantıyı kontrol edip tekrar deneyin.",
+      "release_failed": "Kontrol geri verilemedi. Bot duraklatılmış kalır; Bitirdim'i yeniden deneyin.",
+      "release_unconfirmed": "Daemon devralmanızı hâlâ etkin gösteriyor. Bitirdim'i yeniden deneyin.",
+      "takeover_failed": "Kontrol devralınamadı. Tekrar deneyin.",
+      "recover_failed": "Kontrol kurtarılamadı. Tekrar deneyin."
+    },
+    "reconnecting": "Ekran akışına yeniden bağlanılıyor…",
+    "releaseOnClose": "Kapatmak önce kontrolü bota geri verir."
   }
 }

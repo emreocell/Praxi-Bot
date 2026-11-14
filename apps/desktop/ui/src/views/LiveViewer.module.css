@@ -1,7 +1,7 @@
 .backdrop {
   position: fixed;
   inset: var(--space-0);
-  z-index: 60;
+  z-index: 40; /* below Modal/Toast (50): dialogs and toasts stay visible and usable */
   display: flex;
   flex-direction: column;
   background-color: var(--color-background);
@@ -116,6 +116,20 @@
   background-color: color-mix(in srgb, var(--color-surface) 70%, transparent);
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.approvalBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-5);
+  border-bottom: var(--size-border) solid var(--color-warning);
+  background-color: var(--color-accent-subtle);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
   flex-shrink: 0;
 }
 

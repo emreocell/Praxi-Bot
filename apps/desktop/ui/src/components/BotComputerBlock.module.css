@@ -170,3 +170,9 @@
   color: var(--color-text-muted);
   white-space: nowrap;
 }
+
+.release {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-2);
+}

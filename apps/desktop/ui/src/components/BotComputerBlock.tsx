@@ -1,6 +1,7 @@
 import { Globe, Maximize2, Monitor } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { summarizeTarget } from "../lib/liveViewState";
+import { Button } from "ui";
+import { isActivelyOwningTakeover, summarizeTarget } from "../lib/liveViewState";
 import { useLiveView } from "../state/LiveViewContext";
 import styles from "./BotComputerBlock.module.css";
 
@@ -26,8 +27,19 @@ function panelTone(
 
 export function BotComputerBlock() {
   const { t } = useTranslation();
-  const { selectedTarget, state, frameUrl, panelAction, openViewer } =
-    useLiveView();
+  const {
+    selectedTarget,
+    state,
+    frameUrl,
+    panelAction,
+    openViewer,
+    releaseTakeover,
+    retryRelease
+  } = useLiveView();
+  // Control can outlive the viewer (a failed hand-back keeps it): never leave the
+  // bot paused with only a status pill, always offer Bitirdim here too.
+  const releasePending = state.pendingRequest?.kind === "release";
+  const showRelease = isActivelyOwningTakeover(state) || releasePending;
 
   const summary = selectedTarget ? summarizeTarget(selectedTarget) : null;
   const tone = panelTone(
@@ -147,6 +159,28 @@ export function BotComputerBlock() {
           </span>
         </div>
       </button>
+
+      {showRelease ? (
+        <div className={styles.release}>
+          <Button
+            variant="primary"
+            size="sm"
+            data-testid="bot-computer-release"
+            onClick={() =>
+              void (releasePending && state.lastError
+                ? retryRelease()
+                : releaseTakeover(null))
+            }
+            disabled={releasePending && !state.lastError}
+          >
+            {releasePending && state.lastError
+              ? t("liveView.retryDone")
+              : releasePending
+                ? t("liveView.retryingDone")
+                : t("liveView.doneAction")}
+          </Button>
+        </div>
+      ) : null}
     </section>
   );
 }
