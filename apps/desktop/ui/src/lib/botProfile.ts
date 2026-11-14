@@ -133,9 +133,12 @@ function str(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
-const DEFAULT_CATEGORIES = Object.fromEntries(
-  PERMISSION_CATEGORIES.map((c) => [c, "ask"])
-) as Record<PermissionCategoryName, PermissionLevel>;
+function presetCategories(preset: string): Record<PermissionCategoryName, PermissionLevel> {
+  const level = preset === "full" ? "allow" : preset === "read-only" ? "deny" : "ask";
+  return Object.fromEntries(
+    PERMISSION_CATEGORIES.map((c) => [c, level])
+  ) as Record<PermissionCategoryName, PermissionLevel>;
+}
 
 /** Form state from a stored bot (or defaults for a new one). */
 export function draftFromBot(bot?: Bot): BotDraft {
@@ -144,20 +147,24 @@ export function draftFromBot(bot?: Bot): BotDraft {
   const models = obj(cfg.models);
   const perms = obj(cfg.permissions);
   const cats = obj(perms.categories);
-  const presetName = str(perms.preset);
-  const categories = { ...DEFAULT_CATEGORIES };
+  const presetName = str(perms.preset).replace(/_/g, "-");
+  const categories = presetCategories(presetName);
   for (const c of PERMISSION_CATEGORIES) {
     const level = str(obj(obj(cats[c]).level).level);
     if (level === "allow" || level === "ask" || level === "deny") {
       categories[c] = level;
+    } else if (level === "allow_with_limits") {
+      // The daemon currently asks for these rules (limits are not enforced).
+      // configFromDraft preserves their full shape unless this level is edited.
+      categories[c] = "ask";
     }
   }
   const hasCats = Object.keys(cats).length > 0;
   let preset: PresetChoice = "approve-destructive";
-  if (presetName) {
-    preset = presetName.replace(/_/g, "-") as PermissionPreset;
-  } else if (hasCats) {
+  if (hasCats) {
     preset = "custom";
+  } else if (presetName) {
+    preset = presetName as PermissionPreset;
   }
   const fallback = Array.isArray(models.fallback)
     ? models.fallback.filter((x): x is string => typeof x === "string")
@@ -235,23 +242,32 @@ export function configFromDraft(draft: BotDraft, existing?: Bot): Json {
     delete models.fallback;
   }
 
-  const permissions: Json = {};
-  if (draft.preset === "custom") {
-    permissions.categories = Object.fromEntries(
-      PERMISSION_CATEGORIES.map((c) => [
-        c,
-        { level: { level: draft.categories[c] } }
-      ])
-    );
-  } else {
-    permissions.preset = draft.preset;
+  const initial = existing ? draftFromBot(existing) : undefined;
+  const changedCategories = PERMISSION_CATEGORIES.filter(
+    (c) => !initial || draft.categories[c] !== initial.categories[c]
+  );
+  // PUT replaces the whole profile. Identity/model edits must retain the exact
+  // policy, including inheritance, limits and per-initiator overrides that the
+  // simple form cannot edit. Only an explicit preset choice resets the policy.
+  let permissions = old.permissions;
+  if (!initial || draft.preset !== initial.preset || changedCategories.length > 0) {
+    if (draft.preset === "custom") {
+      const previous = obj(old.permissions);
+      const categories = { ...obj(previous.categories) };
+      for (const c of changedCategories) {
+        categories[c] = { ...obj(categories[c]), level: { level: draft.categories[c] } };
+      }
+      permissions = { ...previous, categories };
+    } else {
+      permissions = { preset: draft.preset };
+    }
   }
 
   return {
     ...old,
     bot: botSection,
     models,
-    permissions,
+    ...(permissions === undefined ? {} : { permissions }),
     runtime: {
       ...obj(old.runtime),
       computer: draft.computer,
