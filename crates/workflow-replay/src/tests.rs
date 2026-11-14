@@ -100,6 +100,51 @@ fn handles(desktop: Option<Arc<FakeDesktop>>, browser: Option<Arc<FakeBrowser>>)
     }
 }
 
+struct BoundControl {
+    inner: Arc<dyn builtin_tools::DesktopControlGate>,
+    desktop: Option<Arc<dyn desktop_api::DesktopBackend>>,
+}
+#[async_trait::async_trait]
+impl builtin_tools::DesktopControlGate for BoundControl {
+    fn desktop_for_run(&self, _: &str) -> Option<Arc<dyn desktop_api::DesktopBackend>> {
+        self.desktop.clone()
+    }
+    fn latch_refusal(&self) -> Option<String> {
+        self.inner.latch_refusal()
+    }
+    fn observation_refused(&self) -> Option<String> {
+        self.inner.observation_refused()
+    }
+    fn observation_epoch(&self) -> u64 {
+        self.inner.observation_epoch()
+    }
+    async fn before_action(&self, req: &builtin_tools::ControlRequest) -> Result<(), String> {
+        self.inner.before_action(req).await
+    }
+}
+fn bound_options(handles: &Handles, mut opts: ReplayOptions) -> ReplayOptions {
+    opts.control = opts.control.map(|inner| {
+        Arc::new(BoundControl {
+            inner,
+            desktop: handles.desktop.clone(),
+        }) as Arc<dyn builtin_tools::DesktopControlGate>
+    });
+    opts
+}
+fn replayer(handles: Handles, opts: ReplayOptions) -> Replayer {
+    let opts = bound_options(&handles, opts);
+    Replayer::new(handles, opts)
+}
+fn bound_tools(
+    store: WorkflowStore,
+    handles: Handles,
+    gate: Arc<dyn builtin_tools::ToolGate>,
+    opts: ReplayOptions,
+) -> Vec<Arc<dyn tool_registry::Tool>> {
+    let opts = bound_options(&handles, opts);
+    crate::tools(store, handles, gate, opts)
+}
+
 fn collector() -> (EventSink, Arc<Mutex<Vec<Event>>>) {
     let store = Arc::new(Mutex::new(Vec::new()));
     let s = store.clone();
@@ -163,7 +208,7 @@ async fn record_from_scripted_run_then_replay_with_zero_model_calls() {
     let (sink, events) = collector();
     let mut opts = ReplayOptions::instant();
     opts.events = Some(sink);
-    let report = Replayer::new(handles(Some(desktop.clone()), None), opts)
+    let report = replayer(handles(Some(desktop.clone()), None), opts)
         .replay(&wf, &params(&json!({"text": "Goodbye"})), &gate)
         .await
         .unwrap();
@@ -218,7 +263,7 @@ async fn renamed_button_hands_over_at_the_right_step() {
     let (sink, events) = collector();
     let mut opts = ReplayOptions::instant();
     opts.events = Some(sink);
-    let report = Replayer::new(handles(Some(desktop.clone()), None), opts)
+    let report = replayer(handles(Some(desktop.clone()), None), opts)
         .replay(&wf, &params(&json!({})), &RecordingGate::default())
         .await
         .unwrap();
@@ -253,7 +298,7 @@ async fn ambiguous_locator_is_a_drift_never_a_first_pick() {
             node(1, "button", "OK", 50.0, 10.0),
         ],
     );
-    let report = Replayer::new(
+    let report = replayer(
         handles(Some(desktop.clone()), None),
         ReplayOptions::instant(),
     )
@@ -277,7 +322,7 @@ async fn ambiguous_window_is_a_drift_too() {
         vec![window(1, "A - App"), window(2, "B - App")],
         vec![node(0, "button", "OK", 10.0, 10.0)],
     );
-    let report = Replayer::new(handles(Some(desktop), None), ReplayOptions::instant())
+    let report = replayer(handles(Some(desktop), None), ReplayOptions::instant())
         .replay(&wf, &params(&json!({})), &RecordingGate::default())
         .await
         .unwrap();
@@ -341,7 +386,7 @@ async fn params_are_substituted_typed_and_validated() {
         browser: Some(browser.clone()),
         tools,
     };
-    let rp = Replayer::new(h, ReplayOptions::instant());
+    let rp = replayer(h, ReplayOptions::instant());
     let gate = RecordingGate::default();
     let report = rp
         .replay(&wf, &params(&json!({"query": "blue hat", "qty": 3})), &gate)
@@ -388,7 +433,7 @@ async fn permission_deny_stops_the_replay() {
         ],
     );
     let gate = RecordingGate::denying("desktop_click");
-    let report = Replayer::new(
+    let report = replayer(
         handles(Some(desktop.clone()), None),
         ReplayOptions::instant(),
     )
@@ -433,7 +478,7 @@ async fn success_checks_require_computer_read_admission_before_backend_access() 
         let mut wf = Workflow::new("read-admission");
         wf.success_check = Some(check);
         let gate = RecordingGate::denying(tool);
-        let rp = Replayer::new(
+        let rp = replayer(
             handles(Some(desktop.clone()), Some(browser.clone())),
             ReplayOptions::instant(),
         );
@@ -467,7 +512,7 @@ async fn agent_step_and_failed_success_check_hand_over() {
     wf.steps = vec![Step::Agent(AgentStep {
         instruction: "Greet {who}".into(),
     })];
-    let rp = Replayer::new(
+    let rp = replayer(
         handles(None, Some(browser.clone())),
         ReplayOptions::instant(),
     );
@@ -519,7 +564,7 @@ async fn browser_css_fallback_needs_a_unique_match() {
         action: BrowserActionKind::Click,
         value: None,
     })];
-    let rp = Replayer::new(
+    let rp = replayer(
         handles(None, Some(browser.clone())),
         ReplayOptions::instant(),
     );
@@ -560,7 +605,7 @@ async fn browser_url_mismatch_is_a_drift() {
         action: BrowserActionKind::Click,
         value: None,
     })];
-    let r = Replayer::new(
+    let r = replayer(
         handles(None, Some(browser.clone())),
         ReplayOptions::instant(),
     )
@@ -590,7 +635,7 @@ async fn workflow_run_tool_replays_and_reports_handover_and_denial() {
         vec![node(0, "button", "Save", 10.0, 10.0)],
     );
     let gate = RecordingGate::default();
-    let tools = crate::tools(
+    let tools = bound_tools(
         store.clone(),
         handles(Some(desktop), None),
         Arc::new(gate),
@@ -622,7 +667,7 @@ async fn workflow_run_tool_replays_and_reports_handover_and_denial() {
     assert!(text.contains("two_clicks"));
 
     // A denied step surfaces as a permission error, not a quiet handover.
-    let denied = crate::tools(
+    let denied = bound_tools(
         store,
         handles(
             Some(FakeDesktop::new(
@@ -667,7 +712,7 @@ async fn shell_step_quotes_parameter_values() {
         browser: None,
         tools,
     };
-    let rp = Replayer::new(h, ReplayOptions::instant());
+    let rp = replayer(h, ReplayOptions::instant());
     let report = rp
         .replay(
             &wf,
@@ -699,7 +744,7 @@ async fn gate_sees_the_resolved_tool_name_not_the_alias() {
         tools,
     };
     let gate = RecordingGate::default();
-    let report = Replayer::new(h, ReplayOptions::instant())
+    let report = replayer(h, ReplayOptions::instant())
         .replay(&wf, &params(&json!({})), &gate)
         .await
         .unwrap();
@@ -725,7 +770,7 @@ async fn workflow_cannot_call_itself_through_workflow_run() {
         tools: registry.clone(),
     };
     let gate: Arc<dyn builtin_tools::ToolGate> = Arc::new(RecordingGate::default());
-    for t in crate::tools(
+    for t in bound_tools(
         store.clone(),
         h.clone(),
         gate.clone(),
@@ -777,7 +822,7 @@ async fn non_cyclic_nesting_deeper_than_max_depth_is_refused() {
         tools: registry.clone(),
     };
     let gate: Arc<dyn builtin_tools::ToolGate> = Arc::new(RecordingGate::default());
-    for t in crate::tools(store.clone(), h, gate, ReplayOptions::instant()) {
+    for t in bound_tools(store.clone(), h, gate, ReplayOptions::instant()) {
         assert!(registry.register(t));
     }
     registry
@@ -827,7 +872,7 @@ async fn workflow_cannot_recurse_through_script_run() {
         gate.clone(),
         script_runtime::Limits::default(),
     )));
-    for t in crate::tools(store.clone(), h, gate, ReplayOptions::instant()) {
+    for t in bound_tools(store.clone(), h, gate, ReplayOptions::instant()) {
         assert!(registry.register(t));
     }
     let out = tokio::time::timeout(
@@ -897,7 +942,7 @@ async fn a_replay_step_never_reads_or_acts_while_control_is_held_back() {
     );
     let mut opts = ReplayOptions::instant();
     opts.control = Some(Arc::new(LatchedAdmit));
-    let report = Replayer::new(handles(Some(desktop.clone()), None), opts)
+    let report = replayer(handles(Some(desktop.clone()), None), opts)
         .replay(&wf, &params(&json!({})), &RecordingGate::default())
         .await
         .unwrap();
@@ -936,7 +981,7 @@ async fn refusing_control_gate_blocks_every_desktop_action_kind() {
             vec![node(0, "button", "OK", 10.0, 10.0)],
         );
         let (opts, control) = refusing_opts();
-        let report = Replayer::new(handles(Some(desktop.clone()), None), opts)
+        let report = replayer(handles(Some(desktop.clone()), None), opts)
             .replay(&wf, &params(&json!({})), &RecordingGate::default())
             .await
             .unwrap();
@@ -957,7 +1002,7 @@ async fn refusing_control_gate_blocks_launch() {
     })]);
     let desktop = notepad_desktop();
     let (opts, _c) = refusing_opts();
-    let report = Replayer::new(handles(Some(desktop.clone()), None), opts)
+    let report = replayer(handles(Some(desktop.clone()), None), opts)
         .replay(&wf, &params(&json!({})), &RecordingGate::default())
         .await
         .unwrap();
@@ -1003,7 +1048,7 @@ async fn refusing_control_gate_blocks_every_browser_action_and_navigate() {
     for step in cases {
         let browser = FakeBrowser::new(page);
         let (opts, control) = refusing_opts();
-        let report = Replayer::new(handles(None, Some(browser.clone())), opts)
+        let report = replayer(handles(None, Some(browser.clone())), opts)
             .replay(
                 &screen_wf(vec![step.clone()]),
                 &params(&json!({})),
@@ -1036,10 +1081,54 @@ async fn missing_control_gate_fails_closed_for_acting_steps() {
         ..ReplayOptions::default()
     };
     assert!(opts.control.is_none());
+    let report = replayer(handles(Some(desktop.clone()), None), opts)
+        .replay(&wf, &params(&json!({})), &RecordingGate::default())
+        .await
+        .unwrap();
+    assert!(!report.is_completed());
+    assert!(desktop.launched.lock().is_empty());
+}
+
+#[tokio::test]
+async fn replay_missing_run_desktop_never_uses_local_default() {
+    let desktop = notepad_desktop();
+    // AllowAllControl supplies no per-run desktop, despite a default backend.
+    let opts = ReplayOptions::instant();
+    let wf = screen_wf(vec![Step::Launch(Launch {
+        executable: "notepad.exe".into(),
+        args: vec![],
+    })]);
     let report = Replayer::new(handles(Some(desktop.clone()), None), opts)
         .replay(&wf, &params(&json!({})), &RecordingGate::default())
         .await
         .unwrap();
     assert!(!report.is_completed());
     assert!(desktop.launched.lock().is_empty());
+}
+
+#[tokio::test]
+async fn remote_pc_replay_cannot_navigate_host_browser() {
+    struct NoBrowser;
+    #[async_trait::async_trait]
+    impl builtin_tools::DesktopControlGate for NoBrowser {
+        fn browser_available_for_run(&self, _: &str) -> bool {
+            false
+        }
+        async fn before_action(&self, _: &builtin_tools::ControlRequest) -> Result<(), String> {
+            Ok(())
+        }
+    }
+    let browser = FakeBrowser::new("# Page (https://example.test)");
+    let mut opts = ReplayOptions::instant();
+    opts.control = Some(Arc::new(NoBrowser));
+    let wf = screen_wf(vec![Step::Navigate(crate::format::Navigate {
+        url: "https://example.test".into(),
+        profile: None,
+    })]);
+    let report = Replayer::new(handles(None, Some(browser.clone())), opts)
+        .replay(&wf, &params(&json!({})), &RecordingGate::default())
+        .await
+        .unwrap();
+    assert!(!report.is_completed());
+    assert!(browser.calls.lock().is_empty());
 }

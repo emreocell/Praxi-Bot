@@ -94,6 +94,9 @@ pub struct Device {
     pub addr: Option<EndpointAddr>,
     /// Unix seconds when pairing completed.
     pub paired_at: u64,
+    /// Unique incarnation of the pairing, renewed on every successful pair.
+    #[serde(default)]
+    pub pairing_generation: String,
 }
 
 impl Device {
@@ -188,7 +191,8 @@ impl DeviceStore {
     /// # Errors
     ///
     /// Returns an error if the list cannot be persisted. Memory is unchanged.
-    pub fn upsert(&self, device: Device) -> Result<()> {
+    pub fn upsert(&self, mut device: Device) -> Result<()> {
+        device.pairing_generation = iroh::SecretKey::generate().public().to_string();
         let mut guard = self.devices.lock();
         let mut next = guard.clone();
         match next.iter_mut().find(|d| d.id == device.id) {
@@ -258,7 +262,23 @@ mod tests {
             capabilities: vec!["desktop".into()],
             addr: None,
             paired_at: 1,
+            pairing_generation: String::new(),
         }
+    }
+
+    #[test]
+    fn re_pair_in_same_second_always_changes_generation() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = DeviceStore::open(dir.path().join("devices.json")).unwrap();
+        let key = iroh::SecretKey::generate().public();
+        store.upsert(dev(&key, Role::Desktop)).unwrap();
+        let first = store.get(&key).unwrap();
+        store.remove(&key).unwrap();
+        store.upsert(dev(&key, Role::Desktop)).unwrap();
+        let second = store.get(&key).unwrap();
+        assert_eq!(first.paired_at, second.paired_at);
+        assert_ne!(first.pairing_generation, "");
+        assert_ne!(first.pairing_generation, second.pairing_generation);
     }
 
     #[test]

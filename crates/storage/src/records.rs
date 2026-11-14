@@ -93,6 +93,17 @@ pub struct Run {
     /// Spawn parameters of a subagent run (task, limits, ...); `None` for
     /// top-level runs.
     pub spec: Option<Value>,
+    /// Resolved computer target label (`pc`, `host`, `browser`, `off`), fixed
+    /// at run start.
+    pub computer_target: Option<String>,
+    /// Stable resolved node key (`local` for this daemon).
+    pub computer_node: Option<String>,
+    /// Display name captured when the run was bound.
+    pub computer_node_name: Option<String>,
+    /// Start of the current pause, independent of row updates.
+    pub paused_at_ms: Option<i64>,
+    /// Why a run is in `paused` state (e.g. `waiting_for_pc`).
+    pub pause_reason: Option<String>,
 }
 
 /// One persisted step of a run.

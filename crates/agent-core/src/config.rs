@@ -290,6 +290,9 @@ impl JournalSlot {
     }
 }
 
+/// Default max time a run waits for an offline PC node before failing (24 hours).
+pub const DEFAULT_WAIT_FOR_PC_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
+
 /// Configuration of an [`AgentLoop`](crate::AgentLoop).
 #[derive(Debug, Clone)]
 pub struct LoopConfig {
@@ -326,6 +329,9 @@ pub struct LoopConfig {
     /// How long a schedule-started run waits for an approval (or a question
     /// answer) before it pauses (default [`DEFAULT_SCHEDULE_APPROVAL_TIMEOUT`]).
     pub schedule_approval_timeout: Duration,
+    /// How long a run configured with `runtime.computer = "pc"` waits for a
+    /// paired PC node before failing (default [`DEFAULT_WAIT_FOR_PC_TIMEOUT`]).
+    pub wait_for_pc_timeout: Duration,
     /// Where events are journaled.  Empty by default: the loop then creates a
     /// background writer over its own storage on first use.
     pub journal: JournalSlot,
@@ -353,6 +359,7 @@ impl Default for LoopConfig {
             redactor: None,
             memory: None,
             schedule_approval_timeout: DEFAULT_SCHEDULE_APPROVAL_TIMEOUT,
+            wait_for_pc_timeout: DEFAULT_WAIT_FOR_PC_TIMEOUT,
             journal: JournalSlot::default(),
         }
     }

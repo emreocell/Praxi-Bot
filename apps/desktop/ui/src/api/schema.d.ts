@@ -1180,7 +1180,7 @@ export interface components {
             /** @description Tool the model wants to call. */
             tool_name: string;
         };
-        /** @description A bot. */
+        /** @description Public bot representation. */
         BotDto: {
             /** @description Bot profile (ADR-0011) as JSON. */
             config: unknown;
@@ -1197,6 +1197,7 @@ export interface components {
             id: string;
             /** @description Display name. */
             name: string;
+            runtime?: null | components["schemas"]["RuntimeConfigDto"];
         };
         /**
          * @description Create (`POST /v1/bots`) or replace (`PUT /v1/bots/{id}`) a bot.  Exactly
@@ -1209,6 +1210,7 @@ export interface components {
             name?: string | null;
             /** @description Profile as TOML text (the contents of a bot profile file). */
             profile_toml?: string | null;
+            runtime?: null | components["schemas"]["RuntimeConfigDto"];
         };
         /** @description Usage of one bot. */
         BotUsage: components["schemas"]["UsageTotals"] & {
@@ -1713,6 +1715,8 @@ export interface components {
         GapReason: "log_line_missing" | "log_unreadable";
         /** @description A persisted "always allow" rule of a bot. */
         GrantDto: {
+            /** @description Computer scope of this grant, when it controls a desktop/browser. */
+            computer?: string | null;
             /**
              * Format: int64
              * @description When it was granted.
@@ -2324,6 +2328,12 @@ export interface components {
              * @description Chat, if any.
              */
             chat_id?: string | null;
+            /** @description Stable key of the PC used by this run (`local` for the daemon desktop). */
+            computer_node?: string | null;
+            /** @description Display name captured at target binding. */
+            computer_node_name?: string | null;
+            /** @description Resolved computer target label fixed at run start (`pc`, `host`, `browser`, `off`). */
+            computer_target?: string | null;
             /**
              * Format: int64
              * @description Creation time.
@@ -2343,6 +2353,13 @@ export interface components {
              * @description The run that spawned this one when it is a subagent run.
              */
             parent_run_id?: string | null;
+            /** @description Reason the run is currently `paused` (e.g. `waiting_for_pc`). */
+            pause_reason?: string | null;
+            /**
+             * Format: int64
+             * @description Start of the current pause in Unix milliseconds.
+             */
+            paused_at_ms?: number | null;
             /**
              * Format: uuid
              * @description The schedule that started this run (`null` for runs the user started).
@@ -2355,6 +2372,11 @@ export interface components {
              * @description Last state change.
              */
             updated_at_ms: number;
+        };
+        /** @description Bot `[runtime]` settings (ADR-0027 §7). */
+        RuntimeConfigDto: {
+            /** @description Configured computer target (`auto`, `pc`, `host`, `browser`, `off`, or `node:<id>`). */
+            computer: string;
         };
         /**
          * @description What happened to a schedule (see [`ScheduleChanged`]).

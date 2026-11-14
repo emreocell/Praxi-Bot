@@ -96,6 +96,8 @@ struct Raw {
     tools: ToolFilter,
     #[serde(default)]
     router: RouterSettings,
+    #[serde(default)]
+    runtime: computer_target::RuntimeConfig,
 }
 
 /// A loaded bot profile.
@@ -117,10 +119,14 @@ pub struct BotProfile {
     pub tools: ToolFilter,
     /// Decision-ladder settings.
     pub router: RouterSettings,
+    /// Runtime configuration (`[runtime]`, including `computer` target).
+    pub runtime: computer_target::RuntimeConfig,
     allow: GlobSet,
     exclude: GlobSet,
     /// Extra allow-lists a tool must also match (subagent narrowing).
     restrict: Vec<GlobSet>,
+    hide_desktop: bool,
+    hide_browser: bool,
 }
 
 fn globs(patterns: &[String]) -> Result<GlobSet, String> {
@@ -155,6 +161,8 @@ impl TryFrom<Raw> for BotProfile {
             allow: globs(&r.tools.allow)?,
             exclude: globs(&r.tools.exclude)?,
             restrict: Vec::new(),
+            hide_desktop: false,
+            hide_browser: false,
             id: r.bot.id,
             name: r.bot.name,
             persona: r.bot.persona,
@@ -163,6 +171,7 @@ impl TryFrom<Raw> for BotProfile {
             permissions: r.permissions,
             tools: r.tools,
             router: r.router,
+            runtime: r.runtime,
         })
     }
 }
@@ -230,12 +239,36 @@ impl BotProfile {
             .filter(|_| self.router.k3.unwrap_or(true))
     }
 
-    /// Whether `tool_name` passes the allow / exclude lists.
+    /// Whether `tool_name` passes the allow / exclude lists and resolved
+    /// computer availability.
     #[must_use]
     pub fn tool_visible(&self, tool_name: &str) -> bool {
-        (self.tools.allow.is_empty() || self.allow.is_match(tool_name))
+        (!self.hide_desktop || !tool_name.starts_with("desktop_"))
+            && (!self.hide_browser || !tool_name.starts_with("browser_"))
+            && (self.tools.allow.is_empty() || self.allow.is_match(tool_name))
             && !self.exclude.is_match(tool_name)
             && self.restrict.iter().all(|g| g.is_match(tool_name))
+    }
+
+    /// Whether a tool's permission category is permitted by the resolved
+    /// computer target.
+    #[must_use]
+    pub fn category_visible(&self, category: PermissionCategory) -> bool {
+        match category {
+            PermissionCategory::Desktop => !self.hide_desktop,
+            PermissionCategory::Browser => !self.hide_browser,
+            _ => true,
+        }
+    }
+
+    /// Copy of this profile narrowed to the desktop/browser availability
+    /// resolved at run start.
+    #[must_use]
+    pub fn with_computer_access(&self, desktop: bool, browser: bool) -> Self {
+        let mut p = self.clone();
+        p.hide_desktop = !desktop;
+        p.hide_browser = !browser;
+        p
     }
 
     /// The profile a subagent runs with: the same bot (persona, permissions,
@@ -307,6 +340,44 @@ preset = "approve-destructive"
 allow = ["fs.*", "plan.*"]
 exclude = ["fs.delete*"]
 "#;
+
+    #[test]
+    fn runtime_computer_parses_defaults_values_aliases_and_rejects_unknown() {
+        use computer_target::ComputerTarget;
+
+        let minimal = r#"
+[bot]
+id = "b"
+name = "B"
+persona = "p"
+
+[models]
+executor = "fake/echo"
+"#;
+        let p = BotProfile::from_toml_str(minimal).unwrap();
+        assert_eq!(p.runtime.computer, ComputerTarget::Auto);
+
+        for (raw, expected) in [
+            ("auto", ComputerTarget::Auto),
+            ("pc", ComputerTarget::Pc),
+            ("local", ComputerTarget::Pc),
+            ("host", ComputerTarget::Host),
+            ("browser", ComputerTarget::Browser),
+            ("off", ComputerTarget::Off),
+            ("node:pc-1", ComputerTarget::Node("node:pc-1".into())),
+        ] {
+            let src = format!("{minimal}\n[runtime]\ncomputer = \"{raw}\"\n");
+            let parsed = BotProfile::from_toml_str(&src).unwrap();
+            assert_eq!(parsed.runtime.computer, expected);
+        }
+
+        let bad = format!("{minimal}\n[runtime]\ncomputer = \"unknown_target\"\n");
+        assert!(BotProfile::from_toml_str(&bad).is_err());
+
+        // Existing fixture uses legacy alias `computer = "local"`.
+        let legacy = BotProfile::from_toml_str(TOML).unwrap();
+        assert_eq!(legacy.runtime.computer, ComputerTarget::Pc);
+    }
 
     #[test]
     fn parses_and_filters_tools() {

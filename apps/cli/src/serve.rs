@@ -208,6 +208,7 @@ pub fn build_agent_with_redactor(
     build_agent_with_live_views(storage, providers, data_dir, desktop, redactor, None)
 }
 
+#[cfg(test)]
 pub fn build_agent_with_live_views(
     storage: &Arc<Storage>,
     providers: Providers,
@@ -215,6 +216,26 @@ pub fn build_agent_with_live_views(
     desktop: Option<Arc<dyn DesktopBackend>>,
     redactor: SharedRedactor,
     view_registry: Option<Arc<live_view::TargetRegistry>>,
+) -> AgentLoop {
+    build_agent_inner(
+        storage,
+        providers,
+        data_dir,
+        desktop,
+        redactor,
+        view_registry,
+        false,
+    )
+}
+
+fn build_agent_inner(
+    storage: &Arc<Storage>,
+    providers: Providers,
+    data_dir: &Path,
+    desktop: Option<Arc<dyn DesktopBackend>>,
+    redactor: SharedRedactor,
+    view_registry: Option<Arc<live_view::TargetRegistry>>,
+    dynamic_desktop: bool,
 ) -> AgentLoop {
     // Placeholder: `with_builtin_tools` replaces it with the loop's own gate.
     let gate = ResolverGate::new(
@@ -225,6 +246,7 @@ pub fn build_agent_with_live_views(
     );
     let mut tools = BuiltinConfig::new(data_dir.to_path_buf(), Arc::new(gate));
     tools.desktop.clone_from(&desktop);
+    tools.dynamic_desktop = dynamic_desktop;
     tools.view_registry = view_registry;
     let host_limits = std::fs::read_to_string(data_dir.join("host.toml")).unwrap_or_default();
     let (max_computer_runs, idle) = computer_limits(
@@ -810,13 +832,16 @@ pub fn serve(
         }) as Arc<dyn SecretStore>
     });
     let views = Arc::new(live_view::TargetRegistry::default());
-    let agent = build_agent_with_live_views(
+    let dynamic_desktop = crate::peer::is_enabled(data_dir, *host_mode, *peer_enabled)?;
+    let local_desktop = desktop.clone();
+    let agent = build_agent_inner(
         &storage,
         providers,
         data_dir,
         desktop,
         redactor.clone(),
         Some(Arc::clone(&views)),
+        dynamic_desktop,
     );
     // Same registry the loop calls tools from: MCP servers, email and web tools register into it.
     let mcp_tools = agent.tool_registry();
@@ -832,7 +857,7 @@ pub fn serve(
     if let Ok(extra) = std::env::var(ALLOWED_ORIGINS_ENV) {
         cfg.allowed_origins.extend(parse_origins(&extra));
     }
-    let state = AppState::with_view_registry(agent, storage, cfg, views)?;
+    let state = AppState::with_view_registry(agent.clone(), storage, cfg, views)?;
     register_schedule_tools(data_dir, &state);
     if let Some(host) = host {
         state.set_provider_host(host);
@@ -858,9 +883,22 @@ pub fn serve(
         };
         let peer =
             crate::peer::start_server(data_dir, *host_mode, *peer_enabled, state.clone()).await?;
+        let computer = Arc::new(crate::computer::CliComputerProvider::new(
+            *host_mode,
+            local_desktop,
+            peer.clone(),
+        ));
+        agent.set_computer_provider(Arc::clone(&computer) as Arc<dyn agent_core::ComputerProvider>);
+        agent.reconcile_waiting_for_pc_runs()?;
         // A revoked pairing loses screen privileges, live sessions and takeover
         // within a couple of seconds, wherever the revoke happened.
         if let Some(net) = peer.clone() {
+            crate::computer::spawn_peer_monitor(
+                net.clone(),
+                Arc::clone(&computer),
+                agent.clone(),
+                state.downgrade(),
+            );
             let weak = state.downgrade();
             tokio::spawn(async move {
                 let mut tick = tokio::time::interval(Duration::from_secs(2));

@@ -142,6 +142,40 @@ impl DesktopControlGate for LoopControl {
     async fn admit_background_action(&self, req: &ToolRequest) -> Result<ActionPermit, String> {
         self.admit(req, false).await
     }
+
+    fn desktop_for_run(
+        &self,
+        run_id: &str,
+    ) -> Option<std::sync::Arc<dyn desktop_api::DesktopBackend>> {
+        let sh = self.sh.upgrade()?;
+        let id = run_id.parse::<Uuid>().ok().map(RunId)?;
+        sh.runs
+            .lock()
+            .get(&id)
+            .and_then(|ctx| ctx.resolved_computer.desktop.clone())
+    }
+
+    fn browser_available_for_run(&self, run_id: &str) -> bool {
+        let Some(sh) = self.sh.upgrade() else {
+            return false;
+        };
+        let Some(id) = run_id.parse::<Uuid>().ok().map(RunId) else {
+            return false;
+        };
+        sh.runs
+            .lock()
+            .get(&id)
+            .is_some_and(|ctx| ctx.resolved_computer.browser)
+    }
+
+    fn browser_headless_for_run(&self, run_id: &str) -> Option<bool> {
+        let sh = self.sh.upgrade()?;
+        let id = run_id.parse::<Uuid>().ok().map(RunId)?;
+        sh.runs
+            .lock()
+            .get(&id)
+            .and_then(|ctx| ctx.resolved_computer.browser_headless)
+    }
 }
 impl LoopControl {
     async fn admit(&self, req: &ToolRequest, highlight: bool) -> Result<ActionPermit, String> {

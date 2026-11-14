@@ -8,6 +8,11 @@ use std::sync::{Arc, OnceLock, Weak};
 
 use agent_router::ToolSurface;
 use agent_router::ladder::{GeminiEmbedder, gemini};
+use computer_target::{
+    ComputerLabel, ComputerProvider, ComputerTarget, Resolution, WAIT_FOR_PC_REASON,
+    resolve as resolve_computer,
+};
+use desktop_api::DesktopBackend;
 use parking_lot::{Mutex, RwLock};
 use permission_engine::{Decision, PermissionResolver, Policy};
 use protocol::event::TodoItem;
@@ -110,6 +115,8 @@ pub struct Grant {
     pub target: GrantTarget,
     /// When it was granted (ms since the Unix epoch).
     pub granted_at_ms: i64,
+    /// Concrete computer scope for desktop/browser grants.
+    pub computer: Option<String>,
 }
 
 /// What to do with a user message arriving while a turn is running.
@@ -541,15 +548,22 @@ pub(crate) struct Pending {
 
 #[derive(Default)]
 pub(crate) struct Grants {
-    pub this_chat: HashSet<(ChatId, String)>,
+    pub this_chat: HashSet<(ChatId, String, Option<String>)>,
     /// Persisted rules, in creation order.
     pub always: Vec<Grant>,
 }
 
 impl Grants {
-    pub fn covers(&self, bot: BotId, tool: &str, category: PermissionCategory) -> bool {
+    pub fn covers(
+        &self,
+        bot: BotId,
+        tool: &str,
+        category: PermissionCategory,
+        computer: Option<&str>,
+    ) -> bool {
         self.always.iter().any(|g| {
             g.bot_id == bot
+                && g.computer.as_deref() == computer
                 && match &g.target {
                     GrantTarget::Tool(t) => t == tool,
                     GrantTarget::Category(c) => *c == category,
@@ -565,9 +579,46 @@ pub(crate) struct CtxState {
     pub todos: Vec<TodoItem>,
 }
 
+/// Per-run resolved computer placement fixed at run start.
+#[derive(Clone)]
+pub(crate) struct RunComputer {
+    pub node: Option<computer_target::ComputerNode>,
+    pub unavailable_reason: Option<String>,
+    pub label: ComputerLabel,
+    pub desktop: Option<Arc<dyn DesktopBackend>>,
+    pub desktop_available: bool,
+    pub browser: bool,
+    pub browser_headless: Option<bool>,
+    pub wait_for_pc: bool,
+}
+
+struct FallbackComputerProvider {
+    desktop: Option<Arc<dyn DesktopBackend>>,
+    browser: bool,
+}
+
+impl ComputerProvider for FallbackComputerProvider {
+    fn local(&self) -> Option<Arc<dyn DesktopBackend>> {
+        self.desktop.clone()
+    }
+
+    fn pc(&self) -> Option<Arc<dyn DesktopBackend>> {
+        None
+    }
+
+    fn is_host(&self) -> bool {
+        false
+    }
+
+    fn browser_available(&self) -> bool {
+        self.browser
+    }
+}
+
 pub(crate) struct RunCtx {
     pub computer: Arc<tokio::sync::OnceCell<tokio::sync::OwnedSemaphorePermit>>,
     pub waiting_computer: Arc<AtomicBool>,
+    pub resolved_computer: RunComputer,
     pub run_id: RunId,
     pub chat_id: ChatId,
     pub bot_id: BotId,
@@ -585,6 +636,23 @@ pub(crate) struct RunCtx {
 }
 
 impl RunCtx {
+    pub(crate) fn grant_scope(&self, category: PermissionCategory) -> Option<String> {
+        matches!(
+            category,
+            PermissionCategory::Desktop | PermissionCategory::Browser
+        )
+        .then(|| {
+            format!(
+                "{}:{}",
+                self.resolved_computer.label.as_str(),
+                self.resolved_computer
+                    .node
+                    .as_ref()
+                    .map_or("local", |n| n.id.as_str())
+            )
+        })
+    }
+
     /// Subagent nesting level: 0 for a top-level run.
     pub fn depth(&self) -> u32 {
         self.sub.as_ref().map_or(0, |s| s.depth)
@@ -615,6 +683,15 @@ pub(crate) struct Shared {
     pub policy_locked: std::sync::atomic::AtomicBool,
     /// Desktop control bridge (see `control.rs`); `None` = no gate.
     pub control: RwLock<Option<Arc<dyn crate::control::ControlGate>>>,
+    /// Dynamic computer availability provider installed by the daemon (`serve`).
+    pub computer_provider: RwLock<Option<Arc<dyn ComputerProvider>>>,
+    /// Static desktop backend passed to [`AgentLoop::with_builtin_tools`] (fallback when
+    /// no [`ComputerProvider`] is installed).
+    pub static_desktop: RwLock<Option<Arc<dyn DesktopBackend>>>,
+    /// Pre-resolved per-run computer placement keyed by `run_id` until `ctx()` claims it.
+    pub run_computers: Mutex<HashMap<RunId, RunComputer>>,
+    /// Active timeout cancellation tokens for runs paused on `waiting_for_pc`.
+    pub wait_pc_timers: Mutex<HashMap<RunId, tokio_util::sync::CancellationToken>>,
     pub computer_slots: Arc<tokio::sync::Semaphore>,
     pub resolver: PermissionResolver,
     pub cfg: LoopConfig,
@@ -769,6 +846,223 @@ impl Shared {
         Ok(profile)
     }
 
+    /// Warm up any async remote desktop connection on the installed
+    /// [`ComputerProvider`] before resolving a run's target synchronously.
+    pub(crate) async fn prepare_computer_provider(&self, target: &ComputerTarget) {
+        if !matches!(
+            target,
+            ComputerTarget::Auto | ComputerTarget::Pc | ComputerTarget::Node(_)
+        ) {
+            return;
+        }
+        let provider = self.computer_provider.read().clone();
+        if let Some(p) = provider {
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), p.prepare()).await;
+        }
+    }
+
+    pub(crate) async fn prepare_run_computer(&self, profile: &BotProfile, run: &Run) {
+        let target = match run.computer_target.as_deref() {
+            Some("pc") => match run.computer_node.as_deref() {
+                Some("local") => ComputerTarget::Host,
+                Some(id) => ComputerTarget::Node(id.into()),
+                None => ComputerTarget::Pc,
+            },
+            Some(_) => return,
+            None => profile.runtime.computer.clone(),
+        };
+        self.prepare_computer_provider(&target).await;
+    }
+
+    fn desktop_tools_registered(&self) -> bool {
+        self.tools
+            .list()
+            .iter()
+            .any(|s| s.category == PermissionCategory::Desktop || s.name.starts_with("desktop_"))
+    }
+
+    fn browser_tools_registered(&self) -> bool {
+        self.tools
+            .list()
+            .iter()
+            .any(|s| s.category == PermissionCategory::Browser || s.name.starts_with("browser_"))
+    }
+
+    /// Resolve a bot's computer target for a single run, honoring a previously
+    /// persisted resolution label when resuming a fixed-resolution run.
+    pub(crate) fn resolve_computer_for_run(
+        &self,
+        profile: &BotProfile,
+        persisted: Option<&Run>,
+    ) -> RunComputer {
+        let provider = self.computer_provider.read().clone();
+        if let Some(run) = persisted
+            && let Some(label) = run.computer_target.as_deref()
+        {
+            let Some(label) = ComputerLabel::parse(label) else {
+                let mut rc = self.resolve_fallback_computer(profile);
+                rc.desktop = None;
+                rc.desktop_available = false;
+                rc.browser = false;
+                rc.unavailable_reason = Some("Unknown persisted computer target".into());
+                return rc;
+            };
+            if label == ComputerLabel::Pc {
+                // A never-bound initial wait may select its first PC. A previously
+                // used PC with a missing key cannot safely be reconstructed.
+                if run.computer_node.is_none()
+                    && run.pause_reason.as_deref() == Some(WAIT_FOR_PC_REASON)
+                {
+                    return provider.as_deref().map_or_else(
+                        || Self::offline_pc(None),
+                        |p| {
+                            Self::run_computer(
+                                resolve_computer(&ComputerTarget::Pc, p),
+                                p.has_display(),
+                            )
+                        },
+                    );
+                }
+                let mut node = Some(computer_target::ComputerNode {
+                    id: run
+                        .computer_node
+                        .clone()
+                        .unwrap_or_else(|| "unresolved".into()),
+                    name: run
+                        .computer_node_name
+                        .clone()
+                        .unwrap_or_else(|| "Unknown PC".into()),
+                });
+                let desktop =
+                    provider
+                        .as_deref()
+                        .and_then(|p| match run.computer_node.as_deref() {
+                            Some("local") if !p.is_host() => p.local(),
+                            Some("local") | None => None,
+                            Some(id) => p.node_target(id).filter(|d| d.node.id == id).map(|d| {
+                                node = Some(d.node);
+                                d.backend
+                            }),
+                        });
+                let mut rc = Self::offline_pc(node);
+                rc.wait_for_pc = desktop.is_none();
+                rc.desktop_available = desktop.is_some();
+                rc.desktop = desktop;
+                if rc.wait_for_pc && provider.as_deref().is_some_and(|p| !p.pc_network_enabled()) {
+                    rc.wait_for_pc = false;
+                    rc.unavailable_reason =
+                        Some("PC desktop unavailable: peer networking is disabled".into());
+                }
+                let local = run.computer_node.as_deref() == Some("local");
+                rc.browser = local
+                    && provider
+                        .as_deref()
+                        .is_some_and(ComputerProvider::browser_available);
+                rc.browser_headless = rc.browser.then_some(true);
+                return rc;
+            }
+            let target = match label {
+                ComputerLabel::Host => ComputerTarget::Host,
+                ComputerLabel::Browser => ComputerTarget::Browser,
+                _ => ComputerTarget::Off,
+            };
+            return if let Some(p) = provider.as_deref() {
+                Self::run_computer(resolve_computer(&target, p), p.has_display())
+            } else {
+                let mut fixed = profile.clone();
+                fixed.runtime.computer = target;
+                self.resolve_fallback_computer(&fixed)
+            };
+        }
+        if let Some(p) = provider.as_deref() {
+            return Self::run_computer(
+                resolve_computer(&profile.runtime.computer, p),
+                p.has_display(),
+            );
+        }
+        self.resolve_fallback_computer(profile)
+    }
+
+    fn offline_pc(node: Option<computer_target::ComputerNode>) -> RunComputer {
+        RunComputer {
+            node,
+            unavailable_reason: None,
+            label: ComputerLabel::Pc,
+            desktop: None,
+            desktop_available: false,
+            browser: false,
+            browser_headless: None,
+            wait_for_pc: true,
+        }
+    }
+
+    fn run_computer(res: Resolution, has_display: bool) -> RunComputer {
+        let browser_headless = res.browser.then(|| res.browser_headless(has_display));
+        RunComputer {
+            label: res.label,
+            node: res.node,
+            unavailable_reason: res.unavailable_reason,
+            desktop_available: res.desktop.is_some(),
+            desktop: res.desktop,
+            browser: res.browser,
+            browser_headless,
+            wait_for_pc: res.wait_for_pc,
+        }
+    }
+
+    pub(crate) fn bind_computer(&self, run_id: RunId, rc: &RunComputer) -> storage::Result<()> {
+        self.storage.bind_run_computer(
+            run_id,
+            rc.label.as_str(),
+            rc.node.as_ref().map(|n| n.id.as_str()),
+            rc.node.as_ref().map(|n| n.name.as_str()),
+        )
+    }
+
+    fn resolve_fallback_computer(&self, profile: &BotProfile) -> RunComputer {
+        let static_desktop = self.static_desktop.read().clone();
+        let desktop_tools = self.desktop_tools_registered();
+        let browser_tools = self.browser_tools_registered();
+        let fallback = FallbackComputerProvider {
+            desktop: static_desktop.clone(),
+            browser: browser_tools,
+        };
+        if matches!(
+            profile.runtime.computer,
+            ComputerTarget::Pc | ComputerTarget::Node(_)
+        ) {
+            return Self::offline_pc(profile.runtime.computer.node_id().map(|id| {
+                computer_target::ComputerNode {
+                    id: id.into(),
+                    name: id.into(),
+                }
+            }));
+        }
+        let mut res = resolve_computer(&profile.runtime.computer, &fallback);
+        let allow_manual_desktop = static_desktop.is_none()
+            && desktop_tools
+            && matches!(profile.runtime.computer, ComputerTarget::Auto);
+        if allow_manual_desktop {
+            res.label = match profile.runtime.computer {
+                ComputerTarget::Host => ComputerLabel::Host,
+                _ => ComputerLabel::Pc,
+            };
+            res.wait_for_pc = false;
+        }
+        let browser_headless = (res.label == ComputerLabel::Browser && res.browser).then_some(true);
+        let desktop_available = res.desktop.is_some() || allow_manual_desktop;
+        RunComputer {
+            node: res.node,
+            unavailable_reason: res.unavailable_reason,
+            label: res.label,
+            desktop: res.desktop,
+            desktop_available,
+            browser: res.browser,
+            browser_headless,
+            wait_for_pc: res.wait_for_pc,
+        }
+    }
+
     /// Per-run context, built on first use (also after a restart).
     pub fn ctx(&self, run: &Run) -> Result<Arc<RunCtx>, ExecError> {
         if let Some(c) = self.runs.lock().get(&run.id) {
@@ -777,14 +1071,22 @@ impl Shared {
         let chat_id = run.chat_id.ok_or_else(|| xe("turn run has no chat"))?;
         let seq = read_event_log(self.storage.data_dir(), run.id)
             .map_or(0, |v| v.last().map_or(0, |e| e.seq + 1));
-        let (profile, bot_policy, initiator, sub) = match run.parent_run_id {
+        let (profile, bot_policy, initiator, sub, resolved_computer) = match run.parent_run_id {
             None => {
-                let profile = self.profile_for(run.bot_id).map_err(xe)?;
+                let raw_profile = self.profile_for(run.bot_id).map_err(xe)?;
+                let rc = self
+                    .run_computers
+                    .lock()
+                    .remove(&run.id)
+                    .unwrap_or_else(|| self.resolve_computer_for_run(&raw_profile, Some(run)));
+                let profile =
+                    Arc::new(raw_profile.with_computer_access(rc.desktop_available, rc.browser));
                 (
-                    Arc::clone(&profile),
-                    profile.policy(),
+                    profile,
+                    raw_profile.policy(),
                     initiator_of(&run.kind),
                     None,
+                    rc,
                 )
             }
             Some(parent_id) => {
@@ -804,7 +1106,13 @@ impl Shared {
                         .narrowed(spec.tools.as_deref(), Some(&model))
                         .map_err(xe)?,
                 );
-                (profile, pctx.bot_policy.clone(), pctx.initiator, Some(spec))
+                (
+                    profile,
+                    pctx.bot_policy.clone(),
+                    pctx.initiator,
+                    Some(spec),
+                    pctx.resolved_computer.clone(),
+                )
             }
         };
         let computer = run
@@ -819,6 +1127,7 @@ impl Shared {
         let ctx = Arc::new(RunCtx {
             computer,
             waiting_computer: Arc::new(AtomicBool::new(false)),
+            resolved_computer,
             run_id: run.id,
             chat_id,
             bot_id: run.bot_id,
@@ -865,6 +1174,7 @@ impl Shared {
     /// in the tool itself; this keeps hidden tools out of what the model sees.
     pub(crate) fn spec_visible(&self, profile: &BotProfile, bot: BotId, spec: &ToolSpec) -> bool {
         profile.tool_visible(&spec.name)
+            && profile.category_visible(spec.category)
             && platform_ok(&spec.platforms)
             // Fail closed: a name the registry no longer knows is not visible.
             && self
@@ -1030,7 +1340,10 @@ impl Shared {
         } else {
             // Same gate as the spec list: a hidden or wrong-platform tool must
             // not run just because the model named it.
-            if !profile.tool_visible(name) || !platform_ok(&own.platforms) {
+            if !profile.tool_visible(name)
+                || !profile.category_visible(own.category)
+                || !platform_ok(&own.platforms)
+            {
                 return None;
             }
             (Some(own), name.to_owned())

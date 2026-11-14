@@ -29,8 +29,8 @@ use crate::dto::{
     Decision, DecisionResponse, DeliveryKind, DetectedProviderDto, EffectivePolicyDto,
     EnableCliProviderInput, GrantDto, GrantTargetDto, Health, LatestCursor, MessageDto, Mode,
     ParseSchedule, ParsedSchedule, PolicyDto, PolicyInput, ProvidersDto, ReloadResponse,
-    RememberResponse, RevokeGrant, RunDto, ScheduleChangeKind, ScheduleDto, ScheduleInput, Scope,
-    SendMessage, SendResponse, UsageSummary, UsageTotals,
+    RememberResponse, RevokeGrant, RunDto, RuntimeConfigDto, ScheduleChangeKind, ScheduleDto,
+    ScheduleInput, Scope, SendMessage, SendResponse, UsageSummary, UsageTotals,
 };
 use crate::error::{ApiError, ErrorBody};
 
@@ -58,12 +58,18 @@ fn id(s: &str) -> Result<Uuid, ApiError> {
 }
 
 fn bot_dto(b: Bot) -> BotDto {
+    let runtime = serde_json::from_value::<BotProfile>(b.config.clone())
+        .ok()
+        .map(|p| RuntimeConfigDto {
+            computer: p.runtime.computer.as_str().to_owned(),
+        });
     BotDto {
         id: b.id.0,
         name: b.name,
         config: b.config,
         created_at_ms: b.created_at_ms,
         effective_policy: None,
+        runtime,
     }
 }
 
@@ -76,6 +82,7 @@ fn category_name(c: PermissionCategory) -> String {
 
 fn grant_dto(g: &Grant) -> GrantDto {
     GrantDto {
+        computer: g.computer.clone(),
         target: match &g.target {
             GrantTarget::Tool(name) => GrantTargetDto::Tool { name: name.clone() },
             GrantTarget::Category(c) => GrantTargetDto::Category {
@@ -156,6 +163,11 @@ fn run_dto_with(r: storage::Run, can_remember: bool) -> RunDto {
         parent_run_id: r.parent_run_id.map(|p| p.0),
         can_remember,
         schedule_id,
+        computer_target: r.computer_target,
+        computer_node: r.computer_node,
+        computer_node_name: r.computer_node_name,
+        paused_at_ms: r.paused_at_ms,
+        pause_reason: r.pause_reason,
     }
 }
 
@@ -206,7 +218,7 @@ fn decide(list: &mut [ApprovalDto], call: ToolCallId, what: &str, at_ms: i64) {
 
 /// Validate a bot definition; returns `(name, config json)`.
 fn resolve_bot(input: BotInput) -> Result<(String, Value), ApiError> {
-    let config = match (input.config, input.profile_toml) {
+    let mut config = match (input.config, input.profile_toml) {
         (Some(c), None) => c,
         (None, Some(t)) => toml::from_str::<Value>(&t)
             .map_err(|e| ApiError::bad_request(format!("profile toml: {e}")))?,
@@ -216,6 +228,28 @@ fn resolve_bot(input: BotInput) -> Result<(String, Value), ApiError> {
             ));
         }
     };
+    if let Some(rt) = input.runtime {
+        let Some(obj) = config.as_object_mut() else {
+            return Err(ApiError::bad_request("bot config must be a JSON object"));
+        };
+        if let Some(existing) = obj.get("runtime") {
+            let declared: agent_core::RuntimeConfig = serde_json::from_value(existing.clone())
+                .map_err(|e| ApiError::bad_request(format!("runtime: {e}")))?;
+            let requested: agent_core::ComputerTarget =
+                rt.computer.parse().map_err(|e: String| {
+                    ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "bad_profile", e)
+                })?;
+            if declared.computer != requested {
+                return Err(ApiError::bad_request(
+                    "conflicting runtime computer targets",
+                ));
+            }
+        }
+        obj.insert(
+            "runtime".to_owned(),
+            serde_json::json!({ "computer": rt.computer }),
+        );
+    }
     let profile: BotProfile = serde_json::from_value(config.clone()).map_err(|e| {
         ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -354,7 +388,17 @@ pub(crate) async fn update_bot(
     ApiJson(input): ApiJson<BotInput>,
 ) -> Result<Json<BotDto>, ApiError> {
     let mut bot = s.bot_of_user(BotId(id(&bid)?))?;
-    let (name, config) = resolve_bot(input)?;
+    let preserve_runtime = input.runtime.is_none();
+    let (name, mut config) = resolve_bot(input)?;
+    if preserve_runtime
+        && config.get("runtime").is_none()
+        && let Some(runtime) = bot.config.get("runtime")
+    {
+        config
+            .as_object_mut()
+            .ok_or_else(|| ApiError::bad_request("bot config must be an object"))?
+            .insert("runtime".into(), runtime.clone());
+    }
     s.storage().update_bot(bot.id, &name, &config)?;
     bot.name = name;
     bot.config = config;

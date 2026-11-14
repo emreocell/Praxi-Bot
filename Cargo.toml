@@ -15,6 +15,7 @@ members = [
     "crates/vision",
     "crates/provider-catalog",
     "crates/cli-provider",
+    "crates/computer-target",
     "crates/mcp-bridge",
     "crates/workflow-replay",
     "crates/memory-store",

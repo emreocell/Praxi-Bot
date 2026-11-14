@@ -15,6 +15,14 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0003_subagents",
         include_str!("../migrations/0003_subagents.sql"),
     ),
+    (
+        "0004_computer_target",
+        include_str!("../migrations/0004_computer_target.sql"),
+    ),
+    (
+        "0005_computer_identity",
+        include_str!("../migrations/0005_computer_identity.sql"),
+    ),
 ];
 
 /// Highest schema version this build supports.
@@ -92,6 +100,31 @@ mod tests {
                 "users"
             ]
         );
+    }
+
+    #[test]
+    fn pre_058_paused_run_survives_upgrade_with_null_target_and_pause_clock() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        for (_, sql) in &MIGRATIONS[..3] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.execute_batch(
+            "PRAGMA user_version = 3;
+            INSERT INTO users (id,name,created_at_ms) VALUES ('user','u',100);
+            INSERT INTO bots (id,user_id,name,created_at_ms) VALUES ('bot','user','b',100);
+            INSERT INTO runs (id,user_id,bot_id,kind,state,created_at_ms,updated_at_ms)
+            VALUES ('run','user','bot','turn','paused',100,200);",
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let row: (String, Option<String>, Option<String>, i64) = conn
+            .query_row(
+                "SELECT state,computer_target,computer_node,paused_at_ms FROM runs WHERE id='run'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(row, ("paused".into(), None, None, 200));
     }
 
     #[test]

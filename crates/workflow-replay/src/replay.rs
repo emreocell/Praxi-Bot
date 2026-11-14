@@ -618,7 +618,7 @@ impl Replayer {
                     .await
             }
             Step::Navigate(n) => {
-                let driver = Arc::clone(self.browser()?);
+                let driver = self.browser()?;
                 let url = template::render(&n.url, vars).map_err(|e| tpl(&e))?;
                 self.authorize(
                     gate,
@@ -641,7 +641,7 @@ impl Replayer {
                 })
             }
             Step::Launch(l) => {
-                let backend = Arc::clone(self.desktop()?);
+                let backend = self.desktop()?;
                 let executable = template::render(&l.executable, vars).map_err(|e| tpl(&e))?;
                 let args = l
                     .args
@@ -726,18 +726,41 @@ impl Replayer {
         }
     }
 
-    fn desktop(&self) -> Result<&Arc<dyn DesktopBackend>, Stop> {
-        self.handles
-            .desktop
-            .as_ref()
-            .ok_or_else(|| Stop::Missing("no desktop backend".into()))
+    fn desktop(&self) -> Result<Arc<dyn DesktopBackend>, Stop> {
+        match &self.opts.control {
+            Some(c) => c.desktop_for_run(&self.opts.run_id),
+            None => self.handles.desktop.clone(),
+        }
+        .ok_or_else(|| Stop::Missing("no desktop backend for this run".into()))
     }
 
-    fn browser(&self) -> Result<&Arc<dyn BrowserDriver>, Stop> {
-        self.handles
+    fn browser(&self) -> Result<Arc<dyn BrowserDriver>, Stop> {
+        if self
+            .opts
+            .control
+            .as_ref()
+            .is_some_and(|g| !g.browser_available_for_run(&self.opts.run_id))
+        {
+            return Err(Stop::Missing(
+                "browser is unavailable for this run's computer target".into(),
+            ));
+        }
+        let driver = self
+            .handles
             .browser
             .as_ref()
-            .ok_or_else(|| Stop::Missing("no browser driver".into()))
+            .ok_or_else(|| Stop::Missing("no browser driver".into()))?;
+        if let Some(headless) = self
+            .opts
+            .control
+            .as_ref()
+            .and_then(|c| c.browser_headless_for_run(&self.opts.run_id))
+        {
+            return Ok(driver
+                .for_headless(headless)
+                .unwrap_or_else(|| driver.clone()));
+        }
+        Ok(driver.clone())
     }
 
     async fn call_tool(&self, name: &str, input: Value, gate: &dyn ToolGate) -> Result<Done, Stop> {
@@ -816,7 +839,7 @@ impl Replayer {
         gate: &dyn ToolGate,
         permit: &ActionPermit,
     ) -> Result<Done, Stop> {
-        let backend = self.desktop()?;
+        let backend = &self.desktop()?;
         let value = d
             .value
             .as_ref()
@@ -1000,7 +1023,7 @@ impl Replayer {
                     Ok(f) => Ok(Hit::Ref(page.nodes[f.node].ref_id.clone(), f)),
                     Err(Drift::NotFound { tried }) => match &loc.css {
                         Some(css) => self
-                            .css_unique(driver, css)
+                            .css_unique(&driver, css)
                             .await
                             .map(|()| Hit::Css(css.clone())),
                         None => Err(Drift::NotFound { tried }),
@@ -1038,7 +1061,7 @@ impl Replayer {
                 json!({"js": js}),
             )
             .await?;
-            let driver = Arc::clone(driver);
+            let driver = Arc::clone(&driver);
             permit
                 .protect(async move { driver.eval(&js).await })
                 .await
@@ -1062,7 +1085,7 @@ impl Replayer {
             )
             .await?;
             let need = || "browser step has no target".to_owned();
-            let driver = Arc::clone(driver);
+            let driver = Arc::clone(&driver);
             let action = b.action;
             permit
                 .protect(async move {
@@ -1200,7 +1223,7 @@ impl Replayer {
                 window_title_pattern,
                 contains,
             } => {
-                let backend = self
+                let backend = &self
                     .desktop()
                     .map_err(|_| "no desktop backend".to_owned())?;
                 let needle = template::render(contains, vars).map_err(|e| e.to_string())?;
