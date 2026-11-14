@@ -22,6 +22,8 @@ pub(super) struct InboxWire {
 pub(super) struct ListWire {
     #[serde(default)]
     pub messages: Vec<MessageWire>,
+    #[serde(default)]
+    pub next_page_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
