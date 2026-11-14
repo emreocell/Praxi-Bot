@@ -7,6 +7,8 @@ import {
   computeContainedImageRect,
   domButtonToInputButton,
   isAllowedKeyCode,
+  KeyForwarder,
+  type KeyLikeEvent,
   LiveInputQueue,
   mapClientPointToNormalized,
   normalizeWheelDelta,
@@ -191,4 +193,110 @@ test("DOM code allowlist, IME composition suppression, wheel clamp, and UTF-8 sa
   const parts = chunkTextInput(longText);
   assert.equal(parts.length, 2);
   assert.ok(parts.every((p) => new TextEncoder().encode(p).byteLength <= 4096));
+});
+
+function keyEv(
+  code: string,
+  key: string,
+  extra: Partial<KeyLikeEvent> = {}
+): KeyLikeEvent {
+  return {
+    code,
+    key,
+    location: 0,
+    repeat: false,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    ...extra
+  };
+}
+
+test("Turkish Q keyboard: ş ğ ü ö ç ı and i travel as text, not as US-layout key codes", () => {
+  // Physical keys of the Turkish Q layout and what they produce.
+  const cases: Array<[string, string]> = [
+    ["Semicolon", "ş"],
+    ["BracketLeft", "ğ"],
+    ["BracketRight", "ü"],
+    ["Quote", "i"],
+    ["Comma", "ö"],
+    ["Period", "ç"],
+    ["KeyI", "ı"],
+    ["Semicolon", "Ş"],
+    ["Quote", "İ"],
+    ["Slash", "."],
+    ["Backslash", ","]
+  ];
+  for (const [code, key] of cases) {
+    assert.deepEqual(
+      classifyKeyDown(keyEv(code, key, { shiftKey: key !== key.toLowerCase() }), false),
+      [{ type: "text", text: key }],
+      `${code} -> ${key}`
+    );
+  }
+});
+
+test("US-layout keys and named keys still travel as key events", () => {
+  const down = classifyKeyDown(keyEv("KeyA", "a"), false);
+  assert.equal(down.length, 1);
+  assert.equal(down[0].type, "key");
+  assert.equal(classifyKeyDown(keyEv("Enter", "Enter"), false)[0].type, "key");
+  assert.equal(classifyKeyDown(keyEv("Space", " "), false)[0].type, "key");
+  assert.equal(classifyKeyDown(keyEv("Semicolon", ";"), false)[0].type, "key");
+  // shortcuts keep the physical code so the remote sees ctrl+c
+  const ctrlC = classifyKeyDown(keyEv("KeyC", "c", { ctrlKey: true }), false);
+  assert.equal(ctrlC[0].type, "key");
+  assert.deepEqual(
+    ctrlC[0].type === "key" ? ctrlC[0].modifiers : [],
+    ["ctrl"]
+  );
+});
+
+test("AltGr combinations (@ and euro) arrive as text even when reported as ctrl+alt", () => {
+  assert.deepEqual(
+    classifyKeyDown(keyEv("KeyQ", "@", { ctrlKey: true, altKey: true }), false),
+    [{ type: "text", text: "@" }]
+  );
+  assert.deepEqual(
+    classifyKeyDown(keyEv("KeyE", "€", { altKey: true, altGraph: true }), false),
+    [{ type: "text", text: "€" }]
+  );
+  assert.deepEqual(
+    classifyKeyDown(keyEv("Digit2", "@", { shiftKey: true }), false),
+    [
+      {
+        type: "key",
+        phase: "down",
+        code: "Digit2",
+        key: "@",
+        location: 0,
+        repeat: false,
+        modifiers: ["shift"]
+      }
+    ],
+    "shift+2 on a US layout is a plain key event"
+  );
+});
+
+test("KeyForwarder: a text key sends no key up; an up never precedes a forwarded down", () => {
+  const f = new KeyForwarder();
+  assert.deepEqual(f.down(keyEv("Semicolon", "ş"), false), [
+    { type: "text", text: "ş" }
+  ]);
+  assert.deepEqual(f.up(keyEv("Semicolon", "ş"), false), []);
+
+  // key up for a key whose down was never forwarded is dropped
+  assert.deepEqual(f.up(keyEv("ShiftLeft", "Shift"), false), []);
+
+  const d = f.down(keyEv("KeyA", "a"), false);
+  assert.equal(d.length, 1);
+  const u = f.up(keyEv("KeyA", "a"), false);
+  assert.equal(u.length, 1);
+  assert.equal(u[0].type === "key" ? u[0].phase : "", "up");
+  assert.deepEqual(f.up(keyEv("KeyA", "a"), false), [], "second up is dropped");
+
+  f.down(keyEv("KeyB", "b"), false);
+  f.reset();
+  assert.deepEqual(f.up(keyEv("KeyB", "b"), false), []);
 });

@@ -260,6 +260,52 @@ export interface KeyLikeEvent {
   shiftKey: boolean;
   isComposing?: boolean;
   keyCode?: number;
+  /** `getModifierState("AltGraph")`; AltGr often arrives as ctrl+alt on Windows. */
+  altGraph?: boolean;
+}
+
+/**
+ * What a US-layout keyboard produces for each physical key (unshifted then
+ * shifted). The daemon injects `key` events by physical `code`, so a key whose
+ * produced character differs from this table (Turkish `ş` on `Semicolon`, `i`
+ * on `Quote`, AltGr `@` on `KeyQ`, ...) must travel as committed `text`
+ * instead, otherwise the remote host would type the US character.
+ */
+const US_PRINTABLE: Record<string, string> = {
+  Backquote: "`~",
+  Minus: "-_",
+  Equal: "=+",
+  BracketLeft: "[{",
+  BracketRight: "]}",
+  Backslash: "\\|",
+  Semicolon: ";:",
+  Quote: "'\"",
+  Comma: ",<",
+  Period: ".>",
+  Slash: "/?",
+  Space: " ",
+  Digit0: "0)",
+  Digit1: "1!",
+  Digit2: "2@",
+  Digit3: "3#",
+  Digit4: "4$",
+  Digit5: "5%",
+  Digit6: "6^",
+  Digit7: "7&",
+  Digit8: "8*",
+  Digit9: "9("
+};
+
+export function isUsLayoutPrintable(code: string, key: string): boolean {
+  if (/^Key[A-Z]$/.test(code)) {
+    return key.length === 1 && key.toLowerCase() === code.slice(3).toLowerCase();
+  }
+  const chars = US_PRINTABLE[code];
+  return chars !== undefined && key.length === 1 && chars.includes(key);
+}
+
+function isSinglePrintable(key: string): boolean {
+  return key.length > 0 && Array.from(key).length === 1;
 }
 
 export function classifyKeyDown(
@@ -268,6 +314,13 @@ export function classifyKeyDown(
 ): InputEvent[] {
   if (composing || e.isComposing || e.key === "Process" || e.keyCode === 229) {
     return [];
+  }
+  const printable = isSinglePrintable(e.key);
+  const altGr = Boolean(e.altGraph) || (e.ctrlKey && e.altKey);
+  // Plain typing and AltGr produce characters; ctrl/alt/meta chords are shortcuts.
+  const producesText = printable && !e.metaKey && (altGr || (!e.ctrlKey && !e.altKey));
+  if (producesText && !isUsLayoutPrintable(e.code, e.key)) {
+    return chunkTextInput(e.key).map((text) => ({ type: "text", text }));
   }
   if (isAllowedKeyCode(e.code)) {
     const location =
@@ -286,13 +339,7 @@ export function classifyKeyDown(
       }
     ];
   }
-  if (
-    !e.ctrlKey &&
-    !e.metaKey &&
-    !e.altKey &&
-    e.key &&
-    Array.from(e.key).length === 1
-  ) {
+  if (producesText && !e.ctrlKey && !e.altKey) {
     return chunkTextInput(e.key).map((text) => ({ type: "text", text }));
   }
   return [];
@@ -323,6 +370,46 @@ export function classifyKeyUp(
       modifiers: extractModifiers(e)
     }
   ];
+}
+
+/**
+ * Stateful key classifier for one focus session. Never emits a key `up` that
+ * was not preceded by a forwarded key `down`, and swallows the `up` of keys that
+ * travelled as `text` (so the remote never sees a stray release).
+ */
+export class KeyForwarder {
+  private readonly keys = new Set<string>();
+  private readonly textKeys = new Set<string>();
+
+  down(e: KeyLikeEvent, composing: boolean): InputEvent[] {
+    const events = classifyKeyDown(e, composing);
+    const first = events[0];
+    if (first?.type === "key") {
+      this.keys.add(e.code);
+    } else if (first?.type === "text") {
+      this.textKeys.add(e.code);
+    }
+    return events;
+  }
+
+  up(e: KeyLikeEvent, composing: boolean): InputEvent[] {
+    if (this.textKeys.delete(e.code)) {
+      return [];
+    }
+    if (!this.keys.has(e.code)) {
+      return [];
+    }
+    const events = classifyKeyUp(e, composing);
+    if (events.length > 0) {
+      this.keys.delete(e.code);
+    }
+    return events;
+  }
+
+  reset(): void {
+    this.keys.clear();
+    this.textKeys.clear();
+  }
 }
 
 /**
