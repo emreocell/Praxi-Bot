@@ -50,6 +50,11 @@ pub trait DesktopControlGate: Send + Sync {
     ) -> Option<std::sync::Arc<dyn desktop_api::DesktopBackend>> {
         None
     }
+    /// Whether this run is allowed a browser on this daemon. Dynamic routing
+    /// gates override this and reject unknown runs as well.
+    fn browser_available_for_run(&self, _run_id: &str) -> bool {
+        true
+    }
     /// Per-run browser headless override (`Some(false)` for headed on Xvfb,
     /// `Some(true)` for headless). `None` keeps `BrowserSettings::headless`.
     fn browser_headless_for_run(&self, _run_id: &str) -> Option<bool> {

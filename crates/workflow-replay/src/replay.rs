@@ -618,7 +618,7 @@ impl Replayer {
                     .await
             }
             Step::Navigate(n) => {
-                let driver = Arc::clone(self.browser()?);
+                let driver = self.browser()?;
                 let url = template::render(&n.url, vars).map_err(|e| tpl(&e))?;
                 self.authorize(
                     gate,
@@ -727,21 +727,24 @@ impl Replayer {
     }
 
     fn desktop(&self) -> Result<Arc<dyn DesktopBackend>, Stop> {
-        if let Some(d) = self
+        match &self.opts.control {
+            Some(c) => c.desktop_for_run(&self.opts.run_id),
+            None => self.handles.desktop.clone(),
+        }
+        .ok_or_else(|| Stop::Missing("no desktop backend for this run".into()))
+    }
+
+    fn browser(&self) -> Result<Arc<dyn BrowserDriver>, Stop> {
+        if self
             .opts
             .control
             .as_ref()
-            .and_then(|c| c.desktop_for_run(&self.opts.run_id))
+            .is_some_and(|g| !g.browser_available_for_run(&self.opts.run_id))
         {
-            return Ok(d);
+            return Err(Stop::Missing(
+                "browser is unavailable for this run's computer target".into(),
+            ));
         }
-        self.handles
-            .desktop
-            .clone()
-            .ok_or_else(|| Stop::Missing("no desktop backend".into()))
-    }
-
-    fn browser(&self) -> Result<&Arc<dyn BrowserDriver>, Stop> {
         let driver = self
             .handles
             .browser
@@ -753,9 +756,11 @@ impl Replayer {
             .as_ref()
             .and_then(|c| c.browser_headless_for_run(&self.opts.run_id))
         {
-            driver.set_headless(headless);
+            return Ok(driver
+                .for_headless(headless)
+                .unwrap_or_else(|| driver.clone()));
         }
-        Ok(driver)
+        Ok(driver.clone())
     }
 
     async fn call_tool(&self, name: &str, input: Value, gate: &dyn ToolGate) -> Result<Done, Stop> {
@@ -1018,7 +1023,7 @@ impl Replayer {
                     Ok(f) => Ok(Hit::Ref(page.nodes[f.node].ref_id.clone(), f)),
                     Err(Drift::NotFound { tried }) => match &loc.css {
                         Some(css) => self
-                            .css_unique(driver, css)
+                            .css_unique(&driver, css)
                             .await
                             .map(|()| Hit::Css(css.clone())),
                         None => Err(Drift::NotFound { tried }),
@@ -1056,7 +1061,7 @@ impl Replayer {
                 json!({"js": js}),
             )
             .await?;
-            let driver = Arc::clone(driver);
+            let driver = Arc::clone(&driver);
             permit
                 .protect(async move { driver.eval(&js).await })
                 .await
@@ -1080,7 +1085,7 @@ impl Replayer {
             )
             .await?;
             let need = || "browser step has no target".to_owned();
-            let driver = Arc::clone(driver);
+            let driver = Arc::clone(&driver);
             let action = b.action;
             permit
                 .protect(async move {

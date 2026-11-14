@@ -422,11 +422,11 @@ impl Shared {
     }
 
     fn backend(&self, run_id: &str) -> Result<Arc<dyn DesktopBackend>, ToolError> {
-        self.control
-            .as_ref()
-            .and_then(|gate| gate.desktop_for_run(run_id))
-            .or_else(|| self.default_backend.clone())
-            .ok_or_else(|| exec_err("desktop backend is unavailable for this run"))
+        match &self.control {
+            Some(gate) => gate.desktop_for_run(run_id),
+            None => self.default_backend.clone(),
+        }
+        .ok_or_else(|| exec_err("desktop backend is unavailable for this run"))
     }
 
     async fn act(
@@ -2014,12 +2014,16 @@ mod tests {
     }
 
     struct Recorder {
+        backend: Arc<dyn DesktopBackend>,
         seen: Mutex<Vec<ControlRequest>>,
         refuse: bool,
     }
 
     #[async_trait]
     impl DesktopControlGate for Recorder {
+        fn desktop_for_run(&self, _: &str) -> Option<Arc<dyn DesktopBackend>> {
+            Some(self.backend.clone())
+        }
         async fn before_action(&self, req: &ControlRequest) -> Result<(), String> {
             self.seen.lock().push(req.clone());
             if self.refuse {
@@ -2036,6 +2040,7 @@ mod tests {
     ) -> (tempfile::TempDir, Vec<Arc<dyn Tool>>, Arc<Recorder>) {
         let d = tempfile::tempdir().unwrap();
         let gate = Arc::new(Recorder {
+            backend: fake.clone(),
             seen: Mutex::new(Vec::new()),
             refuse,
         });
@@ -2133,10 +2138,14 @@ mod tests {
     /// Latches on demand (a Stop / takeover landing mid-script).
     #[derive(Default)]
     struct StopGate {
+        backend: Option<Arc<dyn DesktopBackend>>,
         stopped: std::sync::atomic::AtomicBool,
     }
     #[async_trait]
     impl DesktopControlGate for StopGate {
+        fn desktop_for_run(&self, _: &str) -> Option<Arc<dyn DesktopBackend>> {
+            self.backend.clone()
+        }
         fn latch_refusal(&self) -> Option<String> {
             self.stopped
                 .load(std::sync::atomic::Ordering::SeqCst)
@@ -2153,6 +2162,7 @@ mod tests {
     /// The observation epoch and the "human drives" ban, flipped by a test.
     #[derive(Default)]
     struct ObsGate {
+        backend: Option<Arc<dyn DesktopBackend>>,
         epoch: std::sync::atomic::AtomicU64,
         driving: std::sync::atomic::AtomicBool,
     }
@@ -2165,6 +2175,9 @@ mod tests {
     }
     #[async_trait]
     impl DesktopControlGate for ObsGate {
+        fn desktop_for_run(&self, _: &str) -> Option<Arc<dyn DesktopBackend>> {
+            self.backend.clone()
+        }
         fn observation_epoch(&self) -> u64 {
             self.epoch.load(std::sync::atomic::Ordering::SeqCst)
         }
@@ -2189,7 +2202,10 @@ mod tests {
             ("desktop_list_apps", json!({}), "windows"),
         ] {
             let fake = Arc::new(FakeDesktop::new(false));
-            let gate = Arc::new(ObsGate::default());
+            let gate = Arc::new(ObsGate {
+                backend: Some(fake.clone()),
+                ..ObsGate::default()
+            });
             let flip = Arc::clone(&gate);
             *fake.hook.lock() = Some(Arc::new(move |what| {
                 if what == hook_on {
@@ -2209,7 +2225,10 @@ mod tests {
     #[tokio::test]
     async fn the_refresh_after_an_action_never_shows_a_screen_taken_during_a_takeover() {
         let fake = Arc::new(FakeDesktop::new(false));
-        let gate = Arc::new(ObsGate::default());
+        let gate = Arc::new(ObsGate {
+            backend: Some(fake.clone()),
+            ..ObsGate::default()
+        });
         let d = tempfile::tempdir().unwrap();
         let t = tools(fake.clone(), None, d.path(), settings(), Some(gate.clone()));
         let ctx = ToolContext::default();
@@ -2240,7 +2259,10 @@ mod tests {
     async fn a_script_cannot_launch_or_act_after_a_stop_with_a_cached_permit() {
         let fake = Arc::new(FakeDesktop::new(false));
         let d = tempfile::tempdir().unwrap();
-        let gate = Arc::new(StopGate::default());
+        let gate = Arc::new(StopGate {
+            backend: Some(fake.clone()),
+            ..StopGate::default()
+        });
         let t = tools(fake.clone(), None, d.path(), settings(), Some(gate.clone()));
         let ctx = ToolContext {
             run_id: "script-run".into(),
@@ -2754,7 +2776,13 @@ mod tests {
         let gate = Arc::new(RunRouter { routes });
 
         let d = tempfile::tempdir().unwrap();
-        let t = tools_dynamic(None, None, d.path(), settings(), Some(gate));
+        let t = tools_dynamic(
+            Some(Arc::new(FakeDesktop::new(false))),
+            None,
+            d.path(),
+            settings(),
+            Some(gate),
+        );
 
         let ctx_a = ToolContext {
             run_id: "run-a".into(),
