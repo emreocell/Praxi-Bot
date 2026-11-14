@@ -493,7 +493,7 @@ impl Replayer {
         }
 
         if let Some(check) = &wf.success_check
-            && let Err(detail) = self.check(check, &vars).await
+            && let Err(detail) = self.check(check, &vars, gate).await
         {
             let reason = HandoverReason::SuccessCheckFailed { detail };
             return Ok(self.stopped(
@@ -1184,7 +1184,20 @@ impl Replayer {
             .map_err(|e| Stop::Drift(format!("wait condition not met: {e}")))
     }
 
-    async fn check(&self, check: &SuccessCheck, vars: &Vars) -> Result<(), String> {
+    async fn check(
+        &self,
+        check: &SuccessCheck,
+        vars: &Vars,
+        gate: &dyn ToolGate,
+    ) -> Result<(), String> {
+        let (tool, category) = match check {
+            SuccessCheck::WindowTitle { .. } => ("desktop_list_apps", PermissionCategory::Desktop),
+            SuccessCheck::DesktopText { .. } => ("desktop_get_state", PermissionCategory::Desktop),
+            SuccessCheck::BrowserText { .. } => ("browser_snapshot", PermissionCategory::Browser),
+        };
+        self.authorize(gate, tool, category, Effect::Read, json!({}))
+            .await
+            .map_err(|e| HandoverReason::from(e).detail().to_owned())?;
         match check {
             SuccessCheck::WindowTitle { pattern } => {
                 let backend = self

@@ -989,11 +989,8 @@ impl ToolGate for LoopGate {
         if !ctx.profile.tool_visible(&req.tool) {
             return Err(format!("unknown tool: {}", req.tool));
         }
-        match sh.decide(&ctx, &req.tool, req.effect, req.category, &req.input) {
-            Decision::Allow => {
-                note_gate(&ctx, req);
-                Ok(())
-            }
+        let result = match sh.decide(&ctx, &req.tool, req.effect, req.category, &req.input) {
+            Decision::Allow => Ok(()),
             Decision::Deny => Err(format!(
                 "permission denied: {} is not allowed by policy",
                 req.tool
@@ -1014,7 +1011,6 @@ impl ToolGate for LoopGate {
                 )
                 .await
                 .and_then(ExecPermit::commit)
-                .map(|()| note_gate(&ctx, req))
                 .map_err(|reason| {
                     format!(
                         "permission denied by the user{}",
@@ -1022,7 +1018,19 @@ impl ToolGate for LoopGate {
                     )
                 })
             }
+        };
+        result?;
+        // The slot is the host-wide computer semaphore. Take it only after the
+        // user (or policy) has allowed the call, and record taint only once the
+        // call will actually run: a denial or a failed admission read nothing.
+        if matches!(
+            req.category,
+            PermissionCategory::Desktop | PermissionCategory::Browser
+        ) {
+            crate::control::acquire_computer_slot(&sh, &ctx).await?;
         }
+        note_gate(&ctx, req);
+        Ok(())
     }
 }
 

@@ -291,6 +291,7 @@
       "sendTitle": "Send on your behalf?",
       "countdown": "Auto-deny in {{seconds}} s",
       "once": "Allow once",
+      "sendOnce": "Send",
       "thisChat": "This chat",
       "always": "Always",
       "deny": "Deny",
@@ -380,7 +381,233 @@
     "conversationLabel": "Today",
     "composerHint": "Enter to send · / for commands · @ to mention a bot",
     "openBot": "Open {{name}}",
-    "emptyTitle": "What shall we work on?"
+    "emptyTitle": "What shall we work on?",
+    "emptyGreeting": "Hi, I'm {{name}}",
+    "emptySub": "Ask something or start with a ready-made task.",
+    "starters": {
+      "research": "Research",
+      "summarize": "Summarize",
+      "plan": "Plan",
+      "email": "Draft an email",
+      "calendar": "Check my calendar",
+      "code": "Review code",
+      "remind": "Remind me"
+    },
+    "chain": {
+      "thought": "Thought for {{duration}}",
+      "working": "Working step by step",
+      "details": "Details",
+      "problems_one": "{{count}} step failed",
+      "problems_other": "{{count}} steps failed"
+    },
+    "duration": {
+      "seconds_one": "{{count}} second",
+      "seconds_other": "{{count}} seconds",
+      "minutes_one": "{{count}} minute",
+      "minutes_other": "{{count}} minutes"
+    },
+    "menu": {
+      "navigate": "navigate",
+      "select": "select",
+      "close": "close"
+    },
+    "step": {
+      "web_search": {
+        "running": "Searching the web",
+        "done": "Searched the web",
+        "failed": "Couldn't search the web"
+      },
+      "web_read": {
+        "running": "Reading a page",
+        "done": "Read a page",
+        "failed": "Couldn't read a page"
+      },
+      "doc_read": {
+        "running": "Reading a document",
+        "done": "Read a document",
+        "failed": "Couldn't read a document"
+      },
+      "fs_read": {
+        "running": "Reading a file",
+        "done": "Read a file",
+        "failed": "Couldn't read a file"
+      },
+      "fs_write": {
+        "running": "Writing a file",
+        "done": "Wrote a file",
+        "failed": "Couldn't write a file"
+      },
+      "fs_move": {
+        "running": "Moving a file",
+        "done": "Moved a file",
+        "failed": "Couldn't move a file"
+      },
+      "fs_delete": {
+        "running": "Deleting a file",
+        "done": "Deleted a file",
+        "failed": "Didn't delete a file"
+      },
+      "fs_list": {
+        "running": "Looking through a folder",
+        "done": "Looked through a folder",
+        "failed": "Couldn't look through a folder"
+      },
+      "fs_search": {
+        "running": "Searching files",
+        "done": "Searched files",
+        "failed": "Couldn't search files"
+      },
+      "shell": {
+        "running": "Running a command",
+        "done": "Ran a command",
+        "failed": "Didn't run a command"
+      },
+      "browser_open": {
+        "running": "Opening a page",
+        "done": "Opened a page",
+        "failed": "Didn't open a page"
+      },
+      "browser_click": {
+        "running": "Clicking on a page",
+        "done": "Clicked on a page",
+        "failed": "Didn't click on a page"
+      },
+      "browser_fill": {
+        "running": "Filling in a field",
+        "done": "Filled in a field",
+        "failed": "Didn't fill in a field"
+      },
+      "browser_eval": {
+        "running": "Running a script in the browser",
+        "done": "Ran a script in the browser",
+        "failed": "Didn't run a script in the browser"
+      },
+      "browser_press": {
+        "running": "Pressing a key in the browser",
+        "done": "Pressed a key in the browser",
+        "failed": "Didn't press a key in the browser"
+      },
+      "browser_select": {
+        "running": "Choosing an option on a page",
+        "done": "Chose an option on a page",
+        "failed": "Didn't choose an option"
+      },
+      "browser_view": {
+        "running": "Looking at a page",
+        "done": "Looked at a page",
+        "failed": "Couldn't look at a page"
+      },
+      "desktop_pointer": {
+        "running": "Using the mouse",
+        "done": "Used the mouse",
+        "failed": "Didn't use the mouse"
+      },
+      "desktop_type": {
+        "running": "Typing on the computer",
+        "done": "Typed on the computer",
+        "failed": "Didn't type on the computer"
+      },
+      "desktop_key": {
+        "running": "Pressing keys on the computer",
+        "done": "Pressed keys on the computer",
+        "failed": "Didn't press keys"
+      },
+      "desktop_set": {
+        "running": "Setting a field on the computer",
+        "done": "Set a field on the computer",
+        "failed": "Didn't set a field"
+      },
+      "desktop_launch": {
+        "running": "Opening an app",
+        "done": "Opened an app",
+        "failed": "Didn't open an app"
+      },
+      "desktop_look": {
+        "running": "Looking at the computer",
+        "done": "Looked at the computer",
+        "failed": "Couldn't look at the computer"
+      },
+      "skill_write": {
+        "running": "Writing a skill",
+        "done": "Wrote a skill",
+        "failed": "Didn't write a skill"
+      },
+      "skill_look": {
+        "running": "Looking up a skill",
+        "done": "Looked up a skill",
+        "failed": "Couldn't look up a skill"
+      },
+      "workflow": {
+        "running": "Running a workflow",
+        "done": "Ran a workflow",
+        "failed": "Didn't run a workflow"
+      },
+      "todo": {
+        "running": "Updating the plan",
+        "done": "Updated the plan",
+        "failed": "Couldn't update the plan"
+      },
+      "schedule_create": {
+        "running": "Creating a recurring task",
+        "done": "Created a recurring task",
+        "failed": "Didn't create a recurring task"
+      },
+      "schedule_update": {
+        "running": "Changing a recurring task",
+        "done": "Changed a recurring task",
+        "failed": "Didn't change a recurring task"
+      },
+      "schedule_delete": {
+        "running": "Deleting a recurring task",
+        "done": "Deleted a recurring task",
+        "failed": "Didn't delete a recurring task"
+      },
+      "schedule_list": {
+        "running": "Checking recurring tasks",
+        "done": "Checked recurring tasks",
+        "failed": "Couldn't check recurring tasks"
+      },
+      "email_send": {
+        "running": "Sending an email",
+        "done": "Sent an email",
+        "failed": "Didn't send an email"
+      },
+      "email_draft": {
+        "running": "Drafting an email",
+        "done": "Drafted an email",
+        "failed": "Didn't draft an email"
+      },
+      "email_read": {
+        "running": "Reading email",
+        "done": "Read email",
+        "failed": "Couldn't read email"
+      },
+      "email_mark": {
+        "running": "Changing the read state of email",
+        "done": "Changed the read state of email",
+        "failed": "Didn't change the read state of email"
+      },
+      "agent": {
+        "running": "Handing off to a helper",
+        "done": "Handed off to a helper",
+        "failed": "Didn't hand off to a helper"
+      },
+      "ask": {
+        "running": "Asking you",
+        "done": "Asked you",
+        "failed": "Couldn't ask you"
+      },
+      "mcp": {
+        "running": "Using {{app}} ({{action}})",
+        "done": "Used {{app}} ({{action}})",
+        "failed": "Didn't complete {{app}} ({{action}})"
+      },
+      "generic": {
+        "running": "Running {{name}}",
+        "done": "Ran {{name}}",
+        "failed": "Didn't complete {{name}}"
+      }
+    }
   },
   "botForm": {
     "apps": {
@@ -756,13 +983,17 @@
     "apps": "Apps",
     "computer": "Computer",
     "help": "Help",
-    "localComputer": "This computer"
+    "localComputer": "This computer",
+    "appearance": "Appearance",
+    "ai": "AI",
+    "usage": "Usage",
+    "updates": "Updates",
+    "shortcutSettings": "Ctrl ,"
   },
   "apps": {
     "title": "Apps",
-    "subtitle": "Connect your apps once. Choose which bots can use them.",
-    "search": "Search apps and servers",
-    "mcpServers": "Custom MCP server",
+    "search": "Search apps",
+    "mcpServers": "Your own MCP server",
     "categoriesLabel": "Categories",
     "categories": {
       "all": "All",
@@ -810,8 +1041,8 @@
     "connectedToast": "{{name}} connected",
     "disconnectedToast": "{{name}} disconnected",
     "missingSecret": "Enter every required secret.",
-    "connectedSection": "Connected apps",
-    "catalogSection": "Catalog",
+    "connectedSection": "Connected",
+    "catalogSection": "Discover",
     "loading": "Loading catalog…",
     "noResults": "No matching servers.",
     "custom": {
@@ -828,7 +1059,11 @@
       "url": "Server URL",
       "errUrl": "Enter a valid HTTP URL.",
       "add": "Add server"
-    }
+    },
+    "manage": "Manage",
+    "close": "Close",
+    "usedBy": "Used by",
+    "connectApp": "Connect {{name}}"
   },
   "help": {
     "title": "Keyboard shortcuts",
@@ -843,7 +1078,14 @@
     "search": "Search models",
     "empty": "No matching models.",
     "switched": "Switched to {{model}}",
-    "switchedDefault": "Default model set to {{model}}"
+    "switchedDefault": "Default model set to {{model}}",
+    "thinking": "Thinking",
+    "levels": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "max": "Max"
+    }
   },
   "settingsModal": {
     "title": "Settings",
@@ -882,36 +1124,45 @@
     "ai": {
       "defaultModel": {
         "title": "Default model",
-        "description": "Used when a bot has no model set."
+        "description": "Used when a bot has no model set.",
+        "heading": "Default"
       },
       "keys": {
-        "title": "Provider API keys",
-        "description": "Write-only; stored in the OS keychain.",
-        "none": "No providers loaded.",
-        "inputLabel": "API key for {{provider}}",
-        "replace": "Replace key",
-        "placeholder": "Paste API key",
-        "saved": "Saved key for {{provider}}"
+        "title": "Add with an API key",
+        "description": "Keys are stored in your system keychain and never shown again.",
+        "placeholder": "Paste a key. We recognise the provider.",
+        "saved": "Saved key for {{provider}}",
+        "pasteLabel": "API key",
+        "addTo": "Add to {{provider}}",
+        "add": "Add",
+        "providers": "Provider",
+        "stored": "A key is stored",
+        "compatible": "OpenAI-compatible server",
+        "unknown": "We cannot tell which provider this key is for. Choose one below."
       },
       "detected": {
-        "title": "Detected accounts",
-        "description": "Coding CLIs found on your PATH. Praxi invokes the CLI binary without reading login files.",
+        "title": "Found on this computer",
+        "description": "We find installed AI tools ourselves. The ones you turn on show up in the model list, no key needed.",
         "termsNotice": "Your vendor plan terms apply; verify automated CLI use is permitted before enabling.",
-        "refresh": "Refresh",
+        "refresh": "Rescan",
         "retry": "Retry",
-        "enable": "Enable",
-        "enabled": "Enabled",
         "enabledToast": "{{name}} enabled.",
         "notInstalled": "Not installed",
-        "signInHint": "Run {{command}} in terminal",
         "codexUnconfinable": "Detected, but cannot be run safely in this version.",
         "notRunnable": "Detected, not runnable in this version",
         "detectError": "Could not check installed coding tools.",
         "offline": "Connect to the daemon to inspect detected coding tools.",
         "authSignedIn": "Signed in",
         "authSignedOut": "Signed out",
-        "authUnknown": "Unknown"
-      }
+        "authUnknown": "Unknown",
+        "ready": "ready",
+        "foundSignInNeeded": "found, sign-in needed",
+        "signIn": "Sign in",
+        "signInIn": "Run in a terminal:",
+        "install": "Install",
+        "toggle": "Use {{name}}"
+      },
+      "advanced": "Advanced provider settings"
     },
     "computer": {
       "soon": "Soon",
@@ -1228,5 +1479,23 @@
         "other": "Other"
       }
     }
+  },
+  "quota": {
+    "title": "Quota left",
+    "remaining": "{{label}}: {{pct}}% left",
+    "resets": "Resets {{when}}"
+  },
+  "shell": {
+    "railGrip": "Resize sidebar (arrow keys)",
+    "panelGrip": "Resize bot panel (arrow keys)"
+  },
+  "botPanel": {
+    "toggle": "Bot panel",
+    "close": "Close panel",
+    "settings": "Bot settings",
+    "profile": "Bot profile",
+    "chats": "Chats",
+    "noChats": "No chats yet.",
+    "untitled": "New chat"
   }
 }

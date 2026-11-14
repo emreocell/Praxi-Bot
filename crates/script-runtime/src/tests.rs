@@ -276,7 +276,7 @@ async fn large_logs_are_truncated_with_marker() {
     assert!(out.logs.len() < 100);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn timeout_applies_while_awaiting_a_slow_tool() {
     struct Slow;
     #[async_trait]

@@ -21,8 +21,16 @@ import {
   type EgressApprovalDetails,
   type ScheduleApprovalDetails
 } from "../lib/approvalDetails";
+import { brandIcon } from "../lib/brandIcons";
+import { describeTool, isSendTool } from "../lib/toolLabels";
+import { StepIcon } from "./StepIcon";
 import formStyles from "./Form.module.css";
 import styles from "./ChatCards.module.css";
+
+const brandName = (name: string): string | null => {
+  const b = brandIcon(name);
+  return b.known ? b.name : null;
+};
 
 /** One-line summary of a tool input (first few `key: value` pairs). */
 export function summarizeInput(input: unknown, max = 90): string {
@@ -107,31 +115,39 @@ export function ToolCard({ tool }: { tool: ToolItem }) {
       </button>
       {open ? (
         <div className={styles.cardBody}>
-          <span className={styles.bodyLabel}>{t("chat.tool.input")}</span>
-          <pre className={styles.code}>{prettyJson(tool.input)}</pre>
-          {tool.summary ? (
-            <p className={styles.bodyText}>{tool.summary}</p>
-          ) : null}
-          {tool.denyReason ? (
-            <p className={styles.bodyText}>
-              {t("chat.tool.denyReason", { reason: tool.denyReason })}
-            </p>
-          ) : null}
-          {tool.error ? (
-            <>
-              <span className={styles.bodyLabel}>{t("chat.tool.result")}</span>
-              <pre className={styles.code}>{tool.error}</pre>
-            </>
-          ) : null}
-          {!tool.error && tool.outputPreview ? (
-            <>
-              <span className={styles.bodyLabel}>{t("chat.tool.result")}</span>
-              <pre className={styles.code}>{tool.outputPreview}</pre>
-            </>
-          ) : null}
+          <ToolBody tool={tool} />
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** Input, summary and result of one tool call (shared by the card and the chain step). */
+export function ToolBody({ tool }: { tool: ToolItem }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <span className={styles.bodyLabel}>{t("chat.tool.input")}</span>
+      <pre className={styles.code}>{prettyJson(tool.input)}</pre>
+      {tool.summary ? <p className={styles.bodyText}>{tool.summary}</p> : null}
+      {tool.denyReason ? (
+        <p className={styles.bodyText}>
+          {t("chat.tool.denyReason", { reason: tool.denyReason })}
+        </p>
+      ) : null}
+      {tool.error ? (
+        <>
+          <span className={styles.bodyLabel}>{t("chat.tool.result")}</span>
+          <pre className={styles.code}>{tool.error}</pre>
+        </>
+      ) : null}
+      {!tool.error && tool.outputPreview ? (
+        <>
+          <span className={styles.bodyLabel}>{t("chat.tool.result")}</span>
+          <pre className={styles.code}>{tool.outputPreview}</pre>
+        </>
+      ) : null}
+    </>
   );
 }
 
@@ -277,6 +293,7 @@ export function ApprovalCard({
   };
 
   const disabled = busy || remaining === 0;
+  const glyph = describeTool(tool.name, tool.input, brandName);
   return (
     <div
       className={[styles.approval, outbound ? styles.outbound : ""]
@@ -286,87 +303,95 @@ export function ApprovalCard({
       aria-label={t(outbound ? "chat.approval.sendTitle" : "chat.approval.title")}
       data-testid={outbound ? "approval-card-outbound" : "approval-card"}
     >
-      <div className={styles.approvalHead}>
-        <span className={styles.approvalTitle}>
-          {outbound ? t("chat.approval.sendTitle") : t("chat.approval.title")}
-        </span>
-        {remaining !== null ? (
-          <span className={styles.countdown} aria-live="polite">
-            {t("chat.approval.countdown", { seconds: remaining })}
+      <span className={styles.approvalIcon}>
+        <StepIcon icon={glyph.icon} brand={glyph.brand} size={22} />
+      </span>
+      <div className={styles.approvalMain}>
+        <div className={styles.approvalHead}>
+          <span className={styles.approvalTitle}>
+            {outbound ? t("chat.approval.sendTitle") : t("chat.approval.title")}
           </span>
-        ) : null}
-      </div>
-      {schedule ? (
-        <>
-          <p className={styles.approvalSummary}>
-            {t(`chat.approval.schedule.title.${schedule.action}`)}
-          </p>
-          <ScheduleApprovalBody d={schedule} />
-          <div className={styles.approvalMeta}>
-            <span className={styles.approvalTool}>{tool.name}</span>
-          </div>
-        </>
-      ) : (
-        <>
-          <p className={styles.approvalSummary}>
-            {egress?.reason || tool.summary || tool.name}
-          </p>
-          <div className={styles.approvalMeta}>
-            <span className={styles.approvalTool}>{tool.name}</span>
-            <span className={styles.inputSummary}>
-              {summarizeInput(tool.input, 140)}
+          {remaining !== null ? (
+            <span className={styles.countdown} aria-live="polite">
+              {t("chat.approval.countdown", { seconds: remaining })}
             </span>
-          </div>
-        </>
-      )}
-      {egress ? <EgressApprovalBody d={egress} /> : null}
-      <div className={styles.actions}>
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={disabled}
-          onClick={() => void decide("approve", "once")}
-        >
-          {t("chat.approval.once")}
-        </Button>
-        {/* The daemon refuses a standing grant for any card with details. */}
-        {tool.details != null ? null : (
+          ) : null}
+        </div>
+        {schedule ? (
           <>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={disabled}
-              onClick={() => void decide("approve", "this_chat")}
-            >
-              {t("chat.approval.thisChat")}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={disabled}
-              onClick={() => void decide("approve", "always")}
-            >
-              {t("chat.approval.always")}
-            </Button>
+            <p className={styles.approvalSummary}>
+              {t(`chat.approval.schedule.title.${schedule.action}`)}
+            </p>
+            <ScheduleApprovalBody d={schedule} />
+            <div className={styles.approvalMeta}>
+              <span className={styles.approvalTool}>{tool.name}</span>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className={styles.approvalSummary}>
+              {egress?.reason || tool.summary || tool.name}
+            </p>
+            <div className={styles.approvalMeta}>
+              <span className={styles.approvalTool}>{tool.name}</span>
+              <span className={styles.inputSummary}>
+                {summarizeInput(tool.input, 140)}
+              </span>
+            </div>
           </>
         )}
-        <Button
-          size="sm"
-          variant="danger"
-          disabled={disabled}
-          onClick={() => void decide("deny", undefined, reason || undefined)}
-        >
-          {t("chat.approval.deny")}
-        </Button>
+        {egress ? <EgressApprovalBody d={egress} /> : null}
+        <div className={styles.actions}>
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={disabled}
+            onClick={() => void decide("approve", "once")}
+          >
+            {isSendTool(tool.name)
+              ? t("chat.approval.sendOnce")
+              : t("chat.approval.once")}
+          </Button>
+          {/* The daemon refuses a standing grant for any card with details. */}
+          {tool.details != null ? null : (
+            <>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={disabled}
+                onClick={() => void decide("approve", "this_chat")}
+              >
+                {t("chat.approval.thisChat")}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={disabled}
+                onClick={() => void decide("approve", "always")}
+              >
+                {t("chat.approval.always")}
+              </Button>
+            </>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className={styles.denyButton}
+            disabled={disabled}
+            onClick={() => void decide("deny", undefined, reason || undefined)}
+          >
+            {t("chat.approval.deny")}
+          </Button>
+        </div>
+        <input
+          className={[formStyles.input, styles.reasonInput].join(" ")}
+          value={reason}
+          placeholder={t("chat.approval.reasonPlaceholder")}
+          aria-label={t("chat.approval.reasonPlaceholder")}
+          onChange={(e) => setReason(e.target.value)}
+        />
+        {error ? <p className={formStyles.error}>{error}</p> : null}
       </div>
-      <input
-        className={formStyles.input}
-        value={reason}
-        placeholder={t("chat.approval.reasonPlaceholder")}
-        aria-label={t("chat.approval.reasonPlaceholder")}
-        onChange={(e) => setReason(e.target.value)}
-      />
-      {error ? <p className={formStyles.error}>{error}</p> : null}
     </div>
   );
 }

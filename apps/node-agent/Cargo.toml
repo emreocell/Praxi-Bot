@@ -23,3 +23,10 @@ tokio = { workspace = true, features = ["signal"] }
 
 [target.'cfg(windows)'.dependencies]
 desktop-windows = { path = "../../crates/desktop-windows", version = "0.1.0" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+browser-cdp = { path = "../../crates/browser-cdp", version = "0.1.0" }
+desktop-linux = { path = "../../crates/desktop-linux", version = "0.1.0" }
+
+[dev-dependencies]
+desktop-linux = { path = "../../crates/desktop-linux", version = "0.1.0" }

@@ -117,14 +117,14 @@ pub struct BrowserSettings {
 }
 
 impl BrowserSettings {
-    /// Isolated, headless defaults with named profiles under `<data_dir>/browser-profiles`.
+    /// Isolated, headless defaults with named profiles under `<data_dir>/browsers`.
     #[must_use]
     pub fn isolated(data_dir: &Path) -> Self {
         Self {
             executable: None,
             headless: true,
             profile_dir: None,
-            profiles_root: data_dir.join("browser-profiles"),
+            profiles_root: data_dir.join("browsers"),
             idle_timeout: Duration::from_secs(120),
         }
     }
@@ -138,6 +138,9 @@ struct Session {
 }
 
 /// [`BrowserDriver`] over Chrome/Edge via `browser-cdp`, launched lazily.
+type BrowserPeers =
+    Arc<parking_lot::Mutex<std::collections::HashMap<String, std::sync::Weak<CdpDriver>>>>;
+
 pub struct CdpDriver {
     settings: BrowserSettings,
     session: Arc<Mutex<Option<Session>>>,
@@ -145,6 +148,7 @@ pub struct CdpDriver {
     /// True while a bot run that used the computer is still active.
     activity: Arc<std::sync::RwLock<Option<ActivityProbe>>>,
     reaper_started: std::sync::atomic::AtomicBool,
+    peers: Option<(String, BrowserPeers)>,
 }
 
 /// Reports whether real bot work is going on (see [`CdpDriver::set_activity_probe`]).
@@ -234,6 +238,7 @@ impl CdpDriver {
     pub fn new(settings: BrowserSettings) -> Self {
         Self {
             settings,
+            peers: None,
             session: Arc::new(Mutex::new(None)),
             takeover_pin: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             activity: Arc::new(std::sync::RwLock::new(None)),
@@ -243,7 +248,8 @@ impl CdpDriver {
 
     fn profile_path(&self, profile: Option<&str>) -> Result<Option<PathBuf>, String> {
         match profile {
-            None | Some("isolated") => Ok(self.settings.profile_dir.clone()),
+            None => Ok(self.settings.profile_dir.clone()),
+            Some("isolated") => Ok(None),
             Some(name) => {
                 if name.is_empty()
                     || !name
@@ -262,6 +268,42 @@ impl CdpDriver {
     }
 
     async fn launch_session(&self, profile: Option<&str>) -> Result<Session, String> {
+        // Admission has already reserved this bot's run slot. Reclaim other
+        // inactive profiles before spawning another Chromium on a small host.
+        if let Some((id, peers)) = &self.peers {
+            let others: Vec<_> = peers
+                .lock()
+                .iter()
+                .filter(|(key, _)| *key != id)
+                .filter_map(|(_, weak)| weak.upgrade())
+                .collect();
+            for other in others {
+                let active = other
+                    .activity
+                    .read()
+                    .ok()
+                    .and_then(|p| p.clone())
+                    .is_some_and(|p| p());
+                if !active && !other.takeover_pin.load(std::sync::atomic::Ordering::SeqCst) {
+                    let idle = other.session.try_lock().ok().and_then(|mut s| {
+                        let active = other
+                            .activity
+                            .read()
+                            .ok()
+                            .and_then(|p| p.clone())
+                            .is_some_and(|p| p());
+                        if active || other.takeover_pin.load(std::sync::atomic::Ordering::SeqCst) {
+                            None
+                        } else {
+                            s.take()
+                        }
+                    });
+                    if let Some(session) = idle {
+                        let _ = session.browser.close().await;
+                    }
+                }
+            }
+        }
         let opts = LaunchOptions {
             executable: self.settings.executable.clone(),
             headless: self.settings.headless,
@@ -273,7 +315,15 @@ impl CdpDriver {
         Ok(Session {
             browser,
             page,
-            profile: profile.map(str::to_string),
+            profile: Some(
+                profile
+                    .unwrap_or(if self.settings.profile_dir.is_some() {
+                        "<default>"
+                    } else {
+                        "isolated"
+                    })
+                    .to_owned(),
+            ),
             last_work: tokio::time::Instant::now(),
         })
     }
@@ -454,7 +504,7 @@ macro_rules! with_session {
 #[async_trait]
 impl BrowserDriver for CdpDriver {
     fn on_desktop(&self) -> bool {
-        !self.settings.headless
+        !self.settings.headless && browser_cdp::host::has_display()
     }
 
     async fn open_opts(
@@ -636,9 +686,76 @@ enum Op {
 
 struct Shared {
     driver: Arc<dyn BrowserDriver>,
+    managed: Option<ManagedBrowsers>,
     data_dir: PathBuf,
     control: Option<Arc<dyn DesktopControlGate>>,
     observed_epoch: std::sync::atomic::AtomicU64,
+}
+
+/// The tool context supplies the bot identity, never the model's input.
+struct ManagedBrowsers {
+    settings: BrowserSettings,
+    peers: BrowserPeers,
+    bots: parking_lot::Mutex<std::collections::HashMap<String, Arc<Shared>>>,
+}
+
+impl Shared {
+    fn for_bot(self: &Arc<Self>, bot: Option<&str>) -> Result<Arc<Self>, ToolError> {
+        let Some(managed) = &self.managed else {
+            return Ok(Arc::clone(self));
+        };
+        let id = bot.ok_or_else(|| exec_err("managed browser requires a bot identity"))?;
+        if id.is_empty()
+            || !id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err(exec_err("invalid bot identity for browser profile"));
+        }
+        let mut bots = managed.bots.lock();
+        Ok(Arc::clone(bots.entry(id.into()).or_insert_with(|| {
+            let mut settings = managed.settings.clone();
+            let root = settings.profiles_root.join(id);
+            settings.profile_dir = Some(root.clone());
+            settings.profiles_root = root.join("profiles");
+            let mut cdp = CdpDriver::new(settings);
+            cdp.peers = Some((id.into(), Arc::clone(&managed.peers)));
+            if let Some(gate) = self.control.clone() {
+                let bot_id = id.to_owned();
+                cdp.set_activity_probe(Arc::new(move || gate.computer_in_use_for_bot(&bot_id)));
+            }
+            let cdp = Arc::new(cdp);
+            managed.peers.lock().insert(id.into(), Arc::downgrade(&cdp));
+            Arc::new(Shared {
+                driver: cdp,
+                managed: None,
+                data_dir: self.data_dir.clone(),
+                control: self.control.clone(),
+                observed_epoch: std::sync::atomic::AtomicU64::new(0),
+            })
+        })))
+    }
+}
+
+/// Lazily construct a driver per bot, with persistent profiles in `<data>/browsers/<bot-id>`.
+/// Explicit `profile: "isolated"` still selects a temporary, disposable profile.
+#[must_use]
+pub fn managed_tools(
+    settings: BrowserSettings,
+    data_dir: &Path,
+    control: Option<Arc<dyn DesktopControlGate>>,
+) -> Vec<Arc<dyn Tool>> {
+    let driver = Arc::new(CdpDriver::new(settings.clone()));
+    tools_with_pool(
+        driver,
+        data_dir,
+        control,
+        Some(ManagedBrowsers {
+            settings,
+            peers: BrowserPeers::default(),
+            bots: parking_lot::Mutex::new(std::collections::HashMap::new()),
+        }),
+    )
 }
 
 /// One browser tool.
@@ -655,8 +772,18 @@ pub fn tools(
     data_dir: &Path,
     control: Option<Arc<dyn DesktopControlGate>>,
 ) -> Vec<Arc<dyn Tool>> {
+    tools_with_pool(driver, data_dir, control, None)
+}
+
+fn tools_with_pool(
+    driver: Arc<dyn BrowserDriver>,
+    data_dir: &Path,
+    control: Option<Arc<dyn DesktopControlGate>>,
+    managed: Option<ManagedBrowsers>,
+) -> Vec<Arc<dyn Tool>> {
     let shared = Arc::new(Shared {
         driver,
+        managed,
         data_dir: data_dir.to_path_buf(),
         control,
         observed_epoch: std::sync::atomic::AtomicU64::new(0),
@@ -672,7 +799,7 @@ pub fn tools(
                 "Open a URL in the browser and return the page snapshot. Example: {\"url\":\"https://example.com\"}",
                 json!({"type":"object","properties":{
                     "url":{"type":"string","description":"Full URL."},
-                    "profile":{"type":"string","description":"Profile name; default is the isolated profile. Only honoured when the browser starts."},
+                    "profile":{"type":"string","description":"Profile name, or 'isolated' for a disposable profile. Omit to use the configured per-bot default. Only honoured when the browser starts."},
                     "dialog":{"type":"string","enum":["accept","dismiss"],"description":"How to handle any dialog (e.g. beforeunload) during navigation. Default is dismiss (alerts are still accepted)."},
                     "prompt_text":{"type":"string","description":"Optional text to enter when accepting a prompt dialog."}
                 },"required":["url"]}),
@@ -1409,7 +1536,12 @@ impl Tool for BrowserTool {
     }
 
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
-        let text = self.run(&ctx.run_id, input).await?;
+        let selected = BrowserTool {
+            spec: self.spec.clone(),
+            op: self.op,
+            shared: self.shared.for_bot(ctx.bot_id.as_deref())?,
+        };
+        let text = selected.run(&ctx.run_id, input).await?;
         Ok(finish_text(ctx, &self.shared.data_dir.join("spill"), text))
     }
 }
@@ -1820,6 +1952,55 @@ mod tests {
             get(&t, "browser_click").spec().category,
             PermissionCategory::Browser
         );
+    }
+
+    #[test]
+    fn managed_profiles_are_per_bot_and_isolated_stays_temporary() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = BrowserSettings::isolated(dir.path());
+        let shared = Arc::new(Shared {
+            driver: Arc::new(CdpDriver::new(settings.clone())),
+            managed: Some(ManagedBrowsers {
+                settings,
+                peers: BrowserPeers::default(),
+                bots: parking_lot::Mutex::new(std::collections::HashMap::new()),
+            }),
+            data_dir: dir.path().into(),
+            control: None,
+            observed_epoch: std::sync::atomic::AtomicU64::new(0),
+        });
+        let a = shared.for_bot(Some("bot-a")).unwrap();
+        let b = shared.for_bot(Some("bot-b")).unwrap();
+        let peers = &shared.managed.as_ref().unwrap().peers;
+        let a_driver = peers.lock().get("bot-a").unwrap().upgrade().unwrap();
+        let b_driver = peers.lock().get("bot-b").unwrap().upgrade().unwrap();
+        assert_eq!(
+            a_driver.settings.profile_dir,
+            Some(dir.path().join("browsers/bot-a"))
+        );
+        assert_eq!(
+            b_driver.settings.profile_dir,
+            Some(dir.path().join("browsers/bot-b"))
+        );
+        assert_eq!(a_driver.profile_path(Some("isolated")).unwrap(), None);
+
+        assert!(!Arc::ptr_eq(&a, &b));
+        assert!(Arc::ptr_eq(&a, &shared.for_bot(Some("bot-a")).unwrap()));
+        assert!(shared.for_bot(None).is_err());
+        assert!(shared.for_bot(Some("../escape")).is_err());
+        assert!(
+            !dir.path().join("browsers").exists(),
+            "selection never launches Chromium"
+        );
+        let drv = CdpDriver::new(BrowserSettings {
+            profile_dir: Some(dir.path().join("browsers/bot-a")),
+            ..BrowserSettings::isolated(dir.path())
+        });
+        assert_eq!(
+            drv.profile_path(None).unwrap(),
+            Some(dir.path().join("browsers/bot-a"))
+        );
+        assert_eq!(drv.profile_path(Some("isolated")).unwrap(), None);
     }
 
     #[test]
@@ -2309,6 +2490,65 @@ mod tests {
             std::fs::set_permissions(&path, perms).unwrap();
             path
         }
+    }
+
+    #[tokio::test]
+    async fn switching_bots_reclaims_inactive_browser_but_keeps_active_work_and_takeover() {
+        let dir = tempfile::tempdir().unwrap();
+        let profile = dir.path().join("browsers/bot-a");
+        std::fs::create_dir_all(&profile).unwrap();
+        std::fs::write(profile.join("login-fixture"), "keep").unwrap();
+        let a = Arc::new(CdpDriver::new(BrowserSettings {
+            profile_dir: Some(profile.clone()),
+            ..BrowserSettings::isolated(dir.path())
+        }));
+        let server = FakeCdp::start();
+        let browser = Browser::connect(&server.url).await.unwrap();
+        let page = browser.first_page().await.unwrap();
+        *a.session.lock().await = Some(Session {
+            browser,
+            page,
+            profile: None,
+            last_work: tokio::time::Instant::now(),
+        });
+        let active = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let probe = Arc::clone(&active);
+        a.set_activity_probe(Arc::new(move || {
+            probe.load(std::sync::atomic::Ordering::SeqCst)
+        }));
+        let mut b = CdpDriver::new(BrowserSettings {
+            executable: Some(write_fake_launcher(
+                dir.path(),
+                &dir.path().join("launches"),
+            )),
+            ..BrowserSettings::isolated(dir.path())
+        });
+        let peers = BrowserPeers::default();
+        peers.lock().insert("bot-a".into(), Arc::downgrade(&a));
+        b.peers = Some(("bot-b".into(), peers));
+        assert!(b.launch_session(None).await.is_err());
+        assert!(
+            a.session.lock().await.is_some(),
+            "active bot keeps its browser"
+        );
+        active.store(false, std::sync::atomic::Ordering::SeqCst);
+        a.set_takeover_pin(true);
+        assert!(b.launch_session(None).await.is_err());
+        assert!(
+            a.session.lock().await.is_some(),
+            "takeover keeps its browser"
+        );
+        a.set_takeover_pin(false);
+        assert!(b.launch_session(None).await.is_err());
+        assert!(
+            a.session.lock().await.is_none(),
+            "idle browser was reclaimed before launch"
+        );
+        assert!(
+            profile.join("login-fixture").exists(),
+            "persistent login profiles survive close"
+        );
+        server.kill();
     }
 
     #[tokio::test]
