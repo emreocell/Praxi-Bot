@@ -541,3 +541,17 @@ async fn phone_cannot_revoke_non_phone_devices() {
         other_net.shutdown().await;
     }
 }
+
+#[tokio::test]
+async fn higher_epoch_records_leader_without_losing_fresh_import_eligibility() {
+    let t = setup_with(|data| {
+        HostConfig { mode: HostMode::Host, state: HostState::Fresh, ..Default::default() }.save(data).unwrap();
+    });
+    let peer = peer_network::identity::load_or_create_secret_key(&t._dir.path().join("peer.key")).unwrap().public().to_string();
+    t.state.leader().observe(&peer, LeaderInfo { epoch: 8, state: LeaderState::Active }).await.unwrap();
+    let config = HostConfig::load(t._dir.path()).unwrap();
+    assert_eq!(config.state, HostState::Fresh);
+    assert_eq!(config.epoch, 8);
+    assert_eq!(config.leader.as_deref(), Some(peer.as_str()));
+    t.state.stop_components().await;
+}

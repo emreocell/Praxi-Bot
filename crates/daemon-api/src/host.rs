@@ -383,7 +383,9 @@ impl LeaderControl {
         }
         let conflict = info.epoch == next.epoch && next.state == HostState::Active;
         if info.epoch > next.epoch || conflict {
-            next.state = HostState::Standby;
+            if next.state != HostState::Fresh {
+                next.state = HostState::Standby;
+            }
             next.epoch = info.epoch;
             next.leader = Some(peer.into());
             let result = self.apply(next).await;
