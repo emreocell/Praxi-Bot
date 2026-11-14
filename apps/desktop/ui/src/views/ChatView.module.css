@@ -32,10 +32,6 @@
   white-space: nowrap;
 }
 
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-}
-
 .scroller {
   flex: 1;
   min-height: var(--space-0);
