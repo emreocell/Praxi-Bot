@@ -402,7 +402,9 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Documentation stub for the SSE route (the handler lives in `sse.rs`).
+         * Host notifications: `host_state_changed` carries `HostConfig`, `host_conflict` carries
+         *     `HostConflict` (reason, peer, epoch, notification). These live refetch hints have no cursor.
+         *     Documentation stub for the SSE route (the handler lives in `sse.rs`).
          * @description Server-sent events; each `data:` is a `protocol::Envelope` JSON object, the
          *     SSE `event:` is its `type`.  With `run_id` the SSE `id` is the run-local
          *     `seq` and `Last-Event-ID: <seq>` resumes from the run's NDJSON log.  Without
@@ -499,6 +501,102 @@ export interface paths {
         get: operations["health"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/host": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["host_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/host/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["host_activate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/host/devices/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["host_revoke"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/host/invite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["host_invite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/host/standby": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["host_standby"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/host/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["host_update"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1138,6 +1236,9 @@ export interface components {
             /** @description Always `accepted`. */
             status: string;
         };
+        ActivateInput: {
+            force: boolean;
+        };
         /** @description `POST /v1/questions/{call_id}`. */
         AnswerQuestion: {
             /** @description The user's answer (free text, or one of the offered options). */
@@ -1758,17 +1859,95 @@ export interface components {
             /** Format: uuid */
             takeover_id?: string | null;
         };
+        HostConfig: {
+            /**
+             * Format: int64
+             * @default 0
+             */
+            epoch: number;
+            /** @default null */
+            leader: string | null;
+            /**
+             * @default {
+             *       "max_computer_runs": null
+             *     }
+             */
+            limits: components["schemas"]["HostLimits"];
+            /** @default standalone */
+            mode: components["schemas"]["HostMode"];
+            /** @default active */
+            state: components["schemas"]["HostState"];
+        };
+        HostConflict: {
+            /** Format: int64 */
+            epoch: number;
+            /** @description Human-readable notification accompanying the SSE event. */
+            notification: string;
+            peer?: string | null;
+            reason: string;
+        };
         /** @description Host capabilities, independent of provider readiness. */
         HostInfo: {
             arch: string;
+            /** Format: int64 */
+            epoch: number;
             has_browser: boolean;
             has_display: boolean;
+            mode: components["schemas"]["HostMode"];
             os: string;
+            state: components["schemas"]["HostState"];
             /**
              * Format: int64
              * @description Physical memory in MiB (1024 * 1024 bytes).
              */
             total_ram_mb: number;
+        };
+        HostInvite: {
+            code: string;
+            /** Format: int64 */
+            expires_at_ms: number;
+            install_command?: string | null;
+            qr_svg: string;
+            ticket: string;
+        };
+        HostInviteInput: {
+            role: components["schemas"]["InviteRole"];
+            /** Format: int64 */
+            ttl_secs?: number | null;
+        };
+        HostLimits: {
+            /** @default null */
+            max_computer_runs: number | null;
+        };
+        /** @enum {string} */
+        HostMode: "standalone" | "host" | "client";
+        HostPeer: {
+            key: string;
+            /** Format: int64 */
+            last_seen_ms?: number | null;
+            name: string;
+            online: boolean;
+            role: string;
+        };
+        /** @enum {string} */
+        HostState: "active" | "standby" | "fresh";
+        HostStatus: {
+            api_version: string;
+            arch: string;
+            endpoint_id?: string | null;
+            /** Format: int64 */
+            epoch: number;
+            has_browser: boolean;
+            has_display: boolean;
+            leader?: string | null;
+            mode: components["schemas"]["HostMode"];
+            os: string;
+            peers: components["schemas"]["HostPeer"][];
+            relay_url?: string | null;
+            state: components["schemas"]["HostState"];
+            /** Format: int64 */
+            total_ram_mb: number;
+            version: string;
         };
         /** @enum {string} */
         HumanAction: "login_completed" | "application_opened" | "other";
@@ -1836,6 +2015,8 @@ export interface components {
             applied_through: number;
             state: components["schemas"]["ViewState"];
         };
+        /** @enum {string} */
+        InviteRole: "desktop" | "phone" | "node" | "host";
         /** @enum {string} */
         KeyPhase: "down" | "up";
         /** @description `GET /v1/events/latest`. */
@@ -3884,6 +4065,142 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Health"];
+                };
+            };
+        };
+    };
+    host_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostStatus"];
+                };
+            };
+        };
+    };
+    host_activate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActivateInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostConfig"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    host_revoke: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    host_invite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostInviteInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostInvite"];
+                };
+            };
+        };
+    };
+    host_standby: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostConfig"];
+                };
+            };
+        };
+    };
+    host_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };

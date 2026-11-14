@@ -8,7 +8,9 @@ use axum::Json;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
-use crate::{dto, email, email_routes, error, host, live_view, mcp, mcp_routes, routes, sse, web, web_routes};
+use crate::{
+    dto, email, email_routes, error, host, live_view, mcp, mcp_routes, routes, sse, web, web_routes,
+};
 
 struct Security;
 
