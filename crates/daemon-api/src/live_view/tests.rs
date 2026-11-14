@@ -1,4 +1,5 @@
 #![allow(clippy::too_many_lines)]
+mod browser_target_loss;
 use super::*;
 use ::live_view::*;
 use async_trait::async_trait;

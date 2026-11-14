@@ -11,15 +11,18 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-sysinfo = { version = "0.37", default-features = false, features = ["system"] }
-tracing = "0.1"
+async-trait.workspace = true
 base64.workspace = true
 futures-util.workspace = true
+live-view.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 similar.workspace = true
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 tokio.workspace = true
 tokio-tungstenite.workspace = true
+tracing = "0.1"
+uuid.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

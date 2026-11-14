@@ -831,8 +831,10 @@ dependencies = [
 name = "browser-cdp"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
  "futures-util",
+ "live-view",
  "rustix",
  "serde",
  "serde_json",
@@ -841,6 +843,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tracing",
+ "uuid",
  "windows 0.62.2",
  "x11rb",
 ]
@@ -1772,6 +1775,7 @@ dependencies = [
  "task-runtime",
  "tempfile",
  "tokio",
+ "tokio-tungstenite",
  "tokio-util",
  "toml 0.8.2",
  "tool-registry",

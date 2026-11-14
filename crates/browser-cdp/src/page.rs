@@ -2,18 +2,19 @@
 //! A single tab: session management, frames (including out-of-process iframes), snapshots.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, Notify, broadcast};
 use tokio::task::JoinHandle;
 
 use crate::client::{CdpClient, CdpEvent};
 use crate::diff::{self, SnapshotDiff};
 use crate::dom::{self, COMPUTED_STYLES};
 use crate::error::{Error, Result};
+use crate::live_view::{BrowserViewConfig, BrowserViewTarget};
 use crate::snapshot::{
     DomExtra, FrameInput, RefEntry, RefMap, Snapshot, SnapshotOptions, build_snapshot,
 };
@@ -98,7 +99,6 @@ pub(crate) fn default_accepts_dialog(kind: &str) -> bool {
 }
 
 /// Shared with the background event watcher.
-#[derive(Default)]
 pub(crate) struct Shared {
     /// Frame id -> flattened session of out-of-process iframes.
     pub oopif: StdMutex<HashMap<String, String>>,
@@ -117,6 +117,40 @@ pub(crate) struct Shared {
     pub last_net: StdMutex<Option<Instant>>,
     /// Incremented on every main-frame navigation; invalidates refs.
     pub nav_gen: AtomicU64,
+    /// Set once this page/session detaches, crashes, or closes.
+    pub target_closed: Arc<AtomicBool>,
+    /// Signaled whenever `target_closed` transitions to `true`.
+    pub target_close_notify: Arc<Notify>,
+    /// Level-triggered broadcast of `target_closed` transitions for zero-lost-wakeup listeners.
+    pub target_close_tx: tokio::sync::watch::Sender<bool>,
+    /// Hooks notified synchronously when `target_closed` transitions to `true`.
+    pub live_view_close_hooks: StdMutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
+    /// Hooks notified on main-frame navigation or completed page actions.
+    pub live_view_action_hooks: StdMutex<Vec<std::sync::Weak<dyn Fn() + Send + Sync>>>,
+    /// Strong owner anchors removed if/when needed; callers hold their own `Arc` or register strong hooks.
+    pub live_view_strong_hooks: StdMutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
+}
+
+impl Default for Shared {
+    fn default() -> Self {
+        let (target_close_tx, _) = tokio::sync::watch::channel(false);
+        Self {
+            oopif: StdMutex::default(),
+            ready: StdMutex::default(),
+            inflight: StdMutex::default(),
+            dialogs: StdMutex::default(),
+            dialog_policy: StdMutex::default(),
+            snap_rounds: AtomicU64::default(),
+            last_net: StdMutex::default(),
+            nav_gen: AtomicU64::default(),
+            target_closed: Arc::default(),
+            target_close_notify: Arc::default(),
+            target_close_tx,
+            live_view_close_hooks: StdMutex::default(),
+            live_view_action_hooks: StdMutex::default(),
+            live_view_strong_hooks: StdMutex::default(),
+        }
+    }
 }
 
 /// Geometry and ownership of a frame, kept for coordinate translation.
@@ -149,6 +183,7 @@ pub struct Page {
 
 impl Drop for Page {
     fn drop(&mut self) {
+        mark_target_closed(&self.shared);
         self.watcher.abort();
     }
 }
@@ -172,6 +207,7 @@ impl Page {
         let watcher = tokio::spawn(watch(
             rx,
             session.clone(),
+            target_id.to_string(),
             shared.clone(),
             Some(client.clone()),
         ));
@@ -187,6 +223,11 @@ impl Page {
         Ok(page)
     }
 
+    /// Underlying shared CDP websocket client.
+    pub fn client(&self) -> &Arc<CdpClient> {
+        &self.client
+    }
+
     /// Target id of this tab.
     pub fn target_id(&self) -> &str {
         &self.target_id
@@ -197,23 +238,86 @@ impl Page {
         &self.session
     }
 
+    /// False once the CDP connection or this target session has closed/crashed.
+    pub fn is_alive(&self) -> bool {
+        !self.client.is_closed() && !self.shared.target_closed.load(Ordering::SeqCst)
+    }
+
+    /// Create a live-view adapter pinned to this tab.
+    pub fn live_view(&self, config: BrowserViewConfig) -> Arc<BrowserViewTarget> {
+        BrowserViewTarget::from_page(self, config)
+    }
+
+    pub(crate) fn live_view_close_signal(
+        &self,
+    ) -> (
+        Arc<AtomicBool>,
+        Arc<Notify>,
+        tokio::sync::watch::Receiver<bool>,
+    ) {
+        (
+            self.shared.target_closed.clone(),
+            self.shared.target_close_notify.clone(),
+            self.shared.target_close_tx.subscribe(),
+        )
+    }
+
+    pub(crate) fn register_live_view_close_hook(&self, hook: &Arc<dyn Fn() + Send + Sync>) {
+        if self.shared.target_closed.load(Ordering::SeqCst) {
+            hook();
+            return;
+        }
+        if let Ok(mut hooks) = self.shared.live_view_close_hooks.lock() {
+            if hooks.len() >= 16 {
+                hooks.remove(0);
+            }
+            hooks.push(Arc::clone(hook));
+        }
+        if self.shared.target_closed.load(Ordering::SeqCst) {
+            notify_close_hooks(&self.shared);
+        }
+    }
+
+    pub(crate) fn register_live_view_action_hook(&self, hook: &Arc<dyn Fn() + Send + Sync>) {
+        if let Ok(mut strong) = self.shared.live_view_strong_hooks.lock() {
+            if strong.len() >= 16 {
+                strong.remove(0);
+            }
+            strong.push(Arc::clone(hook));
+        }
+        if let Ok(mut hooks) = self.shared.live_view_action_hooks.lock() {
+            hooks.retain(|w| w.strong_count() > 0);
+            hooks.push(Arc::downgrade(hook));
+        }
+    }
+
+    pub(crate) fn notify_live_view_action(&self) {
+        notify_action_hooks(&self.shared);
+    }
+
     /// Detach the session (the tab keeps running).
     pub async fn detach(&self) -> Result<()> {
-        self.client
+        let res = self
+            .client
             .send(
                 "Target.detachFromTarget",
                 json!({"sessionId": self.session}),
             )
             .await
-            .map(|_| ())
+            .map(|_| ());
+        mark_target_closed(&self.shared);
+        res
     }
 
     /// Close the tab.
     pub async fn close(&self) -> Result<()> {
-        self.client
+        let res = self
+            .client
             .send("Target.closeTarget", json!({"targetId": self.target_id}))
             .await
-            .map(|_| ())
+            .map(|_| ());
+        mark_target_closed(&self.shared);
+        res
     }
 
     /// Bring the tab to the foreground.
@@ -663,19 +767,64 @@ impl Page {
     }
 }
 
-/// Background task: tracks OOPIF sessions, network activity and navigations for one page.
+/// Background task: tracks OOPIF sessions, network activity, navigations, and target loss for one page.
 async fn watch(
     mut rx: broadcast::Receiver<CdpEvent>,
     session: String,
+    target_id: String,
     shared: Arc<Shared>,
     client: Option<Arc<CdpClient>>,
 ) {
+    let mut client_closed = client.as_ref().map(|c| c.subscribe_closed());
     loop {
-        let ev = match rx.recv().await {
-            Ok(ev) => ev,
-            Err(broadcast::error::RecvError::Lagged(_)) => continue,
-            Err(broadcast::error::RecvError::Closed) => return,
+        if client.as_ref().is_some_and(|c| c.is_closed()) {
+            mark_target_closed(&shared);
+            return;
+        }
+        let recv_res = tokio::select! {
+            biased;
+            closed = wait_client_closed(&mut client_closed), if client_closed.is_some() => {
+                if closed {
+                    mark_target_closed(&shared);
+                    return;
+                }
+                continue;
+            }
+            res = rx.recv() => res,
         };
+        let ev = match recv_res {
+            Ok(ev) => ev,
+            Err(broadcast::error::RecvError::Lagged(_)) => {
+                if !verify_target_attached(client.as_deref(), &target_id).await {
+                    mark_target_closed(&shared);
+                    return;
+                }
+                continue;
+            }
+            Err(broadcast::error::RecvError::Closed) => {
+                mark_target_closed(&shared);
+                return;
+            }
+        };
+        if ev.session_id.is_none() {
+            match ev.method.as_str() {
+                "Target.detachedFromTarget"
+                    if ev.params["sessionId"].as_str() == Some(session.as_str())
+                        || ev.params["targetId"].as_str() == Some(target_id.as_str()) =>
+                {
+                    mark_target_closed(&shared);
+                    return;
+                }
+                "Target.targetDestroyed" | "Target.targetCrashed"
+                    if ev.params["targetId"].as_str() == Some(target_id.as_str()) =>
+                {
+                    mark_target_closed(&shared);
+                    return;
+                }
+                _ => {}
+            }
+            continue;
+        }
         let Some(sid) = ev.session_id.as_deref() else {
             continue;
         };
@@ -700,6 +849,9 @@ async fn watch(
             }
             "Target.detachedFromTarget" => {
                 if let Some(csid) = ev.params["sessionId"].as_str() {
+                    if csid == session {
+                        mark_target_closed(&shared);
+                    }
                     if let Ok(mut m) = shared.oopif.lock() {
                         m.retain(|_, v| v != csid);
                     }
@@ -707,6 +859,9 @@ async fn watch(
                         r.remove(csid);
                     }
                 }
+            }
+            "Inspector.targetCrashed" | "Target.targetCrashed" if sid == session => {
+                mark_target_closed(&shared);
             }
             "Network.requestWillBeSent" if sid == session => {
                 if let Ok(mut map) = shared.inflight.lock() {
@@ -772,9 +927,80 @@ async fn watch(
                 if let Ok(mut set) = shared.inflight.lock() {
                     set.clear();
                 }
+                notify_action_hooks(&shared);
             }
             _ => {}
         }
+    }
+}
+
+async fn wait_client_closed(rx: &mut Option<tokio::sync::watch::Receiver<bool>>) -> bool {
+    let Some(rx) = rx.as_mut() else {
+        std::future::pending::<()>().await;
+        return false;
+    };
+    if *rx.borrow_and_update() {
+        return true;
+    }
+    let _ = rx.wait_for(|&closed| closed).await;
+    true
+}
+
+async fn verify_target_attached(client: Option<&CdpClient>, target_id: &str) -> bool {
+    let Some(client) = client else {
+        return false;
+    };
+    if client.is_closed() {
+        return false;
+    }
+    let Ok(Ok(res)) = tokio::time::timeout(
+        Duration::from_secs(2),
+        client.send("Target.getTargetInfo", json!({"targetId": target_id})),
+    )
+    .await
+    else {
+        return false;
+    };
+    let info = &res["targetInfo"];
+    info["targetId"].as_str() == Some(target_id) && info["attached"].as_bool() != Some(false)
+}
+
+fn mark_target_closed(shared: &Shared) {
+    shared.target_closed.store(true, Ordering::SeqCst);
+    shared.target_close_tx.send_if_modified(|closed| {
+        let was = *closed;
+        *closed = true;
+        !was
+    });
+    shared.target_close_notify.notify_one();
+    notify_close_hooks(shared);
+}
+
+fn notify_close_hooks(shared: &Shared) {
+    let callbacks: Vec<Arc<dyn Fn() + Send + Sync>> = shared
+        .live_view_close_hooks
+        .lock()
+        .ok()
+        .map(|mut hooks| hooks.drain(..).collect())
+        .unwrap_or_default();
+    for cb in callbacks {
+        cb();
+    }
+}
+
+fn notify_action_hooks(shared: &Shared) {
+    let callbacks: Vec<Arc<dyn Fn() + Send + Sync>> = shared
+        .live_view_action_hooks
+        .lock()
+        .ok()
+        .map(|mut hooks| {
+            let live: Vec<_> = hooks.iter().filter_map(std::sync::Weak::upgrade).collect();
+            hooks.retain(|w| w.strong_count() > 0);
+            live
+        })
+        .unwrap_or_default();
+    for cb in callbacks {
+        cb();
     }
 }
 
@@ -795,6 +1021,28 @@ fn touch(shared: &Shared) {
 mod tests {
     use super::*;
 
+    #[tokio::test(start_paused = true)]
+    async fn target_close_notification_is_latched_before_worker_parks() {
+        let shared = Shared::default();
+        // Closure can occur between the worker's liveness check and its next
+        // select. No notification future has been created or polled yet.
+        mark_target_closed(&shared);
+        assert!(shared.target_closed.load(Ordering::SeqCst));
+        tokio::time::timeout(
+            Duration::from_millis(1),
+            shared.target_close_notify.notified(),
+        )
+        .await
+        .expect("a late worker must consume the stored close notification");
+        // A separate late listener still observes closure after that permit was
+        // consumed, including when more than one adapter shares the Page.
+        let mut late_listener = shared.target_close_tx.subscribe();
+        late_listener
+            .wait_for(|&closed| closed)
+            .await
+            .expect("closure is also level-triggered");
+    }
+
     fn ev(method: &str, params: Value) -> CdpEvent {
         CdpEvent {
             method: method.into(),
@@ -807,7 +1055,7 @@ mod tests {
     async fn redirect_chain_does_not_leak_inflight() {
         let (tx, rx) = broadcast::channel(64);
         let shared = Arc::new(Shared::default());
-        let task = tokio::spawn(watch(rx, "S".into(), shared.clone(), None));
+        let task = tokio::spawn(watch(rx, "S".into(), "T".into(), shared.clone(), None));
         // Three hops share one requestId, then a single loadingFinished.
         for _ in 0..3 {
             tx.send(ev("Network.requestWillBeSent", json!({"requestId": "R1"})))
@@ -825,7 +1073,7 @@ mod tests {
     async fn old_long_poll_does_not_block_idle() {
         let (tx, rx) = broadcast::channel(64);
         let shared = Arc::new(Shared::default());
-        let task = tokio::spawn(watch(rx, "S".into(), shared.clone(), None));
+        let task = tokio::spawn(watch(rx, "S".into(), "T".into(), shared.clone(), None));
         tx.send(ev(
             "Network.requestWillBeSent",
             json!({"requestId": "poll"}),
@@ -849,7 +1097,7 @@ mod tests {
     async fn expired_inflight_is_pruned_on_new_request() {
         let (tx, rx) = broadcast::channel(64);
         let shared = Arc::new(Shared::default());
-        let task = tokio::spawn(watch(rx, "S".into(), shared.clone(), None));
+        let task = tokio::spawn(watch(rx, "S".into(), "T".into(), shared.clone(), None));
         let old = Instant::now()
             .checked_sub(INFLIGHT_CAP + Duration::from_secs(1))
             .unwrap();
@@ -878,7 +1126,7 @@ mod tests {
     async fn redirect_hops_keep_first_seen_time() {
         let (tx, rx) = broadcast::channel(64);
         let shared = Arc::new(Shared::default());
-        let task = tokio::spawn(watch(rx, "S".into(), shared.clone(), None));
+        let task = tokio::spawn(watch(rx, "S".into(), "T".into(), shared.clone(), None));
         tx.send(ev("Network.requestWillBeSent", json!({"requestId": "R"})))
             .unwrap();
         tokio::time::sleep(Duration::from_millis(30)).await;
@@ -895,7 +1143,7 @@ mod tests {
     async fn dialog_events_are_recorded_with_default_policy() {
         let (tx, rx) = broadcast::channel(64);
         let shared = Arc::new(Shared::default());
-        let task = tokio::spawn(watch(rx, "S".into(), shared.clone(), None));
+        let task = tokio::spawn(watch(rx, "S".into(), "T".into(), shared.clone(), None));
         for (t, m) in [
             ("alert", "a"),
             ("confirm", "c"),
@@ -937,7 +1185,7 @@ mod tests {
         let (tx, rx) = broadcast::channel(64);
         let shared = Arc::new(Shared::default());
         *shared.dialog_policy.lock().unwrap() = DialogOptions::accept_prompt("hello");
-        let task = tokio::spawn(watch(rx, "S".into(), shared.clone(), None));
+        let task = tokio::spawn(watch(rx, "S".into(), "T".into(), shared.clone(), None));
         for (t, m) in [("confirm", "c"), ("prompt", "p"), ("beforeunload", "b")] {
             tx.send(ev(
                 "Page.javascriptDialogOpening",

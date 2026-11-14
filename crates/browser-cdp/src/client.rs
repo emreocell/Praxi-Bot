@@ -1,17 +1,22 @@
 // Adapted from vercel-labs/agent-browser (Apache-2.0): raw CDP over tokio-tungstenite.
 //! Minimal CDP client: request/response by id, event broadcast, flattened-session multiplexing.
 
+use std::borrow::Cow;
+use std::collections::{HashMap, VecDeque};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::Duration;
-use std::{borrow::Cow, collections::HashMap};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use futures_util::stream::SplitSink;
 use futures_util::{Sink as MessageSink, SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::{Value, json, value::RawValue};
 use tokio::net::TcpStream;
-use tokio::sync::{Mutex, broadcast, oneshot};
+use tokio::sync::{Mutex, Notify, broadcast, oneshot, watch};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Error as WsError;
@@ -23,6 +28,17 @@ use crate::error::{Error, Result};
 
 type Pending = Arc<StdMutex<HashMap<u64, oneshot::Sender<Result<Value>>>>>;
 type Sink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
+pub(crate) type ViewStopHookFn = dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync;
+pub(crate) type ViewStopHook = Arc<ViewStopHookFn>;
+
+const SCREENCAST_METHOD: &str = "Page.screencastFrame";
+/// Maximum decoded `Page.screencastFrame` image size (`2 MiB`, matching `live_view::MAX_PAYLOAD`).
+pub const DEFAULT_MAX_SCREENCAST_IMAGE_BYTES: usize = live_view::MAX_PAYLOAD;
+/// Maximum serialized `Page.screencastFrame` CDP message size (`3 MiB`).
+pub const DEFAULT_MAX_SCREENCAST_EVENT_BYTES: usize = 3 * 1024 * 1024;
+const MAX_PENDING_DROPPED_ACKS: usize = 16;
+const MAX_SCREENCAST_IMAGE_WIDTH: u32 = 1920;
+const MAX_SCREENCAST_IMAGE_HEIGHT: u32 = 1080;
 
 /// Default per-command timeout.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -50,6 +66,10 @@ pub struct CdpClientConfig {
     /// The slot count is rounded down to a power of two and capped at 4096;
     /// allocator/JSON representation overhead and consumer-owned copies are extra.
     pub event_buffer_bytes: usize,
+    /// Maximum serialized `Page.screencastFrame` message size before parsing parameters or decoding.
+    pub max_screencast_event_bytes: usize,
+    /// Maximum decoded `Page.screencastFrame` image payload size in bytes.
+    pub max_screencast_image_bytes: usize,
 }
 
 impl Default for CdpClientConfig {
@@ -62,6 +82,8 @@ impl Default for CdpClientConfig {
             max_reply_bytes: 32 * 1024 * 1024,
             max_event_bytes: 64 * 1024,
             event_buffer_bytes: 16 * 1024 * 1024,
+            max_screencast_event_bytes: DEFAULT_MAX_SCREENCAST_EVENT_BYTES,
+            max_screencast_image_bytes: DEFAULT_MAX_SCREENCAST_IMAGE_BYTES,
         }
     }
 }
@@ -75,6 +97,9 @@ impl CdpClientConfig {
             || self.max_event_bytes == 0
             || self.max_event_bytes > self.max_reply_bytes
             || self.event_buffer_bytes < self.max_event_bytes
+            || self.max_screencast_event_bytes == 0
+            || self.max_screencast_image_bytes == 0
+            || self.max_screencast_image_bytes > self.max_screencast_event_bytes
             || self.max_message_bytes > usize::MAX - 128 * 1024 - 14
         {
             return Err(Error::WebSocket(
@@ -119,16 +144,175 @@ pub struct CdpEvent {
     pub session_id: Option<String>,
 }
 
+/// Metadata delivered with a CDP `Page.screencastFrame` event.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScreencastMetadata {
+    /// Top offset of the viewport in DIPs.
+    pub offset_top: f64,
+    /// Current page scale factor (pinch zoom).
+    pub page_scale_factor: f64,
+    /// Device/viewport width in DIPs.
+    pub device_width: f64,
+    /// Device/viewport height in DIPs.
+    pub device_height: f64,
+    /// Horizontal scroll offset in CSS pixels.
+    pub scroll_offset_x: f64,
+    /// Vertical scroll offset in CSS pixels.
+    pub scroll_offset_y: f64,
+    /// Optional compositor timestamp in seconds since epoch.
+    pub timestamp: Option<f64>,
+}
+
+/// Reason a `Page.screencastFrame` message was rejected before delivery.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ScreencastFault {
+    EventTooLarge { size: usize, limit: usize },
+    ImageTooLarge { size: usize, limit: usize },
+    MalformedFrame(String),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DecodedScreencastFrame {
+    pub jpeg: Arc<[u8]>,
+    pub width: u32,
+    pub height: u32,
+    /// Numeric `params.sessionId` for `Page.screencastFrameAck`, distinct from flattened CDP `sessionId`.
+    pub ack_session_id: i64,
+    pub metadata: ScreencastMetadata,
+}
+
+#[derive(Default)]
+struct ScreencastSlotState {
+    latest: Option<DecodedScreencastFrame>,
+    dropped_acks: VecDeque<i64>,
+    last_fault: Option<ScreencastFault>,
+    dropped_frames: u64,
+    rejected_frames: u64,
+}
+
+pub(crate) struct ScreencastSlot {
+    state: StdMutex<ScreencastSlotState>,
+    notify: Notify,
+}
+
+pub(crate) struct ScreencastTake {
+    pub frame: Option<DecodedScreencastFrame>,
+    pub dropped_acks: Vec<i64>,
+    pub fault: Option<ScreencastFault>,
+}
+
+impl ScreencastSlot {
+    pub(crate) fn new() -> Arc<Self> {
+        Arc::new(Self {
+            state: StdMutex::new(ScreencastSlotState::default()),
+            notify: Notify::new(),
+        })
+    }
+
+    pub(crate) fn push_frame(&self, frame: DecodedScreencastFrame) {
+        if let Ok(mut state) = self.state.lock() {
+            if let Some(prev) = state.latest.replace(frame) {
+                state.dropped_frames = state.dropped_frames.saturating_add(1);
+                if state.dropped_acks.len() >= MAX_PENDING_DROPPED_ACKS {
+                    state.dropped_acks.pop_front();
+                }
+                state.dropped_acks.push_back(prev.ack_session_id);
+            }
+            state.last_fault = None;
+        }
+        self.notify.notify_one();
+    }
+
+    pub(crate) fn push_fault(&self, fault: ScreencastFault) {
+        if let Ok(mut state) = self.state.lock() {
+            state.rejected_frames = state.rejected_frames.saturating_add(1);
+            state.last_fault = Some(fault);
+        }
+        self.notify.notify_one();
+    }
+
+    pub(crate) fn notify(&self) {
+        self.notify.notify_one();
+    }
+
+    pub(crate) async fn notified(&self) {
+        self.notify.notified().await;
+    }
+
+    pub(crate) fn take(&self) -> ScreencastTake {
+        let Ok(mut state) = self.state.lock() else {
+            return ScreencastTake {
+                frame: None,
+                dropped_acks: Vec::new(),
+                fault: None,
+            };
+        };
+        ScreencastTake {
+            frame: state.latest.take(),
+            dropped_acks: state.dropped_acks.drain(..).collect(),
+            fault: state.last_fault.take(),
+        }
+    }
+
+    pub(crate) fn clear(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.latest = None;
+            state.dropped_acks.clear();
+            state.last_fault = None;
+        }
+        self.notify.notify_one();
+    }
+}
+
+type ScreencastSinks = Arc<StdMutex<HashMap<String, Arc<ScreencastSlot>>>>;
+
+pub(crate) struct ScreencastRegistration {
+    sinks: ScreencastSinks,
+    session_key: String,
+    slot: Arc<ScreencastSlot>,
+}
+
+impl ScreencastRegistration {
+    pub(crate) fn slot(&self) -> &Arc<ScreencastSlot> {
+        &self.slot
+    }
+}
+
+impl Drop for ScreencastRegistration {
+    fn drop(&mut self) {
+        self.slot.clear();
+        if let Ok(mut map) = self.sinks.lock()
+            && map
+                .get(&self.session_key)
+                .is_some_and(|cur| Arc::ptr_eq(cur, &self.slot))
+        {
+            map.remove(&self.session_key);
+        }
+    }
+}
+
 /// A connection to a CDP websocket endpoint shared by all sessions of a browser.
 pub struct CdpClient {
     sink: Mutex<Sink>,
     next_id: AtomicU64,
     pending: Pending,
     events: broadcast::Sender<CdpEvent>,
+    screencast_sinks: ScreencastSinks,
+    active_views: StdMutex<Vec<Weak<ViewStopHookFn>>>,
     closed: Arc<AtomicBool>,
+    close_tx: watch::Sender<bool>,
     reader: JoinHandle<()>,
     limits: CdpClientConfig,
     rejected_events: Arc<AtomicU64>,
+    rejected_screencast_events: Arc<AtomicU64>,
+    unsubscribed_screencast_events: Arc<AtomicU64>,
+}
+
+#[derive(Default)]
+struct DispatchStats {
+    rejected_generic: bool,
+    rejected_screencast: bool,
+    unsubscribed_screencast: bool,
 }
 
 impl CdpClient {
@@ -157,15 +341,24 @@ impl CdpClient {
         let (sink, mut stream) = ws.split();
         let pending: Pending = Arc::new(StdMutex::new(HashMap::new()));
         let (events, _) = broadcast::channel(event_capacity);
+        let screencast_sinks: ScreencastSinks = Arc::new(StdMutex::new(HashMap::new()));
+        let active_views = StdMutex::new(Vec::new());
         let closed = Arc::new(AtomicBool::new(false));
+        let (close_tx, _) = watch::channel(false);
         let rejected_events = Arc::new(AtomicU64::new(0));
+        let rejected_screencast_events = Arc::new(AtomicU64::new(0));
+        let unsubscribed_screencast_events = Arc::new(AtomicU64::new(0));
 
         let reader = {
             let pending = pending.clone();
             let events = events.clone();
+            let screencast_sinks = screencast_sinks.clone();
             let closed = closed.clone();
+            let close_tx = close_tx.clone();
             let limits = limits.clone();
             let rejected_events = rejected_events.clone();
+            let rejected_screencast_events = rejected_screencast_events.clone();
+            let unsubscribed_screencast_events = unsubscribed_screencast_events.clone();
             tokio::spawn(async move {
                 let mut transport_error = None;
                 while let Some(msg) = stream.next().await {
@@ -180,14 +373,31 @@ impl CdpClient {
                         Ok(Message::Close(_)) => break,
                         Ok(_) => continue,
                     };
-                    if matches!(
-                        dispatch(text.as_str(), &pending, &events, &limits),
-                        Err(Error::MessageTooLarge { kind: "event", .. })
-                    ) {
-                        rejected_events.fetch_add(1, Ordering::Relaxed);
+                    match dispatch(text.as_str(), &pending, &events, &screencast_sinks, &limits) {
+                        Ok(stats) => {
+                            if stats.rejected_generic {
+                                rejected_events.fetch_add(1, Ordering::Relaxed);
+                            }
+                            if stats.rejected_screencast {
+                                rejected_screencast_events.fetch_add(1, Ordering::Relaxed);
+                            }
+                            if stats.unsubscribed_screencast {
+                                unsubscribed_screencast_events.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                        Err(Error::MessageTooLarge { kind: "event", .. }) => {
+                            rejected_events.fetch_add(1, Ordering::Relaxed);
+                        }
+                        Err(_) => {}
                     }
                 }
                 closed.store(true, Ordering::SeqCst);
+                close_tx.send_replace(true);
+                if let Ok(sinks) = screencast_sinks.lock() {
+                    for slot in sinks.values() {
+                        slot.notify();
+                    }
+                }
                 let drained: Vec<_> = pending
                     .lock()
                     .map(|mut p| p.drain().collect())
@@ -206,10 +416,15 @@ impl CdpClient {
             next_id: AtomicU64::new(1),
             pending,
             events,
+            screencast_sinks,
+            active_views,
             closed,
+            close_tx,
             reader,
             limits,
             rejected_events,
+            rejected_screencast_events,
+            unsubscribed_screencast_events,
         }))
     }
 
@@ -218,15 +433,77 @@ impl CdpClient {
         self.events.subscribe()
     }
 
+    /// Register a single-slot `Page.screencastFrame` sink for a flattened session (or `None` for root).
+    ///
+    /// Replaces any prior registration for the same session key. Dropping the returned
+    /// guard removes the registration if it still points to this slot.
+    pub(crate) fn register_screencast_sink(
+        &self,
+        session_id: Option<&str>,
+    ) -> ScreencastRegistration {
+        let session_key = session_id.unwrap_or_default().to_string();
+        let slot = ScreencastSlot::new();
+        if let Ok(mut map) = self.screencast_sinks.lock() {
+            map.insert(session_key.clone(), slot.clone());
+        }
+        ScreencastRegistration {
+            sinks: self.screencast_sinks.clone(),
+            session_key,
+            slot,
+        }
+    }
+
+    /// Register a weak stop callback invoked before closing the browser.
+    pub(crate) fn register_view_stop_hook(&self, hook: &ViewStopHook) {
+        if let Ok(mut hooks) = self.active_views.lock() {
+            hooks.retain(|w| w.strong_count() > 0);
+            hooks.push(Arc::downgrade(hook));
+        }
+    }
+
+    /// Stop all live views registered on this connection (used before `Browser::close`).
+    pub(crate) async fn stop_active_views(&self) {
+        let hooks: Vec<ViewStopHook> = {
+            let Ok(mut guard) = self.active_views.lock() else {
+                return;
+            };
+            let live: Vec<_> = guard.iter().filter_map(Weak::upgrade).collect();
+            guard.retain(|w| w.strong_count() > 0);
+            live
+        };
+        let futures: Vec<_> = hooks.into_iter().map(|hook| hook()).collect();
+        futures_util::future::join_all(futures).await;
+    }
+
     /// Events discarded because they exceeded the configured per-event byte cap.
     /// Queue eviction is reported separately by each receiver's `Lagged` error.
     pub fn rejected_event_count(&self) -> u64 {
         self.rejected_events.load(Ordering::Relaxed)
     }
 
+    /// Screencast frames rejected due to byte budget or JPEG/metadata validation failure.
+    pub fn rejected_screencast_event_count(&self) -> u64 {
+        self.rejected_screencast_events.load(Ordering::Relaxed)
+    }
+
+    /// Screencast frames discarded immediately because no live-view sink was subscribed.
+    pub fn unsubscribed_screencast_event_count(&self) -> u64 {
+        self.unsubscribed_screencast_events.load(Ordering::Relaxed)
+    }
+
+    /// Returns the configured transport and screencast byte limits.
+    pub fn limits(&self) -> &CdpClientConfig {
+        &self.limits
+    }
+
     /// True once the websocket has closed.
     pub fn is_closed(&self) -> bool {
         self.closed.load(Ordering::SeqCst)
+    }
+
+    /// Subscribe to websocket closure as a level-triggered watch receiver.
+    pub(crate) fn subscribe_closed(&self) -> watch::Receiver<bool> {
+        self.close_tx.subscribe()
     }
 
     /// Send a command on the browser session.
@@ -314,6 +591,8 @@ async fn exchange<S: MessageSink<Message, Error = WsError> + Unpin>(
 
 impl Drop for CdpClient {
     fn drop(&mut self) {
+        self.closed.store(true, Ordering::SeqCst);
+        self.close_tx.send_replace(true);
         self.reader.abort();
     }
 }
@@ -335,12 +614,44 @@ struct Envelope<'a> {
     error: Option<&'a RawValue>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawScreencastParams<'a> {
+    #[serde(borrow)]
+    data: Cow<'a, str>,
+    metadata: RawScreencastMetadata,
+    session_id: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawScreencastMetadata {
+    #[serde(default)]
+    offset_top: f64,
+    #[serde(default = "default_scale_factor")]
+    page_scale_factor: f64,
+    device_width: f64,
+    device_height: f64,
+    #[serde(default)]
+    scroll_offset_x: f64,
+    #[serde(default)]
+    scroll_offset_y: f64,
+    #[serde(default)]
+    timestamp: Option<f64>,
+}
+
+const fn default_scale_factor() -> f64 {
+    1.0
+}
+
 fn dispatch(
     text: &str,
     pending: &Pending,
     events: &broadcast::Sender<CdpEvent>,
+    screencast_sinks: &ScreencastSinks,
     limits: &CdpClientConfig,
-) -> Result<()> {
+) -> Result<DispatchStats> {
+    let mut stats = DispatchStats::default();
     let message: Envelope<'_> = serde_json::from_str(text)?;
     if let Some(id) = message.id {
         let tx = pending.lock().ok().and_then(|mut p| p.remove(&id));
@@ -357,6 +668,17 @@ fn dispatch(
             let _ = tx.send(res);
         }
     } else if let Some(method) = message.method {
+        if method == SCREENCAST_METHOD {
+            dispatch_screencast(
+                text.len(),
+                message.session_id.as_deref(),
+                message.params,
+                screencast_sinks,
+                limits,
+                &mut stats,
+            );
+            return Ok(stats);
+        }
         if text.len() > limits.max_event_bytes {
             return Err(Error::MessageTooLarge {
                 kind: "event",
@@ -372,7 +694,224 @@ fn dispatch(
             session_id: message.session_id.map(Cow::into_owned),
         });
     }
-    Ok(())
+    Ok(stats)
+}
+
+fn dispatch_screencast(
+    raw_len: usize,
+    session_id: Option<&str>,
+    raw_params: Option<&RawValue>,
+    screencast_sinks: &ScreencastSinks,
+    limits: &CdpClientConfig,
+    stats: &mut DispatchStats,
+) {
+    let session_key = session_id.unwrap_or_default();
+    let slot = screencast_sinks
+        .lock()
+        .ok()
+        .and_then(|map| map.get(session_key).cloned());
+
+    if raw_len > limits.max_screencast_event_bytes {
+        stats.rejected_screencast = true;
+        if let Some(slot) = slot {
+            slot.push_fault(ScreencastFault::EventTooLarge {
+                size: raw_len,
+                limit: limits.max_screencast_event_bytes,
+            });
+        }
+        return;
+    }
+
+    let Some(slot) = slot else {
+        stats.unsubscribed_screencast = true;
+        return;
+    };
+
+    let Some(raw) = raw_params else {
+        stats.rejected_screencast = true;
+        slot.push_fault(ScreencastFault::MalformedFrame(
+            "screencastFrame missing params".into(),
+        ));
+        return;
+    };
+
+    let parsed: RawScreencastParams<'_> = match serde_json::from_str(raw.get()) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            stats.rejected_screencast = true;
+            slot.push_fault(ScreencastFault::MalformedFrame(format!(
+                "invalid screencastFrame params: {error}"
+            )));
+            return;
+        }
+    };
+
+    let Some(metadata) = validate_screencast_metadata(&parsed.metadata) else {
+        stats.rejected_screencast = true;
+        slot.push_fault(ScreencastFault::MalformedFrame(
+            "invalid screencastFrame metadata geometry".into(),
+        ));
+        return;
+    };
+
+    match decode_screencast_jpeg(parsed.data.as_ref(), limits.max_screencast_image_bytes) {
+        Ok((jpeg, width, height)) => {
+            slot.push_frame(DecodedScreencastFrame {
+                jpeg,
+                width,
+                height,
+                ack_session_id: parsed.session_id,
+                metadata,
+            });
+        }
+        Err(fault) => {
+            stats.rejected_screencast = true;
+            slot.push_fault(fault);
+        }
+    }
+}
+
+fn validate_screencast_metadata(raw: &RawScreencastMetadata) -> Option<ScreencastMetadata> {
+    let finite = raw.offset_top.is_finite()
+        && raw.page_scale_factor.is_finite()
+        && raw.device_width.is_finite()
+        && raw.device_height.is_finite()
+        && raw.scroll_offset_x.is_finite()
+        && raw.scroll_offset_y.is_finite()
+        && raw.timestamp.is_none_or(|t| t.is_finite() && t >= 0.0);
+    if !finite
+        || raw.offset_top < 0.0
+        || raw.page_scale_factor <= 0.0
+        || raw.device_width <= 0.0
+        || raw.device_height <= raw.offset_top
+    {
+        return None;
+    }
+    Some(ScreencastMetadata {
+        offset_top: raw.offset_top,
+        page_scale_factor: raw.page_scale_factor,
+        device_width: raw.device_width,
+        device_height: raw.device_height,
+        scroll_offset_x: raw.scroll_offset_x,
+        scroll_offset_y: raw.scroll_offset_y,
+        timestamp: raw.timestamp,
+    })
+}
+
+fn decode_screencast_jpeg(
+    data: &str,
+    max_image_bytes: usize,
+) -> std::result::Result<(Arc<[u8]>, u32, u32), ScreencastFault> {
+    let b64 = data.as_bytes();
+    if b64.len() < 4 || !b64.len().is_multiple_of(4) || b64.ends_with(b"===") {
+        return Err(ScreencastFault::MalformedFrame(
+            "invalid base64 frame length".into(),
+        ));
+    }
+    let pad = if b64.ends_with(b"==") {
+        2usize
+    } else {
+        usize::from(b64.ends_with(b"="))
+    };
+    let upper = (b64.len() / 4) * 3;
+    let decoded_len = upper.saturating_sub(pad);
+    if decoded_len < 4 {
+        return Err(ScreencastFault::MalformedFrame(
+            "screencast frame shorter than JPEG header".into(),
+        ));
+    }
+    if decoded_len > max_image_bytes {
+        return Err(ScreencastFault::ImageTooLarge {
+            size: decoded_len,
+            limit: max_image_bytes,
+        });
+    }
+
+    // Validate JPEG SOI (`FF D8`) on stack before allocating the full image buffer.
+    let mut head = [0u8; 3];
+    match BASE64_STANDARD.decode_slice(&b64[..4], &mut head) {
+        Ok(3) if head[0] == 0xFF && head[1] == 0xD8 => {}
+        Ok(_) => {
+            return Err(ScreencastFault::MalformedFrame(
+                "screencast frame is not JPEG (missing SOI)".into(),
+            ));
+        }
+        Err(error) => {
+            return Err(ScreencastFault::MalformedFrame(format!(
+                "invalid base64 header: {error}"
+            )));
+        }
+    }
+
+    // Allocate exact conservative upper bound (at most +2 bytes over decoded_len).
+    let mut buf = vec![0u8; upper];
+    let written = BASE64_STANDARD
+        .decode_slice(b64, &mut buf)
+        .map_err(|error| {
+            ScreencastFault::MalformedFrame(format!("invalid base64 payload: {error}"))
+        })?;
+    buf.truncate(written);
+    if buf.len() > max_image_bytes {
+        return Err(ScreencastFault::ImageTooLarge {
+            size: buf.len(),
+            limit: max_image_bytes,
+        });
+    }
+
+    let (width, height) = parse_jpeg_dimensions(&buf)
+        .map_err(|reason| ScreencastFault::MalformedFrame(reason.into()))?;
+    Ok((Arc::from(buf), width, height))
+}
+
+fn parse_jpeg_dimensions(bytes: &[u8]) -> std::result::Result<(u32, u32), &'static str> {
+    if bytes.len() < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8 {
+        return Err("missing JPEG SOI marker");
+    }
+    let mut pos = 2usize;
+    while pos < bytes.len() {
+        if bytes[pos] != 0xFF {
+            return Err("invalid JPEG marker alignment");
+        }
+        while pos < bytes.len() && bytes[pos] == 0xFF {
+            pos += 1;
+        }
+        if pos >= bytes.len() {
+            break;
+        }
+        let marker = bytes[pos];
+        pos += 1;
+        match marker {
+            0x00 | 0x01 | 0xD0..=0xD8 => continue,
+            0xD9 | 0xDA => return Err("JPEG reached scan/end before SOF header"),
+            _ => {}
+        }
+        if pos + 2 > bytes.len() {
+            return Err("truncated JPEG segment length");
+        }
+        let seg_len = u16::from_be_bytes([bytes[pos], bytes[pos + 1]]) as usize;
+        if seg_len < 2 || pos + seg_len > bytes.len() {
+            return Err("invalid JPEG segment length");
+        }
+        let is_sof = matches!(
+            marker,
+            0xC0..=0xC3 | 0xC5..=0xC7 | 0xC9..=0xCB | 0xCD..=0xCF
+        );
+        if is_sof {
+            if seg_len < 7 {
+                return Err("truncated JPEG SOF segment");
+            }
+            let height = u32::from(u16::from_be_bytes([bytes[pos + 3], bytes[pos + 4]]));
+            let width = u32::from(u16::from_be_bytes([bytes[pos + 5], bytes[pos + 6]]));
+            if !(1..=MAX_SCREENCAST_IMAGE_WIDTH).contains(&width)
+                || !(1..=MAX_SCREENCAST_IMAGE_HEIGHT).contains(&height)
+            {
+                return Err("JPEG dimensions outside live-view bounds");
+            }
+            return Ok((width, height));
+        }
+        pos += seg_len;
+    }
+    Err("JPEG missing start-of-frame header")
 }
 
 fn parse_reply(message: &Envelope<'_>) -> Result<Value> {
@@ -532,12 +1071,13 @@ mod tests {
         let capacity = limits.event_capacity().unwrap();
         assert_eq!(capacity, 4); // 1500 / 256 = 5 slots, rounded DOWN to 4.
         let pending = Arc::new(StdMutex::new(HashMap::new()));
+        let sinks = ScreencastSinks::default();
         let (events, mut receiver) = broadcast::channel(capacity);
         for index in 0..1000 {
             let message =
                 json!({"method": "Test.event", "params": {"index": index, "text": "x".repeat(64)}})
                     .to_string();
-            dispatch(&message, &pending, &events, &limits).unwrap();
+            dispatch(&message, &pending, &events, &sinks, &limits).unwrap();
             assert!(events.len() * limits.max_event_bytes <= limits.event_buffer_bytes);
         }
         assert!(matches!(
@@ -769,5 +1309,206 @@ mod tests {
         let b = c.send("Second", json!({})).await.unwrap();
         assert_eq!(b["who"], "second");
         assert_eq!(a.await.unwrap()["who"], "first");
+    }
+
+    fn minimal_jpeg(width: u16, height: u16, target_len: usize) -> Vec<u8> {
+        let mut bytes = vec![
+            0xFF,
+            0xD8, // SOI
+            0xFF,
+            0xC0,
+            0x00,
+            0x0B,
+            0x08, // SOF0
+            (height >> 8) as u8,
+            (height & 0xFF) as u8,
+            (width >> 8) as u8,
+            (width & 0xFF) as u8,
+            0x01,
+            0x01,
+            0x11,
+            0x00, // 1 component
+            0xFF,
+            0xDA,
+            0x00,
+            0x08,
+            0x01,
+            0x01,
+            0x00,
+            0x00,
+            0x3F,
+            0x00, // SOS
+        ];
+        if target_len > bytes.len() + 2 {
+            bytes.resize(target_len - 2, 0xAA);
+        }
+        bytes.extend_from_slice(&[0xFF, 0xD9]);
+        bytes
+    }
+
+    #[tokio::test]
+    async fn screencast_frame_over_64kib_bypasses_generic_ring_and_routes_by_session() {
+        let big_jpeg = minimal_jpeg(960, 600, 128 * 1024);
+        let b64 = BASE64_STANDARD.encode(&big_jpeg);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (s, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
+            while let Some(Ok(Message::Text(t))) = ws.next().await {
+                let req: Value = serde_json::from_str(t.as_str()).unwrap();
+                let frames = vec![
+                    json!({
+                        "method": "Page.screencastFrame",
+                        "sessionId": "TAB-OTHER",
+                        "params": {
+                            "data": b64,
+                            "metadata": {"deviceWidth": 960, "deviceHeight": 600, "pageScaleFactor": 1},
+                            "sessionId": 99
+                        }
+                    }),
+                    json!({
+                        "method": "Page.screencastFrame",
+                        "sessionId": "TAB-1",
+                        "params": {
+                            "data": b64,
+                            "metadata": {"deviceWidth": 960, "deviceHeight": 600, "pageScaleFactor": 1, "offsetTop": 0},
+                            "sessionId": 42
+                        }
+                    }),
+                    json!({"method": "Page.loadEventFired", "sessionId": "TAB-1", "params": {"timestamp": 1.0}}),
+                    json!({"id": req["id"], "result": {"ok": true}}),
+                ];
+                for msg in frames {
+                    ws.send(Message::text(msg.to_string())).await.unwrap();
+                }
+            }
+        });
+
+        let client = CdpClient::connect(&url).await.unwrap();
+        let reg = client.register_screencast_sink(Some("TAB-1"));
+        let mut generic_rx = client.subscribe();
+        let reply = client.send("Sync", json!({})).await.unwrap();
+        assert_eq!(reply["ok"], true);
+
+        let take = reg.slot().take();
+        let frame = take.frame.expect("TAB-1 screencast frame received");
+        assert_eq!(frame.ack_session_id, 42);
+        assert_eq!(frame.width, 960);
+        assert_eq!(frame.height, 600);
+        assert_eq!(frame.jpeg.len(), big_jpeg.len());
+        assert_eq!(client.unsubscribed_screencast_event_count(), 1);
+        assert_eq!(client.rejected_screencast_event_count(), 0);
+
+        // Broadcast ring must only contain Page.loadEventFired, never the 128 KiB screencast payload.
+        let ev = generic_rx.try_recv().unwrap();
+        assert_eq!(ev.method, "Page.loadEventFired");
+        assert!(matches!(
+            generic_rx.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
+    async fn screencast_bounds_exact_2mib_and_rejects_oversized_malformed_unsubscribed() {
+        let exact_2mib = minimal_jpeg(1280, 800, 2 * 1024 * 1024);
+        assert_eq!(exact_2mib.len(), 2 * 1024 * 1024);
+        let over_2mib = minimal_jpeg(1280, 800, 2 * 1024 * 1024 + 1);
+        let over_3mib_event = "A".repeat(3 * 1024 * 1024 + 64);
+        let non_jpeg_b64 = BASE64_STANDARD.encode(b"\x89PNG\r\n\x1a\nnotjpeg");
+        let no_sof_b64 = BASE64_STANDARD.encode([0xFF, 0xD8, 0xFF, 0xD9]);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (s, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
+            while let Some(Ok(Message::Text(t))) = ws.next().await {
+                let req: Value = serde_json::from_str(t.as_str()).unwrap();
+                match req["method"].as_str() {
+                    Some("Batch") => {
+                        let msgs = vec![
+                            json!({"method": "Page.screencastFrame", "sessionId": "S1", "params": {"data": BASE64_STANDARD.encode(&exact_2mib), "metadata": {"deviceWidth": 1280, "deviceHeight": 800}, "sessionId": 1}}),
+                            json!({"id": req["id"], "result": {"step": 1}}),
+                        ];
+                        for m in msgs {
+                            ws.send(Message::text(m.to_string())).await.unwrap();
+                        }
+                    }
+                    Some("InvalidBatch") => {
+                        let msgs = vec![
+                            json!({"method": "Page.screencastFrame", "sessionId": "S1", "params": {"data": BASE64_STANDARD.encode(&over_2mib), "metadata": {"deviceWidth": 1280, "deviceHeight": 800}, "sessionId": 2}}),
+                            json!({"method": "Page.screencastFrame", "sessionId": "S1", "params": {"data": non_jpeg_b64, "metadata": {"deviceWidth": 1280, "deviceHeight": 800}, "sessionId": 3}}),
+                            json!({"method": "Page.screencastFrame", "sessionId": "S1", "params": {"data": no_sof_b64, "metadata": {"deviceWidth": 1280, "deviceHeight": 800}, "sessionId": 4}}),
+                            json!({"method": "Page.screencastFrame", "sessionId": "S1", "params": {"data": over_3mib_event, "metadata": {"deviceWidth": 1280, "deviceHeight": 800}, "sessionId": 5}}),
+                            json!({"method": "Test.bigGeneric", "sessionId": "S1", "params": {"text": "x".repeat(70 * 1024)}}),
+                            json!({"id": req["id"], "result": {"step": 2}}),
+                        ];
+                        for m in msgs {
+                            ws.send(Message::text(m.to_string())).await.unwrap();
+                        }
+                    }
+                    Some("BurstFlood") => {
+                        let small = BASE64_STANDARD.encode(minimal_jpeg(640, 480, 128));
+                        for i in 1..=25 {
+                            ws.send(Message::text(
+                                json!({"method": "Page.screencastFrame", "sessionId": "S1", "params": {"data": small, "metadata": {"deviceWidth": 640, "deviceHeight": 480}, "sessionId": i}})
+                                    .to_string(),
+                            ))
+                            .await
+                            .unwrap();
+                        }
+                        ws.send(Message::text(
+                            json!({"id": req["id"], "result": {"step": 3}}).to_string(),
+                        ))
+                        .await
+                        .unwrap();
+                    }
+                    _ => {
+                        ws.send(Message::text(
+                            json!({"id": req["id"], "result": {}}).to_string(),
+                        ))
+                        .await
+                        .unwrap();
+                    }
+                }
+            }
+        });
+
+        let client = CdpClient::connect(&url).await.unwrap();
+        let reg = client.register_screencast_sink(Some("S1"));
+        assert_eq!(client.send("Batch", json!({})).await.unwrap()["step"], 1);
+        let take = reg.slot().take();
+        assert_eq!(take.frame.unwrap().jpeg.len(), 2 * 1024 * 1024);
+
+        assert_eq!(
+            client.send("InvalidBatch", json!({})).await.unwrap()["step"],
+            2
+        );
+        let take2 = reg.slot().take();
+        assert!(take2.frame.is_none());
+        assert!(matches!(
+            take2.fault,
+            Some(ScreencastFault::EventTooLarge { .. })
+        ));
+        assert_eq!(client.rejected_screencast_event_count(), 4);
+        assert_eq!(client.rejected_event_count(), 1);
+        assert!(!client.is_closed());
+
+        // Single-slot retention: 25 bursts keep only frame 25 and cap dropped_acks at MAX_PENDING_DROPPED_ACKS.
+        assert_eq!(
+            client.send("BurstFlood", json!({})).await.unwrap()["step"],
+            3
+        );
+        let take3 = reg.slot().take();
+        assert_eq!(take3.frame.unwrap().ack_session_id, 25);
+        assert_eq!(take3.dropped_acks.len(), MAX_PENDING_DROPPED_ACKS);
+        assert_eq!(take3.dropped_acks[0], 9);
+        assert_eq!(*take3.dropped_acks.last().unwrap(), 24);
+
+        // Unsubscribing clears sink and drops subsequent frames without queueing.
+        drop(reg);
+        assert_eq!(client.send("Batch", json!({})).await.unwrap()["step"], 1);
+        assert_eq!(client.unsubscribed_screencast_event_count(), 1);
     }
 }
