@@ -1,7 +1,7 @@
 //! Persistent installation ownership and runtime leadership control.
 use std::{
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, atomic::{AtomicBool, Ordering}},
     time::Duration,
 };
 
@@ -172,6 +172,8 @@ struct LeaderInner {
     data: PathBuf,
     config: Mutex<HostConfig>,
     transition: tokio::sync::Mutex<()>,
+    startup: tokio::sync::Mutex<()>,
+    verifying: AtomicBool,
     state: WeakAppState,
     network: Mutex<Option<PeerNetwork>>,
     invites: Mutex<std::collections::VecDeque<std::time::Instant>>,
@@ -184,6 +186,8 @@ impl LeaderControl {
             data,
             config: Mutex::new(config),
             transition: tokio::sync::Mutex::new(()),
+            startup: tokio::sync::Mutex::new(()),
+            verifying: AtomicBool::new(false),
             state,
             network: Mutex::new(None),
             invites: Mutex::default(),
@@ -228,6 +232,7 @@ impl LeaderControl {
     /// Attach the already-running peer endpoint and publish our ownership state.
     pub fn set_network(&self, net: PeerNetwork) {
         let config = self.0.config.lock();
+        self.0.verifying.store(config.state == HostState::Active && net.devices().iter().any(|d| matches!(d.role, Role::Desktop | Role::Host)), Ordering::SeqCst);
         net.set_leader_info(Some(config.wire()));
         *self.0.network.lock() = Some(net);
     }
@@ -292,7 +297,7 @@ impl LeaderControl {
     /// Linearize a synchronous automatic-run admission with ownership changes.
     pub(crate) fn with_active<T>(&self, action: impl FnOnce() -> T) -> Result<T, ApiError> {
         let config = self.0.config.lock();
-        if !config.runs_components() {
+        if self.0.verifying.load(Ordering::SeqCst) || !config.runs_components() {
             return Err(ApiError::conflict("this installation is standby"));
         }
         let result = action();
@@ -300,16 +305,43 @@ impl LeaderControl {
         Ok(result)
     }
 
-    /// Start the components permitted by current ownership without changing the epoch.
+    pub(crate) fn components_allowed(&self) -> bool {
+        !self.0.verifying.load(Ordering::SeqCst) && self.config().runs_components()
+    }
+
+    /// Start after a bounded (10 second) check of paired daemon heartbeats.
+    /// Unreachable peers cannot establish ownership; after the deadline the
+    /// persisted owner starts, with the residual partition risk documented.
     /// # Errors
     /// Returns an unavailable daemon or errors opening the schedule store.
     pub async fn start(&self) -> Result<(), ApiError> {
+        let _startup = self.0.startup.lock().await;
+        if self.0.verifying.load(Ordering::SeqCst) {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+            loop {
+                let mut complete = true;
+                if let Some(net) = self.network() {
+                    for device in net.devices().iter().filter(|d| matches!(d.role, Role::Desktop | Role::Host)) {
+                        if let Ok(key) = peer_network::key_from_string(&device.id) {
+                            if let Some(info) = net.peer_leader(&key) {
+                                // Apply the verdict ourselves before opening admission;
+                                // the watcher may not yet have consumed its event.
+                                self.observe(&device.id, info).await?;
+                            } else { complete = false; }
+                        }
+                    }
+                }
+                if complete || self.config().state != HostState::Active || tokio::time::Instant::now() >= deadline { break; }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        }
         let _transition = self.0.transition.lock().await;
         let state = self
             .0
             .state
             .upgrade()
             .ok_or_else(|| ApiError::unavailable("daemon stopped"))?;
+        self.0.verifying.store(false, Ordering::SeqCst);
         state.start_leader_components()
     }
 
@@ -325,6 +357,7 @@ impl LeaderControl {
                 "handover cannot decrease the ownership epoch",
             ));
         }
+        self.0.verifying.store(false, Ordering::SeqCst);
         self.apply(next).await
     }
 
@@ -370,6 +403,7 @@ impl LeaderControl {
             return Err(ApiError::conflict("leader epoch ceiling reached; explicit force required"));
         }
         next.epoch = highest.saturating_add(1).min(EPOCH_CEILING);
+        self.0.verifying.store(false, Ordering::SeqCst);
         next.state = HostState::Active;
         next.leader = None;
         if next.mode == HostMode::Client {

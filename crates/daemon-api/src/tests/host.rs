@@ -587,3 +587,19 @@ async fn conflict_notifications_require_active_sender_and_active_local_owner() {
         }
     }
 }
+
+#[tokio::test]
+async fn boot_peer_verification_blocks_scheduler_and_automatic_admission() {
+    let t = setup();
+    let other = setup();
+    let net = attach_network(&t).await;
+    let other_net = attach_network(&other).await;
+    let invite = net.create_invite(peer_network::Role::Desktop).await;
+    other_net.pair(&peer_network::PairTicket::parse(&invite.ticket).unwrap()).await.unwrap();
+    t.state.leader().set_network(net.clone());
+    t.state.start_leader_components().unwrap();
+    assert!(t.state.scheduler().is_err());
+    assert!(t.state.leader().with_active(|| ()).is_err());
+    net.shutdown().await;
+    other_net.shutdown().await;
+}

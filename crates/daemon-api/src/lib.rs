@@ -424,7 +424,7 @@ impl AppState {
     /// # Errors
     /// Returns errors opening the schedule store.
     pub(crate) fn start_leader_components(&self) -> Result<(), ApiError> {
-        if self.0.shutdown.is_cancelled() || !self.leader().config().runs_components() {
+        if self.0.shutdown.is_cancelled() || !self.leader().components_allowed() {
             return Ok(());
         }
         self.start_scheduler()?;
@@ -479,7 +479,7 @@ impl AppState {
 
     /// The running scheduler, or `503` when the daemon did not start one.
     pub(crate) fn scheduler(&self) -> Result<Scheduler, ApiError> {
-        if !self.leader().config().runs_components() {
+        if !self.leader().components_allowed() {
             return Err(ApiError::conflict("this installation is standby"));
         }
         self.0
@@ -496,11 +496,11 @@ impl AppState {
     /// # Errors
     /// The schedule store cannot be opened.
     pub fn start_scheduler(&self) -> Result<(), scheduler::SchedulerError> {
-        if !self.leader().config().runs_components() {
+        if !self.leader().components_allowed() {
             return Ok(());
         }
         let mut scheduler = self.0.scheduler.lock();
-        if !self.leader().config().runs_components() {
+        if !self.leader().components_allowed() {
             return Ok(());
         }
         if scheduler.is_some() {
