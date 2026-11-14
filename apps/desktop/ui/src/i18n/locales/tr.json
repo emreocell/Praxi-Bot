@@ -743,7 +743,12 @@
     "apps": "Uygulamalar",
     "computer": "Bilgisayar",
     "help": "Yardım",
-    "localComputer": "Bu bilgisayar"
+    "localComputer": "Bu bilgisayar",
+    "appearance": "Görünüm",
+    "ai": "Yapay zekâ",
+    "usage": "Kullanım",
+    "updates": "Güncellemeler",
+    "shortcutSettings": "Ctrl ,"
   },
   "apps": {
     "title": "Uygulamalar",
@@ -830,7 +835,14 @@
     "search": "Model ara",
     "empty": "Eşleşen model yok.",
     "switched": "{{model}} modeline geçildi",
-    "switchedDefault": "Varsayılan model {{model}} olarak ayarlandı"
+    "switchedDefault": "Varsayılan model {{model}} olarak ayarlandı",
+    "thinking": "Düşünme",
+    "levels": {
+      "low": "Düşük",
+      "medium": "Orta",
+      "high": "Yüksek",
+      "max": "Maks"
+    }
   },
   "settingsModal": {
     "title": "Ayarlar",
@@ -1263,5 +1275,18 @@
         "other": "Diğer"
       }
     }
+  },
+  "shell": {
+    "railGrip": "Kenar şeridini boyutlandır (ok tuşları)",
+    "panelGrip": "Bot panelini boyutlandır (ok tuşları)"
+  },
+  "botPanel": {
+    "toggle": "Bot paneli",
+    "close": "Paneli kapat",
+    "settings": "Bot ayarları",
+    "profile": "Bot profili",
+    "chats": "Sohbetler",
+    "noChats": "Henüz sohbet yok.",
+    "untitled": "Yeni sohbet"
   }
 }
