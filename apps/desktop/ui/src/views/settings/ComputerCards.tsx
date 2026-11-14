@@ -2,6 +2,8 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import {
   COMPUTER_TARGETS,
+  isComputerTargetAvailable,
+  parseComputerTarget,
   type ComputerTarget
 } from "../../lib/settingsPrefs";
 import styles from "../SettingsModal.module.css";
@@ -10,7 +12,7 @@ import { EmailCard } from "./EmailCard";
 import { WebSearchCard } from "./WebSearchCard";
 import type { CardDef, SettingsBridge } from "./types";
 
-/** Where the bot runs: this PC, a browser tab, a remote host (soon) or nowhere. */
+/** The connected computer; alternate targets stay unavailable until daemon support exists. */
 export function ComputerTargetBlock({
   value,
   onChange
@@ -26,8 +28,8 @@ export function ComputerTargetBlock({
       aria-label={t("settingsModal.computer.target.title")}
     >
       {COMPUTER_TARGETS.map((target) => {
-        const soon = target === "remote";
-        const active = value === target;
+        const soon = !isComputerTargetAvailable(target);
+        const active = parseComputerTarget(value) === target;
         return (
           <button
             key={target}

@@ -1155,12 +1155,12 @@
       "soon": "Yakında",
       "target": {
         "title": "Bot nerede çalışır",
-        "description": "Bilgisayar ve tarayıcı araçlarının nerede çalışacağını seçin."
+        "description": "Şimdilik yalnızca bağlı bilgisayar destekleniyor. Bilgisayar ve tarayıcı erişimini aşağıdaki İzinler bölümünden yönetin."
       },
       "targets": {
         "this-pc": {
-          "title": "Bu bilgisayar",
-          "description": "Bu makinede masaüstü otomasyonu."
+          "title": "Bağlı bilgisayar",
+          "description": "Araçlar, uygulamanın bağlı olduğu bilgisayarda çalışır."
         },
         "browser": {
           "title": "Yalnızca tarayıcı",
