@@ -1,14 +1,35 @@
+import { Monitor } from "lucide-react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
+import { Button } from "ui";
 import {
   COMPUTER_TARGETS,
   type ComputerTarget
 } from "../../lib/settingsPrefs";
+import { useLiveView } from "../../state/LiveViewContext";
 import styles from "../SettingsModal.module.css";
 import { PermissionsSection } from "../SettingsSections";
 import { EmailCard } from "./EmailCard";
 import { WebSearchCard } from "./WebSearchCard";
 import type { CardDef, SettingsBridge } from "./types";
+
+function OpenLiveViewerRow() {
+  const { t } = useTranslation();
+  const { openViewer } = useLiveView();
+  return (
+    <div>
+      <Button
+        variant="secondary"
+        size="sm"
+        data-testid="computer-open-live-view"
+        onClick={() => openViewer()}
+      >
+        <Monitor />
+        <span>{t("liveView.expand")}</span>
+      </Button>
+    </div>
+  );
+}
 
 /** Where the bot runs: this PC, a browser tab, a remote host (soon) or nowhere. */
 export function ComputerTargetBlock({
@@ -84,6 +105,7 @@ export function computerCards(b: SettingsBridge, t: TFunction): CardDef[] {
             value={b.settings.computerTarget}
             onChange={(computerTarget) => b.update({ computerTarget })}
           />
+          <OpenLiveViewerRow />
         </div>
       )
     },

@@ -113,7 +113,7 @@ function AppShell() {
     refreshBots,
     retry
   } = useDaemon();
-  const { setThumbnailDemand, overrideStop } = useLiveView();
+  const { setThumbnailDemand, overrideStop, openViewer } = useLiveView();
   const [settings, setSettings] = useState<AppSettings>(() => loadSettingsSync() ?? DEFAULT_SETTINGS);
   const [route, setRoute] = useState<Route>({ kind: "home" });
   const [controlState, setControlState] = useState<ControlSnapshot>(
@@ -499,6 +499,13 @@ function AppShell() {
             }}
           >
             {isHumanDriving ? t("widget.giveBack") : t("widget.takeTheWheel")}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => openViewer()}
+          >
+            {t("liveView.expand")}
           </Button>
         </div>
       </div>

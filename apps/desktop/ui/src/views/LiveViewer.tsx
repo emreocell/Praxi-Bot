@@ -17,6 +17,7 @@ import {
   type PointerEvent,
   type WheelEvent
 } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import type { HumanAction, TargetInfo } from "../api/types";
@@ -361,7 +362,7 @@ export function LiveViewer() {
     }
   };
 
-  if (!viewerOpen) {
+  if (!viewerOpen || typeof document === "undefined") {
     return null;
   }
 
@@ -438,7 +439,7 @@ export function LiveViewer() {
 
   const KindIcon = selectedTarget?.kind === "browser" ? Globe : Monitor;
 
-  return (
+  return createPortal(
     <div
       className={styles.backdrop}
       role="dialog"
@@ -786,7 +787,7 @@ export function LiveViewer() {
           <>
             <span className={styles.dockStatus}>
               {state.disconnected
-                ? t("liveView.states.disconnected")
+                ? t("liveView.reasons.disconnected")
                 : otherOwner
                   ? t("liveView.otherOwner", { owner: otherOwner })
                   : selectedTarget && targetSummary?.available
@@ -814,6 +815,7 @@ export function LiveViewer() {
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
