@@ -110,6 +110,15 @@ impl DesktopControlGate for LoopControl {
         })
     }
 
+    fn computer_in_use_for_bot(&self, bot_id: &str) -> bool {
+        self.sh.upgrade().is_some_and(|sh| {
+            sh.runs
+                .lock()
+                .values()
+                .any(|ctx| ctx.bot_id.to_string() == bot_id && ctx.computer.get().is_some())
+        })
+    }
+
     fn observation_refused(&self) -> Option<String> {
         self.sh
             .upgrade()
@@ -140,9 +149,7 @@ impl LoopControl {
             // Fail closed: if the loop is gone the latch cannot be consulted.
             return Err(NOT_CONSULTABLE.to_owned());
         };
-        let Some(gate) = sh.control.read().clone() else {
-            return Ok(ActionPermit::default());
-        };
+        let gate = sh.control.read().clone();
         let ctx = req
             .run_id
             .parse::<Uuid>()
@@ -154,29 +161,7 @@ impl LoopControl {
         let Some(ctx) = ctx else {
             return Err(NOT_CONSULTABLE.to_owned());
         };
-        let waiting = ComputerWait(Arc::clone(&ctx.waiting_computer));
-        if ctx.computer.get().is_none() {
-            ctx.waiting_computer
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-            if sh.computer_slots.available_permits() == 0 {
-                sh.emit(
-                    &ctx,
-                    Event::MessageDelta(protocol::event::MessageDelta {
-                        run_id: ctx.run_id,
-                        text: "Waiting for computer.\n".into(),
-                    }),
-                );
-            }
-        }
-        ctx.computer
-            .get_or_try_init(|| async {
-                Arc::clone(&sh.computer_slots)
-                    .acquire_owned()
-                    .await
-                    .map_err(|_| "computer admission closed".to_string())
-            })
-            .await?;
-        drop(waiting);
+        acquire_computer_slot(&sh, &ctx).await?;
         let request = ControlRequest {
             request_id: Uuid::now_v7(),
             run_id: ctx.run_id,
@@ -196,10 +181,14 @@ impl LoopControl {
         let computer = Arc::clone(&ctx.computer);
         let sh2: Arc<Shared> = Arc::clone(&sh);
         let publish = move || sh2.emit(&ctx, event.clone());
-        let permit = if highlight {
-            gate.admit_action(request, &publish).await?
+        let permit = if let Some(gate) = gate {
+            if highlight {
+                gate.admit_action(request, &publish).await?
+            } else {
+                gate.admit_background_action(request).await?
+            }
         } else {
-            gate.admit_background_action(request).await?
+            ActionPermit::default()
         };
         let validator = permit.validator();
         let epoch = permit.epoch();
@@ -211,6 +200,44 @@ impl LoopControl {
         wrapped.set_epoch(epoch);
         Ok(wrapped)
     }
+}
+
+/// One permit per root run, shared with its subagents and held until completion.
+/// Observation calls and script delegates reserve the same slot as mutations.
+pub(crate) async fn acquire_computer_slot(
+    sh: &Shared,
+    ctx: &crate::shared::RunCtx,
+) -> Result<(), String> {
+    let waiting = ComputerWait(Arc::clone(&ctx.waiting_computer));
+    if ctx.computer.get().is_none() {
+        ctx.waiting_computer
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    ctx.computer
+        .get_or_try_init(|| async {
+            match Arc::clone(&sh.computer_slots).try_acquire_owned() {
+                Ok(permit) => Ok(permit),
+                Err(tokio::sync::TryAcquireError::Closed) => {
+                    Err("computer admission closed".to_string())
+                }
+                Err(tokio::sync::TryAcquireError::NoPermits) => {
+                    sh.emit(
+                        ctx,
+                        Event::MessageDelta(protocol::event::MessageDelta {
+                            run_id: ctx.run_id,
+                            text: "Waiting for computer.\n".into(),
+                        }),
+                    );
+                    Arc::clone(&sh.computer_slots)
+                        .acquire_owned()
+                        .await
+                        .map_err(|_| "computer admission closed".to_string())
+                }
+            }
+        })
+        .await?;
+    drop(waiting);
+    Ok(())
 }
 
 /// Tool timeouts count active time; a human pause remains a cancellable wait.

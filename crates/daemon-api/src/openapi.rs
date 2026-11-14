@@ -112,7 +112,7 @@ impl Modify for Security {
     ),
     components(schemas(
         ::live_view::RecordHeader, ::live_view::FrameMetadata, ::live_view::SourceRect,
-        dto::ReleaseResult, dto::ControlStateChanged, dto::ScreenPrivilegesInput, sse::SseStatus, sse::Gap, dto::Health, dto::BotDto, dto::BotInput, dto::ChatDto, dto::CreateChat,
+        dto::ReleaseResult, dto::ControlStateChanged, dto::ScreenPrivilegesInput, sse::SseStatus, sse::Gap, dto::Health, dto::HostInfo, dto::BotDto, dto::BotInput, dto::ChatDto, dto::CreateChat,
         dto::MessageDto, dto::Mode, dto::SendMessage, dto::DeliveryKind, dto::SendResponse,
         dto::ApprovalDto, dto::Decision, dto::Scope, dto::DecideApproval,
         dto::DecisionResponse, dto::RunDto, dto::UsageTotals, dto::BotUsage,

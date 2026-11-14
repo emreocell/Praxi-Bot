@@ -38,6 +38,10 @@ pub trait DesktopControlGate: Send + Sync {
     fn computer_in_use(&self) -> bool {
         false
     }
+    /// Bot-specific activity, used to avoid pinning every idle profile for another bot's work.
+    fn computer_in_use_for_bot(&self, _bot_id: &str) -> bool {
+        self.computer_in_use()
+    }
     /// While the human drives, observation tools (snapshots, screenshots, OCR,
     /// tab and window listings) are refused too: the model must not read what
     /// the user types. `Some(message)` is returned to the model.
