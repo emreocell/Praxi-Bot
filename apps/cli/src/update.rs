@@ -549,7 +549,11 @@ mod linux {
     #[cfg(unix)]
     fn installed_tag(prefix: &Path) -> Result<String> {
         if let Some(current) = read_version_link(prefix, "current")? {
-            validate_installed(&prefix.join(&current))?;
+            let installed = prefix.join(&current);
+            validate_installed(&installed)?;
+            if let Some(version) = version_file(&installed)? {
+                return Ok(version);
+            }
             return Ok(current
                 .file_name()
                 .and_then(|s| s.to_str())
@@ -636,7 +640,6 @@ mod linux {
         directory(&prefix)?;
         let _lock = lock(&prefix)?;
         directory(&prefix.join("versions"))?;
-        let target = PathBuf::from("versions").join(&release.tag_name);
         // Always download and verify again, including same-tag repair. Directory
         // presence (or an interrupted current switch) is not proof of integrity.
         let staging = tempfile::Builder::new()
@@ -673,9 +676,7 @@ mod linux {
         std::fs::create_dir(&unpacked)?;
         unpack(&archive, &unpacked, std::env::consts::ARCH)?;
         ensure_launchers(&prefix)?;
-        remove_version(&prefix, &target)?;
-        std::fs::rename(&unpacked, prefix.join(&target))?;
-        std::fs::File::open(prefix.join("versions"))?.sync_all()?;
+        let target = publish_version(&prefix, &unpacked, &release.tag_name)?;
         switch(&prefix, &target)?;
         println!(
             "installed {}; restart required (launch {}/current/bin/bot)",
@@ -683,6 +684,61 @@ mod linux {
             prefix.display()
         );
         Ok(())
+    }
+
+    #[cfg(unix)]
+    fn publish_version(prefix: &Path, unpacked: &Path, version: &str) -> Result<PathBuf> {
+        use std::io::Write;
+
+        if tag(version)? != version {
+            return Err("invalid published version".into());
+        }
+        validate_installed(unpacked)?;
+        // VERSION is already included in current release archives. Preserve it,
+        // and add it for legacy archives so generation names never become the
+        // version displayed by self-update --check.
+        if let Some(archived) = version_file(unpacked)? {
+            if archived != version {
+                return Err("archive VERSION differs from the verified release".into());
+            }
+        } else {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(unpacked.join("VERSION"))?;
+            writeln!(file, "{version}")?;
+            file.sync_all()?;
+        }
+        std::fs::File::open(unpacked)?.sync_all()?;
+
+        // Never replace a version directory: current or previous may still
+        // reference it, including during same-tag repair. Publish into a fresh
+        // generation, then let switch() atomically select it for both launchers.
+        let generation = tempfile::Builder::new()
+            .prefix("v0-install-")
+            .tempdir_in(prefix.join("versions"))?;
+        let target = PathBuf::from("versions").join(
+            generation
+                .path()
+                .file_name()
+                .ok_or("invalid installation generation")?,
+        );
+        std::fs::rename(unpacked, generation.path())?;
+        std::fs::File::open(prefix.join("versions"))?.sync_all()?;
+        let _published = generation.keep();
+        Ok(target)
+    }
+
+    #[cfg(unix)]
+    fn version_file(directory: &Path) -> Result<Option<String>> {
+        match std::fs::read_to_string(directory.join("VERSION")) {
+            Ok(value) => Ok(Some(tag(value
+                .split_whitespace()
+                .next()
+                .ok_or("empty VERSION")?)?)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.into()),
+        }
     }
 
     #[cfg(unix)]
@@ -987,19 +1043,126 @@ mod linux {
             assert!(installed_tag(dir.path()).is_err());
             // Same operations used after freshly verified unpacking in run().
             ensure_launchers(dir.path()).unwrap();
-            remove_version(dir.path(), target).unwrap();
             let file = dir.path().join("archive.gz");
             std::fs::write(&file, archive()).unwrap();
-            std::fs::create_dir(dir.path().join(target)).unwrap();
-            unpack(&file, &dir.path().join(target), "aarch64").unwrap();
-            switch(dir.path(), target).unwrap();
+            let unpacked = dir.path().join("unpacked");
+            std::fs::create_dir(&unpacked).unwrap();
+            unpack(&file, &unpacked, "aarch64").unwrap();
+            let repaired = publish_version(dir.path(), &unpacked, "v1.0.0").unwrap();
+            switch(dir.path(), &repaired).unwrap();
             assert_eq!(installed_tag(dir.path()).unwrap(), "v1.0.0");
             // A fully unpacked release left before current switch is also repairable.
             std::fs::remove_file(dir.path().join("current")).unwrap();
-            switch(dir.path(), target).unwrap();
+            switch(dir.path(), &repaired).unwrap();
             assert_eq!(
                 std::fs::read(dir.path().join("bin/bot-node")).unwrap(),
                 b"fixture binary"
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn failed_same_version_publication_preserves_the_running_installation() {
+            let dir = tempfile::tempdir().unwrap();
+            let active = Path::new("versions/v1.0.0");
+            let installed = dir.path().join(active);
+            std::fs::create_dir_all(installed.join("bin")).unwrap();
+            for name in ["bot", "bot-node"] {
+                std::fs::write(installed.join("bin").join(name), "running binary").unwrap();
+            }
+            seal_installation(&installed).unwrap();
+            switch(dir.path(), active).unwrap();
+            // Model a filesystem failure after verification but before the
+            // staged directory can be published. The current version must
+            // remain launchable even when the final rename fails.
+            assert!(
+                publish_version(dir.path(), &dir.path().join("lost-staging"), "v1.0.0").is_err()
+            );
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("current/bin/bot")).unwrap(),
+                "running binary"
+            );
+            assert_eq!(installed_tag(dir.path()).unwrap(), "v1.0.0");
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn same_tag_publication_keeps_active_and_previous_until_atomic_switch() {
+            let dir = tempfile::tempdir().unwrap();
+            let active = Path::new("versions/v1.0.0");
+            let previous = Path::new("versions/v0.9.0");
+            for (target, contents) in [(previous, "previous"), (active, "running")] {
+                let installed = dir.path().join(target);
+                std::fs::create_dir_all(installed.join("bin")).unwrap();
+                for name in ["bot", "bot-node"] {
+                    std::fs::write(installed.join("bin").join(name), contents).unwrap();
+                }
+                seal_installation(&installed).unwrap();
+                switch(dir.path(), target).unwrap();
+            }
+            let file = dir.path().join("archive.gz");
+            std::fs::write(&file, archive()).unwrap();
+            let unpacked = dir.path().join("unpacked");
+            std::fs::create_dir(&unpacked).unwrap();
+            unpack(&file, &unpacked, "aarch64").unwrap();
+            std::fs::write(unpacked.join("VERSION"), "v1.0.0 signed-commit\n").unwrap();
+            let published = publish_version(dir.path(), &unpacked, "v1.0.0").unwrap();
+
+            assert_ne!(published, active);
+            assert_eq!(
+                read_version_link(dir.path(), "current").unwrap().as_deref(),
+                Some(active)
+            );
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("current/bin/bot")).unwrap(),
+                "running"
+            );
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("previous/bin/bot")).unwrap(),
+                "previous"
+            );
+            validate_installed(&dir.path().join(&published)).unwrap();
+
+            switch(dir.path(), &published).unwrap();
+            assert_eq!(installed_tag(dir.path()).unwrap(), "v1.0.0");
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("current/bin/bot")).unwrap(),
+                "fixture binary"
+            );
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("previous/bin/bot")).unwrap(),
+                "running"
+            );
+            switch(dir.path(), active).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("current/bin/bot")).unwrap(),
+                "running"
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn publication_rejects_a_mismatched_archive_version() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join("versions")).unwrap();
+            let file = dir.path().join("archive.gz");
+            std::fs::write(&file, archive()).unwrap();
+            let unpacked = dir.path().join("unpacked");
+            std::fs::create_dir(&unpacked).unwrap();
+            unpack(&file, &unpacked, "aarch64").unwrap();
+            std::fs::write(unpacked.join("VERSION"), "v9.9.9").unwrap();
+            let error = publish_version(dir.path(), &unpacked, "v1.0.0").unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("differs from the verified release")
+            );
+            assert!(unpacked.join("bin/bot").exists());
+            assert_eq!(
+                std::fs::read_dir(dir.path().join("versions"))
+                    .unwrap()
+                    .count(),
+                0
             );
         }
 
