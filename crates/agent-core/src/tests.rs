@@ -6237,13 +6237,22 @@ async fn computer_prepare_skips_non_pc_targets_and_bounds_stalled_provider() {
         computer_target::ComputerTarget::Browser,
         computer_target::ComputerTarget::Host,
     ] {
-        lp.sh.prepare_computer_provider(&target).await;
+        tokio::time::timeout(
+            Duration::from_secs(3),
+            lp.sh.prepare_computer_provider(&target),
+        )
+        .await
+        .expect("non-PC targets must not wait on preparation");
     }
     assert_eq!(provider.0.load(Ordering::SeqCst), 0);
     let start = tokio::time::Instant::now();
-    lp.sh
-        .prepare_computer_provider(&computer_target::ComputerTarget::Pc)
-        .await;
+    tokio::time::timeout(
+        Duration::from_secs(3),
+        lp.sh
+            .prepare_computer_provider(&computer_target::ComputerTarget::Pc),
+    )
+    .await
+    .expect("PC preparation must have its own bounded timeout");
     assert_eq!(provider.0.load(Ordering::SeqCst), 1);
     assert_eq!(start.elapsed(), Duration::from_secs(2));
 }
