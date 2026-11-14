@@ -1679,6 +1679,255 @@ async fn all_models_failing_fails_the_run() {
 
 // ---------- crash / recover ----------
 
+async fn run_with_pending_steering(
+    env: &Env,
+    during_model: bool,
+    already_consumed: bool,
+) -> protocol::RunId {
+    let barrier = Arc::new(Barrier::new(2));
+    let mut slow = tool("t.write", Effect::Write, "finished");
+    slow.barrier = Some(Arc::clone(&barrier));
+    let slow = Arc::new(slow);
+    let initial_model = during_model && !already_consumed;
+    let fake = Fake::new(if initial_model {
+        vec![Reply::Hang]
+    } else {
+        vec![calls(&[("c1", "t.write", json!({}))]), Reply::Hang]
+    });
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&slow)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "original task").unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let ready = if initial_model {
+                fake.n_requests() == 1
+            } else {
+                slow.count.load(Ordering::SeqCst) == 1
+            };
+            if ready {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("run did not reach its blocking step");
+    let steer = || {
+        assert_eq!(
+            lp.send_user_message(env.chat, "updated instruction", MessageMode::Steer)
+                .unwrap(),
+            Delivery::Steered(run)
+        );
+    };
+    if already_consumed {
+        steer();
+        barrier.wait().await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while fake.n_requests() < 2 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("first steering message was not consumed");
+    }
+    // Identical messages are separate accepted inputs. Restoration must
+    // preserve both occurrences without duplicating previously consumed ones.
+    steer();
+    steer();
+    run
+}
+
+fn crash_with_pending_steering(during_model: bool, already_consumed: bool) {
+    let env = setup();
+    let path = env.dir.path().to_path_buf();
+    let bot = env.bot;
+    let rt1 = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let run = rt1.block_on(run_with_pending_steering(
+        &env,
+        during_model,
+        already_consumed,
+    ));
+    drop(rt1);
+    let _data_dir = env.crash();
+
+    let storage = Arc::new(Storage::open(&path).unwrap());
+    let rt2 = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    rt2.block_on(async {
+        let fake = Fake::new(vec![text("adjusted")]);
+        let lp = make_loop(&storage, bot, &fake, &[], profile(""), cfg(Policy::full()));
+        assert_eq!(lp.recover().unwrap(), vec![run]);
+        lp.resume(run).unwrap();
+        assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+        assert_eq!(fake.n_requests(), 1);
+        let request = fake.request(0);
+        let users: Vec<_> = request
+            .messages
+            .iter()
+            .filter(|message| message.role == MessageRole::User)
+            .filter_map(|message| message.content.as_str())
+            .collect();
+        let mut expected = vec!["original task"];
+        expected.resize(if already_consumed { 4 } else { 3 }, "updated instruction");
+        assert_eq!(
+            users, expected,
+            "all accepted steering must reach the first resumed model request exactly once"
+        );
+        let persisted_users = storage
+            .list_steps(run)
+            .unwrap()
+            .into_iter()
+            .filter(|step| step.name == crate::shared::STEP_USER)
+            .count();
+        assert_eq!(persisted_users, expected.len());
+        // Rebuilding a finished context must not resurrect already-consumed
+        // messages as fresh steering after the next process restart.
+        let fresh = make_loop(&storage, bot, &fake, &[], profile(""), cfg(Policy::full()));
+        assert!(fresh.ctx_of(run).unwrap().state.lock().steer.is_empty());
+    });
+}
+
+#[test]
+fn pending_steering_survives_crash_during_tool() {
+    crash_with_pending_steering(false, false);
+}
+
+#[test]
+fn pending_steering_precedes_restarted_model_request() {
+    crash_with_pending_steering(true, false);
+}
+
+#[test]
+fn pending_steering_does_not_replay_consumed_messages() {
+    crash_with_pending_steering(true, true);
+}
+
+#[tokio::test]
+async fn pending_steering_continues_a_scheduled_tool_run() {
+    let env = setup();
+    let write = Arc::new(tool("t.write", Effect::Write, "written"));
+    let fake = Fake::new(vec![text("adjusted")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&write)],
+        profile(""),
+        cfg(Policy::approve_destructive()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp
+        .run_scheduled(
+            env.chat,
+            protocol::TaskId::new(),
+            crate::ScheduleWork::Tool {
+                name: "t.write".into(),
+                input: json!({}),
+            },
+        )
+        .unwrap();
+    let Event::ApprovalNeeded(approval) =
+        until(&mut rx, |event| matches!(event, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(
+        lp.send_user_message(env.chat, "also explain the result", MessageMode::Steer)
+            .unwrap(),
+        Delivery::Steered(run)
+    );
+    lp.approve(approval.call_id, ApprovalScope::Once, env.user)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(write.count.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        fake.n_requests(),
+        1,
+        "accepted steering must reach the model"
+    );
+    let request = fake.request(0);
+    let roles: Vec<_> = request
+        .messages
+        .iter()
+        .map(|message| &message.role)
+        .collect();
+    assert_eq!(
+        roles,
+        [
+            &MessageRole::System,
+            &MessageRole::User,
+            &MessageRole::User,
+            &MessageRole::User,
+        ]
+    );
+    let output = request.messages[2].content.as_str().unwrap();
+    assert!(output.contains("UNTRUSTED"));
+    assert!(output.contains("written"));
+    assert!(request.messages[2].tool_call_id.is_none());
+    assert_eq!(request.messages[3].content, "also explain the result");
+}
+
+#[tokio::test]
+async fn pending_steering_redacts_persisted_steps() {
+    let env = setup();
+    let secret = "steering-sentinel-KEY-5150";
+    let write = Arc::new(tool("t.write", Effect::Write, "unused"));
+    let fake = Fake::new(vec![
+        calls(&[("c1", "t.write", json!({}))]),
+        text("adjusted"),
+    ]);
+    let mut config = cfg(Policy::approve_destructive());
+    config.redactor = Some(redactor_with(secret));
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&write)],
+        profile(""),
+        config,
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "start").unwrap();
+    let Event::ApprovalNeeded(approval) =
+        until(&mut rx, |event| matches!(event, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(
+        lp.send_user_message(env.chat, &format!("keep {secret} safe"), MessageMode::Steer)
+            .unwrap(),
+        Delivery::Steered(run)
+    );
+    lp.deny(approval.call_id, env.user, None).unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let steps: Vec<_> = env
+        .storage
+        .list_steps(run)
+        .unwrap()
+        .into_iter()
+        .map(|step| json!({"input": step.input, "output": step.output}))
+        .collect();
+    let steps = serde_json::to_string(&steps).unwrap();
+    assert!(
+        !steps.contains(secret),
+        "secret stored in run steps: {steps}"
+    );
+    assert!(steps.contains("[REDACTED]"));
+}
+
 #[test]
 fn crash_mid_tool_then_recover_never_replays_the_tool() {
     let env = setup();

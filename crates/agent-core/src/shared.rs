@@ -24,7 +24,7 @@ use secret_store::SecretStore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use storage::{EventJournal, JournalRecord, Run, Storage, read_event_log};
-use task_runtime::{ExecError, Runtime};
+use task_runtime::{ExecError, RunState, Runtime};
 use tokio::sync::{broadcast, oneshot};
 use tokio::task::JoinHandle;
 use tool_registry::{Platform, ToolRegistry, ToolSpec};
@@ -816,6 +816,7 @@ impl Shared {
                     .map(|ctx| Arc::clone(&ctx.computer))
             })
             .unwrap_or_else(|| Arc::new(tokio::sync::OnceCell::new()));
+        let steer = self.pending_steering(run)?;
         let ctx = Arc::new(RunCtx {
             computer,
             waiting_computer: Arc::new(AtomicBool::new(false)),
@@ -834,13 +835,46 @@ impl Shared {
             parent_run_id: run.parent_run_id,
             sub,
             state: Mutex::new(CtxState {
-                steer: VecDeque::new(),
+                steer,
                 closed: false,
                 seq,
                 todos: Vec::new(),
             }),
         });
         Ok(Arc::clone(self.runs.lock().entry(run.id).or_insert(ctx)))
+    }
+
+    /// Accepted steering is stored as a user message before it is queued.
+    /// Every planned user step consumes one such row, even if its no-op
+    /// execution was interrupted: history replays the durable step input.
+    fn pending_steering(&self, run: &Run) -> Result<VecDeque<String>, ExecError> {
+        if run.parent_run_id.is_some()
+            || RunState::parse(&run.state).is_some_and(RunState::is_terminal)
+        {
+            return Ok(VecDeque::new());
+        }
+        let Some(chat_id) = run.chat_id else {
+            return Ok(VecDeque::new());
+        };
+        let consumed = self
+            .storage
+            .list_steps(run.id)
+            .map_err(xe)?
+            .iter()
+            .filter(|step| step.name == STEP_USER)
+            .count()
+            // The original task belongs to first_step, including when no
+            // step intent was written before the restart.
+            .max(1);
+        Ok(self
+            .storage
+            .list_messages(chat_id)
+            .map_err(xe)?
+            .into_iter()
+            .filter(|message| message.run_id == Some(run.id) && message.role == "user")
+            .skip(consumed)
+            .map(|message| message.content)
+            .collect())
     }
 
     /// Whether `spec` may be shown to / used by the bot of run `run_id` (the
