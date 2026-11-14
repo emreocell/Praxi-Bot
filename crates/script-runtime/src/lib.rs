@@ -40,6 +40,7 @@ use rquickjs::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
+use tokio_util::sync::CancellationToken;
 
 /// Marker appended to anything that was cut because of `max_output_bytes`.
 pub const TRUNCATION_MARKER: &str = "…[truncated]";
@@ -156,6 +157,9 @@ pub enum ScriptError {
     /// The wall-clock timeout elapsed.
     #[error("script timed out after {0:?}")]
     Timeout(Duration),
+    /// The caller cancelled the run.
+    #[error("script was cancelled")]
+    Cancelled,
     /// The JS heap exceeded the memory limit.
     #[error("script exceeded the memory limit of {limit_bytes} bytes")]
     MemoryLimitExceeded {
@@ -291,6 +295,24 @@ impl ScriptRuntime {
         host: Arc<dyn ScriptHost>,
         limits: Limits,
     ) -> Result<ScriptOutput, ScriptError> {
+        Self::run_cancellable(code, host, limits, CancellationToken::new()).await
+    }
+
+    /// Run a script until it finishes, reaches a limit, or is cancelled.
+    /// Cancellation interrupts JavaScript execution and drops awaited host
+    /// calls, including when the interpreter runs on a blocking worker.
+    ///
+    /// # Errors
+    /// As [`Self::run`], plus [`ScriptError::Cancelled`] when `cancel` is set.
+    pub async fn run_cancellable(
+        code: &str,
+        host: Arc<dyn ScriptHost>,
+        limits: Limits,
+        cancel: CancellationToken,
+    ) -> Result<ScriptOutput, ScriptError> {
+        if cancel.is_cancelled() {
+            return Err(ScriptError::Cancelled);
+        }
         let started = Instant::now();
         let deadline = started + limits.timeout;
         let timed_out = Arc::new(AtomicBool::new(false));
@@ -300,7 +322,11 @@ impl ScriptRuntime {
         rt.set_max_stack_size(limits.max_stack_bytes).await;
         {
             let flag = Arc::clone(&timed_out);
+            let interrupt_cancel = cancel.clone();
             rt.set_interrupt_handler(Some(Box::new(move || {
+                if interrupt_cancel.is_cancelled() {
+                    return true;
+                }
                 if Instant::now() >= deadline {
                     flag.store(true, Ordering::SeqCst);
                     true
@@ -341,10 +367,18 @@ impl ScriptRuntime {
             ctx.async_with(async move |ctx| execute(&ctx, &source, &state).await)
         };
 
-        let Ok(outcome) = tokio::time::timeout(limits.timeout, work).await else {
+        let outcome = tokio::select! {
+            biased;
+            () = cancel.cancelled() => return Err(ScriptError::Cancelled),
+            result = tokio::time::timeout(limits.timeout, work) => result,
+        };
+        let Ok(outcome) = outcome else {
             return Err(ScriptError::Timeout(limits.timeout));
         };
 
+        if cancel.is_cancelled() {
+            return Err(ScriptError::Cancelled);
+        }
         if state.call_limit_hit.load(Ordering::SeqCst) {
             return Err(ScriptError::ToolCallLimitExceeded {
                 max: limits.max_tool_calls,

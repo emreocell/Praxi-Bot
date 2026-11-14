@@ -108,6 +108,65 @@ async fn infinite_loop_is_killed_by_timeout() {
     assert!(started.elapsed() < Duration::from_secs(4));
 }
 
+struct StartedHost(Arc<tokio::sync::Notify>);
+
+#[async_trait]
+impl ScriptHost for StartedHost {
+    async fn call_tool(&self, _name: &str, _input: Value) -> Result<Value, String> {
+        self.0.notify_one();
+        Ok(Value::Null)
+    }
+}
+
+#[tokio::test]
+async fn cancellation_interrupts_a_busy_loop_before_its_deadline() {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let host = Arc::new(StartedHost(Arc::clone(&entered)));
+    let cancel = CancellationToken::new();
+    let worker_cancel = cancel.clone();
+    let handle = tokio::runtime::Handle::current();
+    let worker = tokio::task::spawn_blocking(move || {
+        handle.block_on(ScriptRuntime::run_cancellable(
+            "await tools.call('started', {}); while (true) {}",
+            host,
+            limits(),
+            worker_cancel,
+        ))
+    });
+    tokio::time::timeout(Duration::from_secs(5), entered.notified())
+        .await
+        .expect("script did not start");
+    cancel.cancel();
+    let error = tokio::time::timeout(Duration::from_secs(2), worker)
+        .await
+        .expect("cancelled worker did not stop")
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(error, ScriptError::Cancelled);
+}
+
+#[tokio::test]
+async fn an_already_cancelled_script_does_not_start() {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+    let error = ScriptRuntime::run_cancellable(
+        "await tools.call('started', {});",
+        Arc::new(StartedHost(Arc::clone(&entered))),
+        limits(),
+        cancel,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error, ScriptError::Cancelled);
+    assert!(
+        tokio::time::timeout(Duration::ZERO, entered.notified())
+            .await
+            .is_err(),
+        "a cancelled script must not call its host"
+    );
+}
+
 #[tokio::test]
 async fn memory_bomb_is_stopped() {
     let limits = Limits {
