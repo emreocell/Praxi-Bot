@@ -167,8 +167,8 @@ mod linux {
         if expected.len() != 64 || !expected.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err("invalid sha256".into());
         }
-        if let Some(file) = words.next()
-            && file.trim_start_matches('*') != name
+        if words.next().map(|file| file.trim_start_matches('*')) != Some(name)
+            || words.next().is_some()
         {
             return Err("checksum names a different asset".into());
         }
@@ -194,7 +194,8 @@ mod linux {
         let config = tempfile::Builder::new()
             .prefix(".gh-verify-")
             .tempdir_in(archive.parent().ok_or("archive has no parent")?)?;
-        let status = tokio::process::Command::new("gh")
+        let verifier = trusted_verifier()?;
+        let status = tokio::process::Command::new(verifier)
             .arg("attestation")
             .arg("verify")
             .arg(archive)
@@ -219,7 +220,7 @@ mod linux {
             ])
             // The verifier needs no daemon/provider credentials or account config.
             .env_clear()
-            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("PATH", "/usr/bin:/bin")
             .env("HOME", config.path())
             .env("GH_CONFIG_DIR", config.path())
             .env("GH_HOST", "github.com")
@@ -231,6 +232,34 @@ mod linux {
             .map_err(|e| format!("provenance verification requires gh attestation: {e}"))?;
         if !status.success() {
             return Err("provenance verification failed; installation unchanged".into());
+        }
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    fn trusted_verifier() -> Result<PathBuf> {
+        // Check every component: a root-owned executable in a writable directory
+        // is still replaceable. Never search the caller's PATH, even under sudo.
+        let path = Path::new("/usr/bin/gh").canonicalize().map_err(
+            |_| "provenance verification requires trusted /usr/bin/gh; installation unchanged",
+        )?;
+        trusted_root_path(&path)?;
+        Ok(path)
+    }
+
+    #[cfg(not(unix))]
+    fn trusted_verifier() -> Result<PathBuf> {
+        Err("provenance verification requires Linux".into())
+    }
+
+    #[cfg(unix)]
+    fn trusted_root_path(path: &Path) -> Result<()> {
+        use std::os::unix::fs::MetadataExt;
+        for component in path.ancestors() {
+            let meta = std::fs::symlink_metadata(component)?;
+            if meta.uid() != 0 || meta.mode() & 0o022 != 0 || meta.file_type().is_symlink() {
+                return Err("untrusted provenance verifier ownership or permissions".into());
+            }
         }
         Ok(())
     }
@@ -383,16 +412,8 @@ mod linux {
             return Err("invalid installed version".into());
         }
         let directory = prefix.join(&target);
-        if std::fs::symlink_metadata(&directory)?
-            .file_type()
-            .is_symlink()
-        {
+        if std::fs::symlink_metadata(&directory).is_ok_and(|meta| meta.file_type().is_symlink()) {
             return Err("installed version must not be a symlink".into());
-        }
-        for binary in ["bin/bot", "bin/bot-node"] {
-            if !directory.join(binary).is_file() {
-                return Err("installed version is incomplete".into());
-            }
         }
         Ok(Some(target))
     }
@@ -461,12 +482,9 @@ mod linux {
                 .transpose()?
                 .unwrap_or(tag(env!("CARGO_PKG_VERSION"))?);
             let baseline = PathBuf::from("versions").join(installed);
-            if prefix.join(&baseline).try_exists()? {
-                return Err(
-                    "baseline version already exists without current; repair installation first"
-                        .into(),
-                );
-            }
+            // No launcher has changed until current exists. Rebuild a baseline
+            // left by an interrupted adoption from the original flat binaries.
+            remove_version(prefix, &baseline)?;
             let staging = tempfile::Builder::new()
                 .prefix(".baseline-")
                 .tempdir_in(prefix)?;
@@ -496,6 +514,7 @@ mod linux {
     #[cfg(unix)]
     fn installed_tag(prefix: &Path) -> Result<String> {
         if let Some(current) = read_version_link(prefix, "current")? {
+            validate_installed(&prefix.join(&current))?;
             return Ok(current
                 .file_name()
                 .and_then(|s| s.to_str())
@@ -505,8 +524,19 @@ mod linux {
         std::fs::read_to_string(prefix.join("VERSION"))
             .ok()
             .and_then(|s| s.split_whitespace().next().map(str::to_owned))
-            .map(|s| tag(&s))
-            .unwrap_or_else(|| tag(env!("CARGO_PKG_VERSION")))
+            .map_or_else(|| tag(env!("CARGO_PKG_VERSION")), |s| tag(&s))
+    }
+
+    #[cfg(unix)]
+    fn validate_installed(directory: &Path) -> Result<()> {
+        for binary in ["bin/bot", "bin/bot-node"] {
+            let meta = std::fs::symlink_metadata(directory.join(binary))
+                .map_err(|_| "installed version is incomplete; rerun self-update to repair")?;
+            if !meta.is_file() || meta.len() == 0 || meta.file_type().is_symlink() {
+                return Err("installed version is incomplete; rerun self-update to repair".into());
+            }
+        }
+        Ok(())
     }
 
     #[cfg(target_os = "linux")]
@@ -516,12 +546,18 @@ mod linux {
             .prefix
             .clone()
             .map_or_else(|| inferred_prefix(&std::env::current_exe()?), Ok)?;
+        if !args.check {
+            directory(&prefix)?;
+            tempfile::Builder::new().prefix(".write-probe-").tempdir_in(&prefix)
+                .map_err(|e| format!("installation prefix is not writable: {e}; run sudo {}/bin/bot self-update (with the same options)", prefix.display()))?;
+        }
         if args.rollback {
             directory(&prefix)?;
             let _lock = lock(&prefix)?;
             directory(&prefix.join("versions"))?;
             let previous = read_version_link(&prefix, "previous")?
                 .ok_or("no previous version to roll back to")?;
+            validate_installed(&prefix.join(&previous))?;
             switch(&prefix, &previous)?;
             println!("rolled back to {}; restart required", previous.display());
             return Ok(());
@@ -546,23 +582,24 @@ mod linux {
                 return Err("unexpected release asset origin".into());
             }
         }
-        let installed = installed_tag(&prefix)?;
+        let installed = installed_tag(&prefix);
         println!(
-            "installed {installed}; available {} ({name})",
+            "installed {}; available {} ({name})",
+            installed
+                .as_deref()
+                .unwrap_or("incomplete (repair required)"),
             release.tag_name
         );
-        if args.check || installed == release.tag_name {
+        if args.check {
+            installed?;
             return Ok(());
         }
         directory(&prefix)?;
         let _lock = lock(&prefix)?;
         directory(&prefix.join("versions"))?;
         let target = PathBuf::from("versions").join(&release.tag_name);
-        if prefix.join(&target).try_exists()? {
-            return Err(
-                "version already installed; use --rollback or choose another version".into(),
-            );
-        }
+        // Always download and verify again, including same-tag repair. Directory
+        // presence (or an interrupted current switch) is not proof of integrity.
         let staging = tempfile::Builder::new()
             .prefix(".update-")
             .tempdir_in(&prefix)?;
@@ -597,6 +634,7 @@ mod linux {
         std::fs::create_dir(&unpacked)?;
         unpack(&archive, &unpacked, std::env::consts::ARCH)?;
         ensure_launchers(&prefix)?;
+        remove_version(&prefix, &target)?;
         std::fs::rename(&unpacked, prefix.join(&target))?;
         std::fs::File::open(prefix.join("versions"))?.sync_all()?;
         switch(&prefix, &target)?;
@@ -605,6 +643,30 @@ mod linux {
             release.tag_name,
             prefix.display()
         );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    fn remove_version(prefix: &Path, target: &Path) -> Result<()> {
+        let mut parts = target.components();
+        if parts.next() != Some(Component::Normal("versions".as_ref()))
+            || parts.clone().count() != 1
+            || target
+                .file_name()
+                .and_then(|s| s.to_str())
+                .is_none_or(|s| tag(s).ok().as_deref() != Some(s))
+        {
+            return Err("unsafe version replacement".into());
+        }
+        let path = prefix.join(target);
+        match std::fs::symlink_metadata(&path) {
+            Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => {
+                std::fs::remove_dir_all(path)?
+            }
+            Ok(_) => return Err("version must be an ordinary directory".into()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+            Err(e) => return Err(e.into()),
+        }
         Ok(())
     }
 
@@ -806,6 +868,95 @@ mod linux {
             assert!(lock(dir.path()).is_err());
             drop(first);
             assert!(lock(dir.path()).is_ok());
+        }
+
+        #[test]
+        fn checksum_requires_exactly_the_named_asset() {
+            let dir = tempfile::tempdir().unwrap();
+            let file = dir.path().join("asset");
+            std::fs::write(&file, b"verified bytes").unwrap();
+            let hash = format!("{:x}", Sha256::digest(b"verified bytes"));
+            for suffix in ["", "  wrong", "  asset extra"] {
+                assert!(verify_sha256(&file, &format!("{hash}{suffix}"), "asset").is_err());
+            }
+            verify_sha256(&file, &format!("{hash} *asset"), "asset").unwrap();
+        }
+
+        #[cfg(unix)]
+        #[tokio::test]
+        async fn planted_path_verifier_cannot_accept_unverified_bytes() {
+            const CHILD: &str = "PRAXI_TEST_PLANTED_VERIFIER";
+            if std::env::var_os(CHILD).is_some() {
+                let dir = tempfile::tempdir().unwrap();
+                let archive = dir.path().join("bad.tar.gz");
+                let bundle = dir.path().join("bad.json");
+                std::fs::write(&archive, "unverified").unwrap();
+                std::fs::write(&bundle, "{}").unwrap();
+                assert!(verify_signature(&archive, &bundle, "v1.2.3").await.is_err());
+                return;
+            }
+            use std::os::unix::fs::PermissionsExt;
+            let dir = tempfile::tempdir().unwrap();
+            let fake = dir.path().join("gh");
+            let marker = dir.path().join("executed");
+            std::fs::write(
+                &fake,
+                format!("#!/bin/sh\ntouch '{}'\nexit 0\n", marker.display()),
+            )
+            .unwrap();
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "update::linux::tests::planted_path_verifier_cannot_accept_unverified_bytes",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .env("PATH", dir.path())
+                .status()
+                .unwrap();
+            assert!(status.success());
+            assert!(
+                !marker.exists(),
+                "caller PATH must never select the verifier"
+            );
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o777)).unwrap();
+            assert!(trusted_root_path(&fake).is_err());
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn interrupted_adoption_and_incomplete_current_can_be_repaired() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join("bin")).unwrap();
+            std::fs::create_dir_all(dir.path().join("versions")).unwrap();
+            std::fs::write(dir.path().join("VERSION"), "1.0.0").unwrap();
+            for name in ["bot", "bot-node"] {
+                std::fs::write(dir.path().join("bin").join(name), "baseline").unwrap();
+            }
+            let target = Path::new("versions/v1.0.0");
+            std::fs::create_dir_all(dir.path().join(target).join("bin")).unwrap();
+            std::fs::write(dir.path().join(target).join("bin/bot"), "partial").unwrap();
+            ensure_launchers(dir.path()).unwrap();
+            assert_eq!(installed_tag(dir.path()).unwrap(), "v1.0.0");
+            std::fs::remove_file(dir.path().join(target).join("bin/bot-node")).unwrap();
+            assert!(installed_tag(dir.path()).is_err());
+            // Same operations used after freshly verified unpacking in run().
+            ensure_launchers(dir.path()).unwrap();
+            remove_version(dir.path(), target).unwrap();
+            let file = dir.path().join("archive.gz");
+            std::fs::write(&file, archive()).unwrap();
+            std::fs::create_dir(dir.path().join(target)).unwrap();
+            unpack(&file, &dir.path().join(target), "aarch64").unwrap();
+            switch(dir.path(), target).unwrap();
+            assert_eq!(installed_tag(dir.path()).unwrap(), "v1.0.0");
+            // A fully unpacked release left before current switch is also repairable.
+            std::fs::remove_file(dir.path().join("current")).unwrap();
+            switch(dir.path(), target).unwrap();
+            assert_eq!(
+                std::fs::read(dir.path().join("bin/bot-node")).unwrap(),
+                b"fixture binary"
+            );
         }
 
         #[cfg(unix)]

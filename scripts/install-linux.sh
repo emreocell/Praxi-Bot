@@ -540,6 +540,11 @@ write_wrapper() { # <command name> <binary name> <env file>
 # Runs ${PREFIX}/bin/${bin} as the ${SVC_USER} user with ${envf}.
 inner='set -a; . ${envf}; set +a; exec "\$@"'
 if [ "\$(id -u)" -eq 0 ]; then
+  if [ "${cmd}" = praxi ] && [ "\${1:-}" = self-update ]; then
+    # Only this explicit maintenance command retains root. Do not source the
+    # service environment (which includes provider/daemon secrets).
+    exec env -i PATH=/usr/bin:/bin HOME=/root ${PREFIX}/bin/${bin} "\$@"
+  fi
   if [ "${cmd}" = praxi ] && [ "\${1:-}" = doctor ]; then
     exec systemd-run --quiet --wait --pipe --collect --unit="praxi-doctor-\$\$" \
       --property=User=${SVC_USER} --property=Group=${SVC_USER} \

@@ -406,6 +406,55 @@ async fn permission_deny_stops_the_replay() {
 }
 
 #[tokio::test]
+async fn success_checks_require_computer_read_admission_before_backend_access() {
+    let desktop = notepad_desktop();
+    let browser = FakeBrowser::new("needle");
+    for (check, tool) in [
+        (
+            SuccessCheck::WindowTitle {
+                pattern: "*".into(),
+            },
+            "desktop_list_apps",
+        ),
+        (
+            SuccessCheck::DesktopText {
+                window_title_pattern: None,
+                contains: "needle".into(),
+            },
+            "desktop_get_state",
+        ),
+        (
+            SuccessCheck::BrowserText {
+                contains: "needle".into(),
+            },
+            "browser_snapshot",
+        ),
+    ] {
+        let mut wf = Workflow::new("read admission");
+        wf.success_check = Some(check);
+        let gate = RecordingGate::denying(tool);
+        let rp = Replayer::new(
+            handles(Some(desktop.clone()), Some(browser.clone())),
+            ReplayOptions::instant(),
+        );
+        let report = rp
+            .replay(&wf, &params(&json!({})), gate.as_ref())
+            .await
+            .unwrap();
+        assert!(
+            report
+                .handover()
+                .unwrap()
+                .reason
+                .detail()
+                .contains("permission denied")
+        );
+        assert_eq!(gate.tools(), vec![tool]);
+        assert!(browser.calls.lock().is_empty());
+    }
+}
+
+#[tokio::test]
 async fn agent_step_and_failed_success_check_hand_over() {
     let browser = FakeBrowser::new("# P (https://a.test/)\n  [e1] button \"Go\"\n");
     let mut wf = Workflow::new("w");

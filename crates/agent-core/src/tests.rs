@@ -3834,31 +3834,20 @@ async fn computer_slot_is_enforced_without_an_embedder_control_gate() {
     let other = gate.clone();
     let second_request = req(second);
     let pending = tokio::spawn(async move { other.admit_action(&second_request).await });
-    for _ in 0..100 {
-        if lp
-            .sh
-            .runs
-            .lock()
-            .get(&second)
-            .unwrap()
-            .waiting_computer
-            .load(std::sync::atomic::Ordering::SeqCst)
-        {
-            break;
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let item = events.recv().await.unwrap();
+            if let Event::MessageDelta(delta) = item.envelope.event
+                && delta.run_id == second
+                && delta.text.contains("Waiting for computer")
+            {
+                break;
+            }
         }
-        tokio::task::yield_now().await;
-    }
+    })
+    .await
+    .expect("a queued computer run must emit a visible waiting message");
     assert!(!pending.is_finished());
-    let mut waiting_notice = false;
-    while let Ok(item) = events.try_recv() {
-        if let Event::MessageDelta(delta) = item.envelope.event {
-            waiting_notice |= delta.run_id == second && delta.text.contains("Waiting for computer");
-        }
-    }
-    assert!(
-        waiting_notice,
-        "a queued computer run must have a visible waiting message"
-    );
     lp.sh.runs.lock().remove(&first);
     assert!(
         !pending.is_finished(),
