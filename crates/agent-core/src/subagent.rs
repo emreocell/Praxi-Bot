@@ -484,8 +484,11 @@ pub(crate) fn model_tokens(steps: &[storage::RunStep]) -> u64 {
         .filter(|s| s.name == STEP_MODEL)
         .filter_map(step_output::<ModelOut>)
         .filter_map(|m| m.usage)
-        .map(|u| u.prompt_tokens + u.completion_tokens)
-        .sum()
+        .fold(0_u64, |total, usage| {
+            total
+                .saturating_add(usage.prompt_tokens)
+                .saturating_add(usage.completion_tokens)
+        })
 }
 
 /// Tokens spent by every descendant of `run_id` (children, grandchildren, ...),
