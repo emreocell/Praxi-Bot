@@ -115,6 +115,24 @@ async fn adding_an_agentmail_account_creates_the_inbox_and_keeps_the_key_in_the_
 }
 
 #[tokio::test]
+async fn invalid_sender_allowlist_never_creates_a_remote_inbox() {
+    let server = MockServer::start().await;
+    mock_create(&server, "helper@agentmail.to").await;
+    let f = fixture(&server);
+    let mut request = input("bot-mail", Some(BOT_A));
+    request.allowed_senders = vec!["not-an-address".to_owned()];
+    let err = f.host.add(request).await.unwrap_err();
+    assert!(matches!(err, EmailControlError::Invalid(_)), "{err:?}");
+    assert!(
+        server.received_requests().await.unwrap().is_empty(),
+        "invalid local configuration must fail before any provider request"
+    );
+    assert!(f.host.list().is_empty());
+    assert!(secret(&f, "email/bot-mail/api_key").is_none());
+    assert!(!f.dir.path().join(EMAIL_FILE).exists());
+}
+
+#[tokio::test]
 async fn a_provider_refusal_saves_nothing_and_never_echoes_the_key() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
