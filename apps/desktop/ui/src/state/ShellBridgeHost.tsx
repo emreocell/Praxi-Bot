@@ -18,8 +18,7 @@ import {
 } from "../lib/shell";
 import { useDaemon } from "./DaemonContext";
 import type { RunState } from "./timeline";
-
-const LIVE_RUN_STATES = new Set(["pending", "running", "waiting_approval"]);
+import { cancelAllRuns } from "../lib/runState";
 
 export interface ShellBridgeSettings extends NotifyPrefs {
   notifyPrivate: boolean;
@@ -174,15 +173,7 @@ export function ShellBridgeHost({
         if (!c) {
           return;
         }
-        void c
-          .listRuns()
-          .then((all) =>
-            Promise.allSettled(
-              all
-                .filter((r) => LIVE_RUN_STATES.has(r.state))
-                .map((r) => c.cancelRun(r.id))
-            )
-          )
+        void cancelAllRuns(c)
           .then(() => refreshRuns())
           .catch(() => {});
       })

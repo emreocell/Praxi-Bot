@@ -39,7 +39,7 @@ export function ControlBridgeHost() {
           await startBotRun(bot, step);
         },
         stopRun: async () => {
-          await stopBotRun();
+          return (await stopBotRun()).runGeneration;
         },
         click: overlayClick
       },
@@ -63,18 +63,43 @@ export function ControlBridgeHost() {
       now: () => Date.now()
     });
     const offEvents = onDaemonEvent((env) => void bridge.handleEvent(env));
+    let nativeEvents = 0;
     const offState = subscribeOverlayEvents({
-      onControlStateChanged: (snap) =>
-        void bridge.onNativeState(snap.mode as ControlMode),
+      onControlStateChanged: (snap) => {
+        nativeEvents += 1;
+        void bridge.onNativeState(snap.mode as ControlMode, snap.runGeneration);
+      },
       onSettingsUpdated: () => {}
     });
-    // Register as controller now (with the mode the state machine is in) and
-    // keep the heartbeat going.
-    void getControlState()
-      .then((snap) => bridge.onNativeState(snap.mode))
-      .catch(() => bridge.heartbeat());
-    const beat = window.setInterval(() => void bridge.heartbeat(), HEARTBEAT_MS);
+    // Both subscriptions are installed before either initial snapshot starts.
+    let disposed = false;
+    let nativeReady = false;
+    let initializing = false;
+    const tick = async () => {
+      if (disposed || initializing) return;
+      if (!nativeReady) {
+        initializing = true;
+        const observed = nativeEvents;
+        try {
+          const snap = await getControlState();
+          if (disposed) return;
+          if (observed === nativeEvents) await bridge.initializeNativeState(snap.mode);
+          nativeReady = true;
+        } catch {
+          // Retry initialization on the next heartbeat without changing control.
+        } finally {
+          initializing = false;
+        }
+      }
+      if (disposed || !nativeReady) return;
+      void bridge.restoreRuns();
+      await bridge.heartbeat();
+    };
+    void tick();
+    const beat = window.setInterval(() => void tick(), HEARTBEAT_MS);
     return () => {
+      disposed = true;
+      bridge.dispose();
       offEvents();
       offState();
       window.clearInterval(beat);
