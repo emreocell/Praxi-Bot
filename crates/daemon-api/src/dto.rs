@@ -48,6 +48,14 @@ impl HostInfo {
 }
 
 /// A bot.
+/// Bot `[runtime]` settings (ADR-0027 §7).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RuntimeConfigDto {
+    /// Configured computer target (`auto`, `pc`, `host`, `browser`, `off`, or `node:<id>`).
+    pub computer: String,
+}
+
+/// Public bot representation.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct BotDto {
     /// Bot id.
@@ -62,6 +70,9 @@ pub struct BotDto {
     /// persisted "always allow" grants.  Only present in `GET /v1/bots/{id}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_policy: Option<EffectivePolicyDto>,
+    /// Parsed `[runtime]` computer target settings (`auto` when omitted in profile).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<RuntimeConfigDto>,
 }
 
 /// A bot's permission picture (`GET /v1/bots/{id}`).
@@ -146,6 +157,9 @@ pub struct BotInput {
     /// Profile as TOML text (the contents of a bot profile file).
     #[serde(default)]
     pub profile_toml: Option<String>,
+    /// Optional `[runtime]` override (applied over `config` / `profile_toml` when present).
+    #[serde(default)]
+    pub runtime: Option<RuntimeConfigDto>,
 }
 
 /// A chat thread.
@@ -340,6 +354,12 @@ pub struct RunDto {
     /// The schedule that started this run (`null` for runs the user started).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schedule_id: Option<Uuid>,
+    /// Resolved computer target label fixed at run start (`pc`, `host`, `browser`, `off`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub computer_target: Option<String>,
+    /// Reason the run is currently `paused` (e.g. `waiting_for_pc`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause_reason: Option<String>,
 }
 
 /// Token totals.

@@ -975,6 +975,8 @@ fn completed_run(t: &Test) -> (protocol::RunId, protocol::ChatId) {
             updated_at_ms: now,
             parent_run_id: None,
             spec: None,
+            computer_target: None,
+            pause_reason: None,
         })
         .unwrap();
     t.target.info.lock().run_id = Some(run.0);

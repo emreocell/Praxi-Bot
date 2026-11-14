@@ -111,6 +111,8 @@ fn fx_at(l: ScheduleLimits, start_ms: i64, known_user: bool) -> Fx {
             updated_at_ms: now_ms(),
             parent_run_id: None,
             spec: None,
+            computer_target: None,
+            pause_reason: None,
         })
         .unwrap();
     let store = Arc::new(ScheduleStore::open(dir.path()).unwrap());

@@ -3533,7 +3533,7 @@
       },
       "BotDto": {
         "type": "object",
-        "description": "A bot.",
+        "description": "Public bot representation.",
         "required": [
           "id",
           "name",
@@ -3568,6 +3568,17 @@
           "name": {
             "type": "string",
             "description": "Display name."
+          },
+          "runtime": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RuntimeConfigDto",
+                "description": "Parsed `[runtime]` computer target settings (`auto` when omitted in profile)."
+              }
+            ]
           }
         }
       },
@@ -3591,6 +3602,17 @@
               "null"
             ],
             "description": "Profile as TOML text (the contents of a bot profile file)."
+          },
+          "runtime": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RuntimeConfigDto",
+                "description": "Optional `[runtime]` override (applied over `config` / `profile_toml` when present)."
+              }
+            ]
           }
         }
       },
@@ -6537,6 +6559,13 @@
             "format": "uuid",
             "description": "Chat, if any."
           },
+          "computer_target": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Resolved computer target label fixed at run start (`pc`, `host`, `browser`, `off`)."
+          },
           "created_at_ms": {
             "type": "integer",
             "format": "int64",
@@ -6566,6 +6595,13 @@
             "format": "uuid",
             "description": "The run that spawned this one when it is a subagent run."
           },
+          "pause_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Reason the run is currently `paused` (e.g. `waiting_for_pc`)."
+          },
           "schedule_id": {
             "type": [
               "string",
@@ -6582,6 +6618,19 @@
             "type": "integer",
             "format": "int64",
             "description": "Last state change."
+          }
+        }
+      },
+      "RuntimeConfigDto": {
+        "type": "object",
+        "description": "A bot.\nBot `[runtime]` settings (ADR-0027 §7).",
+        "required": [
+          "computer"
+        ],
+        "properties": {
+          "computer": {
+            "type": "string",
+            "description": "Configured computer target (`auto`, `pc`, `host`, `browser`, `off`, or `node:<id>`)."
           }
         }
       },

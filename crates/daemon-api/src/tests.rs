@@ -1921,6 +1921,8 @@ async fn listing_runs_writes_nothing_to_disk() {
         updated_at_ms: now,
         parent_run_id: None,
         spec: None,
+        computer_target: None,
+        pause_reason: None,
     })
     .unwrap();
     st.insert_message(&storage::Message {
@@ -3010,4 +3012,209 @@ async fn health_includes_host_capabilities_without_starting_a_browser() {
     assert!(value["host"]["total_ram_mb"].as_u64().unwrap() > 0);
     let dto: crate::dto::Health = serde_json::from_value(value.clone()).unwrap();
     assert_eq!(serde_json::to_value(dto).unwrap(), value);
+}
+
+#[tokio::test]
+async fn bots_round_trip_runtime_computer_target_and_reject_invalid() {
+    let t = setup();
+
+    // Default bot without [runtime] exposes runtime.computer = "auto".
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/bots",
+        Some(json!({ "profile_toml": PROFILE })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    assert_eq!(r.json()["runtime"]["computer"], "auto");
+    let bot_id = r.json()["id"].as_str().unwrap().to_owned();
+    let bot_path = format!("/v1/bots/{bot_id}");
+
+    let r = call(&t, Method::GET, &bot_path, None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json()["runtime"]["computer"], "auto");
+
+    // Round-trip all canonical values plus legacy "local" -> "pc" alias via PUT.
+    for (input, expected) in [
+        ("pc", "pc"),
+        ("host", "host"),
+        ("browser", "browser"),
+        ("off", "off"),
+        ("local", "pc"),
+        ("auto", "auto"),
+    ] {
+        let r = call(
+            &t,
+            Method::PUT,
+            &bot_path,
+            Some(json!({
+                "config": {
+                    "bot": {"id": "tester", "name": "Tester"},
+                    "models": {"executor": "fake/echo"}
+                },
+                "runtime": {"computer": input}
+            })),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::OK, "{input}: {:?}", r.json());
+        assert_eq!(r.json()["runtime"]["computer"], expected);
+
+        let get_r = call(&t, Method::GET, &bot_path, None).await;
+        assert_eq!(get_r.status, StatusCode::OK);
+        assert_eq!(get_r.json()["runtime"]["computer"], expected);
+    }
+
+    // Invalid [runtime] computer returns 422 bad_profile on POST and PUT.
+    let bad_post = call(
+        &t,
+        Method::POST,
+        "/v1/bots",
+        Some(json!({
+            "profile_toml": format!("{PROFILE}\n[runtime]\ncomputer = \"quantum\"\n")
+        })),
+    )
+    .await;
+    assert_eq!(bad_post.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(bad_post.json()["error"]["code"], "bad_profile");
+
+    let bad_put = call(
+        &t,
+        Method::PUT,
+        &bot_path,
+        Some(json!({
+            "config": {
+                "bot": {"id": "tester", "name": "Tester"},
+                "models": {"executor": "fake/echo"}
+            },
+            "runtime": {"computer": "quantum"}
+        })),
+    )
+    .await;
+    assert_eq!(bad_put.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(bad_put.json()["error"]["code"], "bad_profile");
+}
+
+struct StubProvider;
+
+impl agent_core::ComputerProvider for StubProvider {
+    fn local(&self) -> Option<Arc<dyn desktop_api::DesktopBackend>> {
+        None
+    }
+
+    fn pc(&self) -> Option<Arc<dyn desktop_api::DesktopBackend>> {
+        None
+    }
+
+    fn is_host(&self) -> bool {
+        true
+    }
+
+    fn browser_available(&self) -> bool {
+        true
+    }
+
+    fn has_display(&self) -> bool {
+        false
+    }
+
+    fn node(&self, _id: &str) -> Option<Arc<dyn desktop_api::DesktopBackend>> {
+        None
+    }
+}
+
+#[tokio::test]
+async fn runs_expose_computer_target_and_waiting_for_pc_pause_reason() {
+    let t = setup();
+    t.agent.set_computer_provider(Arc::new(StubProvider));
+
+    // Bot 1: "browser" completes normally and records computer_target = "browser".
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/bots",
+        Some(json!({
+            "profile_toml": format!("{PROFILE}\n[runtime]\ncomputer = \"browser\"\n")
+        })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    let bot_browser = r.json()["id"].as_str().unwrap().to_owned();
+    let chat_browser = call(
+        &t,
+        Method::POST,
+        "/v1/chats",
+        Some(json!({ "bot_id": bot_browser })),
+    )
+    .await
+    .json()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let run_browser = send_msg(&t, &chat_browser, "hello", "queue").await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    wait_state(&t, &run_browser, "succeeded").await;
+
+    // Bot 2: "pc" with offline PC pauses with pause_reason = "waiting_for_pc".
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/bots",
+        Some(json!({
+            "profile_toml": format!("{PROFILE}\n[runtime]\ncomputer = \"pc\"\n")
+        })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    let bot_pc = r.json()["id"].as_str().unwrap().to_owned();
+    let chat_pc = call(
+        &t,
+        Method::POST,
+        "/v1/chats",
+        Some(json!({ "bot_id": bot_pc })),
+    )
+    .await
+    .json()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let run_pc = send_msg(&t, &chat_pc, "wait for pc", "queue").await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    wait_state(&t, &run_pc, "paused").await;
+
+    let get_br = call(&t, Method::GET, &format!("/v1/runs/{run_browser}"), None).await;
+    assert_eq!(get_br.status, StatusCode::OK);
+    assert_eq!(get_br.json()["computer_target"], "browser");
+    assert!(get_br.json()["pause_reason"].is_null());
+
+    let get_pc = call(&t, Method::GET, &format!("/v1/runs/{run_pc}"), None).await;
+    assert_eq!(get_pc.status, StatusCode::OK);
+    assert_eq!(get_pc.json()["state"], "paused");
+    assert_eq!(get_pc.json()["computer_target"], "pc");
+    assert_eq!(get_pc.json()["pause_reason"], "waiting_for_pc");
+
+    // GET /v1/runs list also surfaces computer_target and pause_reason.
+    let list_r = call(&t, Method::GET, "/v1/runs", None).await;
+    assert_eq!(list_r.status, StatusCode::OK);
+    let runs = list_r.json();
+    let arr = runs.as_array().unwrap();
+    let listed_pc = arr
+        .iter()
+        .find(|item| item["id"] == run_pc)
+        .expect("paused run in /v1/runs");
+    assert_eq!(listed_pc["computer_target"], "pc");
+    assert_eq!(listed_pc["pause_reason"], "waiting_for_pc");
+
+    // Cancelling the paused run clears pause_reason while keeping computer_target.
+    let cancel_r = call(&t, Method::POST, &format!("/v1/runs/{run_pc}/cancel"), None).await;
+    assert_eq!(cancel_r.status, StatusCode::OK);
+    wait_state(&t, &run_pc, "cancelled").await;
+    let get_pc_after = call(&t, Method::GET, &format!("/v1/runs/{run_pc}"), None).await;
+    assert_eq!(get_pc_after.json()["state"], "cancelled");
+    assert_eq!(get_pc_after.json()["computer_target"], "pc");
+    assert!(get_pc_after.json()["pause_reason"].is_null());
 }
