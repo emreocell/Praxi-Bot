@@ -240,6 +240,9 @@ impl Page {
         if let Ok(mut p) = self.shared.dialog_policy.lock() {
             *p = DialogOptions::default();
         }
+        if outcome.is_ok() {
+            self.notify_live_view_action();
+        }
         Ok(ActionResult {
             ok: outcome.is_ok(),
             error: outcome.err().map(|e| e.to_string()),
