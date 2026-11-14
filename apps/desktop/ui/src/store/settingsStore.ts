@@ -115,7 +115,12 @@ export function loadSettingsSync(): AppSettings | null {
     const raw = typeof window !== "undefined" ? window.localStorage?.getItem(LOCAL_STORAGE_KEY) : null;
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<AppSettings>;
-    return { ...DEFAULT_SETTINGS, ...parsed, ...normalizeAppearance(parsed as Record<string, unknown>) };
+    return {
+      ...DEFAULT_SETTINGS,
+      ...parsed,
+      ...normalizeAppearance(parsed as Record<string, unknown>),
+      computerTarget: parseComputerTarget(parsed.computerTarget)
+    };
   } catch {
     return null;
   }
@@ -229,23 +234,7 @@ export async function loadSettings(): Promise<AppSettings> {
     }
   }
 
-  if (typeof window !== "undefined" && window.localStorage) {
-    try {
-      const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<AppSettings>;
-        return {
-          ...DEFAULT_SETTINGS,
-          ...parsed,
-          ...normalizeAppearance(parsed as Record<string, unknown>)
-        };
-      }
-    } catch {
-      // Ignore malformed localStorage
-    }
-  }
-
-  return { ...DEFAULT_SETTINGS };
+  return loadSettingsSync() ?? { ...DEFAULT_SETTINGS };
 }
 
 export async function saveSettings(settings: AppSettings): Promise<void> {

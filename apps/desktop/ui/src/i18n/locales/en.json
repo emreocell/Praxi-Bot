@@ -1156,12 +1156,12 @@
       "soon": "Soon",
       "target": {
         "title": "Where the bot runs",
-        "description": "Choose where computer and browser tools execute."
+        "description": "Only the connected computer is currently supported. Manage computer and browser access in Permissions below."
       },
       "targets": {
         "this-pc": {
-          "title": "This PC",
-          "description": "Desktop automation on this machine."
+          "title": "Connected computer",
+          "description": "Tools run on the computer connected to this app."
         },
         "browser": {
           "title": "Browser only",
