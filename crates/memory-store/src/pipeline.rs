@@ -196,10 +196,14 @@ impl<'a> Pipeline<'a> {
                     importance: Some(c.importance.max(target.importance)),
                     valid_until_ms: None,
                 };
-                let m = self
-                    .store
-                    .update(ctx.user_id, id, &patch, "consolidated update")?;
-                Ok(Outcome::Updated(m))
+                let updated = self.store.update_if_trust(
+                    ctx.user_id,
+                    id,
+                    &patch,
+                    "consolidated update",
+                    untrusted.then_some(Trust::Untrusted),
+                )?;
+                Ok(updated.map_or(Outcome::Skipped, Outcome::Updated))
             }
         }
     }
