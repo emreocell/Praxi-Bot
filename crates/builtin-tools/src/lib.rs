@@ -271,16 +271,34 @@ mod tests {
             "desktop_type",
             "desktop_set_value",
             "desktop_key",
-            "desktop_click",
-            "desktop_scroll",
-            "desktop_drag",
-            "browser_scroll",
             "browser_tabs",
         ] {
             assert!(
                 crate::util::classify(name).unwrap().egress,
                 "{name} sends data off the machine"
             );
+        }
+        for name in [
+            "desktop_click",
+            "desktop_scroll",
+            "desktop_drag",
+            "browser_scroll",
+        ] {
+            let class = crate::util::classify(name).unwrap();
+            assert!(!class.egress, "{name} cannot carry data off the machine");
+        }
+        for name in [
+            "fs_write",
+            "fs_edit",
+            "fs_move",
+            "fs_delete",
+            "checkpoint_list",
+            "checkpoint_restore",
+            "schedule_list",
+        ] {
+            let class = crate::util::classify(name).unwrap();
+            assert!(!class.reads_private, "{name} is not a private read");
+            assert!(!class.ingests_untrusted, "{name} does not ingest content");
         }
         assert!(!crate::util::classify("desktop_list_apps").unwrap().egress);
         assert!(!crate::util::classify("desktop_get_state").unwrap().egress);

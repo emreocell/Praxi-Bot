@@ -1318,7 +1318,8 @@ mod class_tests {
             );
         }
         assert!(content_for_unnamed("desktop_launch").egress);
-        assert!(content_for_unnamed("browser_scroll").egress);
+        assert!(!content_for_unnamed("browser_scroll").egress);
+        assert!(content_for_unnamed("browser_tabs").egress);
         assert!(!content_for_unnamed("browser_snapshot").egress);
     }
 }
