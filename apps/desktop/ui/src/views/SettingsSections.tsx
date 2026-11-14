@@ -12,6 +12,7 @@ import { isTauriRuntime } from "../overlay/events";
 import formStyles from "../components/Form.module.css";
 import { botView } from "../lib/botProfile";
 import { addProvider, setDefaultProvider, testProvider } from "../lib/providers";
+import { canManageProviders, PROVIDERS_LOCAL_ONLY } from "../lib/providerConnection";
 import {
   canTestProvider,
   isCliProvider,
@@ -39,6 +40,8 @@ export function ProvidersSection() {
   const { t } = useTranslation();
   const { client, conn, restartDaemon } = useDaemon();
   const native = isTauriRuntime();
+  const providerTarget = { connection: conn, baseUrl: client?.baseUrl };
+  const canManage = native && canManageProviders(providerTarget);
   const canView = native || client?.baseUrl === MOCK_BASE_URL;
   const { dto, error: loadError, reload } = useProviders();
   const view = useMemo(() => providersView(dto), [dto]);
@@ -76,7 +79,8 @@ export function ProvidersSection() {
         setNeedsRestart(!reloaded);
       }
     } catch (e) {
-      setOutcome({ ok: false, text: e instanceof Error ? e.message : String(e) });
+      const message = e instanceof Error ? e.message : String(e);
+      setOutcome({ ok: false, text: message === PROVIDERS_LOCAL_ONLY ? t("settings.providers.localDaemonOnly") : message });
     } finally {
       setBusy(false);
       await reload();
@@ -86,7 +90,7 @@ export function ProvidersSection() {
 
   const isCustom = choice === CUSTOM;
   const id = isCustom ? customId.trim() : choice;
-  const canAdd = native && id !== "" && (!isCustom || baseUrl.trim() !== "") && !busy;
+  const canAdd = canManage && id !== "" && (!isCustom || baseUrl.trim() !== "") && !busy;
 
   return (
     <Card padding="md" className={styles.card}>
@@ -98,6 +102,7 @@ export function ProvidersSection() {
         <p className={formStyles.hint}>{t("settings.providers.nativeOnly")}</p>
       ) : (
         <>
+          {native && !canManage ? <p className={formStyles.hint}>{t("settings.providers.localDaemonOnly")}</p> : null}
           {loadError ? <p className={formStyles.error}>{loadError}</p> : null}
           {list.length === 0 && !loadError ? (
             <p className={formStyles.hint}>{t("settings.providers.none")}</p>
@@ -141,10 +146,10 @@ export function ProvidersSection() {
                         <Button
                           size="sm"
                           variant="secondary"
-                          disabled={busy}
+                          disabled={busy || !canManage}
                           onClick={() =>
                             void run(
-                              async () => outcomeOf(await testProvider(p.id)),
+                              async () => outcomeOf(await testProvider(p.id, providerTarget)),
                               false
                             )
                           }
@@ -156,10 +161,10 @@ export function ProvidersSection() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          disabled={busy}
+                          disabled={busy || !canManage}
                           onClick={() =>
                             void run(
-                              async () => outcomeOf(await setDefaultProvider(p.id)),
+                              async () => outcomeOf(await setDefaultProvider(p.id, providerTarget)),
                               true
                             )
                           }
@@ -262,7 +267,7 @@ export function ProvidersSection() {
                         baseUrl: isCustom ? baseUrl.trim() : undefined,
                         model: model.trim() || undefined,
                         apiKey: apiKey || undefined
-                      })
+                      }, providerTarget)
                     );
                     if (o.ok) {
                       setApiKey("");

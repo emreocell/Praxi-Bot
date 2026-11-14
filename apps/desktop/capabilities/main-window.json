@@ -1,0 +1,11 @@
+{
+  "identifier": "main-window",
+  "description": "Window frame preference and title bar controls for the main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:window:allow-set-decorations",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close"
+  ]
+}

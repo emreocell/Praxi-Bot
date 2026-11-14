@@ -929,6 +929,67 @@ async fn token_budget_guard_stops_the_turn() {
     );
 }
 
+async fn overflowing_usage_stops_at_budget(usages: &[(u64, u64)]) {
+    let env = setup();
+    let read = Arc::new(tool("t.read", Effect::Read, "x"));
+    let mut replies = Vec::new();
+    for (index, &(prompt_tokens, completion_tokens)) in usages.iter().enumerate() {
+        let Reply::Chunks(mut chunks) =
+            calls(&[(&format!("call-{index}"), "t.read", json!({"index": index}))])
+        else {
+            unreachable!();
+        };
+        chunks.insert(
+            0,
+            ChatChunk::Usage(Usage {
+                prompt_tokens,
+                completion_tokens,
+                cached_tokens: None,
+                cache_write_tokens: None,
+            }),
+        );
+        replies.push(Reply::Chunks(chunks));
+    }
+    replies.push(text("Budget reached."));
+    let fake = Fake::new(replies);
+    let mut config = cfg(Policy::full());
+    config.guards.max_tokens_per_turn = u64::MAX;
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&read)],
+        profile(""),
+        config,
+    );
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(lp.stopped_by_guard(run).unwrap());
+    assert_eq!(fake.n_requests(), usages.len() + 1);
+    let closing = fake.request(usages.len());
+    assert!(closing.tools.is_empty());
+    assert!(
+        closing
+            .messages
+            .last()
+            .unwrap()
+            .content
+            .as_str()
+            .unwrap()
+            .contains("token budget")
+    );
+}
+
+#[tokio::test]
+async fn token_budget_saturates_a_single_model_usage() {
+    overflowing_usage_stops_at_budget(&[(u64::MAX, 1)]).await;
+}
+
+#[tokio::test]
+async fn token_budget_saturates_usage_across_model_steps() {
+    overflowing_usage_stops_at_budget(&[(u64::MAX / 2 + 1, 0); 2]).await;
+}
+
 #[tokio::test]
 async fn failing_closing_call_still_fails_the_run() {
     let env = setup();

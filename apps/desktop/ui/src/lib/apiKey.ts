@@ -1,4 +1,6 @@
 import type { ProvidersDto } from "../api/types.ts";
+import type { ApiClient } from "../api/client.ts";
+import { canManageProviders, PROVIDERS_LOCAL_ONLY, type ProviderConnection } from "./providerConnection.ts";
 
 type ProviderCatalogDto = ProvidersDto["catalog"][number];
 
@@ -28,6 +30,35 @@ export function detectKeyProvider(key: string): string | null {
 export interface KeyTarget {
   id: string;
   keyEnv: string;
+}
+
+export interface ProviderKeyWriter {
+  (input: { id: string; apiKey: string }): Promise<{
+    code: number;
+    stdout: string;
+    stderr: string;
+  }>;
+}
+
+/** Save a provider key and activate the updated provider configuration. */
+export async function saveProviderKey(
+  target: KeyTarget,
+  secret: string,
+  client: Pick<ApiClient, "baseUrl" | "reloadProviders">,
+  configureProvider: ProviderKeyWriter,
+  connection: ProviderConnection | null
+): Promise<void> {
+  if (!canManageProviders({ connection, baseUrl: client.baseUrl })) {
+    throw new Error(PROVIDERS_LOCAL_ONLY);
+  }
+  // A generic secret named ANTHROPIC_API_KEY is neither a process environment
+  // variable nor a ProviderSettings.key reference. The existing provider setup
+  // command writes the referenced key and providers.toml together.
+  const result = await configureProvider({ id: target.id, apiKey: secret });
+  if (result.code !== 0) {
+    throw new Error((result.stderr || result.stdout).trim() || `provider setup failed (${result.code})`);
+  }
+  await client.reloadProviders();
 }
 
 /**

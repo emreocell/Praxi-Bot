@@ -12,6 +12,11 @@ export const COMPUTER_TARGETS: readonly ComputerTarget[] = [
   "off"
 ];
 
+/** Alternate targets have no daemon API wiring yet. */
+export function isComputerTargetAvailable(target: ComputerTarget): boolean {
+  return target === "this-pc";
+}
+
 interface KeyLike {
   key: string;
   shiftKey: boolean;
@@ -40,7 +45,7 @@ export function parseSendWith(v: unknown): SendWith {
   return v === "ctrl-enter" ? "ctrl-enter" : "enter";
 }
 
-/** Narrow a stored value to a known `ComputerTarget` (defaults to `this-pc`). */
+/** Discard preview-only targets so old settings cannot imply an unenforced restriction. */
 export function parseComputerTarget(v: unknown): ComputerTarget {
-  return COMPUTER_TARGETS.find((t) => t === v) ?? "this-pc";
+  return COMPUTER_TARGETS.find((t) => t === v && isComputerTargetAvailable(t)) ?? "this-pc";
 }

@@ -24,7 +24,7 @@
       }
     ],
     "security": {
-      "capabilities": ["default"],
+      "capabilities": ["default", "main-window"],
       "csp": null
     }
   },

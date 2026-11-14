@@ -41,7 +41,7 @@ export function ModelPicker({
   disabled?: boolean;
   placeholder?: string;
   reviewOpen?: boolean;
-  /** Show the thinking-level segment (stored on this device, not yet sent to the daemon). */
+  /** Show the thinking-level design preview in mock mode; the daemon cannot apply it yet. */
   thinking?: boolean;
   placement?: PopoverPlacement;
   testId?: string;
@@ -208,7 +208,7 @@ export function ModelPicker({
             </>
           )}
         </div>
-        {thinking ? (
+        {thinking && isMockMode() ? (
           <div className={styles.effort}>
             <span className={styles.effortLabel} id="thinking-level-label">
               {t("modelPicker.thinking")}
