@@ -43,6 +43,7 @@ import {
 import { modelGroups } from "../lib/modelPicker";
 import { type Chain, chainOrderTs, groupRunItems } from "../lib/thinkingChain";
 import { type SendWith, shouldSend } from "../lib/settingsPrefs";
+import { isProcessingRunState } from "../lib/runState";
 import { rank } from "../lib/fuzzy";
 import {
   applyCompletion,
@@ -68,8 +69,6 @@ import {
 } from "../state/timeline";
 import ccStyles from "../components/ChatCards.module.css";
 import styles from "./ChatView.module.css";
-
-const LIVE_STATES = new Set(["pending", "running", "waiting_approval"]);
 
 /** Empty-chat prompt starters (plain text for the composer, not commands). */
 const STARTERS = [
@@ -253,7 +252,7 @@ export function ChatView({
   const serverRuns = runs.filter(
     (r) => r.chat_id === chatId && !r.parent_run_id
   );
-  const serverLive = [...serverRuns].reverse().find((r) => LIVE_STATES.has(r.state));
+  const serverLive = [...serverRuns].reverse().find((r) => isProcessingRunState(r.state));
   const serverPaused = [...serverRuns].reverse().find((r) => r.state === "paused");
   const eventLive: RunState | undefined = [...chatRuns]
     .reverse()

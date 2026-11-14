@@ -14,6 +14,7 @@ import { type Connection, connectDaemon } from "../api/connection";
 import { subscribeEvents } from "../api/events";
 import { MOCK_BASE_URL } from "../api/mockMode";
 import type { Bot, Chat, GlobalEnvelope, Health, Run } from "../api/types";
+import { isProcessingRunState } from "../lib/runState";
 import {
   applyEvent,
   EMPTY_EVENTS,
@@ -25,9 +26,6 @@ import {
 } from "./timeline";
 
 export type Phase = "connecting" | "ready" | "error";
-
-/** Runs in these states can still produce approvals / questions. */
-const LIVE_RUN_STATES = new Set(["pending", "running", "waiting_approval"]);
 
 type Action =
   | { type: "event"; env: GlobalEnvelope }
@@ -231,7 +229,7 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
           type: "reconcile",
           approvals: new Set(approvals.map((a) => a.call_id)),
           live: new Set(
-            runList.filter((r) => LIVE_RUN_STATES.has(r.state)).map((r) => r.id)
+            runList.filter((r) => isProcessingRunState(r.state)).map((r) => r.id)
           ),
           asOfMs: startedAt - 1500
         });

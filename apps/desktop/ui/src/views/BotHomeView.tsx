@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { BotAvatar, Button, Card } from "ui";
 import formStyles from "../components/Form.module.css";
 import { botView, draftFromBot } from "../lib/botProfile";
+import { isProcessingRunState } from "../lib/runState";
 import { useDaemon } from "../state/DaemonContext";
 import styles from "./BotHomeView.module.css";
 
@@ -80,7 +81,7 @@ export function BotHomeView({
       runs.some(
         (r) =>
           r.chat_id === chatId &&
-          (r.state === "running" || r.state === "waiting_approval")
+          isProcessingRunState(r.state)
       )
     ) {
       return "running";

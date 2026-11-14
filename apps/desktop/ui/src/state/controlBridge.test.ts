@@ -4,7 +4,8 @@ import type {
   ControlModeName,
   ControlVerdict,
   DaemonEvent,
-  GlobalEnvelope
+  GlobalEnvelope,
+  Run
 } from "../api/types.ts";
 import {
   type BotMeta,
@@ -38,8 +39,10 @@ function setup(beginResult: boolean | (() => boolean) = true) {
     clicks: []
   };
   let now = NOW;
+  let listRuns: () => Promise<Pick<Run, "id" | "bot_id" | "state">[]> = async () => [];
   const bridge = new ControlBridge({
     client: {
+      listRuns: () => listRuns(),
       putControlState: async (m, release) => {
         calls.put.push(m);
         calls.release.push(release === true);
@@ -54,7 +57,7 @@ function setup(beginResult: boolean | (() => boolean) = true) {
         return typeof beginResult === "function" ? beginResult() : beginResult;
       },
       startRun: async (bot, step) => void calls.start.push({ bot, step }),
-      stopRun: async () => void (calls.stop += 1),
+      stopRun: async () => ++calls.stop,
       click: async (x, y) => void calls.clicks.push({ x, y })
     },
     botMeta: (id) => ({ botId: id, botName: `Bot ${id}` }),
@@ -71,6 +74,7 @@ function setup(beginResult: boolean | (() => boolean) = true) {
     bridge,
     calls,
     feed,
+    snapshot: (read: typeof listRuns) => { listRuns = read; },
     advance: (ms: number) => {
       now += ms;
     }
@@ -241,6 +245,7 @@ test("startRun preserves explicit botShape even when it differs from ID hash fal
   const calls: { bot: BotMeta; step: string }[] = [];
   const bridge = new ControlBridge({
     client: {
+      listRuns: async () => [],
       putControlState: async () => undefined,
       decideControl: async () => undefined,
       cancelRun: async () => undefined
@@ -248,7 +253,7 @@ test("startRun preserves explicit botShape even when it differs from ID hash fal
     native: {
       beginAction: async () => true,
       startRun: async (bot, step) => void calls.push({ bot, step }),
-      stopRun: async () => undefined,
+      stopRun: async () => 1,
       click: async () => undefined
     },
     botMeta: (id) => ({
@@ -275,4 +280,170 @@ test("startRun preserves explicit botShape even when it differs from ID hash fal
   assert.equal(calls.length, 1);
   assert.equal(calls[0].bot.botId, "bot-cube-0");
   assert.equal(calls[0].bot.botShape, "heart");
+});
+
+test("reopening the app restores existing daemon runs so Stop cancels them", async () => {
+  const t = setup();
+  t.snapshot(async () => [{ id: "existing", bot_id: "b1", state: "running" }]);
+  await t.feed({ type: "run_started", run_id: "existing", chat_id: "c", bot_id: "b1" }, NOW - 60_000);
+  await t.bridge.restoreRuns();
+  assert.deepEqual(t.bridge.liveRuns(), ["existing"]);
+  assert.equal(t.calls.start.length, 1);
+  await t.bridge.onNativeState("idle");
+  assert.deepEqual(t.calls.cancel, ["existing"]);
+});
+
+test("restoration uses actual daemon states and does not release an existing human hold", async () => {
+  const t = setup();
+  await t.bridge.onNativeState("human_driving");
+  t.snapshot(async () => [
+    { id: "queued", bot_id: "b1", state: "queued" },
+    { id: "waiting", bot_id: "b1", state: "waiting_approval" },
+    { id: "paused", bot_id: "b1", state: "paused" },
+    { id: "done", bot_id: "b1", state: "succeeded" },
+    { id: "failed", bot_id: "b1", state: "failed" },
+    { id: "cancelled", bot_id: "b1", state: "cancelled" }
+  ]);
+  await t.bridge.restoreRuns();
+  assert.deepEqual(t.bridge.liveRuns().sort(), ["paused", "queued", "waiting"]);
+  assert.equal(t.calls.start.length, 0);
+  assert.equal(t.bridge.mode, "human_driving");
+  assert.ok(t.calls.release.every((release) => !release));
+});
+
+test("a terminal event arriving during the initial snapshot wins over its stale row", async () => {
+  const t = setup();
+  let resolve!: (runs: Pick<Run, "id" | "bot_id" | "state">[]) => void;
+  t.snapshot(() => new Promise((done) => { resolve = done; }));
+  const restoring = t.bridge.restoreRuns();
+  await t.feed({ type: "run_finished", run_id: "finished-during-read", error: null });
+  resolve?.([{ id: "finished-during-read", bot_id: "b1", state: "running" }]);
+  await restoring;
+  assert.deepEqual(t.bridge.liveRuns(), []);
+  assert.equal(t.calls.start.length, 0);
+});
+
+test("fresh starts received while the snapshot is pending stay live even when absent from it", async () => {
+  const t = setup();
+  let resolve!: (runs: Pick<Run, "id" | "bot_id" | "state">[]) => void;
+  t.snapshot(() => new Promise((done) => { resolve = done; }));
+  const restoring = t.bridge.restoreRuns();
+  await t.feed({ type: "run_started", run_id: "new", bot_id: "b1", chat_id: "c" });
+  resolve?.([]);
+  await restoring;
+  assert.deepEqual(t.bridge.liveRuns(), ["new"]);
+  await t.bridge.onNativeState("idle");
+  assert.deepEqual(t.calls.cancel, ["new"]);
+});
+
+test("Stop during restoration cancels snapshot runs without starting the native widget again", async () => {
+  const t = setup();
+  let resolve!: (runs: Pick<Run, "id" | "bot_id" | "state">[]) => void;
+  t.snapshot(() => new Promise((done) => { resolve = done; }));
+  const restoring = t.bridge.restoreRuns();
+  await t.feed({ type: "run_started", run_id: "new", bot_id: "b1", chat_id: "c" });
+  await t.bridge.onNativeState("idle");
+  resolve?.([{ id: "existing", bot_id: "b1", state: "running" }]);
+  await restoring;
+  assert.deepEqual(t.calls.cancel.sort(), ["existing", "new"]);
+  assert.deepEqual(t.bridge.liveRuns(), []);
+  assert.equal(t.calls.start.length, 1);
+});
+
+test("disposing the old connection drops its active runs and prevents late cancellation", async () => {
+  const old = setup();
+  await old.feed({ type: "run_started", run_id: "old-daemon", bot_id: "b1", chat_id: "c" });
+  old.bridge.dispose();
+  const current = setup();
+  current.snapshot(async () => [{ id: "current-daemon", bot_id: "b1", state: "running" }]);
+  await current.bridge.restoreRuns();
+  await old.bridge.onNativeState("idle");
+  await current.bridge.onNativeState("idle");
+  assert.deepEqual(old.bridge.liveRuns(), []);
+  assert.deepEqual(old.calls.cancel, []);
+  assert.deepEqual(current.calls.cancel, ["current-daemon"]);
+});
+
+test("a delayed snapshot cannot revive an already disposed daemon connection", async () => {
+  const old = setup();
+  let resolve!: (runs: Pick<Run, "id" | "bot_id" | "state">[]) => void;
+  old.snapshot(() => new Promise((done) => { resolve = done; }));
+  const restoring = old.bridge.restoreRuns();
+  old.bridge.dispose();
+  resolve?.([{ id: "old-daemon", bot_id: "b1", state: "running" }]);
+  await restoring;
+  assert.deepEqual(old.bridge.liveRuns(), []);
+  assert.equal(old.calls.start.length, 0);
+  assert.deepEqual(old.calls.cancel, []);
+});
+
+test("a failed initial run snapshot can be retried", async () => {
+  const t = setup();
+  t.snapshot(async () => { throw new Error("temporarily offline"); });
+  await t.bridge.restoreRuns();
+  t.snapshot(async () => [{ id: "existing", bot_id: "b1", state: "running" }]);
+  await t.bridge.restoreRuns();
+  assert.deepEqual(t.bridge.liveRuns(), ["existing"]);
+});
+
+test("a stale initial idle snapshot does not stop a freshly started run", async () => {
+  const t = setup();
+  await t.feed({ type: "run_started", run_id: "new", chat_id: "c", bot_id: "b1" });
+  await t.bridge.initializeNativeState("idle");
+  assert.equal(t.bridge.mode, "bot_driving");
+  assert.deepEqual(t.bridge.liveRuns(), ["new"]);
+  assert.deepEqual(t.calls.cancel, []);
+  assert.ok(t.calls.release.every((release) => !release));
+});
+
+test("restoring only paused runs does not make the bot start processing", async () => {
+  const t = setup();
+  t.snapshot(async () => [{ id: "paused", bot_id: "b1", state: "paused" }]);
+  await t.bridge.restoreRuns();
+  assert.deepEqual(t.bridge.liveRuns(), ["paused"]);
+  assert.equal(t.bridge.mode, "idle");
+  assert.equal(t.calls.start.length, 0);
+});
+
+test("explicit Stop from native idle wins over the first in-flight snapshot", async () => {
+  const t = setup();
+  let resolve!: (runs: Pick<Run, "id" | "bot_id" | "state">[]) => void;
+  t.snapshot(() => new Promise((done) => { resolve = done; }));
+  const restoring = t.bridge.restoreRuns();
+  await t.bridge.onNativeState("idle");
+  resolve([{ id: "existing", bot_id: "b1", state: "running" }]);
+  await restoring;
+  assert.deepEqual(t.calls.cancel, ["existing"]);
+  assert.equal(t.calls.start.length, 0);
+  assert.deepEqual(t.bridge.liveRuns(), []);
+});
+
+test("Stop intent survives a failed first snapshot until a successful retry", async () => {
+  const t = setup();
+  let reject!: (error: Error) => void;
+  t.snapshot(() => new Promise((_, fail) => { reject = fail; }));
+  const restoring = t.bridge.restoreRuns();
+  await t.bridge.onNativeState("idle");
+  reject(new Error("offline"));
+  await restoring;
+  t.snapshot(async () => [{ id: "existing", bot_id: "b1", state: "running" }]);
+  await t.bridge.restoreRuns();
+  assert.deepEqual(t.calls.cancel, ["existing"]);
+  assert.equal(t.calls.start.length, 0);
+  assert.deepEqual(t.bridge.liveRuns(), []);
+});
+
+test("an automatic finish-to-idle event cannot cancel other runs in the pending snapshot", async () => {
+  const t = setup();
+  let resolve!: (runs: Pick<Run, "id" | "bot_id" | "state">[]) => void;
+  t.snapshot(() => new Promise((done) => { resolve = done; }));
+  const restoring = t.bridge.restoreRuns();
+  await t.feed({ type: "run_started", run_id: "new", bot_id: "b1", chat_id: "c" });
+  await t.feed({ type: "run_finished", run_id: "new", error: null });
+  await t.bridge.onNativeState("idle", t.calls.stop);
+  resolve([{ id: "other", bot_id: "b1", state: "running" }]);
+  await restoring;
+  assert.deepEqual(t.bridge.liveRuns(), ["other"]);
+  assert.deepEqual(t.calls.cancel, []);
+  assert.equal(t.calls.start.length, 2);
 });
