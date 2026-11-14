@@ -1047,6 +1047,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/web/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Current web search configuration (API keys are write-only: `brave_key_set`
+         *     and `tavily_key_set` indicate whether a key is stored, never its value).
+         */
+        get: operations["get_web_search"];
+        /**
+         * Update web search configuration (`web.toml` and write-only API keys in the
+         *     secret store) and apply immediately for the next tool call.
+         */
+        put: operations["update_web_search"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/web/search/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a sample live search against the current web search configuration and
+         *     report which backend answered and how long it took. At most two probes run
+         *     at once (`429`).
+         */
+        post: operations["test_web_search"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/webhooks/{id}": {
         parameters: {
             query?: never;
@@ -1693,6 +1738,10 @@ export interface components {
         };
         /** @description `GET /v1/health`. */
         Health: {
+            /** @description HTTP API compatibility version. */
+            api_version: string;
+            /** @description Capabilities of this host; probes never launch a browser. */
+            host: components["schemas"]["HostInfo"];
             /** @description `ok` when ready for inference, or `setup_required` before provider setup. */
             status: string;
             /**
@@ -1708,6 +1757,18 @@ export interface components {
             control_epoch?: number | null;
             /** Format: uuid */
             takeover_id?: string | null;
+        };
+        /** @description Host capabilities, independent of provider readiness. */
+        HostInfo: {
+            arch: string;
+            has_browser: boolean;
+            has_display: boolean;
+            os: string;
+            /**
+             * Format: int64
+             * @description Physical memory in MiB (1024 * 1024 bytes).
+             */
+            total_ram_mb: number;
         };
         /** @enum {string} */
         HumanAction: "login_completed" | "application_opened" | "other";
@@ -2593,6 +2654,99 @@ export interface components {
         };
         /** @enum {string} */
         ViewState: "watch" | "acquiring" | "active" | "paused" | "unavailable" | "closed";
+        /**
+         * @description Current web search configuration (`GET /v1/web/search`): non-secret fields
+         *     only.
+         */
+        WebSearchConfigDto: {
+            /**
+             * @description Effective ordered list of enabled and usable backends that `web_search`
+             *     will try.
+             */
+            active_backends: string[];
+            /** @description Whether the Bing HTML fallback is enabled. */
+            bing: boolean;
+            /** @description Whether a Brave Search API key is stored (never returned). */
+            brave_key_set: boolean;
+            /**
+             * @description Parse or validation warning when `<data dir>/web.toml` could not be
+             *     loaded cleanly (the daemon fell back to defaults until saved).
+             */
+            config_error?: string | null;
+            /** @description Whether the `DuckDuckGo` HTML fallback is enabled. */
+            duckduckgo: boolean;
+            /** @description Whether the `DuckDuckGo` Lite fallback is enabled. */
+            duckduckgo_lite: boolean;
+            /**
+             * @description Priority order of backend ids (`searxng`, `brave`, `tavily`,
+             *     `duckduckgo`, `duckduckgo_lite`, `bing`).
+             */
+            order: string[];
+            /** @description Configured `SearXNG` base URL; `null` if unset. */
+            searxng_url?: string | null;
+            /** @description Whether a Tavily Search API key is stored (never returned). */
+            tavily_key_set: boolean;
+        };
+        /**
+         * @description Body of `PUT /v1/web/search`. Every field is optional: omitted fields keep
+         *     their stored values.
+         */
+        WebSearchConfigInput: {
+            /** @description Enable or disable the Bing HTML fallback. */
+            bing?: boolean | null;
+            /**
+             * @description Brave Search API key (**write-only**: stored in secret store, never
+             *     returned or logged).
+             */
+            brave_key?: string | null;
+            /** @description Remove the stored Brave Search API key. */
+            clear_brave_key?: boolean | null;
+            /** @description Remove the stored Tavily Search API key. */
+            clear_tavily_key?: boolean | null;
+            /** @description Enable or disable the `DuckDuckGo` HTML fallback. */
+            duckduckgo?: boolean | null;
+            /** @description Enable or disable the `DuckDuckGo` Lite fallback. */
+            duckduckgo_lite?: boolean | null;
+            /** @description Desired priority order of backend ids. */
+            order?: string[] | null;
+            /** @description `SearXNG` base URL; empty string clears it. */
+            searxng_url?: string | null;
+            /**
+             * @description Tavily Search API key (**write-only**: stored in secret store, never
+             *     returned or logged).
+             */
+            tavily_key?: string | null;
+        };
+        /** @description Body of `POST /v1/web/search/test`. */
+        WebSearchTestInput: {
+            /**
+             * @description Optional backend id to probe directly; omit to test the active fallback
+             *     chain.
+             */
+            backend?: string | null;
+            /** @description Sample query to run; defaults to `"rust programming"`. */
+            query?: string | null;
+        };
+        /** @description Result of a live web search probe (`POST /v1/web/search/test`). */
+        WebSearchTestReport: {
+            /** @description Backend that answered (`null` when all failed). */
+            backend?: string | null;
+            /**
+             * Format: int64
+             * @description Elapsed wall-clock time in milliseconds.
+             */
+            elapsed_ms: number;
+            /** @description Error summary when the probe failed (`null` on success). */
+            error?: string | null;
+            /** @description Errors from earlier backends in the chain before the answering one. */
+            fallback_errors?: string[];
+            /** @description `true` when at least one backend answered with results. */
+            ok: boolean;
+            /** @description Query that was run. */
+            query: string;
+            /** @description Number of search results returned. */
+            result_count: number;
+        };
     };
     responses: never;
     parameters: never;
@@ -4867,6 +5021,143 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TargetInfo"][];
+                };
+            };
+        };
+    };
+    get_web_search: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebSearchConfigDto"];
+                };
+            };
+            /** @description web search management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_web_search: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebSearchConfigInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebSearchConfigDto"];
+                };
+            };
+            /** @description bad API key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid config */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description web search management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_web_search: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebSearchTestInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebSearchTestReport"];
+                };
+            };
+            /** @description query too long */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid backend */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description too many probes running */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description web search management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };

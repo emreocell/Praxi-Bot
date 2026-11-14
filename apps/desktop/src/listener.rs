@@ -270,6 +270,40 @@ mod platform {
     }
 }
 
+/// Run `test_name` in its own process when this one is shared with other tests.
+///
+/// Returns `true` when the caller should execute the body. On Linux a
+/// `fork` copies every file descriptor, and `SOCK_CLOEXEC` drops the listening
+/// socket only at `exec`. A sibling test's `Command::spawn` therefore shows up
+/// in the `/proc/*/fd` scan for a moment, and [`trusted`] with
+/// [`Expect::Child`] rejects the port because it is no longer a single pid.
+///
+/// That extra pid is not ignored in production. The child can `accept` on the
+/// inherited socket and would receive the bearer token. "ppid is us" and
+/// "short-lived" do not make that safe. Re-executing the check alone removes
+/// the sibling without widening [`trusted`].
+#[cfg(test)]
+#[must_use]
+pub(crate) fn enter_isolated(test_name: &str) -> bool {
+    if std::env::var_os("PRAXI_LISTENER_ISOLATED").is_some() {
+        return true;
+    }
+    let exe = std::env::current_exe().unwrap_or_else(|e| panic!("current_exe: {e}"));
+    let output = std::process::Command::new(exe)
+        .args([test_name, "--exact", "--test-threads=1"])
+        .env("PRAXI_LISTENER_ISOLATED", "1")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap_or_else(|e| panic!("re-exec {test_name}: {e}"));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success() && stdout.contains("ok. 1 passed"),
+        "isolated {test_name} failed\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,6 +324,9 @@ mod tests {
 
     #[test]
     fn resolves_our_own_listener() {
+        if !super::enter_isolated("listener::tests::resolves_our_own_listener") {
+            return;
+        }
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = l.local_addr().unwrap().port();
         let me = std::process::id();
@@ -299,5 +336,153 @@ mod tests {
         assert!(verify(port, Expect::Child(me)).is_ok());
         // A listener that is not the expected child is refused.
         assert!(verify(port, Expect::Child(me.wrapping_add(1))).is_err());
+    }
+
+    /// The fork/exec window is real: a child that has not `exec`'d still holds
+    /// the listening socket, and that set must not satisfy [`Expect::Child`].
+    ///
+    /// `Command::spawn` waits until `execve`, and `execve` closes `SOCK_CLOEXEC`,
+    /// so the parent would see the child only after the inherited socket is gone.
+    /// Fork with no `exec` and park the child in `read`. Isolation keeps that
+    /// child from holding a sibling test's `Command::output` pipe open.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[allow(unsafe_code)]
+    fn forked_child_inherits_the_listener_and_stays_untrusted() {
+        if !super::enter_isolated(
+            "listener::tests::forked_child_inherits_the_listener_and_stays_untrusted",
+        ) {
+            return;
+        }
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let me = std::process::id();
+        let (hold_end, release_end) = super::inherited_fork::pipe_ends();
+        // The child does not return: it parks in `read` until this parent is reaped.
+        let pid = super::inherited_fork::fork_child(hold_end, release_end);
+        let child_pid = u32::try_from(pid).expect("fork pid fits u32");
+        let _reap = super::inherited_fork::Reap {
+            pid,
+            hold_end,
+            release_end,
+        };
+        let started = std::time::Instant::now();
+        let pids = loop {
+            let pids = platform::listener_pids(port).unwrap();
+            if pids.contains(&me) && pids.contains(&child_pid) {
+                break pids;
+            }
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(5),
+                "child {child_pid} never showed the inherited socket: {pids:?}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert!(
+            !trusted(&pids, Expect::Child(me), |_| true),
+            "an inherited listener must not pass the exact-child check: {pids:?}"
+        );
+        assert_eq!(
+            pids.len(),
+            2,
+            "isolated fork should be the only extra listener: {pids:?}"
+        );
+    }
+}
+
+/// Fork helpers for the inherited-listener test.
+///
+/// The child may only call async-signal-safe libc functions. `Drop` of [`Reap`]
+/// runs in the parent and always reaps, including on assertion failure.
+#[cfg(all(test, target_os = "linux"))]
+#[allow(unsafe_code)]
+mod inherited_fork {
+    const EINTR: i32 = 4;
+    const SIGKILL: i32 = 9;
+
+    unsafe extern "C" {
+        fn fork() -> i32;
+        fn pipe(fds: *mut i32) -> i32;
+        fn close(fd: i32) -> i32;
+        fn read(fd: i32, buf: *mut std::ffi::c_void, count: usize) -> isize;
+        fn kill(pid: i32, sig: i32) -> i32;
+        fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
+        fn _exit(status: i32) -> !;
+        fn __errno_location() -> *mut i32;
+    }
+
+    #[must_use = "dropping reaps the forked child"]
+    pub(super) struct Reap {
+        pub(super) pid: i32,
+        pub(super) hold_end: i32,
+        pub(super) release_end: i32,
+    }
+
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            unsafe {
+                close(self.release_end);
+                close(self.hold_end);
+                kill(self.pid, SIGKILL);
+                let mut status = 0;
+                loop {
+                    let rc = waitpid(self.pid, &raw mut status, 0);
+                    if rc >= 0 || *__errno_location() != EINTR {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Opens a blocking pipe.
+    ///
+    /// # Panics
+    /// Panics if `pipe` fails.
+    #[must_use]
+    pub(super) fn pipe_ends() -> (i32, i32) {
+        let mut fds = [0i32; 2];
+        // SAFETY: `fds` is a writable two-int buffer, as `pipe` requires.
+        let rc = unsafe { pipe(fds.as_mut_ptr()) };
+        assert_eq!(rc, 0, "pipe: {}", std::io::Error::last_os_error());
+        (fds[0], fds[1])
+    }
+
+    /// # Safety
+    /// Call only from the forked child, before any allocation or lock.
+    pub(super) unsafe fn hold_inherited_socket(hold_end: i32, release_end: i32) -> ! {
+        // The body of an `unsafe fn` is safe in edition 2024, so the libc calls
+        // stay inside an explicit block. They are async-signal-safe.
+        unsafe {
+            close(release_end);
+            let mut buf = [0u8; 1];
+            loop {
+                let n = read(hold_end, buf.as_mut_ptr().cast(), 1);
+                if n >= 0 {
+                    break;
+                }
+                if *__errno_location() != EINTR {
+                    _exit(1);
+                }
+            }
+            _exit(0);
+        }
+    }
+
+    /// Fork. The child never returns; it parks in [`hold_inherited_socket`].
+    ///
+    /// # Panics
+    /// Panics if `fork` fails.
+    #[must_use]
+    pub(super) fn fork_child(hold_end: i32, release_end: i32) -> i32 {
+        // SAFETY: `fork` has no preconditions. The child goes straight into
+        // `hold_inherited_socket` (async-signal-safe) and does not run the assert.
+        let pid = unsafe { fork() };
+        if pid == 0 {
+            // SAFETY: this process is the child, immediately after `fork`.
+            unsafe { hold_inherited_socket(hold_end, release_end) };
+        }
+        assert!(pid > 0, "fork: {}", std::io::Error::last_os_error());
+        pid
     }
 }

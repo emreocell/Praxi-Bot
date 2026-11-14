@@ -12,7 +12,7 @@ import { avatarFromFile, AvatarFileError } from "../lib/avatar";
 import {
   BOT_COLORS,
   configFromDraft,
-  draftFromBot
+  onboardingBotDraft
 } from "../lib/botProfile";
 import {
   addProvider,
@@ -209,6 +209,32 @@ export function OnboardingView({
   })();
 
   const roleDefaults = providerRoleDefaults(resolvedProviderId, providerModel);
+  const activeProviderForBot =
+    fakeAvailable && presetGroup === "fake"
+      ? FAKE_PROVIDER_ID
+      : resolvedProviderId;
+  const existingStep4Bot = createdBotId
+    ? bots.find((b) => b.id === createdBotId)
+    : undefined;
+  const step4Draft = onboardingBotDraft(existingStep4Bot, {
+    name: botName,
+    color: botColor,
+    avatar: botAvatar,
+    persona: botPersona,
+    executor: {
+      provider: activeProviderForBot,
+      model: executorModel.trim() || roleDefaults.executor
+    },
+    planner: {
+      provider: plannerModel.trim() ? activeProviderForBot : "",
+      model: plannerModel.trim()
+    },
+    classifier: {
+      provider: classifierModel.trim() ? activeProviderForBot : "",
+      model: classifierModel.trim()
+    },
+    preset: safetyPreset
+  });
 
   // Sync existing configured providers from daemon so `keyStoredFor` reflects OS keychain state
   useEffect(() => {
@@ -508,38 +534,11 @@ export function OnboardingView({
 
     setBotBusy(true);
     try {
-      const activeProviderForBot =
-        fakeAvailable && presetGroup === "fake"
-          ? FAKE_PROVIDER_ID
-          : resolvedProviderId;
-      const existing = createdBotId
-        ? bots.find((b) => b.id === createdBotId)
-        : undefined;
-      const baseDraft = draftFromBot(existing);
-      const config = configFromDraft(
-        {
-          ...baseDraft,
-          name: botName.trim(),
-          color: botColor,
-          avatar: botAvatar ?? null,
-          persona: botPersona,
-          executor: { provider: activeProviderForBot, model: execModel },
-          planner: {
-            provider: plannerModel.trim() ? activeProviderForBot : "",
-            model: plannerModel.trim()
-          },
-          classifier: {
-            provider: classifierModel.trim() ? activeProviderForBot : "",
-            model: classifierModel.trim()
-          },
-          preset: safetyPreset
-        },
-        existing
-      );
+      const config = configFromDraft(step4Draft, existingStep4Bot);
 
-      const input = { name: botName.trim(), config };
-      const savedBot = existing
-        ? await client.updateBot(existing.id, input)
+      const input = { name: step4Draft.name, config };
+      const savedBot = existingStep4Bot
+        ? await client.updateBot(existingStep4Bot.id, input)
         : await client.createBot(input);
 
       setCreatedBotId(savedBot.id);
@@ -1156,7 +1155,16 @@ export function OnboardingView({
             </header>
 
             <div className={formStyles.row}>
-              <BotAvatar bot={{ id: "new-bot", name: botName, color: botColor, avatar: botAvatar }} size="lg" />
+              <BotAvatar
+                bot={{
+                  id: existingStep4Bot?.id ?? "new-bot",
+                  name: botName,
+                  shape: step4Draft.shape,
+                  color: botColor,
+                  avatar: botAvatar
+                }}
+                size="lg"
+              />
               <div className={`${formStyles.field} ${formStyles.grow}`}>
                 <label className={formStyles.label} htmlFor="onb-bot-name">
                   {t("botForm.name")}

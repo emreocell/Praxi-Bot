@@ -90,6 +90,7 @@ export function ControlBridgeHost() {
         return {
           botId: v.id,
           botName: v.name,
+          botShape: v.shape,
           botAvatar: v.avatar,
           botColor: v.color
         };

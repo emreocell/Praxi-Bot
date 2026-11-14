@@ -48,7 +48,11 @@ import type {
   TakeoverRequest,
   TargetInfo,
   UsageSummary,
-  ViewHeartbeat
+  ViewHeartbeat,
+  WebSearchConfig,
+  WebSearchConfigInput,
+  WebSearchTestInput,
+  WebSearchTestReport
 } from "./types";
 
 export const LIVE_VIEW_MEDIA_TYPE = "application/vnd.praxi.live-view.v1";
@@ -473,5 +477,17 @@ export class ApiClient {
     active: string[];
   }> {
     return this.request("POST", "/providers/reload");
+  }
+
+  getWebSearch(): Promise<WebSearchConfig> {
+    return this.request("GET", "/web/search");
+  }
+
+  updateWebSearch(input: WebSearchConfigInput): Promise<WebSearchConfig> {
+    return this.request("PUT", "/web/search", { body: input });
+  }
+
+  testWebSearch(input: WebSearchTestInput = {}): Promise<WebSearchTestReport> {
+    return this.request("POST", "/web/search/test", { body: input });
   }
 }

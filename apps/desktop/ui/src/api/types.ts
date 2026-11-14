@@ -299,3 +299,8 @@ export type EmailSecurity = S["EmailSecurity"];
 export type EmailProviderKind = S["EmailProviderKind"];
 export type EmailProbeStatus = S["EmailProbeStatus"];
 export type EmailTestReport = S["EmailTestReport"];
+
+export type WebSearchConfig = S["WebSearchConfigDto"];
+export type WebSearchConfigInput = S["WebSearchConfigInput"];
+export type WebSearchTestInput = S["WebSearchTestInput"];
+export type WebSearchTestReport = S["WebSearchTestReport"];

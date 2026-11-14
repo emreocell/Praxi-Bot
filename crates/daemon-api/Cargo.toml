@@ -15,6 +15,7 @@ fake-provider = []
 workspace = true
 
 [dependencies]
+browser-cdp = { path = "../browser-cdp", version = "0.1.0" }
 tempfile.workspace = true
 live-view = { workspace = true, features = ["openapi"] }
 agent-core = { path = "../agent-core", version = "0.1.0" }

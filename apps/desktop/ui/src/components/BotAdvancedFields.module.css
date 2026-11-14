@@ -1,0 +1,108 @@
+.sectionGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.heading {
+  margin: var(--space-0);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.hiddenFile {
+  display: none;
+}
+
+.presets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.preset {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  border: var(--size-border) solid var(--color-border);
+  cursor: pointer;
+}
+
+.presetActive {
+  border-color: var(--color-accent);
+  background-color: var(--color-accent-subtle);
+}
+
+.presetText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.presetName {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.categories {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--size-control-lg) * 4), 1fr));
+  gap: var(--space-3);
+}
+
+.appList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--size-control-lg) * 4), 1fr));
+  gap: var(--space-2);
+  margin: var(--space-0);
+  padding: var(--space-0);
+  list-style: none;
+}
+
+.appItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--size-control-md);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-elevated);
+  border: var(--size-border) solid transparent;
+  cursor: pointer;
+  transition: border-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.appItem:hover {
+  border-color: var(--color-border);
+}
+
+.appItem:has(input:checked) {
+  border-color: var(--color-accent);
+}
+
+.appItem:has(input:focus-visible) {
+  box-shadow: var(--shadow-focus);
+}
+
+.appCheck {
+  flex: none;
+  width: var(--size-icon);
+  height: var(--size-icon);
+  margin: var(--space-0);
+  accent-color: var(--color-accent-text);
+  cursor: pointer;
+}
+
+.appCheck:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.appName {
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+}

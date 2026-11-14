@@ -291,6 +291,7 @@
       "sendTitle": "Send on your behalf?",
       "countdown": "Auto-deny in {{seconds}} s",
       "once": "Allow once",
+      "sendOnce": "Send",
       "thisChat": "This chat",
       "always": "Always",
       "deny": "Deny",
@@ -371,7 +372,233 @@
     "conversationLabel": "Today",
     "composerHint": "Enter to send · / for commands · @ to mention a bot",
     "openBot": "Open {{name}}",
-    "emptyTitle": "What shall we work on?"
+    "emptyTitle": "What shall we work on?",
+    "emptyGreeting": "Hi, I'm {{name}}",
+    "emptySub": "Ask something or start with a ready-made task.",
+    "starters": {
+      "research": "Research",
+      "summarize": "Summarize",
+      "plan": "Plan",
+      "email": "Draft an email",
+      "calendar": "Check my calendar",
+      "code": "Review code",
+      "remind": "Remind me"
+    },
+    "chain": {
+      "thought": "Thought for {{duration}}",
+      "working": "Working step by step",
+      "details": "Details",
+      "problems_one": "{{count}} step failed",
+      "problems_other": "{{count}} steps failed"
+    },
+    "duration": {
+      "seconds_one": "{{count}} second",
+      "seconds_other": "{{count}} seconds",
+      "minutes_one": "{{count}} minute",
+      "minutes_other": "{{count}} minutes"
+    },
+    "menu": {
+      "navigate": "navigate",
+      "select": "select",
+      "close": "close"
+    },
+    "step": {
+      "web_search": {
+        "running": "Searching the web",
+        "done": "Searched the web",
+        "failed": "Couldn't search the web"
+      },
+      "web_read": {
+        "running": "Reading a page",
+        "done": "Read a page",
+        "failed": "Couldn't read a page"
+      },
+      "doc_read": {
+        "running": "Reading a document",
+        "done": "Read a document",
+        "failed": "Couldn't read a document"
+      },
+      "fs_read": {
+        "running": "Reading a file",
+        "done": "Read a file",
+        "failed": "Couldn't read a file"
+      },
+      "fs_write": {
+        "running": "Writing a file",
+        "done": "Wrote a file",
+        "failed": "Couldn't write a file"
+      },
+      "fs_move": {
+        "running": "Moving a file",
+        "done": "Moved a file",
+        "failed": "Couldn't move a file"
+      },
+      "fs_delete": {
+        "running": "Deleting a file",
+        "done": "Deleted a file",
+        "failed": "Didn't delete a file"
+      },
+      "fs_list": {
+        "running": "Looking through a folder",
+        "done": "Looked through a folder",
+        "failed": "Couldn't look through a folder"
+      },
+      "fs_search": {
+        "running": "Searching files",
+        "done": "Searched files",
+        "failed": "Couldn't search files"
+      },
+      "shell": {
+        "running": "Running a command",
+        "done": "Ran a command",
+        "failed": "Didn't run a command"
+      },
+      "browser_open": {
+        "running": "Opening a page",
+        "done": "Opened a page",
+        "failed": "Didn't open a page"
+      },
+      "browser_click": {
+        "running": "Clicking on a page",
+        "done": "Clicked on a page",
+        "failed": "Didn't click on a page"
+      },
+      "browser_fill": {
+        "running": "Filling in a field",
+        "done": "Filled in a field",
+        "failed": "Didn't fill in a field"
+      },
+      "browser_eval": {
+        "running": "Running a script in the browser",
+        "done": "Ran a script in the browser",
+        "failed": "Didn't run a script in the browser"
+      },
+      "browser_press": {
+        "running": "Pressing a key in the browser",
+        "done": "Pressed a key in the browser",
+        "failed": "Didn't press a key in the browser"
+      },
+      "browser_select": {
+        "running": "Choosing an option on a page",
+        "done": "Chose an option on a page",
+        "failed": "Didn't choose an option"
+      },
+      "browser_view": {
+        "running": "Looking at a page",
+        "done": "Looked at a page",
+        "failed": "Couldn't look at a page"
+      },
+      "desktop_pointer": {
+        "running": "Using the mouse",
+        "done": "Used the mouse",
+        "failed": "Didn't use the mouse"
+      },
+      "desktop_type": {
+        "running": "Typing on the computer",
+        "done": "Typed on the computer",
+        "failed": "Didn't type on the computer"
+      },
+      "desktop_key": {
+        "running": "Pressing keys on the computer",
+        "done": "Pressed keys on the computer",
+        "failed": "Didn't press keys"
+      },
+      "desktop_set": {
+        "running": "Setting a field on the computer",
+        "done": "Set a field on the computer",
+        "failed": "Didn't set a field"
+      },
+      "desktop_launch": {
+        "running": "Opening an app",
+        "done": "Opened an app",
+        "failed": "Didn't open an app"
+      },
+      "desktop_look": {
+        "running": "Looking at the computer",
+        "done": "Looked at the computer",
+        "failed": "Couldn't look at the computer"
+      },
+      "skill_write": {
+        "running": "Writing a skill",
+        "done": "Wrote a skill",
+        "failed": "Didn't write a skill"
+      },
+      "skill_look": {
+        "running": "Looking up a skill",
+        "done": "Looked up a skill",
+        "failed": "Couldn't look up a skill"
+      },
+      "workflow": {
+        "running": "Running a workflow",
+        "done": "Ran a workflow",
+        "failed": "Didn't run a workflow"
+      },
+      "todo": {
+        "running": "Updating the plan",
+        "done": "Updated the plan",
+        "failed": "Couldn't update the plan"
+      },
+      "schedule_create": {
+        "running": "Creating a recurring task",
+        "done": "Created a recurring task",
+        "failed": "Didn't create a recurring task"
+      },
+      "schedule_update": {
+        "running": "Changing a recurring task",
+        "done": "Changed a recurring task",
+        "failed": "Didn't change a recurring task"
+      },
+      "schedule_delete": {
+        "running": "Deleting a recurring task",
+        "done": "Deleted a recurring task",
+        "failed": "Didn't delete a recurring task"
+      },
+      "schedule_list": {
+        "running": "Checking recurring tasks",
+        "done": "Checked recurring tasks",
+        "failed": "Couldn't check recurring tasks"
+      },
+      "email_send": {
+        "running": "Sending an email",
+        "done": "Sent an email",
+        "failed": "Didn't send an email"
+      },
+      "email_draft": {
+        "running": "Drafting an email",
+        "done": "Drafted an email",
+        "failed": "Didn't draft an email"
+      },
+      "email_read": {
+        "running": "Reading email",
+        "done": "Read email",
+        "failed": "Couldn't read email"
+      },
+      "email_mark": {
+        "running": "Changing the read state of email",
+        "done": "Changed the read state of email",
+        "failed": "Didn't change the read state of email"
+      },
+      "agent": {
+        "running": "Handing off to a helper",
+        "done": "Handed off to a helper",
+        "failed": "Didn't hand off to a helper"
+      },
+      "ask": {
+        "running": "Asking you",
+        "done": "Asked you",
+        "failed": "Couldn't ask you"
+      },
+      "mcp": {
+        "running": "Using {{app}} ({{action}})",
+        "done": "Used {{app}} ({{action}})",
+        "failed": "Didn't complete {{app}} ({{action}})"
+      },
+      "generic": {
+        "running": "Running {{name}}",
+        "done": "Ran {{name}}",
+        "failed": "Didn't complete {{name}}"
+      }
+    }
   },
   "botForm": {
     "apps": {
@@ -424,11 +651,11 @@
       },
       "full": {
         "name": "Full",
-        "hint": "Everything is allowed without asking."
+        "hint": "Runs without asking (including ordinary file deletes and sends), except Money, schedule activations, and catastrophic never-list commands."
       },
       "read-and-draft": {
         "name": "Read & draft",
-        "hint": "The bot reads and drafts, but never sends or changes things."
+        "hint": "Reads are free; drafts, file changes, page fetches, clicks, commands, and sends all ask first (same effective policy as Approve destructive)."
       },
       "custom": {
         "name": "Custom",
@@ -585,9 +812,9 @@
       "whatItMeansTitle": "What the bot can do on your computer",
       "explain": {
         "read-only": "The bot can inspect your screen, read files, and look at web pages, but it can never click, type, edit files, or run commands.",
-        "read-and-draft": "The bot can read and prepare drafts, but it still asks before changing files, clicking, or running commands.",
+        "read-and-draft": "The bot can read files, search the web, and inspect your screen freely, and asks before drafting, changing or deleting files, fetching pages, clicking, typing, running commands, or sending messages (same effective policy as Approve destructive).",
         "approve-destructive": "The bot can read files and inspect your screen freely, and shows you a live approval card before clicking, typing, editing files, running shell commands, or sending messages.",
-        "full": "The bot can read, click, type, edit files, and run commands without asking first (except hard safety floors below)."
+        "full": "The bot can read, click, type, edit or delete ordinary files, run shell commands, and send messages without asking first (except the hard safety floors below)."
       },
       "floorsTitle": "Always-on safety protections",
       "floorMoney": "Financial & payment actions always require your explicit confirmation.",
@@ -1078,6 +1305,54 @@
           "bot": "Pick the bot, or choose any bot."
         }
       }
+    },
+    "webSearch": {
+      "title": "Web search",
+      "description": "Search backend priority order, API keys, and live connectivity probe.",
+      "note": "Web search tries active backends in priority order until one returns results. Changes apply immediately on the next bot turn without restarting.",
+      "loadError": "Could not load web search settings: {{message}}",
+      "configError": "web.toml could not be loaded ({{message}}). Showing defaults — saving changes below will replace it.",
+      "orderTitle": "Backend order & fallbacks",
+      "orderHint": "Move preferred backends up. Keyless fallbacks work without an API key but may occasionally hit upstream rate limits.",
+      "credentialsTitle": "Self-hosted & API backends",
+      "searxngLabel": "SearXNG URL",
+      "searxngHint": "Base URL of your own SearXNG instance (clear and save to disable).",
+      "braveKeyLabel": "Brave Search API key",
+      "tavilyKeyLabel": "Tavily Search API key",
+      "tavilyHint": "Optional API key for Tavily Search (stored write-only in the secret store).",
+      "keyStoredPlaceholder": "Key stored (enter a new key to replace)",
+      "keyEmptyPlaceholder": "Enter API key…",
+      "keyWriteOnlyHint": "Write-only: stored in the OS secret store and never read back.",
+      "clearKey": "Clear key",
+      "save": "Save changes",
+      "testTitle": "Connectivity test",
+      "testQueryLabel": "Test search query",
+      "test": "Test",
+      "testing": "Testing…",
+      "testOk": "{{backend}} answered ({{count}} results in {{ms}} ms)",
+      "testFailed": "Search probe failed ({{ms}} ms): {{error}}",
+      "fallbackNotes": "Earlier fallback errors before success: {{details}}",
+      "moveUp": "Move {{name}} up",
+      "moveDown": "Move {{name}} down",
+      "toggleBackend": "Toggle {{name}}",
+      "status": {
+        "active": "Active",
+        "needsKey": "Needs API key",
+        "needsUrl": "Needs URL",
+        "disabled": "Disabled"
+      },
+      "backends": {
+        "searxng": "SearXNG",
+        "brave": "Brave Search API",
+        "tavily": "Tavily Search API",
+        "duckduckgo": "DuckDuckGo (HTML)",
+        "duckduckgo_lite": "DuckDuckGo Lite",
+        "bing": "Bing (HTML)"
+      },
+      "toast": {
+        "saved": "Web search settings saved",
+        "keyCleared": "API key removed from secret store"
+      }
     }
   },
   "palette": {
@@ -1239,6 +1514,54 @@
         "other": "Other"
       }
     }
+  },
+  "newBot": {
+    "title": "New bot",
+    "templatesLabel": "Templates",
+    "templates": {
+      "blank": "Blank",
+      "researcher": "Researcher",
+      "coder": "Coder",
+      "assistant": "Assistant",
+      "social": "Social"
+    },
+    "namePlaceholder": "Bot name",
+    "shapeGroup": "Character shape",
+    "shapes": {
+      "pebble": "Pebble",
+      "cube": "Cube",
+      "diamond": "Diamond",
+      "cloud": "Cloud",
+      "tri": "Triangle",
+      "flower": "Flower",
+      "gem": "Gem",
+      "drop": "Drop",
+      "star": "Star",
+      "ghost": "Ghost",
+      "capsule": "Capsule",
+      "ears": "Ears",
+      "gumdrop": "Gumdrop",
+      "heart": "Heart",
+      "clover": "Clover",
+      "boulder": "Boulder"
+    },
+    "brain": "Brain",
+    "brainHint": "You can change this later in chat",
+    "brainAuto": "Auto",
+    "autonomy": "Autonomy",
+    "autonomyLevels": {
+      "ask": "Ask",
+      "balanced": "Balanced",
+      "auto": "Free"
+    },
+    "autonomyHints": {
+      "ask": "Reads files, checks the screen, and searches the web without asking; asks before drafting, sending, changing or deleting files, fetching pages, clicking, or running commands (same effective policy as Balanced).",
+      "balanced": "Reads files, checks the screen, and searches the web freely; asks before every file write or delete, draft, send, page fetch, click, or command (same effective policy as Ask).",
+      "auto": "Runs without asking—including deleting ordinary files, running shell commands, and sending messages—pausing only for Money, schedule activations, and never-list commands (disk format, system/home wipes, credential paths)."
+    },
+    "autonomyCustom": "Using the {{preset}} permission preset.",
+    "advanced": "Advanced settings",
+    "create": "Create"
   },
   "quota": {
     "title": "Quota left",
