@@ -26,6 +26,14 @@ use crate::util::{exec_err, finish_text, parse, spec};
 
 const DEFAULT_TIMEOUT_SECS: u64 = 60;
 const MAX_TIMEOUT_SECS: u64 = 600;
+
+/// Seconds `shell_run` waits. Omitted input uses [`DEFAULT_TIMEOUT_SECS`].
+fn resolved_timeout_secs(requested: Option<u64>) -> u64 {
+    requested
+        .unwrap_or(DEFAULT_TIMEOUT_SECS)
+        .clamp(1, MAX_TIMEOUT_SECS)
+}
+
 /// Bytes kept per stream; the rest is read and dropped.
 const HARD_CAPTURE_BYTES: usize = 32 * 1024 * 1024;
 
@@ -316,11 +324,7 @@ impl Tool for ShellTool {
             return Err(ToolError::InvalidInput("command is empty".into()));
         }
         let kind = i.shell.unwrap_or_else(ShellKind::default_for_host);
-        let timeout = Duration::from_secs(
-            i.timeout
-                .unwrap_or(DEFAULT_TIMEOUT_SECS)
-                .clamp(1, MAX_TIMEOUT_SECS),
-        );
+        let timeout = Duration::from_secs(resolved_timeout_secs(i.timeout));
         let mut cmd = build_command(kind, &i.command);
         if let Some(cwd) = &i.cwd {
             cmd.current_dir(cwd);
@@ -626,6 +630,20 @@ mod tests {
             became_alive(pid, READY_BOUND).await,
             "pipe-holding child {pid} was not running after shell_run returned"
         );
+    }
+
+    /// Spawning tests inject a long timeout so a slow host is not killed before
+    /// the assertion. This one never starts a process: omitting `timeout` must
+    /// still deserialize and resolve to the production 60s default.
+    #[test]
+    fn omitted_timeout_resolves_to_the_default() {
+        let omitted: Input =
+            parse(json!({"command": "echo hi", "shell": "sh"})).expect("timeout is optional");
+        assert_eq!(omitted.timeout, None);
+        assert_eq!(resolved_timeout_secs(omitted.timeout), DEFAULT_TIMEOUT_SECS);
+        let explicit: Input = parse(json!({"command": "echo hi", "shell": "sh", "timeout": 30}))
+            .expect("explicit timeout");
+        assert_eq!(resolved_timeout_secs(explicit.timeout), 30);
     }
 
     #[tokio::test]
