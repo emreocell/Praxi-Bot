@@ -43,6 +43,53 @@ HTTP completion status are appended to the existing SQLite audit log with the
 paired public key and actor `phone:<paired name>` or `desktop:<paired name>`;
 the normal agent decision audit remains in place.
 
+## Long-lived binary responses (live view)
+
+The ADR 0029 live-view routes (`/v1/view/...`, `/v1/control/takeover|release`)
+use no new ALPN, port, WebSocket or transport-specific API. A frame stream is an
+ordinary `GET /v1/view/sessions/{id}/frames` response with content type
+`application/vnd.praxi.live-view.v1`; input, heartbeat, release and cancel are
+ordinary requests. A paired phone reuses the same path by speaking HTTP/1.1 on
+a `bot/api/1` bi-stream directly (no proxy, no local token).
+
+Passthrough: frames are forwarded unchanged, never collected, re-encoded,
+persisted or placed in the event channel. HTTP and QUIC fragmentation is not a
+record boundary; clients parse with the `live-view` wire decoder. Status,
+content type, `no-store` and `nosniff` are preserved; hop-by-hop headers and
+`x-forwarded-*`/`x-peer-*`/`x-praxi-*` request headers are stripped. A cancelled
+stream (stall, revoke, link loss, proxy stop, upstream failure) ends the body
+with an error, never a clean end, so a cut record is never followed by a newer
+one: reconnect and take the newest frame (there is no replay). POST bodies are
+never replayed after a reconnect; use request ids through the API.
+
+Deadlines: dial 10 s, response *headers* 30 s (`RESPONSE_TIMEOUT`); the body is
+not subject to either. A view body whose next chunk is not requested within
+`VIEW_STALL` (10 s) of the previous one is cancelled on both ends.
+
+Stream budget (per proxy and per peer connection; 32 streams): long-lived
+bodies share 24 (`STREAMS - CONTROL_RESERVE`), of which at most 4 are view
+frame streams (`VIEW_STREAMS`); 8 are reserved for ordinary requests. Daemon
+wide: 256 streams, 192 long-lived, 16 view. Classification uses the decoded
+request path, `Accept`, and finally the response content type, after the
+transport identity is known. Acquisition never waits: a full view/SSE pool
+answers 429 `too_many_streams` at once, a full ordinary pool 502 (proxy) or 503.
+View routes take credentials only in the `Authorization` header; a credential
+in the query is refused with 400 (`/v1/events?token=` is unchanged).
+
+Buffering bounds: request bodies 16 MiB; hyper header buffer 32 KiB; hyper
+holds at most one body chunk (a record is one chunk of at most ~2 MiB) plus its
+write buffer; the daemon keeps one in-flight plus one newest pending frame. The
+remaining transport queue is QUIC flow control: the receiving endpoint's
+connection receive window (peer-network setting, RPC budget by default,
+`CONNECTION_BODY_BUDGET` on a node that also serves this API). A stalled reader
+therefore leaves at most that window of old frames in flight before the stall
+deadline cancels the stream (measured about 1.4 MiB with the default client).
+Tightening it for this ALPN needs a per-stream window in peer-network.
+
+Real-link smoke (synthetic frames and an input sink, no display): see the
+`daemon` tests, which run the real daemon router behind `ApiProxy` over a
+paired iroh link (watch, take over, input, Bitirdim, second device, revoke).
+
 CLI configuration is `<data>/config.toml`:
 
 ```toml

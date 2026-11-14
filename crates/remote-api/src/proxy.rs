@@ -1,4 +1,9 @@
-use crate::{AbortTask, CONNECT_TIMEOUT, RESPONSE_TIMEOUT, STREAMS, oversized, request_body};
+use crate::{
+    AbortTask, CONNECT_TIMEOUT, CONNECTION_CAPACITY, Tuning,
+    budget::{self, Budget, Class},
+    guard::{GuardedBody, Lease},
+    oversized, request_body,
+};
 use axum::{
     Router,
     body::Body,
@@ -6,17 +11,13 @@ use axum::{
     http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header},
     response::{IntoResponse, Response},
 };
-use futures_util::stream;
-use http_body_util::{BodyExt, StreamBody};
+use http_body_util::BodyExt;
 use hyper::client::conn::http1;
 use hyper_util::rt::TokioIo;
 use iroh::{PublicKey, endpoint::Connection};
 use peer_network::{ALPN_API, PeerNetwork};
-use std::{fmt::Write as _, io, sync::Arc, time::Duration};
-use tokio::{
-    net::TcpListener,
-    sync::{Semaphore, watch},
-};
+use std::{fmt::Write as _, io, time::Duration};
+use tokio::{net::TcpListener, sync::watch};
 
 /// Connection status of the remote API tunnel.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,7 +54,8 @@ impl Drop for CloseConnection {
 struct Proxy {
     token: String,
     conn: watch::Receiver<Option<Connection>>,
-    slots: Arc<Semaphore>,
+    budget: Budget,
+    tuning: Tuning,
     cancel: tokio_util::sync::CancellationToken,
 }
 
@@ -64,6 +66,14 @@ impl ApiProxy {
     /// Returns an error if randomness or the loopback bind fails, or the peer
     /// is not paired locally. Dial failures are reported through `state`.
     pub async fn start(net: PeerNetwork, peer: PublicKey) -> io::Result<Self> {
+        Self::start_with(net, peer, Tuning::default()).await
+    }
+
+    pub(crate) async fn start_with(
+        net: PeerNetwork,
+        peer: PublicKey,
+        tuning: Tuning,
+    ) -> io::Result<Self> {
         if net.device(&peer).is_none() {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
@@ -134,7 +144,8 @@ impl ApiProxy {
         let proxy = Proxy {
             token: token.clone(),
             conn,
-            slots: Arc::new(Semaphore::new(STREAMS)),
+            budget: Budget::new(CONNECTION_CAPACITY),
+            tuning,
             cancel: cancel.clone(),
         };
         let app = Router::new().fallback(forward).with_state(proxy);
@@ -204,6 +215,7 @@ fn serde_error(status: StatusCode, message: &str) -> serde_json::Value {
         StatusCode::UNAUTHORIZED => "unauthorized",
         StatusCode::FORBIDDEN => "forbidden",
         StatusCode::PAYLOAD_TOO_LARGE => "payload_too_large",
+        StatusCode::TOO_MANY_REQUESTS => "too_many_streams",
         _ => "unavailable",
     };
     serde_json::json!({"error": {"code": code, "message": message}})
@@ -319,6 +331,14 @@ async fn forward(State(proxy): State<Proxy>, mut req: Request) -> Response {
         cors(&mut response, origin, false);
         return response;
     }
+    // View and control routes take the bearer in an Authorization header only.
+    // Reject (rather than strip) a credential in the URL, after authentication
+    // like the daemon: it would otherwise reach history, logs and referrers.
+    if budget::view_credential_query(req.uri()) {
+        let mut response = error(StatusCode::BAD_REQUEST, "URL credentials are forbidden");
+        cors(&mut response, origin, false);
+        return response;
+    }
     let mut response = if oversized(req.headers()) {
         error(StatusCode::PAYLOAD_TOO_LARGE, "request body too large")
     } else {
@@ -345,14 +365,14 @@ async fn forward(State(proxy): State<Proxy>, mut req: Request) -> Response {
         };
         *req.uri_mut() = target;
         strip_hop_headers(req.headers_mut());
+        // Identity and role come from the pairing, never from a client header.
+        budget::strip_identity_headers(req.headers_mut());
         req.headers_mut().remove(header::AUTHORIZATION);
         req.headers_mut().remove(header::PROXY_AUTHORIZATION);
         req.headers_mut()
             .insert(header::HOST, HeaderValue::from_static("iroh.local"));
-        match tunnel(&proxy, req.map(request_body)).await {
-            Ok(response) => response,
-            Err(e) => error(StatusCode::BAD_GATEWAY, &e.to_string()),
-        }
+        let class = budget::request_class(req.method(), req.uri(), req.headers());
+        tunnel(&proxy, req.map(request_body), class).await
     };
     cors(&mut response, origin, false);
     response
@@ -383,12 +403,49 @@ fn strip_hop_headers(headers: &mut HeaderMap) {
     }
 }
 
-async fn tunnel(proxy: &Proxy, req: Request) -> io::Result<Response> {
-    let permit = proxy
-        .slots
-        .clone()
-        .try_acquire_owned()
-        .map_err(io::Error::other)?;
+/// Why an exchange could not start or continue.
+enum Refusal {
+    /// A budget pool was full: fail fast rather than queue.
+    Overloaded(Class),
+    Io(io::Error),
+}
+
+impl From<io::Error> for Refusal {
+    fn from(e: io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
+fn refusal(refusal: Refusal) -> Response {
+    match refusal {
+        Refusal::Overloaded(Class::View) => {
+            error(StatusCode::TOO_MANY_REQUESTS, "too many live-view streams")
+        }
+        Refusal::Overloaded(Class::Stream) => {
+            error(StatusCode::TOO_MANY_REQUESTS, "too many open event streams")
+        }
+        // Unchanged behaviour: every stream of the connection is in use.
+        Refusal::Overloaded(Class::Ordinary) => {
+            error(StatusCode::BAD_GATEWAY, "no stream capacity available")
+        }
+        Refusal::Io(e) => error(StatusCode::BAD_GATEWAY, &e.to_string()),
+    }
+}
+
+async fn tunnel(proxy: &Proxy, req: Request, class: Class) -> Response {
+    match exchange(proxy, req, class).await {
+        Ok(response) => response,
+        Err(e) => refusal(e),
+    }
+}
+
+async fn exchange(proxy: &Proxy, req: Request, class: Class) -> Result<Response, Refusal> {
+    // `Overloaded` names the pool that was full; an exhausted total is reported
+    // as ordinary whatever was asked for.
+    let mut held = proxy
+        .budget
+        .acquire(class)
+        .map_err(|o| Refusal::Overloaded(o.0))?;
     let mut connection_rx = proxy.conn.clone();
     let conn = tokio::time::timeout(
         CONNECT_TIMEOUT,
@@ -399,7 +456,9 @@ async fn tunnel(proxy: &Proxy, req: Request) -> io::Result<Response> {
     .map_err(io::Error::other)?
     .clone()
     .ok_or_else(|| io::Error::other("remote daemon unreachable"))?;
-    let response = tokio::time::timeout(RESPONSE_TIMEOUT, async {
+    // The deadline covers dial, request upload and response *headers* only. It
+    // ends before the body is returned, so a legitimately endless body survives.
+    let (response, driver) = tokio::time::timeout(proxy.tuning.response_timeout, async {
         let (send, recv) = tokio::time::timeout(CONNECT_TIMEOUT, conn.open_bi())
             .await
             .map_err(io::Error::other)?
@@ -414,17 +473,20 @@ async fn tunnel(proxy: &Proxy, req: Request) -> io::Result<Response> {
     })
     .await
     .map_err(io::Error::other)??;
-    let (response, driver) = response;
     let (mut parts, body) = response.into_parts();
     strip_hop_headers(&mut parts.headers);
-    // The driver and concurrency permit belong to the response body. A browser
-    // cancelling SSE drops both immediately, resetting the QUIC stream.
-    let body = StreamBody::new(stream::unfold(
-        (body, driver, permit, proxy.cancel.clone()),
-        |(mut body, driver, permit, cancel)| async move {
-            let frame = tokio::select! { biased; () = cancel.cancelled() => return None, frame = body.frame() => frame? };
-            Some((frame, (body, driver, permit, cancel)))
-        },
-    ));
+    // The response, not only the request, decides what the body costs.
+    let actual = budget::response_class(&parts.headers);
+    if actual > held.class {
+        proxy
+            .budget
+            .upgrade(&mut held, actual)
+            .map_err(|o| Refusal::Overloaded(o.0))?;
+    }
+    let stall = (held.class == Class::View).then_some(proxy.tuning.view_stall);
+    // Driver and permits belong to the body. Dropping the body (client cancel,
+    // stall, proxy stop) aborts the driver and resets the QUIC stream at once.
+    let lease = Lease::new(proxy.cancel.child_token(), (held, driver));
+    let body = GuardedBody::new(Body::new(body), lease, stall);
     Ok(Response::from_parts(parts, Body::new(body)))
 }
