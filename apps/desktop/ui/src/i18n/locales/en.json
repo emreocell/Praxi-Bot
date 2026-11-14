@@ -1215,5 +1215,53 @@
         "other": "Other"
       }
     }
+  },
+  "newBot": {
+    "title": "New bot",
+    "templatesLabel": "Templates",
+    "templates": {
+      "blank": "Blank",
+      "researcher": "Researcher",
+      "coder": "Coder",
+      "assistant": "Assistant",
+      "social": "Social"
+    },
+    "namePlaceholder": "Bot name",
+    "shapeGroup": "Character shape",
+    "shapes": {
+      "pebble": "Pebble",
+      "cube": "Cube",
+      "diamond": "Diamond",
+      "cloud": "Cloud",
+      "tri": "Triangle",
+      "flower": "Flower",
+      "gem": "Gem",
+      "drop": "Drop",
+      "star": "Star",
+      "ghost": "Ghost",
+      "capsule": "Capsule",
+      "ears": "Ears",
+      "gumdrop": "Gumdrop",
+      "heart": "Heart",
+      "clover": "Clover",
+      "boulder": "Boulder"
+    },
+    "brain": "Brain",
+    "brainHint": "You can change this later in chat",
+    "brainAuto": "Auto",
+    "autonomy": "Autonomy",
+    "autonomyLevels": {
+      "ask": "Ask",
+      "balanced": "Balanced",
+      "auto": "Free"
+    },
+    "autonomyHints": {
+      "ask": "Reads and prepares drafts, and asks before changing files, browsing, or sending.",
+      "balanced": "Reads freely; asks before sending messages or deleting.",
+      "auto": "Runs without asking, pausing only for money or high-risk commands."
+    },
+    "autonomyCustom": "Using the {{preset}} permission preset.",
+    "advanced": "Advanced settings",
+    "create": "Create"
   }
 }

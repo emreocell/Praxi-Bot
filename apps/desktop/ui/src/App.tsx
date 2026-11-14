@@ -39,6 +39,7 @@ import { NeedsYouView } from "./views/NeedsYouView";
 import { OnboardingView } from "./views/OnboardingView";
 import { SchedulesView } from "./views/SchedulesView";
 import { AppsModal } from "./views/AppsModal";
+import { NewBotModal } from "./views/NewBotModal";
 import { SettingsModal } from "./views/SettingsModal";
 import type { SettingsSectionId } from "./views/settings/types";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -101,6 +102,7 @@ function AppShell() {
     null
   );
   const [appsOpen, setAppsOpen] = useState(false);
+  const [newBotOpen, setNewBotOpen] = useState(false);
   const [botSearch, setBotSearch] = useState<string | null>(null);
   const { servers: appServers } = useMcp(true);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -129,7 +131,7 @@ function AppShell() {
         const atlas = "11111111-1111-4111-8111-111111111111";
         if (screen === "onboarding") merged.onboardingCompleted = false;
         if (screen === "botform") setRoute({ kind: "botForm", botId: atlas });
-        if (screen === "newbot") setRoute({ kind: "botForm" });
+        if (screen === "newbot") setNewBotOpen(true);
         if (screen === "bot") setRoute({ kind: "bot", botId: atlas });
         if (screen === "schedules") setRoute({ kind: "schedules" });
         if (screen === "needs") setRoute({ kind: "needs" });
@@ -306,6 +308,7 @@ function AppShell() {
     void simulateBotRun({
       botId: view?.id ?? "atlas",
       botName: view?.name ?? "Atlas",
+      botShape: view?.shape,
       botAvatar: view?.avatar,
       botColor: view?.color ?? BOT_COLORS[0],
       botInitials: view?.initials ?? "AT"
@@ -428,7 +431,7 @@ function AppShell() {
               </button>
               <div className={styles.topActions}>
                 <button className={styles.iconButton} title={t("sidebar.searchBots")} aria-label={t("sidebar.searchBots")} onClick={() => setBotSearch(botSearch === null ? "" : null)}><Search /></button>
-                <button className={styles.iconButton} title={t("sidebar.newBot")} aria-label={t("sidebar.newBot")} onClick={() => setRoute({ kind: "botForm" })}><Plus /></button>
+                <button className={styles.iconButton} title={t("sidebar.newBot")} aria-label={t("sidebar.newBot")} onClick={() => setNewBotOpen(true)}><Plus /></button>
               </div>
             </div>
             {botSearch !== null ? <input className={styles.botSearch} autoFocus value={botSearch} onChange={e => setBotSearch(e.target.value)} aria-label={t("sidebar.searchBots")} placeholder={t("sidebar.searchBots")} /> : null}
@@ -569,7 +572,7 @@ function AppShell() {
                           </Button>
                           <Button
                             variant="secondary"
-                            onClick={() => setRoute({ kind: "botForm" })}
+                            onClick={() => setNewBotOpen(true)}
                           >
                             <Plus />{t("sidebar.newBot")}
                           </Button>
@@ -583,7 +586,7 @@ function AppShell() {
                       ) : (
                         <Button
                           variant="primary"
-                          onClick={() => setRoute({ kind: "botForm" })}
+                          onClick={() => setNewBotOpen(true)}
                         >
                           <Plus />{t("sidebar.newBot")}
                         </Button>
@@ -661,6 +664,14 @@ function AppShell() {
         }}
       />
       <AppsModal open={appsOpen} onClose={() => setAppsOpen(false)} />
+      <NewBotModal
+        open={newBotOpen}
+        onClose={() => setNewBotOpen(false)}
+        onDone={(botId) => {
+          setNewBotOpen(false);
+          setRoute({ kind: "bot", botId });
+        }}
+      />
       <HelpModal
         open={helpOpen}
         onClose={() => setHelpOpen(false)}

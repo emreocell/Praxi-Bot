@@ -1215,5 +1215,53 @@
         "other": "Diğer"
       }
     }
+  },
+  "newBot": {
+    "title": "Yeni bot",
+    "templatesLabel": "Şablonlar",
+    "templates": {
+      "blank": "Boş",
+      "researcher": "Araştırmacı",
+      "coder": "Kodcu",
+      "assistant": "Asistan",
+      "social": "Sosyal"
+    },
+    "namePlaceholder": "Bot adı",
+    "shapeGroup": "Karakter şekli",
+    "shapes": {
+      "pebble": "Çakıl",
+      "cube": "Küp",
+      "diamond": "Elmas",
+      "cloud": "Bulut",
+      "tri": "Üçgen",
+      "flower": "Çiçek",
+      "gem": "Altıgen",
+      "drop": "Damla",
+      "star": "Yıldız",
+      "ghost": "Hayalet",
+      "capsule": "Kapsül",
+      "ears": "Kulaklı",
+      "gumdrop": "Jöle",
+      "heart": "Kalp",
+      "clover": "Yonca",
+      "boulder": "Kaya"
+    },
+    "brain": "Beyin",
+    "brainHint": "Sonradan sohbetten değiştirebilirsin",
+    "brainAuto": "Otomatik",
+    "autonomy": "Özerklik",
+    "autonomyLevels": {
+      "ask": "Sorar",
+      "balanced": "Dengeli",
+      "auto": "Serbest"
+    },
+    "autonomyHints": {
+      "ask": "Okur ve taslak hazırlar; dosya değiştirmeden, taramadan ve göndermeden önce sorar.",
+      "balanced": "Okur, bakar; göndermeden ve silmeden önce sorar.",
+      "auto": "Sormadan çalışır, yalnızca para ve yüksek riskli komutlarda durur."
+    },
+    "autonomyCustom": "{{preset}} izin profili kullanılıyor.",
+    "advanced": "Gelişmiş ayarlar",
+    "create": "Oluştur"
   }
 }
