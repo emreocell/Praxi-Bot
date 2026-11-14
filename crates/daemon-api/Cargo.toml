@@ -51,6 +51,7 @@ uuid.workspace = true
 rustix = { version = "1", default-features = false, features = ["fs", "process", "std"] }
 
 [dev-dependencies]
+tokio-tungstenite.workspace = true
 rusqlite.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 http-body-util = "0.1"
