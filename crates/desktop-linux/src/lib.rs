@@ -7,6 +7,7 @@
 //! error in v0. On non-Linux platforms this crate exposes the platform-independent
 //! helpers in [`pure`].
 
+pub mod live_view_x11;
 pub mod pure;
 
 #[cfg(target_os = "linux")]

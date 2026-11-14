@@ -12,5 +12,13 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
+jpeg-encoder.workspace = true
+live-view.workspace = true
+parking_lot.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -2041,8 +2041,14 @@ name = "desktop-api"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "jpeg-encoder",
+ "live-view",
+ "parking_lot",
  "serde",
+ "tempfile",
  "thiserror 2.0.21",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -2054,7 +2060,10 @@ dependencies = [
  "desktop-api",
  "futures",
  "jpeg-encoder",
+ "live-view",
+ "parking_lot",
  "png 0.18.1",
+ "tempfile",
  "tokio",
  "x11rb",
 ]
@@ -2071,7 +2080,11 @@ dependencies = [
  "desktop-api",
  "futures",
  "jpeg-encoder",
+ "live-view",
+ "parking_lot",
  "png 0.18.1",
+ "tempfile",
+ "tokio",
  "windows 0.62.2",
 ]
 

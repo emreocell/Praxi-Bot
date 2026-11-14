@@ -55,4 +55,23 @@ pub trait DesktopBackend: Send + Sync {
 
     /// Report what this backend supports.
     fn capabilities(&self) -> Capabilities;
+
+    /// Return a live-view target adapter for watching and taking over this
+    /// desktop backend's active host session, or return a typed capability /
+    /// availability [`::live_view::Reason`].
+    ///
+    /// Default returns `Err(Reason::Unsupported)` so unsupported platforms,
+    /// remote proxies, and existing test fakes remain source-compatible.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::live_view::Reason::Unsupported`] on unsupported platforms or
+    /// [`::live_view::Reason::Unavailable`] if the active display session cannot
+    /// be accessed.
+    fn live_view_target(
+        &self,
+        _options: &crate::live_view::LiveViewOptions,
+    ) -> Result<std::sync::Arc<dyn ::live_view::ViewTarget>, ::live_view::Reason> {
+        Err(::live_view::Reason::Unsupported)
+    }
 }
