@@ -93,8 +93,8 @@ impl WebHost {
         )
     }
 
-    fn dto_from(&self, file: &WebConfigFile) -> WebSearchConfigDto {
-        let mut warnings = Vec::new();
+    fn dto_from(&self, file: &WebConfigFile, extra_warnings: Vec<String>) -> WebSearchConfigDto {
+        let mut warnings = extra_warnings;
         let cfg = self.build_tools_cfg(file, &mut warnings);
         let brave_key_set = self.secret_present(file.search.brave_key.as_deref());
         let tavily_key_set = self.secret_present(file.search.tavily_key.as_deref());
@@ -120,6 +120,8 @@ impl WebHost {
             }
         }
 
+        let config_error = (!warnings.is_empty()).then(|| warnings.join("; "));
+
         WebSearchConfigDto {
             order,
             active_backends,
@@ -129,6 +131,7 @@ impl WebHost {
             duckduckgo,
             duckduckgo_lite,
             bing,
+            config_error,
         }
     }
 
@@ -253,8 +256,8 @@ fn validate_searxng_url(raw: &str) -> Result<Option<String>, WebControlError> {
 #[async_trait]
 impl WebControl for WebHost {
     fn get(&self) -> WebSearchConfigDto {
-        let (file, _warnings) = load_web_file(&self.data_dir);
-        self.dto_from(&file)
+        let (file, warnings) = load_web_file(&self.data_dir);
+        self.dto_from(&file, warnings)
     }
 
     async fn update(
@@ -273,20 +276,9 @@ impl WebControl for WebHost {
         }
 
         let _guard = self.update_lock.lock().await;
-        let path = self.data_dir.join(WEB_FILE);
-        let mut file = if path.exists() {
-            let raw = std::fs::read_to_string(&path).map_err(|e| {
-                WebControlError::Internal(format!("cannot read {}: {e}", path.display()))
-            })?;
-            toml::from_str::<WebConfigFile>(&raw).map_err(|e| {
-                WebControlError::Invalid(format!(
-                    "{}: {e}; fix or remove it before updating from settings",
-                    path.display()
-                ))
-            })?
-        } else {
-            WebConfigFile::default()
-        };
+        // Start from defaults when web.toml is missing, unreadable, or malformed so
+        // a valid settings save can repair/replace the broken file on disk.
+        let (mut file, _warnings) = load_web_file(&self.data_dir);
 
         if let Some(order) = &input.order {
             file.search.order = Some(validate_order(order)?);
@@ -354,7 +346,7 @@ impl WebControl for WebHost {
         builtin_tools::register_web_tools(&self.registry, candidate_cfg)
             .map_err(|e| WebControlError::Internal(format!("cannot reload web tools: {e}")))?;
 
-        Ok(self.dto_from(&file))
+        Ok(self.dto_from(&file, Vec::new()))
     }
 
     async fn test(
@@ -581,5 +573,78 @@ mod tests {
         assert_eq!(report.backend.as_deref(), Some("searxng"));
         assert_eq!(report.result_count, 1);
         assert!(report.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn update_rejects_searxng_on_daemon_port_via_localhost_without_connecting() {
+        let daemon = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&daemon)
+            .await;
+        let daemon_port = daemon.address().port();
+
+        let dir = tempfile::tempdir().unwrap();
+        let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
+        let reg = ToolRegistry::new();
+        crate::serve::register_web(dir.path(), daemon_port, &reg, Some(&store));
+        let host = WebHost::new(dir.path(), daemon_port, reg, Some(store));
+
+        for url in [
+            format!("http://localhost:{daemon_port}/v1/web"),
+            format!("http://127.0.0.1:{daemon_port}/v1/web"),
+        ] {
+            let err = host
+                .update(WebSearchConfigInput {
+                    searxng_url: Some(url.clone()),
+                    ..Default::default()
+                })
+                .await
+                .unwrap_err();
+            assert!(matches!(err, WebControlError::Invalid(_)), "{url}: {err:?}");
+        }
+        assert!(!dir.path().join(WEB_FILE).exists());
+        assert!(
+            daemon.received_requests().await.unwrap().is_empty(),
+            "daemon port must never be contacted"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_surfaces_broken_web_toml_and_update_replaces_it() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(WEB_FILE), "this is = = broken toml").unwrap();
+        let (host, _, _) = host_with_store(dir.path());
+
+        let dto = host.get();
+        let err = dto
+            .config_error
+            .as_deref()
+            .expect("get must surface broken web.toml parse error");
+        assert!(err.contains(WEB_FILE), "{err}");
+        assert_eq!(
+            dto.active_backends,
+            vec!["duckduckgo", "duckduckgo_lite", "bing"]
+        );
+
+        let updated = host
+            .update(WebSearchConfigInput {
+                bing: Some(false),
+                ..Default::default()
+            })
+            .await
+            .expect("valid settings save must replace broken web.toml");
+        assert!(updated.config_error.is_none(), "{:?}", updated.config_error);
+        assert!(!updated.bing);
+        assert_eq!(
+            updated.active_backends,
+            vec!["duckduckgo", "duckduckgo_lite"]
+        );
+
+        let after = host.get();
+        assert!(after.config_error.is_none());
+        assert!(!after.bing);
+        let disk = std::fs::read_to_string(dir.path().join(WEB_FILE)).unwrap();
+        assert!(toml::from_str::<WebConfigFile>(&disk).is_ok());
     }
 }

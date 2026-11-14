@@ -32,6 +32,10 @@ pub struct WebSearchConfigDto {
     pub duckduckgo_lite: bool,
     /// Whether the Bing HTML fallback is enabled.
     pub bing: bool,
+    /// Parse or validation warning when `<data dir>/web.toml` could not be
+    /// loaded cleanly (the daemon fell back to defaults until saved).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_error: Option<String>,
 }
 
 /// Body of `PUT /v1/web/search`. Every field is optional: omitted fields keep

@@ -7434,6 +7434,13 @@
             "type": "boolean",
             "description": "Whether a Brave Search API key is stored (never returned)."
           },
+          "config_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Parse or validation warning when `<data dir>/web.toml` could not be\nloaded cleanly (the daemon fell back to defaults until saved)."
+          },
           "duckduckgo": {
             "type": "boolean",
             "description": "Whether the `DuckDuckGo` HTML fallback is enabled."

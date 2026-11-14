@@ -41,6 +41,7 @@ impl FakeWeb {
                 duckduckgo: true,
                 duckduckgo_lite: true,
                 bing: true,
+                config_error: None,
             }),
             brave_secret: Mutex::new(None),
             tavily_secret: Mutex::new(None),

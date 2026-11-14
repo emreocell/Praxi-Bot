@@ -8,6 +8,7 @@
 //! currently cooling down after a bot challenge or transient failure.
 
 use std::collections::{HashMap, HashSet};
+use std::net::ToSocketAddrs as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,7 +24,7 @@ use url::Url;
 
 use crate::error::WebError;
 use crate::http::{GetOptions, HTML_TYPES, HttpConfig, HttpFetcher, JSON_TYPES};
-use crate::policy::TrustedHostPolicy;
+use crate::policy::{TrustedHostPolicy, UrlPolicy};
 
 /// Hard upper bound for results per query.
 pub const MAX_RESULTS: usize = 25;
@@ -560,14 +561,14 @@ impl SearchBackend for DuckDuckGoBackend {
         let opts = browser_search_options(query.language.as_deref(), search_timeout(&self.fetcher));
         let page = self.fetcher.get(url.as_str(), &opts).await?;
         let text = page.text();
+        if is_ddg_challenge(page.status, &text) {
+            return Err(WebError::Search(format!(
+                "duckduckgo returned a bot challenge (HTTP {})",
+                page.status
+            )));
+        }
         let hits = parse_ddg(&text, &page.url);
         if hits.is_empty() {
-            if is_ddg_challenge(page.status, &text) {
-                return Err(WebError::Search(format!(
-                    "duckduckgo returned a bot challenge (HTTP {})",
-                    page.status
-                )));
-            }
             if is_ddg_no_results(&text) {
                 return Ok(Vec::new());
             }
@@ -667,14 +668,14 @@ impl SearchBackend for DuckDuckGoLiteBackend {
         let opts = browser_search_options(query.language.as_deref(), search_timeout(&self.fetcher));
         let page = self.fetcher.get(url.as_str(), &opts).await?;
         let text = page.text();
+        if is_ddg_challenge(page.status, &text) {
+            return Err(WebError::Search(format!(
+                "duckduckgo_lite returned a bot challenge (HTTP {})",
+                page.status
+            )));
+        }
         let hits = parse_ddg_lite(&text, &page.url);
         if hits.is_empty() {
-            if is_ddg_challenge(page.status, &text) {
-                return Err(WebError::Search(format!(
-                    "duckduckgo_lite returned a bot challenge (HTTP {})",
-                    page.status
-                )));
-            }
             if is_ddg_no_results(&text) {
                 return Ok(Vec::new());
             }
@@ -733,11 +734,12 @@ fn bing_target(href: &str, base: &Url) -> Option<String> {
 }
 
 fn is_bing_challenge(status: u16, html: &str) -> bool {
-    if matches!(status, 403 | 429) {
+    if matches!(status, 202 | 403 | 429) {
         return true;
     }
     let lower = html.to_ascii_lowercase();
-    lower.contains("g-recaptcha")
+    lower.contains("challenge-form")
+        || lower.contains("g-recaptcha")
         || lower.contains("hcaptcha")
         || lower.contains("cf-turnstile")
         || lower.contains("challenge-platform")
@@ -788,14 +790,14 @@ impl SearchBackend for BingBackend {
         let opts = browser_search_options(query.language.as_deref(), search_timeout(&self.fetcher));
         let page = self.fetcher.get(url.as_str(), &opts).await?;
         let text = page.text();
+        if is_bing_challenge(page.status, &text) {
+            return Err(WebError::Search(format!(
+                "bing returned a bot challenge (HTTP {})",
+                page.status
+            )));
+        }
         let hits = parse_bing(&text, &page.url);
         if hits.is_empty() {
-            if is_bing_challenge(page.status, &text) {
-                return Err(WebError::Search(format!(
-                    "bing returned a bot challenge (HTTP {})",
-                    page.status
-                )));
-            }
             if text.contains("b_no") || text.contains("There are no results for") {
                 return Ok(Vec::new());
             }
@@ -925,31 +927,30 @@ impl MultiSearch {
                 None => "no search backend configured; enable a backend or configure Brave/Tavily/SearXNG in Web Search settings".into(),
             }));
         }
+        let forced_name = (only.is_some() && candidates.len() == 1).then(|| candidates[0].name());
         let mut errors = Vec::new();
         let now = Instant::now();
         for b in candidates {
             let name = b.name();
-            if only.is_none() {
-                let active_cd = {
-                    let mut guard = self.cooldowns.lock();
-                    match guard.get(name) {
-                        Some(entry) if entry.until > now => Some((
-                            entry.until.saturating_duration_since(now).as_secs().max(1),
-                            entry.reason,
-                        )),
-                        Some(_) => {
-                            guard.remove(name);
-                            None
-                        }
-                        None => None,
+            let active_cd = {
+                let mut guard = self.cooldowns.lock();
+                match guard.get(name) {
+                    Some(entry) if entry.until > now => Some((
+                        entry.until.saturating_duration_since(now).as_secs().max(1),
+                        entry.reason,
+                    )),
+                    Some(_) => {
+                        guard.remove(name);
+                        None
                     }
-                };
-                if let Some((secs, reason)) = active_cd {
-                    errors.push(format!(
-                        "{name}: skipped (cooling down for {secs}s after {reason})"
-                    ));
-                    continue;
+                    None => None,
                 }
+            };
+            if let Some((secs, reason)) = active_cd {
+                errors.push(format!(
+                    "{name}: skipped (cooling down for {secs}s after {reason})"
+                ));
+                continue;
             }
             match b.search(query).await {
                 Ok(results) if !results.is_empty() => {
@@ -975,11 +976,32 @@ impl MultiSearch {
                 }
             }
         }
-        Err(WebError::Search(format!(
-            "all configured search backends ({}) failed ({}); do not retry the exact same query or invent another backend name—rephrase keywords, open a known URL with web_extract, or configure Brave/Tavily/SearXNG in Web Search settings",
-            configured.join(", "),
-            errors.join("; ")
-        )))
+        let msg = if let Some(forced) = forced_name {
+            let others: Vec<&str> = configured
+                .iter()
+                .copied()
+                .filter(|n| *n != forced)
+                .collect();
+            if others.is_empty() {
+                format!(
+                    "search backend `{forced}` failed ({}); do not retry the exact same query or invent another backend name—rephrase keywords, open a known URL with web_extract, or configure Brave/Tavily/SearXNG in Web Search settings",
+                    errors.join("; ")
+                )
+            } else {
+                format!(
+                    "search backend `{forced}` failed ({}); other configured backends ({}) were not tried—omit `backend` to use the automatic fallback chain, rephrase keywords, or configure Brave/Tavily/SearXNG in Web Search settings",
+                    errors.join("; "),
+                    others.join(", ")
+                )
+            }
+        } else {
+            format!(
+                "all configured search backends ({}) failed ({}); do not retry the exact same query or invent another backend name—rephrase keywords, open a known URL with web_extract, or configure Brave/Tavily/SearXNG in Web Search settings",
+                configured.join(", "),
+                errors.join("; ")
+            )
+        };
+        Err(WebError::Search(msg))
     }
 }
 
@@ -1070,9 +1092,20 @@ impl SearchConfig {
             let port = base
                 .port_or_known_default()
                 .ok_or_else(|| WebError::Config("searxng url has no port".into()))?;
-            let policy = TrustedHostPolicy::new(Arc::clone(public.policy()), &host, port);
-            let fetcher = HttpFetcher::new(Arc::new(policy), http.clone())?;
+            let policy: Arc<dyn UrlPolicy> = Arc::new(TrustedHostPolicy::new(
+                Arc::clone(public.policy()),
+                &host,
+                port,
+            ));
+            let fetcher = HttpFetcher::new(Arc::clone(&policy), http.clone())?;
             fetcher.check(base.as_str())?;
+            if matches!(base.host(), Some(url::Host::Domain(_)))
+                && let Ok(addrs) = (host.as_str(), port).to_socket_addrs()
+            {
+                for sock in addrs {
+                    policy.check_socket(&host, sock)?;
+                }
+            }
             available.insert("searxng", Arc::new(SearxngBackend::new(base, fetcher)));
         }
         if let Some(key) = &self.brave_key {
@@ -1250,6 +1283,28 @@ mod tests {
         assert_eq!(out.len(), 2);
         assert_eq!(out[1].rank, 2);
         assert!(make("t", "T", "ftp://a.com/", "").is_none());
+    }
+
+    #[test]
+    fn mixed_challenge_and_result_markers_are_detected() {
+        let encoded = URL_SAFE_NO_PAD.encode("https://www.bing.com/");
+        let bing_mixed = format!(
+            r#"<html><body><form id="challenge-form"></form>
+            <li class="b_algo"><h2><a href="https://www.bing.com/ck/a?u=a1{encoded}">Verify</a></h2></li>
+            </body></html>"#
+        );
+        let bing_base = Url::parse("https://www.bing.com/search?q=x").unwrap();
+        assert_eq!(parse_bing(&bing_mixed, &bing_base).len(), 1);
+        assert!(is_bing_challenge(202, &bing_mixed));
+        assert!(is_bing_challenge(200, &bing_mixed));
+
+        let ddg_lite_mixed = r#"<html><body>
+            <div class="anomaly-modal__modal"></div>
+            <table><tr><td><a class="result-link" href="https://example.com/">Verify</a></td></tr></table>
+        </body></html>"#;
+        let lite_base = Url::parse("https://lite.duckduckgo.com/lite/?q=x").unwrap();
+        assert_eq!(parse_ddg_lite(ddg_lite_mixed, &lite_base).len(), 1);
+        assert!(is_ddg_challenge(200, ddg_lite_mixed));
     }
 
     #[test]
