@@ -17,6 +17,8 @@ pedantic = "warn"
 desktop-api = { path = "../desktop-api", version = "0.1.0" }
 async-trait.workspace = true
 futures.workspace = true
+live-view.workspace = true
+parking_lot.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 atspi.workspace = true
@@ -24,6 +26,10 @@ jpeg-encoder.workspace = true
 png.workspace = true
 tokio.workspace = true
 x11rb.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio.workspace = true
 
 [[example]]
 name = "inspect"
