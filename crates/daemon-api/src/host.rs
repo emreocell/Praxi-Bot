@@ -6,7 +6,7 @@ use std::{
 };
 
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path as Param, State},
     http::StatusCode,
 };
@@ -520,8 +520,14 @@ pub(crate) async fn status(State(s): State<AppState>) -> Json<HostStatus> {
 #[utoipa::path(post, operation_id = "host_invite", path = "/v1/host/invite", tag = "host", security(("bearer" = [])), request_body = HostInviteInput, responses((status = 200, body = HostInvite)))]
 pub(crate) async fn invite(
     State(s): State<AppState>,
+    peer: Option<Extension<crate::PeerIdentity>>,
     ApiJson(input): ApiJson<HostInviteInput>,
 ) -> Result<Json<HostInvite>, ApiError> {
+    if peer.as_ref().is_some_and(|p| p.role != crate::PeerRole::Desktop)
+        && !matches!(input.role, InviteRole::Phone)
+    {
+        return Err(ApiError::forbidden("only a local user or desktop may invite privileged devices"));
+    }
     let net = s
         .leader()
         .network()
@@ -563,6 +569,7 @@ pub(crate) async fn invite(
 pub(crate) async fn revoke(
     State(s): State<AppState>,
     Param(key): Param<String>,
+    peer: Option<Extension<crate::PeerIdentity>>,
 ) -> Result<StatusCode, ApiError> {
     let key =
         peer_network::key_from_string(&key).map_err(|e| ApiError::bad_request(e.to_string()))?;
@@ -570,6 +577,11 @@ pub(crate) async fn revoke(
         .leader()
         .network()
         .ok_or_else(|| ApiError::conflict("peer networking is disabled"))?;
+    if peer.as_ref().is_some_and(|p| p.role == crate::PeerRole::Phone)
+        && net.device(&key).is_some_and(|d| d.role != Role::Phone)
+    {
+        return Err(ApiError::forbidden("phones may revoke only phone devices"));
+    }
     if !net.revoke(&key).map_err(ApiError::internal)? {
         return Err(ApiError::not_found("device"));
     }

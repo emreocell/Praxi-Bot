@@ -507,3 +507,39 @@ fn main_format_host_limits_and_unknown_keys_survive_ownership_roundtrip() {
     assert_eq!(saved["future_setting"], before["future_setting"]);
     assert_eq!(HostConfig::load(dir.path()).unwrap(), config);
 }
+
+async fn phone_request(t: &T, method: Method, path: &str, body: Option<Value>) -> StatusCode {
+    let request = Request::builder().method(method).uri(path)
+        .header("content-type", "application/json")
+        .extension(crate::PeerIdentity { key: "phone-key".into(), role: crate::PeerRole::Phone })
+        .body(body.map_or_else(Body::empty, |v| Body::from(v.to_string()))).unwrap();
+    crate::peer_router(t.state.clone()).oneshot(request).await.unwrap().status()
+}
+
+#[tokio::test]
+async fn phone_cannot_mint_privileged_invites() {
+    let t = setup();
+    let net = attach_network(&t).await;
+    for role in ["desktop", "host", "node"] {
+        assert_eq!(phone_request(&t, Method::POST, "/v1/host/invite", Some(json!({"role":role}))).await, StatusCode::FORBIDDEN);
+    }
+    assert_eq!(phone_request(&t, Method::POST, "/v1/host/invite", Some(json!({"role":"phone"}))).await, StatusCode::OK);
+    net.shutdown().await;
+}
+
+#[tokio::test]
+async fn phone_cannot_revoke_non_phone_devices() {
+    for role in [peer_network::Role::Desktop, peer_network::Role::Host, peer_network::Role::Node, peer_network::Role::Phone] {
+        let t = setup();
+        let other = setup();
+        let net = attach_network(&t).await;
+        let other_net = attach_network(&other).await;
+        let invite = net.create_invite(role).await;
+        other_net.pair(&peer_network::PairTicket::parse(&invite.ticket).unwrap()).await.unwrap();
+        let status = phone_request(&t, Method::DELETE, &format!("/v1/host/devices/{}", other_net.id()), None).await;
+        assert_eq!(status, if role == peer_network::Role::Phone { StatusCode::NO_CONTENT } else { StatusCode::FORBIDDEN });
+        assert_eq!(net.device(&other_net.id()).is_some(), role != peer_network::Role::Phone);
+        net.shutdown().await;
+        other_net.shutdown().await;
+    }
+}
