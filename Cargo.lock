@@ -4954,6 +4954,7 @@ dependencies = [
 name = "node-agent"
 version = "0.1.0"
 dependencies = [
+ "browser-cdp",
  "clap",
  "desktop-api",
  "desktop-linux",

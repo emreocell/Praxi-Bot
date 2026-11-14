@@ -43,10 +43,10 @@ pub fn backend() -> Result<Arc<dyn DesktopBackend>, String> {
         let session = std::env::var("XDG_SESSION_TYPE").ok();
         let wayland = std::env::var("WAYLAND_DISPLAY").ok();
         display_session(display.as_deref(), wayland.as_deref(), session.as_deref())?;
-        let backend = desktop_linux::LinuxBackend::new().map_err(|e| e.to_string())?;
-        if !backend.capabilities().has_display {
+        if !browser_cdp::host::has_display() {
             return Err("X11 DISPLAY is unreachable; check Xvfb, DISPLAY and XAUTHORITY".into());
         }
+        let backend = desktop_linux::LinuxBackend::new().map_err(|e| e.to_string())?;
         Ok(Arc::new(backend))
     }
     #[cfg(not(any(windows, target_os = "linux")))]
