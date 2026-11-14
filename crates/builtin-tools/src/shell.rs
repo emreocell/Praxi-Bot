@@ -175,12 +175,21 @@ fn child_env_allowed(name: &OsStr) -> bool {
     CHILD_ENV_ALLOWLIST.iter().any(|allowed| *allowed == upper)
 }
 
+/// Allowlisted pairs from `vars`, in iteration order. Secret names are absent
+/// even when the daemon process has them; this does not read or write the
+/// process environment.
+fn retained_child_env(
+    vars: impl IntoIterator<Item = (OsString, OsString)>,
+) -> Vec<(OsString, OsString)> {
+    vars.into_iter()
+        .filter(|(key, _)| child_env_allowed(key))
+        .collect()
+}
+
 /// Replace the child's environment with the allowlist, read from the daemon
 /// without modifying it.
 fn apply_child_env(cmd: &mut Command) {
-    let kept: Vec<(OsString, OsString)> = std::env::vars_os()
-        .filter(|(key, _)| child_env_allowed(key))
-        .collect();
+    let kept = retained_child_env(std::env::vars_os());
     cmd.env_clear();
     for (key, value) in kept {
         cmd.env(key, value);
@@ -411,6 +420,11 @@ mod tests {
     #[cfg(windows)]
     use crate::test_serial::WINDOWS_SHELL_TESTS;
 
+    /// Semantic checks inject this instead of the production 60s default.
+    /// A slow runner can spend longer than that just starting PowerShell;
+    /// the command is killed with empty stdout and the assertion never runs.
+    const SLOW_SHELL_TIMEOUT_SECS: u64 = MAX_TIMEOUT_SECS;
+
     fn shell_for_tests() -> &'static str {
         if cfg!(windows) { "powershell" } else { "sh" }
     }
@@ -431,7 +445,7 @@ mod tests {
         let out = t
             .call(
                 &ToolContext::default(),
-                json!({"command": "echo hello-shell", "shell": shell_for_tests()}),
+                json!({"command": "echo hello-shell", "shell": shell_for_tests(), "timeout": SLOW_SHELL_TIMEOUT_SECS}),
             )
             .await
             .unwrap();
@@ -442,7 +456,7 @@ mod tests {
         let out = t
             .call(
                 &ToolContext::default(),
-                json!({"command": "exit 3", "shell": shell_for_tests()}),
+                json!({"command": "exit 3", "shell": shell_for_tests(), "timeout": SLOW_SHELL_TIMEOUT_SECS}),
             )
             .await
             .unwrap();
@@ -533,7 +547,7 @@ mod tests {
         let out = t
             .call(
                 &ctx,
-                json!({"command": gen_cmd, "shell": shell_for_tests()}),
+                json!({"command": gen_cmd, "shell": shell_for_tests(), "timeout": SLOW_SHELL_TIMEOUT_SECS}),
             )
             .await
             .unwrap();
@@ -558,7 +572,7 @@ mod tests {
         let out = t
             .call(
                 &ToolContext::default(),
-                json!({"command": cmd, "shell": shell_for_tests()}),
+                json!({"command": cmd, "shell": shell_for_tests(), "timeout": SLOW_SHELL_TIMEOUT_SECS}),
             )
             .await
             .unwrap();
@@ -1101,6 +1115,52 @@ mod tests {
         );
     }
 
+    #[test]
+    fn child_env_filter_drops_secrets_without_spawning() {
+        let vars = [
+            ("PATH", r"C:\Windows\system32"),
+            ("Path", "/usr/bin"),
+            ("PATHEXT", ".EXE"),
+            ("HOME", "/home/me"),
+            ("BOT_SECRETS_PASSPHRASE", "sentinel-secret-value"),
+            ("OPENAI_API_KEY", "sk-provider-sentinel"),
+            ("openai_api_key", "sk-provider-sentinel-lower"),
+            ("ANTHROPIC_API_KEY", "sk-ant-sentinel"),
+            ("BOT_API_BEARER", "Bearer-sentinel-token"),
+            ("AWS_SECRET_ACCESS_KEY", "aws-sentinel"),
+            ("PATH_EXTRA", "not-the-path"),
+        ];
+        let kept = retained_child_env(
+            vars.into_iter()
+                .map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v))),
+        );
+        let has = |key: &str, val: &str| {
+            kept.iter().any(|(k, v)| {
+                k.to_string_lossy().eq_ignore_ascii_case(key) && v.to_string_lossy() == val
+            })
+        };
+        assert!(has("PATH", r"C:\Windows\system32"));
+        assert!(has("Path", "/usr/bin"));
+        assert!(has("PATHEXT", ".EXE"));
+        assert!(has("HOME", "/home/me"));
+        assert!(!has("PATH_EXTRA", "not-the-path"));
+        let blob = kept
+            .iter()
+            .map(|(k, v)| format!("{}={}", k.to_string_lossy(), v.to_string_lossy()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for secret in [
+            "sentinel-secret-value",
+            "sk-provider-sentinel",
+            "sk-provider-sentinel-lower",
+            "sk-ant-sentinel",
+            "Bearer-sentinel-token",
+            "aws-sentinel",
+        ] {
+            assert!(!blob.contains(secret), "{secret} leaked:\n{blob}");
+        }
+    }
+
     #[tokio::test]
     #[allow(unsafe_code)]
     async fn child_env_omits_secrets_but_keeps_path() {
@@ -1126,32 +1186,56 @@ mod tests {
             std::env::set_var("BOT_API_BEARER", "Bearer-sentinel-token");
         }
         let parent_path = std::env::var("PATH").expect("PATH");
-        let d = tempfile::tempdir().unwrap();
-        let cmd = if cfg!(windows) {
-            "Write-Output $env:PATH; Write-Output $env:BOT_SECRETS_PASSPHRASE; Write-Output $env:OPENAI_API_KEY; Write-Output $env:ANTHROPIC_API_KEY; Write-Output $env:BOT_API_BEARER"
-        } else {
-            "printf '%s\\n' \"$PATH\" \"$BOT_SECRETS_PASSPHRASE\" \"$OPENAI_API_KEY\" \"$ANTHROPIC_API_KEY\" \"$BOT_API_BEARER\""
-        };
-        let out = tool(d.path())
-            .call(
-                &ToolContext::default(),
-                json!({"command": cmd, "shell": shell_for_tests()}),
+        // `cmd` starts without the PowerShell host. The production default on
+        // Windows is still exercised below; both use an injected timeout so a
+        // slow host is not killed at the 60s default before it can print.
+        #[cfg(windows)]
+        {
+            assert_child_env(&parent_path, "cmd", "set").await;
+            assert_child_env(
+                &parent_path,
+                "powershell",
+                "Write-Output $env:PATH; Write-Output $env:BOT_SECRETS_PASSPHRASE; Write-Output $env:OPENAI_API_KEY; Write-Output $env:ANTHROPIC_API_KEY; Write-Output $env:BOT_API_BEARER",
             )
-            .await
-            .unwrap();
-        let s = text(&out);
-        assert!(
-            s.contains(&parent_path),
-            "PATH was not visible to the child:\n{s}"
-        );
-        assert!(!s.contains("sentinel-secret-value"), "{s}");
-        assert!(!s.contains("sk-provider-sentinel"), "{s}");
-        assert!(!s.contains("sk-ant-sentinel"), "{s}");
-        assert!(!s.contains("Bearer-sentinel-token"), "{s}");
+            .await;
+        }
+        #[cfg(not(windows))]
+        {
+            assert_child_env(
+                &parent_path,
+                "sh",
+                "printf '%s\\n' \"$PATH\" \"$BOT_SECRETS_PASSPHRASE\" \"$OPENAI_API_KEY\" \"$ANTHROPIC_API_KEY\" \"$BOT_API_BEARER\"",
+            )
+            .await;
+        }
         assert_eq!(
             std::env::var("BOT_SECRETS_PASSPHRASE").unwrap(),
             "sentinel-secret-value",
             "daemon environment was mutated"
         );
+    }
+
+    async fn assert_child_env(parent_path: &str, shell: &str, command: &str) {
+        let d = tempfile::tempdir().unwrap();
+        let out = tool(d.path())
+            .call(
+                &ToolContext::default(),
+                json!({
+                    "command": command,
+                    "shell": shell,
+                    "timeout": SLOW_SHELL_TIMEOUT_SECS,
+                }),
+            )
+            .await
+            .unwrap_or_else(|err| panic!("{shell} env probe failed: {err}"));
+        let s = text(&out);
+        assert!(
+            s.contains(parent_path),
+            "{shell}: PATH was not visible to the child:\n{s}"
+        );
+        assert!(!s.contains("sentinel-secret-value"), "{shell}: {s}");
+        assert!(!s.contains("sk-provider-sentinel"), "{shell}: {s}");
+        assert!(!s.contains("sk-ant-sentinel"), "{shell}: {s}");
+        assert!(!s.contains("Bearer-sentinel-token"), "{shell}: {s}");
     }
 }
