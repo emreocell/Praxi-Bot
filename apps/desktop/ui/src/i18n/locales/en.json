@@ -1305,6 +1305,54 @@
           "bot": "Pick the bot, or choose any bot."
         }
       }
+    },
+    "webSearch": {
+      "title": "Web search",
+      "description": "Search backend priority order, API keys, and live connectivity probe.",
+      "note": "Web search tries active backends in priority order until one returns results. Changes apply immediately on the next bot turn without restarting.",
+      "loadError": "Could not load web search settings: {{message}}",
+      "configError": "web.toml could not be loaded ({{message}}). Showing defaults — saving changes below will replace it.",
+      "orderTitle": "Backend order & fallbacks",
+      "orderHint": "Move preferred backends up. Keyless fallbacks work without an API key but may occasionally hit upstream rate limits.",
+      "credentialsTitle": "Self-hosted & API backends",
+      "searxngLabel": "SearXNG URL",
+      "searxngHint": "Base URL of your own SearXNG instance (clear and save to disable).",
+      "braveKeyLabel": "Brave Search API key",
+      "tavilyKeyLabel": "Tavily Search API key",
+      "tavilyHint": "Optional API key for Tavily Search (stored write-only in the secret store).",
+      "keyStoredPlaceholder": "Key stored (enter a new key to replace)",
+      "keyEmptyPlaceholder": "Enter API key…",
+      "keyWriteOnlyHint": "Write-only: stored in the OS secret store and never read back.",
+      "clearKey": "Clear key",
+      "save": "Save changes",
+      "testTitle": "Connectivity test",
+      "testQueryLabel": "Test search query",
+      "test": "Test",
+      "testing": "Testing…",
+      "testOk": "{{backend}} answered ({{count}} results in {{ms}} ms)",
+      "testFailed": "Search probe failed ({{ms}} ms): {{error}}",
+      "fallbackNotes": "Earlier fallback errors before success: {{details}}",
+      "moveUp": "Move {{name}} up",
+      "moveDown": "Move {{name}} down",
+      "toggleBackend": "Toggle {{name}}",
+      "status": {
+        "active": "Active",
+        "needsKey": "Needs API key",
+        "needsUrl": "Needs URL",
+        "disabled": "Disabled"
+      },
+      "backends": {
+        "searxng": "SearXNG",
+        "brave": "Brave Search API",
+        "tavily": "Tavily Search API",
+        "duckduckgo": "DuckDuckGo (HTML)",
+        "duckduckgo_lite": "DuckDuckGo Lite",
+        "bing": "Bing (HTML)"
+      },
+      "toast": {
+        "saved": "Web search settings saved",
+        "keyCleared": "API key removed from secret store"
+      }
     }
   },
   "palette": {

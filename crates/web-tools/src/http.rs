@@ -67,6 +67,8 @@ pub struct GetOptions {
     pub accept_types: Vec<String>,
     /// Override of [`HttpConfig::max_bytes`].
     pub max_bytes: Option<usize>,
+    /// Optional per-request timeout override (capped by `HttpConfig::timeout` if shorter, or overrides it).
+    pub timeout: Option<Duration>,
 }
 
 impl GetOptions {
@@ -222,15 +224,7 @@ impl HttpFetcher {
     /// content type, or too many redirects.
     pub async fn get(&self, url: &str, opts: &GetOptions) -> Result<Fetched, WebError> {
         let mut current = self.check(url)?;
-        let mut headers = HeaderMap::new();
-        for (k, v) in &opts.headers {
-            let name = HeaderName::from_bytes(k.as_bytes())
-                .map_err(|e| WebError::Config(format!("header name `{k}`: {e}")))?;
-            let mut value = HeaderValue::from_str(v)
-                .map_err(|_| WebError::Config(format!("header `{k}` has an invalid value")))?;
-            value.set_sensitive(true);
-            headers.insert(name, value);
-        }
+        let headers = build_headers(&opts.headers)?;
         let cap = opts.max_bytes.unwrap_or(self.cfg.max_bytes);
         let mut hops = 0usize;
         loop {
@@ -240,13 +234,11 @@ impl HttpFetcher {
             } else {
                 HeaderMap::new()
             };
-            let resp = self
-                .client
-                .get(current.clone())
-                .headers(send_headers)
-                .send()
-                .await
-                .map_err(|e| map_send_error(&e))?;
+            let mut req = self.client.get(current.clone()).headers(send_headers);
+            if let Some(t) = opts.timeout {
+                req = req.timeout(t);
+            }
+            let resp = req.send().await.map_err(|e| map_send_error(&e))?;
             let status = resp.status();
             if status.is_redirection() {
                 let Some(loc) = resp.headers().get(LOCATION).and_then(|v| v.to_str().ok()) else {
@@ -263,43 +255,95 @@ impl HttpFetcher {
                 hops += 1;
                 continue;
             }
-            if status.as_u16() >= 400 {
-                return Err(WebError::Status(status.as_u16()));
-            }
-            let (media_type, charset) = parse_content_type(
-                resp.headers()
-                    .get(CONTENT_TYPE)
-                    .and_then(|v| v.to_str().ok()),
-            );
-            if let Some(mt) = &media_type {
-                if !opts.accept_types.is_empty() && !type_allowed(mt, &opts.accept_types) {
-                    return Err(WebError::ContentType(mt.clone()));
-                }
-            }
-            let mut body = Vec::new();
-            let mut truncated = false;
-            let mut stream = resp.bytes_stream();
-            while let Some(chunk) = stream.next().await {
-                let chunk = chunk.map_err(|e| map_send_error(&e))?;
-                let room = cap - body.len();
-                if chunk.len() > room {
-                    body.extend_from_slice(&chunk[..room]);
-                    truncated = true;
-                    break;
-                }
-                body.extend_from_slice(&chunk);
-            }
-            return Ok(Fetched {
-                url: current,
-                status: status.as_u16(),
-                media_type,
-                charset,
-                body,
-                truncated,
-                redirects: hops,
-            });
+            return read_response(resp, current, hops, cap, &opts.accept_types).await;
         }
     }
+
+    /// POST a JSON payload to `url` without following redirects (so API keys
+    /// and request bodies are never bounced to another host).
+    ///
+    /// # Errors
+    /// Policy violations, transport errors, HTTP status >= 300, or a refused
+    /// content type.
+    pub async fn post_json(
+        &self,
+        url: &str,
+        body: &[u8],
+        opts: &GetOptions,
+    ) -> Result<Fetched, WebError> {
+        let current = self.check(url)?;
+        let mut headers = build_headers(&opts.headers)?;
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        let cap = opts.max_bytes.unwrap_or(self.cfg.max_bytes);
+        let mut req = self
+            .client
+            .post(current.clone())
+            .headers(headers)
+            .body(body.to_vec());
+        if let Some(t) = opts.timeout {
+            req = req.timeout(t);
+        }
+        let resp = req.send().await.map_err(|e| map_send_error(&e))?;
+        read_response(resp, current, 0, cap, &opts.accept_types).await
+    }
+}
+
+fn build_headers(pairs: &[(String, String)]) -> Result<HeaderMap, WebError> {
+    let mut headers = HeaderMap::new();
+    for (k, v) in pairs {
+        let name = HeaderName::from_bytes(k.as_bytes())
+            .map_err(|e| WebError::Config(format!("header name `{k}`: {e}")))?;
+        let mut value = HeaderValue::from_str(v)
+            .map_err(|_| WebError::Config(format!("header `{k}` has an invalid value")))?;
+        value.set_sensitive(true);
+        headers.insert(name, value);
+    }
+    Ok(headers)
+}
+
+async fn read_response(
+    resp: reqwest::Response,
+    url: Url,
+    redirects: usize,
+    cap: usize,
+    accept_types: &[String],
+) -> Result<Fetched, WebError> {
+    let status = resp.status();
+    if status.as_u16() >= 400 || status.is_redirection() {
+        return Err(WebError::Status(status.as_u16()));
+    }
+    let (media_type, charset) = parse_content_type(
+        resp.headers()
+            .get(CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+    );
+    if let Some(mt) = &media_type {
+        if !accept_types.is_empty() && !type_allowed(mt, accept_types) {
+            return Err(WebError::ContentType(mt.clone()));
+        }
+    }
+    let mut body = Vec::new();
+    let mut truncated = false;
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| map_send_error(&e))?;
+        let room = cap - body.len();
+        if chunk.len() > room {
+            body.extend_from_slice(&chunk[..room]);
+            truncated = true;
+            break;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(Fetched {
+        url,
+        status: status.as_u16(),
+        media_type,
+        charset,
+        body,
+        truncated,
+        redirects,
+    })
 }
 
 fn same_origin(a: &Url, original: &str) -> bool {

@@ -36,7 +36,11 @@ import type {
   Scope,
   SendMode,
   SendResponse,
-  UsageSummary
+  UsageSummary,
+  WebSearchConfig,
+  WebSearchConfigInput,
+  WebSearchTestInput,
+  WebSearchTestReport
 } from "./types";
 
 /** An error response of the daemon (`{"error": {"code", "message"}}`) or a network failure. */
@@ -354,5 +358,17 @@ export class ApiClient {
     active: string[];
   }> {
     return this.request("POST", "/providers/reload");
+  }
+
+  getWebSearch(): Promise<WebSearchConfig> {
+    return this.request("GET", "/web/search");
+  }
+
+  updateWebSearch(input: WebSearchConfigInput): Promise<WebSearchConfig> {
+    return this.request("PUT", "/web/search", { body: input });
+  }
+
+  testWebSearch(input: WebSearchTestInput = {}): Promise<WebSearchTestReport> {
+    return this.request("POST", "/web/search/test", { body: input });
   }
 }
