@@ -246,16 +246,22 @@ impl TurnExecutor {
             let first = self.first_user_text(&ctx, run)?;
             return Ok(Some(user_step(&self.with_recall(&ctx, &first))));
         }
-        let steer_empty = ctx.state.lock().steer.is_empty();
-        let plan =
-            Self::directive_plan(history).unwrap_or_else(|| Self::route_plan(history, steer_empty));
-        match plan {
-            RoutePlan::Step(spec) => return Ok(Some(spec)),
-            RoutePlan::Done => {
-                ctx.state.lock().closed = true;
-                return Ok(None);
+        {
+            let mut state = ctx.state.lock();
+            let steer_empty = state.steer.is_empty();
+            let plan = Self::directive_plan(history, steer_empty)
+                .unwrap_or_else(|| Self::route_plan(history, steer_empty));
+            match plan {
+                RoutePlan::Step(spec) => return Ok(Some(spec)),
+                RoutePlan::Done => {
+                    // Close under the same lock used to inspect steering so
+                    // a message cannot be accepted between that check and
+                    // the decision to finish the turn.
+                    state.closed = true;
+                    return Ok(None);
+                }
+                RoutePlan::Continue => {}
             }
-            RoutePlan::Continue => {}
         }
         let model_steps = history.iter().filter(|s| s.name == STEP_MODEL).count();
         match self.pending_tools(&ctx, history) {

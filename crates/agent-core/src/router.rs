@@ -579,15 +579,21 @@ impl TurnExecutor {
     }
 
     /// The step a schedule-started tool run takes after its user step, or
-    /// `Done` once the tool step exists (it is never run twice, even after an
-    /// interruption).
-    pub(crate) fn directive_plan(history: &[RunStep]) -> Option<RoutePlan> {
+    /// `Done` once the tool step exists unless the user has steered the run.
+    /// The tool is never run twice, even after an interruption.
+    pub(crate) fn directive_plan(history: &[RunStep], steer_empty: bool) -> Option<RoutePlan> {
         let first = history.first().filter(|s| s.name == STEP_USER)?;
         let d = first.input.get("directive")?;
         if d["kind"] != "tool" {
             return None;
         }
         if history.len() > 1 {
+            // A user correction turns this into a normal conversation after
+            // the scheduled tool. Keep doing so once the correction has been
+            // injected, even when no more messages remain in the queue.
+            if !steer_empty || history.iter().skip(1).any(|step| step.name == STEP_USER) {
+                return None;
+            }
             return Some(RoutePlan::Done);
         }
         if status_of(first) != Some(StepStatus::Succeeded) {

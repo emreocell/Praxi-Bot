@@ -484,9 +484,9 @@ impl AgentLoop {
                     if let Some(ctx) = ctx {
                         let mut st = ctx.state.lock();
                         if !st.closed {
-                            st.steer.push_back(text.to_owned());
-                            drop(st);
-                            self.insert_user_message(ctx.user_id, chat_id, run_id, text)?;
+                            let stored =
+                                self.insert_user_message(ctx.user_id, chat_id, run_id, text)?;
+                            st.steer.push_back(stored);
                             return Ok(Delivery::Steered(run_id));
                         }
                     }
@@ -923,20 +923,21 @@ impl AgentLoop {
         chat_id: ChatId,
         run_id: RunId,
         text: &str,
-    ) -> Result<()> {
+    ) -> Result<String> {
         // A key pasted into the chat is stored (and replayed into every later
         // provider request) masked.
         self.sh.refresh_redactor();
+        let content = self.sh.redact(text.to_owned());
         self.sh.storage.insert_message(&DbMessage {
             id: Uuid::now_v7(),
             user_id,
             chat_id,
             run_id: Some(run_id),
             role: "user".to_owned(),
-            content: self.sh.redact(text.to_owned()),
+            content: content.clone(),
             created_at_ms: now_ms(),
         })?;
-        Ok(())
+        Ok(content)
     }
 
     /// Start the drive task. Returns `false` when a handle for `run_id` is
@@ -1007,12 +1008,23 @@ impl AgentLoop {
                     }
                     self.rt.start(run_id).await
                 }
-                Start::Resume => match self.rt.resume(run_id).await {
-                    Err(RuntimeError::NeedsDecision(_)) => {
+                Start::Resume => {
+                    // Re-plan before replaying an interrupted model request so
+                    // accepted corrections enter its durable history first.
+                    if self
+                        .ctx_of(run_id)
+                        .is_some_and(|ctx| !ctx.state.lock().steer.is_empty())
+                    {
                         self.rt.resume_skipping_interrupted(run_id).await
+                    } else {
+                        match self.rt.resume(run_id).await {
+                            Err(RuntimeError::NeedsDecision(_)) => {
+                                self.rt.resume_skipping_interrupted(run_id).await
+                            }
+                            other => other,
+                        }
                     }
-                    other => other,
-                },
+                }
             };
             self.conclude(run_id, &res);
         })
