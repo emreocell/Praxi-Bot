@@ -700,7 +700,7 @@ mod linux {
         let path = prefix.join(target);
         match std::fs::symlink_metadata(&path) {
             Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => {
-                std::fs::remove_dir_all(path)?
+                std::fs::remove_dir_all(path)?;
             }
             Ok(_) => return Err("version must be an ordinary directory".into()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
@@ -924,6 +924,7 @@ mod linux {
         #[cfg(unix)]
         #[tokio::test]
         async fn planted_path_verifier_cannot_accept_unverified_bytes() {
+            use std::os::unix::fs::PermissionsExt;
             const CHILD: &str = "PRAXI_TEST_PLANTED_VERIFIER";
             if std::env::var_os(CHILD).is_some() {
                 let dir = tempfile::tempdir().unwrap();
@@ -934,7 +935,6 @@ mod linux {
                 assert!(verify_signature(&archive, &bundle, "v1.2.3").await.is_err());
                 return;
             }
-            use std::os::unix::fs::PermissionsExt;
             let dir = tempfile::tempdir().unwrap();
             let fake = dir.path().join("gh");
             let marker = dir.path().join("executed");
