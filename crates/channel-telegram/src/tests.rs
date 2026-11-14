@@ -3429,7 +3429,7 @@ async fn details_this_channel_would_mask_are_not_offered_for_approval_here() {
 }
 
 #[tokio::test]
-async fn telegram_409_is_typed_and_stops_all_polling_without_retry() {
+async fn telegram_409_stops_only_after_three_bounded_retries() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path(format!("/bot{TEST_BOT_TOKEN}/getUpdates")))
@@ -3437,13 +3437,14 @@ async fn telegram_409_is_typed_and_stops_all_polling_without_retry() {
             ResponseTemplate::new(409)
                 .set_body_json(json!({"ok":false,"error_code":409,"description":"another poller"})),
         )
-        .expect(1)
+        .expect(4)
         .mount(&server)
         .await;
     let conflicts = Arc::new(AtomicUsize::new(0));
     let mut config = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
         .with_api_base_url(server.uri())
         .with_poll_backoff(Duration::from_millis(1));
+    config.conflict_backoff = Duration::from_millis(1);
     let counter = conflicts.clone();
     config.on_conflict = Some(Arc::new(move || {
         counter.fetch_add(1, Ordering::SeqCst);
@@ -3460,7 +3461,7 @@ async fn telegram_409_is_typed_and_stops_all_polling_without_retry() {
     assert_eq!(conflicts.load(Ordering::SeqCst), 1);
     channel.shutdown().await;
     assert_eq!(channel.status(), crate::ChannelStatus::Conflict);
-    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    assert_eq!(server.received_requests().await.unwrap().len(), 4);
 }
 
 #[tokio::test]
@@ -3477,4 +3478,29 @@ async fn telegram_get_updates_maps_a_json_409_even_with_http_200() {
         client.get_updates(None, 0).await,
         Err(crate::TelegramError::Conflict)
     ));
+}
+
+#[tokio::test]
+async fn telegram_409_clears_on_second_poll_without_stopping_channel() {
+    let server = MockServer::start().await;
+    let polls = Arc::new(AtomicUsize::new(0));
+    let counter = polls.clone();
+    Mock::given(method("POST"))
+        .and(path(format!("/bot{TEST_BOT_TOKEN}/getUpdates")))
+        .respond_with(move |_: &wiremock::Request| {
+            if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                ResponseTemplate::new(409).set_body_json(json!({"ok":false,"error_code":409}))
+            } else {
+                ResponseTemplate::new(200).set_body_json(json!({"ok":true,"result":[]}))
+            }
+        }).mount(&server).await;
+    let mut config = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+        .with_api_base_url(server.uri()).with_poll_backoff(Duration::from_millis(1));
+    config.conflict_backoff = Duration::from_millis(1);
+    let channel = TelegramChannel::start(config, Arc::new(FakeDaemon::new(vec![]))).unwrap();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while polls.load(Ordering::SeqCst) < 3 { tokio::task::yield_now().await; }
+    }).await.unwrap();
+    assert_eq!(channel.status(), crate::ChannelStatus::Running);
+    channel.shutdown().await;
 }

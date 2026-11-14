@@ -381,18 +381,17 @@ async fn install_command_only_for_host_invites_from_non_host_install_and_default
 }
 
 #[tokio::test]
-async fn telegram_conflict_demotes_and_emits_reason() {
+async fn telegram_conflict_preserves_ownership_and_scheduler_and_emits_reason() {
     let t = setup();
+    t.state.leader().start().await.unwrap();
+    let before = t.state.leader().config();
     let mut events = t.state.leader().subscribe();
     t.state.leader().telegram_conflict().await.unwrap();
-    assert_eq!(t.state.leader().config().state, HostState::Standby);
-    assert!(matches!(
-        events.recv().await.unwrap(),
-        HostEvent::HostStateChanged(_)
-    ));
-    assert!(
-        matches!(events.recv().await.unwrap(), HostEvent::HostConflict(c) if c.reason == "telegram_409")
-    );
+    assert_eq!(t.state.leader().config(), before);
+    assert_eq!(HostConfig::load(t._dir.path()).unwrap(), before);
+    assert!(t.state.scheduler().is_ok());
+    assert!(matches!(events.recv().await.unwrap(), HostEvent::HostConflict(c) if c.reason == "telegram_409"));
+    t.state.stop_components().await;
 }
 
 #[tokio::test]
@@ -405,10 +404,9 @@ async fn host_notifications_reach_the_global_sse_stream_without_replay_ids() {
     })
     .await;
     let names: Vec<_> = frames.iter().map(|frame| frame.1.as_str()).collect();
-    assert_eq!(names, ["host_state_changed", "host_conflict"]);
+    assert_eq!(names, ["host_conflict"]);
     assert!(frames.iter().all(|frame| frame.0.is_empty()));
-    assert_eq!(frames[0].2["state"], "standby");
-    assert_eq!(frames[1].2["reason"], "telegram_409");
+    assert_eq!(frames[0].2["reason"], "telegram_409");
 }
 
 #[tokio::test]

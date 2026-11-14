@@ -400,13 +400,12 @@ impl LeaderControl {
         let _ = self.0.events.send(HostEvent::HostConflict(event));
     }
 
-    /// Stop automatic components after a terminal Telegram polling conflict.
+    /// Notify after a terminal Telegram conflict; only the channel stops.
     /// # Errors
-    /// Returns persistence errors; the conflict notification is emitted regardless.
+    /// Kept fallible for callers; no ownership persistence is performed.
     pub async fn telegram_conflict(&self) -> Result<(), ApiError> {
-        let result = self.standby().await;
         self.emit_conflict("telegram_409", None);
-        result.map(|_| ())
+        Ok(())
     }
 }
 

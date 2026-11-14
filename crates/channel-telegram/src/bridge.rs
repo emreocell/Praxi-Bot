@@ -98,6 +98,8 @@ pub struct TelegramConfig {
     pub secret_store: Arc<dyn SecretStore>,
     /// Called once when polling stops due to Telegram 409.
     pub on_conflict: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Delay between the three bounded retries for overlapping long polls.
+    pub conflict_backoff: Duration,
     /// Secret reference pointing to the bot token inside `secret_store`.
     pub bot_token_secret: SecretRef,
     /// Base URL for the Telegram Bot API (defaults to `https://api.telegram.org`).
@@ -142,6 +144,7 @@ impl TelegramConfig {
         Self {
             secret_store,
             on_conflict: None,
+            conflict_backoff: Duration::from_secs(15),
             bot_token_secret: SecretRef::new(TELEGRAM_BOT_TOKEN_SECRET)
                 .expect("default telegram secret name is valid"),
             api_base_url: DEFAULT_TELEGRAM_API_URL.to_owned(),
@@ -651,6 +654,7 @@ impl TelegramChannel {
     async fn poll_loop(&self) {
         let base = self.inner.config.poll_backoff;
         let mut failures = 0u32;
+        let mut conflicts = 0u32;
         let mut delay = Duration::ZERO;
         loop {
             tokio::select! {
@@ -671,9 +675,15 @@ impl TelegramChannel {
             match result {
                 Ok(count) => {
                     failures = 0;
+                    conflicts = 0;
                     delay = if count == 0 { base } else { Duration::ZERO };
                 }
                 Err(TelegramError::Conflict) => {
+                    conflicts += 1;
+                    if conflicts <= 3 {
+                        delay = self.inner.config.conflict_backoff;
+                        continue;
+                    }
                     *self.inner.status.lock() = ChannelStatus::Conflict;
                     self.inner.cancel.cancel();
                     if let Some(callback) = &self.inner.config.on_conflict {
