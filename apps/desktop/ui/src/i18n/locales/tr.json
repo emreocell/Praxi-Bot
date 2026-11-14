@@ -78,7 +78,7 @@
     },
     "hotkey": {
       "title": "Tümünü Durdur Kısayolu",
-      "description": "Aktif bot çalışmasını tüm ekranlarda anında iptal eden acil durum kısayolu.",
+      "description": "Aktif bot çalışmalarını iptal eder. Windows masaüstü uygulamasında başka uygulamalar odaktayken de çalışır; diğer platformlarda Praxi-Bot odakta olmalıdır.",
       "currentLabel": "Aktif kısayol",
       "record": "Kısayol Kaydet",
       "recording": "Değiştirici + tuşa basın...",
@@ -200,7 +200,7 @@
     "idleStep": "Aktif bot çalışması yok.",
     "refusedBadge": "{{count}} bot eylemi reddedildi",
     "refusedBadge_other": "{{count}} bot eylemi reddedildi",
-    "hotkeyHint": "Tümünü durdur: {{hotkey}}",
+    "hotkeyHint": "Uygulamada durdur: {{hotkey}}",
     "dragHandleAria": "Yüzen kontrol penceresini sürükle"
   },
   "dev": {
@@ -819,7 +819,7 @@
       "floorsTitle": "Her zaman açık güvenlik korumaları",
       "floorMoney": "Finansal ve ödeme işlemleri her zaman açık onayını gerektirir.",
       "floorNever": "Yerleşik yasaklılar listesi: kimlik bilgisi depoları, SSH/GPG özel anahtarları ve kritik işletim sistemi önyükleme dosyaları her zaman engellenir.",
-      "floorHotkey": "Botu anında durdurmak için istediğin an {{hotkey}} kısayoluna basabilir veya yüzen araçtaki “Kontrolü al” düğmesine tıklayabilirsin.",
+      "floorHotkey": "Praxi-Bot odaktayken {{hotkey}} kısayoluna bas veya yüzen araçtaki “Durdur” düğmesine tıkla. Windows masaüstü uygulamasında kısayol başka uygulamalar odaktayken de çalışır.",
       "saving": "Güvenlik politikası kaydediliyor…",
       "saveError": "Çalışma alanı politikası kaydedilemedi: {{message}}"
     },

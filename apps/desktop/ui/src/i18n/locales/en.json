@@ -77,8 +77,8 @@
       "tr": "Türkçe"
     },
     "hotkey": {
-      "title": "Stop All Global Hotkey",
-      "description": "Emergency shortcut that immediately cancels any active bot run across all screens.",
+      "title": "Stop All Shortcut",
+      "description": "Cancels active bot runs. In the Windows desktop app, it also works while another app has focus. On other platforms, focus Praxi-Bot first.",
       "currentLabel": "Active shortcut",
       "record": "Record Shortcut",
       "recording": "Press modifier + key...",
@@ -200,7 +200,7 @@
     "idleStep": "No active bot run.",
     "refusedBadge": "{{count}} bot action refused",
     "refusedBadge_other": "{{count}} bot actions refused",
-    "hotkeyHint": "Stop all: {{hotkey}}",
+    "hotkeyHint": "Stop in app: {{hotkey}}",
     "dragHandleAria": "Drag floating control widget"
   },
   "dev": {
@@ -819,7 +819,7 @@
       "floorsTitle": "Always-on safety protections",
       "floorMoney": "Financial & payment actions always require your explicit confirmation.",
       "floorNever": "Built-in never-list: credential stores, SSH/GPG private keys, and critical OS boot files are always blocked.",
-      "floorHotkey": "Press {{hotkey}} at any time — or click “Take the wheel” in the floating widget — to stop the bot immediately.",
+      "floorHotkey": "Press {{hotkey}} with Praxi-Bot focused, or click “Stop” in the floating widget. In the Windows desktop app, the shortcut also works while another app has focus.",
       "saving": "Saving safety policy…",
       "saveError": "Could not save workspace policy: {{message}}"
     },
