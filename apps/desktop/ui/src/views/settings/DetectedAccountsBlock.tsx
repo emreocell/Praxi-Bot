@@ -104,7 +104,15 @@ export function DetectedAccountsBlock() {
       case "enabled":
         return [meta, t("settingsModal.ai.detected.ready")].filter(Boolean).join(" · ");
       case "enable":
-        return [meta, t("settingsModal.ai.detected.authSignedIn")].filter(Boolean).join(" · ");
+        // Never claim "signed in" when the daemon could not tell.
+        return [
+          meta,
+          row.auth === "signed_in"
+            ? t("settingsModal.ai.detected.authSignedIn")
+            : t("settingsModal.ai.detected.authUnknown")
+        ]
+          .filter(Boolean)
+          .join(" · ");
       case "sign_in_hint":
         return t("settingsModal.ai.detected.foundSignInNeeded");
       case "not_installed":

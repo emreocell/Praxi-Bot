@@ -122,7 +122,7 @@ export function aiCards(t: TFunction): CardDef[] {
       kind: "block",
       title: t("settings.providers.title"),
       description: t("settings.providers.description"),
-      keywords: "provider saglayici ollama openrouter gelismis advanced compatible",
+      keywords: "provider saglayici ollama openrouter gelismis advanced compatible api key anahtar",
       node: <AdvancedProviders />
     }
   ];

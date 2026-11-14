@@ -104,6 +104,9 @@ export function ApiKeyPaste() {
           disabled={!client}
           onChange={(e) => {
             setValue(e.target.value);
+            if (e.target.value.trim() === "") {
+              setPicked(null);
+            }
             setError(null);
           }}
         />

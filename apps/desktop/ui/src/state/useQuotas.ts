@@ -10,7 +10,9 @@ import { type AccountQuota, visibleQuotas } from "../lib/quota";
 export function useQuotas(): AccountQuota[] {
   const [list, setList] = useState<AccountQuota[]>([]);
   useEffect(() => {
-    if (!isMockMode()) {
+    // Same guard as DaemonContext: Vite drops the dynamic import (and the
+    // sample data chunk) from production builds.
+    if (!(import.meta.env.DEV || import.meta.env.VITE_MOCK === "1") || !isMockMode()) {
       return undefined;
     }
     let live = true;

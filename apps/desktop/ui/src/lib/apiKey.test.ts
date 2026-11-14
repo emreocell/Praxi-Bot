@@ -13,7 +13,7 @@ test("detectKeyProvider reads the provider off the key prefix", () => {
   assert.equal(detectKeyProvider("  sk-or-v1-abc "), "openrouter");
   assert.equal(detectKeyProvider("AIzaSyAbc"), "gemini");
   assert.equal(detectKeyProvider("sk-proj-abc"), "openai");
-  assert.equal(detectKeyProvider("sk-abc"), "openai");
+  assert.equal(detectKeyProvider("sk-abc"), null); // ambiguous: DeepSeek and others use sk- too
   assert.equal(detectKeyProvider("ghp_whatever"), null);
   assert.equal(detectKeyProvider(""), null);
 });

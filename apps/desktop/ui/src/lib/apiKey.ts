@@ -5,13 +5,13 @@ type ProviderCatalogDto = ProvidersDto["catalog"][number];
 /**
  * Provider guess from the shape of an API key.  Pure and local: the key is
  * only looked at, never sent anywhere or logged.  `sk-` alone is ambiguous
- * (OpenAI, DeepSeek, ...), so it is a guess the user can override.
+ * (OpenAI, DeepSeek, ...), so it is not guessed: the user picks the provider.
  */
 const PREFIXES: ReadonlyArray<readonly [RegExp, string]> = [
   [/^sk-ant-/, "anthropic"],
   [/^sk-or-/, "openrouter"],
   [/^AIza/, "gemini"],
-  [/^sk-/, "openai"]
+  [/^sk-proj-/, "openai"]
 ];
 
 /** Catalog provider id a key most likely belongs to, or `null` when unknown. */
