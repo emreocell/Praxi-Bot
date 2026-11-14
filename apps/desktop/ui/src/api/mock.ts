@@ -14,6 +14,9 @@ import type {
   PolicyDto,
   ProvidersDto,
   UsageSummary,
+  WebSearchConfig,
+  WebSearchConfigInput,
+  WebSearchTestInput,
   GlobalEnvelope
 } from "./types.ts";
 
@@ -25,23 +28,23 @@ const NOW = 1_750_000_000_000;
 const ATLAS = "11111111-1111-4111-8111-111111111111";
 const NOVA = "22222222-2222-4222-8222-222222222222";
 
-function bot(id: string, name: string, color: string, model: string): Bot {
+function bot(id: string, name: string, color: string, shape: string, model: string): Bot {
   return {
     id,
     name,
     created_at_ms: NOW,
     config: {
-      bot: { id: name.toLowerCase(), name, color, persona: "" },
+      bot: { id: name.toLowerCase(), name, color, shape, persona: "" },
       models: { executor: model, planner: model, classifier: model }
     }
   };
 }
 
 const BOTS: Bot[] = [
-  bot(ATLAS, "Atlas", "#9D9AE8", "anthropic/claude-sonnet-5-5"),
-  bot(NOVA, "Nova", "#57BAA4", "gemini/gemini-2.5-flash"),
-  bot("bot-milo", "Milo", "#E4B75C", "openai/gpt-4.1"),
-  bot("bot-ember", "Ember", "#DC8D76", "ollama/qwen3:8b")
+  bot(ATLAS, "Atlas", "#9D9AE8", "cloud", "anthropic/claude-sonnet-5-5"),
+  bot(NOVA, "Nova", "#57BAA4", "diamond", "gemini/gemini-2.5-flash"),
+  bot("bot-milo", "Milo", "#E4B75C", "cube", "openai/gpt-4.1"),
+  bot("bot-ember", "Ember", "#DC8D76", "flower", "ollama/qwen3:8b")
 ];
 
 const previews = ["Haftalık özetin hazır.", "Kaynakları inceliyorum…", "Tasarım dosyalarını düzenledim.", "Devam etmek için onayını bekliyorum."];
@@ -285,6 +288,16 @@ export class MockApiClient extends ApiClient {
   readonly chats: Chat[] = structuredClone([...CHATS, ...BOTS.slice(1).map((b,i) => ({ id: `mock-chat-${i}`, chat_id: `mock-chat-${i}`, bot_id: b.id, title: previews[i+1], created_at_ms: NOW }))]);
   readonly messages = new Map<string, Message[]>();
   readonly secrets = new Map<string, number>();
+  private webSearchConfig: WebSearchConfig = {
+    order: ["searxng", "brave", "tavily", "duckduckgo", "duckduckgo_lite", "bing"],
+    active_backends: ["duckduckgo", "duckduckgo_lite", "bing"],
+    searxng_url: null,
+    brave_key_set: false,
+    tavily_key_set: false,
+    duckduckgo: true,
+    duckduckgo_lite: true,
+    bing: true
+  };
   readonly emailAccounts: EmailAccount[] = [
     {
       name: "personal",
@@ -525,6 +538,10 @@ export class MockApiClient extends ApiClient {
       case "PUT /mcp":
       case "DELETE /mcp":
         return ok(this.mcp(method, seg, opts.body));
+      case "GET /web":
+      case "PUT /web":
+      case "POST /web":
+        return ok(this.web(method, seg, opts.body));
       default:
         throw new ApiError(404, "not_found", `mock: ${method} ${path}`);
     }
@@ -621,6 +638,69 @@ export class MockApiClient extends ApiClient {
     } as EmailAccount;
     this.emailAccounts[idx] = merged;
     return merged;
+  }
+
+  private web(method: string, seg: string[], body: unknown): unknown {
+    const [, sub, action] = seg;
+    if (sub !== "search") {
+      throw new ApiError(404, "not_found", "mock web");
+    }
+    if (action === "test" && method === "POST") {
+      const input = (body ?? {}) as WebSearchTestInput;
+      const backend =
+        input.backend ?? this.webSearchConfig.active_backends[0] ?? null;
+      return {
+        ok: backend !== null,
+        query: input.query?.trim() || "rust programming",
+        backend,
+        result_count: backend ? 5 : 0,
+        elapsed_ms: 48,
+        error: backend ? null : "no search backend configured",
+        fallback_errors: []
+      };
+    }
+    if (!action && method === "GET") {
+      return structuredClone(this.webSearchConfig);
+    }
+    if (!action && method === "PUT") {
+      const input = (body ?? {}) as WebSearchConfigInput;
+      const cur = this.webSearchConfig;
+      const order = input.order ?? cur.order;
+      const searxng_url =
+        input.searxng_url !== undefined
+          ? (input.searxng_url ?? "").trim() || null
+          : cur.searxng_url;
+      const brave_key_set = input.clear_brave_key
+        ? false
+        : cur.brave_key_set || Boolean(input.brave_key);
+      const tavily_key_set = input.clear_tavily_key
+        ? false
+        : cur.tavily_key_set || Boolean(input.tavily_key);
+      const duckduckgo = input.duckduckgo ?? cur.duckduckgo;
+      const duckduckgo_lite = input.duckduckgo_lite ?? cur.duckduckgo_lite;
+      const bing = input.bing ?? cur.bing;
+      const active_backends = order.filter((name) => {
+        if (name === "searxng") return searxng_url !== null;
+        if (name === "brave") return brave_key_set;
+        if (name === "tavily") return tavily_key_set;
+        if (name === "duckduckgo") return duckduckgo;
+        if (name === "duckduckgo_lite") return duckduckgo_lite;
+        if (name === "bing") return bing;
+        return false;
+      });
+      this.webSearchConfig = {
+        order,
+        active_backends,
+        searxng_url,
+        brave_key_set,
+        tavily_key_set,
+        duckduckgo,
+        duckduckgo_lite,
+        bing
+      };
+      return structuredClone(this.webSearchConfig);
+    }
+    throw new ApiError(404, "not_found", "mock web");
   }
 
   private mcp(method: string, seg: string[], body: unknown): unknown {

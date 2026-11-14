@@ -34,6 +34,7 @@ export interface Rect {
 export interface BotMeta {
   botId: string;
   botName: string;
+  botShape?: string;
   botAvatar?: string;
   botColor?: string;
   botInitials?: string;

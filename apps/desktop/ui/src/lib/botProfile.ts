@@ -1,10 +1,19 @@
+import {
+  CHARACTER_COLORS,
+  fallbackBotColor,
+  fallbackBotShape,
+  normalizeBotShape,
+  type BotShapeId
+} from "ui/bot-shape";
 import type {
   Bot,
   PermissionCategoryName,
   PermissionLevel,
-  PermissionPreset
-} from "../api/types";
-import { PERMISSION_CATEGORIES } from "../api/types";
+  PermissionPreset,
+  ProvidersDto
+} from "../api/types.ts";
+import { PERMISSION_CATEGORIES } from "../api/types.ts";
+import { defaultModelRef, isCliProvider, providerRoleDefaults } from "./providerView.ts";
 
 /** `provider/model` split into its two parts (either may be empty). */
 export interface ModelRef {
@@ -13,12 +22,22 @@ export interface ModelRef {
 }
 
 export type PresetChoice = PermissionPreset | "custom";
+export type BotTemplateId = "blank" | "researcher" | "coder" | "assistant" | "social";
+export type AutonomyLevel = "ask" | "balanced" | "auto";
+
+export interface BotTemplate {
+  id: BotTemplateId;
+  defaultName: string;
+  shape: BotShapeId;
+  color: string;
+}
 
 export interface BotDraft {
   name: string;
   persona: string;
+  shape: BotShapeId;
   color: string;
-  /** Image / GIF as a data URL; `null` = initials. */
+  /** Image / GIF as a data URL; `null` = 3D clay character. */
   avatar: string | null;
   planner: ModelRef;
   executor: ModelRef;
@@ -32,14 +51,53 @@ export interface BotDraft {
   browser: "local";
 }
 
-export const BOT_COLORS = [
-  "#3b82f6",
-  "#10b981",
-  "#8b5cf6",
-  "#f59e0b",
-  "#e11d48",
-  "#0ea5e9"
+export const BOT_COLORS = CHARACTER_COLORS;
+export const DEFAULT_NEW_BOT_COLOR = "#34c77b";
+
+export const BOT_TEMPLATES: readonly BotTemplate[] = [
+  { id: "blank", defaultName: "", shape: "pebble", color: "#f4f4f5" },
+  { id: "researcher", defaultName: "Nova", shape: "diamond", color: "#2fc4b2" },
+  { id: "coder", defaultName: "Byte", shape: "gem", color: "#4c8dff" },
+  { id: "assistant", defaultName: "Mira", shape: "cloud", color: "#f25fa8" },
+  { id: "social", defaultName: "Echo", shape: "flower", color: "#f5803e" }
 ] as const;
+
+export const AUTONOMY_LEVELS: readonly AutonomyLevel[] = ["ask", "balanced", "auto"] as const;
+
+/**
+ * Map simple 3-way autonomy to an existing daemon permission preset.
+ *
+ * Note: `read-and-draft` and `approve-destructive` both set `Ask` on every
+ * category in `permission-engine` (`read_tools_skip_ask` lets `Effect::Read`
+ * tools run without prompting, while all writes/fetches/drafts/sends/commands
+ * ask). `full` sets `Allow` on every category except `Money`, never-list
+ * commands, and `always_ask` schedule actions.
+ */
+export function autonomyToPreset(level: AutonomyLevel): PermissionPreset {
+  switch (level) {
+    case "ask":
+      return "read-and-draft";
+    case "balanced":
+      return "approve-destructive";
+    case "auto":
+      return "full";
+  }
+}
+
+/** Map a stored preset to the 3-way autonomy pill (`null` for `read-only`/`custom`). */
+export function presetToAutonomy(preset: PresetChoice): AutonomyLevel | null {
+  switch (preset) {
+    case "read-and-draft":
+      return "ask";
+    case "approve-destructive":
+      return "balanced";
+    case "full":
+      return "auto";
+    case "read-only":
+    case "custom":
+      return null;
+  }
+}
 
 export const PRESET_CHOICES: readonly PresetChoice[] = [
   "read-only",
@@ -109,7 +167,8 @@ export function draftFromBot(bot?: Bot): BotDraft {
   return {
     name: bot?.name ?? "",
     persona: str(b.persona),
-    color: str(b.color) || BOT_COLORS[0],
+    shape: normalizeBotShape(str(b.shape)) ?? (bot ? fallbackBotShape(bot.id) : "pebble"),
+    color: str(b.color) || (bot ? fallbackBotColor(bot.id) : DEFAULT_NEW_BOT_COLOR),
     avatar: str(b.avatar) || null,
     planner: parseModelRef(str(models.planner)),
     executor: parseModelRef(str(models.executor)),
@@ -147,6 +206,7 @@ export function configFromDraft(draft: BotDraft, existing?: Bot): Json {
     id,
     name: draft.name.trim(),
     persona: draft.persona,
+    shape: normalizeBotShape(draft.shape) ?? "pebble",
     color: draft.color
   };
   if (draft.avatar) {
@@ -207,10 +267,37 @@ export function configFromDraft(draft: BotDraft, existing?: Bot): Json {
 export interface BotView {
   id: string;
   name: string;
+  shape: BotShapeId;
   color: string;
   avatar?: string;
   initials?: string;
   executor: string;
+}
+
+/** Pick the daemon's default `provider/model` for "Auto" brain mode. */
+export function resolveAutoExecutorRef(
+  dto: ProvidersDto | null,
+  fakeAvailable = false
+): ModelRef {
+  const def = defaultModelRef(dto);
+  if (def) {
+    return parseModelRef(def);
+  }
+  const firstEnabled = dto?.configured.find((p) => p.enabled);
+  if (firstEnabled) {
+    const cli = isCliProvider(firstEnabled.id, dto);
+    const model =
+      firstEnabled.default_model ||
+      firstEnabled.models[0] ||
+      (cli ? "default" : providerRoleDefaults(firstEnabled.id).defaultModel);
+    if (model) {
+      return { provider: firstEnabled.id, model };
+    }
+  }
+  if (fakeAvailable) {
+    return { provider: "fake", model: "echo" };
+  }
+  return { provider: "", model: "" };
 }
 
 /** What the sidebar / chat header need from a stored bot. */
@@ -219,8 +306,43 @@ export function botView(bot: Bot): BotView {
   return {
     id: bot.id,
     name: bot.name,
+    shape: d.shape,
     color: d.color,
     avatar: d.avatar ?? undefined,
     executor: formatModelRef(d.executor)
+  };
+}
+
+/** Fields edited in Onboarding Step 4; shared by the preview and save path. */
+export interface OnboardingBotFields {
+  name: string;
+  color: string;
+  avatar?: string;
+  persona: string;
+  executor: ModelRef;
+  planner: ModelRef;
+  classifier: ModelRef;
+  preset: PermissionPreset;
+}
+
+/**
+ * Build the `BotDraft` used by Onboarding Step 4 so the preview `<BotAvatar>`
+ * and `configFromDraft` agree on `shape` and `color`.
+ */
+export function onboardingBotDraft(
+  existing: Bot | undefined,
+  fields: OnboardingBotFields
+): BotDraft {
+  const base = draftFromBot(existing);
+  return {
+    ...base,
+    name: fields.name.trim(),
+    color: fields.color,
+    avatar: fields.avatar ?? null,
+    persona: fields.persona,
+    executor: fields.executor,
+    planner: fields.planner,
+    classifier: fields.classifier,
+    preset: fields.preset
   };
 }

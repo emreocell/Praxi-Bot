@@ -63,6 +63,23 @@ pub trait UrlPolicy: Send + Sync {
     fn check_ip_trusted(&self, host: &str, ip: IpAddr) -> Result<(), PolicyViolation> {
         self.check_ip(host, ip)
     }
+
+    /// Check one resolved socket address (host + IP + port).
+    ///
+    /// # Errors
+    /// A [`PolicyViolation`] describing why the socket address is refused.
+    fn check_socket(&self, host: &str, sock: SocketAddr) -> Result<(), PolicyViolation> {
+        self.check_ip(host, sock.ip())
+    }
+
+    /// Trusted-host variant of [`UrlPolicy::check_socket`]; see
+    /// [`UrlPolicy::check_url_trusted`].
+    ///
+    /// # Errors
+    /// A [`PolicyViolation`] describing why the socket address is refused.
+    fn check_socket_trusted(&self, host: &str, sock: SocketAddr) -> Result<(), PolicyViolation> {
+        self.check_ip_trusted(host, sock.ip())
+    }
 }
 
 /// Wraps an injected policy and additionally trusts exactly one `host:port`
@@ -108,11 +125,36 @@ impl UrlPolicy for TrustedHostPolicy {
     fn check_ip(&self, host: &str, ip: IpAddr) -> Result<(), PolicyViolation> {
         if self.same_host(host) {
             // Every URL for this host already passed `check_url` on the
-            // trusted port, so the port-less DNS check may be relaxed.
-            self.inner.check_ip_trusted(host, ip)
+            // trusted port, so pass that port so `blocked_sockets` still applies.
+            self.inner
+                .check_socket_trusted(host, SocketAddr::new(ip, self.port))
         } else {
             self.inner.check_ip(host, ip)
         }
+    }
+
+    fn check_socket(&self, host: &str, sock: SocketAddr) -> Result<(), PolicyViolation> {
+        if self.same_host(host) {
+            if sock.port() != self.port {
+                return Err(PolicyViolation::new(format!(
+                    "host `{}` is only trusted on port {}",
+                    self.host, self.port
+                )));
+            }
+            self.inner.check_socket_trusted(host, sock)
+        } else {
+            self.inner.check_socket(host, sock)
+        }
+    }
+
+    fn check_socket_trusted(&self, host: &str, sock: SocketAddr) -> Result<(), PolicyViolation> {
+        if self.same_host(host) && sock.port() != self.port {
+            return Err(PolicyViolation::new(format!(
+                "host `{}` is only trusted on port {}",
+                self.host, self.port
+            )));
+        }
+        self.inner.check_socket_trusted(host, sock)
     }
 }
 
@@ -257,7 +299,7 @@ impl DefaultUrlPolicy {
         Ok(())
     }
 
-    fn check_socket(&self, sock: SocketAddr) -> Result<(), PolicyViolation> {
+    fn check_blocked_socket(&self, sock: SocketAddr) -> Result<(), PolicyViolation> {
         let ip = canonical_ip(sock.ip());
         if self
             .blocked_sockets
@@ -270,6 +312,10 @@ impl DefaultUrlPolicy {
         }
         Ok(())
     }
+}
+
+fn is_loopback_name(host: &str) -> bool {
+    host == "localhost" || host.ends_with(".localhost") || host == "ip6-localhost"
 }
 
 impl DefaultUrlPolicy {
@@ -304,12 +350,14 @@ impl DefaultUrlPolicy {
         }
         if let Host::Domain(d) = &host {
             let d = d.trim_end_matches('.').to_ascii_lowercase();
-            if (d == "localhost" || d.ends_with(".localhost"))
-                && self.block_loopback
-                && !trusted
-                && !self.host_exempt(&d)
-            {
-                return Err(PolicyViolation::new("localhost is blocked"));
+            if is_loopback_name(&d) {
+                if self.block_loopback && !trusted && !self.host_exempt(&d) {
+                    return Err(PolicyViolation::new("localhost is blocked"));
+                }
+                // Even when loopback is waived (trusted SearXNG or block_loopback = false),
+                // loopback names must never reach a protected daemon socket.
+                self.check_blocked_socket(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))?;
+                self.check_blocked_socket(SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port))?;
             }
         }
         // `url` normalises decimal/hex/octal IPv4 forms to Host::Ipv4.
@@ -320,7 +368,7 @@ impl DefaultUrlPolicy {
         };
         if let Some(ip) = literal {
             self.check_addr(&host_str, ip, trusted)?;
-            self.check_socket(SocketAddr::new(ip, port))?;
+            self.check_blocked_socket(SocketAddr::new(ip, port))?;
         }
         Ok(())
     }
@@ -354,6 +402,16 @@ impl UrlPolicy for DefaultUrlPolicy {
 
     fn check_ip_trusted(&self, host: &str, ip: IpAddr) -> Result<(), PolicyViolation> {
         self.check_ip_inner(host, ip, true)
+    }
+
+    fn check_socket(&self, host: &str, sock: SocketAddr) -> Result<(), PolicyViolation> {
+        self.check_addr(host, sock.ip(), false)?;
+        self.check_blocked_socket(sock)
+    }
+
+    fn check_socket_trusted(&self, host: &str, sock: SocketAddr) -> Result<(), PolicyViolation> {
+        self.check_addr(host, sock.ip(), true)?;
+        self.check_blocked_socket(sock)
     }
 }
 
@@ -487,7 +545,35 @@ mod tests {
         let meta: IpAddr = "169.254.169.254".parse().unwrap();
         assert!(p.check_ip("searx.lan", meta).is_err());
         // Protected sockets still apply on a trusted literal host.
-        let lit = TrustedHostPolicy::new(inner, "10.0.0.5", 7777);
+        let lit = TrustedHostPolicy::new(Arc::clone(&inner), "10.0.0.5", 7777);
         assert!(lit.check_url(&u("http://10.0.0.5:7777/")).is_err());
+
+        // Protected daemon loopback socket is refused for `localhost` and DNS results on that port.
+        let inner_loop: Arc<dyn UrlPolicy> = Arc::new(DefaultUrlPolicy {
+            blocked_sockets: vec!["127.0.0.1:47000".parse().unwrap()],
+            ..DefaultUrlPolicy::default()
+        });
+        let trusted_daemon = TrustedHostPolicy::new(Arc::clone(&inner_loop), "localhost", 47000);
+        assert!(
+            trusted_daemon
+                .check_url(&u("http://localhost:47000/v1/web"))
+                .is_err()
+        );
+        assert!(
+            trusted_daemon
+                .check_ip("localhost", "127.0.0.1".parse().unwrap())
+                .is_err()
+        );
+        let trusted_searx = TrustedHostPolicy::new(inner_loop, "localhost", 8080);
+        assert!(
+            trusted_searx
+                .check_url(&u("http://localhost:8080/"))
+                .is_ok()
+        );
+        assert!(
+            trusted_searx
+                .check_ip("localhost", "127.0.0.1".parse().unwrap())
+                .is_ok()
+        );
     }
 }

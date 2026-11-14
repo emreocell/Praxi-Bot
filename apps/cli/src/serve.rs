@@ -436,13 +436,17 @@ pub fn daemon_protected_sockets(daemon_port: u16) -> Vec<SocketAddr> {
 }
 
 /// `<data_dir>/web.toml`. Every key is optional; the web tools work without
-/// the file (`DuckDuckGo` needs no key).
+/// the file (keyless fallbacks need no key).
 ///
 /// ```toml
 /// [search]
 /// searxng_url = "http://127.0.0.1:8080"  # trusted local/private instance
 /// brave_key = "web/brave"                # NAME of a secret, never the key
+/// tavily_key = "web/tavily"              # NAME of a secret, never the key
 /// duckduckgo = true                      # keyless fallback (default)
+/// duckduckgo_lite = true                 # keyless fallback (default)
+/// bing = true                            # keyless fallback (default)
+/// order = ["searxng", "brave", "tavily", "duckduckgo", "duckduckgo_lite", "bing"]
 ///
 /// [http]
 /// timeout_secs = 20
@@ -450,7 +454,7 @@ pub fn daemon_protected_sockets(daemon_port: u16) -> Vec<SocketAddr> {
 /// max_bytes = 5242880
 /// max_redirects = 5
 /// ```
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, serde::Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct WebConfigFile {
     #[serde(default)]
@@ -460,22 +464,38 @@ pub struct WebConfigFile {
 }
 
 /// `[search]` of [`WebConfigFile`].
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, serde::Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct WebSearchSection {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub searxng_url: Option<String>,
     /// Name of the secret holding the Brave Search API key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brave_key: Option<String>,
+    /// Name of the secret holding the Tavily Search API key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tavily_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duckduckgo: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duckduckgo_lite: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bing: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<Vec<String>>,
 }
 
 /// `[http]` of [`WebConfigFile`].
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, serde::Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct WebHttpSection {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connect_timeout_secs: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_bytes: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_redirects: Option<usize>,
 }
 
@@ -525,15 +545,46 @@ pub fn web_tools_config(
     if let Some(d) = s.duckduckgo {
         cfg.search.duckduckgo = d;
     }
-    if let Some(name) = s.brave_key.as_deref().filter(|n| !n.trim().is_empty()) {
-        match secret_store::SecretRef::new(name) {
-            Ok(r) if store.is_some() => cfg.search.brave_key = Some(r),
-            Ok(_) => warnings.push(format!(
-                "web.toml: brave_key {name:?} ignored, the secret store is not available"
-            )),
-            Err(e) => warnings.push(format!("web.toml: brave_key ignored: {e}")),
+    if let Some(d) = s.duckduckgo_lite {
+        cfg.search.duckduckgo_lite = d;
+    }
+    if let Some(b) = s.bing {
+        cfg.search.bing = b;
+    }
+    if let Some(order) = &s.order {
+        for name in order {
+            if web_tools::KNOWN_BACKENDS.contains(&name.as_str()) {
+                if !cfg.search.order.contains(name) {
+                    cfg.search.order.push(name.clone());
+                }
+            } else {
+                warnings.push(format!(
+                    "web.toml: unknown search backend {name:?} in order; ignored"
+                ));
+            }
         }
     }
+    let resolve_key = |field: &str,
+                       raw: Option<&str>,
+                       warnings: &mut Vec<String>|
+     -> Option<secret_store::SecretRef> {
+        let name = raw.filter(|n| !n.trim().is_empty())?;
+        match secret_store::SecretRef::new(name) {
+            Ok(r) if store.is_some() => Some(r),
+            Ok(_) => {
+                warnings.push(format!(
+                    "web.toml: {field} {name:?} ignored, the secret store is not available"
+                ));
+                None
+            }
+            Err(e) => {
+                warnings.push(format!("web.toml: {field} ignored: {e}"));
+                None
+            }
+        }
+    };
+    cfg.search.brave_key = resolve_key("brave_key", s.brave_key.as_deref(), warnings);
+    cfg.search.tavily_key = resolve_key("tavily_key", s.tavily_key.as_deref(), warnings);
     let h = &file.http;
     let positive = |what: &str, v: Option<u64>, warnings: &mut Vec<String>| {
         v.filter(|n| {
@@ -581,7 +632,7 @@ pub fn web_tools_config(
 /// Which search backends `cfg` will try, in order (for logs and `bot doctor`).
 #[must_use]
 pub fn web_backend_summary(cfg: &web_tools::WebToolsConfig) -> String {
-    let mut v = Vec::new();
+    let mut labels = std::collections::HashMap::new();
     if let Some(u) = &cfg.search.searxng_url {
         // Only scheme://host[:port]: never a path, query or credentials.
         let origin = url::Url::parse(u)
@@ -592,13 +643,33 @@ pub fn web_backend_summary(cfg: &web_tools::WebToolsConfig) -> String {
                 Some(format!("{}://{host}{port}", p.scheme()))
             })
             .unwrap_or_else(|| "invalid url".to_owned());
-        v.push(format!("searxng ({origin})"));
+        labels.insert("searxng", format!("searxng ({origin})"));
     }
     if cfg.search.brave_key.is_some() {
-        v.push("brave".to_owned());
+        labels.insert("brave", "brave".to_owned());
+    }
+    if cfg.search.tavily_key.is_some() {
+        labels.insert("tavily", "tavily".to_owned());
     }
     if cfg.search.duckduckgo {
-        v.push("duckduckgo".to_owned());
+        labels.insert("duckduckgo", "duckduckgo".to_owned());
+    }
+    if cfg.search.duckduckgo_lite {
+        labels.insert("duckduckgo_lite", "duckduckgo_lite".to_owned());
+    }
+    if cfg.search.bing {
+        labels.insert("bing", "bing".to_owned());
+    }
+    let mut v = Vec::new();
+    for name in &cfg.search.order {
+        if let Some(label) = labels.remove(name.as_str()) {
+            v.push(label);
+        }
+    }
+    for name in web_tools::KNOWN_BACKENDS {
+        if let Some(label) = labels.remove(name) {
+            v.push(label);
+        }
     }
     if v.is_empty() {
         "none".to_owned()
@@ -752,6 +823,8 @@ pub fn serve(
     let email = crate::email_host::start_email(data_dir, &mcp_tools, telegram_store.as_ref())
         .map(|(host, _)| host);
     register_web(data_dir, port, &mcp_tools, telegram_store.as_ref());
+    let web_host =
+        crate::web_host::WebHost::new(data_dir, port, mcp_tools.clone(), telegram_store.clone());
     let recovered = agent.recover()?;
     let mut cfg = DaemonConfig::new(api_token.clone());
     cfg.shutdown_grace = grace;
@@ -822,6 +895,7 @@ pub fn serve(
         if let Some(email) = email {
             state.set_email(email as Arc<dyn daemon_api::EmailControl>);
         }
+        state.set_web(Arc::new(web_host) as Arc<dyn daemon_api::WebControl>);
         if let Some(store) = telegram_store.clone() {
             state.set_secret_store(store);
         }
@@ -1328,7 +1402,12 @@ host = "smtp.example.com"
         let cfg = web_tools_config(dir.path(), &file, None, &[], &mut w);
         assert_eq!(w.len(), 0);
         assert!(cfg.search.duckduckgo);
-        assert_eq!(web_backend_summary(&cfg), "duckduckgo");
+        assert!(cfg.search.duckduckgo_lite);
+        assert!(cfg.search.bing);
+        assert_eq!(
+            web_backend_summary(&cfg),
+            "duckduckgo > duckduckgo_lite > bing"
+        );
         assert_eq!(cfg.spill_dir, Some(dir.path().join("spill")));
     }
 
@@ -1342,6 +1421,8 @@ host = "smtp.example.com"
 searxng_url = "http://127.0.0.1:8080"
 brave_key = "web/brave"
 duckduckgo = false
+duckduckgo_lite = false
+bing = false
 
 [http]
 timeout_secs = 7
@@ -1460,10 +1541,44 @@ connect_timeout_secs = 999
         cfg.search.searxng_url =
             Some("https://user:pw@searx.example.org:8443/private/path?token=abc".into());
         let s = web_backend_summary(&cfg);
-        assert_eq!(s, "searxng (https://searx.example.org:8443) > duckduckgo");
+        assert_eq!(
+            s,
+            "searxng (https://searx.example.org:8443) > duckduckgo > duckduckgo_lite > bing"
+        );
         assert!(!s.contains("pw") && !s.contains("token") && !s.contains("private"));
         cfg.search.searxng_url = Some("not a url".into());
         assert!(web_backend_summary(&cfg).contains("invalid url"));
+    }
+
+    #[test]
+    fn web_toml_honours_custom_order_and_tavily_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let store: Arc<dyn SecretStore> = Arc::new(secret_store::MemoryStore::new());
+        store.set("web/tavily", "tvly-test").unwrap();
+        std::fs::write(
+            dir.path().join(WEB_FILE),
+            "[search]
+tavily_key = \"web/tavily\"
+duckduckgo_lite = false
+order = [\"bing\", \"tavily\", \"bogus\", \"duckduckgo\"]
+",
+        )
+        .unwrap();
+        let (file, file_warnings) = load_web_file(dir.path());
+        assert!(file_warnings.is_empty(), "{file_warnings:?}");
+        let mut warnings = Vec::new();
+        let cfg = web_tools_config(dir.path(), &file, Some(&store), &[], &mut warnings);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("bogus"), "{warnings:?}");
+        assert_eq!(
+            cfg.search
+                .tavily_key
+                .as_ref()
+                .map(secret_store::SecretRef::name),
+            Some("web/tavily")
+        );
+        assert!(!cfg.search.duckduckgo_lite);
+        assert_eq!(web_backend_summary(&cfg), "bing > tavily > duckduckgo");
     }
 
     #[test]

@@ -53,6 +53,7 @@ export interface OverlayClickPayload {
 export interface BotRunMeta {
   botId: string;
   botName: string;
+  botShape?: string;
   botAvatar?: string;
   botColor?: string;
   botInitials?: string;

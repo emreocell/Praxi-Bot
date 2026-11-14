@@ -38,7 +38,7 @@ export function Segmented<T extends string>({
   label
 }: {
   value: T;
-  options: ReadonlyArray<{ value: T; label: string }>;
+  options: ReadonlyArray<{ value: T; label: string; testId?: string }>;
   onChange: (v: T) => void;
   label: string;
 }) {
@@ -50,6 +50,7 @@ export function Segmented<T extends string>({
           type="button"
           role="radio"
           aria-checked={o.value === value}
+          data-testid={o.testId}
           className={[
             styles.segment,
             o.value === value ? styles.segmentActive : ""

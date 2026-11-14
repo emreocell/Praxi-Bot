@@ -236,3 +236,43 @@ test("refusal reasons name the state", () => {
   assert.match(refusalReason("paused"), /paused/);
   assert.match(refusalReason("bot_driving"), /stopped/);
 });
+
+test("startRun preserves explicit botShape even when it differs from ID hash fallback", async () => {
+  const calls: { bot: BotMeta; step: string }[] = [];
+  const bridge = new ControlBridge({
+    client: {
+      putControlState: async () => undefined,
+      decideControl: async () => undefined,
+      cancelRun: async () => undefined
+    },
+    native: {
+      beginAction: async () => true,
+      startRun: async (bot, step) => void calls.push({ bot, step }),
+      stopRun: async () => undefined,
+      click: async () => undefined
+    },
+    botMeta: (id) => ({
+      botId: id,
+      botName: "HeartBot",
+      botShape: "heart",
+      botColor: "#4c8dff"
+    }),
+    startingStep: "Working…",
+    now: () => NOW
+  });
+  await bridge.handleEvent({
+    v: 1,
+    seq: 1,
+    ts_ms: NOW,
+    gseq: 1,
+    event: {
+      type: "run_started",
+      run_id: "run-shape",
+      chat_id: "c",
+      bot_id: "bot-cube-0"
+    }
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].bot.botId, "bot-cube-0");
+  assert.equal(calls[0].bot.botShape, "heart");
+});

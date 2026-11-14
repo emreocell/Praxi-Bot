@@ -1,21 +1,143 @@
-.avatar { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: var(--size-avatar-md); height: var(--size-avatar-md); }
-.avatar svg, .avatar img { width: 100%; height: 100%; object-fit: cover; }
-.avatar img { border-radius: 28%; }
+.avatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: var(--size-avatar-md);
+  height: var(--size-avatar-md);
+}
+
 .xs { width: var(--space-6); height: var(--space-6); }
 .sm { width: var(--space-8); height: var(--space-8); }
-.md { width: var(--space-12); height: var(--space-12); }
+.md { width: var(--space-10); height: var(--space-10); }
 .lg { width: var(--space-16); height: var(--space-16); }
-.hero { width: calc(var(--space-16) * 1.5); height: calc(var(--space-16) * 1.5); }
-.body { fill: color-mix(in srgb, var(--bot-color) 76%, var(--color-text)); }
-.sheen { fill: none; stroke: color-mix(in srgb, var(--bot-color), var(--color-text) 38%); stroke-width: 1; }
-.eyes { fill: var(--color-creature-eyes); transform-origin: center; animation: blink 9s ease-in-out infinite; }
-.thinking > svg { animation: ponder 2.8s ease-in-out infinite; }
-.working > svg { animation: work 1.6s ease-in-out infinite; }
-.waiting-approval > svg { animation: wait 3s ease-in-out infinite; }
-.error > svg { animation: shake 0.4s ease-out 2; }
-@keyframes blink { 0%, 44%, 48%, 100% { transform: scaleY(1); } 46% { transform: scaleY(0.12); } }
-@keyframes ponder { 50% { transform: rotate(-7deg) translateY(-3%); } }
-@keyframes work { 50% { transform: translateY(-5%); } }
-@keyframes wait { 50% { opacity: 0.65; transform: rotate(4deg); } }
-@keyframes shake { 25% { transform: rotate(-5deg); } 75% { transform: rotate(5deg); } }
-@media (prefers-reduced-motion: reduce) { .avatar > svg, .eyes { animation: none; } }
+.hero { width: calc(var(--space-16) * 1.625); height: calc(var(--space-16) * 1.625); }
+
+.customImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 28%;
+}
+
+.character {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+  filter: drop-shadow(
+    0 calc(var(--size-border) * 2) calc(var(--size-border) * 3)
+      color-mix(in srgb, var(--color-shadow) 42%, transparent)
+  );
+}
+
+.filterDefs {
+  position: absolute;
+  width: var(--space-0);
+  height: var(--space-0);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.bodyImg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.eyes {
+  position: absolute;
+  inset: var(--space-0);
+  width: 100%;
+  height: 100%;
+  fill: var(--color-creature-eyes);
+  pointer-events: none;
+}
+
+.gaze {
+  transition: transform 0.25s ease-out;
+}
+
+.eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: blink 5.5s ease-in-out infinite;
+}
+
+.live {
+  animation: bob 4s ease-in-out infinite;
+}
+
+:is(button, a, [role="button"]):hover .character,
+.avatar:hover .character {
+  animation: wig 0.55s ease-in-out;
+  transform-origin: 50% 90%;
+}
+
+.character.hop { animation: hop 0.72s ease-in-out; }
+.character.tilt { animation: tilt 1.2s ease-in-out; }
+.character.stretch { animation: stretch 0.9s ease-in-out; transform-origin: 50% 92%; }
+
+.thinking .character { animation: ponder 2.8s ease-in-out infinite; }
+.working .character { animation: work 1.1s ease-in-out infinite; transform-origin: 50% 92%; }
+.waiting-approval .character { animation: wait 3s ease-in-out infinite; }
+.error .character { animation: shake 0.4s ease-out 2; }
+
+@keyframes blink {
+  0%, 46%, 50%, 100% { transform: scaleY(1); }
+  48% { transform: scaleY(0.12); }
+}
+
+@keyframes wig {
+  25% { transform: rotate(-9deg) scale(1.07); }
+  70% { transform: rotate(7deg) scale(1.07); }
+}
+
+@keyframes bob {
+  50% { transform: translateY(-5%); }
+}
+
+@keyframes hop {
+  40% { transform: translateY(-10%) scale(1.04, 0.96); }
+  75% { transform: translateY(1%) scale(0.96, 1.04); }
+}
+
+@keyframes tilt {
+  40% { transform: rotate(-7deg); }
+  75% { transform: rotate(4deg); }
+}
+
+@keyframes stretch {
+  45% { transform: scale(1.06, 0.92); }
+}
+
+@keyframes ponder {
+  50% { transform: rotate(-7deg) translateY(-3%); }
+}
+
+@keyframes work {
+  50% { transform: scale(1.08, 0.9); }
+}
+
+@keyframes wait {
+  50% { opacity: 0.72; transform: rotate(4deg); }
+}
+
+@keyframes shake {
+  25% { transform: rotate(-5deg); }
+  75% { transform: rotate(5deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .character,
+  .live,
+  .eye,
+  .gaze {
+    animation: none;
+    transition: none;
+  }
+}
