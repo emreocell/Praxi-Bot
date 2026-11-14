@@ -1234,7 +1234,16 @@ fn metadata_facts(specs: &[ToolSpec]) -> Vec<taint::ExecFact> {
     specs
         .iter()
         .filter(|spec| spec.content.has_external_metadata())
-        .map(|spec| taint::ExecFact::ran(spec.content, taint::source_label(&spec.name, &json!({}))))
+        .map(|spec| {
+            // A remote description is untrusted text. It is not a private read,
+            // so it must not turn off the untrusted-only exemption for search.
+            taint::ExecFact {
+                ran: true,
+                ingests_untrusted: true,
+                reads_private: false,
+                label: taint::source_label(&spec.name, &json!({})),
+            }
+        })
         .collect()
 }
 

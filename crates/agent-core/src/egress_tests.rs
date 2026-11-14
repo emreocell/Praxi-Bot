@@ -704,7 +704,7 @@ async fn a_tainted_message_outside_the_history_bound_does_not_gate_the_next_turn
 }
 
 #[tokio::test]
-async fn external_metadata_in_the_tool_list_taints_before_any_call() {
+async fn external_metadata_is_untrusted_text_and_does_not_gate_web_search() {
     let env = setup();
     let leak = Arc::new(with_class(
         "listPets",
@@ -731,15 +731,13 @@ async fn external_metadata_in_the_tool_list_taints_before_any_call() {
         profile(""),
         cfg(Policy::full()),
     );
-    let mut rx = lp.subscribe();
     let run = lp.run_turn(env.chat, "search").unwrap();
-    let card = card_of(&until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await);
-    assert!(
-        card["reason"].as_str().unwrap().contains("listPets"),
-        "{card}"
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(
+        search.count.load(Ordering::SeqCst),
+        1,
+        "a remote description is not a private read, so web_search stays prompt-free"
     );
-    assert_eq!(leak.count.load(Ordering::SeqCst), 0);
-    assert_eq!(search.count.load(Ordering::SeqCst), 0);
     let model = env
         .storage
         .list_steps(run)
@@ -747,11 +745,9 @@ async fn external_metadata_in_the_tool_list_taints_before_any_call() {
         .into_iter()
         .find(|s| s.name == "model")
         .unwrap();
-    assert_eq!(
-        model.output.as_ref().unwrap()["metadata"][0]["reads_private"],
-        true
-    );
-    lp.cancel(run).unwrap();
+    let fact = &model.output.as_ref().unwrap()["metadata"][0];
+    assert_eq!(fact["reads_private"], false, "{fact}");
+    assert_eq!(fact["ingests_untrusted"], true, "{fact}");
 }
 
 #[tokio::test]
@@ -932,4 +928,346 @@ async fn a_secret_in_the_egress_payload_is_refused_before_approval() {
     while let Ok(item) = rx.try_recv() {
         assert!(!matches!(item.envelope.event, Event::ApprovalNeeded(_)));
     }
+}
+
+#[tokio::test]
+async fn hidden_characters_in_an_egress_payload_are_refused_and_not_sent() {
+    let env = setup();
+    let read = read_tool("fs_read", ContentClass::untrusted_private());
+    let search = egress_tool(
+        "web_search",
+        Effect::Read,
+        PermissionCategory::Browser,
+        ContentClass::untrusted_egress(),
+    );
+    let query = format!("weather{}", '\u{E0041}');
+    let fake = Fake::new(vec![
+        calls(&[("c1", "fs_read", json!({"path": "notes.txt"}))]),
+        calls(&[("c2", "web_search", json!({"query": query}))]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&read), t(&search)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "search").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(search.count.load(Ordering::SeqCst), 0);
+    let msg = tool_messages(&fake.request(2)).join("\n");
+    assert!(msg.contains("hidden or control characters"), "{msg}");
+    assert!(!msg.contains('\u{E0041}'), "{msg}");
+    while let Ok(item) = rx.try_recv() {
+        assert!(!matches!(item.envelope.event, Event::ApprovalNeeded(_)));
+    }
+}
+
+#[tokio::test]
+async fn external_metadata_still_gates_a_fetch() {
+    let env = setup();
+    let leak = Arc::new(with_class(
+        "listPets",
+        Effect::Read,
+        PermissionCategory::Fs,
+        ContentClass::declared(true, true, false).with_external_metadata(),
+        "remote schema",
+    ));
+    let fetch = egress_tool(
+        "web_extract",
+        Effect::Write,
+        PermissionCategory::Browser,
+        ContentClass::untrusted_egress(),
+    );
+    let fake = Fake::new(vec![
+        calls(&[(
+            "c1",
+            "web_extract",
+            json!({"url": "https://evil.example/hook"}),
+        )]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&leak), t(&fetch)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "fetch").unwrap();
+    let card = card_of(&until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await);
+    assert!(
+        card["reason"].as_str().unwrap().contains("listPets"),
+        "{card}"
+    );
+    assert_eq!(fetch.count.load(Ordering::SeqCst), 0);
+    lp.cancel(run).unwrap();
+}
+
+#[tokio::test]
+async fn a_click_or_scroll_after_a_private_read_does_not_ask_but_typing_does() {
+    let env = setup();
+    let read = read_tool("desktop_get_state", ContentClass::untrusted_private());
+    let click = Arc::new(with_class(
+        "desktop_click",
+        Effect::Write,
+        PermissionCategory::Desktop,
+        builtin_tools::classify("desktop_click").unwrap(),
+        "clicked",
+    ));
+    let scroll = Arc::new(with_class(
+        "browser_scroll",
+        Effect::Read,
+        PermissionCategory::Browser,
+        builtin_tools::classify("browser_scroll").unwrap(),
+        "scrolled",
+    ));
+    let bare_click = Arc::new(with_class(
+        "browser_click",
+        Effect::Write,
+        PermissionCategory::Browser,
+        ContentClass::all(),
+        "clicked",
+    ));
+    let typed = Arc::new(with_class(
+        "desktop_type",
+        Effect::Write,
+        PermissionCategory::Desktop,
+        builtin_tools::classify("desktop_type").unwrap(),
+        "typed",
+    ));
+    let fake = Fake::new(vec![
+        calls(&[("c1", "desktop_get_state", json!({}))]),
+        calls(&[("c2", "desktop_click", json!({"index": 1}))]),
+        calls(&[("c3", "browser_scroll", json!({"dy": 400}))]),
+        calls(&[("c4", "browser_click", json!({"ref": "e1"}))]),
+        calls(&[("c5", "desktop_type", json!({"text": "hello"}))]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&read), t(&click), t(&scroll), t(&bare_click), t(&typed)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "look and act").unwrap();
+    let _card = card_of(&until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await);
+    assert_eq!(click.count.load(Ordering::SeqCst), 1);
+    assert_eq!(scroll.count.load(Ordering::SeqCst), 1);
+    assert_eq!(bare_click.count.load(Ordering::SeqCst), 1);
+    assert_eq!(typed.count.load(Ordering::SeqCst), 0);
+    lp.cancel(run).unwrap();
+}
+
+#[tokio::test]
+async fn browser_click_prompt_text_still_asks_after_a_read() {
+    let env = setup();
+    let read = read_tool("fs_read", ContentClass::untrusted_private());
+    let click = Arc::new(with_class(
+        "browser_click",
+        Effect::Write,
+        PermissionCategory::Browser,
+        ContentClass::all(),
+        "clicked",
+    ));
+    let fake = Fake::new(vec![
+        calls(&[("c1", "fs_read", json!({"path": "notes.txt"}))]),
+        calls(&[(
+            "c2",
+            "browser_click",
+            json!({"ref": "e1", "prompt_text": "SECRET_DATA"}),
+        )]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&read), t(&click)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "click").unwrap();
+    let card = card_of(&until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await);
+    let payload = card["payload"].as_str().unwrap();
+    assert!(payload.contains("SECRET_DATA"), "{payload}");
+    assert!(payload.contains("prompt_text"), "{payload}");
+    assert_eq!(click.count.load(Ordering::SeqCst), 0);
+    lp.cancel(run).unwrap();
+}
+
+#[tokio::test]
+async fn a_file_write_does_not_count_as_a_private_read() {
+    let env = setup();
+    let write = Arc::new(with_class(
+        "fs_write",
+        Effect::Write,
+        PermissionCategory::Fs,
+        builtin_tools::classify("fs_write").unwrap(),
+        "wrote",
+    ));
+    let search = egress_tool(
+        "web_search",
+        Effect::Read,
+        PermissionCategory::Browser,
+        ContentClass::untrusted_egress(),
+    );
+    let fake = Fake::new(vec![
+        calls(&[(
+            "c1",
+            "fs_write",
+            json!({"path": "notes.txt", "content": "hi"}),
+        )]),
+        calls(&[("c2", "web_search", json!({"query": "weather"}))]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&write), t(&search)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let state = tokio::time::timeout(
+        Duration::from_secs(8),
+        lp.wait(lp.run_turn(env.chat, "write then search").unwrap()),
+    )
+    .await
+    .expect("a write tainted the run, so the search asked")
+    .unwrap();
+    assert_eq!(state, RunState::Succeeded);
+    assert_eq!(search.count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_later_scheduled_firing_does_not_inherit_taint_from_its_own_history() {
+    let env = setup();
+    let read = read_tool("fs_read", ContentClass::untrusted_private());
+    let search = egress_tool(
+        "web_search",
+        Effect::Read,
+        PermissionCategory::Browser,
+        ContentClass::untrusted_egress(),
+    );
+    let fake = Fake::new(vec![
+        calls(&[("c1", "fs_read", json!({"path": "notes.txt"}))]),
+        text("day one PRIVATE_SENTINEL"),
+        calls(&[("c2", "web_search", json!({"query": "weather"}))]),
+        text("day two"),
+        calls(&[("c3", "fs_read", json!({"path": "mail.txt"}))]),
+        text("human saw the mailbox"),
+        calls(&[("c4", "web_search", json!({"query": "leak"}))]),
+        text("unused"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&read), t(&search)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let sid = protocol::TaskId::new();
+    let day1 = lp
+        .run_scheduled(env.chat, sid, ScheduleWork::Prompt("read the notes".into()))
+        .unwrap();
+    assert_eq!(lp.wait(day1).await.unwrap(), RunState::Succeeded);
+    let day2 = lp
+        .run_scheduled(
+            env.chat,
+            sid,
+            ScheduleWork::Prompt("search the weather".into()),
+        )
+        .unwrap();
+    let state = tokio::time::timeout(Duration::from_secs(8), lp.wait(day2))
+        .await
+        .expect("day 2 asked because it inherited its own history")
+        .unwrap();
+    assert_eq!(state, RunState::Succeeded);
+    assert_eq!(search.count.load(Ordering::SeqCst), 1);
+    let seen = fake
+        .request(2)
+        .messages
+        .iter()
+        .map(|m| m.content.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !seen.contains("PRIVATE_SENTINEL"),
+        "yesterday's answer is back in the prompt: {seen}"
+    );
+
+    let human = lp.run_turn(env.chat, "read the mail").unwrap();
+    assert_eq!(lp.wait(human).await.unwrap(), RunState::Succeeded);
+    let mut rx = lp.subscribe();
+    let day3 = lp
+        .run_scheduled(env.chat, sid, ScheduleWork::Prompt("search again".into()))
+        .unwrap();
+    let card = card_of(&until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await);
+    assert_eq!(card["kind"], "egress");
+    assert_eq!(search.count.load(Ordering::SeqCst), 1);
+    lp.cancel(day3).unwrap();
+}
+
+#[tokio::test]
+async fn a_no_tool_turn_that_can_see_tainted_history_is_untrusted_memory() {
+    let env = setup();
+    let read = read_tool("fs_read", ContentClass::untrusted_private());
+    let fake = Fake::new(vec![
+        calls(&[("c1", "fs_read", json!({"path": "notes.txt"}))]),
+        text("the file says PRIVATE"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&read)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let first = lp.run_turn(env.chat, "read the notes").unwrap();
+    assert_eq!(lp.wait(first).await.unwrap(), RunState::Succeeded);
+    let run = storage::Run {
+        id: protocol::RunId::new(),
+        user_id: env.user,
+        bot_id: env.bot,
+        chat_id: Some(env.chat),
+        kind: "turn".into(),
+        state: "running".into(),
+        error: None,
+        created_at_ms: storage::now_ms(),
+        updated_at_ms: storage::now_ms(),
+        parent_run_id: None,
+        spec: None,
+    };
+    env.storage.insert_run(&run).unwrap();
+    env.storage
+        .insert_message(&storage::Message {
+            id: uuid::Uuid::now_v7(),
+            user_id: env.user,
+            chat_id: env.chat,
+            run_id: Some(run.id),
+            role: "user".into(),
+            content: "what did you find?".into(),
+            created_at_ms: storage::now_ms(),
+            exposure_untrusted: false,
+            exposure_private: false,
+            exposure_sources: Vec::new(),
+        })
+        .unwrap();
+    let ex = crate::memory::Exchange::of(&lp.sh, &run, "it said PRIVATE").unwrap();
+    assert!(
+        ex.untrusted,
+        "a turn that can see a tainted answer must not be stored as user trust"
+    );
 }

@@ -838,7 +838,12 @@ impl Shared {
         // the context. Dropped by the history bound means the bytes are not
         // in front of the model, so those bits are not inherited.
         if run.parent_run_id.is_none() {
-            let prior = crate::history::chat_provenance(&self.storage, chat_id, Some(run.id));
+            let prior = crate::history::chat_provenance(
+                &self.storage,
+                chat_id,
+                Some(run.id),
+                schedule_id_of(&run.kind),
+            );
             taint.exposure.inherit(prior.exposure);
             for label in prior.sources {
                 taint.note_label(&label);

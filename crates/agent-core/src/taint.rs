@@ -80,11 +80,17 @@ impl ExecFact {
 /// bits; the card names the most recent distinct ones that still fit.
 const MAX_SOURCES: usize = 8;
 
+/// A source label longer than this is cut. The model chooses the text
+/// (`path`, `url`, `query`), so an uncapped label can fill the reason line.
+const MAX_LABEL_CHARS: usize = 120;
+
 /// Exposure bits plus the labels the approval card quotes.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ContentTaint {
     pub exposure: ContentExposure,
     sources: Vec<String>,
+    /// Distinct labels dropped because [`MAX_SOURCES`] kept a newer one.
+    earlier: usize,
 }
 
 impl ContentTaint {
@@ -114,21 +120,44 @@ impl ContentTaint {
     /// Union with taint inherited from a parent run or from stored history.
     pub(crate) fn inherit(&mut self, other: &Self) {
         self.exposure.inherit(other.exposure);
+        self.earlier += other.earlier;
         for label in &other.sources {
             self.push_label(label);
         }
     }
 
     fn push_label(&mut self, label: &str) {
-        let label = label.trim();
-        if label.is_empty() || self.sources.iter().any(|s| s == label) {
+        let label = sanitize_label(label);
+        if label.is_empty() {
+            return;
+        }
+        if let Some(i) = self.sources.iter().position(|s| s == &label) {
+            let kept = self.sources.remove(i);
+            self.sources.push(kept);
             return;
         }
         if self.sources.len() >= MAX_SOURCES {
-            return;
+            self.sources.remove(0);
+            self.earlier += 1;
         }
-        self.sources.push(label.to_owned());
+        self.sources.push(label);
     }
+}
+
+/// Drop control and invisible characters and cap the length. Done when the
+/// label is recorded, so a later card cannot grow a model-chosen sentence.
+fn sanitize_label(label: &str) -> String {
+    let mut out = String::new();
+    for c in label.trim().chars() {
+        if c.is_control() || protocol::approval_text::is_hidden(c) {
+            continue;
+        }
+        out.push(c);
+        if out.chars().count() >= MAX_LABEL_CHARS {
+            break;
+        }
+    }
+    out.trim().to_owned()
 }
 
 /// Fold one persisted step into `taint`.
@@ -256,55 +285,26 @@ pub(crate) fn egress_payload(name: &str, input: &Value) -> (String, String, &'st
         let server = server.split('/').next().unwrap_or("mcp").to_owned();
         return (server, render_fields(input), "body");
     }
-    match name {
-        "web_search" => {
-            let mut payload = str_field("query");
-            // `language` and `limit` are query parameters on at least one
-            // configured backend. `backend` selects which host is called.
-            for (key, kind) in [("language", "str"), ("limit", "num"), ("backend", "str")] {
-                if let Some(extra) = field_text(input, key, kind) {
-                    payload.push('\n');
-                    payload.push_str(key);
-                    payload.push_str(": ");
-                    payload.push_str(&extra);
-                }
-            }
-            (
-                search_host(input.get("backend").and_then(Value::as_str)),
-                payload,
-                "query",
-            )
-        }
+    // Every field is in the text. A per-tool projection drops a field the
+    // next schema change adds, and that field can be what leaves the machine.
+    let payload = if matches!(name, "email_send" | "email_draft") {
+        email_body(input)
+    } else {
+        render_transmitted(input)
+    };
+    let (host, kind) = match name {
+        "web_search" => (
+            search_host(input.get("backend").and_then(Value::as_str)),
+            "query",
+        ),
         "web_extract" | "web_feed" | "web_sitemap" | "web_metadata" | "browser_open" => {
-            let url = str_field("url");
-            let host = host_of_url(&url);
-            // The URL is the request line, query string included. Other keys
-            // on these tools are local (how much of the reply to keep).
-            (host, url, "url")
+            (host_of_url(&str_field("url")), "url")
         }
         "email_send" | "email_draft" => {
-            let to = all_addrs(input.get("to"));
-            let cc = all_addrs(input.get("cc"));
-            let bcc = all_addrs(input.get("bcc"));
-            let mut everyone = to.clone();
-            everyone.extend(cc.iter().cloned());
-            everyone.extend(bcc.iter().cloned());
-            let host = domains_of(&everyone);
-            let mut body = String::new();
-            push_addrs(&mut body, "To", &to);
-            push_addrs(&mut body, "Cc", &cc);
-            push_addrs(&mut body, "Bcc", &bcc);
-            let account = str_field("account");
-            if !account.is_empty() {
-                body.push_str("Account: ");
-                body.push_str(&account);
-                body.push('\n');
-            }
-            body.push_str("Subject: ");
-            body.push_str(&str_field("subject"));
-            body.push_str("\n\n");
-            body.push_str(&str_field("body"));
-            (host, body, "body")
+            let mut everyone = all_addrs(input.get("to"));
+            everyone.extend(all_addrs(input.get("cc")));
+            everyone.extend(all_addrs(input.get("bcc")));
+            (domains_of(&everyone), "body")
         }
         "email_search" | "email_read" | "email_mark_read" | "email_list_folders" => {
             let account = str_field("account");
@@ -313,58 +313,148 @@ pub(crate) fn egress_payload(name: &str, input: &Value) -> (String, String, &'st
             } else {
                 format!("mailbox {account}")
             };
-            (host, render_fields(input), "body")
+            (host, "body")
         }
-        "shell_run" => ("the shell".to_owned(), render_fields(input), "body"),
-        "script_run" => ("a script".to_owned(), render_fields(input), "body"),
+        "shell_run" => ("the shell".to_owned(), "body"),
+        "script_run" => ("a script".to_owned(), "body"),
         "browser_fill" | "browser_press" | "browser_select" | "browser_click"
-        | "browser_scroll" | "browser_tabs" | "browser_back" => {
-            ("the browser".to_owned(), render_fields(input), "body")
+        | "browser_scroll" | "browser_tabs" | "browser_back" | "browser_eval" => {
+            ("the browser".to_owned(), "body")
         }
-        "browser_eval" => ("the browser".to_owned(), str_field("js"), "body"),
-        "schedule_create" | "schedule_update" | "schedule_resume" => (
-            "this bot's scheduler".to_owned(),
-            str_field("prompt"),
-            "body",
-        ),
-        other if other.starts_with("desktop_") => {
-            ("the desktop".to_owned(), render_fields(input), "body")
+        "schedule_create" | "schedule_update" | "schedule_resume" => {
+            ("this bot's scheduler".to_owned(), "body")
         }
+        other if other.starts_with("desktop_") => ("the desktop".to_owned(), "body"),
         _ => {
-            if let Some(url) = input.get("url").and_then(Value::as_str) {
-                (host_of_url(url), render_fields(input), "url")
+            if input.get("url").and_then(Value::as_str).is_some() {
+                (host_of_url(&str_field("url")), "url")
             } else {
-                (name.to_owned(), render_fields(input), "body")
+                (name.to_owned(), "body")
             }
         }
+    };
+    (host, payload, kind)
+}
+
+/// Every object field. A lone `url` or `query` stays the bare string, matching
+/// cards that predate the all-fields rule. Any other field is appended, URL
+/// or query first, so a new schema property cannot leave unseen.
+fn render_transmitted(input: &Value) -> String {
+    let Some(obj) = input.as_object() else {
+        return display_value(input);
+    };
+    if obj.is_empty() {
+        return String::new();
     }
+    if obj.len() == 1 {
+        let (key, value) = obj.iter().next().unwrap();
+        if let Some(text) = value.as_str()
+            && matches!(
+                key.as_str(),
+                "url" | "query" | "js" | "prompt" | "command" | "body" | "text"
+            )
+        {
+            return text.to_owned();
+        }
+    }
+    let mut keys: Vec<&String> = obj.keys().collect();
+    keys.sort_by_key(|key| match key.as_str() {
+        "url" => 0,
+        "query" => 1,
+        _ => 2,
+    });
+    let mut lines = Vec::with_capacity(keys.len());
+    for key in keys {
+        let value = &obj[key];
+        if matches!(key.as_str(), "url" | "query")
+            && let Some(text) = value.as_str()
+        {
+            lines.push(text.to_owned());
+            continue;
+        }
+        lines.push(format!("{key}: {}", display_value(value)));
+    }
+    lines.join("\n")
 }
 
 /// Every object field, in the order the call carried them.
 fn render_fields(input: &Value) -> String {
     let Some(obj) = input.as_object() else {
-        return input.to_string();
+        return display_value(input);
     };
     if obj.is_empty() {
         return String::new();
     }
     obj.iter()
-        .map(|(k, v)| format!("{k}: {v}"))
+        .map(|(k, v)| format!("{k}: {}", display_value(v)))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn field_text(input: &Value, key: &str, kind: &str) -> Option<String> {
-    let value = input.get(key)?;
-    if kind == "num" {
-        return value.as_i64().map(|n| n.to_string()).or_else(|| {
-            value
-                .as_u64()
-                .map(|n| n.to_string())
-                .or_else(|| value.as_f64().map(|n| n.to_string()))
-        });
+fn display_value(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Array(items) => items
+            .iter()
+            .map(display_value)
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join(", "),
+        Value::Null => String::new(),
+        other => other.to_string(),
     }
-    value.as_str().filter(|s| !s.is_empty()).map(str::to_owned)
+}
+
+/// Recipients, subject and body, then any field that layout does not already name.
+fn email_body(input: &Value) -> String {
+    let to = all_addrs(input.get("to"));
+    let cc = all_addrs(input.get("cc"));
+    let bcc = all_addrs(input.get("bcc"));
+    let mut body = String::new();
+    push_addrs(&mut body, "To", &to);
+    push_addrs(&mut body, "Cc", &cc);
+    push_addrs(&mut body, "Bcc", &bcc);
+    let account = input
+        .get("account")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if !account.is_empty() {
+        body.push_str("Account: ");
+        body.push_str(account);
+        body.push('\n');
+    }
+    body.push_str("Subject: ");
+    body.push_str(
+        input
+            .get("subject")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    );
+    body.push_str("\n\n");
+    body.push_str(
+        input
+            .get("body")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    );
+    if let Some(obj) = input.as_object() {
+        for (key, value) in obj {
+            if matches!(
+                key.as_str(),
+                "to" | "cc" | "bcc" | "account" | "subject" | "body"
+            ) {
+                continue;
+            }
+            if !body.is_empty() && !body.ends_with('\n') {
+                body.push('\n');
+            }
+            body.push_str(key);
+            body.push_str(": ");
+            body.push_str(&display_value(value));
+            body.push('\n');
+        }
+    }
+    body
 }
 
 fn all_addrs(value: Option<&Value>) -> Vec<String> {
@@ -393,9 +483,12 @@ fn push_addrs(out: &mut String, label: &str, addrs: &[String]) {
 fn domains_of(addrs: &[String]) -> String {
     let mut domains = Vec::new();
     for addr in addrs {
-        let domain = domain_of_addr(addr);
-        if !domains.contains(&domain) {
-            domains.push(domain);
+        // One string may carry several addresses ("a@evil.test, b@other.test").
+        for part in addr.split([',', ';']) {
+            let domain = domain_of_addr(part);
+            if domain != "unknown" && !domains.contains(&domain) {
+                domains.push(domain);
+            }
         }
     }
     if domains.is_empty() {
@@ -415,14 +508,43 @@ fn search_host(backend: Option<&str>) -> String {
 }
 
 fn host_of_url(url: &str) -> String {
-    let rest = url.split("://").nth(1).unwrap_or(url);
-    let host = rest.split(['/', '?', '#']).next().unwrap_or(rest);
-    let host = host.split('@').next_back().unwrap_or(host);
-    let host = host.split(':').next().unwrap_or(host);
-    if host.is_empty() {
-        "unknown".to_owned()
-    } else {
-        host.to_owned()
+    // `url` treats `\` as `/` for http(s). A hand-rolled split on `/` does not,
+    // so `https://evil.example\@trusted.example/` used to name trusted.example
+    // in the footer while the request went to evil.example. A backslash, or a
+    // URL the parser rejects, is not given a host name at all.
+    if url.contains('\\') {
+        return "unparseable URL".to_owned();
+    }
+    url::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_owned))
+        .filter(|host| !host.is_empty())
+        .unwrap_or_else(|| "unparseable URL".to_owned())
+}
+
+/// A click names an on-screen target. `prompt_text` is typed into the page,
+/// so that call can carry data even though the tool is still called a click.
+pub(crate) fn call_can_egress(name: &str, class: ContentClass, input: &Value) -> bool {
+    if !class.egress {
+        return false;
+    }
+    if name == "browser_click" {
+        return input
+            .get("prompt_text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.is_empty());
+    }
+    true
+}
+
+/// Any string [`protocol::approval_text::scrub`] would shorten. The card must
+/// not be offered for that input: what the user would see is not what is sent.
+pub(crate) fn input_hides_characters(value: &Value) -> bool {
+    match value {
+        Value::String(text) => protocol::approval_text::hides_characters(text),
+        Value::Array(items) => items.iter().any(input_hides_characters),
+        Value::Object(map) => map.values().any(input_hides_characters),
+        _ => false,
     }
 }
 
@@ -444,7 +566,11 @@ pub(crate) fn egress_details(taint: &ContentTaint, name: &str, input: &Value) ->
         return None;
     }
     let (host, payload, payload_kind) = egress_payload(name, input);
-    let read: Vec<&str> = taint.sources.iter().map(String::as_str).collect();
+    let mut read: Vec<String> = taint.sources.clone();
+    if taint.earlier > 0 {
+        let word = if taint.earlier == 1 { "read" } else { "reads" };
+        read.push(format!("and {} earlier {word}", taint.earlier));
+    }
     let sources = if read.is_empty() {
         "untrusted or private content".to_owned()
     } else {
@@ -476,5 +602,228 @@ pub(crate) fn merge_egress(details: &mut Option<Value>, egress: Value) {
                 *details = Some(egress);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod card_tests {
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use builtin_tools::{
+        BuiltinConfig, GateRequest, ScheduleCaller, ScheduleChange, ScheduleHost, SchedulePreview,
+        ScheduleRequest, ScheduleView, ToolGate,
+    };
+    use secret_store::SecretStore;
+    use serde_json::{Value, json};
+    use tool_registry::{ContentClass, ToolRegistry};
+
+    use super::{ContentTaint, egress_payload};
+
+    #[test]
+    fn browser_open_card_contains_every_transmitted_field() {
+        let (_host, payload, kind) = egress_payload(
+            "browser_open",
+            &json!({
+                "url": "https://evil.example/",
+                "dialog": "accept",
+                "prompt_text": "SECRET_DATA",
+                "profile": "logged-in"
+            }),
+        );
+        assert_eq!(kind, "url");
+        assert!(payload.starts_with("https://evil.example/"), "{payload}");
+        assert!(payload.contains("prompt_text: SECRET_DATA"), "{payload}");
+        assert!(payload.contains("dialog: accept"), "{payload}");
+        assert!(payload.contains("profile: logged-in"), "{payload}");
+    }
+
+    #[test]
+    fn a_backslash_cannot_rename_the_destination_host() {
+        let (host, payload, _) = egress_payload(
+            "web_extract",
+            &json!({"url": "https://evil.example\\@trusted.example/x"}),
+        );
+        assert_eq!(host, "unparseable URL");
+        assert!(payload.contains("evil.example"), "{payload}");
+        assert!(payload.contains("trusted.example"), "{payload}");
+        let (host, _, _) =
+            egress_payload("browser_open", &json!({"url": "https://evil.example/hook"}));
+        assert_eq!(host, "evil.example");
+        let (host, _, _) = egress_payload(
+            "email_send",
+            &json!({
+                "to": "a@evil.example, b@trusted.example",
+                "subject": "s",
+                "body": "b"
+            }),
+        );
+        assert!(host.contains("evil.example"), "{host}");
+        assert!(host.contains("trusted.example"), "{host}");
+    }
+
+    #[test]
+    fn the_card_keeps_the_most_recent_sources_and_bounds_labels() {
+        let mut taint = ContentTaint::default();
+        for i in 0..8 {
+            taint.note(
+                ContentClass::untrusted_private(),
+                &format!("file junk{i}.txt"),
+            );
+        }
+        taint.note(
+            ContentClass::untrusted_private(),
+            "file C:/Users/me/.ssh/id_rsa",
+        );
+        assert_eq!(taint.sources().len(), 8);
+        assert_eq!(
+            taint.sources().last().map(String::as_str),
+            Some("file C:/Users/me/.ssh/id_rsa")
+        );
+        assert!(taint.sources().iter().all(|s| !s.contains("junk0")));
+        assert_eq!(taint.earlier, 1);
+        let card = super::egress_details(&taint, "web_search", &json!({"query": "q"})).unwrap();
+        let reason = card["reason"].as_str().unwrap();
+        assert!(reason.contains("id_rsa"), "{reason}");
+        assert!(reason.contains("earlier read"), "{reason}");
+        assert!(!reason.contains("junk0"), "{reason}");
+
+        let mut capped = ContentTaint::default();
+        capped.note(
+            ContentClass::private_read(),
+            &format!("file {}", "a".repeat(400)),
+        );
+        capped.note(
+            ContentClass::private_read(),
+            "file notes\u{1b}[2Jsafe to approve",
+        );
+        assert!(capped.sources()[0].chars().count() <= 120);
+        assert!(!capped.sources()[1].contains('\u{1b}'));
+    }
+
+    struct AllowAll;
+
+    #[async_trait]
+    impl ToolGate for AllowAll {
+        async fn authorize(&self, _req: &GateRequest) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    struct NoSched;
+
+    impl ScheduleHost for NoSched {
+        fn list(&self, _: &ScheduleCaller) -> Result<Vec<ScheduleView>, String> {
+            Err("unused".into())
+        }
+        fn preview(
+            &self,
+            _: &ScheduleCaller,
+            _: &ScheduleChange,
+        ) -> Result<SchedulePreview, String> {
+            Err("unused".into())
+        }
+        fn discard(&self, _: &ScheduleCaller, _: &ScheduleChange, _: &str) {}
+        fn create(&self, _: &ScheduleCaller, _: &ScheduleRequest) -> Result<ScheduleView, String> {
+            Err("unused".into())
+        }
+        fn update(
+            &self,
+            _: &ScheduleCaller,
+            _: &str,
+            _: &ScheduleRequest,
+        ) -> Result<ScheduleView, String> {
+            Err("unused".into())
+        }
+        fn set_enabled(
+            &self,
+            _: &ScheduleCaller,
+            _: &str,
+            _: bool,
+        ) -> Result<ScheduleView, String> {
+            Err("unused".into())
+        }
+        fn delete(&self, _: &ScheduleCaller, _: &str) -> Result<ScheduleView, String> {
+            Err("unused".into())
+        }
+    }
+
+    #[test]
+    fn every_egress_tool_schema_field_is_on_the_card() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::new();
+        let mut cfg = BuiltinConfig::new(dir.path().to_path_buf(), Arc::new(AllowAll));
+        cfg.web = Some(builtin_tools::web_tools::WebToolsConfig::default());
+        let store = Arc::new(secret_store::MemoryStore::new());
+        store.set("email/test", "password").unwrap();
+        let account = builtin_tools::connector_email::AccountConfig {
+            name: "test".to_string(),
+            address: "user@example.com".to_string(),
+            username: String::new(),
+            password: secret_store::SecretRef::new("email/test").unwrap(),
+            imap: builtin_tools::connector_email::ImapSettings {
+                host: "imap.example.com".to_string(),
+                port: 993,
+            },
+            smtp: builtin_tools::connector_email::SmtpSettings {
+                host: "smtp.example.com".to_string(),
+                port: 465,
+                security: builtin_tools::connector_email::SmtpSecurity::Implicit,
+            },
+            drafts_folder: "Drafts".to_string(),
+            extra_root_pem: None,
+            timeout_secs: 30,
+            bot: None,
+            allowed_senders: Vec::new(),
+            kind: builtin_tools::connector_email::AccountKind::ImapSmtp,
+            inbox_id: None,
+        };
+        cfg.email = Some(Arc::new(
+            builtin_tools::connector_email::EmailConnector::new(vec![account], store).unwrap(),
+        ));
+        let _ = builtin_tools::register_builtin_tools(&registry, cfg);
+        let host: Arc<dyn ScheduleHost> = Arc::new(NoSched);
+        for tool in builtin_tools::schedule::tools(&host) {
+            registry.register(tool);
+        }
+
+        let mut checked = 0usize;
+        let mut saw_browser_open = false;
+        for spec in registry.list() {
+            if !spec.content.egress {
+                continue;
+            }
+            let Some(props) = spec
+                .input_schema
+                .get("properties")
+                .and_then(Value::as_object)
+            else {
+                continue;
+            };
+            if props.is_empty() {
+                continue;
+            }
+            let input = Value::Object(
+                props
+                    .keys()
+                    .map(|key| (key.clone(), Value::String(format!("SNTNL_{key}_END"))))
+                    .collect(),
+            );
+            let (_host, payload, _) = egress_payload(&spec.name, &input);
+            for key in props.keys() {
+                let sentinel = format!("SNTNL_{key}_END");
+                assert!(
+                    payload.contains(&sentinel),
+                    "{} hides `{key}`: {payload}",
+                    spec.name
+                );
+            }
+            if spec.name == "browser_open" {
+                saw_browser_open = true;
+            }
+            checked += 1;
+        }
+        assert!(saw_browser_open, "browser_open was not in the audited set");
+        assert!(checked > 8, "only {checked} egress tools were audited");
     }
 }

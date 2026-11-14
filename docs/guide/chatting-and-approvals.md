@@ -140,7 +140,10 @@ read and shows the exact outgoing query, URL, or body, including every
 recipient, with the tail reachable by scrolling, and the destination host.
 Approving that card allows that one send. It does not create a standing grant.
 A later message in the same chat still asks while the earlier answer is in the
-conversation the model sees. Search against the configured provider stays
+conversation the model sees. A click, scroll, or drag does not send data off
+the machine, so it stays allowed after a read; typing, pasting, launching, and
+filling a page still ask. Writing or moving a file does not count as reading
+private data. Search against the configured provider stays
 prompt-free when the run has only untrusted content and has not read private
 data. The bot form has an explicit, off-by-default setting that skips this ask
 for that bot. Deny rules and the floors above still win. A run that has not
@@ -149,7 +152,10 @@ read anything behaves as before.
 ### Runs started by a schedule
 
 A scheduled run (see [Scheduled tasks](scheduled-tasks.md)) behaves like you
-unless its rule says otherwise. If it needs an approval and nobody answers
+unless its rule says otherwise. Each firing starts from its own prompt: earlier
+firings of that same schedule are not loaded back into the prompt, so
+yesterday's answer does not make today's run ask. A human conversation in that
+chat still does. If it needs an approval and nobody answers
 within **30 minutes**, the run **pauses** (it does not guess). Money and
 never-list actions are never auto-approved in scheduled runs.
 

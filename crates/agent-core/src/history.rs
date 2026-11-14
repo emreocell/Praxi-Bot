@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 
-use protocol::{ChatId, RunId};
+use protocol::{ChatId, RunId, TaskId};
 use provider_catalog::{Message, MessageRole, ToolCall};
 use serde_json::{Value, json};
 use storage::{Run, RunStep, Storage};
@@ -12,7 +12,7 @@ use tool_registry::ToolSpec;
 use crate::profile::BotProfile;
 use crate::router::workflow_note;
 use crate::shared::{
-    CallRec, ModelOut, ResultRec, STEP_MODEL, STEP_TOOLS, STEP_USER, STEP_WORKFLOW,
+    CallRec, ModelOut, ResultRec, STEP_MODEL, STEP_TOOLS, STEP_USER, STEP_WORKFLOW, schedule_id_of,
 };
 
 /// Providers (OpenAI-style) reject `.` in function names; expose `a.b` as `a__b`.
@@ -84,6 +84,7 @@ fn messages_in_context(
     storage: &Storage,
     chat: ChatId,
     exclude_run: Option<RunId>,
+    own_schedule: Option<TaskId>,
 ) -> Result<(Vec<storage::Message>, bool), storage::StorageError> {
     let (history, omitted) = storage.list_messages_bounded(
         chat,
@@ -95,10 +96,32 @@ fn messages_in_context(
         .iter()
         .position(|m| m.role == "user")
         .unwrap_or(history.len());
-    Ok((
-        history.into_iter().skip(start).collect(),
-        omitted || start > 0,
-    ))
+    let history: Vec<_> = history
+        .into_iter()
+        .skip(start)
+        .filter(|message| !message_from_schedule(storage, message, own_schedule))
+        .collect();
+    Ok((history, omitted || start > 0))
+}
+
+/// Earlier firings of this schedule. Their text is not put back in front of
+/// the model, so it does not taint the next day.
+fn message_from_schedule(
+    storage: &Storage,
+    message: &storage::Message,
+    own_schedule: Option<TaskId>,
+) -> bool {
+    let Some(schedule) = own_schedule else {
+        return false;
+    };
+    let Some(run_id) = message.run_id else {
+        return false;
+    };
+    storage
+        .get_run(run_id)
+        .ok()
+        .flatten()
+        .is_some_and(|run| schedule_id_of(&run.kind) == Some(schedule))
 }
 
 /// Provenance of chat messages that will be in the model context.
@@ -116,10 +139,11 @@ pub(crate) fn chat_provenance(
     storage: &Storage,
     chat: ChatId,
     exclude_run: Option<RunId>,
+    own_schedule: Option<TaskId>,
 ) -> ChatProvenance {
     let mut exposure = permission_engine::ContentExposure::clean();
     let mut sources = Vec::new();
-    let Ok((messages, _)) = messages_in_context(storage, chat, exclude_run) else {
+    let Ok((messages, _)) = messages_in_context(storage, chat, exclude_run, own_schedule) else {
         return ChatProvenance { exposure, sources };
     };
     for m in messages {
@@ -127,7 +151,7 @@ pub(crate) fn chat_provenance(
             exposure.observe(m.exposure_untrusted, m.exposure_private);
         }
         for label in m.exposure_sources {
-            if !label.is_empty() && !sources.iter().any(|s| s == &label) && sources.len() < 8 {
+            if !label.is_empty() && !sources.iter().any(|s| s == &label) {
                 sources.push(label);
             }
         }
@@ -143,7 +167,8 @@ fn append_chat_history(
     let Some(chat) = run.chat_id else {
         return Ok(());
     };
-    let (history, omitted) = messages_in_context(storage, chat, Some(run.id))?;
+    let (history, omitted) =
+        messages_in_context(storage, chat, Some(run.id), schedule_id_of(&run.kind))?;
     if omitted {
         out.push(Message::text(MessageRole::System, HISTORY_OMITTED_NOTE));
     }

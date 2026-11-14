@@ -157,9 +157,11 @@ impl Shared {
         let exposure = ctx.taint.lock().exposure;
         // `web_search` can only reach the configured search provider. Every
         // other egress tool, including fetch, can be aimed at an arbitrary host.
+        // A click, scroll, or drag does not carry bytes; `browser_click` does
+        // only when `prompt_text` is set.
         let must_ask = egress_must_ask(
             exposure,
-            class.egress,
+            taint::call_can_egress(name, class, input),
             name == "web_search",
             ctx.profile.permissions.allow_egress_after_reads,
         );
@@ -223,7 +225,7 @@ impl Shared {
             .tools
             .get(name)
             .map_or_else(ContentClass::unspecified, |t| t.spec().content);
-        if !class.egress {
+        if !taint::call_can_egress(name, class, input) {
             return None;
         }
         let taint = ctx.taint.lock();
@@ -515,6 +517,34 @@ impl Shared {
         )
     }
 
+    /// An egress card is the text the user is asked to approve. Hidden
+    /// characters would be revealed on the card and still present in the
+    /// bytes that run, so the two would not match. Refuse instead of sending
+    /// a different string than the one that was shown.
+    fn refuse_unshowable_egress(
+        &self,
+        ctx: &RunCtx,
+        name: &str,
+        input: &Value,
+        token: Option<&str>,
+    ) -> Result<(), String> {
+        if self.egress_card(ctx, name, input).is_none() || !taint::input_hides_characters(input) {
+            return Ok(());
+        }
+        if let Some(tool) = self.tools.get(name) {
+            let tctx = tool_registry::ToolContext {
+                run_id: ctx.run_id.to_string(),
+                bot_id: Some(ctx.bot_id.to_string()),
+                ..tool_registry::ToolContext::default()
+            };
+            tool.approval_closed(&tctx, input, token);
+        }
+        Err(
+            "the outgoing text contains hidden or control characters, so it cannot be shown exactly as it would be sent; remove them and ask again"
+                .into(),
+        )
+    }
+
     /// Park the run in `WaitingApproval` until `approve` / `deny` is called.
     ///
     /// `Ok(permit)` means the user approved and the post-approve recheck did
@@ -538,6 +568,8 @@ impl Shared {
         if let Some(o) = details.as_mut().and_then(Value::as_object_mut) {
             o.remove("approval_ref");
         }
+        self.refuse_unshowable_egress(ctx, name, input, token.as_deref())
+            .map_err(Some)?;
         if let Some(extra) = self.egress_card(ctx, name, input) {
             taint::merge_egress(&mut details, extra);
         }

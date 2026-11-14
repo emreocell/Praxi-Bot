@@ -84,6 +84,7 @@ dependencies = [
  "toml 0.8.2",
  "tool-registry",
  "tracing",
+ "url",
  "uuid",
  "workflow-replay",
 ]
