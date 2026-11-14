@@ -291,6 +291,7 @@
       "sendTitle": "Send on your behalf?",
       "countdown": "Auto-deny in {{seconds}} s",
       "once": "Allow once",
+      "sendOnce": "Send",
       "thisChat": "This chat",
       "always": "Always",
       "deny": "Deny",
@@ -371,7 +372,150 @@
     "conversationLabel": "Today",
     "composerHint": "Enter to send · / for commands · @ to mention a bot",
     "openBot": "Open {{name}}",
-    "emptyTitle": "What shall we work on?"
+    "emptyTitle": "What shall we work on?",
+    "emptyGreeting": "Hi, I'm {{name}}",
+    "emptySub": "Ask something or start with a ready-made task.",
+    "starters": {
+      "research": "Research",
+      "summarize": "Summarize",
+      "plan": "Plan",
+      "email": "Draft an email",
+      "calendar": "Check my calendar",
+      "code": "Review code",
+      "remind": "Remind me"
+    },
+    "chain": {
+      "thought": "Thought for {{duration}}",
+      "working": "Working step by step",
+      "details": "Details",
+      "problems_one": "{{count}} step failed",
+      "problems_other": "{{count}} steps failed"
+    },
+    "duration": {
+      "seconds_one": "{{count}} second",
+      "seconds_other": "{{count}} seconds",
+      "minutes_one": "{{count}} minute",
+      "minutes_other": "{{count}} minutes"
+    },
+    "menu": {
+      "navigate": "navigate",
+      "select": "select",
+      "close": "close"
+    },
+    "step": {
+      "web_search": {
+        "running": "Searching the web",
+        "done": "Searched the web"
+      },
+      "web_read": {
+        "running": "Reading a page",
+        "done": "Read a page"
+      },
+      "doc_read": {
+        "running": "Reading a document",
+        "done": "Read a document"
+      },
+      "fs_read": {
+        "running": "Reading a file",
+        "done": "Read a file"
+      },
+      "fs_write": {
+        "running": "Writing a file",
+        "done": "Wrote a file"
+      },
+      "fs_move": {
+        "running": "Moving a file",
+        "done": "Moved a file"
+      },
+      "fs_delete": {
+        "running": "Deleting a file",
+        "done": "Deleted a file"
+      },
+      "fs_list": {
+        "running": "Looking through a folder",
+        "done": "Looked through a folder"
+      },
+      "fs_search": {
+        "running": "Searching files",
+        "done": "Searched files"
+      },
+      "shell": {
+        "running": "Running a command",
+        "done": "Ran a command"
+      },
+      "browser_open": {
+        "running": "Opening a page",
+        "done": "Opened a page"
+      },
+      "browser": {
+        "running": "Using the browser",
+        "done": "Used the browser"
+      },
+      "desktop": {
+        "running": "Using the computer",
+        "done": "Used the computer"
+      },
+      "workflow": {
+        "running": "Running a workflow",
+        "done": "Ran a workflow"
+      },
+      "todo": {
+        "running": "Updating the plan",
+        "done": "Updated the plan"
+      },
+      "schedule_create": {
+        "running": "Creating a recurring task",
+        "done": "Created a recurring task"
+      },
+      "schedule_update": {
+        "running": "Changing a recurring task",
+        "done": "Changed a recurring task"
+      },
+      "schedule_delete": {
+        "running": "Deleting a recurring task",
+        "done": "Deleted a recurring task"
+      },
+      "schedule_list": {
+        "running": "Checking recurring tasks",
+        "done": "Checked recurring tasks"
+      },
+      "email_send": {
+        "running": "Sending an email",
+        "done": "Sent an email"
+      },
+      "email_draft": {
+        "running": "Drafting an email",
+        "done": "Drafted an email"
+      },
+      "email_read": {
+        "running": "Reading email",
+        "done": "Read email"
+      },
+      "memory": {
+        "running": "Using memory",
+        "done": "Used memory"
+      },
+      "skill": {
+        "running": "Using a skill",
+        "done": "Used a skill"
+      },
+      "agent": {
+        "running": "Handing off to a helper",
+        "done": "Handed off to a helper"
+      },
+      "ask": {
+        "running": "Asking you",
+        "done": "Asked you"
+      },
+      "mcp": {
+        "running": "Using {{app}} ({{action}})",
+        "done": "Used {{app}} ({{action}})"
+      },
+      "generic": {
+        "running": "Running {{name}}",
+        "done": "Ran {{name}}"
+      }
+    }
   },
   "botForm": {
     "apps": {

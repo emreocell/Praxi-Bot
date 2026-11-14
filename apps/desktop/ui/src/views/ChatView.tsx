@@ -1,9 +1,18 @@
-import { ArrowLeft, ArrowUp, Bookmark, Square, Zap } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowUp,
+  Bookmark,
+  Plus,
+  Square,
+  Terminal,
+  Zap
+} from "lucide-react";
 import {
   type KeyboardEvent,
   type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState
@@ -23,6 +32,7 @@ import {
 } from "../components/ChatCards";
 import { Markdown } from "../components/Markdown";
 import { ModelPicker } from "../components/ModelPicker";
+import { ThinkingChain } from "../components/ThinkingChain";
 import { useToast } from "../components/Toast";
 import {
   botView,
@@ -31,6 +41,7 @@ import {
   parseModelRef
 } from "../lib/botProfile";
 import { modelGroups } from "../lib/modelPicker";
+import { type Chain, groupRunItems } from "../lib/thinkingChain";
 import { type SendWith, shouldSend } from "../lib/settingsPrefs";
 import { rank } from "../lib/fuzzy";
 import {
@@ -60,11 +71,32 @@ import styles from "./ChatView.module.css";
 
 const LIVE_STATES = new Set(["pending", "running", "waiting_approval"]);
 
+/** Empty-chat prompt starters (plain text for the composer, not commands). */
+const STARTERS = [
+  "research",
+  "summarize",
+  "plan",
+  "email",
+  "calendar",
+  "code",
+  "remind"
+] as const;
+
+const SLASH_ICONS: Record<string, typeof Plus> = { new: Plus, stop: Square };
+
+interface MenuBot {
+  id: string;
+  name: string;
+  color?: string;
+  avatar?: string | null;
+}
+
 type Entry =
   | { kind: "day"; key: string; ts: number }
   | { kind: "user"; key: string; ts: number; text: string }
   | { kind: "assistant"; key: string; ts: number; text: string; live: boolean }
   | { kind: "item"; key: string; ts: number; item: TimelineItem; runId: string }
+  | { kind: "chain"; key: string; ts: number; chain: Chain; runId: string }
   | { kind: "runError"; key: string; ts: number; message: string }
   | { kind: "route"; key: string; ts: number; run: RunState }
   | { kind: "remember"; key: string; ts: number; run: RunState };
@@ -73,6 +105,12 @@ type Entry =
 type RememberState = "idle" | "busy" | "saved" | "hidden";
 
 /** A finished, successful turn that did not just run a command (`/new`). */
+/** Icon of a slash command in the menu. */
+function SlashIcon({ name }: { name: string }) {
+  const Icon = SLASH_ICONS[name] ?? Terminal;
+  return <Icon />;
+}
+
 function canOfferRemember(run: RunState): boolean {
   return (
     run.finishedMs !== undefined &&
@@ -265,14 +303,24 @@ export function ChatView({
           run
         });
       }
-      for (const item of run.items) {
-        out.push({
-          kind: "item",
-          key: `${run.id}-${item.key}`,
-          ts: itemTs(item),
-          item,
-          runId: run.id
-        });
+      for (const seg of groupRunItems(run.items, run.finishedMs !== undefined)) {
+        if (seg.kind === "chain") {
+          out.push({
+            kind: "chain",
+            key: `${run.id}-${seg.chain.key}`,
+            ts: seg.chain.startMs,
+            chain: seg.chain,
+            runId: run.id
+          });
+        } else {
+          out.push({
+            kind: "item",
+            key: `${run.id}-${seg.item.key}`,
+            ts: itemTs(seg.item),
+            item: seg.item,
+            runId: run.id
+          });
+        }
       }
       if (run.finishedMs !== undefined && run.error) {
         out.push({
@@ -309,7 +357,9 @@ export function ChatView({
   const lastLen =
     lastItem?.kind === "item" && lastItem.item.kind === "text"
       ? lastItem.item.text.length
-      : 0;
+      : lastItem?.kind === "chain"
+        ? lastItem.chain.steps.length
+        : 0;
   useEffect(() => {
     if (stickToBottom.current) {
       const el = scrollerRef.current;
@@ -344,20 +394,37 @@ export function ChatView({
         id: r.item.name,
         label: `/${r.item.name}`,
         detail: t(r.item.i18nKey),
-        insert: r.item.name
+        insert: r.item.name,
+        bot: undefined as MenuBot | undefined
       }));
     }
     return rank(bots, triggerQuery, (b) => ({
       text: mentionHandle(botView(b).name)
-    })).map((r) => ({
-      id: r.item.id,
-      label: `@${mentionHandle(botView(r.item).name)}`,
-      detail: "",
-      insert: mentionHandle(botView(r.item).name)
-    }));
+    })).map((r) => {
+      const v = botView(r.item);
+      return {
+        id: r.item.id,
+        label: `@${mentionHandle(v.name)}`,
+        detail: v.executor.split("/").pop() ?? "",
+        insert: mentionHandle(v.name),
+        bot: { id: r.item.id, name: v.name, color: v.color, avatar: v.avatar } as
+          | MenuBot
+          | undefined
+      };
+    });
   }, [triggerKind, triggerQuery, triggerKey, menuDismissed, bots, t]);
+  const menuId = useId();
   const menuOpen = menuItems.length > 0;
   const menuActive = Math.min(menuIdx, Math.max(menuItems.length - 1, 0));
+
+  // keep the arrow-key selection visible in a long menu
+  useEffect(() => {
+    if (menuOpen) {
+      document
+        .getElementById(`${menuId}-${menuActive}`)
+        ?.scrollIntoView({ block: "nearest" });
+    }
+  }, [menuOpen, menuActive, menuId]);
 
   const complete = (i: number) => {
     const item = menuItems[i];
@@ -373,6 +440,20 @@ export function ChatView({
       if (el) {
         el.focus();
         el.setSelectionRange(next.caret, next.caret);
+      }
+    });
+  };
+
+  // An empty-chat starter: put its words in the composer, caret at the end.
+  const applyStarter = (words: string) => {
+    const next = `${words} `;
+    setText(next);
+    setCaret(next.length);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(next.length, next.length);
       }
     });
   };
@@ -486,7 +567,7 @@ export function ChatView({
 
   const awaitingApproval = serverLive?.state === "waiting_approval" || chatRuns.some(run => run.finishedMs === undefined && run.items.some(item => item.kind === "tool" && item.status === "awaiting_approval"));
   const lastFailed = [...chatRuns].reverse()[0]?.error;
-  const avatarState = awaitingApproval ? "waiting-approval" : active ? (lastItem?.kind === "item" && lastItem.item.kind === "tool" ? "working" : "thinking") : lastFailed ? "error" : "idle";
+  const avatarState = awaitingApproval ? "waiting-approval" : active ? (lastItem?.kind === "chain" || (lastItem?.kind === "item" && lastItem.item.kind === "tool") ? "working" : "thinking") : lastFailed ? "error" : "idle";
   const botAvatarFor = (decorative: boolean) => <BotAvatar bot={view ?? { id: chat?.bot_id ?? "unknown", name: "Bot" }} size="sm" state={avatarState} decorative={decorative} />;
 
   const rememberRun = async (runId: string) => {
@@ -622,14 +703,6 @@ export function ChatView({
             <span className={styles.subtitle}>{view?.name}</span>
           </span>
         </button>
-        {bot ? (
-          <ModelPicker
-            groups={pickerGroups}
-            value={view?.executor ?? ""}
-            disabled={!client}
-            onPick={(ref) => void pickModel(ref)}
-          />
-        ) : null}
         {active ? (
           <Button size="sm" variant="danger" onClick={() => void stop()}>
             <Square />{t("chat.stop")}
@@ -647,9 +720,36 @@ export function ChatView({
         onScroll={onScroll}
         data-testid="chat-timeline"
       >
-        <div className={styles.timeline}>
+        <div
+          className={[
+            styles.timeline,
+            entries.length === 0 ? styles.timelineEmpty : ""
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
           {entries.length === 0 ? (
-            <div className={styles.emptyConversation}><BotAvatar bot={view ?? { id: "bot", name: "Bot" }} size="hero" /><h1>{t("chat.emptyTitle", { name: view?.name })}</h1><p className={styles.hint}>{t("chat.emptyHint")}</p></div>
+            <div className={styles.emptyConversation}>
+              <BotAvatar
+                bot={view ?? { id: "bot", name: "Bot" }}
+                size="hero"
+                state="idle"
+              />
+              <h1>{t("chat.emptyGreeting", { name: view?.name ?? "" })}</h1>
+              <p className={styles.hint}>{t("chat.emptySub")}</p>
+              <div className={styles.starters}>
+                {STARTERS.map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    className={styles.starter}
+                    onClick={() => applyStarter(t(`chat.starters.${k}`))}
+                  >
+                    {t(`chat.starters.${k}`)}
+                  </button>
+                ))}
+              </div>
+            </div>
           ) : null}
           {entries.map((e) => {
             switch (e.kind) {
@@ -729,6 +829,22 @@ export function ChatView({
                   </div>
                 );
               }
+              case "chain":
+                return (
+                  <div key={e.key} className={styles.chainRow}>
+                    <ThinkingChain
+                      chain={e.chain}
+                      avatar={
+                        <BotAvatar
+                          bot={view ?? { id: chat?.bot_id ?? "unknown", name: "Bot" }}
+                          size="xs"
+                          state={e.chain.live ? "working" : "idle"}
+                          decorative
+                        />
+                      }
+                    />
+                  </div>
+                );
               case "item":
                 return (
                   <div key={e.key} className={styles.itemRow}>
@@ -737,7 +853,7 @@ export function ChatView({
                 );
             }
           })}
-          {active && !streaming ? (
+          {active && !streaming && !(lastItem?.kind === "chain" && lastItem.chain.live) ? (
             <p className={styles.working} role="status">
               <span className={styles.workingDot} aria-hidden="true" />
               {t("chat.working")}
@@ -775,48 +891,80 @@ export function ChatView({
             ))}
           </div>
         ) : null}
-        {menuOpen ? (
-          <ul
-            className={styles.menu}
-            role="listbox"
-            aria-label={
-              triggerKind === "slash"
-                ? t("chat.slash.menu")
-                : t("chat.slash.mentionMenu")
-            }
-            data-testid="composer-menu"
-          >
-            {menuItems.map((m, i) => (
-              <li
-                key={m.id}
-                role="option"
-                aria-selected={i === menuActive}
-                className={[
-                  styles.menuItem,
-                  i === menuActive ? styles.menuItemActive : ""
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  complete(i);
-                }}
-                onMouseMove={() => setMenuIdx(i)}
+        <div className={styles.boxWrap}>
+          {menuOpen ? (
+            <div className={styles.menu} data-testid="composer-menu">
+              <p className={styles.menuHead}>
+                {triggerKind === "slash"
+                  ? t("chat.slash.menu")
+                  : t("chat.slash.mentionMenu")}
+              </p>
+              <ul
+                className={styles.menuList}
+                id={menuId}
+                role="listbox"
+                aria-label={
+                  triggerKind === "slash"
+                    ? t("chat.slash.menu")
+                    : t("chat.slash.mentionMenu")
+                }
               >
-                <span className={styles.menuLabel}>{m.label}</span>
-                {m.detail ? (
-                  <span className={styles.menuDetail}>{m.detail}</span>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        <div className={styles.inputRow}>
+                {menuItems.map((m, i) => (
+                  <li
+                    key={m.id}
+                    id={`${menuId}-${i}`}
+                    role="option"
+                    aria-selected={i === menuActive}
+                    className={[
+                      styles.menuItem,
+                      i === menuActive ? styles.menuItemActive : ""
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      complete(i);
+                    }}
+                    onMouseMove={() => setMenuIdx(i)}
+                  >
+                    <span
+                      className={[styles.menuIcon, m.bot ? styles.menuIconBot : ""].filter(Boolean).join(" ")}
+                      aria-hidden="true"
+                    >
+                      {m.bot ? (
+                        <BotAvatar bot={m.bot} size="sm" decorative />
+                      ) : (
+                        <SlashIcon name={m.id} />
+                      )}
+                    </span>
+                    <span className={styles.menuLabel}>{m.label}</span>
+                    {m.detail ? (
+                      <span className={styles.menuDetail}>{m.detail}</span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              <p className={styles.menuKeys} aria-hidden="true">
+                <kbd>↑</kbd>
+                <kbd>↓</kbd> {t("chat.menu.navigate")}
+                <kbd>↵</kbd> {t("chat.menu.select")}
+                <kbd>esc</kbd> {t("chat.menu.close")}
+              </p>
+            </div>
+          ) : null}
+          <div className={styles.box}>
           <textarea
             ref={inputRef}
             className={styles.input}
             value={text}
             rows={1}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={menuOpen}
+            aria-controls={menuOpen ? menuId : undefined}
+            aria-activedescendant={
+              menuOpen ? `${menuId}-${menuActive}` : undefined
+            }
             placeholder={
               active ? t("chat.placeholderBusy") : t("chat.placeholder")
             }
@@ -828,18 +976,35 @@ export function ChatView({
             }}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onKeyDown={onKeyDown}
+            onBlur={() => setMenuDismissed(triggerKey)}
           />
-          <Button
-            variant="primary"
-            disabled={sending || !text.trim()}
-            title={t("chat.send")}
-            aria-label={t("chat.send")}
-            onClick={() => void send()}
-          >
-            <ArrowUp />
-          </Button>
+          <div className={styles.tools}>
+            {bot ? (
+              <div className={styles.modelSlot}>
+                <ModelPicker
+                  groups={pickerGroups}
+                  value={view?.executor ?? ""}
+                  disabled={!client}
+                  onPick={(ref) => void pickModel(ref)}
+                />
+              </div>
+            ) : null}
+            <span className={styles.spacer} />
+            <Button
+              variant="primary"
+              className={styles.send}
+              disabled={sending || !text.trim()}
+              title={t("chat.send")}
+              aria-label={t("chat.send")}
+              onClick={() => void send()}
+            >
+              <ArrowUp />
+            </Button>
+          </div>
+          </div>
         </div>
-      <p className={styles.composerHint}>{t("chat.composerHint")}</p></footer>
+        <p className={styles.composerHint}>{t("chat.composerHint")}</p>
+      </footer>
     </div>
   );
 }
