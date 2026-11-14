@@ -1,18 +1,8 @@
-.root { width: 100%; display: flex; flex-direction: column; gap: var(--space-3); }
-.grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
-.option { padding: var(--space-0); border: none; background: none; color: var(--color-text-secondary); cursor: pointer; font: inherit; text-align: left; }
-.preview { position: relative; display: flex; height: calc(var(--space-12) * 1.5); overflow: hidden; border: var(--size-border) solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-background); }
-.sidebar { width: 28%; padding: var(--space-3) var(--space-2); background: var(--color-surface); border-right: var(--size-border) solid var(--color-border); }
-.sidebar i { display: block; height: var(--space-1); margin-bottom: var(--space-2); border-radius: var(--radius-sm); background: var(--color-text-muted); opacity: 0.6; }
-.canvas { flex: 1; padding: var(--space-3); }
-.canvas i, .canvas b { display: block; width: 80%; height: var(--space-1); margin-bottom: var(--space-2); border-radius: var(--radius-sm); background: var(--color-text-muted); opacity: 0.55; }
-.canvas i:nth-child(2) { width: 50%; }
-.canvas b { width: 60%; background: var(--color-accent); opacity: 1; }
-.swatch { position: absolute; right: var(--space-2); bottom: var(--space-2); width: var(--space-3); height: var(--space-3); border-radius: var(--radius-pill); background: var(--color-accent); }
-.label { display: flex; justify-content: space-between; align-items: center; margin-top: var(--space-2); font-size: var(--font-size-xs); }
-.label svg { width: var(--size-icon-sm); height: var(--size-icon-sm); color: var(--color-accent-text); }
-.option[aria-pressed="true"] .preview { outline: var(--size-border-thick) solid var(--color-focus); outline-offset: var(--space-1); }
-.option:hover .preview { box-shadow: var(--shadow-card); }
-.option[aria-pressed="true"] .label { color: var(--color-text); }
+/* Mini theme preview (inline colours come from the derived theme). */
+.pal { display: flex; flex-direction: column; justify-content: flex-start; gap: var(--space-1); padding: var(--space-2); }
+.pal > i { display: block; height: var(--space-1); border-radius: var(--radius-pill); flex: none; }
+.pal > i.card { flex: 1; height: auto; display: flex; align-items: flex-end; justify-content: flex-end; padding: var(--space-1); border-radius: var(--radius-sm); }
+.card b { display: block; width: var(--space-4); height: var(--space-1); border-radius: var(--radius-pill); }
 .system { display: flex; align-items: center; gap: var(--space-2); align-self: flex-start; min-height: var(--size-control-sm); border: none; border-radius: var(--radius-sm); padding: var(--space-1) var(--space-2); background: none; color: var(--color-text-muted); font: inherit; font-size: var(--font-size-xs); cursor: pointer; }
 .system:hover, .system[aria-pressed="true"] { background: var(--color-surface-elevated); color: var(--color-text); }
+.system svg { width: var(--size-icon-sm); height: var(--size-icon-sm); }

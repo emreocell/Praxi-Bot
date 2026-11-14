@@ -99,3 +99,10 @@
 .avatar { width: var(--space-8); height: var(--space-8); font-weight: var(--font-weight-medium); }
 .menu { width: calc(var(--size-sidebar-width) - var(--space-8)); right: auto; bottom: calc(100% + var(--space-3)); padding: var(--space-2); border-color: var(--color-border); }
 .item { min-height: var(--space-10); }
+
+/* Appearance axes: popovers get a sheen (solid) or frosted glass. */
+.menu { background-image: var(--surface-sheen); }
+:global(:root[data-style="glass"]) .menu {
+  background-color: color-mix(in srgb, var(--color-surface-elevated-opaque) 72%, transparent);
+  backdrop-filter: blur(var(--blur-glass)) saturate(1.5);
+}

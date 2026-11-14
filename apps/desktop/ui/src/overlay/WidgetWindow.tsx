@@ -3,18 +3,17 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  applyTheme,
   BotAvatar,
   Button,
-  Card,
-  resolveTheme,
-  subscribeSystemTheme
+  Card
 } from "ui";
 import { i18n } from "../i18n";
+import { useApplyAppearance } from "../state/useApplyAppearance";
 import {
   type AppSettings,
   DEFAULT_SETTINGS,
-  loadSettings
+  loadSettings,
+  loadSettingsSync
 } from "../store/settingsStore";
 import {
   type ControlSnapshot,
@@ -33,7 +32,7 @@ import styles from "./WidgetWindow.module.css";
 
 export function WidgetWindow() {
   const { t } = useTranslation();
-  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<AppSettings>(() => loadSettingsSync() ?? DEFAULT_SETTINGS);
   const [controlState, setControlState] = useState<ControlSnapshot>(
     INITIAL_CONTROL_SNAPSHOT
   );
@@ -58,21 +57,7 @@ export function WidgetWindow() {
     };
   }, []);
 
-  useEffect(() => {
-    const activeTheme = resolveTheme(settings.themeMode);
-    applyTheme(activeTheme, {
-      accentColor: settings.accentColor
-    });
-
-    if (settings.themeMode === "system") {
-      return subscribeSystemTheme((sysTheme) => {
-        applyTheme(sysTheme, {
-          accentColor: settings.accentColor
-        });
-      });
-    }
-    return undefined;
-  }, [settings.themeMode, settings.accentColor]);
+  useApplyAppearance(settings, undefined, true);
 
   useEffect(() => {
     return subscribeOverlayEvents({

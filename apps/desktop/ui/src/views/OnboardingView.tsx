@@ -2,7 +2,7 @@ import { ThemePicker } from "../components/ThemePicker";
 import type { ChangeEvent, CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { BotAvatar, Button, Card, type ThemeMode } from "ui";
+import { BotAvatar, Button, Card } from "ui";
 import type { Message, PermissionPreset } from "../api/types";
 import { ApprovalCard, ToolCard } from "../components/ChatCards";
 import formStyles from "../components/Form.module.css";
@@ -52,7 +52,6 @@ export interface OnboardingViewProps {
   settings: AppSettings;
   onUpdateSettings: (patch: Partial<AppSettings>) => void;
   onLanguageChange: (lang: SupportedLanguage) => void;
-  onThemeChange: (mode: ThemeMode) => void;
   onSkip: (currentStep: number) => void;
   onComplete: (result: { botId?: string; chatId?: string }) => void;
 }
@@ -97,7 +96,6 @@ export function OnboardingView({
   settings,
   onUpdateSettings,
   onLanguageChange,
-  onThemeChange,
   onSkip,
   onComplete
 }: OnboardingViewProps) {
@@ -735,7 +733,12 @@ export function OnboardingView({
               <p className={formStyles.hint}>
                 {t("onboarding.step1.themeHint")}
               </p>
-              <ThemePicker value={settings.themeMode} onChange={onThemeChange} />
+              <ThemePicker
+                mode={settings.themeMode}
+                custom={settings.customTheme}
+                accent={settings.accentColor}
+                onChange={onUpdateSettings}
+              />
             </section>
 
             <div className={styles.privacyBox}>

@@ -9,11 +9,14 @@ import styles from "./Sidebar.module.css";
 
 export interface SidebarLayoutProps extends HTMLAttributes<HTMLDivElement> {
   sidebar: ReactNode;
+  /** Optional full-window backdrop (canvas) drawn between the image layer and the panels. */
+  backdrop?: ReactNode;
   children: ReactNode;
 }
 
 export function SidebarLayout({
   sidebar,
+  backdrop,
   children,
   className,
   ...props
@@ -22,6 +25,7 @@ export function SidebarLayout({
   return (
     <div className={classes} {...props}>
       <div className={styles.backgroundImageLayer} aria-hidden="true" />
+      {backdrop}
       <div className={styles.backgroundDimLayer} aria-hidden="true" />
       <div className={styles.foregroundContainer}>
         {sidebar}

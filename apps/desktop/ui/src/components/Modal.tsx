@@ -1,9 +1,13 @@
 import { type ReactNode, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { createModalStack } from "../lib/modalStack";
 import styles from "./Modal.module.css";
 
 const FOCUSABLE =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** Only the topmost open dialog reacts to Esc / Tab (nested dialogs). */
+const modalStack = createModalStack();
 
 /**
  * A centered dialog over a dimmed backdrop: Esc and a backdrop click close it,
@@ -24,6 +28,10 @@ export function Modal({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  // Taken at open time (render), so it follows opening order even within one commit.
+  const seqRef = useRef(0);
+  if (open && seqRef.current === 0) seqRef.current = modalStack.next();
+  if (!open) seqRef.current = 0;
   const closeRef = useRef(onClose);
   useEffect(() => { closeRef.current = onClose; }, [onClose]);
 
@@ -33,10 +41,13 @@ export function Modal({
     }
     const previous = document.activeElement as HTMLElement | null;
     const node = ref.current;
+    const seq = seqRef.current;
+    modalStack.add(seq);
     const appRoot = document.getElementById("root");
     if (appRoot) appRoot.inert = true;
     (node?.querySelector<HTMLElement>("[data-autofocus]") ?? node)?.focus();
     const onKey = (e: KeyboardEvent) => {
+      if (!modalStack.isTop(seq)) return;
       if (e.key === "Escape") {
         e.stopPropagation();
         closeRef.current();
@@ -63,6 +74,7 @@ export function Modal({
     document.addEventListener("keydown", onKey, true);
     return () => {
       document.removeEventListener("keydown", onKey, true);
+      modalStack.remove(seq);
       if (appRoot && ![...document.querySelectorAll('[aria-modal="true"]')].some(dialog => dialog !== node)) appRoot.inert = false;
       previous?.focus?.();
     };
