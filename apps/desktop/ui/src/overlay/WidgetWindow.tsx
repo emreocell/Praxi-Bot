@@ -126,6 +126,7 @@ export function WidgetWindow() {
   const bot = controlState.bot ?? {
     botId: "atlas",
     botName: "Atlas",
+    botShape: undefined,
     botColor: undefined,
     botInitials: "AT",
     botAvatar: undefined
