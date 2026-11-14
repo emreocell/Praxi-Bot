@@ -111,13 +111,21 @@ if [[ "${SKIP_PACKAGES}" -eq 0 ]]; then
     fonts-noto-core
   )
 
-  # Debian ships `chromium` on amd64/arm64; Ubuntu may expose `chromium-browser` or `chromium`.
-  if apt-cache show chromium >/dev/null 2>&1; then
+  apt_candidate() {
+    local candidate
+    candidate="$(apt-cache policy "$1" | awk '/Candidate:/ {print $2}')"
+    [[ -n "${candidate}" && "${candidate}" != "(none)" && "${candidate}" != *snap* ]]
+  }
+
+  # Only Debian's native package is accepted; Ubuntu's chromium/chromium-browser
+  # resolve to snap wrappers, which are unsupported under systemd hardening.
+  distro_id="$(. /etc/os-release 2>/dev/null; printf '%s' "${ID:-}")"
+  if [[ "${distro_id}" == "debian" ]] && apt_candidate chromium; then
     PACKAGES+=(chromium)
-  elif apt-cache show chromium-browser >/dev/null 2>&1; then
-    PACKAGES+=(chromium-browser)
+  elif [[ -x /opt/praxi-browser/chrome ]]; then
+    echo "[praxi-headless] using existing non-snap browser at /opt/praxi-browser/chrome"
   else
-    echo "[praxi-headless] warning: neither 'chromium' nor 'chromium-browser' found in apt cache" >&2
+    echo "[praxi-headless] warning: no non-snap apt chromium package found; install Chrome for Testing via scripts/install-linux.sh --with-desktop (see docs/guide/remote-host.md)" >&2
   fi
 
   if [[ "${ENABLE_VNC}" -eq 1 ]]; then
