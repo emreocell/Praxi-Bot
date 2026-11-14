@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatFiring, scheduleDetails } from "./approvalDetails.ts";
+import { egressDetails, formatFiring, scheduleDetails } from "./approvalDetails.ts";
 
 const card = {
   kind: "schedule",
@@ -72,4 +72,35 @@ test("a firing keeps the wall-clock time of its own offset", () => {
   assert.match(formatFiring("2026-11-13T10:30:00+03:00", "en"), /10:30$/);
   assert.match(formatFiring("2026-11-13T09:00:00-05:00", "en"), /09:00$/);
   assert.equal(formatFiring("garbage"), "garbage");
+});
+
+test("an egress card keeps the full payload, including beside a schedule", () => {
+  const payload = "q".repeat(3000);
+  const d = egressDetails({
+    kind: "egress",
+    reason: "this run read file notes.txt and now wants to send data to configured-search-provider",
+    read: ["file notes.txt"],
+    host: "configured-search-provider",
+    payload,
+    payload_kind: "query"
+  });
+  assert.ok(d);
+  assert.equal(d.payload, payload);
+  assert.equal(d.payloadKind, "query");
+  assert.deepEqual(d.read, ["file notes.txt"]);
+  const nested = egressDetails({
+    kind: "schedule",
+    action: "create",
+    egress: {
+      kind: "egress",
+      reason: "r",
+      read: [],
+      host: "example.com",
+      payload: "https://example.com/x",
+      payload_kind: "url"
+    }
+  });
+  assert.equal(nested?.host, "example.com");
+  assert.equal(nested?.payloadKind, "url");
+  assert.equal(egressDetails({ kind: "other" }), null);
 });

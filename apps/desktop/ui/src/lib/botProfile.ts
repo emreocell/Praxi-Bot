@@ -26,6 +26,8 @@ export interface BotDraft {
   fallback: string;
   preset: PresetChoice;
   categories: Record<PermissionCategoryName, PermissionLevel>;
+  /** Per-bot waiver of the egress gate. Default off. */
+  allowEgressAfterReads: boolean;
   computer: "local";
   browser: "local";
 }
@@ -115,6 +117,7 @@ export function draftFromBot(bot?: Bot): BotDraft {
     fallback: fallback.join(", "),
     preset,
     categories,
+    allowEgressAfterReads: perms.allow_egress_after_reads === true,
     computer: "local",
     browser: "local"
   };
@@ -186,6 +189,7 @@ export function configFromDraft(draft: BotDraft, existing?: Bot): Json {
   } else {
     permissions.preset = draft.preset;
   }
+  permissions.allow_egress_after_reads = draft.allowEgressAfterReads;
 
   return {
     ...old,

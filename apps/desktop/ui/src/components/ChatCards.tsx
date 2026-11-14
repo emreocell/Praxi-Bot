@@ -15,8 +15,10 @@ import {
   type ToolItem
 } from "../state/timeline";
 import {
+  egressDetails,
   formatFiring,
   scheduleDetails,
+  type EgressApprovalDetails,
   type ScheduleApprovalDetails
 } from "../lib/approvalDetails";
 import formStyles from "./Form.module.css";
@@ -226,6 +228,25 @@ function ScheduleApprovalBody({ d }: { d: ScheduleApprovalDetails }) {
   );
 }
 
+function EgressApprovalBody({ d }: { d: EgressApprovalDetails }) {
+  const { t } = useTranslation();
+  const kind = d.payloadKind === "query" || d.payloadKind === "url" ? d.payloadKind : "body";
+  return (
+    <div data-testid="approval-egress">
+      <p className={styles.bodyLabel}>{t("chat.approval.egress.host", { host: d.host })}</p>
+      {d.read.length > 0 ? (
+        <p className={styles.bodyLabel}>
+          {t("chat.approval.egress.read", { list: d.read.join(", ") })}
+        </p>
+      ) : null}
+      <span className={styles.bodyLabel}>{t(`chat.approval.egress.payload.${kind}`)}</span>
+      <pre className={styles.code} tabIndex={0}>
+        {d.payload}
+      </pre>
+    </div>
+  );
+}
+
 export function ApprovalCard({
   tool,
   onDecide,
@@ -238,6 +259,7 @@ export function ApprovalCard({
   const outbound = isOutboundSend(tool.name);
   const remaining = useCountdown(expiresAtMs);
   const schedule = scheduleDetails(tool.details);
+  const egress = egressDetails(tool.details);
 
   const decide = async (
     decision: "approve" | "deny",
@@ -286,7 +308,9 @@ export function ApprovalCard({
         </>
       ) : (
         <>
-          <p className={styles.approvalSummary}>{tool.summary ?? tool.name}</p>
+          <p className={styles.approvalSummary}>
+            {egress?.reason || tool.summary || tool.name}
+          </p>
           <div className={styles.approvalMeta}>
             <span className={styles.approvalTool}>{tool.name}</span>
             <span className={styles.inputSummary}>
@@ -295,6 +319,7 @@ export function ApprovalCard({
           </div>
         </>
       )}
+      {egress ? <EgressApprovalBody d={egress} /> : null}
       <div className={styles.actions}>
         <Button
           size="sm"

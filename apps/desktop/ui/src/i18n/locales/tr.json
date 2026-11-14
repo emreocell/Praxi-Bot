@@ -316,6 +316,15 @@
           "read_only": "salt okunur"
         },
         "note": "Bu onay yalnızca bu değişikliği kapsar; her seferinde sorulur."
+      },
+      "egress": {
+        "host": "Hedef: {{host}}",
+        "read": "Bu çalışma şunu okudu: {{list}}",
+        "payload": {
+          "query": "Giden sorgu (tamamını okumak için kaydırın):",
+          "url": "Giden adres (tamamını okumak için kaydırın):",
+          "body": "Giden veri (tamamını okumak için kaydırın):"
+        }
       }
     },
     "question": {
@@ -413,6 +422,10 @@
     "executorRequired": "Yürütücü model gerekli.",
     "fallbackPlaceholder": "sağlayıcı/model, sağlayıcı/model",
     "permissions": "İzinler",
+    "allowEgressAfterReads": {
+      "title": "Bu bot bir şey okuduktan sonra veri göndermesine izin ver",
+      "hint": "Varsayılan kapalıdır. Bir araç izni bunu açmaz. Kapalıyken, dosya, posta kutusu, sayfa veya başka özel ya da güvenilmeyen içerik okumuş bir çalışma, bu makineden veri göndermeden önce sormak zorundadır."
+    },
     "preset": {
       "read-only": {
         "name": "Salt okunur",

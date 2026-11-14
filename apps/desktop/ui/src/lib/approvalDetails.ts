@@ -85,6 +85,33 @@ export function scheduleDetails(details: unknown): ScheduleApprovalDetails | nul
   };
 }
 
+export interface EgressApprovalDetails {
+  reason: string;
+  read: string[];
+  host: string;
+  payload: string;
+  payloadKind: string;
+}
+
+/** Parse an egress card, including one nested beside a schedule card. */
+export function egressDetails(details: unknown): EgressApprovalDetails | null {
+  if (!isObject(details)) return null;
+  const raw =
+    details.kind === "egress"
+      ? details
+      : isObject(details.egress) && details.egress.kind === "egress"
+        ? details.egress
+        : null;
+  if (!raw) return null;
+  return {
+    reason: typeof raw.reason === "string" ? raw.reason : "",
+    read: strings(raw.read),
+    host: typeof raw.host === "string" ? raw.host : "",
+    payload: typeof raw.payload === "string" ? raw.payload : "",
+    payloadKind: typeof raw.payload_kind === "string" ? raw.payload_kind : "body"
+  };
+}
+
 /** `2026-11-13T10:30:00+03:00` as `Fri 13 Nov, 10:30` in the offset it carries. */
 export function formatFiring(rfc3339: string, locale?: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(rfc3339);
