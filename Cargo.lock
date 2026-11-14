@@ -6531,6 +6531,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "iroh",
+ "live-view",
  "peer-network",
  "reqwest 0.12.28",
  "serde_json",
@@ -6541,6 +6542,7 @@ dependencies = [
  "tool-registry",
  "tower",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -9502,8 +9504,10 @@ name = "web-tools"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "ego-tree",
  "futures-util",
+ "parking_lot",
  "reqwest 0.12.28",
  "roxmltree",
  "scraper",

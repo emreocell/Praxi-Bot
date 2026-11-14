@@ -651,11 +651,11 @@
       },
       "full": {
         "name": "Tam",
-        "hint": "Her şeye sormadan izin verilir."
+        "hint": "Sormadan çalışır (sıradan dosya silme ve gönderimler dahil); yalnızca Para, zamanlanmış görev etkinleştirme ve yasaklı listedeki yıkıcı komutlarda sorar."
       },
       "read-and-draft": {
         "name": "Oku ve taslak hazırla",
-        "hint": "Bot okur ve taslak hazırlar, ama asla göndermez veya değiştirmez."
+        "hint": "Okumalar serbest; taslaklar, dosya değişiklikleri, sayfa açma, tıklama, komutlar ve gönderimler önce sorar (Yıkıcı işlemlerde onay ile aynı etkili politika)."
       },
       "custom": {
         "name": "Özel",
@@ -812,9 +812,9 @@
       "whatItMeansTitle": "Bot bu bilgisayarda neler yapabilir?",
       "explain": {
         "read-only": "Bot ekranını inceleyebilir, dosyaları okuyabilir ve web sayfalarına bakabilir; ancak asla tıklayamaz, yazamaz, dosya düzenleyemez veya komut çalıştıramaz.",
-        "read-and-draft": "Bot okuyabilir ve taslak hazırlayabilir; ancak dosya değiştirmeden, tıklamadan veya komut çalıştırmadan önce yine sana sorar.",
+        "read-and-draft": "Bot dosyaları okuyabilir, web’de arama yapabilir ve ekranını serbestçe inceleyebilir; taslak hazırlamadan, dosya değiştirip silmeden, sayfa açmadan, tıklamadan, yazmadan, komut çalıştırmadan veya ileti göndermeden önce sana sorar (Yıkıcı işlemlerde onay ile aynı etkili politika).",
         "approve-destructive": "Bot dosyaları okuyabilir ve ekranını serbestçe inceleyebilir; tıklamadan, yazmadan, dosya düzenlemeden, kabuk komutu çalıştırmadan veya ileti göndermeden önce sana canlı bir onay kartı gösterir.",
-        "full": "Bot önceden sormadan okuyabilir, tıklayabilir, yazabilir, dosya düzenleyebilir ve komut çalıştırabilir (aşağıdaki sert güvenlik sınırları hariç)."
+        "full": "Bot önceden sormadan okuyabilir, tıklayabilir, yazabilir, sıradan dosyaları düzenleyip silebilir, kabuk komutu çalıştırabilir ve ileti gönderebilir (aşağıdaki sert güvenlik sınırları hariç)."
       },
       "floorsTitle": "Her zaman açık güvenlik korumaları",
       "floorMoney": "Finansal ve ödeme işlemleri her zaman açık onayını gerektirir.",
@@ -1305,6 +1305,54 @@
           "bot": "Botu seç ya da herhangi bir bot seç."
         }
       }
+    },
+    "webSearch": {
+      "title": "Web araması",
+      "description": "Arama sağlayıcı öncelik sırası, API anahtarları ve canlı bağlantı testi.",
+      "note": "Web araması, sonuç dönen ilk etkin sağlayıcıya kadar öncelik sırasıyla dener. Değişiklikler yeniden başlatma olmadan bir sonraki turda uygulanır.",
+      "loadError": "Web araması ayarları yüklenemedi: {{message}}",
+      "configError": "web.toml yüklenemedi ({{message}}). Varsayılanlar gösteriliyor — aşağıda değişiklikleri kaydetmek dosyayı yenileyecektir.",
+      "orderTitle": "Sağlayıcı sırası ve yedekler",
+      "orderHint": "Tercih ettiğiniz sağlayıcıları yukarı taşıyın. Anahtarsız yedekler hesap gerektirmez ancak zaman zaman hız sınırına takılabilir.",
+      "credentialsTitle": "Kendi sunucunuz ve API sağlayıcıları",
+      "searxngLabel": "SearXNG URL",
+      "searxngHint": "Kendi SearXNG örneğinizin temel URL'si (devre dışı bırakmak için temizleyip kaydedin).",
+      "braveKeyLabel": "Brave Search API anahtarı",
+      "tavilyKeyLabel": "Tavily Search API anahtarı",
+      "tavilyHint": "Tavily Search için isteğe bağlı API anahtarı (anahtar kasasında yalnızca yazılabilir olarak saklanır).",
+      "keyStoredPlaceholder": "Anahtar kayıtlı (değiştirmek için yeni anahtar girin)",
+      "keyEmptyPlaceholder": "API anahtarı girin…",
+      "keyWriteOnlyHint": "Yalnızca yazılabilir: işletim sistemi anahtar kasasında saklanır, geri okunmaz.",
+      "clearKey": "Anahtarı sil",
+      "save": "Değişiklikleri kaydet",
+      "testTitle": "Bağlantı testi",
+      "testQueryLabel": "Test arama sorgusu",
+      "test": "Test et",
+      "testing": "Test ediliyor…",
+      "testOk": "{{backend}} yanıt verdi ({{ms}} ms içinde {{count}} sonuç)",
+      "testFailed": "Arama testi başarısız ({{ms}} ms): {{error}}",
+      "fallbackNotes": "Başarılı olmadan önceki yedek hataları: {{details}}",
+      "moveUp": "{{name}} sağlayıcısını yukarı taşı",
+      "moveDown": "{{name}} sağlayıcısını aşağı taşı",
+      "toggleBackend": "{{name}} sağlayıcısını aç/kapat",
+      "status": {
+        "active": "Etkin",
+        "needsKey": "API anahtarı gerekli",
+        "needsUrl": "URL gerekli",
+        "disabled": "Devre dışı"
+      },
+      "backends": {
+        "searxng": "SearXNG",
+        "brave": "Brave Search API",
+        "tavily": "Tavily Search API",
+        "duckduckgo": "DuckDuckGo (HTML)",
+        "duckduckgo_lite": "DuckDuckGo Lite",
+        "bing": "Bing (HTML)"
+      },
+      "toast": {
+        "saved": "Web araması ayarları kaydedildi",
+        "keyCleared": "API anahtarı gizli depodan kaldırıldı"
+      }
     }
   },
   "palette": {
@@ -1466,6 +1514,54 @@
         "other": "Diğer"
       }
     }
+  },
+  "newBot": {
+    "title": "Yeni bot",
+    "templatesLabel": "Şablonlar",
+    "templates": {
+      "blank": "Boş",
+      "researcher": "Araştırmacı",
+      "coder": "Kodcu",
+      "assistant": "Asistan",
+      "social": "Sosyal"
+    },
+    "namePlaceholder": "Bot adı",
+    "shapeGroup": "Karakter şekli",
+    "shapes": {
+      "pebble": "Çakıl",
+      "cube": "Küp",
+      "diamond": "Elmas",
+      "cloud": "Bulut",
+      "tri": "Üçgen",
+      "flower": "Çiçek",
+      "gem": "Altıgen",
+      "drop": "Damla",
+      "star": "Yıldız",
+      "ghost": "Hayalet",
+      "capsule": "Kapsül",
+      "ears": "Kulaklı",
+      "gumdrop": "Jöle",
+      "heart": "Kalp",
+      "clover": "Yonca",
+      "boulder": "Kaya"
+    },
+    "brain": "Beyin",
+    "brainHint": "Sonradan sohbetten değiştirebilirsin",
+    "brainAuto": "Otomatik",
+    "autonomy": "Özerklik",
+    "autonomyLevels": {
+      "ask": "Sorar",
+      "balanced": "Dengeli",
+      "auto": "Serbest"
+    },
+    "autonomyHints": {
+      "ask": "Dosya okuma, ekran görüntüsü ve web aramasını sormadan yapar; taslak hazırlama, gönderme, dosya değiştirme veya silme, sayfa açma, tıklama ve komut çalıştırma dahil diğer tüm işlemlerde sorar (Dengeli ile aynı etkili politika).",
+      "balanced": "Dosya okuma, ekran görüntüsü ve web aramasını serbestçe yapar; her dosya yazma veya silme, taslak, gönderim, sayfa açma, tıklama ve komutta önce sorar (Sorar ile aynı etkili politika).",
+      "auto": "Sormadan çalışır—sıradan dosya silme, kabuk komutu çalıştırma ve ileti gönderme dahil—yalnızca Para işlemleri, zamanlanmış görev etkinleştirme ve yasaklı liste komutlarında (disk biçimlendirme, sistem/ev dizini silme, kimlik bilgisi yolları) onay ister."
+    },
+    "autonomyCustom": "{{preset}} izin profili kullanılıyor.",
+    "advanced": "Gelişmiş ayarlar",
+    "create": "Oluştur"
   },
   "quota": {
     "title": "Kalan kota",
