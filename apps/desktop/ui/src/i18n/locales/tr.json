@@ -1053,6 +1053,53 @@
           "bot": "Botu seç ya da herhangi bir bot seç."
         }
       }
+    },
+    "webSearch": {
+      "title": "Web araması",
+      "description": "Arama sağlayıcı öncelik sırası, API anahtarları ve canlı bağlantı testi.",
+      "note": "Web araması, sonuç dönen ilk etkin sağlayıcıya kadar öncelik sırasıyla dener. Değişiklikler yeniden başlatma olmadan bir sonraki turda uygulanır.",
+      "loadError": "Web araması ayarları yüklenemedi: {{message}}",
+      "orderTitle": "Sağlayıcı sırası ve yedekler",
+      "orderHint": "Tercih ettiğiniz sağlayıcıları yukarı taşıyın. Anahtarsız yedekler hesap gerektirmez ancak zaman zaman hız sınırına takılabilir.",
+      "credentialsTitle": "Kendi sunucunuz ve API sağlayıcıları",
+      "searxngLabel": "SearXNG URL",
+      "searxngHint": "Kendi SearXNG örneğinizin temel URL'si (devre dışı bırakmak için temizleyip kaydedin).",
+      "braveKeyLabel": "Brave Search API anahtarı",
+      "tavilyKeyLabel": "Tavily Search API anahtarı",
+      "tavilyHint": "Tavily Search için isteğe bağlı API anahtarı (anahtar kasasında yalnızca yazılabilir olarak saklanır).",
+      "keyStoredPlaceholder": "Anahtar kayıtlı (değiştirmek için yeni anahtar girin)",
+      "keyEmptyPlaceholder": "API anahtarı girin…",
+      "keyWriteOnlyHint": "Yalnızca yazılabilir: işletim sistemi anahtar kasasında saklanır, geri okunmaz.",
+      "clearKey": "Anahtarı sil",
+      "save": "Değişiklikleri kaydet",
+      "testTitle": "Bağlantı testi",
+      "testQueryLabel": "Test arama sorgusu",
+      "test": "Test et",
+      "testing": "Test ediliyor…",
+      "testOk": "{{backend}} yanıt verdi ({{ms}} ms içinde {{count}} sonuç)",
+      "testFailed": "Arama testi başarısız ({{ms}} ms): {{error}}",
+      "fallbackNotes": "Başarılı olmadan önceki yedek hataları: {{details}}",
+      "moveUp": "{{name}} sağlayıcısını yukarı taşı",
+      "moveDown": "{{name}} sağlayıcısını aşağı taşı",
+      "toggleBackend": "{{name}} sağlayıcısını aç/kapat",
+      "status": {
+        "active": "Etkin",
+        "needsKey": "API anahtarı gerekli",
+        "needsUrl": "URL gerekli",
+        "disabled": "Devre dışı"
+      },
+      "backends": {
+        "searxng": "SearXNG",
+        "brave": "Brave Search API",
+        "tavily": "Tavily Search API",
+        "duckduckgo": "DuckDuckGo (HTML)",
+        "duckduckgo_lite": "DuckDuckGo Lite",
+        "bing": "Bing (HTML)"
+      },
+      "toast": {
+        "saved": "Web araması ayarları kaydedildi",
+        "keyCleared": "API anahtarı gizli depodan kaldırıldı"
+      }
     }
   },
   "palette": {

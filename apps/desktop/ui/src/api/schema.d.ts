@@ -175,6 +175,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/control/override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * `POST /v1/control/override`: the local user's stop. Works against a peer's
+         *     takeover; the bot stays paused until `release` or `recover`.
+         */
+        post: operations["local_override"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/control/recover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * `POST /v1/control/recover`: the local user clears a takeover latch (also one
+         *     restored after a restart) without a registered target or view session. The
+         *     bot resumes with a fresh observation.
+         */
+        post: operations["local_recover"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/control/release": {
         parameters: {
             query?: never;
@@ -215,6 +256,22 @@ export interface paths {
          */
         put: operations["put_control_state"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/control/takeover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["takeover"];
         delete?: never;
         options?: never;
         head?: never;
@@ -378,6 +435,11 @@ export interface paths {
          *     `{"type":"mcp_server_changed","name","status"}`) when an MCP server is
          *     added, updated, removed or changes status (connecting / connected / error /
          *     quarantined ...); same rules: a hint to refetch `/v1/mcp/servers`.
+         *
+         *     And `control_state_changed` events (`dto::ControlStateChanged`:
+         *     `{"type":"control_state_changed","state","owner","target_id","reason"}`) when
+         *     a screen takeover is acquired, becomes active, is interrupted, released or
+         *     recovered (no ids, epochs, pixels or text); not replayed.
          */
         get: operations["events_doc"];
         put?: never;
@@ -868,6 +930,168 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/view/privileges/{peer_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * `PUT /v1/view/privileges/{peer_key}`: the local user grants or revokes
+         *     `screen:view` / `screen:input` for one paired device. A paired device has
+         *     neither until granted; revoking interrupts its sessions and takeover.
+         */
+        put: operations["set_privileges"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/view/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["create_session"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/view/sessions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["delete_session"];
+        options?: never;
+        head?: never;
+        patch: operations["update_session"];
+        trace?: never;
+    };
+    "/v1/view/sessions/{id}/frames": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["frames"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/view/sessions/{id}/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["heartbeat"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/view/sessions/{id}/input": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["input"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/view/targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["targets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/web/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Current web search configuration (API keys are write-only: `brave_key_set`
+         *     and `tavily_key_set` indicate whether a key is stored, never its value).
+         */
+        get: operations["get_web_search"];
+        /**
+         * Update web search configuration (`web.toml` and write-only API keys in the
+         *     secret store) and apply immediately for the next tool call.
+         */
+        put: operations["update_web_search"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/web/search/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a sample live search against the current web search configuration and
+         *     report which backend answered and how long it took. At most two probes run
+         *     at once (`429`).
+         */
+        post: operations["test_web_search"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/webhooks/{id}": {
         parameters: {
             query?: never;
@@ -994,6 +1218,14 @@ export interface components {
              */
             bot_id: string;
         };
+        /** @enum {string} */
+        Button: "left" | "middle" | "right";
+        Capabilities: {
+            codecs: components["schemas"]["Codec"][];
+            input: boolean;
+            reason?: null | components["schemas"]["Reason"];
+            view: boolean;
+        };
         /** @description A catalog entry. */
         CatalogProviderDto: {
             /** @description `api_key_env` or `none`. */
@@ -1020,6 +1252,8 @@ export interface components {
             /** @description `true` when `allow` holds only because of a category grant. */
             via_grant: boolean;
         };
+        /** @enum {string} */
+        Cause: "idle" | "action" | "refresh";
         /** @description A messaging channel (e.g. Telegram) as seen by the daemon. */
         ChannelDto: {
             /** @description Credentials are stored. */
@@ -1064,6 +1298,8 @@ export interface components {
          * @enum {string}
          */
         CliAuthState: "signed_in" | "signed_out" | "unknown";
+        /** @enum {string} */
+        Codec: "jpeg" | "webp";
         /** @description A configured provider (never carries a key). */
         ConfiguredProviderDto: {
             /** @description Loaded in the running loop (a restart or `reload` picks up changes). */
@@ -1107,6 +1343,27 @@ export interface components {
          * @enum {string}
          */
         ControlMode: "idle" | "bot_driving" | "human_driving" | "paused";
+        /**
+         * @description Data of the `control_state_changed` SSE event of the daemon-wide stream: a
+         *     screen takeover was acquired, became active, was interrupted, released or
+         *     recovered. A notification only (refetch `GET /v1/control/state`): no SSE
+         *     `id`, not replayed, not an envelope. It names who and which target, never
+         *     takeover ids, epochs, pixels, text or keys.
+         */
+        ControlStateChanged: {
+            /** @description Displayable actor identity (`local-ui:...` or `peer:<key>`). */
+            owner: string;
+            reason?: null | components["schemas"]["Reason"];
+            /** @description `acquiring`, `active`, `paused`, `released` or `recovered`. */
+            state: string;
+            /**
+             * Format: uuid
+             * @description The target the takeover addressed.
+             */
+            target_id: string;
+            /** @description Always `control_state_changed`. */
+            type: string;
+        };
         /** @description The daemon's view of the controller registration. */
         ControlStateDto: {
             /** @description A desktop app is listening on the global event stream. */
@@ -1118,6 +1375,8 @@ export interface components {
             expires_in_ms: number;
             latched?: null | components["schemas"]["ControlMode"];
             mode?: null | components["schemas"]["ControlMode"];
+            release?: null | components["schemas"]["ReleaseResult"];
+            takeover?: null | components["schemas"]["TakeoverInfo"];
         };
         /**
          * @description `PUT /v1/control/state`: the desktop app registers as controller and
@@ -1147,6 +1406,18 @@ export interface components {
             bot_id: string;
             /** @description Title (default `New chat`). */
             title?: string | null;
+        };
+        CreateSession: {
+            /** Format: uuid */
+            client_id: string;
+            codecs: components["schemas"]["Codec"][];
+            /** Format: int32 */
+            max_height: number;
+            /** Format: int32 */
+            max_width: number;
+            profile: components["schemas"]["Profile"];
+            /** Format: uuid */
+            target_id: string;
         };
         /** @description `POST /v1/approvals/{call_id}`. */
         DecideApproval: {
@@ -1214,6 +1485,22 @@ export interface components {
             grants: components["schemas"]["GrantDto"][];
             /** @description The profile's own policy as JSON; `null` = the workspace policy applies. */
             policy?: unknown;
+        };
+        EffectiveProfile: {
+            /** Format: int32 */
+            burst_bytes: number;
+            /** Format: int32 */
+            bytes_per_second: number;
+            codec: components["schemas"]["Codec"];
+            /** Format: int32 */
+            max_fps: number;
+            /** Format: int32 */
+            max_height: number;
+            /** Format: int32 */
+            max_width: number;
+            profile: components["schemas"]["Profile"];
+            /** Format: int32 */
+            quality: number;
         };
         /** @description A configured account (`GET /v1/email/accounts`): the non-secret fields only. */
         EmailAccountDto: {
@@ -1391,6 +1678,28 @@ export interface components {
             /** @description Human-readable message. */
             message: string;
         };
+        FrameMetadata: {
+            /** Format: int64 */
+            action_seq?: number | null;
+            /** Format: int64 */
+            captured_at_ms: number;
+            cause: components["schemas"]["Cause"];
+            codec: components["schemas"]["Codec"];
+            /** Format: int64 */
+            frame_seq: number;
+            /** Format: int64 */
+            generation: number;
+            /** Format: int64 */
+            geometry_revision: number;
+            /** Format: int32 */
+            height: number;
+            repeated: boolean;
+            source_rect: components["schemas"]["SourceRect"];
+            /** Format: uuid */
+            target_id: string;
+            /** Format: int32 */
+            width: number;
+        };
         Gap: {
             /** Format: int64 */
             from_gseq: number;
@@ -1439,6 +1748,80 @@ export interface components {
             /** @description Daemon crate version. */
             version: string;
         };
+        Heartbeat: {
+            /** Format: int64 */
+            control_epoch?: number | null;
+            /** Format: uuid */
+            takeover_id?: string | null;
+        };
+        /** @enum {string} */
+        HumanAction: "login_completed" | "application_opened" | "other";
+        InputBatch: {
+            /** Format: int64 */
+            control_epoch: number;
+            events: components["schemas"]["InputEvent"][];
+            /** Format: int64 */
+            first_seq: number;
+            /** Format: int64 */
+            generation: number;
+            /** Format: int64 */
+            geometry_revision: number;
+            /** Format: uuid */
+            takeover_id: string;
+            /** Format: int32 */
+            v: number;
+        };
+        InputEvent: {
+            button?: null | components["schemas"]["Button"];
+            /** Format: int32 */
+            buttons: number;
+            modifiers: components["schemas"]["Modifier"][];
+            phase: components["schemas"]["PointerPhase"];
+            /** @enum {string} */
+            type: "pointer";
+            /** Format: double */
+            x: number;
+            /** Format: double */
+            y: number;
+        } | {
+            /** Format: double */
+            delta_x: number;
+            /** Format: double */
+            delta_y: number;
+            modifiers: components["schemas"]["Modifier"][];
+            /** @enum {string} */
+            type: "wheel";
+            /** Format: double */
+            x: number;
+            /** Format: double */
+            y: number;
+        } | {
+            code: string;
+            key: string;
+            /** Format: int32 */
+            location: number;
+            modifiers: components["schemas"]["Modifier"][];
+            phase: components["schemas"]["KeyPhase"];
+            repeat: boolean;
+            /** @enum {string} */
+            type: "key";
+        } | {
+            text: string;
+            /** @enum {string} */
+            type: "text";
+        } | {
+            /** @enum {string} */
+            type: "reset";
+        };
+        InputResult: {
+            /** Format: int64 */
+            accepted_through: number;
+            /** Format: int64 */
+            applied_through: number;
+            state: components["schemas"]["ViewState"];
+        };
+        /** @enum {string} */
+        KeyPhase: "down" | "up";
         /** @description `GET /v1/events/latest`. */
         LatestCursor: {
             /**
@@ -1761,6 +2144,10 @@ export interface components {
          * @enum {string}
          */
         Mode: "steer" | "queue";
+        /** @enum {string} */
+        Modifier: "alt" | "ctrl" | "meta" | "shift";
+        /** @enum {string} */
+        Outcome: "completed";
         /** @description A one-time pairing code (`POST /v1/channels/telegram/pair-code`). */
         PairCodeDto: {
             /** @description The 6-digit code the user sends as `/pair <code>`. */
@@ -1788,6 +2175,8 @@ export interface components {
             /** @description The [`ScheduleDto::spec`] the phrase means. */
             spec: unknown;
         };
+        /** @enum {string} */
+        PointerPhase: "move" | "down" | "up";
         /** @description The global default permission policy (`GET` / `PUT /v1/policy`). */
         PolicyDto: {
             /** @description Level per category: `deny`, `ask`, `allow` or `allow_with_limits`. */
@@ -1817,6 +2206,8 @@ export interface components {
             /** @description `read-only`, `approve-destructive`, `read-and-draft` or `full`. */
             preset?: string | null;
         };
+        /** @enum {string} */
+        Profile: "watch" | "live";
         /** @description `GET /v1/providers`. */
         ProvidersDto: {
             /** @description Ids of the providers the running loop can use. */
@@ -1827,6 +2218,58 @@ export interface components {
             configured: components["schemas"]["ConfiguredProviderDto"][];
             /** @description Id of the loop's default provider. */
             default_provider?: string | null;
+        };
+        /** @enum {string} */
+        Reason: "browser_idle" | "remote_node_live_view" | "unsupported" | "unavailable" | "expired" | "revoked" | "disconnected" | "stale" | "geometry_changed" | "refresh_pending" | "frame_budget_exceeded" | "drain_timeout" | "audit_failed" | "reset_failed" | "partial_injection" | "rate_limited" | "restart" | "persistence_failed" | "local_override";
+        RecordHeader: (components["schemas"]["FrameMetadata"] & {
+            /** Format: int64 */
+            sent_at_ms: number;
+            /** Format: uuid */
+            session_id: string;
+            /** Format: int32 */
+            v: number;
+        } & {
+            /** @enum {string} */
+            type: "frame";
+        }) | {
+            /** Format: int64 */
+            control_epoch: number;
+            effective_profile: components["schemas"]["EffectiveProfile"];
+            input_allowed: boolean;
+            reason?: null | components["schemas"]["Reason"];
+            /** Format: uuid */
+            session_id: string;
+            state: components["schemas"]["ViewState"];
+            /** @enum {string} */
+            type: "status";
+            /** Format: int32 */
+            v: number;
+        } | {
+            /** Format: int64 */
+            server_time_ms: number;
+            /** @enum {string} */
+            type: "heartbeat";
+            /** Format: int32 */
+            v: number;
+        };
+        /** @enum {string} */
+        RecoveryReason: "owner_lost" | "device_revoked" | "daemon_restart";
+        ReleaseRequest: {
+            /** Format: int64 */
+            control_epoch: number;
+            human_action?: null | components["schemas"]["HumanAction"];
+            outcome: components["schemas"]["Outcome"];
+            /** Format: uuid */
+            request_id: string;
+            /** Format: uuid */
+            takeover_id: string;
+        };
+        ReleaseResult: {
+            /** Format: uuid */
+            request_id: string;
+            state: string;
+            /** Format: uuid */
+            takeover_id: string;
         };
         /** @description `POST /v1/providers/reload`. */
         ReloadResponse: {
@@ -2016,6 +2459,13 @@ export interface components {
          * @enum {string}
          */
         Scope: "once" | "this_chat" | "always" | "always_category";
+        /** @description Body of `PUT /v1/view/privileges/{peer_key}` (local user only). */
+        ScreenPrivilegesInput: {
+            /** @description May take over and drive input (`screen:input`); requires `view`. */
+            input: boolean;
+            /** @description May watch the screen (`screen:view`). */
+            view: boolean;
+        };
         /** @description `POST /v1/chats/{id}/messages`. */
         SendMessage: {
             /** @description Behaviour while a turn is running. */
@@ -2033,10 +2483,49 @@ export interface components {
              */
             run_id?: string | null;
         };
+        SessionInfo: {
+            effective_profile: components["schemas"]["EffectiveProfile"];
+            /** Format: int64 */
+            expires_in_ms: number;
+            /** Format: int64 */
+            generation: number;
+            input_capabilities: boolean;
+            /** Format: uuid */
+            session_id: string;
+            stream_url: string;
+        };
+        SessionUpdate: {
+            /** Format: int32 */
+            buffered_frames?: number | null;
+            /** Format: int32 */
+            bytes_per_second?: number | null;
+            /** Format: int32 */
+            decode_ms?: number | null;
+            /** Format: int64 */
+            last_rendered_frame_seq?: number | null;
+            /** Format: int32 */
+            max_height?: number | null;
+            /** Format: int32 */
+            max_width?: number | null;
+            profile?: null | components["schemas"]["Profile"];
+            /** Format: int32 */
+            quality?: number | null;
+        };
         /** @description Body of `POST /v1/secrets/{name}`. */
         SetSecret: {
             /** @description The secret value.  Write-only: no route returns it. */
             value: string;
+        };
+        SourceRect: {
+            /** Format: int32 */
+            height: number;
+            units: components["schemas"]["Units"];
+            /** Format: int32 */
+            width: number;
+            /** Format: double */
+            x: number;
+            /** Format: double */
+            y: number;
         };
         /** @description Counters of the SSE machinery (authenticated, unlike `/v1/health`). */
         SseStatus: {
@@ -2056,6 +2545,56 @@ export interface components {
              */
             sse_subscribers: number;
         };
+        TakeoverAccepted: {
+            /** Format: int64 */
+            control_epoch: number;
+            state: components["schemas"]["ViewState"];
+            /** Format: uuid */
+            takeover_id: string;
+        };
+        TakeoverInfo: {
+            /** Format: int64 */
+            control_epoch: number;
+            /** Format: uuid */
+            id: string;
+            /** Format: int64 */
+            input_expires_in_ms: number;
+            owner: string;
+            reason?: null | components["schemas"]["Reason"];
+            /** Format: uuid */
+            session_id: string;
+            state: components["schemas"]["ViewState"];
+            /** Format: uuid */
+            target_id: string;
+        };
+        TakeoverRequest: {
+            /** Format: uuid */
+            reacquire_takeover_id?: string | null;
+            reason?: null | components["schemas"]["RecoveryReason"];
+            recover?: boolean;
+            /** Format: uuid */
+            request_id: string;
+            /** Format: uuid */
+            session_id: string;
+        };
+        TargetInfo: {
+            /** Format: uuid */
+            bot_id?: string | null;
+            capabilities: components["schemas"]["Capabilities"];
+            /** Format: int64 */
+            generation: number;
+            host_id: string;
+            kind: components["schemas"]["TargetKind"];
+            /** Format: uuid */
+            run_id?: string | null;
+            /** Format: uuid */
+            target_id: string;
+            unavailable_reason?: null | components["schemas"]["Reason"];
+        };
+        /** @enum {string} */
+        TargetKind: "browser" | "desktop";
+        /** @enum {string} */
+        Units: "physical_px" | "css_px";
         /** @description `GET /v1/usage`. */
         UsageSummary: {
             /** @description Per bot. */
@@ -2096,6 +2635,96 @@ export interface components {
              * @description Prompt tokens.
              */
             prompt_tokens: number;
+        };
+        /** @enum {string} */
+        ViewState: "watch" | "acquiring" | "active" | "paused" | "unavailable" | "closed";
+        /**
+         * @description Current web search configuration (`GET /v1/web/search`): non-secret fields
+         *     only.
+         */
+        WebSearchConfigDto: {
+            /**
+             * @description Effective ordered list of enabled and usable backends that `web_search`
+             *     will try.
+             */
+            active_backends: string[];
+            /** @description Whether the Bing HTML fallback is enabled. */
+            bing: boolean;
+            /** @description Whether a Brave Search API key is stored (never returned). */
+            brave_key_set: boolean;
+            /** @description Whether the `DuckDuckGo` HTML fallback is enabled. */
+            duckduckgo: boolean;
+            /** @description Whether the `DuckDuckGo` Lite fallback is enabled. */
+            duckduckgo_lite: boolean;
+            /**
+             * @description Priority order of backend ids (`searxng`, `brave`, `tavily`,
+             *     `duckduckgo`, `duckduckgo_lite`, `bing`).
+             */
+            order: string[];
+            /** @description Configured `SearXNG` base URL; `null` if unset. */
+            searxng_url?: string | null;
+            /** @description Whether a Tavily Search API key is stored (never returned). */
+            tavily_key_set: boolean;
+        };
+        /**
+         * @description Body of `PUT /v1/web/search`. Every field is optional: omitted fields keep
+         *     their stored values.
+         */
+        WebSearchConfigInput: {
+            /** @description Enable or disable the Bing HTML fallback. */
+            bing?: boolean | null;
+            /**
+             * @description Brave Search API key (**write-only**: stored in secret store, never
+             *     returned or logged).
+             */
+            brave_key?: string | null;
+            /** @description Remove the stored Brave Search API key. */
+            clear_brave_key?: boolean | null;
+            /** @description Remove the stored Tavily Search API key. */
+            clear_tavily_key?: boolean | null;
+            /** @description Enable or disable the `DuckDuckGo` HTML fallback. */
+            duckduckgo?: boolean | null;
+            /** @description Enable or disable the `DuckDuckGo` Lite fallback. */
+            duckduckgo_lite?: boolean | null;
+            /** @description Desired priority order of backend ids. */
+            order?: string[] | null;
+            /** @description `SearXNG` base URL; empty string clears it. */
+            searxng_url?: string | null;
+            /**
+             * @description Tavily Search API key (**write-only**: stored in secret store, never
+             *     returned or logged).
+             */
+            tavily_key?: string | null;
+        };
+        /** @description Body of `POST /v1/web/search/test`. */
+        WebSearchTestInput: {
+            /**
+             * @description Optional backend id to probe directly; omit to test the active fallback
+             *     chain.
+             */
+            backend?: string | null;
+            /** @description Sample query to run; defaults to `"rust programming"`. */
+            query?: string | null;
+        };
+        /** @description Result of a live web search probe (`POST /v1/web/search/test`). */
+        WebSearchTestReport: {
+            /** @description Backend that answered (`null` when all failed). */
+            backend?: string | null;
+            /**
+             * Format: int64
+             * @description Elapsed wall-clock time in milliseconds.
+             */
+            elapsed_ms: number;
+            /** @description Error summary when the probe failed (`null` on success). */
+            error?: string | null;
+            /** @description Errors from earlier backends in the chain before the answering one. */
+            fallback_errors?: string[];
+            /** @description `true` when at least one backend answered with results. */
+            ok: boolean;
+            /** @description Query that was run. */
+            query: string;
+            /** @description Number of search results returned. */
+            result_count: number;
         };
     };
     responses: never;
@@ -2596,7 +3225,7 @@ export interface operations {
             };
         };
     };
-    release_control: {
+    local_override: {
         parameters: {
             query?: never;
             header?: never;
@@ -2611,6 +3240,88 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ControlStateDto"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    local_recover: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlStateDto"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    release_control: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": null | components["schemas"]["ReleaseRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlStateDto"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };
@@ -2661,6 +3372,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    takeover: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TakeoverRequest"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TakeoverAccepted"];
                 };
             };
         };
@@ -4046,6 +4796,347 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UsageSummary"];
+                };
+            };
+        };
+    };
+    set_privileges: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                peer_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScreenPrivilegesInput"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_session: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSession"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInfo"];
+                };
+            };
+        };
+    };
+    delete_session: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_session: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionUpdate"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EffectiveProfile"];
+                };
+            };
+        };
+    };
+    frames: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.praxi.live-view.v1": string;
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    heartbeat: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Heartbeat"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    input: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InputBatch"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InputResult"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    targets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TargetInfo"][];
+                };
+            };
+        };
+    };
+    get_web_search: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebSearchConfigDto"];
+                };
+            };
+            /** @description web search management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_web_search: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebSearchConfigInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebSearchConfigDto"];
+                };
+            };
+            /** @description bad API key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid config */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description web search management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_web_search: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebSearchTestInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebSearchTestReport"];
+                };
+            };
+            /** @description query too long */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid backend */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description too many probes running */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description web search management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };
