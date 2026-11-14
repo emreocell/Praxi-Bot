@@ -33,3 +33,16 @@ test("sequence numbers only grow, also after dialogs close", () => {
   s.remove(a);
   assert.ok(s.next() > a);
 });
+
+test("a popover opened from a dialog sits on top and Esc ordering follows", async () => {
+  const { layerStack } = await import("./modalStack.ts");
+  const dialog = layerStack.next();
+  layerStack.add(dialog);
+  const popover = layerStack.next();
+  layerStack.add(popover);
+  assert.equal(layerStack.isTop(popover), true);
+  assert.equal(layerStack.isTop(dialog), false); // the dialog ignores this Esc
+  layerStack.remove(popover);
+  assert.equal(layerStack.isTop(dialog), true); // the next Esc reaches the dialog
+  layerStack.remove(dialog);
+});

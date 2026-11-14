@@ -122,14 +122,12 @@ function canOfferRemember(run: RunState): boolean {
 export function ChatView({
   chatId,
   onBack,
-  onOpenBot,
   onSwitchChat,
   showAgentRoute = false,
   sendWith = "enter"
 }: {
   chatId: string;
   onBack: () => void;
-  onOpenBot?: () => void;
   /** Open another chat (after a `/new` turn created one). */
   onSwitchChat?: (chatId: string) => void;
   /** Debug: also show the chip for a plain `Agent` decision at K4. */
@@ -710,19 +708,9 @@ export function ChatView({
         <Button size="sm" variant="ghost" title={t("common.back")} aria-label={t("common.back")} onClick={onBack}>
           <ArrowLeft />
         </Button>
-        <button
-          type="button"
-          className={styles.headerBot}
-          title={t("chat.openBot", { name: view?.name })}
-          aria-label={t("chat.openBot", { name: view?.name })}
-          onClick={onOpenBot}
-        >
-          {botAvatarFor(true)}
-          <span className={styles.headerText}>
-            <span className={styles.title}>{chat.title}</span>
-            <span className={styles.subtitle}>{view?.name}</span>
-          </span>
-        </button>
+        <span className={styles.headerText}>
+          <span className={styles.title}>{chat.title}</span>
+        </span>
         {active ? (
           <Button size="sm" variant="danger" onClick={() => void stop()}>
             <Square />{t("chat.stop")}
@@ -1015,11 +1003,13 @@ export function ChatView({
           />
           <div className={styles.tools}>
             {bot ? (
-              <div className={styles.modelSlot}>
+              <div>
                 <ModelPicker
                   groups={pickerGroups}
                   value={view?.executor ?? ""}
                   disabled={!client}
+                  thinking
+                  placement="top-start"
                   onPick={(ref) => void pickModel(ref)}
                 />
               </div>

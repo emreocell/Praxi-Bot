@@ -22,3 +22,10 @@ export function createModalStack(): ModalStack {
     isTop: (seq) => open.size > 0 && seq === Math.max(...open)
   };
 }
+
+/**
+ * The app-wide layer stack: dialogs (`Modal`) and popovers (`Popover`) all take a number here,
+ * so only the topmost layer reacts to Esc / Tab (a popover opened from inside a dialog closes
+ * first; the dialog stays).
+ */
+export const layerStack: ModalStack = createModalStack();

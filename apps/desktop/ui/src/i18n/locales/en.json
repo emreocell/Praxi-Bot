@@ -970,7 +970,12 @@
     "apps": "Apps",
     "computer": "Computer",
     "help": "Help",
-    "localComputer": "This computer"
+    "localComputer": "This computer",
+    "appearance": "Appearance",
+    "ai": "AI",
+    "usage": "Usage",
+    "updates": "Updates",
+    "shortcutSettings": "Ctrl ,"
   },
   "apps": {
     "title": "Apps",
@@ -1057,7 +1062,14 @@
     "search": "Search models",
     "empty": "No matching models.",
     "switched": "Switched to {{model}}",
-    "switchedDefault": "Default model set to {{model}}"
+    "switchedDefault": "Default model set to {{model}}",
+    "thinking": "Thinking",
+    "levels": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "max": "Max"
+    }
   },
   "settingsModal": {
     "title": "Settings",
@@ -1442,5 +1454,18 @@
         "other": "Other"
       }
     }
+  },
+  "shell": {
+    "railGrip": "Resize sidebar (arrow keys)",
+    "panelGrip": "Resize bot panel (arrow keys)"
+  },
+  "botPanel": {
+    "toggle": "Bot panel",
+    "close": "Close panel",
+    "settings": "Bot settings",
+    "profile": "Bot profile",
+    "chats": "Chats",
+    "noChats": "No chats yet.",
+    "untitled": "New chat"
   }
 }
