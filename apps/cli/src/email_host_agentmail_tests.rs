@@ -127,7 +127,7 @@ async fn invalid_sender_allowlist_never_creates_a_remote_inbox() {
         server.received_requests().await.unwrap().is_empty(),
         "invalid local configuration must fail before any provider request"
     );
-    assert!(f.host.list().is_empty());
+    assert_eq!(f.host.list().len(), 0);
     assert!(secret(&f, "email/bot-mail/api_key").is_none());
     assert!(!f.dir.path().join(EMAIL_FILE).exists());
 }
