@@ -244,6 +244,8 @@ pub(crate) async fn health(State(s): State<AppState>) -> Json<Health> {
         }
         .into(),
         version: env!("CARGO_PKG_VERSION").into(),
+        api_version: "1.0".into(),
+        host: crate::dto::HostInfo::detect(),
         uptime_secs: s.uptime_secs(),
     })
 }

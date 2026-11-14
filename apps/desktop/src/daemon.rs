@@ -572,6 +572,13 @@ mod tests {
 
     #[tokio::test]
     async fn token_is_withheld_from_a_foreign_listener() {
+        // Same `/proc` race as `resolves_our_own_listener`: the exact-pid
+        // check at the bottom shares this process with every other test.
+        if !crate::listener::enter_isolated(
+            "daemon::tests::token_is_withheld_from_a_foreign_listener",
+        ) {
+            return;
+        }
         // This test process plays the squatter: it answers a healthy probe.
         let port = ok_daemon().await;
         let url = format!("http://127.0.0.1:{port}");

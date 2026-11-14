@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { BotAvatar, Button, Card } from "ui";
 import type { UsageSummary, UsageTotals } from "../api/types";
 import formStyles from "../components/Form.module.css";
+import { QuotaBlock } from "../components/QuotaRings";
 import { botView } from "../lib/botProfile";
 import { useDaemon } from "../state/DaemonContext";
 import styles from "./UsageView.module.css";
@@ -69,6 +70,8 @@ export function UsageView({ embedded = false }: { embedded?: boolean }) {
             <p className={styles.subtitle}>{t("usage.subtitle")}</p>
           </header>
         )}
+
+        <QuotaBlock />
 
         <div className={styles.rangeRow} role="group" aria-label={t("usage.range")}>
           {(["all", "day", "week", "month"] as const).map((r) => (

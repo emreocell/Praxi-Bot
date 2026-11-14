@@ -11,12 +11,15 @@ export interface SidebarLayoutProps extends HTMLAttributes<HTMLDivElement> {
   sidebar: ReactNode;
   /** Optional full-window backdrop (canvas) drawn between the image layer and the panels. */
   backdrop?: ReactNode;
+  /** Optional right-hand panel (a `SidePanel`), laid out after the main pane. */
+  aside?: ReactNode;
   children: ReactNode;
 }
 
 export function SidebarLayout({
   sidebar,
   backdrop,
+  aside,
   children,
   className,
   ...props
@@ -30,6 +33,7 @@ export function SidebarLayout({
       <div className={styles.foregroundContainer}>
         {sidebar}
         <main className={styles.mainPane}>{children}</main>
+        {aside}
       </div>
     </div>
   );
@@ -135,5 +139,29 @@ export function SidebarFooter({
     <div className={classes} {...props}>
       {children}
     </div>
+  );
+}
+
+export interface SidePanelProps extends Omit<HTMLAttributes<HTMLElement>, "children"> {
+  open: boolean;
+  /** Width in px while open. */
+  width: number;
+  children: ReactNode;
+}
+
+/** Right-hand panel: slides open to `width`, inert and out of the tab order while closed. */
+export function SidePanel({ open, width, className, style, children, ...props }: SidePanelProps) {
+  const classes = [styles.panel, className ?? ""].filter(Boolean).join(" ");
+  return (
+    <aside
+      className={classes}
+      data-open={open}
+      aria-hidden={!open}
+      inert={!open}
+      style={{ ...style, "--panel-w": `${width}px` } as CSSProperties}
+      {...props}
+    >
+      <div className={styles.panelInner}>{children}</div>
+    </aside>
   );
 }

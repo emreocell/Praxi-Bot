@@ -27,6 +27,8 @@ fn cfg(policy: DefaultUrlPolicy) -> WebToolsConfig {
         policy: Arc::new(policy),
         search: SearchConfig {
             duckduckgo: false,
+            duckduckgo_lite: false,
+            bing: false,
             ..SearchConfig::default()
         },
         ..WebToolsConfig::default()
@@ -700,4 +702,457 @@ async fn overlong_urls_and_queries_are_refused_before_any_request() {
         .await
         .unwrap_err();
     assert!(!err.contains("too long"), "{err}");
+}
+
+#[tokio::test]
+async fn web_search_schema_lists_only_configured_backends() {
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, WebToolsConfig::default()).unwrap();
+    let spec = reg.get("web_search").unwrap().spec().clone();
+    assert!(!spec.description.contains("Brave"), "{}", spec.description);
+    assert!(
+        !spec.description.contains("SearXNG"),
+        "{}",
+        spec.description
+    );
+    let enum_vals: Vec<String> = spec.input_schema["properties"]["backend"]["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(enum_vals, vec!["duckduckgo", "duckduckgo_lite", "bing"]);
+}
+
+#[tokio::test]
+async fn keyless_fallback_chain_recovers_from_bot_challenge_and_cools_down() {
+    let server = MockServer::start().await;
+    let challenge_html = r#"<!DOCTYPE html><html><body>
+        <form id="challenge-form" action="//duckduckgo.com/anomaly.js"></form>
+        <div class="anomaly-modal__title">Unfortunately, bots use DuckDuckGo too.</div>
+    </body></html>"#;
+    let bing_html = r#"<html><body><ol id="b_results">
+        <li class="b_algo"><h2><a href="https://example.org/rust">Rust Lang</a></h2>
+        <div class="b_caption"><p>Safe systems language.</p></div></li>
+    </ol></body></html>"#;
+
+    Mock::given(method("GET"))
+        .and(path("/html/"))
+        .and(wiremock::matchers::header_exists("user-agent"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .set_body_raw(challenge_html.as_bytes().to_vec(), "text/html"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/lite/"))
+        .respond_with(ResponseTemplate::new(429))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .respond_with(html(bing_html))
+        .mount(&server)
+        .await;
+
+    let mut c = cfg(loopback_ok());
+    c.search.duckduckgo = true;
+    c.search.duckduckgo_endpoint = Some(format!("{}/html/", server.uri()));
+    c.search.duckduckgo_lite = true;
+    c.search.duckduckgo_lite_endpoint = Some(format!("{}/lite/", server.uri()));
+    c.search.bing = true;
+    c.search.bing_endpoint = Some(format!("{}/search", server.uri()));
+    c.search.cooldown = std::time::Duration::from_millis(100);
+
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+
+    // First call hits duckduckgo (202 challenge), duckduckgo_lite (429), then succeeds on bing.
+    let out = call(&reg, "web_search", json!({"query": "rust"}))
+        .await
+        .unwrap();
+    let t = text(&out);
+    assert!(t.contains("via bing"), "{t}");
+    assert!(t.contains("bot challenge"), "{t}");
+    assert!(t.contains("https://example.org/rust"), "{t}");
+
+    let reqs_after_first = server.received_requests().await.unwrap();
+    let ddg_hits_first = reqs_after_first
+        .iter()
+        .filter(|r| r.url.path() == "/html/")
+        .count();
+    assert_eq!(ddg_hits_first, 1);
+    let ddg_ua = reqs_after_first
+        .iter()
+        .find(|r| r.url.path() == "/html/")
+        .unwrap()
+        .headers
+        .get("user-agent")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        ddg_ua.contains("Mozilla/5.0"),
+        "expected browser UA, got {ddg_ua}"
+    );
+
+    // Second call during cooldown skips duckduckgo & duckduckgo_lite without hitting them!
+    let out2 = call(&reg, "web_search", json!({"query": "rust two"}))
+        .await
+        .unwrap();
+    let t2 = text(&out2);
+    assert!(t2.contains("via bing"), "{t2}");
+    assert!(t2.contains("cooling down"), "{t2}");
+    let reqs_after_second = server.received_requests().await.unwrap();
+    let ddg_hits_second = reqs_after_second
+        .iter()
+        .filter(|r| r.url.path() == "/html/")
+        .count();
+    assert_eq!(
+        ddg_hits_second, 1,
+        "challenged backend must not be re-hit during cooldown"
+    );
+
+    // Wait past cooldown: duckduckgo is retried.
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    let _ = call(&reg, "web_search", json!({"query": "rust three"}))
+        .await
+        .unwrap();
+    let reqs_after_third = server.received_requests().await.unwrap();
+    let ddg_hits_third = reqs_after_third
+        .iter()
+        .filter(|r| r.url.path() == "/html/")
+        .count();
+    assert_eq!(
+        ddg_hits_third, 2,
+        "backend should be retried after cooldown expires"
+    );
+}
+
+#[tokio::test]
+async fn all_backends_failing_returns_single_clear_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(202).set_body_raw(
+            b"<div class=\"anomaly-modal__title\">Unfortunately, bots use DuckDuckGo too.</div>"
+                .to_vec(),
+            "text/html",
+        ))
+        .mount(&server)
+        .await;
+    let mut c = cfg(loopback_ok());
+    c.search.duckduckgo = true;
+    c.search.duckduckgo_endpoint = Some(format!("{}/html/", server.uri()));
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+    let err = call(&reg, "web_search", json!({"query": "hello"}))
+        .await
+        .unwrap_err();
+    assert!(
+        err.contains("all configured search backends (duckduckgo) failed"),
+        "{err}"
+    );
+    assert!(err.contains("do not retry the exact same query"), "{err}");
+}
+
+#[tokio::test]
+async fn tavily_backend_uses_secret_ref_and_respects_custom_order() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/search"))
+        .and(header("Authorization", "Bearer tvly-secret"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "results": [{"title": "Tavily Hit", "url": "https://tavily.example/a", "content": "Snippet"}]
+        })))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/search"))
+        .respond_with(ResponseTemplate::new(401))
+        .with_priority(10)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/html/"))
+        .respond_with(html(
+            r#"<div class="result"><a class="result__a" href="https://ddg.example/">DDG</a></div>"#,
+        ))
+        .mount(&server)
+        .await;
+
+    let store = Arc::new(MemoryStore::new());
+    store.set("web/tavily", "tvly-secret").unwrap();
+
+    let mut c = cfg(loopback_ok());
+    c.secrets = Some(store.clone());
+    c.search.tavily_key = Some(SecretRef::new("web/tavily").unwrap());
+    c.search.tavily_endpoint = Some(format!("{}/search", server.uri()));
+    c.search.duckduckgo = true;
+    c.search.duckduckgo_endpoint = Some(format!("{}/html/", server.uri()));
+    c.search.order = vec!["duckduckgo".into(), "tavily".into()];
+
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+
+    // Custom order puts duckduckgo first.
+    let out = call(&reg, "web_search", json!({"query": "order"}))
+        .await
+        .unwrap();
+    assert!(text(&out).contains("via duckduckgo"));
+
+    // Explicit backend: tavily works and never leaks token.
+    let out_t = call(
+        &reg,
+        "web_search",
+        json!({"query": "order", "backend": "tavily"}),
+    )
+    .await
+    .unwrap();
+    assert!(text(&out_t).contains("Tavily Hit"));
+    assert!(!text(&out_t).contains("tvly-secret"));
+
+    // Wrong token is rejected without leaking.
+    store.set("web/tavily", "bad-tok").unwrap();
+    let err = call(
+        &reg,
+        "web_search",
+        json!({"query": "order", "backend": "tavily"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(err.contains("rejected"), "{err}");
+    assert!(!err.contains("bad-tok"), "{err}");
+}
+
+#[tokio::test]
+async fn searxng_rejects_protected_daemon_port_via_localhost_and_redirects() {
+    let daemon = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&daemon)
+        .await;
+    let daemon_port = daemon.address().port();
+
+    let policy = DefaultUrlPolicy {
+        blocked_sockets: vec![*daemon.address()],
+        ..DefaultUrlPolicy::default()
+    };
+    let fetcher = HttpFetcher::new(Arc::new(policy.clone()), HttpConfig::default()).unwrap();
+    let mut search_cfg = cfg(policy.clone()).search;
+    search_cfg.searxng_url = Some(format!("http://localhost:{daemon_port}/v1/web"));
+    let Err(err) = search_cfg.build(&fetcher, &HttpConfig::default(), None) else {
+        panic!("localhost:<protected port> must be refused");
+    };
+    assert!(matches!(err, WebError::Policy(_)), "{err:?}");
+    assert!(
+        daemon.received_requests().await.unwrap().is_empty(),
+        "no connection may be made to the protected daemon port"
+    );
+
+    // A SearXNG instance on another loopback port cannot redirect to the protected daemon port
+    // or cloud metadata IP.
+    let searx = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .respond_with(
+            ResponseTemplate::new(302)
+                .insert_header("location", format!("http://localhost:{daemon_port}/v1/web")),
+        )
+        .mount(&searx)
+        .await;
+    let mut c = cfg(policy);
+    c.search.searxng_url = Some(searx.uri());
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+    let err = call(&reg, "web_search", json!({"query": "test"}))
+        .await
+        .unwrap_err();
+    assert!(err.contains("blocked by URL policy"), "{err}");
+    assert!(
+        daemon.received_requests().await.unwrap().is_empty(),
+        "redirect to protected daemon port must be blocked"
+    );
+}
+
+#[tokio::test]
+async fn forced_backend_applies_cooldown_and_names_only_itself_on_failure() {
+    let server = MockServer::start().await;
+    let challenge_html = r#"<!DOCTYPE html><html><body>
+        <form id="challenge-form" action="//duckduckgo.com/anomaly.js"></form>
+    </body></html>"#;
+    Mock::given(method("GET"))
+        .and(path("/html/"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .set_body_raw(challenge_html.as_bytes().to_vec(), "text/html"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/lite/"))
+        .respond_with(html(
+            "<a class=\"result-link\" href=\"https://example.org/\">Ok</a>",
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .respond_with(html(
+            "<li class=\"b_algo\"><h2><a href=\"https://example.org/\">Ok</a></h2></li>",
+        ))
+        .mount(&server)
+        .await;
+
+    let mut c = cfg(loopback_ok());
+    c.search.duckduckgo = true;
+    c.search.duckduckgo_endpoint = Some(format!("{}/html/", server.uri()));
+    c.search.duckduckgo_lite = true;
+    c.search.duckduckgo_lite_endpoint = Some(format!("{}/lite/", server.uri()));
+    c.search.bing = true;
+    c.search.bing_endpoint = Some(format!("{}/search", server.uri()));
+    c.search.cooldown = std::time::Duration::from_secs(30);
+
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+
+    // First forced call hits duckduckgo and gets a bot challenge.
+    let err1 = call(
+        &reg,
+        "web_search",
+        json!({"query": "rust", "backend": "duckduckgo"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        err1.contains("search backend `duckduckgo` failed"),
+        "{err1}"
+    );
+    assert!(
+        err1.contains("other configured backends (duckduckgo_lite, bing) were not tried"),
+        "{err1}"
+    );
+    assert!(
+        !err1.contains("all configured search backends"),
+        "forced failure must not claim all backends failed: {err1}"
+    );
+
+    // Follow-up forced call during cooldown must NOT re-hit /html/.
+    let err2 = call(
+        &reg,
+        "web_search",
+        json!({"query": "rust", "backend": "duckduckgo"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(err2.contains("cooling down"), "{err2}");
+    let ddg_hits = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path() == "/html/")
+        .count();
+    assert_eq!(ddg_hits, 1, "forced backend must respect active cooldown");
+}
+
+#[tokio::test]
+async fn challenge_markers_override_parsed_hits_and_trigger_cooldown() {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    let server = MockServer::start().await;
+    let encoded = URL_SAFE_NO_PAD.encode("https://example.com/verify");
+    // Mixed fixture: contains BOTH a challenge marker AND a parseable <li class="b_algo"> node.
+    let bing_mixed = format!(
+        r#"<html><body>
+        <form id="challenge-form"></form>
+        <ol id="b_results">
+            <li class="b_algo"><h2><a href="https://www.bing.com/ck/a?u=a1{encoded}">Verify</a></h2></li>
+        </ol></body></html>"#
+    );
+    let ddg_mixed = r#"<html><body>
+        <form id="challenge-form"></form>
+        <div class="result"><a class="result__a" href="https://example.com/verify">Verify</a></div>
+    </body></html>"#;
+    let ddg_lite_ok = r#"<html><body><table>
+        <tr><td>1.</td><td><a class="result-link" href="https://example.org/ok">Real Result</a></td></tr>
+        <tr><td></td><td class="result-snippet">Clean snippet.</td></tr>
+    </table></body></html>"#;
+
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .respond_with(
+            ResponseTemplate::new(202).set_body_raw(bing_mixed.as_bytes().to_vec(), "text/html"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/html/"))
+        .respond_with(html(ddg_mixed))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/lite/"))
+        .respond_with(html(ddg_lite_ok))
+        .mount(&server)
+        .await;
+
+    let mut c = cfg(loopback_ok());
+    c.search.bing = true;
+    c.search.bing_endpoint = Some(format!("{}/search", server.uri()));
+    c.search.duckduckgo = true;
+    c.search.duckduckgo_endpoint = Some(format!("{}/html/", server.uri()));
+    c.search.duckduckgo_lite = true;
+    c.search.duckduckgo_lite_endpoint = Some(format!("{}/lite/", server.uri()));
+    c.search.order = vec!["bing".into(), "duckduckgo".into(), "duckduckgo_lite".into()];
+    c.search.cooldown = std::time::Duration::from_secs(30);
+
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+
+    // Bing (HTTP 202 + challenge-form + b_algo) and DDG (HTTP 200 + challenge-form + result)
+    // must both be rejected as challenges so the chain falls back to duckduckgo_lite.
+    let out = call(&reg, "web_search", json!({"query": "rust"}))
+        .await
+        .unwrap();
+    let t = text(&out);
+    assert!(t.contains("via duckduckgo_lite"), "{t}");
+    assert!(t.contains("Real Result"), "{t}");
+    assert!(!t.contains("Verify"), "challenge Verify hit leaked: {t}");
+    assert!(
+        t.contains("bing: search failed: bing returned a bot challenge (HTTP 202)"),
+        "{t}"
+    );
+    assert!(
+        t.contains("duckduckgo: search failed: duckduckgo returned a bot challenge (HTTP 200)"),
+        "{t}"
+    );
+
+    // Second call skips both bing and duckduckgo during cooldown.
+    let out2 = call(&reg, "web_search", json!({"query": "rust 2"}))
+        .await
+        .unwrap();
+    let t2 = text(&out2);
+    assert!(t2.contains("bing: skipped (cooling down"), "{t2}");
+    assert!(t2.contains("duckduckgo: skipped (cooling down"), "{t2}");
+}
+
+#[tokio::test]
+#[ignore = "hits live internet search backends; run manually with --ignored"]
+async fn live_keyless_chain_returns_results() {
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, WebToolsConfig::default()).unwrap();
+    let out = call(
+        &reg,
+        "web_search",
+        json!({"query": "rust programming language", "limit": 3}),
+    )
+    .await
+    .unwrap();
+    let j = json_part(&out);
+    let results = j["results"].as_array().unwrap();
+    assert!(!results.is_empty(), "expected live results: {out:?}");
 }

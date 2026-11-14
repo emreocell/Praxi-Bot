@@ -127,7 +127,6 @@
   overflow: auto;
 }
 
-.approval,
 .question {
   display: flex;
   flex-direction: column;
@@ -136,15 +135,76 @@
   border-radius: var(--radius-card);
   border: var(--size-border) solid var(--color-border);
   background-color: var(--color-surface);
-  box-shadow: inset var(--size-border-thick) 0 0 var(--color-warning);
-}
-
-.question {
   box-shadow: inset var(--size-border-thick) 0 0 var(--color-accent);
 }
 
+/* Approval card (198 D): app icon, what will happen, then the choices. */
+.approval {
+  --approval-tone: var(--color-warning);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-card);
+  border: var(--size-border) solid color-mix(in srgb, var(--approval-tone) 38%, var(--color-border));
+  background-color: var(--color-surface-elevated);
+  background-image:
+    linear-gradient(180deg, color-mix(in srgb, var(--approval-tone) 9%, transparent), transparent 70%),
+    var(--surface-sheen);
+  box-shadow: var(--shadow-card);
+  animation: approvalIn var(--motion-duration-normal) var(--motion-easing-standard);
+}
+
 .outbound {
-  box-shadow: inset var(--size-border-thick) 0 0 var(--color-danger);
+  --approval-tone: var(--color-danger);
+}
+
+.approvalIcon {
+  display: inline-flex;
+  flex: none;
+  margin-top: var(--space-1);
+  color: var(--approval-tone);
+}
+
+.approvalIcon > :first-child {
+  color: var(--approval-tone);
+}
+
+.approvalMain {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: var(--space-0);
+}
+
+.approvalMain .actions {
+  margin-top: var(--space-2);
+}
+
+.denyButton {
+  color: var(--color-text-muted);
+}
+
+.denyButton:hover:not(:disabled) {
+  color: var(--color-danger);
+}
+
+.reasonInput {
+  font-size: var(--font-size-xs);
+}
+
+@keyframes approvalIn {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-2));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .approval {
+    animation: none;
+  }
 }
 
 .approvalHead {
@@ -156,10 +216,8 @@
 
 .approvalTitle {
   font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-bold);
-  letter-spacing: var(--letter-spacing-wide);
-  text-transform: uppercase;
-  color: var(--color-text);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
 }
 
 .countdown {
@@ -172,7 +230,7 @@
 .approvalSummary {
   margin: var(--space-0);
   font-size: var(--font-size-md);
-  font-weight: var(--font-weight-semibold);
+  font-weight: var(--font-weight-medium);
   color: var(--color-text);
 }
 

@@ -17,12 +17,14 @@ export {
   SidebarItem,
   SidebarLayout,
   SidebarSection,
+  SidePanel,
   type SidebarFooterProps,
   type SidebarHeaderProps,
   type SidebarItemProps,
   type SidebarLayoutProps,
   type SidebarProps,
-  type SidebarSectionProps
+  type SidebarSectionProps,
+  type SidePanelProps
 } from "./components/Sidebar";
 export {
   accentAfterThemeChange,
@@ -72,3 +74,17 @@ export {
 } from "./theme";
 
 export { BotAvatar, type BotAvatarState, type BotIdentity } from "./components/BotAvatar";
+export {
+  BOT_SHAPE_IDS,
+  BOT_SHAPES,
+  botShape,
+  CHARACTER_COLORS,
+  fallbackBotColor,
+  fallbackBotShape,
+  gradientMapConfig,
+  normalizeBotShape,
+  normalizeHexColor,
+  type BotShapeDef,
+  type BotShapeId,
+  type GradientMapConfig
+} from "./botShape";

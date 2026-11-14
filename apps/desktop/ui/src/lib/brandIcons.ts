@@ -1,6 +1,6 @@
-import { siGithub, siGitlab, siNotion, siGoogledrive, siGooglecalendar, siGmail, siDiscord, siFigma, siLinear, siAnthropic, siGooglegemini, siOllama, siClaude, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siTodoist, siObsidian, siHomeassistant } from 'simple-icons';
+import { siGithub, siGitlab, siNotion, siGoogledrive, siGooglecalendar, siGmail, siDiscord, siFigma, siLinear, siAnthropic, siGooglegemini, siOllama, siClaude, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siTodoist, siObsidian, siHomeassistant, siOpenrouter, siDeepseek, siMistralai, siCursor, siGithubcopilot, siLmstudio } from 'simple-icons';
 
-const icons = [siGithub, siGitlab, siNotion, siGoogledrive, siGooglecalendar, siGmail, siDiscord, siFigma, siLinear, siAnthropic, siGooglegemini, siOllama, siClaude, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siTodoist, siObsidian, siHomeassistant];
+const icons = [siGithub, siGitlab, siNotion, siGoogledrive, siGooglecalendar, siGmail, siDiscord, siFigma, siLinear, siAnthropic, siGooglegemini, siOllama, siClaude, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siTodoist, siObsidian, siHomeassistant, siOpenrouter, siDeepseek, siMistralai, siCursor, siGithubcopilot, siLmstudio];
 const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 const aliases: Record<string, string> = {
   'bravesearch': 'brave',
@@ -26,4 +26,25 @@ export function brandIcon(name: string) {
   for (const char of key) hash = (Math.imul(hash, 31) + char.charCodeAt(0)) >>> 0;
   const colors = ['#A77DD8', '#3C9C8A', '#CD8B51', '#5C8BCC', '#C97388'];
   return { name, color: colors[hash % colors.length], path: '', monogram: name.trim().slice(0, 2).toUpperCase() || '?', known: false };
+}
+
+/** Relative luminance (0 dark .. 1 light) of a `#rrggbb` colour. */
+export function hexLuminance(hex: string): number {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return 0.5;
+  const ch = [0, 2, 4].map((i) => {
+    const v = parseInt(m[1].slice(i, i + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+}
+
+/**
+ * Colour of a bare logo (no tile behind it): the brand colour, except marks so
+ * dark or so light that they would vanish on the theme surface, which follow
+ * the text colour instead.
+ */
+export function bareBrandColor(hex: string): string {
+  const l = hexLuminance(hex);
+  return l < 0.06 || l > 0.9 ? 'currentColor' : hex;
 }

@@ -1005,7 +1005,17 @@ impl TurnExecutor {
             g.tool_timeout,
             control,
             Arc::clone(&ctx.waiting_computer),
-            tool.call(&tctx, input),
+            async {
+                if matches!(
+                    tool.spec().category,
+                    PermissionCategory::Desktop | PermissionCategory::Browser
+                ) {
+                    crate::control::acquire_computer_slot(&self.sh, ctx)
+                        .await
+                        .map_err(tool_registry::ToolError::Execution)?;
+                }
+                tool.call(&tctx, input).await
+            },
         )
         .await;
         let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
