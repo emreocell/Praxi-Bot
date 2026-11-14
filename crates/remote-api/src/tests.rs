@@ -239,7 +239,7 @@ async fn proxy_guard_and_credential_stripping() {
         request(
             &proxy,
             reqwest::Method::GET,
-            "/v1/events?%74oken=hidden&token=local&keep=yes"
+            "/v1/events?%74oken=hidden&token=local&TOKEN=up&Token=x&keep=yes"
         )
         .header("Connection", "x-hop")
         .header("x-hop", "secret")

@@ -1,6 +1,6 @@
 use crate::{
-    CONNECT_TIMEOUT, CONNECTION_BODY_BUDGET, CONNECTION_CAPACITY, SERVER_CONTROL_RESERVE,
-    SERVER_STREAMS, SERVER_VIEW_STREAMS, STREAMS, Tuning,
+    CONNECT_TIMEOUT, CONNECTION_BODY_BUDGET, CONNECTION_CAPACITY, CONTROL_RESERVE,
+    SERVER_CONTROL_RESERVE, SERVER_STREAMS, SERVER_VIEW_STREAMS, STREAMS, Tuning, VIEW_STREAMS,
     budget::{self, Budget, Capacity, Class, Held},
     guard::{GuardedBody, Lease},
     oversized, request_body,
@@ -19,12 +19,21 @@ use hyper_util::rt::{TokioIo, TokioTimer};
 use iroh::endpoint::Connection;
 use peer_network::{Device, ProtocolHandler, Role};
 use std::{
+    collections::HashMap,
     convert::Infallible,
     sync::{Arc, Mutex},
 };
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
+
+/// What one paired key may hold across all its connections: a quarter of the
+/// daemon's streams, so at least three other devices keep a full share.
+const PEER_CAPACITY: Capacity = Capacity {
+    total: SERVER_STREAMS / 4,
+    long: SERVER_STREAMS / 4 - CONTROL_RESERVE,
+    view: VIEW_STREAMS,
+};
 
 const SERVER_CAPACITY: Capacity = Capacity {
     total: SERVER_STREAMS,
@@ -37,6 +46,10 @@ pub struct ApiProtocol {
     router: Router,
     global: Budget,
     connection: Capacity,
+    peer: Capacity,
+    /// One budget per paired key, shared by all of that key's connections, so
+    /// one device cannot open many connections and fill the daemon budget.
+    peers: Mutex<HashMap<String, Budget>>,
     tuning: Tuning,
 }
 impl ApiProtocol {
@@ -51,6 +64,14 @@ impl ApiProtocol {
     }
 
     #[cfg(test)]
+    pub(crate) fn for_test_peer(router: Router, global: Capacity, peer: Capacity) -> Self {
+        let mut protocol =
+            Self::for_test_with(router, global, CONNECTION_CAPACITY, Tuning::default());
+        protocol.peer = peer;
+        protocol
+    }
+
+    #[cfg(test)]
     pub(crate) fn for_test_with(
         router: Router,
         global: Capacity,
@@ -61,6 +82,8 @@ impl ApiProtocol {
             router,
             global: Budget::new(global),
             connection,
+            peer: PEER_CAPACITY,
+            peers: Mutex::default(),
             tuning,
         }
     }
@@ -71,6 +94,8 @@ impl ApiProtocol {
             router: daemon_api::peer_router(state),
             global: Budget::new(SERVER_CAPACITY),
             connection: CONNECTION_CAPACITY,
+            peer: PEER_CAPACITY,
+            peers: Mutex::default(),
             tuning: Tuning::default(),
         }
     }
@@ -99,32 +124,65 @@ fn overloaded(class: Class) -> Response {
 }
 
 /// Per-stream admission. The stream already holds an ordinary permit on the
-/// connection and server budgets; classification may raise it to a long-lived
-/// class on both, or fail at once.
+/// connection, peer and server budgets; classification may raise it to a
+/// long-lived class on all three, or fail at once.
 struct Admission {
-    local: Budget,
-    global: Budget,
-    held: Mutex<Option<(Held, Held)>>,
+    budgets: [Budget; 3],
+    held: Mutex<Option<[Held; 3]>>,
 }
 
 impl Admission {
+    /// Take ordinary permits on every budget, narrowest first.
+    fn open(budgets: [Budget; 3]) -> Option<Arc<Self>> {
+        let [a, b, c] = &budgets;
+        let held = [
+            a.acquire(Class::Ordinary).ok()?,
+            b.acquire(Class::Ordinary).ok()?,
+            c.acquire(Class::Ordinary).ok()?,
+        ];
+        Some(Arc::new(Self {
+            budgets,
+            held: Mutex::new(Some(held)),
+        }))
+    }
+
+    /// Atomic across budgets: a failure leaves no budget upgraded.
     fn upgrade(&self, class: Class) -> Result<(), Class> {
         let mut guard = self.held.lock().map_err(|_| Class::Ordinary)?;
-        let (local, global) = guard.as_mut().ok_or(Class::Ordinary)?;
-        self.local.upgrade(local, class).map_err(|o| o.0)?;
-        self.global.upgrade(global, class).map_err(|o| o.0)
+        let held = guard.as_mut().ok_or(Class::Ordinary)?;
+        for (budget, h) in self.budgets.iter().zip(held.iter_mut()) {
+            // On failure the caller answers 429 and drops every permit.
+            budget.upgrade(h, class).map_err(|o| o.0)?;
+        }
+        Ok(())
     }
 
     fn class(&self) -> Class {
         self.held
             .lock()
             .ok()
-            .and_then(|g| g.as_ref().map(|(l, _)| l.class))
+            .and_then(|g| g.as_ref().map(|h| h[0].class))
             .unwrap_or(Class::Ordinary)
     }
 
-    fn take(&self) -> Option<(Held, Held)> {
+    fn take(&self) -> Option<[Held; 3]> {
         self.held.lock().ok().and_then(|mut g| g.take())
+    }
+}
+
+impl ApiProtocol {
+    fn peer_budget(&self, key: &str) -> Budget {
+        let mut peers = self
+            .peers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Forget keys with no open connection so the map stays as small as the
+        // set of devices that are actually connected.
+        peers.retain(|_, b| !b.unshared());
+        peers
+            .entry(key.to_owned())
+            .or_insert_with(|| Budget::new(self.peer))
+            .clone()
     }
 }
 
@@ -154,6 +212,7 @@ impl ProtocolHandler for ApiProtocol {
         };
         let name = PeerName(device.name);
         let local = Budget::new(self.connection);
+        let peer = self.peer_budget(&identity.key);
         let mut tasks = JoinSet::new();
         loop {
             tokio::select! {
@@ -162,15 +221,10 @@ impl ProtocolHandler for ApiProtocol {
                 Some(_) = tasks.join_next(), if !tasks.is_empty() => {},
                 accepted = conn.accept_bi() => {
                     let Ok((send, recv)) = accepted else { break };
-                    let (Ok(local_held), Ok(global_held)) = (local.acquire(Class::Ordinary), self.global.acquire(Class::Ordinary)) else {
+                    let Some(admission) = Admission::open([local.clone(), peer.clone(), self.global.clone()]) else {
                         drop((send, recv));
                         continue;
                     };
-                    let admission = Arc::new(Admission {
-                        local: local.clone(),
-                        global: self.global.clone(),
-                        held: Mutex::new(Some((local_held, global_held))),
-                    });
                     tasks.spawn(serve_stream(
                         recv,
                         send,

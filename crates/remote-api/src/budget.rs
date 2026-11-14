@@ -94,6 +94,12 @@ impl Budget {
         Ok(())
     }
 
+    /// No clone of this budget exists besides the caller's (no connection or
+    /// stream refers to it).
+    pub(crate) fn unshared(&self) -> bool {
+        Arc::strong_count(&self.total) == 1
+    }
+
     #[cfg(test)]
     pub(crate) fn available(&self) -> (usize, usize, usize) {
         (
@@ -227,9 +233,12 @@ pub(crate) fn view_credential_query(uri: &Uri) -> bool {
             "/v1/control/takeover" | "/v1/control/release"
         ))
         && uri.query().is_some_and(|q| {
-            q.split('&').any(|kv| {
-                let key = percent_decode(kv.split('=').next().unwrap_or_default());
-                matches!(key.as_str(), "token" | "access_token" | "authorization")
+            // Same decoding as the forwarder (`+`, percent), any letter case,
+            // any repetition: one match anywhere refuses the request.
+            url::form_urlencoded::parse(q.as_bytes()).any(|(key, _)| {
+                ["token", "access_token", "authorization"]
+                    .iter()
+                    .any(|name| key.eq_ignore_ascii_case(name))
             })
         })
 }
@@ -327,6 +336,13 @@ mod tests {
             "/v1/view/sessions/a/frames?access_token=x",
             "/v1/control/takeover?authorization=x",
             "/v1/%76iew/targets?token=x",
+            "/v1/view/targets?Token=x",
+            "/v1/view/targets?TOKEN=x",
+            "/v1/view/sessions/a/frames?Access_Token=x",
+            "/v1/view/sessions/a/frames?AUTHORIZATION=x",
+            "/v1/view/targets?keep=1&keep=2&%54oken=x",
+            "/v1/view/targets?a=1&token=x&token=y",
+            "/v1/control/release?Token",
         ] {
             assert!(view_credential_query(&uri.parse().unwrap()), "{uri}");
         }

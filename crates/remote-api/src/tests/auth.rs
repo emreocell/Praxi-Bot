@@ -66,7 +66,18 @@ async fn view_routes_need_the_local_token_loopback_host_and_header_credentials()
             .unwrap();
         assert_eq!(query.status(), 401, "{path}");
         // A correct header plus a credential in the URL is refused, not stripped.
-        for key in ["token", "%74oken", "access_token", "authorization"] {
+        for key in [
+            "token",
+            "%74oken",
+            "access_token",
+            "authorization",
+            "Token",
+            "TOKEN",
+            "Access_Token",
+            "AUTHORIZATION",
+            "keep=1&keep=2&%54oken",
+            "ok=1&token=a&Token",
+        ] {
             let both = http
                 .get(format!("{url}?{key}=x"))
                 .bearer_auth(&proxy.token)

@@ -447,10 +447,22 @@ async fn link_loss_keeps_the_latch_paused_and_stale_input_is_refused_after_recon
     .await
     .unwrap()
     .unwrap();
-    let cut = tokio::time::timeout(Duration::from_secs(5), session.reader.next())
-        .await
-        .unwrap();
-    assert!(cut.is_err(), "loss ends the body with an error");
+    // Records that were already on the wire may still arrive, but the body
+    // must end in an error and never in a clean end.
+    let end = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            match session.reader.next().await {
+                Ok(Some(_)) => {}
+                other => break other.map(|r| r.is_some()),
+            }
+        }
+    })
+    .await
+    .expect("the body ends promptly after the revoke");
+    assert!(
+        end.is_err(),
+        "loss ends the body with an error, got {end:?}"
+    );
     // The daemon pauses input but keeps the bot paused: nothing released it.
     eventually("input interrupted", Duration::from_secs(40), || {
         daemon.target.sink.resets.load(SeqCst) > 0

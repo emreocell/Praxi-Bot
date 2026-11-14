@@ -179,7 +179,7 @@ async fn view_streams_cannot_starve_control_traffic_and_permits_return() {
 }
 
 /// One raw HTTP/1.1 exchange on its own bi-stream of `conn`.
-async fn raw_get(
+pub(super) async fn raw_get(
     conn: &iroh::endpoint::Connection,
     path: &str,
 ) -> (hyper::Response<hyper::body::Incoming>, crate::AbortTask) {
@@ -191,12 +191,46 @@ async fn raw_get_with(
     path: &str,
     accept_view: bool,
 ) -> (hyper::Response<hyper::body::Incoming>, crate::AbortTask) {
+    raw_try(conn, path, accept_view).await.unwrap()
+}
+
+/// Send a request and never wait for the response (a handler that hangs).
+async fn raw_hang(
+    conn: &iroh::endpoint::Connection,
+    path: &str,
+) -> (crate::AbortTask, crate::AbortTask) {
     let (send, recv) = conn.open_bi().await.unwrap();
     let (mut sender, connection) = hyper::client::conn::http1::handshake(
         hyper_util::rt::TokioIo::new(tokio::io::join(recv, send)),
     )
     .await
     .unwrap();
+    let driver = crate::AbortTask(tokio::spawn(async move {
+        let _ = connection.await;
+    }));
+    let request = axum::http::Request::builder()
+        .uri(path)
+        .header("Host", "remote")
+        .body(Body::empty())
+        .unwrap();
+    let call = crate::AbortTask(tokio::spawn(async move {
+        let _ = sender.send_request(request).await;
+    }));
+    (driver, call)
+}
+
+/// `None` when the daemon side refused the stream outright (reset).
+pub(super) async fn raw_try(
+    conn: &iroh::endpoint::Connection,
+    path: &str,
+    accept_view: bool,
+) -> Option<(hyper::Response<hyper::body::Incoming>, crate::AbortTask)> {
+    let (send, recv) = conn.open_bi().await.ok()?;
+    let (mut sender, connection) = hyper::client::conn::http1::handshake(
+        hyper_util::rt::TokioIo::new(tokio::io::join(recv, send)),
+    )
+    .await
+    .ok()?;
     let driver = crate::AbortTask(tokio::spawn(async move {
         let _ = connection.await;
     }));
@@ -207,7 +241,11 @@ async fn raw_get_with(
         request = request.header("Accept", MEDIA_TYPE);
     }
     let request = request.body(Body::empty()).unwrap();
-    (sender.send_request(request).await.unwrap(), driver)
+    let response = tokio::time::timeout(Duration::from_secs(3), sender.send_request(request))
+        .await
+        .ok()?
+        .ok()?;
+    Some((response, driver))
 }
 
 #[tokio::test]
@@ -223,11 +261,15 @@ async fn server_budget_limits_view_streams_per_connection_and_per_daemon() {
     let (host, client, proxy) = setup(
         dir.path(),
         Role::Desktop,
-        ApiProtocol::for_test_with(
+        ApiProtocol::for_test_peer(
             long_lived_app(&active, &produced, &hits, 0),
             global,
-            crate::CONNECTION_CAPACITY,
-            Tuning::default(),
+            // Roomy per-key share: this test is about connection/daemon caps.
+            Capacity {
+                total: 64,
+                long: 48,
+                view: 16,
+            },
         ),
         Tuning::default(),
     )
@@ -338,4 +380,90 @@ async fn stalled_view_reader_cancels_upstream_cuts_the_body_and_frees_permits() 
         .await;
     }
     stop(host, client, proxy).await;
+}
+
+#[tokio::test]
+async fn one_paired_peer_cannot_starve_the_others_of_the_daemon_budget() {
+    let dir = tempfile::tempdir().unwrap();
+    let (active, produced, hits) = (Arc::default(), Arc::default(), Arc::default());
+    let app = long_lived_app(&active, &produced, &hits, 0).route(
+        "/hang",
+        get(|| async {
+            std::future::pending::<()>().await;
+            "never"
+        }),
+    );
+    // Daemon: 16 streams. One key: 4 (2 long-lived). Others keep the rest.
+    let (host, client, proxy) = setup(
+        dir.path(),
+        Role::Desktop,
+        ApiProtocol::for_test_peer(
+            app,
+            Capacity {
+                total: 16,
+                long: 12,
+                view: 8,
+            },
+            Capacity {
+                total: 4,
+                long: 2,
+                view: 2,
+            },
+        ),
+        Tuning::default(),
+    )
+    .await;
+    let other =
+        peer_network::PeerNetwork::start(super::config(dir.path(), "other", Role::Desktop), None)
+            .await
+            .unwrap();
+    super::pair(&host, &other, Role::Desktop).await;
+    // The greedy device spreads its streams over several connections.
+    let mut greedy = Vec::new();
+    for _ in 0..4 {
+        greedy.push(client.connect(&host.id(), ALPN_API).await.unwrap());
+    }
+    let mut held = Vec::new();
+    let mut hanging = Vec::new();
+    for path in ["/v1/events", "/v1/events", "/hang", "/hang"] {
+        let conn = &greedy[(held.len() + hanging.len()) % greedy.len()];
+        if path == "/hang" {
+            hanging.push(raw_hang(conn, path).await);
+        } else {
+            held.push(raw_get_with(conn, path, false).await);
+        }
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Everything beyond the key's share fails at once, on any connection.
+    for conn in &greedy {
+        let started = std::time::Instant::now();
+        assert!(
+            raw_try(conn, "/v1/events", false)
+                .await
+                .is_none_or(|(r, _)| r.status() == 429)
+        );
+        assert!(raw_try(conn, "/hang", false).await.is_none());
+        assert!(started.elapsed() < Duration::from_secs(20));
+    }
+    // Another device is unaffected: long-lived, ordinary and control all work.
+    let theirs = other.connect(&host.id(), ALPN_API).await.unwrap();
+    let (events, _d1) = raw_get_with(&theirs, "/v1/events", false).await;
+    assert_eq!(events.status(), 200);
+    let (health, _d2) = raw_get_with(&theirs, "/v1/health", false).await;
+    assert_eq!(health.status(), 200);
+    let (heartbeat, _d3) = raw_get_with(&theirs, "/v1/health", false).await;
+    assert_eq!(heartbeat.status(), 200);
+    // The greedy device's own control traffic is still served through its proxy
+    // only within its share; releasing its streams restores it.
+    drop((held, hanging));
+    eventually("greedy streams released", Duration::from_secs(10), || {
+        active.load(SeqCst) <= 1
+    })
+    .await;
+    let (health, _d4) = raw_get_with(&greedy[0], "/v1/health", false).await;
+    assert_eq!(health.status(), 200);
+    drop(proxy);
+    other.shutdown().await;
+    client.shutdown().await;
+    host.shutdown().await;
 }

@@ -347,7 +347,7 @@ async fn forward(State(proxy): State<Proxy>, mut req: Request) -> Response {
         let query = req.uri().query().map(|q| {
             url::form_urlencoded::parse(q.as_bytes())
                 .into_owned()
-                .filter(|(k, _)| k != "token")
+                .filter(|(k, _)| !k.eq_ignore_ascii_case("token"))
                 .collect::<Vec<_>>()
         });
         let mut target = req.uri().path().to_owned();
@@ -486,7 +486,17 @@ async fn exchange(proxy: &Proxy, req: Request, class: Class) -> Result<Response,
     let stall = (held.class == Class::View).then_some(proxy.tuning.view_stall);
     // Driver and permits belong to the body. Dropping the body (client cancel,
     // stall, proxy stop) aborts the driver and resets the QUIC stream at once.
-    let lease = Lease::new(proxy.cancel.child_token(), (held, driver));
+    // A closed connection (revoke, loss) cancels the body at once: the reader
+    // gets an error even if records are still buffered, never a clean end.
+    let token = proxy.cancel.child_token();
+    let watcher = AbortTask(tokio::spawn({
+        let (token, conn) = (token.clone(), conn.clone());
+        async move {
+            conn.closed().await;
+            token.cancel();
+        }
+    }));
+    let lease = Lease::new(token, (held, driver, watcher));
     let body = GuardedBody::new(Body::new(body), lease, stall);
     Ok(Response::from_parts(parts, Body::new(body)))
 }
