@@ -57,6 +57,10 @@ browser-idle:    [39988, 1372508, 1394456]
 
 The observed combined peak was 1.33 GiB, below the 2.5 GiB budget. These are sampled RSS sums (shared mappings can be counted more than once), not a cgroup peak or a measurement of a real paid model turn. The GTK fixture remains in the daemon's descendant count during the browser check. Idle cleanup was checked after 26 seconds with a 15-second configured browser idle timeout.
 
+The generated maintenance wrapper was also exercised with the real release binary in a temporary root-owned prefix: root reached the GitHub release lookup (404 for the intentionally nonexistent v0.0.0), while the actual `praxi` service user was denied writes to `/opt/praxi` and received `run sudo /opt/praxi/bin/bot self-update (with the same options)`. The installed wrapper and binaries were not replaced. Installer `bash -n` and generated-wrapper tests passed.
+
+Native Unix regressions passed, including interrupted adoption/repair, symlink rollback, planted-PATH verifier rejection, checksum filenames, display timeout/cache, and workflow admission. Native Clippy and the final release build passed. The first native seven-package test batch had one unrelated `daemon-api --test cli_only_turn` fixture failure (`signed_out` expected, `cli_io_error` returned); that entire test file then passed three serial reruns unchanged. Final workspace and CI evidence is in the PR body and external report.
+
 ## Limits and decisions
 
 - `self-update --check` checks release metadata and installed binary integrity; it does not download or verify release bytes. This repository currently returns 404 for the latest published release. No live signed install, repair, or rollback against a published release could be demonstrated. Unix tests cover the local installation transaction; missing trusted gh fails closed.
