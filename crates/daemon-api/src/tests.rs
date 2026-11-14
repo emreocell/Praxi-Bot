@@ -23,6 +23,7 @@ use crate::fake::FakeProvider;
 use crate::{AppState, DaemonConfig, router};
 
 mod email;
+mod host;
 mod mcp;
 mod schedules;
 mod web;

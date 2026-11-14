@@ -127,6 +127,7 @@ struct Feed {
     // ---- global form ----
     /// `schedule_changed` notifications (global stream only).
     sched_rx: Option<broadcast::Receiver<ScheduleChanged>>,
+    host_rx: Option<broadcast::Receiver<crate::host::HostEvent>>,
     /// `mcp_server_changed` notifications (global stream only).
     mcp_rx: Option<broadcast::Receiver<McpServerChanged>>,
     /// `control_state_changed` notifications (global stream only).
@@ -425,6 +426,7 @@ impl Feed {
         true
     }
 
+    #[allow(clippy::too_many_lines)] // independent notification streams share the replay-aware select
     async fn next_global_item(&mut self) -> Option<Out> {
         loop {
             if self.cancel.is_cancelled() {
@@ -463,6 +465,13 @@ impl Feed {
             );
             let received = tokio::select! {
                 () = self.cancel.cancelled() => return None,
+                h = async {
+                    match &mut self.host_rx { Some(rx) => rx.recv().await, None => std::future::pending().await }
+                } => match h {
+                    Ok(event) => return Some(Out::Host(event)),
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => { self.host_rx = None; continue; }
+                },
                 r = rx.recv() => r,
                 s = async {
                     match sched_rx {
@@ -533,6 +542,7 @@ impl Feed {
 pub(crate) enum Out {
     Run(StreamItem),
     Schedule(ScheduleChanged),
+    Host(crate::host::HostEvent),
     Mcp(McpServerChanged),
     Control(crate::dto::ControlStateChanged),
     Gap(Gap),
@@ -908,6 +918,20 @@ fn event_stream(feed: Feed, local: bool) -> impl Stream<Item = Result<SseEvent, 
         };
         let ev = match out {
             Out::Run(item) => to_sse(&item, feed.scoped),
+            Out::Host(event) => {
+                let (name, data) = match event {
+                    crate::host::HostEvent::HostStateChanged(data) => {
+                        ("host_state_changed", serde_json::to_value(data))
+                    }
+                    crate::host::HostEvent::HostConflict(data) => {
+                        ("host_conflict", serde_json::to_value(data))
+                    }
+                };
+                SseEvent::default()
+                    .event(name)
+                    .json_data(data.unwrap_or_default())
+                    .unwrap_or_else(|_| SseEvent::default().comment("unserialisable event"))
+            }
             Out::Schedule(change) => SseEvent::default()
                 .event("schedule_changed")
                 .json_data(&change)
@@ -984,6 +1008,7 @@ pub(crate) async fn events(
         gaps_total: Arc::clone(&state.0.sse_gaps_total),
         audited_gaps: Arc::clone(&state.0.sse_audited_gaps),
         _slot: Some(slot),
+        host_rx: scoped_run.is_none().then(|| state.leader().subscribe()),
         sched_rx: scoped_run
             .is_none()
             .then(|| state.subscribe_schedule_events()),
@@ -1305,6 +1330,7 @@ mod tests {
             audited_gaps: Arc::default(),
             _slot: None,
             sched_rx: None,
+            host_rx: None,
             mcp_rx: None,
             control_rx: None,
             storage: Arc::clone(&storage),

@@ -8,6 +8,7 @@ mod commands;
 mod doctor;
 mod email_cmd;
 mod email_host;
+mod host;
 mod host_runtime;
 mod mcp_host;
 mod peer;
@@ -73,6 +74,11 @@ struct Cli {
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)] // one-shot CLI args, built once
 enum Command {
+    /// Manage the active host and paired devices.
+    Host {
+        #[command(subcommand)]
+        action: host::HostCmd,
+    },
     /// Interactive first-run setup (or scripted with --provider).
     Setup(SetupCmd),
     /// Check the installation (data dir, config, providers, daemon, browser, ...).
@@ -509,7 +515,14 @@ fn run() -> Result<()> {
     if cli.remote.is_some()
         && !matches!(
             command,
-            Command::Status
+            Command::Host {
+                action: host::HostCmd::Invite { .. }
+                    | host::HostCmd::Status
+                    | host::HostCmd::Devices
+                    | host::HostCmd::Revoke { .. }
+                    | host::HostCmd::Standby
+                    | host::HostCmd::Activate { .. }
+            } | Command::Status
                 | Command::Chat { .. }
                 | Command::Bots { .. }
                 | Command::Approve { .. }
@@ -527,12 +540,20 @@ fn run() -> Result<()> {
         return Err("--remote supports daemon client commands (status, bots, chat, approve, answer, grants, schedules, email, channels telegram pair); this command manages the local installation".into());
     }
 
+    if let Command::Host {
+        action: host::HostCmd::Join { ticket },
+    } = command
+    {
+        return current_thread_runtime()?.block_on(host::join(&data_dir, ticket));
+    }
+
     // Daemon commands (no secret store needed, except `serve` with real providers).
     match command {
         Command::Serve { .. } => return run_serve(&cli, command, &data_dir),
         Command::Doctor(c) => return run_doctor(&cli, c, &data_dir),
         Command::SelfUpdate(args) => return update::run(args),
-        Command::Status
+        Command::Host { .. }
+        | Command::Status
         | Command::Chat { .. }
         | Command::Bots { .. }
         | Command::Approve { .. }
@@ -591,7 +612,8 @@ fn run() -> Result<()> {
             }
             SecretsCmd::Delete { name } => commands::secrets_delete(store, name),
         },
-        Command::SelfUpdate(_)
+        Command::Host { .. }
+        | Command::SelfUpdate(_)
         | Command::Doctor(_)
         | Command::Serve { .. }
         | Command::Status
@@ -844,6 +866,7 @@ fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Resul
     let json = cli.json;
     let outcome = rt.block_on(async {
         match command {
+            Command::Host { action } => host::run(&c, action, json, &mut out).await,
             Command::Status => remote::status(&c, json, &mut out).await,
             Command::Bots {
                 action: BotsCmd::List,
@@ -1082,6 +1105,27 @@ mod tests {
             Cli::try_parse_from(["bot", "self-update", "--rollback", "--version", "1.0.0"])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn parses_host_commands() {
+        for args in [
+            vec!["status"],
+            vec!["devices"],
+            vec!["standby"],
+            vec!["activate"],
+            vec!["activate", "--force"],
+            vec!["invite", "--role", "phone"],
+            vec!["invite", "--role", "desktop"],
+            vec!["invite", "--role", "node"],
+            vec!["join", "bot-pair:TEST"],
+            vec!["revoke", "key"],
+        ] {
+            let cli = Cli::try_parse_from(["bot", "host"].into_iter().chain(args)).unwrap();
+            assert!(matches!(cli.command, Some(Command::Host { .. })));
+        }
+        assert!(Cli::try_parse_from(["bot", "host", "invite", "--role", "host"]).is_err());
+        assert!(Cli::try_parse_from(["bot", "host", "join"]).is_err());
     }
 
     #[test]

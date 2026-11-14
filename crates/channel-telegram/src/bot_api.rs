@@ -341,6 +341,9 @@ impl BotApiClient {
                 .await
                 .map_err(|e| self.sanitize_error(e))?;
 
+            if method == "getUpdates" && resp.status() == reqwest::StatusCode::CONFLICT {
+                return Err(TelegramError::Conflict);
+            }
             if resp
                 .content_length()
                 .is_some_and(|n| n > MAX_RESPONSE_BYTES as u64)
@@ -365,6 +368,9 @@ impl BotApiClient {
                 });
             }
 
+            if method == "getUpdates" && parsed.error_code == Some(409) {
+                return Err(TelegramError::Conflict);
+            }
             if parsed.error_code == Some(429) {
                 let retry_after_secs = parsed
                     .parameters

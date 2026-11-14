@@ -119,6 +119,10 @@ pub struct DoctorEnv<'a> {
 #[must_use]
 pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
     vec![
+        check_host(env),
+        check_peer_relay(env),
+        check_host_display(env),
+        check_free_ram(),
         check_data_dir(env.data_dir),
         check_config(env.data_dir),
         check_secrets(env),
@@ -136,6 +140,151 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         check_resources(),
         check_telegram(env),
     ]
+}
+
+fn check_host(env: &DoctorEnv<'_>) -> Check {
+    match daemon_api::host::HostConfig::load(env.data_dir) {
+        Ok(config) => {
+            let detail = format!(
+                "mode={:?}, state={:?}, epoch={}, leader={}",
+                config.mode,
+                config.state,
+                config.epoch,
+                config.leader.as_deref().unwrap_or("local")
+            );
+            if config.runs_components() {
+                Check::ok("host ownership", detail)
+            } else {
+                Check::warn(
+                    "host ownership",
+                    detail,
+                    "this installation is idle; use bot host status or explicitly activate --force for emergency local operation",
+                )
+            }
+        }
+        Err(e) => Check::fail(
+            "host ownership",
+            e.to_string(),
+            "fix host.toml; the daemon refuses invalid ownership state",
+        ),
+    }
+}
+
+fn check_host_display(env: &DoctorEnv<'_>) -> Check {
+    if !daemon_api::host::HostConfig::load(env.data_dir)
+        .is_ok_and(|c| c.mode == daemon_api::host::HostMode::Host)
+    {
+        return Check::ok("host display", "not in host mode");
+    }
+    if browser_cdp::host::has_display() && env.browser.is_some() && env.browser_error.is_none() {
+        Check::ok(
+            "host display",
+            "display reachable and browser discovered; see browser launch check",
+        )
+    } else {
+        Check::warn(
+            "host display",
+            "host display or usable browser missing",
+            "configure Xvfb :99 and a non-snap Chromium; run doctor in the service environment",
+        )
+    }
+}
+
+fn check_free_ram() -> Check {
+    #[cfg(target_os = "linux")]
+    {
+        let available = std::fs::read_to_string("/proc/meminfo")
+            .ok()
+            .and_then(|text| {
+                text.lines()
+                    .find(|l| l.starts_with("MemAvailable:"))
+                    .and_then(|line| line.split_whitespace().nth(1)?.parse::<u64>().ok())
+            });
+        if let Some(kib) = available {
+            let mib = kib / 1024;
+            return if mib < 512 {
+                Check::warn(
+                    "free RAM",
+                    format!("{mib} MiB available"),
+                    "stop unused processes or lower limits.max_computer_runs in host.toml",
+                )
+            } else {
+                Check::ok("free RAM", format!("{mib} MiB available"))
+            };
+        }
+    }
+    Check::warn(
+        "free RAM",
+        "available memory is not exposed by this platform probe",
+        "check available RAM with the operating system monitor",
+    )
+}
+
+fn check_peer_relay(env: &DoctorEnv<'_>) -> Check {
+    if !env.online {
+        return Check::warn(
+            "peer relay",
+            "external reachability not probed",
+            "run bot doctor --online to probe the daemon through its advertised relay",
+        );
+    }
+    let probe = || -> Result<()> {
+        let token = daemon_api::read_token(env.data_dir)?;
+        let rt = crate::current_thread_runtime()?;
+        rt.block_on(async {
+            let client =
+                crate::client::Client::new(&format!("http://127.0.0.1:{}", env.port), token);
+            let status = client
+                .request(reqwest::Method::GET, "/v1/host", None)
+                .await?;
+            let key = peer_network::key_from_string(
+                status["endpoint_id"]
+                    .as_str()
+                    .ok_or("peer endpoint disabled")?,
+            )?;
+            let peer_network::RelayConfig::Custom(relay) = status["relay_url"]
+                .as_str()
+                .ok_or("no relay advertised")?
+                .parse::<peer_network::RelayConfig>()?
+            else {
+                return Err("invalid advertised relay".into());
+            };
+            // A throwaway identity cannot redeem invites. An authenticated pairing
+            // rejection proves the endpoint answers via the advertised relay route.
+            let dir = tempfile::tempdir()?;
+            let mut config = peer_network::PeerConfig::new(dir.path().to_path_buf());
+            config.local_role = peer_network::Role::Node;
+            config.relay = peer_network::RelayConfig::Custom(relay.clone());
+            let net = peer_network::PeerNetwork::start(config, None).await?;
+            let ticket = peer_network::PairTicket {
+                addr: key.into(),
+                secret: "0".repeat(64),
+                code: "000000".into(),
+                role: peer_network::Role::Node,
+            };
+            let ticket = peer_network::PairTicket {
+                addr: ticket.addr.with_relay_url(relay),
+                ..ticket
+            };
+            let result = tokio::time::timeout(Duration::from_secs(15), net.pair(&ticket)).await;
+            net.shutdown().await;
+            match result {
+                Ok(Err(peer_network::PeerError::PairingRejected(_))) => Ok(()),
+                _ => Err("endpoint did not answer the relay probe".into()),
+            }
+        })
+    };
+    match probe() {
+        Ok(()) => Check::ok(
+            "peer relay",
+            "daemon pairing endpoint answered using its advertised relay",
+        ),
+        Err(e) => Check::warn(
+            "peer relay",
+            e.to_string(),
+            "check outbound relay access and run bot serve --peer; no inbound port is required",
+        ),
+    }
 }
 
 fn check_resources() -> Check {

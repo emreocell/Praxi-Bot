@@ -238,3 +238,38 @@ async fn the_daemon_runs_the_channel_and_stops_it_on_shutdown() {
         "the channel stopped with the daemon"
     );
 }
+
+#[tokio::test]
+async fn standby_telegram_runtime_does_not_poll_until_started_and_can_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = telegram_mock().await;
+    let runtime = telegram_runtime(
+        dir.path(),
+        store_with_token(),
+        "http://127.0.0.1:1",
+        "token",
+        Some(&server.uri()),
+        None,
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(polls(&server).await, 0);
+    assert!(!runtime.info().running);
+    runtime.start();
+    wait_for_first_poll(&server).await;
+    assert!(runtime.info().running);
+    runtime.stop().await;
+    assert!(!runtime.info().running);
+    let stopped_at = polls(&server).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(polls(&server).await, stopped_at);
+    runtime.start();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while polls(&server).await == stopped_at {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(runtime.info().running);
+    runtime.shutdown().await;
+}

@@ -176,26 +176,48 @@ pub struct TelegramRuntime {
     configured: bool,
     enabled: bool,
     data_dir: PathBuf,
-    channel: Option<TelegramChannel>,
+    channel: parking_lot::Mutex<Option<TelegramChannel>>,
+    config: Option<TelegramConfig>,
+    client: Arc<HttpDaemonClient>,
 }
 
 impl TelegramRuntime {
     /// Stop polling and wait for the task to end.
     pub async fn shutdown(&self) {
-        if let Some(c) = &self.channel {
+        let channel = self.channel.lock().take();
+        if let Some(c) = channel {
             c.shutdown().await;
         }
     }
 }
 
+#[async_trait::async_trait]
 impl ChannelControl for TelegramRuntime {
+    fn start(&self) {
+        let mut channel = self.channel.lock();
+        if channel.is_none()
+            && let Some(config) = &self.config
+        {
+            match TelegramChannel::start(config.clone(), self.client.clone()) {
+                Ok(c) => *channel = Some(c),
+                Err(e) => eprintln!("warning: telegram channel not started: {e}"),
+            }
+        }
+    }
+    async fn stop(&self) {
+        self.shutdown().await;
+    }
+
     fn info(&self) -> ChannelDto {
+        let channel = self.channel.lock();
         ChannelDto {
             id: "telegram".into(),
             configured: self.configured,
             enabled: self.enabled,
-            running: self.channel.is_some(),
-            paired_users: self.channel.as_ref().map_or_else(
+            running: channel
+                .as_ref()
+                .is_some_and(|c| c.status() == channel_telegram::ChannelStatus::Running),
+            paired_users: channel.as_ref().map_or_else(
                 || paired_users_on_disk(&self.data_dir),
                 |c| c.pairing().paired_users().len(),
             ),
@@ -203,7 +225,7 @@ impl ChannelControl for TelegramRuntime {
     }
 
     fn create_pair_code(&self) -> std::result::Result<PairCodeDto, String> {
-        match &self.channel {
+        match &*self.channel.lock() {
             Some(c) => Ok(PairCodeDto {
                 code: c.create_pair_code(),
                 expires_in_secs: PAIR_CODE_TTL.as_secs(),
@@ -223,6 +245,7 @@ impl ChannelControl for TelegramRuntime {
 /// Must run inside a Tokio runtime.  `api_base_url` overrides the Telegram
 /// endpoint (tests only).  A start failure is reported on stderr and leaves the
 /// channel not running; the daemon carries on.
+#[cfg(test)]
 #[must_use]
 pub fn start_telegram(
     data_dir: &Path,
@@ -231,31 +254,57 @@ pub fn start_telegram(
     daemon_token: &str,
     api_base_url: Option<&str>,
 ) -> Arc<TelegramRuntime> {
-    let configured = telegram_configured(store.as_ref()).unwrap_or_else(|e| {
-        eprintln!("warning: telegram: cannot read the secret store: {e}");
-        false
-    });
+    let runtime = telegram_runtime(
+        data_dir,
+        store,
+        daemon_url,
+        daemon_token,
+        api_base_url,
+        None,
+    );
+    runtime.start();
+    runtime
+}
+
+pub fn telegram_runtime(
+    data_dir: &Path,
+    store: Arc<dyn SecretStore>,
+    daemon_url: &str,
+    daemon_token: &str,
+    api_base_url: Option<&str>,
+    leader: Option<daemon_api::host::LeaderControl>,
+) -> Arc<TelegramRuntime> {
+    let configured = telegram_configured(store.as_ref()).unwrap_or(false);
     let enabled = telegram_enabled(data_dir);
-    let mut channel = None;
-    if configured && enabled {
+    let config = if configured && enabled {
         let mut cfg =
             TelegramConfig::new(store).with_state_path(data_dir.join(TELEGRAM_STATE_FILE));
-        if let Some(u) = api_base_url {
-            cfg = cfg.with_api_base_url(u);
+        if let Some(url) = api_base_url {
+            cfg = cfg.with_api_base_url(url);
         }
-        let client = Arc::new(HttpDaemonClient::new(
-            daemon_url,
-            SecretValue::new(daemon_token),
-        ));
-        match TelegramChannel::start(cfg, client) {
-            Ok(c) => channel = Some(c),
-            Err(e) => eprintln!("warning: telegram channel not started: {e}"),
+        if let Some(leader) = leader {
+            cfg.on_conflict = Some(Arc::new(move || {
+                let leader = leader.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = leader.telegram_conflict().await {
+                        eprintln!("host conflict: {e}");
+                    }
+                });
+            }));
         }
-    }
+        Some(cfg)
+    } else {
+        None
+    };
     Arc::new(TelegramRuntime {
         configured,
         enabled,
         data_dir: data_dir.to_path_buf(),
-        channel,
+        channel: parking_lot::Mutex::new(None),
+        config,
+        client: Arc::new(HttpDaemonClient::new(
+            daemon_url,
+            SecretValue::new(daemon_token),
+        )),
     })
 }

@@ -32,12 +32,18 @@ pub struct HostInfo {
     pub has_browser: bool,
     /// Physical memory in MiB (1024 * 1024 bytes).
     pub total_ram_mb: u64,
+    pub mode: crate::host::HostMode,
+    pub state: crate::host::HostState,
+    pub epoch: u64,
 }
 
 impl HostInfo {
     #[must_use]
     pub fn detect() -> Self {
         Self {
+            mode: crate::host::HostMode::default(),
+            state: crate::host::HostState::default(),
+            epoch: 0,
             os: std::env::consts::OS.into(),
             arch: std::env::consts::ARCH.into(),
             has_display: browser_cdp::host::has_display(),

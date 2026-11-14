@@ -9,6 +9,9 @@ pub type Result<T> = std::result::Result<T, TelegramError>;
 /// Errors produced by the Telegram Bot API client, pairing store, or daemon bridge.
 #[derive(Debug, Error)]
 pub enum TelegramError {
+    /// Another poller or webhook owns this bot. Polling must stop.
+    #[error("telegram polling conflict: another installation is running this bot")]
+    Conflict,
     /// Network or HTTP transport failure talking to Telegram or the daemon.
     #[error("http error: {0}")]
     Http(String),

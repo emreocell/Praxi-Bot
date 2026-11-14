@@ -20,6 +20,7 @@ mod email_routes;
 pub mod error;
 #[cfg(any(test, feature = "fake-provider"))]
 pub mod fake;
+pub mod host;
 pub mod live_view;
 pub mod mcp;
 mod mcp_routes;
@@ -70,6 +71,9 @@ pub use web::{WebControl, WebControlError};
 
 /// Default TCP port of `bot serve`.
 pub const DEFAULT_PORT: u16 = 47821;
+
+/// HTTP API compatibility version advertised by health and host status.
+pub const API_VERSION: &str = "1.0";
 
 /// Origins of the desktop app (Tauri, per platform) accepted by default.
 pub const DEFAULT_ALLOWED_ORIGINS: &[&str] = &[
@@ -130,7 +134,12 @@ pub struct ProviderHost {
 
 /// A messaging channel the embedder runs next to the daemon (see
 /// [`AppState::add_channel`]); backs `/v1/channels`.
+#[async_trait::async_trait]
 pub trait ChannelControl: Send + Sync {
+    /// Start polling when this installation becomes active.
+    fn start(&self) {}
+    /// Stop polling before relinquishing leadership.
+    async fn stop(&self) {}
     /// Current state of the channel.
     fn info(&self) -> dto::ChannelDto;
     /// A fresh one-time pairing code.
@@ -183,7 +192,10 @@ struct Inner {
     /// CLI provider detector (`GET /v1/providers/detected`).
     detector: parking_lot::RwLock<Arc<cli_provider::Detector>>,
     /// The running scheduler (see [`AppState::start_scheduler`]).
-    scheduler: OnceLock<Scheduler>,
+    scheduler: parking_lot::Mutex<Option<Scheduler>>,
+    leader: OnceLock<host::LeaderControl>,
+    #[cfg(test)]
+    scheduler_clock: parking_lot::Mutex<Option<Arc<dyn scheduler::Clock>>>,
     /// Shutdown steps in the order they ran (tests only).
     #[cfg(test)]
     order: parking_lot::Mutex<Vec<&'static str>>,
@@ -280,7 +292,8 @@ impl AppState {
                 Some(msg)
             }
         };
-        Ok(Self(Arc::new(Inner {
+        let host_config = host::HostConfig::load(storage.data_dir())?;
+        let state = Self(Arc::new(Inner {
             schedule_events: tokio::sync::broadcast::channel(64).0,
             channels: parking_lot::Mutex::new(Vec::new()),
             agent,
@@ -307,10 +320,19 @@ impl AppState {
             providers_lock: parking_lot::Mutex::new(()),
             policy_load_error: parking_lot::Mutex::new(policy_load_error),
             detector: parking_lot::RwLock::new(Arc::new(cli_provider::Detector::new())),
-            scheduler: OnceLock::new(),
+            scheduler: parking_lot::Mutex::new(None),
+            leader: OnceLock::new(),
+            #[cfg(test)]
+            scheduler_clock: parking_lot::Mutex::new(None),
             #[cfg(test)]
             order: parking_lot::Mutex::new(Vec::new()),
-        })))
+        }));
+        let _ = state.0.leader.set(host::LeaderControl::new(
+            state.data_dir(),
+            host_config,
+            state.downgrade(),
+        ));
+        Ok(state)
     }
 
     /// Let `/v1/providers` list the catalog and reload the providers (call
@@ -390,6 +412,36 @@ impl AppState {
         self.0.secrets.get().cloned()
     }
 
+    /// Ownership handle for runtime transitions and peer conflict detection.
+    /// # Panics
+    /// Never for a constructed state: the handle is initialized before the state is returned.
+    #[must_use]
+    pub fn leader(&self) -> &host::LeaderControl {
+        self.0.leader.get().expect("initialized with state")
+    }
+
+    /// Start automatic components when ownership permits it.
+    /// # Errors
+    /// Returns errors opening the schedule store.
+    pub(crate) fn start_leader_components(&self) -> Result<(), ApiError> {
+        if self.0.shutdown.is_cancelled() || !self.leader().config().runs_components() {
+            return Ok(());
+        }
+        self.start_scheduler()?;
+        for channel in self.0.channels.lock().iter() {
+            channel.start();
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn stop_components(&self) {
+        self.stop_scheduler().await;
+        let channels = self.0.channels.lock().clone();
+        for channel in channels {
+            channel.stop().await;
+        }
+    }
+
     /// Register a messaging channel for `/v1/channels` (call before [`serve`]).
     pub fn add_channel(&self, channel: Arc<dyn ChannelControl>) {
         self.0.channels.lock().push(channel);
@@ -426,10 +478,14 @@ impl AppState {
     }
 
     /// The running scheduler, or `503` when the daemon did not start one.
-    pub(crate) fn scheduler(&self) -> Result<&Scheduler, ApiError> {
+    pub(crate) fn scheduler(&self) -> Result<Scheduler, ApiError> {
+        if !self.leader().config().runs_components() {
+            return Err(ApiError::conflict("this installation is standby"));
+        }
         self.0
             .scheduler
-            .get()
+            .lock()
+            .clone()
             .ok_or_else(|| ApiError::unavailable("the scheduler is not running"))
     }
 
@@ -440,7 +496,14 @@ impl AppState {
     /// # Errors
     /// The schedule store cannot be opened.
     pub fn start_scheduler(&self) -> Result<(), scheduler::SchedulerError> {
-        if self.0.scheduler.get().is_some() {
+        if !self.leader().config().runs_components() {
+            return Ok(());
+        }
+        let mut scheduler = self.0.scheduler.lock();
+        if !self.leader().config().runs_components() {
+            return Ok(());
+        }
+        if scheduler.is_some() {
             return Ok(());
         }
         let store = self.schedule_store()?;
@@ -448,8 +511,16 @@ impl AppState {
             agent: self.0.agent.clone(),
             storage: self.storage_arc(),
             user_id: self.user_id(),
+            leader: self.leader().clone(),
         });
-        let _ = self.0.scheduler.set(Scheduler::start(store, exec));
+        #[cfg(test)]
+        let clock = self.0.scheduler_clock.lock().clone();
+        #[cfg(not(test))]
+        let clock: Option<Arc<dyn scheduler::Clock>> = None;
+        *scheduler = Some(match clock {
+            Some(clock) => Scheduler::start_with_clock(store, exec, clock),
+            None => Scheduler::start(store, exec),
+        });
         Ok(())
     }
 
@@ -483,7 +554,8 @@ impl AppState {
     /// Stop the scheduler (no new firings); running firings are left to the
     /// agent loop's shutdown.
     async fn stop_scheduler(&self) {
-        if let Some(s) = self.0.scheduler.get() {
+        let scheduler = self.0.scheduler.lock().take();
+        if let Some(s) = scheduler {
             s.shutdown().await;
         }
         #[cfg(test)]
@@ -578,7 +650,9 @@ impl AppState {
     pub(crate) fn data_dir(&self) -> PathBuf {
         self.0.storage.data_dir().to_path_buf()
     }
-    pub(crate) fn shutdown_token(&self) -> CancellationToken {
+    /// Daemon lifetime signal for embedder-owned background tasks.
+    #[must_use]
+    pub fn shutdown_token(&self) -> CancellationToken {
         self.0.shutdown.clone()
     }
     pub(crate) fn uptime_secs(&self) -> u64 {
@@ -653,6 +727,15 @@ fn api_routes() -> Router<AppState> {
     use routes as r;
     use web_routes as w;
     Router::new()
+        .route("/v1/host", get(host::status))
+        .route("/v1/host/invite", post(host::invite))
+        .route(
+            "/v1/host/devices/{key}",
+            axum::routing::delete(host::revoke),
+        )
+        .route("/v1/host/standby", post(host::standby))
+        .route("/v1/host/activate", post(host::activate))
+        .route("/v1/host/update", post(host::update))
         .route("/v1/health", get(r::health))
         .route("/v1/view/targets", get(v::targets))
         .route("/v1/view/sessions", post(v::create_session))
@@ -786,7 +869,11 @@ pub async fn serve(
     state: AppState,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<Vec<RunId>> {
-    state.start_scheduler().map_err(std::io::Error::other)?;
+    state
+        .leader()
+        .start()
+        .await
+        .map_err(std::io::Error::other)?;
     let cancel = state.shutdown_token();
     let served = axum::serve(listener, router(state.clone()))
         .with_graceful_shutdown(async move {

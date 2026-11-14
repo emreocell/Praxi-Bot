@@ -15,6 +15,8 @@ fake-provider = []
 workspace = true
 
 [dependencies]
+peer-network = { path = "../peer-network", version = "0.1.0" }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 browser-cdp = { path = "../browser-cdp", version = "0.1.0" }
 tempfile.workspace = true
 live-view = { workspace = true, features = ["openapi"] }

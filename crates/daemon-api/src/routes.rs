@@ -244,8 +244,15 @@ pub(crate) async fn health(State(s): State<AppState>) -> Json<Health> {
         }
         .into(),
         version: env!("CARGO_PKG_VERSION").into(),
-        api_version: "1.0".into(),
-        host: crate::dto::HostInfo::detect(),
+        api_version: crate::API_VERSION.into(),
+        host: {
+            let mut host = crate::dto::HostInfo::detect();
+            let config = s.leader().config();
+            host.mode = config.mode;
+            host.state = config.state;
+            host.epoch = config.epoch;
+            host
+        },
         uptime_secs: s.uptime_secs(),
     })
 }
@@ -1538,7 +1545,8 @@ pub(crate) async fn run_schedule_now(
     Path(sid): Path<String>,
 ) -> Result<(StatusCode, Json<AcceptedResponse>), ApiError> {
     let sc = schedule_of_user(&s, &sid)?;
-    s.scheduler()?.run_now(sc.id)?;
+    let scheduler = s.scheduler()?;
+    s.leader().with_active(|| scheduler.run_now(sc.id))??;
     Ok((
         StatusCode::ACCEPTED,
         Json(AcceptedResponse {
@@ -1625,8 +1633,9 @@ pub(crate) async fn webhook(
             "X-Webhook-Timestamp must be Unix milliseconds",
         ));
     }
-    s.scheduler()?
-        .trigger_webhook_with_meta(sid, text, signature, &meta)?;
+    let scheduler = s.scheduler()?;
+    s.leader()
+        .with_active(|| scheduler.trigger_webhook_with_meta(sid, text, signature, &meta))??;
     Ok((
         StatusCode::ACCEPTED,
         Json(AcceptedResponse {
