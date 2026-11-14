@@ -6,19 +6,21 @@ import {
   Info,
   KeyRound,
   PlugZap,
-  Trash2
+  Trash2,
+  TriangleAlert
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "ui";
+import { Button, Card } from "ui";
 import type {
   WebSearchConfig,
   WebSearchConfigInput,
   WebSearchTestReport
 } from "../../api/types";
 import formStyles from "../../components/Form.module.css";
-import { Switch } from "../../components/SettingsUi";
+import { SettingGroup, Switch } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
+import { applyWebSearchUpdate } from "../../lib/webSearchDraft";
 import { useDaemon } from "../../state/DaemonContext";
 import styles from "./WebSearchCard.module.css";
 
@@ -73,6 +75,21 @@ export function WebSearchCard() {
     setSearxngUrl(next.searxng_url ?? "");
   }, []);
 
+  const applyDraft = useCallback(
+    (sent: WebSearchConfigInput, updated: WebSearchConfig) => {
+      setConfig(updated);
+      const next = applyWebSearchUpdate(
+        { searxngUrl, braveKey, tavilyKey },
+        sent,
+        updated
+      );
+      setSearxngUrl(next.searxngUrl);
+      setBraveKey(next.braveKey);
+      setTavilyKey(next.tavilyKey);
+    },
+    [braveKey, searxngUrl, tavilyKey]
+  );
+
   const refresh = useCallback(async () => {
     if (!client) {
       return;
@@ -97,7 +114,7 @@ export function WebSearchCard() {
     setSaving(true);
     try {
       const updated = await client.updateWebSearch(input);
-      applyConfig(updated);
+      applyDraft(input, updated);
       setReport(null);
       if (toastMessage) {
         toast.show(toastMessage, "success");
@@ -159,13 +176,7 @@ export function WebSearchCard() {
     setSaving(true);
     try {
       const updated = await client.updateWebSearch(input);
-      applyConfig(updated);
-      if (input.brave_key !== undefined) {
-        setBraveKey("");
-      }
-      if (input.tavily_key !== undefined) {
-        setTavilyKey("");
-      }
+      applyDraft(input, updated);
       setReport(null);
       toast.show(t("settingsModal.webSearch.toast.saved"), "success");
     } catch (err) {
@@ -232,12 +243,22 @@ export function WebSearchCard() {
         </p>
       ) : null}
 
+      {config?.config_error ? (
+        <p className={styles.configWarning} data-testid="web-search-config-warning">
+          <TriangleAlert aria-hidden="true" />
+          <span>
+            {t("settingsModal.webSearch.configError", { message: config.config_error })}
+          </span>
+        </p>
+      ) : null}
+
       {config ? (
         <>
           <div className={styles.section}>
             <h4 className={styles.subheading}>{t("settingsModal.webSearch.orderTitle")}</h4>
             <p className={styles.subhint}>{t("settingsModal.webSearch.orderHint")}</p>
-            <ul className={styles.list}>
+            <SettingGroup>
+              <ul className={styles.list}>
               {config.order.map((id, index) => {
                 const status = statusText(id, config);
                 const label = t(backendLabelKey(id));
@@ -288,10 +309,12 @@ export function WebSearchCard() {
                   </li>
                 );
               })}
-            </ul>
+              </ul>
+            </SettingGroup>
           </div>
 
-          <form className={styles.card} onSubmit={(e) => void saveCredentials(e)}>
+          <Card asChild padding="md" elevated>
+            <form className={styles.card} onSubmit={(e) => void saveCredentials(e)}>
             <h4 className={styles.subheading}>{t("settingsModal.webSearch.credentialsTitle")}</h4>
 
             <div className={formStyles.field}>
@@ -398,9 +421,10 @@ export function WebSearchCard() {
                 {t("settingsModal.webSearch.save")}
               </Button>
             </div>
-          </form>
+            </form>
+          </Card>
 
-          <div className={styles.card}>
+          <Card padding="md" elevated className={styles.card}>
             <h4 className={styles.subheading}>{t("settingsModal.webSearch.testTitle")}</h4>
             <div className={styles.keyRow}>
               <input
@@ -460,7 +484,7 @@ export function WebSearchCard() {
                 ) : null}
               </div>
             ) : null}
-          </div>
+          </Card>
         </>
       ) : null}
     </div>

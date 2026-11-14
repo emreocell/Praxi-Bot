@@ -2652,6 +2652,11 @@ export interface components {
             bing: boolean;
             /** @description Whether a Brave Search API key is stored (never returned). */
             brave_key_set: boolean;
+            /**
+             * @description Parse or validation warning when `<data dir>/web.toml` could not be
+             *     loaded cleanly (the daemon fell back to defaults until saved).
+             */
+            config_error?: string | null;
             /** @description Whether the `DuckDuckGo` HTML fallback is enabled. */
             duckduckgo: boolean;
             /** @description Whether the `DuckDuckGo` Lite fallback is enabled. */

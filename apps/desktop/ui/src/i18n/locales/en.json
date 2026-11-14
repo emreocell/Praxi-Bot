@@ -1060,6 +1060,7 @@
       "description": "Search backend priority order, API keys, and live connectivity probe.",
       "note": "Web search tries active backends in priority order until one returns results. Changes apply immediately on the next bot turn without restarting.",
       "loadError": "Could not load web search settings: {{message}}",
+      "configError": "web.toml could not be loaded ({{message}}). Showing defaults — saving changes below will replace it.",
       "orderTitle": "Backend order & fallbacks",
       "orderHint": "Move preferred backends up. Keyless fallbacks work without an API key but may occasionally hit upstream rate limits.",
       "credentialsTitle": "Self-hosted & API backends",

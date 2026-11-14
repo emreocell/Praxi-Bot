@@ -1060,6 +1060,7 @@
       "description": "Arama sağlayıcı öncelik sırası, API anahtarları ve canlı bağlantı testi.",
       "note": "Web araması, sonuç dönen ilk etkin sağlayıcıya kadar öncelik sırasıyla dener. Değişiklikler yeniden başlatma olmadan bir sonraki turda uygulanır.",
       "loadError": "Web araması ayarları yüklenemedi: {{message}}",
+      "configError": "web.toml yüklenemedi ({{message}}). Varsayılanlar gösteriliyor — aşağıda değişiklikleri kaydetmek dosyayı yenileyecektir.",
       "orderTitle": "Sağlayıcı sırası ve yedekler",
       "orderHint": "Tercih ettiğiniz sağlayıcıları yukarı taşıyın. Anahtarsız yedekler hesap gerektirmez ancak zaman zaman hız sınırına takılabilir.",
       "credentialsTitle": "Kendi sunucunuz ve API sağlayıcıları",
