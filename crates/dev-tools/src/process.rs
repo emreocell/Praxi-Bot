@@ -7,8 +7,8 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sysinfo::{MINIMUM_CPU_UPDATE_INTERVAL, ProcessRefreshKind, ProcessesToUpdate, System};
 use tool_registry::{
-    ContentPart, Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError, ToolOutput,
-    ToolSpec,
+    ContentClass, ContentPart, Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError,
+    ToolOutput, ToolSpec,
 };
 
 /// Tool name.
@@ -52,6 +52,8 @@ pub(crate) fn tool() -> Arc<dyn Tool> {
             effect: Effect::Read,
             category: PermissionCategory::System,
             platforms: vec![Platform::All],
+            // Process names and command lines are private machine state.
+            content: ContentClass::private_read(),
         },
     })
 }
@@ -119,6 +121,7 @@ impl Tool for ProcessList {
         Ok(ToolOutput {
             content: vec![ContentPart::Json { data }],
             spill: None,
+            exposure: None,
         })
     }
 }

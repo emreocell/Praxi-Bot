@@ -479,6 +479,9 @@ fn session_search_over_messages() {
             role: role.into(),
             content: text.into(),
             created_at_ms: i64::try_from(i).unwrap(),
+            exposure_untrusted: false,
+            exposure_private: false,
+            exposure_sources: Vec::new(),
         })
         .unwrap();
     }

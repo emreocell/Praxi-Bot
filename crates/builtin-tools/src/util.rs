@@ -5,11 +5,50 @@ use std::path::Path;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tool_registry::{
-    ContentPart, Effect, PermissionCategory, Platform, SpillRef, ToolContext, ToolError,
-    ToolOutput, ToolSpec,
+    ContentClass, ContentPart, Effect, PermissionCategory, Platform, SpillRef, ToolContext,
+    ToolError, ToolOutput, ToolSpec,
 };
 
+/// Classification of a built-in tool. `None` means the name is not a built-in
+/// (a test double); [`spec`] then leaves it undeclared so registration fails
+/// until the author classifies it.
+///
+/// Arms that share a class are one pattern. Comments name the family.
+#[must_use]
+pub fn classify(name: &str) -> Option<ContentClass> {
+    Some(match name {
+        // Questions, todos, schedule lifecycle, a local write, or a listing
+        // of the bot's own bookkeeping. A write does not bring content in:
+        // the model already had the bytes, and the result is not a private read.
+        "ask_user" | "todo_write" | "schedule_pause" | "schedule_delete" | "fs_write"
+        | "fs_edit" | "fs_move" | "fs_delete" | "checkpoint_list" | "checkpoint_restore"
+        | "schedule_list" => ContentClass::none(),
+        // Observation, including a click, scroll, or drag. Those pick an
+        // on-screen target and cannot carry bytes off the machine. Typing,
+        // keys, fill, launch, and `browser_click`'s `prompt_text` can; the
+        // gate treats a click that includes `prompt_text` as egress.
+        "fs_read" | "fs_list" | "fs_search" | "browser_snapshot" | "browser_screenshot"
+        | "browser_wait" | "desktop_list_apps" | "desktop_get_state" | "desktop_click"
+        | "desktop_scroll" | "desktop_drag" | "browser_scroll" => ContentClass::untrusted_private(),
+        // A shell, a script, browser navigation and input, or a desktop
+        // mutation that types, replaces a value, presses a key, or launches
+        // a program can read and can send data off the machine. Tab changes
+        // stay here: a page can turn them into network requests. The desktop
+        // control gate is about who owns the computer, not about egress.
+        "shell_run" | "script_run" | "browser_open" | "browser_back" | "browser_click"
+        | "browser_fill" | "browser_select" | "browser_press" | "browser_eval" | "browser_tabs"
+        | "desktop_launch" | "desktop_type" | "desktop_set_value" | "desktop_key" => {
+            ContentClass::all()
+        }
+        "schedule_create" | "schedule_update" | "schedule_resume" => ContentClass::egress(),
+        _ => return None,
+    })
+}
+
 /// Build a [`ToolSpec`] that is available on every platform.
+///
+/// The content class comes from [`classify`]. A name that is not a built-in
+/// stays [`ContentClass::unspecified`] so the registry will not accept it.
 pub(crate) fn spec(
     name: &str,
     description: &str,
@@ -24,6 +63,7 @@ pub(crate) fn spec(
         effect,
         category,
         platforms: vec![Platform::All],
+        content: classify(name).unwrap_or_else(ContentClass::unspecified),
     }
 }
 
@@ -79,6 +119,7 @@ pub(crate) fn finish_text(ctx: &ToolContext, spill_dir: &Path, text: String) -> 
                 mime_type: "text/plain".into(),
                 size_bytes: total as u64,
             }),
+            exposure: None,
         }
     } else {
         const MARK: &str = "

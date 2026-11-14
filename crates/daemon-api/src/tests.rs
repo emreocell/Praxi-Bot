@@ -51,6 +51,7 @@ impl Tool for Danger {
             effect: Effect::Write,
             category: PermissionCategory::Fs,
             platforms: vec![Platform::All],
+            content: tool_registry::ContentClass::none(),
         })
     }
     async fn call(&self, _: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
@@ -1062,6 +1063,7 @@ impl Tool for Ask {
             effect: Effect::Read,
             category: PermissionCategory::Meta,
             platforms: vec![Platform::All],
+            content: tool_registry::ContentClass::none(),
         })
     }
     async fn call(&self, _: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
@@ -1074,6 +1076,7 @@ impl Tool for Ask {
                 }),
             }],
             spill: None,
+            exposure: None,
         })
     }
 }
@@ -1511,6 +1514,27 @@ async fn run_and_reply_seen(t: &T, chat: &str, text: &str) -> (String, Vec<proto
             .expect("run never finished")
             .expect("stream closed");
         let ev = item.envelope.event;
+        // A screen read taints the chat, so the following desktop action is
+        // egress and asks before the control overlay. These tests are about
+        // the overlay. Approve that one card and leave the overlay alone.
+        if let protocol::Event::ApprovalNeeded(a) = &ev
+            && a.details
+                .as_ref()
+                .and_then(|d| d.get("kind"))
+                .and_then(|k| k.as_str())
+                == Some("egress")
+        {
+            let (k, v) = auth();
+            let r = send(
+                &t.app,
+                Method::POST,
+                &format!("/v1/approvals/{}", a.call_id),
+                Some(json!({"decision": "approve", "scope": "once"})),
+                &[(k, v.as_str())],
+            )
+            .await;
+            assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+        }
         let finished =
             matches!(&ev, protocol::Event::RunFinished(f) if f.run_id.to_string() == run);
         let mine = match &ev {
@@ -1659,12 +1683,27 @@ async fn human_driving_waits_then_discards_stale_click_without_model_retry() {
     let instruction = click_after_state(3);
     let pending = run_and_reply_seen(&t, &chat, &instruction);
     tokio::pin!(pending);
-    assert!(
-        tokio::time::timeout(Duration::from_millis(100), &mut pending)
-            .await
-            .is_err(),
-        "paused call must wait"
-    );
+    // A fixed 100 ms is not enough on a slow runner: the click may still be in
+    // the model or the egress approval, and releasing then sends it to the
+    // overlay instead of the pause wait. Release only once the hub has parked
+    // this run on the latch. Keep polling the run so that approval can proceed.
+    let already = t.state.hub().affected_run_count();
+    let park = async {
+        loop {
+            if t.state.hub().affected_run_count() > already {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    };
+    tokio::select! {
+        outcome = &mut pending => {
+            panic!("paused call finished before the click parked: {outcome:?}");
+        }
+        result = tokio::time::timeout(Duration::from_secs(10), park) => {
+            result.expect("click never parked on the pause");
+        }
+    }
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
 
     // Handing the wheel back lets the bot continue (an idle registration that
@@ -1932,6 +1971,9 @@ async fn listing_runs_writes_nothing_to_disk() {
         role: "user".to_owned(),
         content: "hello".to_owned(),
         created_at_ms: now,
+        exposure_untrusted: false,
+        exposure_private: false,
+        exposure_sources: Vec::new(),
     })
     .unwrap();
     st.insert_step(&storage::RunStep {

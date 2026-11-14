@@ -44,6 +44,12 @@ pub struct PermissionsConfig {
     /// Per-category rules layered over the preset.
     #[serde(default)]
     pub categories: BTreeMap<PermissionCategory, Rule>,
+    /// This bot may send data off the machine after a run has read untrusted
+    /// or private content, without an extra prompt. Default `false`. A tool
+    /// grant does not turn this on. Not a permission level: [`BotProfile::policy`]
+    /// ignores it.
+    #[serde(default)]
+    pub allow_egress_after_reads: bool,
 }
 
 /// `[tools]` table: allow / exclude globs over tool names.

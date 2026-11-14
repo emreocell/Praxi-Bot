@@ -9,8 +9,8 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use tool_registry::{
-    ContentPart, Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError, ToolOutput,
-    ToolSpec,
+    ContentClass, ContentPart, Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError,
+    ToolOutput, ToolSpec,
 };
 
 use crate::DevToolsConfig;
@@ -51,6 +51,12 @@ fn spec(name: &str, description: &str, schema: Value, effect: Effect) -> ToolSpe
         effect,
         category: PermissionCategory::Fs,
         platforms: vec![Platform::All],
+        content: if name == "git_commit" {
+            ContentClass::private_read()
+        } else {
+            // status/diff/log/show/branch read the repo, which can hold anything.
+            ContentClass::untrusted_private()
+        },
     }
 }
 
@@ -594,6 +600,7 @@ fn json_out(data: Value) -> ToolOutput {
     ToolOutput {
         content: vec![ContentPart::Json { data }],
         spill: None,
+        exposure: None,
     }
 }
 

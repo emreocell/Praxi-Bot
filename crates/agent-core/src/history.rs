@@ -2,6 +2,7 @@
 
 use std::fmt::Write as _;
 
+use protocol::{ChatId, RunId, TaskId};
 use provider_catalog::{Message, MessageRole, ToolCall};
 use serde_json::{Value, json};
 use storage::{Run, RunStep, Storage};
@@ -11,7 +12,7 @@ use tool_registry::ToolSpec;
 use crate::profile::BotProfile;
 use crate::router::workflow_note;
 use crate::shared::{
-    CallRec, ModelOut, ResultRec, STEP_MODEL, STEP_TOOLS, STEP_USER, STEP_WORKFLOW,
+    CallRec, ModelOut, ResultRec, STEP_MODEL, STEP_TOOLS, STEP_USER, STEP_WORKFLOW, schedule_id_of,
 };
 
 /// Providers (OpenAI-style) reject `.` in function names; expose `a.b` as `a__b`.
@@ -77,6 +78,87 @@ const MAX_HISTORY_BYTES: usize = 64 * 1024;
 const HISTORY_OMITTED_NOTE: &str = "Some older conversation exchanges were omitted to keep history bounded. \
 They remain in storage; do not infer their contents. A summary of older history is a follow-up if needed.";
 
+/// Messages from earlier turns that [`build_messages`] will place in context,
+/// after the same bound and the same drop of a leading assistant fragment.
+fn messages_in_context(
+    storage: &Storage,
+    chat: ChatId,
+    exclude_run: Option<RunId>,
+    own_schedule: Option<TaskId>,
+) -> Result<(Vec<storage::Message>, bool), storage::StorageError> {
+    let (history, omitted) = storage.list_messages_bounded(
+        chat,
+        exclude_run,
+        MAX_HISTORY_MESSAGES,
+        MAX_HISTORY_BYTES,
+    )?;
+    let start = history
+        .iter()
+        .position(|m| m.role == "user")
+        .unwrap_or(history.len());
+    let history: Vec<_> = history
+        .into_iter()
+        .skip(start)
+        .filter(|message| !message_from_schedule(storage, message, own_schedule))
+        .collect();
+    Ok((history, omitted || start > 0))
+}
+
+/// Earlier firings of this schedule. Their text is not put back in front of
+/// the model, so it does not taint the next day.
+fn message_from_schedule(
+    storage: &Storage,
+    message: &storage::Message,
+    own_schedule: Option<TaskId>,
+) -> bool {
+    let Some(schedule) = own_schedule else {
+        return false;
+    };
+    let Some(run_id) = message.run_id else {
+        return false;
+    };
+    storage
+        .get_run(run_id)
+        .ok()
+        .flatten()
+        .is_some_and(|run| schedule_id_of(&run.kind) == Some(schedule))
+}
+
+/// Provenance of chat messages that will be in the model context.
+///
+/// A message the history bound leaves out is not included: its bytes are not
+/// in front of the model. A message the bound keeps contributes the bits and
+/// labels stored with it, so compaction does not strip provenance from text
+/// that is still there.
+pub(crate) struct ChatProvenance {
+    pub exposure: permission_engine::ContentExposure,
+    pub sources: Vec<String>,
+}
+
+pub(crate) fn chat_provenance(
+    storage: &Storage,
+    chat: ChatId,
+    exclude_run: Option<RunId>,
+    own_schedule: Option<TaskId>,
+) -> ChatProvenance {
+    let mut exposure = permission_engine::ContentExposure::clean();
+    let mut sources = Vec::new();
+    let Ok((messages, _)) = messages_in_context(storage, chat, exclude_run, own_schedule) else {
+        return ChatProvenance { exposure, sources };
+    };
+    for m in messages {
+        if m.exposure_untrusted || m.exposure_private {
+            exposure.observe(m.exposure_untrusted, m.exposure_private);
+        }
+        for label in m.exposure_sources {
+            if !label.is_empty() && !sources.iter().any(|s| s == &label) {
+                sources.push(label);
+            }
+        }
+    }
+    ChatProvenance { exposure, sources }
+}
+
 fn append_chat_history(
     storage: &Storage,
     run: &Run,
@@ -85,22 +167,12 @@ fn append_chat_history(
     let Some(chat) = run.chat_id else {
         return Ok(());
     };
-    let (history, omitted) = storage.list_messages_bounded(
-        chat,
-        Some(run.id),
-        MAX_HISTORY_MESSAGES,
-        MAX_HISTORY_BYTES,
-    )?;
-    // A bounded suffix may start with an assistant response whose user
-    // message was outside the window. Drop that incomplete exchange.
-    let start = history
-        .iter()
-        .position(|m| m.role == "user")
-        .unwrap_or(history.len());
-    if omitted || start > 0 {
+    let (history, omitted) =
+        messages_in_context(storage, chat, Some(run.id), schedule_id_of(&run.kind))?;
+    if omitted {
         out.push(Message::text(MessageRole::System, HISTORY_OMITTED_NOTE));
     }
-    for m in history.into_iter().skip(start) {
+    for m in history {
         match m.role.as_str() {
             "user" => out.push(Message::text(MessageRole::User, m.content)),
             "assistant" => out.push(Message::text(MessageRole::Assistant, m.content)),
@@ -489,6 +561,9 @@ mod tests {
                     role: if i % 2 == 0 { "user" } else { "assistant" }.into(),
                     content: format!("old message {i}"),
                     created_at_ms: i64::from(i),
+                    exposure_untrusted: false,
+                    exposure_private: false,
+                    exposure_sources: Vec::new(),
                 })
                 .unwrap();
         }
@@ -555,6 +630,9 @@ mod tests {
                     role: role.into(),
                     content: text.into(),
                     created_at_ms: i64::from(i),
+                    exposure_untrusted: false,
+                    exposure_private: false,
+                    exposure_sources: Vec::new(),
                 })
                 .unwrap();
         }

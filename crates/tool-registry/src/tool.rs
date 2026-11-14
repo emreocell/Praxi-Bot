@@ -29,6 +29,21 @@ pub enum ContentPart {
     Binary { mime_type: String, base64: String },
 }
 
+/// Trust of a tool output, recorded by daemon code.
+///
+/// This is not read back from the bytes shown to the model. A tool sets it
+/// when the output's trust is not the tool's own declared class (discovery
+/// returning someone else's description, for example).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutputExposure {
+    /// The output contains untrusted text.
+    pub ingests_untrusted: bool,
+    /// The output contains private data.
+    pub reads_private: bool,
+    /// Short source label for an approval card. Empty means the caller picks one.
+    pub label: String,
+}
+
 /// The result of a successful tool call.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolOutput {
@@ -39,6 +54,10 @@ pub struct ToolOutput {
     /// If the full output exceeded the in-memory budget, the remainder was
     /// written to a temporary file and a pointer is returned here.
     pub spill: Option<SpillRef>,
+    /// Trust of this output when it differs from the tool's declared class.
+    /// `None` means "use the spec". Never derived from [`Self::content`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exposure: Option<OutputExposure>,
 }
 
 impl ToolOutput {
@@ -47,6 +66,7 @@ impl ToolOutput {
         Self {
             content: vec![ContentPart::Text { text: text.into() }],
             spill: None,
+            exposure: None,
         }
     }
 }
@@ -210,6 +230,8 @@ impl<W: ToolWrapper> Tool for W {
 mod delegation_guard {
     use std::collections::{BTreeMap, BTreeSet};
     use std::path::{Path, PathBuf};
+
+    use crate::ContentClass;
 
     use syn::visit::{self, Visit};
     use syn::{
@@ -748,6 +770,8 @@ impl tool_registry::Tool for Good {
                 effect: Effect::Write,
                 category: PermissionCategory::System,
                 platforms: vec![protocol::Platform::All],
+
+                content: ContentClass::none(),
             },
             closed: Arc::clone(&closed),
         });

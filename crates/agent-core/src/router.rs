@@ -685,6 +685,7 @@ impl TurnExecutor {
                 "level": level,
                 "note": "The saved workflow could not be replayed.",
                 "summary": format!("The saved workflow could not be replayed: {why}"),
+                "exposure": { "ran": false },
             })
         };
         let Some(w) = self.sh.router.workflows.get() else {
@@ -707,6 +708,16 @@ impl TurnExecutor {
             Err(e) => return Ok(fail(e.to_string())),
         };
         let summary = summarize(&report);
+        let exposure = json!({
+            "ran": true,
+            "ingests_untrusted": true,
+            "reads_private": true,
+            "label": "workflow replay",
+        });
+        ctx.taint.lock().note(
+            tool_registry::ContentClass::untrusted_private(),
+            "workflow replay",
+        );
         if report.is_completed() {
             self.sh.emit(
                 &ctx,
@@ -721,6 +732,7 @@ impl TurnExecutor {
                 "final_text": summary,
                 "steps_replayed": report.steps_replayed,
                 "wall_time_ms": report.wall_time_ms,
+                "exposure": exposure,
             }));
         }
         Ok(json!({
@@ -729,6 +741,7 @@ impl TurnExecutor {
             "level": level,
             "note": "The saved workflow stopped early.",
             "summary": summary,
+            "exposure": exposure,
         }))
     }
 

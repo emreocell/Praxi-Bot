@@ -111,6 +111,7 @@ mod tests {
             effect: Effect::Read,
             category: PermissionCategory::Accounts,
             platforms: vec![Platform::All],
+            content: tool_registry::ContentClass::none(),
         }
     }
 

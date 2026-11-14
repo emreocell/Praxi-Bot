@@ -361,6 +361,15 @@ export function BotPermissionsFields({
           ))}
         </div>
       ) : null}
+      <label className={formStyles.field}>
+        <span className={formStyles.label}>{t("botForm.allowEgressAfterReads.title")}</span>
+        <input
+          type="checkbox"
+          checked={draft.allowEgressAfterReads}
+          onChange={(e) => patch({ allowEgressAfterReads: e.target.checked })}
+        />
+        <span className={formStyles.hint}>{t("botForm.allowEgressAfterReads.hint")}</span>
+      </label>
     </div>
   );
 }

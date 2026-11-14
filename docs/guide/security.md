@@ -55,6 +55,25 @@ profile by default, not your everyday browser with its logged-in sessions.
 phone home. Data goes to the model provider you configured and to nowhere else,
 except what a bot sends on your behalf when you approve it.
 
+**12. Egress after a read asks.** Once a run has put untrusted or private content
+in front of the model (a file, a mailbox, a page, a screenshot, an MCP result,
+a remote tool description, recalled memory, a workflow report), any tool that
+can send data off the machine asks, even when that tool is a read and even when
+you have a standing grant for it. That includes desktop actions that type, click,
+or launch something, browser scrolling and tab changes, and mailbox reads,
+searches, and mark-read: those calls send the model's arguments to another
+machine. A search that can only reach the search provider you configured stays
+prompt-free after untrusted content, until the run has also read something
+private. Later turns of the same chat stay gated while a message that still
+carries that content is in the prompt. The only way to skip this ask is an
+explicit per-bot setting, "allow sending data after this bot has read something",
+which you turn on in the bot form. An empty tool allow list is not a bypass.
+Deny rules and the floors in item 3 still win. A run that has not read anything
+is unchanged, and existing grants still apply to it. Approving one send does not
+create a standing grant. The card lists every recipient and every field that
+will be sent. Email attachments are covered by `email_read`; there is no
+separate attachment tool.
+
 ## What it does not protect you from
 
 Be realistic about the limits:
@@ -65,9 +84,11 @@ Be realistic about the limits:
   [Gemini free tier](providers-and-models.md#gemini-free-tier) note.
 - **An approval is only as good as your reading of it.** A request can look
   harmless and still matter. Read the summary; deny when unsure.
-- **"Always allow" and the `full` preset are standing permissions.** A bot with
-  broad grants that reads a malicious page can act within them. Prefer
-  per-category rules, narrow `[tools]` lists and separate bots for risky jobs.
+- **"Always allow" and the `full` preset are standing permissions.** They do not
+  waive the egress gate in item 12: after a run has read private or untrusted
+  content, sending data off the machine still asks unless that bot's explicit
+  setting is on. Prefer per-category rules, narrow `[tools]` lists and separate
+  bots for risky jobs.
 - **The never-list is a safety net, not a sandbox.** It recognises known
   catastrophic patterns; it cannot judge every harmful command. Shell access
   (`shell_run`) is as dangerous as giving someone a terminal.

@@ -270,6 +270,8 @@ function serverFromConfig(c: McpServerConfig, category = "other"): McpServer {
     tool_count: 8,
     category: c.category ?? category,
     trust_hints: false,
+    public_content: c.public_content ?? false,
+    local_only: c.local_only ?? false,
     bots: c.bots ?? null
   };
 }

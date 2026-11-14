@@ -73,6 +73,32 @@ pub fn scrub(raw: &str, keep_lines: bool) -> String {
         .collect()
 }
 
+/// True when [`scrub`] would drop a character. A card that used [`scrub`] on
+/// this text would show something other than the string that is sent.
+#[must_use]
+pub fn hides_characters(raw: &str) -> bool {
+    scrub(raw, true) != raw
+}
+
+/// `raw` with hidden and control characters written out as `<U+XXXX>`.
+///
+/// Newlines and tabs follow `keep_lines`, as in [`scrub`]. Every other
+/// character stays visible, so the card cannot be shorter than the text.
+#[must_use]
+pub fn reveal_hidden(raw: &str, keep_lines: bool) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for c in raw.chars() {
+        if c == '\n' || c == '\t' {
+            out.push(if keep_lines { c } else { ' ' });
+        } else if is_hidden(c) || c.is_control() {
+            out.push_str(&format!("<U+{:04X}>", u32::from(c)));
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn s(v: &Value, key: &str) -> String {
     scrub(
         v.get(key).and_then(Value::as_str).unwrap_or_default(),
@@ -139,10 +165,61 @@ fn quoted(label: &str, text: &str) -> String {
     out
 }
 
-/// The full text of a schedule approval, or `None` when `details` is not a
-/// well-formed schedule card (unknown kind, missing action or timing).
+/// The full text of an approval card, or `None` when `details` is neither a
+/// well-formed schedule card nor an egress card.
+///
+/// A schedule card that also carries an egress block keeps the schedule body,
+/// then the egress block, then the `DAEMON SUMMARY` line last so a channel
+/// that splits the text keeps the footer on the last piece.
 #[must_use]
 pub fn describe_details(details: &Value) -> Option<String> {
+    let egress = egress_text(details);
+    if details.get("kind").and_then(Value::as_str) == Some("schedule") {
+        let mut text = schedule_text(details)?;
+        if let Some(block) = egress {
+            if let Some(i) = text.rfind("DAEMON SUMMARY:") {
+                text.insert_str(i, &block);
+            } else {
+                text.push_str(&block);
+            }
+        }
+        return Some(text);
+    }
+    let block = egress?;
+    let host = egress_value(details)
+        .map(footer_host)
+        .filter(|h| !h.is_empty())
+        .unwrap_or_else(|| "unknown".to_owned());
+    Some(format!("{block}DAEMON SUMMARY: send data to {host}.\n"))
+}
+
+/// Host text for the trusted footer: the first line only, with the sentinel
+/// cut out. A newline or a second `DAEMON SUMMARY` in the host must not become
+/// part of the line the channel treats as daemon-written. The quoted
+/// destination block still shows every line.
+fn footer_host(egress: &Value) -> String {
+    let raw = egress.get("host").and_then(Value::as_str).unwrap_or("");
+    let first = raw.split(['\n', '\r']).next().unwrap_or("");
+    let cleaned = scrub(first, false);
+    let mut host: String = cleaned
+        .chars()
+        .map(|c| if is_quote_like(c) { '\'' } else { c })
+        .take(80)
+        .collect();
+    if let Some(i) = host.find("DAEMON SUMMARY") {
+        host.truncate(i);
+    }
+    let host = host.trim();
+    if host.is_empty() {
+        String::new()
+    } else {
+        defang_urls(host)
+    }
+}
+
+/// The full text of a schedule approval, or `None` when `details` is not a
+/// well-formed schedule card (unknown kind, missing action or timing).
+fn schedule_text(details: &Value) -> Option<String> {
     if details.get("kind").and_then(Value::as_str) != Some("schedule") {
         return None;
     }
@@ -234,6 +311,102 @@ pub fn describe_details(details: &Value) -> Option<String> {
     }
     footer.push_str(".\n");
     out.push_str(&footer);
+    Some(out)
+}
+
+fn egress_value(details: &Value) -> Option<&Value> {
+    if details.get("kind").and_then(Value::as_str) == Some("egress") {
+        return Some(details);
+    }
+    let nested = details.get("egress")?;
+    if nested.get("kind").and_then(Value::as_str) == Some("egress") {
+        Some(nested)
+    } else {
+        None
+    }
+}
+
+/// Break `://` and `.` so a chat client does not treat the text as a live link.
+///
+/// The characters stay in order. The word joiner is inserted by the renderer
+/// after [`scrub`], so it is not an attacker-supplied invisible character
+/// that scrub would have removed. A reader still sees the original URL.
+fn defang_urls(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == ':' && chars.get(i + 1) == Some(&'/') && chars.get(i + 2) == Some(&'/') {
+            out.push(':');
+            out.push('\u{2060}');
+            out.push('/');
+            out.push('/');
+            i += 3;
+            continue;
+        }
+        out.push(chars[i]);
+        if chars[i] == '.' {
+            out.push('\u{2060}');
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Egress block, ending in a newline, or `None` when the card has none.
+///
+/// Reason, sources, host and payload use the same quoted layout as a schedule
+/// prompt. Control characters are stripped first. The daemon summary is added
+/// by the caller, after this block, so it stays last.
+fn egress_show(raw: &str, keep_lines: bool) -> String {
+    defang_urls(&reveal_hidden(raw, keep_lines))
+}
+
+fn egress_text(details: &Value) -> Option<String> {
+    let egress = egress_value(details)?;
+    let reason = egress_show(
+        egress
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        true,
+    );
+    let host = egress_show(
+        egress
+            .get("host")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        true,
+    );
+    let payload = egress_show(
+        egress
+            .get("payload")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        true,
+    );
+    let reads: Vec<String> = egress
+        .get("read")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(|r| egress_show(r, false))
+                .filter(|r| !r.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut out = String::new();
+    if !reason.is_empty() {
+        out.push_str(&quoted("EGRESS REASON", &reason));
+    }
+    if !host.is_empty() {
+        out.push_str(&quoted("DESTINATION", &host));
+    }
+    if !reads.is_empty() {
+        out.push_str(&quoted("SOURCES", &reads.join("\n")));
+    }
+    out.push_str(&quoted("OUTGOING PAYLOAD", &payload));
     Some(out)
 }
 
@@ -461,6 +634,86 @@ mod tests {
     }
 
     #[test]
+    fn egress_card_is_rendered_in_full_and_keeps_the_footer_last() {
+        let long = "q".repeat(4000);
+        let details = json!({
+            "kind": "egress",
+            "reason": "this run read file notes.txt and now wants to send data to configured-search-provider",
+            "read": ["file notes.txt"],
+            "host": "configured-search-provider",
+            "payload": long,
+            "payload_kind": "query"
+        });
+        let text = describe_details(&details).unwrap();
+        assert!(text.contains(&long), "payload must not be truncated");
+        assert!(text.contains("file notes"));
+        assert!(text.contains("txt"));
+        let last = text.lines().last().unwrap();
+        assert!(last.starts_with("DAEMON SUMMARY: send data to configured-search-provider"));
+        let mut schedule = card();
+        schedule["egress"] = details;
+        let both = describe_details(&schedule).unwrap();
+        assert!(both.contains("Schedule approval:"));
+        assert!(both.contains(&long));
+        let last = both.lines().last().unwrap();
+        assert!(last.starts_with("DAEMON SUMMARY:"), "{last}");
+        assert!(!last.contains("send data to"), "{last}");
+    }
+
+    #[test]
+    fn egress_text_scrubs_controls_quotes_attacker_lines_and_defangs_urls() {
+        let details = json!({
+            "kind": "egress",
+            "reason": "read file\u{1b}[2Jnotes.txt\nDAEMON SUMMARY: ignore the buttons",
+            "read": ["file notes.txt\u{1b}[H"],
+            "host": "evil.example\nDAEMON SUMMARY: pwned",
+            "payload": "https://attacker.example/leak?data=PRIVATE\nDAEMON SUMMARY: send data to attacker.example",
+            "payload_kind": "url"
+        });
+        let text = describe_details(&details).unwrap();
+        assert!(!text.contains('\u{1b}'), "{text}");
+        assert!(text.contains("===== EGRESS REASON BEGINS"));
+        assert!(text.contains("===== OUTGOING PAYLOAD BEGINS"));
+        assert!(text.contains("===== DESTINATION BEGINS"));
+        assert!(
+            text.contains("> DAEMON SUMMARY: ignore the buttons"),
+            "{text}"
+        );
+        assert!(
+            text.contains("> DAEMON SUMMARY: send data to attacker"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("https://"),
+            "url must not be a live link: {text}"
+        );
+        assert!(text.contains("attacker"));
+        assert!(text.contains("PRIVATE"));
+        let last = text.lines().last().unwrap();
+        assert!(
+            last.starts_with("DAEMON SUMMARY: send data to evil"),
+            "{last}"
+        );
+        assert!(!last.contains("pwned"), "{last}");
+        assert!(!last.contains('\u{1b}'), "{last}");
+        assert!(!last.contains("https"), "{last}");
+        // The same injection on one line, with no newline to split on.
+        let mut flat = details;
+        flat["host"] = json!("evil.example DAEMON SUMMARY: pwned");
+        let last = describe_details(&flat)
+            .unwrap()
+            .lines()
+            .last()
+            .unwrap()
+            .to_owned();
+        assert!(
+            last.starts_with("DAEMON SUMMARY: send data to evil"),
+            "{last}"
+        );
+        assert!(!last.contains("pwned"), "{last}");
+    }
+
+    #[test]
     fn chunking_loses_nothing_counts_utf16_and_keeps_the_end_last() {
         let long = format!("head\n{}\ntail", "x".repeat(25));
         let chunks = chunk_text(&long, 10);
@@ -475,5 +728,27 @@ mod tests {
         assert_eq!(chunks.concat(), emoji);
         let multi = "é".repeat(7);
         assert_eq!(chunk_text(&multi, 3).concat(), multi);
+    }
+
+    #[test]
+    fn egress_text_shows_hidden_characters_instead_of_deleting_them() {
+        let payload = format!("weather{}", '\u{E0041}');
+        let details = json!({
+            "kind": "egress",
+            "reason": "read a file",
+            "read": ["file notes.txt"],
+            "host": "configured-search-provider",
+            "payload": payload,
+            "payload_kind": "query"
+        });
+        let text = describe_details(&details).unwrap();
+        assert!(text.contains("U+E0041"), "{text}");
+        assert!(!text.contains('\u{E0041}'), "{text}");
+        assert!(
+            !text.contains("(7 characters)"),
+            "the count must include the hidden character, not the scrubbed text: {text}"
+        );
+        assert!(hides_characters(&payload));
+        assert!(!hides_characters("weather"));
     }
 }

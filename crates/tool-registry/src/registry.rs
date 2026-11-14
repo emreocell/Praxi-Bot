@@ -42,6 +42,11 @@ impl ToolRegistry {
     /// Register a tool.  Returns `false` if a tool with the same name already exists.
     pub fn register(&self, tool: Arc<dyn Tool>) -> bool {
         let name = tool.spec().name.clone();
+        // An undeclared classification is not registered. Callers that ignore
+        // the bool still will not see the tool; the registry test covers this.
+        if !tool.spec().content.is_declared() {
+            return false;
+        }
         let mut map = self.tools.write();
         if map.contains_key(&name) {
             return false;
@@ -92,7 +97,7 @@ mod tests {
     use super::*;
     use crate::{
         error::ToolError,
-        spec::{Effect, PermissionCategory, Platform},
+        spec::{ContentClass, Effect, PermissionCategory, Platform},
         tool::{Tool, ToolContext, ToolOutput},
     };
     use async_trait::async_trait;
@@ -111,6 +116,7 @@ mod tests {
                 effect: Effect::Read,
                 category: PermissionCategory::Script,
                 platforms: vec![Platform::All],
+                content: ContentClass::none(),
             })
         }
 
@@ -132,6 +138,7 @@ mod tests {
                 effect: Effect::Read,
                 category: PermissionCategory::Fs,
                 platforms: vec![Platform::All],
+                content: ContentClass::untrusted_private(),
             })
         }
 
@@ -177,5 +184,38 @@ mod tests {
         let g2 = reg.generation();
         assert!(!reg.unregister("echo"));
         assert_eq!(g2, reg.generation());
+    }
+
+    struct Bare;
+
+    #[async_trait]
+    impl Tool for Bare {
+        fn spec(&self) -> &ToolSpec {
+            static SPEC: std::sync::OnceLock<ToolSpec> = std::sync::OnceLock::new();
+            SPEC.get_or_init(|| ToolSpec {
+                name: "bare".into(),
+                description: "forgot to classify".into(),
+                input_schema: json!({ "type": "object" }),
+                effect: Effect::Read,
+                category: PermissionCategory::Script,
+                platforms: vec![Platform::All],
+                content: ContentClass::unspecified(),
+            })
+        }
+
+        async fn call(&self, _ctx: &ToolContext, _input: Value) -> Result<ToolOutput, ToolError> {
+            Ok(ToolOutput::text(""))
+        }
+    }
+
+    #[test]
+    fn register_rejects_a_tool_that_does_not_declare_its_classification() {
+        let reg = ToolRegistry::new();
+        assert!(
+            !reg.register(Arc::new(Bare)),
+            "an unspecified classification must not register"
+        );
+        assert!(reg.get("bare").is_none());
+        assert!(reg.list().is_empty());
     }
 }

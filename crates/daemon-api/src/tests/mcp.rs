@@ -57,6 +57,8 @@ impl FakeMcp {
             tool_count: 2,
             category: input.category.clone().unwrap_or_else(|| "accounts".into()),
             trust_hints: input.trust_hints,
+            public_content: input.public_content,
+            local_only: input.local_only,
             bots: input.bots.clone(),
         }
     }
@@ -103,6 +105,14 @@ impl FakeMcp {
         }
         if present("trust_hints") {
             slot.trust_hints = obj["trust_hints"].as_bool().unwrap_or(slot.trust_hints);
+        }
+        if present("public_content") {
+            slot.public_content = obj["public_content"]
+                .as_bool()
+                .unwrap_or(slot.public_content);
+        }
+        if present("local_only") {
+            slot.local_only = obj["local_only"].as_bool().unwrap_or(slot.local_only);
         }
         if present("category")
             && let Some(c) = obj["category"].as_str()
@@ -300,6 +310,8 @@ async fn server_crud_follows_the_contract() {
     // 042 defaults, and "all bots" is an explicit null.
     assert_eq!(s["category"], "accounts");
     assert_eq!(s["trust_hints"], false);
+    assert_eq!(s["public_content"], false);
+    assert_eq!(s["local_only"], false);
     assert!(s.get("bots").is_some() && s["bots"].is_null());
     assert!(s.get("url").is_none() && s.get("error").is_none());
     assert_eq!(s["tool_allow"], json!([]));

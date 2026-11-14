@@ -254,6 +254,8 @@ impl McpHost {
                 .map_or(0, |s| u32::try_from(s.tools.len()).unwrap_or(u32::MAX)),
             category: category_name(cfg.effective_category()),
             trust_hints: cfg.trust_hints,
+            public_content: cfg.public_content,
+            local_only: cfg.local_only,
             bots: cfg.bots.clone(),
         }
     }
@@ -540,6 +542,12 @@ fn merge_update(
     if let Some(v) = obj.get("trust_hints") {
         cfg.trust_hints = json_bool(v, "trust_hints")?;
     }
+    if let Some(v) = obj.get("public_content") {
+        cfg.public_content = json_bool(v, "public_content")?;
+    }
+    if let Some(v) = obj.get("local_only") {
+        cfg.local_only = json_bool(v, "local_only")?;
+    }
     if let Some(v) = obj.get("category") {
         cfg.category = if v.is_null() {
             None
@@ -633,6 +641,8 @@ fn to_config(name: &str, input: McpServerInput) -> Result<McpServerConfig, McpCo
         tool_allow: input.tool_allow,
         tool_exclude: input.tool_exclude,
         trust_hints: input.trust_hints,
+        public_content: input.public_content,
+        local_only: input.local_only,
         category,
         secret_headers: input.secret_headers,
         secret_env: input.secret_env,

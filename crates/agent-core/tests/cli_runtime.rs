@@ -186,6 +186,8 @@ async fn child(case: &str) {
             effect: Effect::Write,
             category: PermissionCategory::Fs,
             platforms: vec![],
+
+            content: tool_registry::ContentClass::none(),
         },
         count: AtomicUsize::new(0),
     });

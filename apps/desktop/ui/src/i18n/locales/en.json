@@ -318,6 +318,15 @@
           "read_only": "read-only"
         },
         "note": "This approval covers only this change; it is asked every time."
+      },
+      "egress": {
+        "host": "Destination: {{host}}",
+        "read": "This run read: {{list}}",
+        "payload": {
+          "query": "Outgoing query (scroll to read all of it):",
+          "url": "Outgoing URL (scroll to read all of it):",
+          "body": "Outgoing data (scroll to read all of it):"
+        }
       }
     },
     "question": {
@@ -641,6 +650,10 @@
     "executorRequired": "The executor model is required.",
     "fallbackPlaceholder": "provider/model, provider/model",
     "permissions": "Permissions",
+    "allowEgressAfterReads": {
+      "title": "Allow sending data after this bot has read something",
+      "hint": "Off by default. A tool grant does not turn this on. While it is off, a run that has read a file, mailbox, page or other private or untrusted content must ask before any tool sends data off this machine."
+    },
     "preset": {
       "read-only": {
         "name": "Read-only",

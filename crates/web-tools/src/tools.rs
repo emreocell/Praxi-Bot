@@ -20,8 +20,8 @@ use secret_store::SecretStore;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tool_registry::{
-    ContentPart, Effect, PermissionCategory, Platform, SpillRef, Tool, ToolContext, ToolError,
-    ToolOutput, ToolRegistry, ToolSpec,
+    ContentClass, ContentPart, Effect, PermissionCategory, Platform, SpillRef, Tool, ToolContext,
+    ToolError, ToolOutput, ToolRegistry, ToolSpec,
 };
 
 use crate::error::WebError;
@@ -132,6 +132,12 @@ pub fn tools(cfg: WebToolsConfig) -> Result<Vec<Arc<dyn Tool>>, WebError> {
                 },
                 category: PermissionCategory::Browser,
                 platforms: vec![Platform::All],
+                // Search and fetch both leave the machine and bring back
+                // untrusted page content. Search is not private; the egress
+                // gate still exempts `web_search` when the run has only
+                // untrusted content, because it can only reach the configured
+                // provider.
+                content: ContentClass::untrusted_egress(),
             },
             kind,
             shared: Arc::clone(&shared),
@@ -277,6 +283,7 @@ fn finish_text(ctx: &ToolContext, spill_dir: Option<&Path>, text: String) -> Too
                 mime_type: "text/markdown".into(),
                 size_bytes: text.len() as u64,
             }),
+            exposure: None,
         }
     } else {
         inline.push_str("\n...[output truncated]");
@@ -367,6 +374,7 @@ fn json_out(source: &str, mut data: Value) -> ToolOutput {
     ToolOutput {
         content: vec![ContentPart::Json { data }],
         spill: None,
+        exposure: None,
     }
 }
 
@@ -430,6 +438,7 @@ impl WebTool {
                 },
             ],
             spill: None,
+            exposure: None,
         })
     }
 

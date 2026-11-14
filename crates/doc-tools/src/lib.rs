@@ -166,6 +166,14 @@ pub(crate) fn mk_spec(
         effect,
         category: PermissionCategory::Fs,
         platforms: vec![Platform::All],
+        content: match name {
+            // Documents can carry prompt injection and are private files.
+            "pdf_extract" | "docx_read" | "xlsx_read" | "csv_read" | "csv_transform"
+            | "json_query" => tool_registry::ContentClass::untrusted_private(),
+            // The model already holds the document it is writing.
+            "docx_write" | "xlsx_write" => tool_registry::ContentClass::none(),
+            _ => tool_registry::ContentClass::unspecified(),
+        },
     }
 }
 
@@ -182,6 +190,8 @@ mod tests {
             assert!(t.spec().is_valid(), "{name}");
         }
         assert_eq!(reg.get("docx_write").unwrap().spec().effect, Effect::Write);
+        assert!(!reg.get("docx_write").unwrap().spec().content.reads_private);
+        assert!(!reg.get("xlsx_write").unwrap().spec().content.reads_private);
         assert_eq!(reg.get("pdf_extract").unwrap().spec().effect, Effect::Read);
     }
 }

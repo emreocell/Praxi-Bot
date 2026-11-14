@@ -73,6 +73,8 @@ fn build_cli_only_app(root: &std::path::Path) -> Router {
             effect: Effect::Read,
             category: PermissionCategory::Fs,
             platforms: vec![Platform::All],
+
+            content: tool_registry::ContentClass::none(),
         },
     }));
 

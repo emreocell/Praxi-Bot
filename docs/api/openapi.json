@@ -5589,7 +5589,7 @@
       },
       "McpServerDto": {
         "type": "object",
-        "description": "A configured MCP server (`GET /v1/mcp/servers`).  The full stored config,\nexcept secret *values*: `secret_env` / `secret_headers` carry secret\n**names** only.",
+        "description": "A configured MCP server (`GET /v1/mcp/servers`).  The full stored config,\nexcept secret *values*: `secret_env` / `secret_headers` carry secret\n**names** only. `enabled`, `trust_hints`, `public_content` and `local_only`\nare independent switches.",
         "required": [
           "name",
           "transport",
@@ -5669,9 +5669,17 @@
               "type": "string"
             }
           },
+          "local_only": {
+            "type": "boolean",
+            "description": "Tools cannot send data off the machine. Default `false`: every tool is egress."
+          },
           "name": {
             "type": "string",
             "description": "Server name (the `<server>` of `mcp:<server>/<tool>`)."
+          },
+          "public_content": {
+            "type": "boolean",
+            "description": "Tool results are public data. Default `false`: a result is a private read."
           },
           "secret_env": {
             "type": "object",
@@ -5809,12 +5817,20 @@
               "type": "string"
             }
           },
+          "local_only": {
+            "type": "boolean",
+            "description": "Tools cannot send data off the machine. Default `false` (every tool is egress)."
+          },
           "name": {
             "type": [
               "string",
               "null"
             ],
             "description": "Server name; `id` is accepted as an alias.  Required on POST; on PUT the\npath wins (a different name in the body is rejected)."
+          },
+          "public_content": {
+            "type": "boolean",
+            "description": "Tool results are public data. Default `false` (a result is a private read)."
           },
           "secret_env": {
             "type": "object",
@@ -5965,12 +5981,26 @@
               "type": "string"
             }
           },
+          "local_only": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Tools cannot send data off the machine. Omit to keep the stored value."
+          },
           "name": {
             "type": [
               "string",
               "null"
             ],
             "description": "Server name; `id` is accepted as an alias.  The path wins (a different\nname in the body is rejected)."
+          },
+          "public_content": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Tool results are public data. Omit to keep the stored value."
           },
           "secret_env": {
             "type": [

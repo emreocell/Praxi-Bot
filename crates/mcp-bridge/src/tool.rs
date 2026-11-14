@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use rmcp::model::{CallToolResult, Tool as McpTool};
 use serde_json::{Value, json};
 use tool_registry::{
-    ContentPart, Effect, Platform, Tool, ToolContext, ToolError, ToolOutput, ToolSpec,
+    ContentClass, ContentPart, Effect, Platform, Tool, ToolContext, ToolError, ToolOutput, ToolSpec,
 };
 
 use crate::{config::McpServerConfig, manager::Server};
@@ -55,6 +55,10 @@ pub(crate) fn spec_of(config: &McpServerConfig, tool: &McpTool) -> ToolSpec {
         effect: effect_of(tool, config.trust_hints),
         category: config.effective_category(),
         platforms: vec![Platform::All],
+        // MCP results are untrusted. They are private unless the server is
+        // marked public, and they are egress unless the server is local-only.
+        content: ContentClass::declared(true, !config.public_content, !config.local_only)
+            .with_external_metadata(),
     }
 }
 
@@ -175,6 +179,7 @@ pub(crate) fn into_output(result: CallToolResult) -> Result<ToolOutput, ToolErro
     Ok(ToolOutput {
         content: parts,
         spill: None,
+        exposure: None,
     })
 }
 
@@ -278,6 +283,23 @@ mod tests {
         assert_eq!(spec.input_schema["type"], "object");
         assert!(spec.input_schema["properties"].is_object());
         assert!(spec.is_valid());
+        assert!(spec.content.ingests_untrusted);
+        assert!(spec.content.reads_private);
+        assert!(spec.content.egress);
+    }
+
+    #[test]
+    fn public_content_and_local_only_change_the_classification() {
+        let mut cfg = McpServerConfig::stdio("srv", "x", [""; 0]);
+        cfg.public_content = true;
+        let spec = spec_of(&cfg, &tool(None));
+        assert!(spec.content.ingests_untrusted);
+        assert!(!spec.content.reads_private);
+        assert!(spec.content.egress);
+        cfg.local_only = true;
+        let spec = spec_of(&cfg, &tool(None));
+        assert!(!spec.content.egress);
+        assert!(spec.content.is_declared());
     }
 
     #[test]

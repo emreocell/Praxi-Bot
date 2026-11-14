@@ -17,7 +17,7 @@ use protocol::{Event, RunId};
 use serde::Serialize;
 use serde_json::{Value, json};
 use tool_registry::{
-    ContentPart, Effect, PermissionCategory, ToolContext, ToolError, ToolRegistry,
+    ContentClass, ContentPart, Effect, PermissionCategory, ToolContext, ToolError, ToolRegistry,
 };
 
 use crate::error::{ReplayError, WorkflowError};
@@ -36,6 +36,14 @@ pub const MAX_WORKFLOW_DEPTH: usize = 4;
 tokio::task_local! {
     /// Names of the workflows currently being replayed on this task chain.
     static WORKFLOW_STACK: Vec<String>;
+}
+
+/// Classification for a workflow step that is not a registered tool (native
+/// browser and desktop actions). The same table as [`builtin_tools::classify`],
+/// so a desktop launch is egress here too. Unknown names stay undeclared,
+/// which the loop treats as private and untrusted.
+fn content_for_unnamed(name: &str) -> ContentClass {
+    builtin_tools::classify(name).unwrap_or_else(ContentClass::unspecified)
 }
 
 /// Workflows currently being replayed (outermost first) on this task.
@@ -557,6 +565,11 @@ impl Replayer {
         effect: Effect,
         input: Value,
     ) -> Result<(), Stop> {
+        let content = self
+            .handles
+            .tools
+            .get(tool)
+            .map_or_else(|| content_for_unnamed(tool), |t| t.spec().content);
         let req = GateRequest {
             run_id: self.opts.run_id.clone(),
             tool: tool.to_owned(),
@@ -564,6 +577,7 @@ impl Replayer {
             effect,
             raw_command: raw_command_for(tool, &input),
             input,
+            content,
         };
         gate.authorize(&req).await.map_err(Stop::Denied)
     }
@@ -1280,4 +1294,32 @@ enum Hit {
     None,
     Ref(String, Found),
     Css(String),
+}
+
+#[cfg(test)]
+mod class_tests {
+    use super::*;
+
+    #[test]
+    fn unnamed_steps_use_the_builtin_classification() {
+        for name in [
+            "desktop_launch",
+            "desktop_type",
+            "desktop_key",
+            "browser_scroll",
+            "browser_tabs",
+            "fs_read",
+            "desktop_list_apps",
+        ] {
+            assert_eq!(
+                content_for_unnamed(name),
+                builtin_tools::classify(name).unwrap(),
+                "{name}"
+            );
+        }
+        assert!(content_for_unnamed("desktop_launch").egress);
+        assert!(!content_for_unnamed("browser_scroll").egress);
+        assert!(content_for_unnamed("browser_tabs").egress);
+        assert!(!content_for_unnamed("browser_snapshot").egress);
+    }
 }

