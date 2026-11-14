@@ -30,6 +30,9 @@ test("send with Ctrl+Enter: plain Enter breaks the line", () => {
 test("stored preferences fall back to safe defaults", () => {
   assert.equal(parseSendWith("nope"), "enter");
   assert.equal(parseSendWith("ctrl-enter"), "ctrl-enter");
-  assert.equal(parseComputerTarget("remote"), "remote");
+  assert.equal(parseComputerTarget("this-pc"), "this-pc");
+  assert.equal(parseComputerTarget("remote"), "this-pc");
+  assert.equal(parseComputerTarget("browser"), "this-pc");
+  assert.equal(parseComputerTarget("off"), "this-pc");
   assert.equal(parseComputerTarget(undefined), "this-pc");
 });

@@ -93,6 +93,7 @@
       "title": "Model providers",
       "description": "API keys are stored in your OS keychain. Changes are picked up by the daemon without a restart.",
       "nativeOnly": "Provider management is available in the desktop app.",
+      "localDaemonOnly": "Provider setup is available for the local daemon started by this app. For other connections, manage providers on the computer running the daemon.",
       "none": "No providers configured yet.",
       "default": "Default",
       "disabled": "Disabled",
@@ -1155,12 +1156,12 @@
       "soon": "Soon",
       "target": {
         "title": "Where the bot runs",
-        "description": "Choose where computer and browser tools execute."
+        "description": "Only the connected computer is currently supported. Manage computer and browser access in Permissions below."
       },
       "targets": {
         "this-pc": {
-          "title": "This PC",
-          "description": "Desktop automation on this machine."
+          "title": "Connected computer",
+          "description": "Tools run on the computer connected to this app."
         },
         "browser": {
           "title": "Browser only",

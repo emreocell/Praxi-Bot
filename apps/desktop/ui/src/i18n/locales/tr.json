@@ -93,6 +93,7 @@
       "title": "Model sağlayıcıları",
       "description": "API anahtarları işletim sistemi anahtarlığında saklanır. Değişiklikleri arka plan servisi yeniden başlatmadan alır.",
       "nativeOnly": "Sağlayıcı yönetimi masaüstü uygulamasında kullanılabilir.",
+      "localDaemonOnly": "Sağlayıcı kurulumu, bu uygulamanın başlattığı yerel daemon için kullanılabilir. Diğer bağlantılarda sağlayıcıları daemon'un çalıştığı bilgisayarda yönetin.",
       "none": "Henüz sağlayıcı yapılandırılmadı.",
       "default": "Varsayılan",
       "disabled": "Devre dışı",
@@ -1155,12 +1156,12 @@
       "soon": "Yakında",
       "target": {
         "title": "Bot nerede çalışır",
-        "description": "Bilgisayar ve tarayıcı araçlarının nerede çalışacağını seçin."
+        "description": "Şimdilik yalnızca bağlı bilgisayar destekleniyor. Bilgisayar ve tarayıcı erişimini aşağıdaki İzinler bölümünden yönetin."
       },
       "targets": {
         "this-pc": {
-          "title": "Bu bilgisayar",
-          "description": "Bu makinede masaüstü otomasyonu."
+          "title": "Bağlı bilgisayar",
+          "description": "Araçlar, uygulamanın bağlı olduğu bilgisayarda çalışır."
         },
         "browser": {
           "title": "Yalnızca tarayıcı",
