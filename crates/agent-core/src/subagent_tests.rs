@@ -27,9 +27,9 @@ use serde_json::{Value, json};
 use storage::{Storage, read_event_log};
 use task_runtime::RunState;
 use tokio::sync::{Barrier, broadcast};
-use tool_registry::{Effect, Tool, ToolRegistry};
+use tool_registry::{ContentClass, Effect, PermissionCategory, Tool, ToolRegistry};
 
-use crate::tests::{Env, cfg, profile, setup, tool, until};
+use crate::tests::{Env, cfg, profile, setup, tool, until, with_class};
 use crate::{
     AgentLoop, ApprovalScope, BotProfile, LoopConfig, ModelPrice, Providers, SkillHints, StreamItem,
 };
@@ -1173,4 +1173,63 @@ async fn finished_children_are_charged_against_the_parents_budget() {
     assert_eq!(kids[0].spec.as_ref().unwrap()["token_budget"], 1_000);
     // The first child burned 3000 of the parent's 4000.
     assert_eq!(kids[1].spec.as_ref().unwrap()["token_budget"], 250);
+}
+
+#[tokio::test]
+async fn a_child_inherits_a_private_read_and_asks_before_search() {
+    let env = setup();
+    let read = Arc::new(with_class(
+        "fs_read",
+        Effect::Read,
+        PermissionCategory::Fs,
+        ContentClass::untrusted_private(),
+        "secret",
+    ));
+    let search = Arc::new(with_class(
+        "web_search",
+        Effect::Read,
+        PermissionCategory::Browser,
+        ContentClass::untrusted_egress(),
+        "hits",
+    ));
+    let brain = Brain::new(|req| {
+        if is_child(req) {
+            if results(req).is_empty() {
+                call(&[("w", "web_search", json!({"query": "leak"}))])
+            } else {
+                say("child done")
+            }
+        } else if results(req).is_empty() {
+            call(&[("r", "fs_read", json!({"path": "secret.txt"}))])
+        } else if results(req).len() == 1 {
+            call(&[("s", "spawn_subagent", json!({"task": "search"}))])
+        } else {
+            say("parent done")
+        }
+    });
+    let lp = make(
+        &env.storage,
+        env.bot,
+        &brain,
+        &[
+            Arc::clone(&read) as Arc<dyn Tool>,
+            Arc::clone(&search) as Arc<dyn Tool>,
+        ],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let mut rx = lp.subscribe();
+    let parent = lp.run_turn(env.chat, "go").unwrap();
+    let event = until(
+        &mut rx,
+        |e| matches!(e, Event::ApprovalNeeded(a) if a.tool_name == "web_search"),
+    )
+    .await;
+    let Event::ApprovalNeeded(a) = event else {
+        unreachable!()
+    };
+    let reason = a.details.unwrap()["reason"].as_str().unwrap().to_owned();
+    assert!(reason.contains("file secret.txt"), "{reason}");
+    assert_eq!(search.count.load(Ordering::SeqCst), 0);
+    lp.cancel(parent).unwrap();
 }

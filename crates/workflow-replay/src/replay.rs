@@ -17,7 +17,7 @@ use protocol::{Event, RunId};
 use serde::Serialize;
 use serde_json::{Value, json};
 use tool_registry::{
-    ContentPart, Effect, PermissionCategory, ToolContext, ToolError, ToolRegistry,
+    ContentClass, ContentPart, Effect, PermissionCategory, ToolContext, ToolError, ToolRegistry,
 };
 
 use crate::error::{ReplayError, WorkflowError};
@@ -36,6 +36,21 @@ pub const MAX_WORKFLOW_DEPTH: usize = 4;
 tokio::task_local! {
     /// Names of the workflows currently being replayed on this task chain.
     static WORKFLOW_STACK: Vec<String>;
+}
+
+/// Classification for a workflow step that is not a registered tool (native
+/// browser and desktop actions). Unknown names stay undeclared, which the
+/// loop treats as private and untrusted.
+fn content_for_unnamed(name: &str) -> ContentClass {
+    match name {
+        "browser_snapshot" | "browser_screenshot" | "browser_wait" | "browser_scroll"
+        | "browser_tabs" | "desktop_list_apps" | "desktop_launch" | "desktop_get_state"
+        | "desktop_click" | "desktop_type" | "desktop_set_value" | "desktop_key"
+        | "desktop_scroll" | "desktop_drag" => ContentClass::untrusted_private(),
+        "browser_open" | "browser_back" | "browser_click" | "browser_fill" | "browser_select"
+        | "browser_press" | "browser_eval" | "shell_run" | "script_run" => ContentClass::all(),
+        _ => ContentClass::unspecified(),
+    }
 }
 
 /// Workflows currently being replayed (outermost first) on this task.
@@ -557,6 +572,11 @@ impl Replayer {
         effect: Effect,
         input: Value,
     ) -> Result<(), Stop> {
+        let content = self
+            .handles
+            .tools
+            .get(tool)
+            .map_or_else(|| content_for_unnamed(tool), |t| t.spec().content);
         let req = GateRequest {
             run_id: self.opts.run_id.clone(),
             tool: tool.to_owned(),
@@ -564,6 +584,7 @@ impl Replayer {
             effect,
             raw_command: raw_command_for(tool, &input),
             input,
+            content,
         };
         gate.authorize(&req).await.map_err(Stop::Denied)
     }

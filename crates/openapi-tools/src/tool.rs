@@ -14,8 +14,8 @@ use secret_store::{Redactor, SecretRef, SecretStore, resolve};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tool_registry::{
-    ContentPart, Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError, ToolOutput,
-    ToolRegistry, ToolSpec,
+    ContentClass, ContentPart, Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError,
+    ToolOutput, ToolRegistry, ToolSpec,
 };
 
 use crate::error::OpenApiError;
@@ -252,6 +252,9 @@ fn tool_spec(op: &Operation, api: &ApiSpec, category: PermissionCategory) -> Too
         effect: effect_for(op.method),
         category,
         platforms: vec![Platform::All],
+        // Every operation contacts the API host (egress) and the response can
+        // be both private account data and untrusted third-party text.
+        content: ContentClass::all(),
     }
 }
 

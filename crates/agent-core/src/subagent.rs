@@ -28,7 +28,8 @@ use serde_json::{Value, json};
 use storage::Run;
 use task_runtime::{RunState, Runtime};
 use tool_registry::{
-    Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError, ToolOutput, ToolSpec,
+    ContentClass, Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError, ToolOutput,
+    ToolSpec,
 };
 
 use crate::agent::{AgentLoop, Start};
@@ -194,6 +195,9 @@ pub(crate) fn tool() -> Arc<dyn Tool> {
             effect: Effect::Read,
             category: PermissionCategory::Meta,
             platforms: vec![Platform::All],
+            // The child inherits the parent's taint; this spec does not itself
+            // read or send. The child's answer is folded back into the parent.
+            content: ContentClass::none(),
         },
     })
 }
@@ -339,6 +343,17 @@ impl TurnExecutor {
         }
         let state = self.wait_child(&rt, run.id, child).await?;
         let (text, is_error) = self.child_result(child, state);
+        // The child's answer is now in the parent's context. The child's own
+        // run context is usually already dropped, so rebuild from its steps
+        // (and from any subagent it spawned).
+        crate::shared::absorb_run_history(
+            &mut ctx.taint.lock(),
+            sh,
+            &ctx.profile,
+            ctx.bot_id,
+            child,
+            0,
+        );
         if adopted && state.is_terminal() {
             // No `conclude` ran for a child that finished before the restart.
             let ev = finished_event(child, run.id, state.as_str(), &text, Some(call));

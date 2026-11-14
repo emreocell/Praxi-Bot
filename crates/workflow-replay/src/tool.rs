@@ -24,7 +24,8 @@ use parking_lot::Mutex;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tool_registry::{
-    Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError, ToolOutput, ToolSpec,
+    ContentClass, Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError, ToolOutput,
+    ToolSpec,
 };
 
 use crate::error::WorkflowError;
@@ -52,6 +53,12 @@ fn spec(
         effect,
         category,
         platforms: vec![Platform::All],
+        content: match name {
+            // Replay drives other tools and the report is untrusted data.
+            RUN_TOOL_NAME => ContentClass::all(),
+            LIST_TOOL_NAME => ContentClass::private_read(),
+            _ => ContentClass::unspecified(),
+        },
     }
 }
 

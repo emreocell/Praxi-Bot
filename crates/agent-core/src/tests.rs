@@ -23,8 +23,8 @@ use storage::{Bot, Chat, Storage, User, now_ms, read_event_log};
 use task_runtime::{RetryPolicy, RunState};
 use tokio::sync::{Barrier, broadcast};
 use tool_registry::{
-    Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError, ToolOutput, ToolRegistry,
-    ToolSpec,
+    ContentClass, Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError, ToolOutput,
+    ToolRegistry, ToolSpec,
 };
 
 use crate::{
@@ -34,7 +34,7 @@ use crate::{
 
 // ---------- fakes ----------
 
-enum Reply {
+pub(crate) enum Reply {
     Chunks(Vec<ChatChunk>),
     Hang,
     /// A provider error: `upstream` (retryable), `auth`, `api400`, `invalid`
@@ -45,7 +45,7 @@ enum Reply {
     RateLimited(Option<Duration>),
 }
 
-fn text(s: &str) -> Reply {
+pub(crate) fn text(s: &str) -> Reply {
     Reply::Chunks(vec![
         ChatChunk::TextDelta(s.to_owned()),
         ChatChunk::Usage(Usage {
@@ -60,7 +60,7 @@ fn text(s: &str) -> Reply {
     ])
 }
 
-fn calls(cs: &[(&str, &str, Value)]) -> Reply {
+pub(crate) fn calls(cs: &[(&str, &str, Value)]) -> Reply {
     let mut v: Vec<ChatChunk> = cs
         .iter()
         .map(|(id, name, args)| {
@@ -79,13 +79,13 @@ fn calls(cs: &[(&str, &str, Value)]) -> Reply {
     Reply::Chunks(v)
 }
 
-struct Fake {
+pub(crate) struct Fake {
     replies: Mutex<VecDeque<Reply>>,
     requests: Mutex<Vec<ChatRequest>>,
 }
 
 impl Fake {
-    fn new(replies: Vec<Reply>) -> Arc<Self> {
+    pub(crate) fn new(replies: Vec<Reply>) -> Arc<Self> {
         Arc::new(Self {
             replies: Mutex::new(replies.into()),
             requests: Mutex::new(Vec::new()),
@@ -150,14 +150,31 @@ pub(crate) struct TestTool {
 }
 
 pub(crate) fn tool(name: &str, effect: Effect, output: &str) -> TestTool {
+    with_class(
+        name,
+        effect,
+        PermissionCategory::Fs,
+        ContentClass::none(),
+        output,
+    )
+}
+
+pub(crate) fn with_class(
+    name: &str,
+    effect: Effect,
+    category: PermissionCategory,
+    content: ContentClass,
+    output: &str,
+) -> TestTool {
     TestTool {
         spec: ToolSpec {
             name: name.to_owned(),
             description: format!("test tool {name}"),
             input_schema: json!({"type": "object"}),
             effect,
-            category: PermissionCategory::Fs,
+            category,
             platforms: vec![Platform::All],
+            content,
         },
         count: Arc::new(AtomicUsize::new(0)),
         delay: Duration::ZERO,
@@ -283,7 +300,7 @@ pub(crate) fn cfg(policy: Policy) -> LoopConfig {
     }
 }
 
-fn make_loop(
+pub(crate) fn make_loop(
     storage: &Arc<Storage>,
     bot: BotId,
     fake: &Arc<Fake>,
@@ -328,7 +345,7 @@ fn tool_messages(req: &ChatRequest) -> Vec<String> {
         .collect()
 }
 
-fn t<T>(x: &Arc<T>) -> &Arc<T> {
+pub(crate) fn t<T>(x: &Arc<T>) -> &Arc<T> {
     x
 }
 
@@ -3696,6 +3713,8 @@ fn gate_loop(env: &Env, fake: &Arc<Fake>) -> AgentLoop {
             effect: Effect::Read,
             category: PermissionCategory::Desktop,
             platforms: vec![Platform::All],
+
+            content: tool_registry::ContentClass::none(),
         },
         gate: Arc::clone(&slot),
     });
@@ -4719,6 +4738,8 @@ fn ask_tool(veto: Option<&'static str>) -> Arc<AskTool> {
             effect: Effect::Write,
             category: PermissionCategory::System,
             platforms: vec![Platform::All],
+
+            content: tool_registry::ContentClass::none(),
         },
         count: Arc::new(AtomicUsize::new(0)),
         veto,

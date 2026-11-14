@@ -185,6 +185,8 @@ impl FakeTool {
                     CategorySpec::Money => PermissionCategory::Money,
                 },
                 platforms: vec![Platform::All],
+
+                content: tool_registry::ContentClass::none(),
             },
             runs: Arc::clone(&runs),
             output,

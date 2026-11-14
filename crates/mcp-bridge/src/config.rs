@@ -49,6 +49,10 @@ pub enum McpTransport {
 }
 
 /// One configured MCP server.
+///
+/// `enabled`, `trust_hints`, `public_content` and `local_only` are independent
+/// switches. Each defaults off or on for a different reason.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpServerConfig {
     /// Stable id; becomes the `<server>` part of `mcp:<server>/<tool>`.
@@ -83,6 +87,14 @@ pub struct McpServerConfig {
     /// [`Self::secret_headers`].
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub secret_env: BTreeMap<String, String>,
+    /// Tool results are not treated as private. Default `false`: an MCP result
+    /// is a private read. Set `true` only when the server returns public data.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub public_content: bool,
+    /// Tools of this server do not leave the machine. Default `false`: every
+    /// tool is egress. Set `true` only for a server that cannot send data out.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub local_only: bool,
     /// Bots that may use this server's tools; `None` = all bots.
     /// [`crate::tool::McpToolAdapter`] refuses a call whose bot id is missing
     /// or not in the list.
@@ -124,6 +136,8 @@ impl McpServerConfig {
             category: None,
             secret_headers: BTreeMap::new(),
             secret_env: BTreeMap::new(),
+            public_content: false,
+            local_only: false,
             bots: None,
         }
     }
@@ -144,6 +158,8 @@ impl McpServerConfig {
             category: None,
             secret_headers: BTreeMap::new(),
             secret_env: BTreeMap::new(),
+            public_content: false,
+            local_only: false,
             bots: None,
         }
     }
@@ -505,11 +521,16 @@ mod tests {
         let s = &cfg.servers[0];
         assert!(!s.trust_hints && s.category.is_none());
         assert!(s.secret_headers.is_empty() && s.secret_env.is_empty());
+        assert!(!s.public_content && !s.local_only);
         assert_eq!(s.effective_category(), PermissionCategory::Accounts);
         // New fields are not emitted when unset.
         let out = toml::to_string_pretty(&cfg).unwrap();
         assert!(
-            !out.contains("trust_hints") && !out.contains("secret_") && !out.contains("category")
+            !out.contains("trust_hints")
+                && !out.contains("secret_")
+                && !out.contains("category")
+                && !out.contains("public_content")
+                && !out.contains("local_only")
         );
     }
 
@@ -519,6 +540,8 @@ mod tests {
         let store = TomlFileStore::new(dir.path().join("m.toml"));
         let mut h = McpServerConfig::http("web", "https://x/mcp");
         h.trust_hints = true;
+        h.public_content = true;
+        h.local_only = true;
         h.category = Some(PermissionCategory::Fs);
         h.secret_headers
             .insert("Authorization".into(), "mcp/web-token".into());

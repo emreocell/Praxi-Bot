@@ -261,6 +261,8 @@ impl CaptureTool {
                 effect: Effect::Write,
                 category: PermissionCategory::Fs,
                 platforms: vec![Platform::All],
+
+                content: tool_registry::ContentClass::none(),
             },
             inputs: Mutex::new(Vec::new()),
         })

@@ -707,6 +707,10 @@ impl TurnExecutor {
             Err(e) => return Ok(fail(e.to_string())),
         };
         let summary = summarize(&report);
+        ctx.taint.lock().note(
+            tool_registry::ContentClass::untrusted_private(),
+            "workflow replay",
+        );
         if report.is_completed() {
             self.sh.emit(
                 &ctx,

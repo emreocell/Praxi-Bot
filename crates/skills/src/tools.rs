@@ -6,8 +6,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use tool_registry::{
-    ContentPart, Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError, ToolOutput,
-    ToolSpec,
+    ContentClass, ContentPart, Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError,
+    ToolOutput, ToolSpec,
 };
 
 use crate::index::SkillIndex;
@@ -44,6 +44,12 @@ fn mk_spec(
         effect,
         category,
         platforms: vec![Platform::All],
+        content: match name {
+            // Skill files are on disk and can carry instructions.
+            "skill_read" => ContentClass::untrusted_private(),
+            "skill_list" | "skill_write" | "skill_publish" => ContentClass::private_read(),
+            _ => ContentClass::unspecified(),
+        },
     }
 }
 

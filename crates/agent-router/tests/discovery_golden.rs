@@ -73,6 +73,7 @@ fn to_spec(t: &FxTool) -> ToolSpec {
         effect: effect(&t.effect),
         category: PermissionCategory::Meta,
         platforms: vec![Platform::All],
+        content: tool_registry::ContentClass::none(),
     }
 }
 

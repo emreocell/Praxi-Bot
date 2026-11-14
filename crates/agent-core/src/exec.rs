@@ -35,6 +35,7 @@ use crate::shared::{
     CallRec, ModelOut, ResultRec, RunCtx, STEP_COMMAND, STEP_MODEL, STEP_TOOLS, STEP_USER,
     STEP_WORKFLOW, Shared, xe,
 };
+use crate::taint;
 
 pub(crate) struct TurnExecutor {
     pub sh: Arc<Shared>,
@@ -346,10 +347,21 @@ impl TurnExecutor {
             .store
             .recall(ctx.user_id, ctx.bot_id, text, m.recall_budget_tokens)
         {
-            Ok(mems) => memory_store::prepend_to_user_message(
-                &memory_store::render_recall_block(&mems),
-                text,
-            ),
+            Ok(mems) => {
+                if !mems.is_empty() {
+                    let untrusted = mems
+                        .iter()
+                        .any(|mem| mem.trust == memory_store::Trust::Untrusted);
+                    ctx.taint.lock().note(
+                        tool_registry::ContentClass::declared(untrusted, true, false),
+                        "memory",
+                    );
+                }
+                memory_store::prepend_to_user_message(
+                    &memory_store::render_recall_block(&mems),
+                    text,
+                )
+            }
             Err(_) => text.to_owned(),
         }
     }
@@ -903,40 +915,51 @@ impl TurnExecutor {
 
         // Reads batched by `pending_tools` run concurrently; everything else is a single call.
         let ctx_ref: &RunCtx = &ctx;
-        let outcomes = futures::future::join_all(slots.into_iter().map(|slot| async move {
-            match slot {
-                Slot::Done { text, is_error } => (text, is_error, None, false),
-                Slot::Spawn {
-                    input,
-                    call,
-                    model_call_id,
-                    permit,
-                } => {
-                    if let Err(reason) = commit_or_deny(permit) {
-                        return (user_denied(reason), true, None, false);
+        let outcomes = futures::future::join_all(slots.into_iter().zip(calls.iter().cloned()).map(
+            |(slot, call)| {
+                let hints = hints.clone();
+                async move {
+                    match slot {
+                        Slot::Done { text, is_error } => (text, is_error, None, false),
+                        Slot::Spawn {
+                            input,
+                            call: call_id,
+                            model_call_id,
+                            permit,
+                        } => {
+                            if let Err(reason) = commit_or_deny(permit) {
+                                return (user_denied(reason), true, None, false);
+                            }
+                            let (t, e, d) = self
+                                .run_subagent(run, ctx_ref, call_id, &model_call_id, input)
+                                .await;
+                            (t, e, d, false)
+                        }
+                        Slot::Run {
+                            tool,
+                            input,
+                            call: call_id,
+                            meta,
+                            permit,
+                        } => {
+                            // Re-check under the policy mutex immediately before the
+                            // call. A deny that landed after approval does not run the
+                            // tool and does not keep a grant (`commit` stores it).
+                            if let Err(reason) = commit_or_deny(permit) {
+                                return (user_denied(reason), true, None, false);
+                            }
+                            let out = self
+                                .run_tool(run, ctx_ref, call_id, &tool, input, meta)
+                                .await;
+                            // The result is in the model context even when the tool
+                            // returned an error. A denial before this point is not.
+                            self.note_executed(ctx_ref, &hints, &call.name, &call.arguments);
+                            out
+                        }
                     }
-                    let (t, e, d) = self
-                        .run_subagent(run, ctx_ref, call, &model_call_id, input)
-                        .await;
-                    (t, e, d, false)
                 }
-                Slot::Run {
-                    tool,
-                    input,
-                    call,
-                    meta,
-                    permit,
-                } => {
-                    // Re-check under the policy mutex immediately before the
-                    // call. A deny that landed after approval does not run the
-                    // tool and does not keep a grant (`commit` stores it).
-                    if let Err(reason) = commit_or_deny(permit) {
-                        return (user_denied(reason), true, None, false);
-                    }
-                    self.run_tool(run, ctx_ref, call, &tool, input, meta).await
-                }
-            }
-        }))
+            },
+        ))
         .await;
 
         let g = &self.sh.cfg.guards;
@@ -1023,6 +1046,21 @@ impl TurnExecutor {
             }
         };
         (text, is_error, Some(duration_ms), self_spilled)
+    }
+
+    /// The tool ran (or failed after starting). Record what its class says
+    /// entered the context, using the resolved target of `use_tool`.
+    fn note_executed(&self, ctx: &RunCtx, hints: &[String], name: &str, arguments: &str) {
+        let input: Value = serde_json::from_str(arguments).unwrap_or(Value::Null);
+        let Some(resolved) = self
+            .sh
+            .resolve_call(&ctx.profile, ctx.bot_id, name, &input, hints)
+        else {
+            return;
+        };
+        let Some(spec) = resolved.spec else { return };
+        let label = taint::source_label(&resolved.name, &resolved.input);
+        ctx.taint.lock().note(spec.content, &label);
     }
 
     /// Turn the structured output of a `Meta` tool into events: a todo list

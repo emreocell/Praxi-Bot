@@ -166,6 +166,13 @@ pub(crate) fn mk_spec(
         effect,
         category: PermissionCategory::Fs,
         platforms: vec![Platform::All],
+        content: match name {
+            // Documents can carry prompt injection and are private files.
+            "pdf_extract" | "docx_read" | "xlsx_read" | "csv_read" | "csv_transform"
+            | "json_query" => tool_registry::ContentClass::untrusted_private(),
+            "docx_write" | "xlsx_write" => tool_registry::ContentClass::private_read(),
+            _ => tool_registry::ContentClass::unspecified(),
+        },
     }
 }
 

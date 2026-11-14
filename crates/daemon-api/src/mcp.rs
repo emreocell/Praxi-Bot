@@ -39,7 +39,9 @@ pub enum McpStatus {
 
 /// A configured MCP server (`GET /v1/mcp/servers`).  The full stored config,
 /// except secret *values*: `secret_env` / `secret_headers` carry secret
-/// **names** only.
+/// **names** only. `enabled`, `trust_hints`, `public_content` and `local_only`
+/// are independent switches.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct McpServerDto {
     /// Server name (the `<server>` of `mcp:<server>/<tool>`).
@@ -89,6 +91,12 @@ pub struct McpServerDto {
     pub category: String,
     /// Whether the readOnlyHint annotations of the server are believed.
     pub trust_hints: bool,
+    /// Tool results are public data. Default `false`: a result is a private read.
+    #[serde(default)]
+    pub public_content: bool,
+    /// Tools cannot send data off the machine. Default `false`: every tool is egress.
+    #[serde(default)]
+    pub local_only: bool,
     /// Bots that may use the server; `null` = all bots.
     pub bots: Option<Vec<String>>,
 }
@@ -174,6 +182,12 @@ pub struct McpServerInput {
     /// Believe the readOnlyHint annotations of the server.  Default `false`.
     #[serde(default)]
     pub trust_hints: bool,
+    /// Tool results are public data. Default `false` (a result is a private read).
+    #[serde(default)]
+    pub public_content: bool,
+    /// Tools cannot send data off the machine. Default `false` (every tool is egress).
+    #[serde(default)]
+    pub local_only: bool,
     /// Permission category of the tools; default `accounts`; `meta` is rejected.
     #[serde(default)]
     pub category: Option<String>,
@@ -231,6 +245,12 @@ pub struct McpServerPatch {
     /// Believe the readOnlyHint annotations of the server.
     #[serde(default)]
     pub trust_hints: Option<bool>,
+    /// Tool results are public data. Omit to keep the stored value.
+    #[serde(default)]
+    pub public_content: Option<bool>,
+    /// Tools cannot send data off the machine. Omit to keep the stored value.
+    #[serde(default)]
+    pub local_only: Option<bool>,
     /// Permission category of the tools; `null` clears it; `meta` is rejected.
     #[serde(default)]
     #[schema(nullable = true)]

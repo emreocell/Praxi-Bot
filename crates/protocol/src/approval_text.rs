@@ -139,10 +139,37 @@ fn quoted(label: &str, text: &str) -> String {
     out
 }
 
-/// The full text of a schedule approval, or `None` when `details` is not a
-/// well-formed schedule card (unknown kind, missing action or timing).
+/// The full text of an approval card, or `None` when `details` is neither a
+/// well-formed schedule card nor an egress card.
+///
+/// A schedule card that also carries an egress block keeps the schedule body,
+/// then the egress block, then the `DAEMON SUMMARY` line last so a channel
+/// that splits the text keeps the footer on the last piece.
 #[must_use]
 pub fn describe_details(details: &Value) -> Option<String> {
+    let egress = egress_text(details);
+    if details.get("kind").and_then(Value::as_str) == Some("schedule") {
+        let mut text = schedule_text(details)?;
+        if let Some(block) = egress {
+            if let Some(i) = text.rfind("DAEMON SUMMARY:") {
+                text.insert_str(i, &block);
+            } else {
+                text.push_str(&block);
+            }
+        }
+        return Some(text);
+    }
+    let block = egress?;
+    let host = egress_value(details)
+        .and_then(|e| e.get("host"))
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    Some(format!("{block}DAEMON SUMMARY: send data to {host}.\n"))
+}
+
+/// The full text of a schedule approval, or `None` when `details` is not a
+/// well-formed schedule card (unknown kind, missing action or timing).
+fn schedule_text(details: &Value) -> Option<String> {
     if details.get("kind").and_then(Value::as_str) != Some("schedule") {
         return None;
     }
@@ -234,6 +261,46 @@ pub fn describe_details(details: &Value) -> Option<String> {
     }
     footer.push_str(".\n");
     out.push_str(&footer);
+    Some(out)
+}
+
+fn egress_value(details: &Value) -> Option<&Value> {
+    if details.get("kind").and_then(Value::as_str) == Some("egress") {
+        return Some(details);
+    }
+    let nested = details.get("egress")?;
+    if nested.get("kind").and_then(Value::as_str) == Some("egress") {
+        Some(nested)
+    } else {
+        None
+    }
+}
+
+/// Egress block, ending in a newline, or `None` when the card has none.
+fn egress_text(details: &Value) -> Option<String> {
+    let egress = egress_value(details)?;
+    let reason = egress.get("reason").and_then(Value::as_str).unwrap_or("");
+    let host = egress.get("host").and_then(Value::as_str).unwrap_or("");
+    let payload = egress.get("payload").and_then(Value::as_str).unwrap_or("");
+    let reads: Vec<&str> = egress
+        .get("read")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    let mut out = String::new();
+    if !reason.is_empty() {
+        out.push_str(reason);
+        out.push('\n');
+    }
+    out.push_str(&format!("Destination: {host}\n"));
+    if !reads.is_empty() {
+        out.push_str(&format!("Read: {}\n", reads.join(", ")));
+    }
+    out.push_str("Outgoing:\n");
+    out.push_str(payload);
+    if !payload.ends_with('\n') {
+        out.push('\n');
+    }
     Some(out)
 }
 
@@ -458,6 +525,32 @@ mod tests {
         let mut c = card();
         c["schedule"] = json!("");
         assert!(describe_details(&c).is_none());
+    }
+
+    #[test]
+    fn egress_card_is_rendered_in_full_and_keeps_the_footer_last() {
+        let long = "q".repeat(4000);
+        let details = json!({
+            "kind": "egress",
+            "reason": "this run read file notes.txt and now wants to send data to configured-search-provider",
+            "read": ["file notes.txt"],
+            "host": "configured-search-provider",
+            "payload": long,
+            "payload_kind": "query"
+        });
+        let text = describe_details(&details).unwrap();
+        assert!(text.contains(&long), "payload must not be truncated");
+        assert!(text.contains("file notes.txt"));
+        let last = text.lines().last().unwrap();
+        assert!(last.starts_with("DAEMON SUMMARY: send data to configured-search-provider"));
+        let mut schedule = card();
+        schedule["egress"] = details;
+        let both = describe_details(&schedule).unwrap();
+        assert!(both.contains("Schedule approval:"));
+        assert!(both.contains(&long));
+        let last = both.lines().last().unwrap();
+        assert!(last.starts_with("DAEMON SUMMARY:"), "{last}");
+        assert!(!last.contains("send data to"), "{last}");
     }
 
     #[test]

@@ -33,6 +33,7 @@ use uuid::Uuid;
 use crate::config::{LoopConfig, ModelPrice, SharedRedactor};
 use crate::profile::BotProfile;
 use crate::subagent::SubSpec;
+use crate::taint::{self, ContentTaint};
 
 /// Errors of the public loop API.
 #[derive(Debug, thiserror::Error)]
@@ -582,6 +583,10 @@ pub(crate) struct RunCtx {
     /// Spawn parameters of a subagent run.
     pub sub: Option<SubSpec>,
     pub state: Mutex<CtxState>,
+    /// Untrusted and private content this run has already shown the model.
+    /// Never cleared. Copied from the parent when a subagent starts, and
+    /// rebuilt from stored steps when the process resumes a run.
+    pub taint: Mutex<ContentTaint>,
 }
 
 impl RunCtx {
@@ -816,6 +821,18 @@ impl Shared {
                     .map(|ctx| Arc::clone(&ctx.computer))
             })
             .unwrap_or_else(|| Arc::new(tokio::sync::OnceCell::new()));
+        let mut taint = ContentTaint::default();
+        if let Some(parent_id) = run.parent_run_id {
+            let inherited = self
+                .runs
+                .lock()
+                .get(&parent_id)
+                .map(|ctx| ctx.taint.lock().clone());
+            if let Some(parent) = inherited {
+                taint.inherit(&parent);
+            }
+        }
+        absorb_run_history(&mut taint, self, &profile, run.bot_id, run.id, 0);
         let ctx = Arc::new(RunCtx {
             computer,
             waiting_computer: Arc::new(AtomicBool::new(false)),
@@ -839,6 +856,7 @@ impl Shared {
                 seq,
                 todos: Vec::new(),
             }),
+            taint: Mutex::new(taint),
         });
         Ok(Arc::clone(self.runs.lock().entry(run.id).or_insert(ctx)))
     }
@@ -1120,6 +1138,44 @@ fn needs_barrier(event: &Event) -> bool {
             | Event::SubagentFinished(_)
             | Event::Error(_)
     )
+}
+
+/// Rebuild taint from stored steps of `run_id` and its subagents.
+///
+/// Used when a run context is created (resume, or a parent absorbing a child
+/// whose in-memory context is already gone).
+pub(crate) fn absorb_run_history(
+    taint: &mut ContentTaint,
+    sh: &Shared,
+    profile: &BotProfile,
+    bot: BotId,
+    run_id: RunId,
+    depth: u32,
+) {
+    if depth > 8 {
+        return;
+    }
+    let Ok(steps) = sh.storage.list_steps(run_id) else {
+        return;
+    };
+    for step in &steps {
+        taint::observe_history_step(
+            taint,
+            &step.name,
+            &step.input,
+            step.output.as_ref(),
+            &mut |name, input| {
+                sh.resolve_call(profile, bot, name, input, &[])
+                    .and_then(|resolved| resolved.spec.map(|spec| spec.content))
+            },
+        );
+    }
+    let Ok(kids) = sh.storage.list_child_runs(run_id) else {
+        return;
+    };
+    for kid in kids {
+        absorb_run_history(taint, sh, profile, bot, kid.id, depth + 1);
+    }
 }
 
 /// Result of [`Shared::resolve_call`].

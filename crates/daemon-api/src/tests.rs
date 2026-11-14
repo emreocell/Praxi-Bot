@@ -50,6 +50,7 @@ impl Tool for Danger {
             effect: Effect::Write,
             category: PermissionCategory::Fs,
             platforms: vec![Platform::All],
+            content: tool_registry::ContentClass::none(),
         })
     }
     async fn call(&self, _: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
@@ -1061,6 +1062,7 @@ impl Tool for Ask {
             effect: Effect::Read,
             category: PermissionCategory::Meta,
             platforms: vec![Platform::All],
+            content: tool_registry::ContentClass::none(),
         })
     }
     async fn call(&self, _: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {

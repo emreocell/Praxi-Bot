@@ -12,8 +12,8 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use tool_registry::{
-    ContentPart, Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError, ToolOutput,
-    ToolSpec,
+    ContentClass, ContentPart, Effect, PermissionCategory, Platform, Tool, ToolContext, ToolError,
+    ToolOutput, ToolSpec,
 };
 
 use crate::config::AccountKind;
@@ -62,6 +62,13 @@ fn spec(name: &str, description: &str, schema: Value, effect: Effect) -> ToolSpe
         effect,
         category: PermissionCategory::Messaging,
         platforms: vec![Platform::All],
+        content: match name {
+            READ | SEARCH => ContentClass::untrusted_private(),
+            LIST_FOLDERS => ContentClass::private_read(),
+            DRAFT | SEND => ContentClass::egress(),
+            // mark_read changes a flag and does not put message content in context.
+            _ => ContentClass::none(),
+        },
     }
 }
 

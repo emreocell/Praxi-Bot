@@ -17,8 +17,8 @@ use script_runtime::{Limits, ScriptError, ScriptHost, ScriptRuntime};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tool_registry::{
-    ContentPart, Effect, PermissionCategory, Tool, ToolContext, ToolError, ToolOutput,
-    ToolRegistry, ToolSpec,
+    ContentClass, ContentPart, Effect, PermissionCategory, Tool, ToolContext, ToolError,
+    ToolOutput, ToolRegistry, ToolSpec,
 };
 
 use crate::util::{exec_err, parse, spec};
@@ -41,6 +41,9 @@ pub struct GateRequest {
     pub raw_command: String,
     /// The call's input.
     pub input: Value,
+    /// Classification of the tool being called. The loop records taint from
+    /// this after a successful authorization.
+    pub content: ContentClass,
 }
 
 /// Permission check for tool calls issued from scripts.
@@ -213,6 +216,7 @@ impl ScriptHost for GateHost {
             effect: spec.effect,
             raw_command: raw_command_for(name, &input),
             input: input.clone(),
+            content: spec.content,
         };
         self.gate.authorize(&req).await?;
         let ctx = ToolContext {
@@ -358,10 +362,13 @@ mod tests {
     }
 
     fn echo(name: &str, cat: PermissionCategory, calls: Arc<Mutex<Vec<Value>>>) -> Arc<dyn Tool> {
-        Arc::new(Echo {
-            spec: spec(name, "d", json!({"type":"object"}), Effect::Read, cat),
-            calls,
-        })
+        let mut spec = spec(name, "d", json!({"type":"object"}), Effect::Read, cat);
+        // Test doubles are not built-ins. Declare them as touching nothing so
+        // the registry accepts them; the test is about the gate, not taint.
+        if !spec.content.is_declared() {
+            spec.content = tool_registry::ContentClass::none();
+        }
+        Arc::new(Echo { spec, calls })
     }
 
     /// Fake gate recording what it was asked and denying configured tools.
@@ -516,6 +523,7 @@ mod tests {
             effect: Effect::Write,
             raw_command: raw.into(),
             input: Value::Null,
+            content: ContentClass::none(),
         };
         assert!(
             gate.authorize(&req("fs_write", PermissionCategory::Fs, ""))

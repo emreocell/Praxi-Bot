@@ -211,6 +211,8 @@ mod delegation_guard {
     use std::collections::{BTreeMap, BTreeSet};
     use std::path::{Path, PathBuf};
 
+    use crate::ContentClass;
+
     use syn::visit::{self, Visit};
     use syn::{
         Expr, Fields, Generics, ImplItem, ItemEnum, ItemImpl, ItemStruct, PathSegment, Type,
@@ -748,6 +750,8 @@ impl tool_registry::Tool for Good {
                 effect: Effect::Write,
                 category: PermissionCategory::System,
                 platforms: vec![protocol::Platform::All],
+
+                content: ContentClass::none(),
             },
             closed: Arc::clone(&closed),
         });

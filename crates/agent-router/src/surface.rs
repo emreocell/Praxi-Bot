@@ -120,6 +120,9 @@ fn meta_spec(name: &str, description: &str, effect: Effect, schema: Value) -> To
         effect,
         category: PermissionCategory::Meta,
         platforms: vec![Platform::All],
+        // Discovery itself does not read user data or leave the machine.
+        // `use_tool` is judged as the target tool.
+        content: tool_registry::ContentClass::none(),
     }
 }
 
@@ -586,6 +589,8 @@ mod tests {
                 effect,
                 category: PermissionCategory::Accounts,
                 platforms: vec![Platform::All],
+
+                content: tool_registry::ContentClass::none(),
             },
         })
     }
@@ -867,6 +872,8 @@ mod tests {
                 effect: Effect::Write,
                 category: PermissionCategory::Accounts,
                 platforms: vec![other],
+
+                content: tool_registry::ContentClass::none(),
             },
         }));
         reg.register(fake("mcp:x/a", "remote", Effect::Read));
