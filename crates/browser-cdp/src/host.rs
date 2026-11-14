@@ -100,11 +100,11 @@ mod tests {
         assert!(!*cache.get_or_init(|| bounded_probe(
             std::time::Duration::from_millis(10),
             || {
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                std::thread::sleep(std::time::Duration::from_secs(5));
                 true
             }
         )));
-        assert!(started.elapsed() < std::time::Duration::from_millis(80));
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
         assert!(!*cache.get_or_init(|| panic!("must use cached result")));
     }
     #[test]

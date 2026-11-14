@@ -331,8 +331,42 @@ mod linux {
                 return Err(format!("release missing {binary}").into());
             }
         }
+        seal_installation(output)?;
         #[cfg(unix)]
         readable_directories(output)?;
+        Ok(())
+    }
+
+    const INSTALL_SEAL: &str = ".installed-sha256.json";
+
+    fn binary_hashes(directory: &Path) -> Result<std::collections::BTreeMap<String, String>> {
+        let mut hashes = std::collections::BTreeMap::new();
+        for binary in ["bin/bot", "bin/bot-node"] {
+            let path = directory.join(binary);
+            let meta = std::fs::symlink_metadata(&path)?;
+            if !meta.is_file() || meta.len() == 0 || meta.file_type().is_symlink() {
+                return Err("installed binary is missing or incomplete".into());
+            }
+            let mut file = std::fs::File::open(path)?;
+            let mut digest = Sha256::new();
+            std::io::copy(&mut file, &mut digest)?;
+            hashes.insert(binary.to_owned(), format!("{:x}", digest.finalize()));
+        }
+        Ok(hashes)
+    }
+
+    // Written only after verified extraction (or preservation of the existing
+    // installer baseline). This detects interrupted/corrupt installed trees;
+    // it is not a substitute for release provenance, which is always reverified.
+    fn seal_installation(directory: &Path) -> Result<()> {
+        use std::io::Write;
+        let bytes = serde_json::to_vec(&binary_hashes(directory)?)?;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(directory.join(INSTALL_SEAL))?;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
         Ok(())
     }
 
@@ -494,6 +528,7 @@ mod linux {
                 std::fs::copy(bin.join(name), &destination)?;
                 std::fs::File::open(destination)?.sync_all()?;
             }
+            seal_installation(staging.path())?;
             readable_directories(staging.path())?;
             std::fs::rename(staging.path(), prefix.join(&baseline))?;
             std::fs::File::open(prefix.join("versions"))?.sync_all()?;
@@ -529,12 +564,16 @@ mod linux {
 
     #[cfg(unix)]
     fn validate_installed(directory: &Path) -> Result<()> {
-        for binary in ["bin/bot", "bin/bot-node"] {
-            let meta = std::fs::symlink_metadata(directory.join(binary))
-                .map_err(|_| "installed version is incomplete; rerun self-update to repair")?;
-            if !meta.is_file() || meta.len() == 0 || meta.file_type().is_symlink() {
-                return Err("installed version is incomplete; rerun self-update to repair".into());
-            }
+        let expected = std::fs::read(directory.join(INSTALL_SEAL))
+            .ok()
+            .and_then(|bytes| {
+                serde_json::from_slice::<std::collections::BTreeMap<String, String>>(&bytes).ok()
+            });
+        let actual = binary_hashes(directory).ok();
+        if expected.is_none() || actual.is_none() || expected != actual {
+            return Err(
+                "installed version is incomplete or damaged; rerun self-update to repair".into(),
+            );
         }
         Ok(())
     }
@@ -939,6 +978,11 @@ mod linux {
             std::fs::write(dir.path().join(target).join("bin/bot"), "partial").unwrap();
             ensure_launchers(dir.path()).unwrap();
             assert_eq!(installed_tag(dir.path()).unwrap(), "v1.0.0");
+            std::fs::write(dir.path().join(target).join("bin/bot-node"), "truncated").unwrap();
+            assert!(
+                installed_tag(dir.path()).is_err(),
+                "nonempty partial binary must also be detected"
+            );
             std::fs::remove_file(dir.path().join(target).join("bin/bot-node")).unwrap();
             assert!(installed_tag(dir.path()).is_err());
             // Same operations used after freshly verified unpacking in run().
