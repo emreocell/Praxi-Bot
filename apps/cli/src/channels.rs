@@ -195,7 +195,7 @@ impl TelegramRuntime {
 impl ChannelControl for TelegramRuntime {
     fn start(&self) {
         let mut channel = self.channel.lock();
-        if channel.is_none()
+        if channel.as_ref().is_none_or(|c| c.status() != channel_telegram::ChannelStatus::Running)
             && let Some(config) = &self.config
         {
             match TelegramChannel::start(config.clone(), self.client.clone()) {
@@ -211,6 +211,11 @@ impl ChannelControl for TelegramRuntime {
     fn info(&self) -> ChannelDto {
         let channel = self.channel.lock();
         ChannelDto {
+            status: Some(match channel.as_ref().map(TelegramChannel::status) {
+                Some(channel_telegram::ChannelStatus::Running) => "running",
+                Some(channel_telegram::ChannelStatus::Conflict) => "conflict",
+                _ => "stopped",
+            }.into()),
             id: "telegram".into(),
             configured: self.configured,
             enabled: self.enabled,

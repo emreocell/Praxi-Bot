@@ -745,6 +745,8 @@ pub struct ChannelDto {
     pub running: bool,
     /// Number of paired (allowed) remote users.
     pub paired_users: usize,
+    /// Polling lifecycle, including a persistent Telegram conflict notification.
+    pub status: Option<String>,
 }
 
 /// A one-time pairing code (`POST /v1/channels/telegram/pair-code`).

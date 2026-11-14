@@ -17,8 +17,6 @@ use utoipa::ToSchema;
 
 use crate::{ApiError, AppState, WeakAppState, routes::ApiJson};
 
-pub const INSTALL_URL: &str =
-    "https://github.com/emreocell/Praxi-Bot/releases/latest/download/install-linux.sh";
 /// Epochs stay representable in TOML and bounded even for compromised peers.
 /// At the ceiling, explicit force reuses the ceiling; equal owners still stop both.
 pub const EPOCH_CEILING: u64 = 1_000_000_000;
@@ -257,23 +255,25 @@ impl LeaderControl {
         let audit = self.audit(actor, action, serde_json::json!({"previous": previous, "next": next, "phase": "requested"}));
         if next.runs_components() {
             audit?;
-            next.save(&self.0.data).map_err(ApiError::internal)?;
+            // Keep a durable idle checkpoint until startup and the final save
+            // both succeed. Even a failed rollback cannot leave active on disk.
+            let mut idle = next.clone();
+            idle.state = HostState::Standby;
+            idle.save(&self.0.data).map_err(ApiError::internal)?;
             *self.0.config.lock() = next.clone();
-            if let Some(net) = self.network() {
-                net.set_leader_info(Some(next.wire()));
-            }
-            if let Err(error) = state.start_leader_components() {
-                let mut idle = next.clone();
-                idle.state = HostState::Standby;
+            let started = state.start_leader_components()
+                .and_then(|()| next.save(&self.0.data).map_err(ApiError::internal));
+            if let Err(error) = started {
                 *self.0.config.lock() = idle.clone();
                 if let Some(net) = self.network() {
                     net.set_leader_info(Some(idle.wire()));
                 }
                 state.stop_components().await;
-                let saved = idle.save(&self.0.data);
                 let _ = self.0.events.send(HostEvent::HostStateChanged(idle));
-                saved.map_err(ApiError::internal)?;
                 return Err(error);
+            }
+            if let Some(net) = self.network() {
+                net.set_leader_info(Some(next.wire()));
             }
             let _ = self
                 .0
@@ -421,6 +421,9 @@ impl LeaderControl {
         }
         if highest >= EPOCH_CEILING && !force {
             return Err(ApiError::conflict("leader epoch ceiling reached; explicit force required"));
+        }
+        if next.state == HostState::Active && !force {
+            return Ok(next);
         }
         next.epoch = highest.saturating_add(1).min(EPOCH_CEILING);
         self.0.verifying.store(false, Ordering::SeqCst);
@@ -638,21 +641,14 @@ pub(crate) async fn invite(
         .create_invite_with_ttl(input.role.peer_role(), Duration::from_secs(ttl))
         .await;
     let qr = qrcode::QrCode::new(invite.ticket.as_bytes()).map_err(ApiError::internal)?;
-    let command = (matches!(input.role, InviteRole::Host)
-        && s.leader().config().mode != HostMode::Host)
-        .then(|| {
-            format!(
-                "curl -fsSL {INSTALL_URL} | sudo sh -s -- --join '{}'",
-                invite.ticket
-            )
-        });
+    // The installer does not implement --join yet. Do not return a broken command.
     Ok(Json(HostInvite {
         ticket: invite.ticket,
         code: invite.code,
         expires_at_ms: storage::now_ms()
             .saturating_add(i64::try_from(ttl * 1000).unwrap_or(i64::MAX)),
         qr_svg: qr.render::<qrcode::render::svg::Color>().build(),
-        install_command: command,
+        install_command: None,
     }))
 }
 

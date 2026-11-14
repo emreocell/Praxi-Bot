@@ -944,6 +944,7 @@ impl crate::ChannelControl for FakeChannel {
             enabled: true,
             running: self.running,
             paired_users: 2,
+            status: None,
         }
     }
     fn create_pair_code(&self) -> Result<crate::dto::PairCodeDto, String> {

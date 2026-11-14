@@ -48,6 +48,7 @@ impl crate::ChannelControl for ChannelCounter {
             enabled: true,
             running: self.0.load(std::sync::atomic::Ordering::SeqCst),
             paired_users: 0,
+            status: None,
         }
     }
     fn create_pair_code(&self) -> Result<crate::dto::PairCodeDto, String> {
@@ -307,7 +308,7 @@ async fn attach_network(t: &T) -> PeerNetwork {
 }
 
 #[tokio::test]
-async fn install_command_only_for_host_invites_from_non_host_install_and_default_ttls() {
+async fn installer_command_is_unavailable_until_join_support_lands_and_default_ttls() {
     for host_mode in [false, true] {
         let t = setup_with(|data| {
             if host_mode {
@@ -332,10 +333,7 @@ async fn install_command_only_for_host_invites_from_non_host_install_and_default
             .await;
             assert_eq!(response.status, StatusCode::OK);
             let invite = response.json();
-            assert_eq!(
-                invite["install_command"].is_string(),
-                role == "host" && !host_mode
-            );
+            assert!(invite["install_command"].is_null());
             assert!(invite["qr_svg"].as_str().unwrap().contains("<svg"));
             let ttl_ms = if role == "host" { 900_000 } else { 120_000 };
             assert!(
@@ -632,4 +630,41 @@ async fn ownership_and_device_actions_audit_actor_state_and_epoch_without_ticket
     t.state.stop_components().await;
     net.shutdown().await;
     other_net.shutdown().await;
+}
+
+#[tokio::test]
+async fn activation_is_idempotent_unless_forced() {
+    let t = setup();
+    assert_eq!(t.state.leader().activate(false).await.unwrap().epoch, 0);
+    assert_eq!(t.state.leader().activate(true).await.unwrap().epoch, 1);
+    assert_eq!(t.state.leader().activate(false).await.unwrap().epoch, 1);
+    t.state.stop_components().await;
+}
+
+struct FailedStartupProbe {
+    data: std::path::PathBuf,
+    observed: Arc<std::sync::Mutex<Option<HostState>>>,
+}
+#[async_trait]
+impl crate::ChannelControl for FailedStartupProbe {
+    fn start(&self) {}
+    async fn stop(&self) {
+        *self.observed.lock().unwrap() = Some(HostConfig::load(&self.data).unwrap().state);
+    }
+    fn info(&self) -> crate::dto::ChannelDto { panic!("unused") }
+    fn create_pair_code(&self) -> Result<crate::dto::PairCodeDto, String> { panic!("unused") }
+}
+
+#[tokio::test]
+async fn failed_activation_has_durable_standby_before_rollback() {
+    let t = setup_with(|data| {
+        HostConfig { state: HostState::Standby, ..Default::default() }.save(data).unwrap();
+    });
+    std::fs::create_dir(t._dir.path().join("schedules.db")).unwrap();
+    let observed = Arc::new(std::sync::Mutex::new(None));
+    t.state.add_channel(Arc::new(FailedStartupProbe { data: t._dir.path().into(), observed: observed.clone() }));
+    assert!(t.state.leader().activate(true).await.is_err());
+    assert_eq!(*observed.lock().unwrap(), Some(HostState::Standby));
+    assert_eq!(HostConfig::load(t._dir.path()).unwrap().state, HostState::Standby);
+    assert_eq!(t.state.leader().config().state, HostState::Standby);
 }

@@ -16,7 +16,7 @@ pub enum HostCmd {
     },
     /// Create a single-use invite and print its QR and confirmation code.
     Invite {
-        #[arg(long, value_parser = ["phone", "desktop", "node"])]
+        #[arg(long, value_parser = ["phone", "desktop", "node", "host"])]
         role: String,
     },
     Status,
@@ -94,7 +94,7 @@ pub async fn run(
     };
     if matches!(action, HostCmd::Activate { force: true }) {
         eprintln!(
-            "Forced activation uses this installation's last local data; newer changes on the other leader may be missing."
+            "Forced activation uses this installation's last local data; newer changes on the other leader may be missing, and missed schedules can duplicate actions already run there."
         );
     }
     let mut response = client.request(method, &path, body).await?;
