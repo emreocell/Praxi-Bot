@@ -267,6 +267,21 @@ impl MemoryStore {
         patch: &MemoryPatch,
         reason: &str,
     ) -> Result<Memory> {
+        self.update_if_trust(user_id, id, patch, reason, None)?
+            .ok_or_else(|| MemoryError::NotFound(format!("memory {id}")))
+    }
+
+    /// Apply an update only while the live row still has the required trust.
+    /// The comparison and mutation share a transaction; a stale consolidation
+    /// must not overwrite a user correction made while the model was deciding.
+    pub(crate) fn update_if_trust(
+        &self,
+        user_id: UserId,
+        id: Uuid,
+        patch: &MemoryPatch,
+        reason: &str,
+        required_trust: Option<Trust>,
+    ) -> Result<Option<Memory>> {
         if let Some(c) = &patch.content {
             validate_text(c, patch.source_quote.as_deref())?;
         } else if let Some(q) = &patch.source_quote {
@@ -280,6 +295,9 @@ impl MemoryStore {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         let (rowid, before) = live_owned(&tx, user_id, id)?;
+        if required_trust.is_some_and(|trust| before.trust != trust) {
+            return Ok(None);
+        }
         let mut after = before.clone();
         if let Some(c) = &patch.content {
             c.trim().clone_into(&mut after.content);
@@ -315,7 +333,7 @@ impl MemoryStore {
             reason,
         )?;
         tx.commit()?;
-        Ok(after)
+        Ok(Some(after))
     }
 
     /// Soft-delete a live memory owned by `user_id`.

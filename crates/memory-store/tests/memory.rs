@@ -21,6 +21,7 @@ struct FakeModel {
     candidates: Mutex<Vec<Candidate>>,
     decision: Mutex<Option<Decision>>,
     consolidate_calls: Mutex<usize>,
+    on_consolidate: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl FakeModel {
@@ -43,6 +44,9 @@ impl MemoryModel for FakeModel {
         similar: &[memory_store::Memory],
     ) -> memory_store::Result<Decision> {
         *self.consolidate_calls.lock().unwrap() += 1;
+        if let Some(edit) = self.on_consolidate.lock().unwrap().take() {
+            edit();
+        }
         Ok(self.decision.lock().unwrap().unwrap_or_else(|| {
             // Default: first similar memory is the one to update.
             Decision::Update(similar[0].id)
@@ -249,6 +253,36 @@ async fn untrusted_flagged_and_cannot_overwrite_user_memories() {
     assert_eq!(m.trust, Trust::Untrusted);
     let block = render_recall_block(std::slice::from_ref(m));
     assert!(block.contains("untrusted_memory_data") && !block.contains("<recalled_memory>"));
+}
+
+#[tokio::test]
+async fn untrusted_consolidation_cannot_overwrite_a_concurrent_user_edit() {
+    let s = Arc::new(store());
+    let (u, b) = (UserId::new(), BotId::new());
+    let mut initial = NewMemory::new(u, None, Kind::Profile, "Store opens at nine");
+    initial.trust = Trust::Untrusted;
+    let memory = s.add(&initial, "shop page").unwrap();
+    let page = FakeModel::with(vec![cand("Store opens at ten", Some("Store opens at ten"))]);
+    let mut context = ctx(u, b, "Shop page: Store opens at ten");
+    context.untrusted = true;
+    let permitted = Pipeline::new(&s, &page).ingest(&context).await.unwrap();
+    assert!(matches!(&permitted[..], [Outcome::Updated(m)] if m.trust == Trust::Untrusted));
+    let editing = Arc::clone(&s);
+    *page.on_consolidate.lock().unwrap() = Some(Box::new(move || {
+        // The real pipeline has already read its similarity snapshot. A user
+        // corrects that row while the model is deciding how to consolidate.
+        editing.edit(u, memory.id, "Store opens at eleven").unwrap();
+    }));
+    let out = Pipeline::new(&s, &page).ingest(&context).await.unwrap();
+    let current = s.get(memory.id).unwrap().unwrap();
+    assert_eq!(current.content, "Store opens at eleven");
+    assert_eq!(current.trust, Trust::User);
+    assert_eq!(out, vec![Outcome::Skipped]);
+    assert_eq!(
+        s.journal(u, 10).unwrap().len(),
+        3,
+        "no stale update was journaled"
+    );
 }
 
 #[test]
