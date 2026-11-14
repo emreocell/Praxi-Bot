@@ -1021,6 +1021,28 @@ fn touch(shared: &Shared) {
 mod tests {
     use super::*;
 
+    #[tokio::test(start_paused = true)]
+    async fn target_close_notification_is_latched_before_worker_parks() {
+        let shared = Shared::default();
+        // Closure can occur between the worker's liveness check and its next
+        // select. No notification future has been created or polled yet.
+        mark_target_closed(&shared);
+        assert!(shared.target_closed.load(Ordering::SeqCst));
+        tokio::time::timeout(
+            Duration::from_millis(1),
+            shared.target_close_notify.notified(),
+        )
+        .await
+        .expect("a late worker must consume the stored close notification");
+        // A separate late listener still observes closure after that permit was
+        // consumed, including when more than one adapter shares the Page.
+        let mut late_listener = shared.target_close_tx.subscribe();
+        late_listener
+            .wait_for(|&closed| closed)
+            .await
+            .expect("closure is also level-triggered");
+    }
+
     fn ev(method: &str, params: Value) -> CdpEvent {
         CdpEvent {
             method: method.into(),
