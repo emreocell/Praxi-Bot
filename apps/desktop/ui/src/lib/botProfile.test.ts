@@ -15,6 +15,135 @@ import {
   resolveAutoExecutorRef
 } from "./botProfile.ts";
 
+function policyBot(permissions?: Record<string, unknown>): Bot {
+  return {
+    id: "policy-bot",
+    name: "Restricted",
+    created_at_ms: 1,
+    config: {
+      bot: { id: "restricted", name: "Restricted" },
+      models: { executor: "anthropic/old-model" },
+      ...(permissions ? { permissions } : {})
+    }
+  };
+}
+
+test("changing only the executor preserves preset category denials and initiator overrides", () => {
+  const permissions = {
+    preset: "full",
+    categories: {
+      shell: { level: { level: "deny" } },
+      messaging: {
+        level: { level: "allow" },
+        by_initiator: { schedule: { level: "deny" }, subagent: { level: "ask" } }
+      }
+    }
+  };
+  const bot = policyBot(permissions);
+  const draft = draftFromBot(bot);
+  draft.executor = { provider: "anthropic", model: "new-model" };
+  const config = configFromDraft(draft, bot);
+  assert.deepEqual(config.permissions, permissions);
+  assert.equal((config.models as Record<string, unknown>).executor, "anthropic/new-model");
+});
+
+test("editing identity preserves unsupported limits without changing them into ordinary Ask", () => {
+  const permissions = {
+    preset: "full",
+    categories: {
+      fs: {
+        level: {
+          level: "allow_with_limits",
+          max_per_hour: 3,
+          max_amount_minor: null,
+          path_patterns: ["/workspace/reports/**"]
+        }
+      }
+    }
+  };
+  const bot = policyBot(permissions);
+  const draft = draftFromBot(bot);
+  assert.equal(draft.categories.fs, "ask");
+  draft.name = "Renamed";
+  assert.deepEqual(configFromDraft(draft, bot).permissions, permissions);
+});
+
+test("editing a bot that inherits the workspace policy keeps that inheritance", () => {
+  const bot = policyBot();
+  const draft = draftFromBot(bot);
+  draft.color = "#4c8dff";
+  const config = configFromDraft(draft, bot);
+  assert.equal(Object.hasOwn(config, "permissions"), false);
+});
+
+test("editing one custom category preserves other rules, restrictions and absent categories", () => {
+  const permissions = {
+    categories: {
+      shell: { level: { level: "deny" } },
+      messaging: {
+        level: { level: "allow" },
+        by_initiator: { schedule: { level: "deny" } }
+      }
+    }
+  };
+  const bot = policyBot(permissions);
+  const draft = draftFromBot(bot);
+  draft.categories.shell = "ask";
+  assert.deepEqual(configFromDraft(draft, bot).permissions, {
+    categories: {
+      ...permissions.categories,
+      shell: { level: { level: "ask" } }
+    }
+  });
+  // Updating a base rule must not erase its per-initiator restriction either.
+  draft.categories.messaging = "ask";
+  const config = configFromDraft(draft, bot);
+  assert.deepEqual((config.permissions as typeof permissions).categories.messaging, {
+    level: { level: "ask" },
+    by_initiator: { schedule: { level: "deny" } }
+  });
+});
+
+test("a preset with category overrides is shown as custom with the effective base levels", () => {
+  const bot = policyBot({ preset: "full", categories: { shell: { level: { level: "deny" } } } });
+  const draft = draftFromBot(bot);
+  assert.equal(draft.preset, "custom");
+  assert.equal(draft.categories.shell, "deny");
+  assert.equal(draft.categories.messaging, "allow");
+  draft.categories.fs = "deny";
+  assert.deepEqual(configFromDraft(draft, bot).permissions, {
+    preset: "full",
+    categories: { shell: { level: { level: "deny" } }, fs: { level: { level: "deny" } } }
+  });
+});
+
+test("choosing custom starts from the selected preset's levels", () => {
+  const bot = policyBot({ preset: "read-only" });
+  const draft = draftFromBot(bot);
+  assert.ok(Object.values(draft.categories).every((level) => level === "deny"));
+  draft.preset = "custom";
+  draft.categories.fs = "ask";
+  const config = configFromDraft(draft, bot);
+  assert.equal((config.permissions as { preset: string }).preset, "read-only");
+  assert.deepEqual((config.permissions as { categories: unknown }).categories, {
+    fs: { level: { level: "ask" } }
+  });
+});
+
+test("an explicit preset replacement and a new custom bot still save their requested policy", () => {
+  const bot = policyBot({ preset: "full", categories: { shell: { level: { level: "deny" } } } });
+  const draft = draftFromBot(bot);
+  draft.preset = "read-only";
+  assert.deepEqual(configFromDraft(draft, bot).permissions, { preset: "read-only" });
+  const fresh = draftFromBot();
+  fresh.name = "New";
+  fresh.preset = "custom";
+  fresh.categories.shell = "deny";
+  assert.deepEqual((configFromDraft(fresh).permissions as { categories: Record<string, unknown> }).categories.shell, {
+    level: { level: "deny" }
+  });
+});
+
 test("draftFromBot and configFromDraft round-trip shape and color with legacy fallback", () => {
   const legacy: Bot = {
     id: "legacy-bot-123",
