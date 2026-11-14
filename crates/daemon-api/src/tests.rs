@@ -1075,6 +1075,7 @@ impl Tool for Ask {
                 }),
             }],
             spill: None,
+            exposure: None,
         })
     }
 }
@@ -1512,6 +1513,27 @@ async fn run_and_reply_seen(t: &T, chat: &str, text: &str) -> (String, Vec<proto
             .expect("run never finished")
             .expect("stream closed");
         let ev = item.envelope.event;
+        // A screen read taints the chat, so the following desktop action is
+        // egress and asks before the control overlay. These tests are about
+        // the overlay. Approve that one card and leave the overlay alone.
+        if let protocol::Event::ApprovalNeeded(a) = &ev
+            && a.details
+                .as_ref()
+                .and_then(|d| d.get("kind"))
+                .and_then(|k| k.as_str())
+                == Some("egress")
+        {
+            let (k, v) = auth();
+            let r = send(
+                &t.app,
+                Method::POST,
+                &format!("/v1/approvals/{}", a.call_id),
+                Some(json!({"decision": "approve", "scope": "once"})),
+                &[(k, v.as_str())],
+            )
+            .await;
+            assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+        }
         let finished =
             matches!(&ev, protocol::Event::RunFinished(f) if f.run_id.to_string() == run);
         let mine = match &ev {
@@ -1933,6 +1955,9 @@ async fn listing_runs_writes_nothing_to_disk() {
         role: "user".to_owned(),
         content: "hello".to_owned(),
         created_at_ms: now,
+        exposure_untrusted: false,
+        exposure_private: false,
+        exposure_sources: Vec::new(),
     })
     .unwrap();
     st.insert_step(&storage::RunStep {

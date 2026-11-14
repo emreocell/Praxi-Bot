@@ -475,6 +475,46 @@ impl Shared {
         None
     }
 
+    /// True when redaction would change the card or the input that would run.
+    fn shown_text_would_change(&self, details: Option<&Value>, input: &Value) -> bool {
+        let Some(r) = &self.cfg.redactor else {
+            return false;
+        };
+        let details_changed = details.is_some_and(|d| {
+            let mut shown = d.clone();
+            crate::shared::redact_value(r, &mut shown)
+        });
+        let mut input_shown = input.clone();
+        details_changed || crate::shared::redact_value(r, &mut input_shown)
+    }
+
+    /// Refuse, and tell the tool its preview is closed, when the user would
+    /// approve different text from the text that runs.
+    fn refuse_hidden_secret(
+        &self,
+        ctx: &RunCtx,
+        name: &str,
+        input: &Value,
+        details: Option<&Value>,
+        token: Option<&str>,
+    ) -> Result<(), String> {
+        if !self.shown_text_would_change(details, input) {
+            return Ok(());
+        }
+        if let Some(tool) = self.tools.get(name) {
+            let tctx = tool_registry::ToolContext {
+                run_id: ctx.run_id.to_string(),
+                bot_id: Some(ctx.bot_id.to_string()),
+                ..tool_registry::ToolContext::default()
+            };
+            tool.approval_closed(&tctx, input, token);
+        }
+        Err(
+            "the request contains text that looks like a secret (a key or token), which cannot be shown for approval; remove it and ask again"
+                .into(),
+        )
+    }
+
     /// Park the run in `WaitingApproval` until `approve` / `deny` is called.
     ///
     /// `Ok(permit)` means the user approved and the post-approve recheck did
@@ -501,6 +541,11 @@ impl Shared {
         if let Some(extra) = self.egress_card(ctx, name, input) {
             taint::merge_egress(&mut details, extra);
         }
+        // The tool's own card was checked before this merge. The egress
+        // payload is part of the card the user sees and part of what the
+        // permit will run.
+        self.refuse_hidden_secret(ctx, name, input, details.as_ref(), token.as_deref())
+            .map_err(Some)?;
         // An always-ask tool must show the user what it does: refuse to ask
         // without details rather than fall back to the generic card.
         if self.always_ask(name) && details.is_none() {

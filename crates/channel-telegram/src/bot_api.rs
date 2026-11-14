@@ -225,10 +225,23 @@ struct GetUpdatesBody<'a> {
     allowed_updates: &'a [&'a str],
 }
 
+/// Telegram fetches a URL in a message to build a link preview unless this
+/// says not to. Every send and edit sets `is_disabled`, including approvals
+/// and ordinary replies: the preview request is itself an egress of the URL.
+#[derive(Debug, Serialize)]
+struct LinkPreviewOptions {
+    is_disabled: bool,
+}
+
+fn link_previews_off() -> LinkPreviewOptions {
+    LinkPreviewOptions { is_disabled: true }
+}
+
 #[derive(Debug, Serialize)]
 struct SendMessageBody<'a> {
     chat_id: i64,
     text: &'a str,
+    link_preview_options: LinkPreviewOptions,
     #[serde(skip_serializing_if = "Option::is_none")]
     reply_markup: Option<&'a InlineKeyboardMarkup>,
 }
@@ -238,6 +251,7 @@ struct EditMessageTextBody<'a> {
     chat_id: i64,
     message_id: i64,
     text: &'a str,
+    link_preview_options: LinkPreviewOptions,
     #[serde(skip_serializing_if = "Option::is_none")]
     reply_markup: Option<&'a InlineKeyboardMarkup>,
 }
@@ -425,6 +439,7 @@ impl BotApiClient {
         let body = SendMessageBody {
             chat_id,
             text: &clamped,
+            link_preview_options: link_previews_off(),
             reply_markup,
         };
         self.post("sendMessage", &body, Duration::from_secs(15))
@@ -450,6 +465,7 @@ impl BotApiClient {
             chat_id,
             message_id,
             text: &clamped,
+            link_preview_options: link_previews_off(),
             reply_markup,
         };
         match self
@@ -633,5 +649,31 @@ impl ThrottledEditor {
                 Ok(Some(msg_id))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::*;
+
+    #[test]
+    fn send_and_edit_disable_link_previews() {
+        let send = SendMessageBody {
+            chat_id: 1,
+            text: "https://attacker.example/leak",
+            link_preview_options: link_previews_off(),
+            reply_markup: None,
+        };
+        let send_body = serde_json::to_value(&send).unwrap();
+        assert_eq!(send_body["link_preview_options"]["is_disabled"], true);
+        let edit = EditMessageTextBody {
+            chat_id: 1,
+            message_id: 2,
+            text: "https://attacker.example/leak",
+            link_preview_options: link_previews_off(),
+            reply_markup: None,
+        };
+        let edited = serde_json::to_value(&edit).unwrap();
+        assert_eq!(edited["link_preview_options"]["is_disabled"], true);
     }
 }

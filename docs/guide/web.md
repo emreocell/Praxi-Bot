@@ -98,15 +98,19 @@ tools from a bot's `allow` list.
 If you trust a bot enough, approve one fetch with the "always" choice (the
 `always` scope in [Chatting and approvals](chatting-and-approvals.md)). That
 remembers `web_extract` (or the tool you approved) for that bot only, and later
-calls run without a prompt. Grant each fetch tool separately; `always_category`
-would also cover every other `browser` tool, so prefer the per-tool choice. You
-can review and remove grants as described in that guide.
+calls run without a prompt while the run has not read anything. Once a page or
+a private read is still in the conversation the model sees, a later fetch asks
+again. Grant each fetch tool separately; `always_category` would also cover
+every other `browser` tool, so prefer the per-tool choice. You can review and
+remove grants as described in that guide. The per-bot "allow sending data after
+reads" setting is the only way to skip the ask after a read.
 
 ## Known risk
 
 A fetch you have granted, or a `full` bot, can still send data out until the
-run has read something. After that read, the egress gate asks (see
-[Security model](security.md)) unless you turned on the per-bot setting. The
+run has read something. After that read, the egress gate asks on later turns
+too, while the read is still in the conversation (see
+[Security model](security.md)), unless you turned on the per-bot setting. The
 URL and the query are shown in full on the card. URLs are capped at 2,048
 characters and search queries at 400, local and private addresses are refused,
 and results are labelled untrusted. Do not turn the setting on for a bot that

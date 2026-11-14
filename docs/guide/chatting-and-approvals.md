@@ -134,13 +134,17 @@ Grants ("always allow") cannot waive a floor.
 
 Once a run has read untrusted or private content, a tool that can send data off
 the machine asks even if a grant or the read shortcut would have allowed it.
-The card says what was read and shows the exact outgoing query, URL or body,
-with the tail reachable by scrolling, and the destination host. Approving that
-card allows that one send. It does not create a standing grant. Search against
-the configured provider stays prompt-free when the run has only untrusted
-content and has not read private data. The bot form has an explicit, off-by-
-default setting that skips this ask for that bot. Deny rules and the floors
-above still win. A run that has not read anything behaves as before.
+Desktop typing, clicking, and launching, browser scrolling and tab changes, and
+mailbox reads, searches, and mark-read are in that set. The card says what was
+read and shows the exact outgoing query, URL, or body, including every
+recipient, with the tail reachable by scrolling, and the destination host.
+Approving that card allows that one send. It does not create a standing grant.
+A later message in the same chat still asks while the earlier answer is in the
+conversation the model sees. Search against the configured provider stays
+prompt-free when the run has only untrusted content and has not read private
+data. The bot form has an explicit, off-by-default setting that skips this ask
+for that bot. Deny rules and the floors above still win. A run that has not
+read anything behaves as before.
 
 ### Runs started by a schedule
 
