@@ -208,3 +208,61 @@
   --shadow-target: 0 0 0 4px var(--color-accent-subtle);
   --shadow-human-banner: 0 0 0 3px var(--color-warning-subtle);
 }
+
+/* Generated default theme — pnpm --dir packages/ui generate:themes */
+:root {
+  color-scheme: dark;
+  --color-background: #111217;
+  --color-surface: #191a1f;
+  --color-surface-elevated: #24252a;
+  --color-surface-active: #2d2e33;
+  --color-surface-opaque: #191a1f;
+  --color-surface-elevated-opaque: #24252a;
+  --color-text: #ecedf1;
+  --color-text-secondary: #c3c4c8;
+  --color-text-muted: #999a9e;
+  --color-text-faint: #64656a;
+  --color-accent: #b6b8fa;
+  --color-accent-contrast: #111111;
+  --color-accent-text: #b6b8fa;
+  --color-border: color-mix(in srgb, #ecedf1 8%, transparent);
+  --color-border-strong: #7f8084;
+  --color-text-inverse: #111111;
+  --color-accent-hover: #bdbffb;
+  --color-accent-subtle: color-mix(in srgb, #b6b8fa 12%, #191a1f);
+  --color-surface-overlay: color-mix(in srgb, #191a1f 88%, transparent);
+  --color-backdrop-dim: #111217;
+  --color-modal-backdrop: #00000099;
+  --color-success: #92ceac;
+  --color-warning: #e8be7c;
+  --color-danger: #f4a3a3;
+  --color-danger-contrast: #111111;
+  --color-danger-subtle: color-mix(in srgb, var(--color-danger) 10%, #191a1f);
+  --color-warning-subtle: color-mix(in srgb, var(--color-warning) 10%, #191a1f);
+  --color-focus: #7f8084;
+  --color-scrollbar: #48494e;
+  --color-selection: color-mix(in srgb, #b6b8fa 35%, #111217);
+  --color-selection-text: #ecedf1;
+  --color-code-bg: #111217;
+  --color-code-text: #ecedf1;
+  --color-code-keyword: #b6b8fa;
+  --color-code-string: #92ceac;
+  --color-code-number: #e8be7c;
+  --color-code-comment: #999a9e;
+  --color-overlay-target-bg: color-mix(in srgb, #b6b8fa 16%, transparent);
+  --color-overlay-ripple: color-mix(in srgb, #b6b8fa 48%, transparent);
+  --color-overlay-human-bg: var(--color-warning-subtle);
+  --color-accent-deep: #b6b8fa;
+  --color-primary: #ecedf1;
+  --color-primary-contrast: #111217;
+  --color-logo-tile: #F5F5F3;
+  --color-creature-eyes: #172125;
+  --color-bg-gradient: #27282d;
+  --color-shadow: color-mix(in srgb, #000000 60%, transparent);
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000000 30%, transparent);
+  --shadow-card: 0 4px 16px color-mix(in srgb, #000000 18%, transparent);
+  --shadow-overlay: 0 32px 100px color-mix(in srgb, #000000 50%, transparent), 0 0 0 1px color-mix(in srgb, #ecedf1 2%, transparent);
+  --shadow-focus: 0 0 0 2px var(--color-background), 0 0 0 4px var(--color-focus);
+  --shadow-target: 0 0 0 4px var(--color-accent-subtle);
+  --shadow-human-banner: 0 0 0 3px var(--color-warning-subtle);
+}

@@ -109,6 +109,18 @@ async function getTauriStore(): Promise<Store | null> {
   return storeInstancePromise;
 }
 
+/** Synchronous read of the localStorage mirror (written by every save); null if absent or malformed. */
+export function loadSettingsSync(): AppSettings | null {
+  try {
+    const raw = typeof window !== "undefined" ? window.localStorage?.getItem(LOCAL_STORAGE_KEY) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<AppSettings>;
+    return { ...DEFAULT_SETTINGS, ...parsed, ...normalizeAppearance(parsed as Record<string, unknown>) };
+  } catch {
+    return null;
+  }
+}
+
 export async function loadSettings(): Promise<AppSettings> {
   const store = await getTauriStore();
   if (store) {

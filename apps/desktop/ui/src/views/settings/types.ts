@@ -35,7 +35,8 @@ export interface CardDef {
 /** What the modal needs from the app shell. */
 export interface SettingsBridge {
   settings: AppSettings;
-  update: (patch: Partial<AppSettings>) => void;
+  /** `deferSave`: apply now, persist / broadcast after a short pause (colour pickers, sliders). */
+  update: (patch: Partial<AppSettings>, opts?: { deferSave?: boolean }) => void;
   /** Colour of the bot in view (the accent follows it by default). */
   botColor?: string;
   onLanguage: (lang: SupportedLanguage) => void;

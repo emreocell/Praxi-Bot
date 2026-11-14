@@ -80,3 +80,17 @@ export function backdropIsActive(backdrop: string, backgroundUrl: string): boole
   if (backdrop === NO_BACKDROP) return false;
   return backdrop !== CUSTOM_BACKDROP || backgroundUrl.trim() !== "";
 }
+
+/** Upper bound for the drawn canvas; larger windows are drawn at a coarser scale. */
+export const MAX_BACKDROP_PIXELS = 2_000_000;
+
+/** Canvas size for a window: `scale` is the base divisor, raised so the area stays under `maxPixels`. */
+export function backdropSize(
+  innerWidth: number,
+  innerHeight: number,
+  scale: number,
+  maxPixels: number = MAX_BACKDROP_PIXELS
+): { w: number; h: number } {
+  const k = Math.max(scale, Math.sqrt((innerWidth * innerHeight) / maxPixels));
+  return { w: Math.max(1, Math.ceil(innerWidth / k)), h: Math.max(1, Math.ceil(innerHeight / k)) };
+}

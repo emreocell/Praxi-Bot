@@ -26,6 +26,7 @@ export {
 } from "./components/Sidebar";
 export {
   accentAfterThemeChange,
+  accentKind,
   accentFor,
   applyTheme,
   BUBBLE_STYLES,
@@ -55,6 +56,7 @@ export {
   subscribeSystemTheme,
   themeFor,
   UI_STYLES,
+  type AccentKind,
   type AccentPreference,
   type BubbleStyle,
   type Corners,

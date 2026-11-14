@@ -18,6 +18,7 @@ import {
 
 export {
   accentAfterThemeChange,
+  accentKind,
   buildTokens,
   contrastRatio,
   CUSTOM_THEME_ID,
@@ -41,6 +42,7 @@ export {
   CORNERS,
   OWN_BUBBLES,
   UI_STYLES,
+  type AccentKind,
   type AccentPreference,
   type BubbleStyle,
   type Corners,

@@ -10,6 +10,7 @@ import "./i18n";
 import { isTauriRuntime } from "./overlay/events";
 import { OverlayWindow } from "./overlay/OverlayWindow";
 import { WidgetWindow } from "./overlay/WidgetWindow";
+import { paintSavedAppearanceEarly } from "./state/useApplyAppearance";
 
 type WindowKind = "main" | "overlay" | "widget";
 
@@ -44,6 +45,8 @@ function resolveWindowKind(): WindowKind {
 
 const windowKind = resolveWindowKind();
 document.documentElement.dataset.windowKind = windowKind;
+
+paintSavedAppearanceEarly(windowKind !== "main");
 
 const container = document.getElementById("root");
 if (!container) {

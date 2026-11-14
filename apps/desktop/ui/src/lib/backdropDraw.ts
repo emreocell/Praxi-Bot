@@ -56,22 +56,38 @@ const SCENES: Record<string, SceneFn> = {
   aurora: (x, w, h) =>
     blobs(x, w, h, "#3f8f96", [["#7fd0b8", 0.2, 0.2, 0.7], ["#b9e3a6", 0.75, 0.55, 0.6], ["#f3c98b", 0.5, 0.75, 0.35], ["#f6e2b0", 0.52, 0.7, 0.16], ["#2b6f86", 0.95, 0.05, 0.5]]),
   meadow: (x, w, h) => {
-    x.fillStyle = "#17260f";
-    x.fillRect(0, 0, w, h);
-    x.filter = `blur(${Math.max(1, w / 160)}px)`;
-    const cs = ["#2f5a1c", "#4f8a22", "#86a83a", "#c9cfa0", "#1d3a14", "#6f9a2c", "#e9e6cf"];
-    const rnd = seeded(7);
-    for (let i = 0; i < 150; i++) {
-      x.save();
-      x.translate(rnd() * w, rnd() * h);
-      x.rotate(-0.9);
-      x.globalAlpha = 0.25 + rnd() * 0.5;
-      x.fillStyle = cs[i % cs.length];
-      x.fillRect(-w * 0.3, 0, w * (0.25 + rnd() * 0.5), 1 + rnd() * h * 0.035);
-      x.restore();
+    const strokes = (g: Ctx, gw: number, gh: number) => {
+      g.fillStyle = "#17260f";
+      g.fillRect(0, 0, gw, gh);
+      const cs = ["#2f5a1c", "#4f8a22", "#86a83a", "#c9cfa0", "#1d3a14", "#6f9a2c", "#e9e6cf"];
+      const rnd = seeded(7);
+      for (let i = 0; i < 150; i++) {
+        g.save();
+        g.translate(rnd() * gw, rnd() * gh);
+        g.rotate(-0.9);
+        g.globalAlpha = 0.25 + rnd() * 0.5;
+        g.fillStyle = cs[i % cs.length];
+        g.fillRect(-gw * 0.3, 0, gw * (0.25 + rnd() * 0.5), 1 + rnd() * gh * 0.035);
+        g.restore();
+      }
+      g.globalAlpha = 1;
+    };
+    if (typeof x.filter === "string") {
+      x.filter = `blur(${Math.max(1, w / 160)}px)`;
+      strokes(x, w, h);
+      x.filter = "none";
+      return;
     }
-    x.filter = "none";
-    x.globalAlpha = 1;
+    // No canvas filter support (e.g. WebKit): paint small and upscale smoothed for a soft look.
+    const small = document.createElement("canvas");
+    small.width = Math.max(1, Math.ceil(w / 4));
+    small.height = Math.max(1, Math.ceil(h / 4));
+    const sg = small.getContext("2d");
+    if (!sg) return strokes(x, w, h);
+    strokes(sg, small.width, small.height);
+    x.imageSmoothingEnabled = true;
+    x.imageSmoothingQuality = "high";
+    x.drawImage(small, 0, 0, w, h);
   },
   sunset: (x, w, h) =>
     blobs(x, w, h, "#cfc7ea", [["#ff9a52", 0.15, 0.35, 0.6], ["#ffd166", 0.3, 0.1, 0.4], ["#ff7eb6", 0.55, 0.6, 0.5], ["#8fd3ff", 0.95, 0.2, 0.55], ["#b7f0c8", 0.75, 0.9, 0.4]]),
@@ -161,6 +177,13 @@ const SCENES: Record<string, SceneFn> = {
   }
 };
 
+/** Positive 31-bit seed from the scene id and canvas size. */
+function grainSeed(scene: string, w: number, h: number): number {
+  let hash = 17;
+  for (const ch of `${scene}:${w}x${h}`) hash = (hash * 31 + ch.charCodeAt(0)) % 2147483646;
+  return hash + 1;
+}
+
 /** Does the scene read the theme colours (so it must be redrawn when they change)? */
 export function sceneIsThemed(id: string): boolean {
   return backdropInfo(id)?.themed === true;
@@ -222,8 +245,10 @@ export function drawBackdrop(cv: HTMLCanvasElement, scene: string, w: number, h:
     }
   } else if (fx === "grain" || fx === "flute") {
     const amount = fx === "flute" ? 22 : 38;
+    // Seeded: the same scene at the same size always gets the same grain.
+    const rnd = seeded(grainSeed(scene, w, h));
     for (let o = 0; o < d.length; o += 4) {
-      const n = (Math.random() - 0.5) * amount;
+      const n = (rnd() - 0.5) * amount;
       d[o] += n;
       d[o + 1] += n;
       d[o + 2] += n;

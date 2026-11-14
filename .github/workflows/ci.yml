@@ -128,3 +128,9 @@ jobs:
 
       - name: UI tests
         run: pnpm --filter ./apps/desktop/ui test
+
+      - name: UI i18n keys
+        run: pnpm --dir apps/desktop/ui check:i18n
+
+      - name: UI theme contrast
+        run: pnpm --dir apps/desktop/ui check:themes

@@ -3,6 +3,7 @@ import { useRef, type CSSProperties } from "react";
 import type { TFunction } from "i18next";
 import {
   accentFor,
+  accentKind,
   BUBBLE_STYLES,
   Button,
   CORNERS,
@@ -19,6 +20,7 @@ import formStyles from "../../components/Form.module.css";
 import pickerStyles from "../../components/AppearancePicker.module.css";
 import { Segmented, SettingRow, Switch } from "../../components/SettingsUi";
 import { selectedThemeId, ThemePicker } from "../../components/ThemePicker";
+import { CUSTOM_BACKDROP, NO_BACKDROP } from "../../lib/backdropCatalog";
 import { ACCENT_PRESETS, BLUR_PRESETS, DIM_PRESETS } from "../../config/product";
 import styles from "../SettingsModal.module.css";
 import type { CardDef, SettingsBridge } from "./types";
@@ -60,7 +62,14 @@ function BackgroundControls({ b, t }: { b: SettingsBridge; t: TFunction }) {
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => update({ backgroundUrl: "", backgroundFileName: "" })}
+            onClick={() =>
+              update({
+                backgroundUrl: "",
+                backgroundFileName: "",
+                // The own-image backdrop has nothing to show any more.
+                ...(settings.backdrop === CUSTOM_BACKDROP ? { backdrop: NO_BACKDROP } : {})
+              })
+            }
           >
             {t("settings.background.clearFile")}
           </Button>
@@ -190,10 +199,11 @@ export function appearanceCards(b: SettingsBridge, t: TFunction): CardDef[] {
       {icon}
     </button>
   );
+  const kind = accentKind(settings.accentColor, theme);
   const accentHint =
-    settings.accentColor === ""
+    kind === "bot"
       ? t("appearance.accent.botHint")
-      : settings.accentColor === "theme"
+      : kind === "theme"
         ? t("appearance.accent.themeHint")
         : t("appearance.accent.fixedHint");
   const themeAccent = paletteById(selectedThemeId(settings.themeMode))?.accent;
@@ -226,12 +236,12 @@ export function appearanceCards(b: SettingsBridge, t: TFunction): CardDef[] {
               "bot",
               b.botColor ?? accent,
               t("appearance.accent.bot"),
-              settings.accentColor === "",
-              () => update({ accentColor: "" }),
+              kind === "bot",
+              () => update({ accentColor: "bot" }),
               <BotIcon />
             )}
             {themeAccent
-              ? swatch("theme", themeAccent, t("appearance.accent.theme"), settings.accentColor === "theme", () =>
+              ? swatch("theme", themeAccent, t("appearance.accent.theme"), kind === "theme", () =>
                   update({ accentColor: "theme" })
                 )
               : null}
@@ -253,7 +263,7 @@ export function appearanceCards(b: SettingsBridge, t: TFunction): CardDef[] {
                 type="color"
                 aria-label={t("appearance.accent.custom")}
                 value={fixed || accent}
-                onChange={(e) => update({ accentColor: e.target.value })}
+                onChange={(e) => update({ accentColor: e.target.value }, { deferSave: true })}
               />
             </label>
           </div>

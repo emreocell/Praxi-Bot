@@ -103,7 +103,7 @@ export function appearanceFromQuery(
   const next = normalizeAppearance({
     ...saved,
     themeMode,
-    accentColor: accent === undefined ? (q("theme") ? "" : saved.accentColor) : accent === "bot" ? "" : accent,
+    accentColor: accent ?? saved.accentColor,
     uiStyle: q("style") ?? saved.uiStyle,
     corners: q("corners") ?? saved.corners,
     bubble: q("bubble") ?? saved.bubble,
@@ -113,6 +113,6 @@ export function appearanceFromQuery(
   });
   // A theme picked by URL gets the same accent treatment as a click.
   return q("theme") && accent === undefined
-    ? { ...next, ...themePickPatch({ accentColor: "", customTheme: next.customTheme }, next.themeMode) }
+    ? { ...next, ...themePickPatch({ accentColor: saved.accentColor, customTheme: next.customTheme }, next.themeMode) }
     : next;
 }

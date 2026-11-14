@@ -38,7 +38,7 @@ export function BackdropPicker({
   dim: number;
   backgroundUrl: string;
   colors: SceneColors;
-  onChange: (patch: BackdropPatch) => void;
+  onChange: (patch: BackdropPatch, opts?: { deferSave?: boolean }) => void;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -89,7 +89,8 @@ export function BackdropPicker({
       </span>
     </button>
   );
-  const slider = backdrop !== NO_BACKDROP ? (
+  // The slider only affects canvas scenes (not "none", not the own image layer).
+  const slider = backdrop !== NO_BACKDROP && backdrop !== CUSTOM_BACKDROP ? (
     <label className={styles.range}>
       <span>{t("appearance.backdrop.calm")}</span>
       <input
@@ -98,7 +99,7 @@ export function BackdropPicker({
         max={BACKDROP_DIM_MAX}
         value={dimToSlider(dim)}
         aria-label={t("appearance.backdrop.intensity")}
-        onChange={(e) => onChange({ backdropDim: sliderToDim(Number(e.target.value)) })}
+        onChange={(e) => onChange({ backdropDim: sliderToDim(Number(e.target.value)) }, { deferSave: true })}
       />
       <span>{t("appearance.backdrop.lively")}</span>
     </label>

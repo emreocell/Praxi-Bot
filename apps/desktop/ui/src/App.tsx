@@ -1,7 +1,7 @@
 import { BellDot, CalendarDays, FlaskConical, LoaderCircle, MessageSquare, Plus, Search, ServerOff, Settings2, Monitor, Minus, Square, X } from "lucide-react";
 import { isMockMode } from "./api/mockMode";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   BotAvatar,
@@ -25,6 +25,7 @@ import { getAutostart, setAutostart } from "./lib/providers";
 import { ToastProvider } from "./components/Toast";
 import { ControlBridgeHost } from "./state/ControlBridgeHost";
 import { appearanceFromQuery } from "./lib/appearance";
+import { createDebounced } from "./lib/debounce";
 import { CUSTOM_BACKDROP, NO_BACKDROP } from "./lib/backdropCatalog";
 import { Backdrop, sceneColors } from "./components/Backdrop";
 import { useApplyAppearance } from "./state/useApplyAppearance";
@@ -63,6 +64,7 @@ import {
   type AppSettings,
   DEFAULT_SETTINGS,
   loadSettings,
+  loadSettingsSync,
   saveSettings,
   shouldOpenOnboardingOnStart
 } from "./store/settingsStore";
@@ -88,7 +90,7 @@ function AppShell() {
     refreshBots,
     retry
   } = useDaemon();
-  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<AppSettings>(() => loadSettingsSync() ?? DEFAULT_SETTINGS);
   const [route, setRoute] = useState<Route>({ kind: "home" });
   const [controlState, setControlState] = useState<ControlSnapshot>(
     INITIAL_CONTROL_SNAPSHOT
@@ -170,11 +172,34 @@ function AppShell() {
     });
   }, []);
 
-  const updateSettings = (patch: Partial<AppSettings>) => {
+  // Continuous inputs (colour pickers, sliders) apply live but persist / broadcast after a pause.
+  const latestSettings = useRef<AppSettings>(settings);
+  const persistLater = useRef(
+    createDebounced(() => {
+      void saveSettings(latestSettings.current);
+      void broadcastSettingsUpdated(latestSettings.current);
+    }, 250)
+  );
+  useEffect(() => {
+    const flush = () => persistLater.current.flush();
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, []);
+
+  const updateSettings = (patch: Partial<AppSettings>, opts?: { deferSave?: boolean }) => {
     setSettings((prev) => {
       const next: AppSettings = { ...prev, ...patch };
-      void saveSettings(next);
-      void broadcastSettingsUpdated(next);
+      latestSettings.current = next;
+      if (opts?.deferSave) {
+        persistLater.current();
+      } else {
+        persistLater.current.cancel();
+        void saveSettings(next);
+        void broadcastSettingsUpdated(next);
+      }
       return next;
     });
   };

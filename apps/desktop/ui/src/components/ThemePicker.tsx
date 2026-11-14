@@ -120,7 +120,10 @@ export function ThemePicker({
   /** The saved accent preference (`""`, `"theme"` or a colour). */
   accent: string;
   /** The caller persists the patch. */
-  onChange: (patch: { themeMode?: string; customTheme?: CustomTheme; accentColor?: string }) => void;
+  onChange: (
+    patch: { themeMode?: string; customTheme?: CustomTheme; accentColor?: string },
+    opts?: { deferSave?: boolean }
+  ) => void;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -133,11 +136,15 @@ export function ThemePicker({
     onChange({ themeMode: id, accentColor: accentAfterThemeChange(accent, next) });
   };
   const editCustom = (next: CustomTheme) => {
-    onChange({
-      customTheme: next,
-      themeMode: CUSTOM_THEME_ID,
-      accentColor: accentAfterThemeChange(accent, {})
-    });
+    // The colour inputs fire on every drag step: apply live, persist after a pause.
+    onChange(
+      {
+        customTheme: next,
+        themeMode: CUSTOM_THEME_ID,
+        accentColor: accentAfterThemeChange(accent, {})
+      },
+      { deferSave: true }
+    );
   };
   const nameOf = (id: string) => t(`theme.names.${id}`);
   const dark = PALETTES.filter((p) => !deriveTheme(p).light);

@@ -1,6 +1,6 @@
 import { useEffect, useRef, type CSSProperties } from "react";
 import { deriveTheme, type Theme } from "ui";
-import { backdropInfo } from "../lib/backdropCatalog";
+import { backdropInfo, backdropSize } from "../lib/backdropCatalog";
 import { drawBackdrop, sceneScale, type SceneColors } from "../lib/backdropDraw";
 import styles from "./Backdrop.module.css";
 
@@ -36,14 +36,10 @@ export function Backdrop({
     const cv = ref.current;
     if (!cv || !info) return undefined;
     const k = sceneScale(info);
-    const paint = () =>
-      drawBackdrop(
-        cv,
-        scene,
-        Math.max(1, Math.ceil(window.innerWidth / k)),
-        Math.max(1, Math.ceil(window.innerHeight / k)),
-        colors
-      );
+    const paint = () => {
+      const { w, h } = backdropSize(window.innerWidth, window.innerHeight, k);
+      drawBackdrop(cv, scene, w, h, colors);
+    };
     paint();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const onResize = () => {

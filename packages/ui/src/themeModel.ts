@@ -122,11 +122,11 @@ export function inkOn(color: string): string {
 /** `[id, bg, text, accent?]` — names live in i18n (`theme.names.<id>`). */
 const RAW: ReadonlyArray<readonly [string, string, string, string?]> = [
   ["obsidian", "#111217", "#ecedf1"],
-  ["cobalt", "#010102", "#f3f3f5"],
+  ["cobalt", "#010102", "#f3f3f5", "#9DBBFF"],
   ["clay", "#f4f1ed", "#1a1a1a"],
   ["porcelain", "#f6f7f9", "#15171c"],
   ["moss", "#0b100d", "#e7efe5"],
-  ["raven", "#14110d", "#fdefd6"],
+  ["raven", "#14110d", "#fdefd6", "#E4B683"],
   ["navy", "#0a0e1a", "#e6ebf7"],
   ["wine", "#150b0f", "#f6e6ea"],
   ["graphite", "#1b1b1b", "#ededed"],
@@ -251,7 +251,7 @@ export function deriveTheme(theme: ThemeDef): DerivedTheme {
   const hover = mix(bg, text, light ? 0.1 : 0.13);
   const surfaces = [bg, surface, raised, hover];
   const muted = fade(text, bg, 0.38, surfaces, 4.5);
-  const secondary = fade(text, bg, 0.18, surfaces, 4.5);
+  const secondary = mix(text, muted, 0.5); // halfway: readable because both ends are
   const lineStrong = fade(text, bg, 0.5, [bg, surface, raised], 3);
   const base = light ? LIGHT_STATUS : DARK_STATUS;
   // A status colour is also the text of its own 10 % badge, so test that too.
@@ -291,20 +291,33 @@ export function fallbackAccent(d: Pick<DerivedTheme, "light">): string {
   return d.light ? "#C86B4A" : "#B6B8FA";
 }
 
-export type AccentPreference = string; // "" (bot colour) | "theme" | "#rrggbb"
+/**
+ * Stored accent preference:
+ * - `""`      implicit default: the theme's own accent when it has one, else the bot's colour
+ *             (this is also what every pre-v6 settings file holds, so old users keep their accent)
+ * - `"bot"`   explicit: follow the active bot's colour
+ * - `"theme"` explicit: the theme's own accent
+ * - `#rrggbb` a fixed colour the user picked
+ */
+export type AccentPreference = string;
 
 /** Validate a stored accent preference. */
 export function parseAccentPreference(value: unknown): AccentPreference {
-  if (value === "theme") return "theme";
+  if (value === "theme" || value === "bot") return value;
   return normalizeHex(value) ?? "";
 }
 
-/**
- * Resolve the colour to use as accent.
- * - `""`      the bot's colour (falls back to the theme's, then a default)
- * - `"theme"` the theme's own accent (falls back to the bot's)
- * - `#rrggbb` that fixed colour
- */
+export type AccentKind = "bot" | "theme" | "fixed";
+
+/** Which choice a preference stands for with the given theme (for highlighting the right swatch). */
+export function accentKind(pref: AccentPreference, theme: Pick<ThemeDef, "accent">): AccentKind {
+  if (normalizeHex(pref)) return "fixed";
+  if (pref === "bot") return "bot";
+  if (pref === "theme") return "theme";
+  return theme.accent ? "theme" : "bot";
+}
+
+/** Resolve the colour to use as accent (the bot / theme colour falls back to the other, then `fallback`). */
 export function resolveAccent(
   pref: AccentPreference,
   theme: Pick<ThemeDef, "accent">,
@@ -315,17 +328,17 @@ export function resolveAccent(
   if (fixed) return fixed;
   const bot = normalizeHex(botColor);
   const own = normalizeHex(theme.accent);
-  if (pref === "theme") return own ?? bot ?? fallback;
-  return bot ?? own ?? fallback;
+  return accentKind(pref, theme) === "theme" ? (own ?? bot ?? fallback) : (bot ?? own ?? fallback);
 }
 
 /**
- * Accent preference after the user picks a theme: a theme that defines its own
- * accent selects "theme"; leaving such a theme drops back to the bot colour.
+ * Accent preference after the user picks a theme.  Only the implicit values
+ * move: a fixed colour and an explicit `"bot"` stay; `"theme"` on a theme
+ * without its own accent becomes implicit again.  (`""` already resolves per theme.)
  */
 export function accentAfterThemeChange(current: AccentPreference, next: Pick<ThemeDef, "accent">): AccentPreference {
-  if (next.accent) return "theme";
-  return current === "theme" ? "" : current;
+  if (current === "theme") return next.accent ? "theme" : "";
+  return current;
 }
 
 /** Warning text for a custom theme, or null when the text is readable. */

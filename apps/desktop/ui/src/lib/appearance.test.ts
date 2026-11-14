@@ -99,11 +99,13 @@ test("backdrop dim is clamped and the slider is its mirror image", () => {
   assert.equal(dimToSlider(20), 88);
 });
 
-test("picking a theme with its own accent selects it; leaving restores the bot colour", () => {
+test("picking a theme keeps a chosen colour and explicit bot; legacy theme choice becomes implicit", () => {
   const base = { accentColor: "", customTheme: DEFAULT_APPEARANCE.customTheme };
-  assert.deepEqual(themePickPatch(base, "copper"), { themeMode: "copper", accentColor: "theme" });
+  assert.deepEqual(themePickPatch(base, "copper"), { themeMode: "copper", accentColor: "" });
   assert.deepEqual(themePickPatch({ ...base, accentColor: "theme" }, "obsidian"), { themeMode: "obsidian", accentColor: "" });
-  assert.deepEqual(themePickPatch({ ...base, accentColor: "#e11d48" }, "obsidian"), { themeMode: "obsidian", accentColor: "#e11d48" });
+  assert.deepEqual(themePickPatch({ ...base, accentColor: "theme" }, "copper"), { themeMode: "copper", accentColor: "theme" });
+  assert.deepEqual(themePickPatch({ ...base, accentColor: "#e11d48" }, "copper"), { themeMode: "copper", accentColor: "#e11d48" });
+  assert.deepEqual(themePickPatch({ ...base, accentColor: "bot" }, "copper"), { themeMode: "copper", accentColor: "bot" });
   assert.deepEqual(themePickPatch(base, "bogus"), { themeMode: "obsidian", accentColor: "" });
   assert.deepEqual(themePickPatch(base, "light"), { themeMode: "light", accentColor: "" });
 });
@@ -113,7 +115,7 @@ test("URL overrides (mock review screenshots) are validated and optional", () =>
   assert.deepEqual(appearanceFromQuery(q(""), DEFAULT_APPEARANCE), DEFAULT_APPEARANCE);
   const a = appearanceFromQuery(q("theme=copper&style=glass&corners=round&backdrop=silk&dim=30"), DEFAULT_APPEARANCE);
   assert.equal(a.themeMode, "copper");
-  assert.equal(a.accentColor, "theme");
+  assert.equal(a.accentColor, "");
   assert.equal(a.uiStyle, "glass");
   assert.equal(a.corners, "round");
   assert.equal(a.backdrop, "silk");
@@ -121,5 +123,5 @@ test("URL overrides (mock review screenshots) are validated and optional", () =>
   const b = appearanceFromQuery(q("theme=moss&accent=%23e11d48&style=bogus"), DEFAULT_APPEARANCE);
   assert.equal(b.accentColor, "#e11d48");
   assert.equal(b.uiStyle, "solid");
-  assert.equal(appearanceFromQuery(q("accent=bot"), { ...DEFAULT_APPEARANCE, accentColor: "theme" }).accentColor, "");
+  assert.equal(appearanceFromQuery(q("accent=bot"), { ...DEFAULT_APPEARANCE, accentColor: "theme" }).accentColor, "bot");
 });
