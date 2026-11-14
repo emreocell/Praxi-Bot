@@ -555,6 +555,8 @@ fn web_loop(env: &Env, fake: &Arc<Fake>, profile: BotProfile, config: LoopConfig
     let registry = ToolRegistry::new();
     let mut web = builtin_tools::web_tools::WebToolsConfig::default();
     web.search.duckduckgo = false;
+    web.search.duckduckgo_lite = false;
+    web.search.bing = false;
     builtin_tools::register_web_tools(&registry, web).unwrap();
     let lp = AgentLoop::new(
         Arc::clone(&env.storage),

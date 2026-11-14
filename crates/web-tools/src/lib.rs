@@ -33,8 +33,10 @@ pub use http::{Fetched, GetOptions, HttpConfig, HttpFetcher};
 pub use metadata::{FeedLink, PageMetadata, extract_metadata};
 pub use policy::{DefaultUrlPolicy, PolicyViolation, TrustedHostPolicy, UrlPolicy};
 pub use search::{
-    BraveBackend, DuckDuckGoBackend, MultiSearch, SearchBackend, SearchConfig, SearchOutcome,
-    SearchQuery, SearchResult, SearxngBackend,
+    BING_ENDPOINT, BRAVE_ENDPOINT, BingBackend, BraveBackend, DEFAULT_CHALLENGE_COOLDOWN,
+    DUCKDUCKGO_ENDPOINT, DUCKDUCKGO_LITE_ENDPOINT, DuckDuckGoBackend, DuckDuckGoLiteBackend,
+    KNOWN_BACKENDS, MultiSearch, SearchBackend, SearchConfig, SearchOutcome, SearchQuery,
+    SearchResult, SearxngBackend, TAVILY_ENDPOINT, TavilyBackend,
 };
 pub use tools::{TOOL_NAMES, WebToolsConfig, register, tools};
 pub use xmlfeed::{
