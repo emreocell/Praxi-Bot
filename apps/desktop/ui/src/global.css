@@ -50,3 +50,7 @@ input::placeholder, textarea::placeholder { color: var(--color-text-muted); opac
 
 /* No colour transitions until the first appearance paint (no dark-to-light flash on start). */
 :root[data-booting] *, :root[data-booting] *::before, :root[data-booting] *::after { transition: none !important; }
+
+/* Column resize in progress (rail / bot panel grips): no text selection, no transitions. */
+:root[data-resizing] { user-select: none; cursor: col-resize; }
+:root[data-resizing] * { transition: none !important; }
