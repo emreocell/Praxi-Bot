@@ -13,10 +13,8 @@ use parking_lot::Mutex as SyncMutex;
 use tokio::sync::Mutex;
 
 use crate::{
-    atspi_tree::AtspiWorker,
-    live_view_x11::open_x11_live_view_target,
-    pure::detect_display_session,
-    x11,
+    atspi_tree::AtspiWorker, live_view_x11::open_x11_live_view_target,
+    pure::detect_display_session, x11,
 };
 
 struct CachedLiveView {
@@ -68,15 +66,23 @@ impl LinuxBackend {
         })
     }
 
+    fn notify_live_view(&self) {
+        if let Some(entry) = self.live_view.lock().as_ref() {
+            entry.target.notify_desktop_action();
+        }
+    }
+
     /// Bring a window to the foreground on the active X11 display.
     ///
     /// # Errors
     ///
     /// Fails if the X11 server cannot be reached or the window ID is invalid.
     pub async fn activate_window(&self, window_id: u64) -> Result<(), DesktopError> {
-        tokio::task::spawn_blocking(move || x11::activate_window(window_id))
+        let res = tokio::task::spawn_blocking(move || x11::activate_window(window_id))
             .await
-            .map_err(|e| DesktopError::Internal(format!("activate_window task: {e}")))?
+            .map_err(|e| DesktopError::Internal(format!("activate_window task: {e}")))?;
+        self.notify_live_view();
+        res
     }
 }
 
@@ -92,11 +98,7 @@ impl DesktopBackend for LinuxBackend {
             let mut guard = self.worker.lock().await;
             guard.act(&action).await
         };
-        if res.is_ok()
-            && let Some(entry) = self.live_view.lock().as_ref()
-        {
-            entry.target.notify_desktop_action();
-        }
+        self.notify_live_view();
         res
     }
 
@@ -113,9 +115,11 @@ impl DesktopBackend for LinuxBackend {
     }
 
     async fn launch(&self, app: AppSpec) -> Result<Pid, DesktopError> {
-        tokio::task::spawn_blocking(move || x11::launch(&app))
+        let res = tokio::task::spawn_blocking(move || x11::launch(&app))
             .await
-            .map_err(|e| DesktopError::Internal(format!("launch task: {e}")))?
+            .map_err(|e| DesktopError::Internal(format!("launch task: {e}")))?;
+        self.notify_live_view();
+        res
     }
 
     fn capabilities(&self) -> Capabilities {

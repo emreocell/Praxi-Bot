@@ -86,6 +86,12 @@ impl WindowsBackend {
             .map_err(|_| DesktopError::Internal("UIA thread dropped the request".into()))?
     }
 
+    fn notify_live_view(&self) {
+        if let Some(entry) = self.live_view.lock().as_ref() {
+            entry.target.notify_desktop_action();
+        }
+    }
+
     /// Bring a window to the foreground (uses the Alt-key workaround for the
     /// foreground lock).
     ///
@@ -93,8 +99,11 @@ impl WindowsBackend {
     ///
     /// Fails if the window no longer exists or Windows refuses the switch.
     pub async fn activate_window(&self, window_id: u64) -> Result<(), DesktopError> {
-        self.run(move |_| winlist::activate(winlist::hwnd_from_id(window_id)))
-            .await
+        let res = self
+            .run(move |_| winlist::activate(winlist::hwnd_from_id(window_id)))
+            .await;
+        self.notify_live_view();
+        res
     }
 }
 
@@ -106,11 +115,7 @@ impl DesktopBackend for WindowsBackend {
 
     async fn act(&self, action: Action) -> Result<ActionResult, DesktopError> {
         let res = self.run(move |w| w.act(&action)).await;
-        if res.is_ok()
-            && let Some(entry) = self.live_view.lock().as_ref()
-        {
-            entry.target.notify_desktop_action();
-        }
+        self.notify_live_view();
         res
     }
 
@@ -124,7 +129,9 @@ impl DesktopBackend for WindowsBackend {
     }
 
     async fn launch(&self, app: AppSpec) -> Result<Pid, DesktopError> {
-        self.run(move |_| winlist::launch(&app)).await
+        let res = self.run(move |_| winlist::launch(&app)).await;
+        self.notify_live_view();
+        res
     }
 
     fn capabilities(&self) -> Capabilities {

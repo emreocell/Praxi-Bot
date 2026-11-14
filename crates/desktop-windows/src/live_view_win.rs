@@ -29,7 +29,7 @@ use desktop_api::live_view::{
     CapturedRawInfo, DesktopViewTarget, DesktopViewTargetConfig, GeometrySnapshot, InputDriver,
     InputDriverFactory, LiveViewOptions, MAX_RAW_PIXELS, MonitorDescriptor, PixelFormat, PixelRect,
     map_normalized_point, point_to_virtual_absolute, select_capture_rect,
-    wheel_pixels_to_win32_delta,
+    validate_positional_geometry, wheel_pixels_to_win32_delta,
 };
 use live_view::{
     Button, InputEvent, KeyPhase, Modifier, PointerPhase, Reason, SourceRect, ViewError,
@@ -92,8 +92,11 @@ pub trait WinCaptureApi: Send + 'static {
     /// # Errors
     ///
     /// Returns [`CaptureFailure`] if GDI capture fails, desktop locks, or limits are exceeded.
-    fn bitblt_bgra(&mut self, rect: PixelRect, out_bgra: &mut Vec<u8>)
-    -> Result<(), CaptureFailure>;
+    fn bitblt_bgra(
+        &mut self,
+        rect: PixelRect,
+        out_bgra: &mut Vec<u8>,
+    ) -> Result<(), CaptureFailure>;
 }
 
 /// Mouse button variants supported by live-view input injection.
@@ -409,9 +412,7 @@ impl<C: WinCaptureApi> WinCaptureDriver<C> {
 impl<C: WinCaptureApi> CaptureDriver for WinCaptureDriver<C> {
     fn capture(&mut self, raw_buf: &mut Vec<u8>) -> Result<CapturedRawInfo, CaptureFailure> {
         let layout = self.api.query_layout()?;
-        if !layout.input_desktop_accessible
-            || layout.desktop_name.as_deref() != Some("Default")
-        {
+        if !layout.input_desktop_accessible || layout.desktop_name.as_deref() != Some("Default") {
             return Err(CaptureFailure::Unavailable(Reason::Unavailable));
         }
         let geometry = select_capture_rect(
@@ -433,7 +434,11 @@ impl<C: WinCaptureApi> CaptureDriver for WinCaptureDriver<C> {
             .map_err(|_| CaptureFailure::LimitExceeded)?;
         let pixel_count = usize::try_from(geometry.rect.width)
             .ok()
-            .and_then(|w| usize::try_from(geometry.rect.height).ok().and_then(|h| w.checked_mul(h)))
+            .and_then(|w| {
+                usize::try_from(geometry.rect.height)
+                    .ok()
+                    .and_then(|h| w.checked_mul(h))
+            })
             .filter(|&px| u64::try_from(px).is_ok_and(|p| p <= MAX_RAW_PIXELS))
             .ok_or(CaptureFailure::LimitExceeded)?;
         let stride_bytes = usize::try_from(geometry.rect.width)
@@ -465,6 +470,7 @@ pub struct WinInputDriver<A: WinInputApi> {
     pressed_buttons: HashSet<WinMouseButton>,
     pressed_vks: Vec<u16>,
     transient_mod_vks: Vec<u16>,
+    pressed_unicode: Vec<u16>,
 }
 
 impl<A: WinInputApi> WinInputDriver<A> {
@@ -476,6 +482,7 @@ impl<A: WinInputApi> WinInputDriver<A> {
             pressed_buttons: HashSet::new(),
             pressed_vks: Vec::new(),
             transient_mod_vks: Vec::new(),
+            pressed_unicode: Vec::new(),
         }
     }
 
@@ -491,7 +498,10 @@ impl<A: WinInputApi> WinInputDriver<A> {
     fn apply_transient_modifiers(&mut self, modifiers: &[Modifier]) -> Result<Vec<u16>, ViewError> {
         let mut to_press = Vec::new();
         for m in modifiers {
-            let already_held = self.pressed_vks.iter().any(|&vk| modifier_matches_vk(m, vk))
+            let already_held = self
+                .pressed_vks
+                .iter()
+                .any(|&vk| modifier_matches_vk(m, vk))
                 || self
                     .transient_mod_vks
                     .iter()
@@ -506,8 +516,10 @@ impl<A: WinInputApi> WinInputDriver<A> {
         if to_press.is_empty() {
             return Ok(Vec::new());
         }
-        let actions: Vec<WinInputAction> =
-            to_press.iter().map(|&vk| self.key_vk_action(vk, true)).collect();
+        let actions: Vec<WinInputAction> = to_press
+            .iter()
+            .map(|&vk| self.key_vk_action(vk, true))
+            .collect();
         let sent = self.api.send_inputs(&actions)?;
         let mut added = Vec::with_capacity(sent);
         for &vk in to_press.iter().take(sent) {
@@ -562,6 +574,14 @@ impl<A: WinInputApi> WinInputDriver<A> {
         source_rect: &SourceRect,
         virtual_rect: PixelRect,
     ) -> Result<(), ViewError> {
+        let win_btn_opt = match phase {
+            PointerPhase::Move => None,
+            PointerPhase::Down | PointerPhase::Up => Some(
+                button
+                    .map(WinMouseButton::from)
+                    .ok_or(ViewError::InvalidRecord)?,
+            ),
+        };
         let (phys_x, phys_y) = map_normalized_point(norm_x, norm_y, source_rect);
         let (abs_x, abs_y) = point_to_virtual_absolute(phys_x, phys_y, virtual_rect);
 
@@ -581,7 +601,7 @@ impl<A: WinInputApi> WinInputDriver<A> {
                 Ok(())
             }
             PointerPhase::Down => {
-                let win_btn = button.map(WinMouseButton::from).ok_or(ViewError::InvalidRecord)?;
+                let win_btn = win_btn_opt.expect("checked above");
                 let mut actions = vec![WinInputAction::MouseMoveAbs { abs_x, abs_y }];
                 let need_press = !self.pressed_buttons.contains(&win_btn);
                 if need_press {
@@ -590,7 +610,13 @@ impl<A: WinInputApi> WinInputDriver<A> {
                         down: true,
                     });
                 }
-                let sent = self.api.send_inputs(&actions)?;
+                let sent = match self.api.send_inputs(&actions) {
+                    Ok(n) => n,
+                    Err(e) => {
+                        let _ = self.release_transient_modifiers();
+                        return Err(e);
+                    }
+                };
                 if sent == 0 {
                     let _ = self.release_transient_modifiers();
                     return Err(ViewError::Unavailable);
@@ -605,7 +631,7 @@ impl<A: WinInputApi> WinInputDriver<A> {
                 Ok(())
             }
             PointerPhase::Up => {
-                let win_btn = button.map(WinMouseButton::from).ok_or(ViewError::InvalidRecord)?;
+                let win_btn = win_btn_opt.expect("checked above");
                 let mut actions = vec![WinInputAction::MouseMoveAbs { abs_x, abs_y }];
                 let was_pressed = self.pressed_buttons.contains(&win_btn);
                 if was_pressed {
@@ -614,20 +640,32 @@ impl<A: WinInputApi> WinInputDriver<A> {
                         down: false,
                     });
                 }
-                let sent = self.api.send_inputs(&actions)?;
+                let Ok(sent) = self.api.send_inputs(&actions) else {
+                    // Keep `win_btn` recorded in `pressed_buttons` so `release_all` retries.
+                    return Err(if was_pressed {
+                        ViewError::PartialInjection
+                    } else {
+                        ViewError::Unavailable
+                    });
+                };
                 if was_pressed && sent >= 2 {
                     let _ = self.pressed_buttons.remove(&win_btn);
                 }
+                let mut mod_res = Ok(());
                 if buttons == 0 && self.pressed_buttons.is_empty() {
-                    let _ = self.release_transient_modifiers();
+                    mod_res = self.release_transient_modifiers();
                 }
                 if sent == 0 {
-                    return Err(ViewError::Unavailable);
+                    return Err(if was_pressed {
+                        ViewError::PartialInjection
+                    } else {
+                        ViewError::Unavailable
+                    });
                 }
                 if sent < actions.len() {
                     return Err(ViewError::PartialInjection);
                 }
-                Ok(())
+                mod_res
             }
         }
     }
@@ -694,44 +732,111 @@ impl<A: WinInputApi> WinInputDriver<A> {
         phase: &KeyPhase,
         code: &str,
         key: &str,
-        _repeat: bool,
+        repeat: bool,
         modifiers: &[Modifier],
     ) -> Result<(), ViewError> {
         let vk = dom_code_to_vk(code, key)?;
         match phase {
             KeyPhase::Down => {
-                if !modifiers.is_empty() {
+                if self.pressed_vks.contains(&vk) {
+                    if !repeat {
+                        return Ok(());
+                    }
+                    let action = self.key_vk_action(vk, true);
+                    let sent = self
+                        .api
+                        .send_inputs(&[action])
+                        .map_err(|_| ViewError::PartialInjection)?;
+                    if sent == 0 {
+                        return Err(ViewError::PartialInjection);
+                    }
+                    return Ok(());
+                }
+                let added_mods = if modifiers.is_empty() {
+                    Vec::new()
+                } else {
                     let mod_only: Vec<Modifier> = modifiers
                         .iter()
                         .filter(|m| !modifier_matches_vk(m, vk))
                         .cloned()
                         .collect();
-                    let _ = self.apply_transient_modifiers(&mod_only)?;
-                }
+                    self.apply_transient_modifiers(&mod_only)?
+                };
                 let action = self.key_vk_action(vk, true);
-                let sent = self.api.send_inputs(&[action])?;
+                let sent = match self.api.send_inputs(&[action]) {
+                    Ok(n) => n,
+                    Err(e) => {
+                        let _ = self.release_specific_transient(&added_mods);
+                        return Err(if added_mods.is_empty() {
+                            e
+                        } else {
+                            ViewError::PartialInjection
+                        });
+                    }
+                };
                 if sent == 0 {
-                    return Err(ViewError::Unavailable);
+                    let _ = self.release_specific_transient(&added_mods);
+                    return Err(if added_mods.is_empty() {
+                        ViewError::Unavailable
+                    } else {
+                        ViewError::PartialInjection
+                    });
                 }
-                if !self.pressed_vks.contains(&vk) {
-                    self.pressed_vks.push(vk);
-                }
+                self.pressed_vks.push(vk);
                 Ok(())
             }
             KeyPhase::Up => {
-                let mut res = Ok(());
                 if let Some(pos) = self.pressed_vks.iter().rposition(|&x| x == vk) {
                     let action = self.key_vk_action(vk, false);
-                    let sent = self.api.send_inputs(&[action])?;
+                    let sent = self
+                        .api
+                        .send_inputs(&[action])
+                        .map_err(|_| ViewError::PartialInjection)?;
                     if sent == 0 {
-                        return Err(ViewError::Unavailable);
+                        // Keep `vk` in `pressed_vks` so `release_all` will retry releasing it.
+                        return Err(ViewError::PartialInjection);
                     }
                     let _ = self.pressed_vks.remove(pos);
+                    if let Some(tpos) = self.transient_mod_vks.iter().rposition(|&x| x == vk) {
+                        let _ = self.transient_mod_vks.remove(tpos);
+                    }
+                } else if self.transient_mod_vks.contains(&vk) {
+                    self.release_specific_transient(&[vk])?;
                 }
                 if self.pressed_vks.is_empty() {
-                    res = self.release_transient_modifiers();
+                    self.release_transient_modifiers()?;
                 }
-                res
+                Ok(())
+            }
+        }
+    }
+
+    fn record_partially_pressed_text_chunk(&mut self, sent_slice: &[WinInputAction]) {
+        for act in sent_slice {
+            match *act {
+                WinInputAction::KeyVk { vk, down: true, .. } => {
+                    if !self.pressed_vks.contains(&vk) {
+                        self.pressed_vks.push(vk);
+                    }
+                }
+                WinInputAction::KeyVk {
+                    vk, down: false, ..
+                } => {
+                    if let Some(pos) = self.pressed_vks.iter().rposition(|&x| x == vk) {
+                        let _ = self.pressed_vks.remove(pos);
+                    }
+                }
+                WinInputAction::UnicodeKey { unit, down: true } => {
+                    if !self.pressed_unicode.contains(&unit) {
+                        self.pressed_unicode.push(unit);
+                    }
+                }
+                WinInputAction::UnicodeKey { unit, down: false } => {
+                    if let Some(pos) = self.pressed_unicode.iter().rposition(|&x| x == unit) {
+                        let _ = self.pressed_unicode.remove(pos);
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -762,6 +867,7 @@ impl<A: WinInputApi> WinInputDriver<A> {
                 });
             }
             if sent < chunk.len() {
+                self.record_partially_pressed_text_chunk(&chunk[..sent]);
                 return Err(ViewError::PartialInjection);
             }
             sent_any = true;
@@ -775,7 +881,7 @@ impl<A: WinInputApi> InputDriver for WinInputDriver<A> {
         &mut self,
         event: &InputEvent,
         source_rect: SourceRect,
-        _fallback_virtual: PixelRect,
+        fallback_virtual: PixelRect,
         cancelled: &AtomicBool,
     ) -> Result<(), ViewError> {
         if cancelled.load(Ordering::Acquire) {
@@ -786,6 +892,12 @@ impl<A: WinInputApi> InputDriver for WinInputDriver<A> {
         }
         // Always refresh live virtual desktop & check locked/Winlogon status before injecting.
         let live_virtual = self.api.check_input_desktop_ready()?;
+        if event.positional() {
+            if live_virtual != fallback_virtual {
+                return Err(ViewError::Unavailable);
+            }
+            validate_positional_geometry(&source_rect, live_virtual)?;
+        }
 
         match event {
             InputEvent::Pointer {
@@ -846,18 +958,25 @@ impl<A: WinInputApi> InputDriver for WinInputDriver<A> {
         for &vk in &vks {
             actions.push(self.key_vk_action(vk, false));
         }
-        let tmods: Vec<u16> = self.transient_mod_vks.iter().copied().rev().collect();
+        let tmods: Vec<u16> = self
+            .transient_mod_vks
+            .iter()
+            .copied()
+            .rev()
+            .filter(|vk| !vks.contains(vk))
+            .collect();
         for &vk in &tmods {
-            if !vks.contains(&vk) {
-                actions.push(self.key_vk_action(vk, false));
-            }
+            actions.push(self.key_vk_action(vk, false));
+        }
+        let ukeys: Vec<u16> = self.pressed_unicode.iter().copied().rev().collect();
+        for &unit in &ukeys {
+            actions.push(WinInputAction::UnicodeKey { unit, down: false });
         }
         if actions.is_empty() {
             return Ok(());
         }
         let sent = self.api.send_inputs(&actions)?;
-        // Clear internal tracking even on partial release? Keep remaining unreleased items so a
-        // subsequent retry can still attempt release, removing only those confirmed sent.
+        // Remove only those items confirmed sent so a retry still releases any remaining held items.
         let mut idx = 0usize;
         for b in btns {
             if idx < sent {
@@ -866,21 +985,29 @@ impl<A: WinInputApi> InputDriver for WinInputDriver<A> {
             idx += 1;
         }
         for vk in vks {
-            if idx < sent
-                && let Some(pos) = self.pressed_vks.iter().rposition(|&x| x == vk)
-            {
-                let _ = self.pressed_vks.remove(pos);
+            if idx < sent {
+                if let Some(pos) = self.pressed_vks.iter().rposition(|&x| x == vk) {
+                    let _ = self.pressed_vks.remove(pos);
+                }
+                if let Some(tpos) = self.transient_mod_vks.iter().rposition(|&x| x == vk) {
+                    let _ = self.transient_mod_vks.remove(tpos);
+                }
             }
             idx += 1;
         }
         for vk in tmods {
-            if self.pressed_vks.contains(&vk) {
-                continue;
-            }
             if idx < sent
                 && let Some(pos) = self.transient_mod_vks.iter().rposition(|&x| x == vk)
             {
                 let _ = self.transient_mod_vks.remove(pos);
+            }
+            idx += 1;
+        }
+        for unit in ukeys {
+            if idx < sent
+                && let Some(pos) = self.pressed_unicode.iter().rposition(|&x| x == unit)
+            {
+                let _ = self.pressed_unicode.remove(pos);
             }
             idx += 1;
         }
@@ -963,33 +1090,34 @@ mod windows_os {
     use std::sync::Arc;
 
     use desktop_api::live_view::{
-        AvailabilityProbeFn, CaptureFailure, DesktopViewTarget, LiveViewOptions,
-        MonitorDescriptor, PixelRect, select_capture_rect,
+        AvailabilityProbeFn, CaptureFailure, DesktopViewTarget, LiveViewOptions, MonitorDescriptor,
+        PixelRect, select_capture_rect,
     };
     use live_view::{Reason, ViewError};
     use windows::{
         Win32::{
             Foundation::{HANDLE, HWND, LPARAM, RECT},
-        Graphics::Gdi::{
-            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CAPTUREBLT, CreateCompatibleBitmap,
-            CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC, DeleteObject, EnumDisplayMonitors,
-            GetDC, GetDIBits, GetMonitorInfoW, HBITMAP, HDC, HGDIOBJ, HMONITOR, MONITORINFO,
-            MONITORINFOEXW, ReleaseDC, SRCCOPY, SelectObject,
-        },
-        System::StationsAndDesktops::{
-            CloseDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_SWITCHDESKTOP, GetUserObjectInformationW,
-            HDESK, OpenInputDesktop, UOI_NAME,
-        },
-        UI::{
-            HiDpi::{GetDpiForMonitor, GetDpiForSystem, MDT_EFFECTIVE_DPI},
-            Input::KeyboardAndMouse::{
-                INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS, KEYBDINPUT,
-                KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MAPVK_VK_TO_VSC,
-                MOUSE_EVENT_FLAGS, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN,
-                MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE,
-                MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK,
-                MOUSEEVENTF_WHEEL, MOUSEINPUT, MapVirtualKeyW, SendInput, VIRTUAL_KEY,
+            Graphics::Gdi::{
+                BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CAPTUREBLT, CreateCompatibleBitmap,
+                CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC, DeleteObject, EnumDisplayMonitors,
+                GetDC, GetDIBits, GetMonitorInfoW, HBITMAP, HDC, HGDIOBJ, HMONITOR, MONITORINFO,
+                MONITORINFOEXW, ReleaseDC, SRCCOPY, SelectObject,
             },
+            System::StationsAndDesktops::{
+                CloseDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_SWITCHDESKTOP,
+                GetUserObjectInformationW, HDESK, OpenInputDesktop, UOI_NAME,
+            },
+            UI::{
+                HiDpi::{GetDpiForMonitor, GetDpiForSystem, MDT_EFFECTIVE_DPI},
+                Input::KeyboardAndMouse::{
+                    INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS, KEYBDINPUT,
+                    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MAPVK_VK_TO_VSC,
+                    MOUSE_EVENT_FLAGS, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL,
+                    MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN,
+                    MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN,
+                    MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEINPUT,
+                    MapVirtualKeyW, SendInput, VIRTUAL_KEY,
+                },
                 WindowsAndMessaging::{
                     GetSystemMetrics, MONITORINFOF_PRIMARY, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
                     SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
@@ -1060,9 +1188,9 @@ mod windows_os {
 
     fn query_input_desktop() -> (bool, Option<String>) {
         // SAFETY: queries desktop handle access without inheriting handles.
-        let Ok(raw) = (unsafe {
-            OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_SWITCHDESKTOP)
-        }) else {
+        let Ok(raw) =
+            (unsafe { OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_SWITCHDESKTOP) })
+        else {
             return (false, None);
         };
         let guard = OwnedDesktop(raw);
@@ -1143,17 +1271,16 @@ mod windows_os {
         let mut dpi_x = 0u32;
         let mut dpi_y = 0u32;
         // SAFETY: `hmon` is the live monitor handle passed by `EnumDisplayMonitors`.
-        let dpi = if unsafe {
-            GetDpiForMonitor(hmon, MDT_EFFECTIVE_DPI, &raw mut dpi_x, &raw mut dpi_y)
-        }
-        .is_ok()
-            && dpi_x > 0
-        {
-            dpi_x
-        } else {
-            // SAFETY: constant Win32 query for system DPI fallback.
-            unsafe { GetDpiForSystem() }.max(96)
-        };
+        let dpi =
+            if unsafe { GetDpiForMonitor(hmon, MDT_EFFECTIVE_DPI, &raw mut dpi_x, &raw mut dpi_y) }
+                .is_ok()
+                && dpi_x > 0
+            {
+                dpi_x
+            } else {
+                // SAFETY: constant Win32 query for system DPI fallback.
+                unsafe { GetDpiForSystem() }.max(96)
+            };
         let is_primary = (info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY) != 0;
 
         // SAFETY: `data.0` borrows a live `Vec<MonitorDescriptor>` on `enumerate_monitors`'s stack.
@@ -1234,10 +1361,8 @@ mod windows_os {
                 return Err(CaptureFailure::Unavailable(Reason::Unavailable));
             }
 
-            let width_i =
-                i32::try_from(rect.width).map_err(|_| CaptureFailure::LimitExceeded)?;
-            let height_i =
-                i32::try_from(rect.height).map_err(|_| CaptureFailure::LimitExceeded)?;
+            let width_i = i32::try_from(rect.width).map_err(|_| CaptureFailure::LimitExceeded)?;
+            let height_i = i32::try_from(rect.height).map_err(|_| CaptureFailure::LimitExceeded)?;
 
             // SAFETY: acquires desktop window DC; `OwnedScreenDc` releases it on every exit.
             let screen = OwnedScreenDc(unsafe { GetDC(Some(HWND::default())) });
@@ -1438,7 +1563,8 @@ mod windows_os {
                 return Ok(0);
             }
             let inputs: Vec<INPUT> = actions.iter().copied().map(to_win32_input).collect();
-            let cb_size = i32::try_from(size_of::<INPUT>()).map_err(|_| ViewError::InvalidRecord)?;
+            let cb_size =
+                i32::try_from(size_of::<INPUT>()).map_err(|_| ViewError::InvalidRecord)?;
             // SAFETY: `inputs` is a contiguous slice of `INPUT` structs with matching `cbSize`.
             let sent = unsafe { SendInput(&inputs, cb_size) };
             Ok(usize::try_from(sent).unwrap_or(0))
@@ -1548,9 +1674,8 @@ mod tests {
             if guard.fail_bitblt {
                 return Err(CaptureFailure::Unavailable(Reason::Unavailable));
             }
-            let len = usize::try_from(rect.width).unwrap()
-                * usize::try_from(rect.height).unwrap()
-                * 4;
+            let len =
+                usize::try_from(rect.width).unwrap() * usize::try_from(rect.height).unwrap() * 4;
             out_bgra.clear();
             out_bgra.resize(len, 255);
             let [r, g, b] = guard.fill_rgb;
@@ -1775,8 +1900,9 @@ mod tests {
             height: 2160,
         };
         let tok = hash_win_layout(huge_virtual, &huge_monitors);
-        let fallback = select_capture_rect(&CaptureScope::Auto, Some(huge_virtual), &huge_monitors, tok)
-            .expect("fallback primary");
+        let fallback =
+            select_capture_rect(&CaptureScope::Auto, Some(huge_virtual), &huge_monitors, tok)
+                .expect("fallback primary");
         assert_eq!(fallback.rect.width, 3840);
         assert_eq!(
             select_capture_rect(
@@ -1850,12 +1976,9 @@ mod tests {
             force_send_error: false,
         }));
 
-        let target = build_mock_target(
-            &cap_state,
-            &in_state,
-            LiveViewOptions::new("test-win-host"),
-        )
-        .expect("target");
+        let target =
+            build_mock_target(&cap_state, &in_state, LiveViewOptions::new("test-win-host"))
+                .expect("target");
 
         let source = target.frame_source();
         let mut sub = source
@@ -1916,7 +2039,10 @@ mod tests {
 
     fn mock_win_input(
         virtual_rect: PixelRect,
-    ) -> (Arc<StdMutex<MockWinInputState>>, WinInputDriver<MockWinInput>) {
+    ) -> (
+        Arc<StdMutex<MockWinInputState>>,
+        WinInputDriver<MockWinInput>,
+    ) {
         let in_state = Arc::new(StdMutex::new(MockWinInputState {
             virtual_rect,
             desktop_ready: true,
@@ -1985,14 +2111,14 @@ mod tests {
                 if (18_000..=19_500).contains(abs_x) && (32_000..=33_500).contains(abs_y)
         )));
         assert!(
-            g.sent
-                .iter()
-                .any(|a| matches!(a, WinInputAction::WheelVertical { delta, .. } if *delta == -120))
+            g.sent.iter().any(
+                |a| matches!(a, WinInputAction::WheelVertical { delta, .. } if *delta == -120)
+            )
         );
         assert!(
-            g.sent
-                .iter()
-                .any(|a| matches!(a, WinInputAction::WheelHorizontal { delta, .. } if *delta == 120))
+            g.sent.iter().any(
+                |a| matches!(a, WinInputAction::WheelHorizontal { delta, .. } if *delta == 120)
+            )
         );
     }
 
@@ -2014,9 +2140,9 @@ mod tests {
             units: Units::PhysicalPx,
         };
 
-        assert!(is_win_extended_vk(0x27));
-        assert!(is_win_extended_vk(0xA3));
-        assert!(is_win_extended_vk(0xA5));
+        for vk in [0x27, 0xA3, 0xA5] {
+            assert!(is_win_extended_vk(vk));
+        }
         assert!(!is_win_extended_vk(0x41));
 
         driver
@@ -2068,15 +2194,26 @@ mod tests {
         );
         assert!(in_state.lock().expect("lock").sent.iter().any(|a| matches!(
             a,
-            WinInputAction::KeyVk { vk: 0x27, scan: 0x4D, extended: true, down: true }
+            WinInputAction::KeyVk {
+                vk: 0x27,
+                scan: 0x4D,
+                extended: true,
+                down: true
+            }
         )));
 
         let before_rel = in_state.lock().expect("lock").sent.len();
         driver.release_all().expect("release all");
-        let after = &in_state.lock().expect("lock").sent[before_rel..];
-        assert!(after.contains(&WinInputAction::MouseButton { button: WinMouseButton::Left, down: false }));
-        assert!(after.iter().any(|a| matches!(a, WinInputAction::KeyVk { vk: 0x27, down: false, .. })));
-        assert!(after.iter().any(|a| matches!(a, WinInputAction::KeyVk { vk: 0xA2, down: false, .. })));
+        let after: Vec<WinInputAction> = in_state.lock().expect("lock").sent[before_rel..].to_vec();
+        assert!(after.contains(&WinInputAction::MouseButton {
+            button: WinMouseButton::Left,
+            down: false
+        }));
+        for vk in [0x27, 0xA2] {
+            assert!(after.iter().any(
+                |a| matches!(a, WinInputAction::KeyVk { vk: v, down: false, .. } if *v == vk)
+            ));
+        }
         assert_eq!(after.len(), 3);
 
         let len_after_rel = in_state.lock().expect("lock").sent.len();
@@ -2134,7 +2271,10 @@ mod tests {
             ),
             Err(ViewError::Unsupported)
         );
-        assert_eq!(in_state.lock().expect("lock").sent.len(), count_before_invalid);
+        assert_eq!(
+            in_state.lock().expect("lock").sent.len(),
+            count_before_invalid
+        );
 
         let g = in_state.lock().expect("lock");
         assert!(g.sent.iter().any(|a| matches!(
@@ -2143,16 +2283,31 @@ mod tests {
         )));
         assert!(g.sent.iter().any(|a| matches!(
             a,
-            WinInputAction::UnicodeKey { unit: 0xD83D, down: true }
+            WinInputAction::UnicodeKey {
+                unit: 0xD83D,
+                down: true
+            }
         )));
         assert!(g.sent.iter().any(|a| matches!(
             a,
-            WinInputAction::UnicodeKey { unit: 0xDE00, down: true }
+            WinInputAction::UnicodeKey {
+                unit: 0xDE00,
+                down: true
+            }
         )));
         let enter_downs = g
             .sent
             .iter()
-            .filter(|a| matches!(a, WinInputAction::KeyVk { vk: 0x0D, down: true, .. }))
+            .filter(|a| {
+                matches!(
+                    a,
+                    WinInputAction::KeyVk {
+                        vk: 0x0D,
+                        down: true,
+                        ..
+                    }
+                )
+            })
             .count();
         assert_eq!(enter_downs, 1);
     }
@@ -2249,6 +2404,211 @@ mod tests {
             ),
             Err(ViewError::Unavailable)
         );
+    }
+
+    #[test]
+    fn win_input_failed_key_up_button_up_and_partial_text_stay_held_for_release_retry() {
+        let virtual_rect = PixelRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        let src = SourceRect {
+            x: 0.0,
+            y: 0.0,
+            width: 1920,
+            height: 1080,
+            units: Units::PhysicalPx,
+        };
+        let (in_state, mut driver) = mock_win_input(virtual_rect);
+        let cancel = AtomicBool::new(false);
+
+        // Press Left mouse button and KeyA.
+        for ev in [
+            InputEvent::Pointer {
+                phase: PointerPhase::Down,
+                x: 0.5,
+                y: 0.5,
+                button: Some(Button::Left),
+                buttons: 1,
+                modifiers: vec![],
+            },
+            InputEvent::Key {
+                phase: KeyPhase::Down,
+                code: "KeyA".into(),
+                key: "a".into(),
+                location: 0,
+                repeat: false,
+                modifiers: vec![],
+            },
+        ] {
+            driver
+                .inject(&ev, src.clone(), virtual_rect, &cancel)
+                .unwrap();
+        }
+
+        // Partial PointerPhase::Up (move=1 succeeds, button-up blocked) and failed KeyPhase::Up (0 sent):
+        // both button and key must stay held, and partial text ('ğ' down without up) must also be held.
+        for (limit, ev) in [
+            (
+                1,
+                InputEvent::Pointer {
+                    phase: PointerPhase::Up,
+                    x: 0.5,
+                    y: 0.5,
+                    button: Some(Button::Left),
+                    buttons: 0,
+                    modifiers: vec![],
+                },
+            ),
+            (
+                0,
+                InputEvent::Key {
+                    phase: KeyPhase::Up,
+                    code: "KeyA".into(),
+                    key: "a".into(),
+                    location: 0,
+                    repeat: false,
+                    modifiers: vec![],
+                },
+            ),
+            (1, InputEvent::Text { text: "ğ".into() }),
+        ] {
+            in_state.lock().expect("lock").next_send_limit = Some(limit);
+            assert_eq!(
+                driver.inject(&ev, src.clone(), virtual_rect, &cancel),
+                Err(ViewError::PartialInjection)
+            );
+        }
+
+        // First `release_all()` only allowed to send 1 event: fails with Unavailable while
+        // retaining the remaining 2 unreleased items.
+        in_state.lock().expect("lock").sent.clear();
+        in_state.lock().expect("lock").next_send_limit = Some(1);
+        assert_eq!(driver.release_all(), Err(ViewError::Unavailable));
+        assert_eq!(in_state.lock().expect("lock").sent.len(), 1);
+
+        // Retry `release_all()` with healthy `SendInput`: releases the remaining 2 items.
+        in_state.lock().expect("lock").sent.clear();
+        driver.release_all().expect("retry release_all succeeds");
+        let retry_sent = in_state.lock().expect("lock").sent.clone();
+        assert_eq!(retry_sent.len(), 2);
+        assert!(retry_sent.iter().any(|a| matches!(
+            a,
+            WinInputAction::KeyVk {
+                vk: 0x41,
+                down: false,
+                ..
+            }
+        )));
+        assert!(retry_sent.contains(&WinInputAction::UnicodeKey {
+            unit: 'ğ' as u16,
+            down: false,
+        }));
+
+        // Third `release_all()` is an idempotent no-op.
+        in_state.lock().expect("lock").sent.clear();
+        driver.release_all().expect("idempotent");
+        assert_eq!(in_state.lock().expect("lock").sent.len(), 0);
+    }
+
+    #[test]
+    fn win_input_drag_repeat_and_stale_geometry_rejection() {
+        let virtual_rect = PixelRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        let src = SourceRect {
+            x: 0.0,
+            y: 0.0,
+            width: 1920,
+            height: 1080,
+            units: Units::PhysicalPx,
+        };
+        let (in_state, mut driver) = mock_win_input(virtual_rect);
+        let cancel = AtomicBool::new(false);
+
+        // Multi-event drag: Down -> Move -> Up
+        for (phase, x, y, buttons) in [
+            (PointerPhase::Down, 0.2, 0.2, 1),
+            (PointerPhase::Move, 0.5, 0.5, 1),
+            (PointerPhase::Up, 0.8, 0.8, 0),
+        ] {
+            driver
+                .inject(
+                    &InputEvent::Pointer {
+                        phase,
+                        x,
+                        y,
+                        button: Some(Button::Left),
+                        buttons,
+                        modifiers: vec![],
+                    },
+                    src.clone(),
+                    virtual_rect,
+                    &cancel,
+                )
+                .unwrap();
+        }
+
+        // KeyDown (repeat=false), duplicate KeyDown (no-op), repeat KeyDown (+1), and KeyUp.
+        for (phase, repeat) in [
+            (KeyPhase::Down, false),
+            (KeyPhase::Down, false),
+            (KeyPhase::Down, true),
+            (KeyPhase::Up, false),
+        ] {
+            let before = in_state.lock().expect("lock").sent.len();
+            driver
+                .inject(
+                    &InputEvent::Key {
+                        phase: phase.clone(),
+                        code: "KeyA".into(),
+                        key: "a".into(),
+                        location: 0,
+                        repeat,
+                        modifiers: vec![],
+                    },
+                    src.clone(),
+                    virtual_rect,
+                    &cancel,
+                )
+                .unwrap();
+            let after = in_state.lock().expect("lock").sent.len();
+            if phase == KeyPhase::Down && repeat {
+                assert_eq!(after, before + 1);
+            }
+        }
+
+        // Simulate live virtual desktop topology change before frame geometry updates:
+        // positional input must be rejected with Unavailable without calling SendInput.
+        in_state.lock().expect("lock").virtual_rect = PixelRect {
+            x: 0,
+            y: 0,
+            width: 1280,
+            height: 720,
+        };
+        in_state.lock().expect("lock").sent.clear();
+        assert_eq!(
+            driver.inject(
+                &InputEvent::Pointer {
+                    phase: PointerPhase::Down,
+                    x: 0.5,
+                    y: 0.5,
+                    button: Some(Button::Left),
+                    buttons: 1,
+                    modifiers: vec![],
+                },
+                src,
+                virtual_rect,
+                &cancel,
+            ),
+            Err(ViewError::Unavailable)
+        );
+        assert_eq!(in_state.lock().expect("lock").sent.len(), 0);
     }
 
     /// Explicit interactive Windows desktop smoke test (moves real mouse / sends real GDI `BitBlt`).

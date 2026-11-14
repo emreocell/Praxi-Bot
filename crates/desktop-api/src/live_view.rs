@@ -367,6 +367,45 @@ pub fn point_to_virtual_absolute(phys_x: f64, phys_y: f64, virtual_rect: PixelRe
     )
 }
 
+/// Validate that `source_rect` is a non-empty `PhysicalPx` rectangle contained
+/// within `virtual_rect` before injecting positional pointer or wheel events.
+///
+/// # Errors
+///
+/// Returns [`ViewError::Unavailable`] when `source_rect` has non-finite origin,
+/// zero dimensions, non-`PhysicalPx` units, or falls outside `virtual_rect`.
+pub fn validate_positional_geometry(
+    source_rect: &SourceRect,
+    virtual_rect: PixelRect,
+) -> Result<(), ViewError> {
+    if source_rect.units != Units::PhysicalPx
+        || !source_rect.x.is_finite()
+        || !source_rect.y.is_finite()
+        || source_rect.width == 0
+        || source_rect.height == 0
+        || virtual_rect.width == 0
+        || virtual_rect.height == 0
+        || source_rect.x < f64::from(i32::MIN)
+        || source_rect.x > f64::from(i32::MAX)
+        || source_rect.y < f64::from(i32::MIN)
+        || source_rect.y > f64::from(i32::MAX)
+    {
+        return Err(ViewError::Unavailable);
+    }
+    #[allow(clippy::cast_possible_truncation)]
+    let (sx0, sy0) = (source_rect.x.round() as i64, source_rect.y.round() as i64);
+    let sx1 = sx0 + i64::from(source_rect.width);
+    let sy1 = sy0 + i64::from(source_rect.height);
+    let vx0 = i64::from(virtual_rect.x);
+    let vy0 = i64::from(virtual_rect.y);
+    let vx1 = vx0 + i64::from(virtual_rect.width);
+    let vy1 = vy0 + i64::from(virtual_rect.height);
+    if sx0 < vx0 || sy0 < vy0 || sx1 > vx1 || sy1 > vy1 {
+        return Err(ViewError::Unavailable);
+    }
+    Ok(())
+}
+
 /// Convert browser CSS-pixel wheel deltas (`[-1200, 1200]`) to OS-agnostic scroll
 /// tick units (1 tick ≈ 100 CSS px / 120 Win32 `WHEEL_DELTA` units).
 #[must_use]
@@ -922,6 +961,8 @@ struct TargetStatus {
 enum InputJob {
     Inject {
         epoch: u64,
+        generation: u64,
+        geometry_revision: u64,
         cancelled: Arc<AtomicBool>,
         event: InputEvent,
         source_rect: SourceRect,
@@ -950,6 +991,7 @@ struct TargetCore {
     ctrl: Mutex<CaptureControl>,
     cvar: Condvar,
     frames_tx: watch::Sender<Option<Arc<Frame>>>,
+    takeover_active: AtomicBool,
     input_epoch: AtomicU64,
     input_worker: Mutex<Option<InputWorker>>,
 }
@@ -1005,6 +1047,7 @@ impl DesktopViewTarget {
             }),
             cvar: Condvar::new(),
             frames_tx,
+            takeover_active: AtomicBool::new(false),
             input_epoch: AtomicU64::new(0),
             input_worker: Mutex::new(None),
         });
@@ -1082,7 +1125,10 @@ impl ViewTarget for DesktopViewTarget {
                 view: st.view_available && st.unavailable_reason.is_none(),
                 input: st.input_available,
                 codecs: vec![Codec::Jpeg],
-                reason: st.unavailable_reason.clone().or_else(|| st.input_reason.clone()),
+                reason: st
+                    .unavailable_reason
+                    .clone()
+                    .or_else(|| st.input_reason.clone()),
             },
             unavailable_reason: st.unavailable_reason.clone(),
         }
@@ -1243,7 +1289,10 @@ impl FrameSource for DesktopFrameSource {
         if ctrl.subscribers == 0 || ctrl.paused {
             return Ok(());
         }
-        ctrl.pending_refresh = Some(ctrl.pending_refresh.map_or(action_seq, |prev| prev.max(action_seq)));
+        ctrl.pending_refresh = Some(
+            ctrl.pending_refresh
+                .map_or(action_seq, |prev| prev.max(action_seq)),
+        );
         self.core.cvar.notify_all();
         Ok(())
     }
@@ -1292,6 +1341,7 @@ struct CaptureSessionCache {
     last_hash: Option<u64>,
     cached_payload: Option<Arc<[u8]>>,
     cached_dims: (u32, u32),
+    cached_captured_at_ms: u64,
     last_geom: Option<GeometrySnapshot>,
     frame_seq: u64,
     last_capture: Instant,
@@ -1307,6 +1357,7 @@ impl CaptureSessionCache {
             last_hash: None,
             cached_payload: None,
             cached_dims: (0, 0),
+            cached_captured_at_ms: 0,
             last_geom: None,
             frame_seq: 0,
             last_capture: now.checked_sub(Duration::from_secs(60)).unwrap_or(now),
@@ -1329,6 +1380,7 @@ impl CaptureSessionCache {
         self.last_hash = None;
         self.cached_payload = None;
         self.cached_dims = (0, 0);
+        self.cached_captured_at_ms = 0;
     }
 }
 
@@ -1353,7 +1405,10 @@ fn periodic_interval(profile: &EffectiveProfile) -> Duration {
     }
 }
 
-fn send_init(init_tx: &mut Option<oneshot::Sender<Result<(), ViewError>>>, val: Result<(), ViewError>) {
+fn send_init(
+    init_tx: &mut Option<oneshot::Sender<Result<(), ViewError>>>,
+    val: Result<(), ViewError>,
+) {
     if let Some(tx) = init_tx.take() {
         let _ = tx.send(val);
     }
@@ -1489,13 +1544,20 @@ fn publish_reused_frame(
         Some(_) => Cause::Refresh,
         None => Cause::Idle,
     };
-    cache.frame_seq = cache.frame_seq.saturating_add(1);
+    let (frame_seq, captured_at_ms) = if forced {
+        cache.frame_seq = cache.frame_seq.saturating_add(1);
+        let now_ms = unix_now_ms();
+        cache.cached_captured_at_ms = now_ms;
+        (cache.frame_seq, now_ms)
+    } else {
+        (cache.frame_seq, cache.cached_captured_at_ms)
+    };
     let frame = Arc::new(Frame {
         metadata: FrameMetadata {
             target_id: core.target_id,
             generation,
-            frame_seq: cache.frame_seq,
-            captured_at_ms: unix_now_ms(),
+            frame_seq,
+            captured_at_ms,
             cause,
             action_seq: refresh_seq.filter(|&s| s > 0),
             codec: Codec::Jpeg,
@@ -1549,7 +1611,8 @@ fn encode_and_publish_frame(
         return Err(ViewError::LimitExceeded);
     };
 
-    let cost = f64::from(u32::try_from(bufs.jpeg.len().saturating_add(MAX_HEADER)).unwrap_or(u32::MAX));
+    let cost =
+        f64::from(u32::try_from(bufs.jpeg.len().saturating_add(MAX_HEADER)).unwrap_or(u32::MAX));
     if !forced && cache.cached_payload.is_some() && cache.token_bytes < cost {
         core.stats
             .frames_skipped_budget
@@ -1559,12 +1622,13 @@ fn encode_and_publish_frame(
     cache.token_bytes = (cache.token_bytes - cost).max(0.0);
     let payload: Arc<[u8]> = Arc::from(bufs.jpeg.as_slice());
     cache.frame_seq = cache.frame_seq.saturating_add(1);
+    let captured_at_ms = unix_now_ms();
     let frame = Arc::new(Frame {
         metadata: FrameMetadata {
             target_id: core.target_id,
             generation,
             frame_seq: cache.frame_seq,
-            captured_at_ms: unix_now_ms(),
+            captured_at_ms,
             cause,
             action_seq: refresh_seq.filter(|&s| s > 0),
             codec: Codec::Jpeg,
@@ -1581,6 +1645,7 @@ fn encode_and_publish_frame(
         cache.last_hash = Some(hash);
         cache.cached_payload = Some(payload);
         cache.cached_dims = (out_w, out_h);
+        cache.cached_captured_at_ms = captured_at_ms;
         cache.last_publish = Instant::now();
         core.stats.frames_encoded.fetch_add(1, Ordering::Relaxed);
     }
@@ -1678,23 +1743,24 @@ fn run_capture_worker(
     core: &Arc<TargetCore>,
     mut init_tx: Option<oneshot::Sender<Result<(), ViewError>>>,
 ) {
-    let mut driver: Option<Box<dyn CaptureDriver>> = match (core.capture_factory)(&core.options.scope) {
-        Ok(d) => Some(d),
-        Err(err) => {
-            let view_err = err.to_view_error();
-            let reason = err.reason();
-            core.stats.capture_errors.fetch_add(1, Ordering::Relaxed);
-            core.stats.set_reason(Some(reason.clone()));
-            {
-                let mut st = core.status.lock();
-                st.view_available = false;
-                st.unavailable_reason = Some(reason);
+    let mut driver: Option<Box<dyn CaptureDriver>> =
+        match (core.capture_factory)(&core.options.scope) {
+            Ok(d) => Some(d),
+            Err(err) => {
+                let view_err = err.to_view_error();
+                let reason = err.reason();
+                core.stats.capture_errors.fetch_add(1, Ordering::Relaxed);
+                core.stats.set_reason(Some(reason.clone()));
+                {
+                    let mut st = core.status.lock();
+                    st.view_available = false;
+                    st.unavailable_reason = Some(reason);
+                }
+                send_init(&mut init_tx, Err(view_err));
+                finish_capture_worker(core);
+                return;
             }
-            send_init(&mut init_tx, Err(view_err));
-            finish_capture_worker(core);
-            return;
-        }
-    };
+        };
 
     let initial_burst = core.ctrl.lock().profile.burst_bytes;
     let mut cache = CaptureSessionCache::new(initial_burst);
@@ -1752,7 +1818,82 @@ impl Drop for CancelOnDrop {
     }
 }
 
-fn ensure_input_worker(core: &Arc<TargetCore>) -> Result<std::sync::mpsc::Sender<InputJob>, ViewError> {
+fn run_input_worker_loop(
+    mut drv: Box<dyn InputDriver>,
+    rx: &std::sync::mpsc::Receiver<InputJob>,
+    core: &Arc<TargetCore>,
+) {
+    let stats = &core.stats;
+    while let Ok(job) = rx.recv() {
+        match job {
+            InputJob::Inject {
+                epoch: job_epoch,
+                generation: job_generation,
+                geometry_revision: job_geometry_revision,
+                cancelled,
+                event,
+                source_rect,
+                virtual_rect,
+                reply,
+            } => {
+                if cancelled.load(Ordering::Acquire)
+                    || !core.takeover_active.load(Ordering::Acquire)
+                    || job_epoch != core.input_epoch.load(Ordering::Acquire)
+                {
+                    stats.input_cancelled.fetch_add(1, Ordering::Relaxed);
+                    let _ = reply.send(Err(ViewError::Unavailable));
+                    continue;
+                }
+                {
+                    let st = core.status.lock();
+                    let stale_geom =
+                        event.positional() && st.geometry_revision != job_geometry_revision;
+                    if !st.view_available
+                        || !st.input_available
+                        || st.unavailable_reason.is_some()
+                        || st.generation != job_generation
+                        || stale_geom
+                    {
+                        stats.input_cancelled.fetch_add(1, Ordering::Relaxed);
+                        let _ = reply.send(Err(ViewError::Unavailable));
+                        continue;
+                    }
+                }
+                if event.positional()
+                    && validate_positional_geometry(&source_rect, virtual_rect).is_err()
+                {
+                    stats.input_cancelled.fetch_add(1, Ordering::Relaxed);
+                    let _ = reply.send(Err(ViewError::Unavailable));
+                    continue;
+                }
+                let res = drv.inject(&event, source_rect, virtual_rect, &cancelled);
+                match &res {
+                    Ok(()) => {
+                        stats.input_events.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Err(ViewError::PartialInjection) => {
+                        stats.input_partial_failures.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Err(_) => {}
+                }
+                let _ = reply.send(res);
+            }
+            InputJob::ReleaseAll { reply } => {
+                stats.input_resets.fetch_add(1, Ordering::Relaxed);
+                let res = drv.release_all();
+                let _ = reply.send(res);
+            }
+            InputJob::Shutdown => {
+                let _ = drv.release_all();
+                break;
+            }
+        }
+    }
+}
+
+fn ensure_input_worker(
+    core: &Arc<TargetCore>,
+) -> Result<std::sync::mpsc::Sender<InputJob>, ViewError> {
     let mut guard = core.input_worker.lock();
     if let Some(worker) = guard.as_ref() {
         return Ok(worker.tx.clone());
@@ -1762,12 +1903,11 @@ fn ensure_input_worker(core: &Arc<TargetCore>) -> Result<std::sync::mpsc::Sender
     };
     let (tx, rx) = std::sync::mpsc::channel::<InputJob>();
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), ViewError>>();
-    let stats = Arc::clone(&core.stats);
     let core_epoch = Arc::clone(core);
     let join = std::thread::Builder::new()
         .name("live-view-in".into())
         .spawn(move || {
-            let mut drv = match factory() {
+            let drv = match factory() {
                 Ok(d) => {
                     let _ = ready_tx.send(Ok(()));
                     d
@@ -1777,46 +1917,7 @@ fn ensure_input_worker(core: &Arc<TargetCore>) -> Result<std::sync::mpsc::Sender
                     return;
                 }
             };
-            while let Ok(job) = rx.recv() {
-                match job {
-                    InputJob::Inject {
-                        epoch: job_epoch,
-                        cancelled,
-                        event,
-                        source_rect,
-                        virtual_rect,
-                        reply,
-                    } => {
-                        if cancelled.load(Ordering::Acquire)
-                            || job_epoch != core_epoch.input_epoch.load(Ordering::Acquire)
-                        {
-                            stats.input_cancelled.fetch_add(1, Ordering::Relaxed);
-                            let _ = reply.send(Err(ViewError::Unavailable));
-                            continue;
-                        }
-                        let res = drv.inject(&event, source_rect, virtual_rect, &cancelled);
-                        match &res {
-                            Ok(()) => {
-                                stats.input_events.fetch_add(1, Ordering::Relaxed);
-                            }
-                            Err(ViewError::PartialInjection) => {
-                                stats.input_partial_failures.fetch_add(1, Ordering::Relaxed);
-                            }
-                            Err(_) => {}
-                        }
-                        let _ = reply.send(res);
-                    }
-                    InputJob::ReleaseAll { reply } => {
-                        stats.input_resets.fetch_add(1, Ordering::Relaxed);
-                        let res = drv.release_all();
-                        let _ = reply.send(res);
-                    }
-                    InputJob::Shutdown => {
-                        let _ = drv.release_all();
-                        break;
-                    }
-                }
-            }
+            run_input_worker_loop(drv, &rx, &core_epoch);
         })
         .map_err(|_| ViewError::Unavailable)?;
 
@@ -1848,20 +1949,33 @@ impl InputSink for DesktopInputSink {
         if matches!(event, InputEvent::Reset) {
             return self.release_pressed_inputs().await;
         }
-        let tx = ensure_input_worker(&self.core)?;
-        let (source_rect, virtual_rect) = {
+        if !self.core.takeover_active.load(Ordering::Acquire) {
+            return Err(ViewError::Unavailable);
+        }
+        let (generation, geometry_revision, source_rect, virtual_rect) = {
             let st = self.core.status.lock();
+            if !st.view_available || !st.input_available || st.unavailable_reason.is_some() {
+                return Err(ViewError::Unavailable);
+            }
             (
+                st.generation,
+                st.geometry_revision,
                 st.latest_geometry.rect.to_source_rect(),
                 st.latest_geometry.virtual_rect,
             )
         };
+        if event.positional() {
+            validate_positional_geometry(&source_rect, virtual_rect)?;
+        }
+        let tx = ensure_input_worker(&self.core)?;
         let cancelled = Arc::new(AtomicBool::new(false));
         let _guard = CancelOnDrop(Arc::clone(&cancelled));
         let epoch = self.core.input_epoch.load(Ordering::Acquire);
         let (reply_tx, reply_rx) = oneshot::channel();
         tx.send(InputJob::Inject {
             epoch,
+            generation,
+            geometry_revision,
             cancelled,
             event: event.clone(),
             source_rect,
@@ -1887,6 +2001,30 @@ impl InputSink for DesktopInputSink {
             .map_err(|_| ViewError::Unavailable)?;
         reply_rx.await.map_err(|_| ViewError::Unavailable)?
     }
+
+    async fn set_takeover_active(&self, active: bool) -> Result<(), ViewError> {
+        if active {
+            {
+                let st = self.core.status.lock();
+                if !st.view_available || !st.input_available || st.unavailable_reason.is_some() {
+                    return Err(ViewError::Unavailable);
+                }
+            }
+            let _ = ensure_input_worker(&self.core)?;
+            self.core.takeover_active.store(true, Ordering::SeqCst);
+            Ok(())
+        } else {
+            self.core.takeover_active.store(false, Ordering::SeqCst);
+            self.core.input_epoch.fetch_add(1, Ordering::SeqCst);
+            let mut ctrl = self.core.ctrl.lock();
+            if ctrl.profile.profile == Profile::Live {
+                ctrl.profile = EffectiveProfile::watch();
+                ctrl.profile_dirty = true;
+                self.core.cvar.notify_all();
+            }
+            Ok(())
+        }
+    }
 }
 
 fn unix_now_ms() -> u64 {
@@ -1898,7 +2036,11 @@ fn unix_now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Action, ActionResult, Capabilities, DesktopBackend, DesktopError, Image, Quality, Region, Snapshot, WindowInfo, snapshot::{AppSpec, Pid}};
+    use crate::{
+        Action, ActionResult, Capabilities, DesktopBackend, DesktopError, Image, Quality, Region,
+        Snapshot, WindowInfo,
+        snapshot::{AppSpec, Pid},
+    };
 
     #[test]
     fn default_desktop_backend_hook_returns_unsupported_without_breaking_fakes() {
@@ -1940,8 +2082,14 @@ mod tests {
 
     #[test]
     fn raw_dimension_validation_rejects_zero_overflow_and_pixel_bombs() {
-        assert_eq!(validate_raw_dimensions(0, 100), Err(ViewError::LimitExceeded));
-        assert_eq!(validate_raw_dimensions(100, 0), Err(ViewError::LimitExceeded));
+        assert_eq!(
+            validate_raw_dimensions(0, 100),
+            Err(ViewError::LimitExceeded)
+        );
+        assert_eq!(
+            validate_raw_dimensions(100, 0),
+            Err(ViewError::LimitExceeded)
+        );
         assert_eq!(
             validate_raw_dimensions(4001, 4000),
             Err(ViewError::LimitExceeded)
@@ -1979,8 +2127,7 @@ mod tests {
         );
 
         // 1x1 RGB565 pure red (0xF800 LE -> [0x00, 0xF8])
-        extract_strided_bgra_into(&[0x00, 0xF8], 1, 1, 2, PixelFormat::Rgb565Le, &mut dst)
-            .unwrap();
+        extract_strided_bgra_into(&[0x00, 0xF8], 1, 1, 2, PixelFormat::Rgb565Le, &mut dst).unwrap();
         assert_eq!(dst, vec![0, 0, 255, 255]);
     }
 
@@ -2067,7 +2214,10 @@ mod tests {
         assert_eq!(map_normalized_point(1.0, 1.0, &sr), (-1.0, 1079.0));
 
         // 0..=65535 virtual desktop projection across (-1920..3840)
-        assert_eq!(point_to_virtual_absolute(-1920.0, 0.0, auto.virtual_rect), (0, 0));
+        assert_eq!(
+            point_to_virtual_absolute(-1920.0, 0.0, auto.virtual_rect),
+            (0, 0)
+        );
         assert_eq!(
             point_to_virtual_absolute(3839.0, 2159.0, auto.virtual_rect),
             (65_535, 65_535)
@@ -2214,7 +2364,15 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(80)).await;
         let weak_first = Arc::downgrade(&f1.payload);
         drop(f1);
-        assert_eq!(sub1.frames.borrow_and_update().as_ref().unwrap().metadata.action_seq, Some(5));
+        assert_eq!(
+            sub1.frames
+                .borrow_and_update()
+                .as_ref()
+                .unwrap()
+                .metadata
+                .action_seq,
+            Some(5)
+        );
 
         // Simulate display geometry resize + monitor reconnect
         *geom.lock() = test_geom(320, 240);
@@ -2310,6 +2468,21 @@ mod tests {
         sink.release_pressed_inputs().await.unwrap();
         sink.release_pressed_inputs().await.unwrap();
 
+        // Inject before takeover activation must be rejected.
+        assert_eq!(
+            sink.inject(&InputEvent::Key {
+                phase: ::live_view::KeyPhase::Down,
+                code: "KeyA".into(),
+                key: "a".into(),
+                location: 0,
+                repeat: false,
+                modifiers: vec![],
+            })
+            .await,
+            Err(ViewError::Unavailable)
+        );
+        sink.set_takeover_active(true).await.unwrap();
+
         // Start a slow inject, immediately drop/abort its future, then call reset barrier.
         let sink2 = Arc::clone(&sink);
         let fut = tokio::spawn(async move {
@@ -2340,9 +2513,142 @@ mod tests {
             })
             .await;
         assert_eq!(res, Err(ViewError::PartialInjection));
+
+        // Dropping takeover active blocks subsequent input immediately.
+        sink.set_takeover_active(false).await.unwrap();
+        assert_eq!(
+            sink.inject(&InputEvent::Key {
+                phase: ::live_view::KeyPhase::Up,
+                code: "KeyA".into(),
+                key: "a".into(),
+                location: 0,
+                repeat: false,
+                modifiers: vec![],
+            })
+            .await,
+            Err(ViewError::Unavailable)
+        );
+
         // Codec WebP is rejected cleanly.
         let mut p = EffectiveProfile::watch();
         p.codec = Codec::Webp;
-        assert_eq!(target.frame_source().subscribe(p).await.err(), Some(ViewError::Unsupported));
+        assert_eq!(
+            target.frame_source().subscribe(p).await.err(),
+            Some(ViewError::Unsupported)
+        );
+    }
+
+    #[tokio::test]
+    async fn takeover_gate_and_stale_geometry_revision_reject_positional_input() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let partial_next = Arc::new(AtomicBool::new(false));
+
+        let target = DesktopViewTarget::new(DesktopViewTargetConfig {
+            options: LiveViewOptions::new("host-geom"),
+            initial_geometry: test_geom(800, 600),
+            capture_factory: Arc::new(|_| Err(CaptureFailure::Unavailable(Reason::Unavailable))),
+            probe: Arc::new(|_| Ok(())),
+            input_factory: Some({
+                let log = Arc::clone(&log);
+                let partial_next = Arc::clone(&partial_next);
+                Arc::new(move || {
+                    Ok(Box::new(SlowMockInput {
+                        log: Arc::clone(&log),
+                        partial_next: Arc::clone(&partial_next),
+                    }))
+                })
+            }),
+            input_reason: None,
+        });
+
+        let sink = target.input_sink().unwrap();
+        sink.set_takeover_active(true).await.unwrap();
+
+        // Queue a slow event on the input worker, and while it is executing queue a positional
+        // pointer event and bump `geometry_revision` before the worker reaches the pointer event.
+        let sink_slow = Arc::clone(&sink);
+        let slow_fut = tokio::spawn(async move {
+            sink_slow
+                .inject(&InputEvent::Text {
+                    text: "slow".into(),
+                })
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        let sink_ptr = Arc::clone(&sink);
+        let ptr_fut = tokio::spawn(async move {
+            sink_ptr
+                .inject(&InputEvent::Pointer {
+                    phase: ::live_view::PointerPhase::Down,
+                    x: 0.5,
+                    y: 0.5,
+                    button: Some(::live_view::Button::Left),
+                    buttons: 1,
+                    modifiers: vec![],
+                })
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        // Simulate monitor topology change mid-flight before the queued pointer job executes.
+        let _ = update_status_ok(&target.core, test_geom(1024, 768));
+
+        assert_eq!(slow_fut.await.unwrap(), Ok(()));
+        assert_eq!(ptr_fut.await.unwrap(), Err(ViewError::Unavailable));
+        assert!(!log.lock().contains(&"other"));
+    }
+
+    #[tokio::test]
+    async fn static_idle_repeated_frame_preserves_seq_and_captured_at() {
+        struct StaticCapture {
+            geom: GeometrySnapshot,
+        }
+        impl CaptureDriver for StaticCapture {
+            fn capture(
+                &mut self,
+                raw_buf: &mut Vec<u8>,
+            ) -> Result<CapturedRawInfo, CaptureFailure> {
+                let len = (self.geom.rect.width as usize) * (self.geom.rect.height as usize) * 4;
+                raw_buf.clear();
+                raw_buf.resize(len, 0x7F);
+                Ok(CapturedRawInfo {
+                    geometry: self.geom,
+                    format: PixelFormat::Bgra32,
+                    stride_bytes: self.geom.rect.width as usize * 4,
+                })
+            }
+        }
+
+        let geom = test_geom(64, 64);
+        let target = DesktopViewTarget::new(DesktopViewTargetConfig {
+            options: LiveViewOptions::new("static-host"),
+            initial_geometry: geom,
+            capture_factory: Arc::new(move |_| Ok(Box::new(StaticCapture { geom }))),
+            probe: Arc::new(|_| Ok(())),
+            input_factory: None,
+            input_reason: Some(Reason::Unsupported),
+        });
+
+        let src = target.frame_source();
+        let mut sub = src.subscribe(EffectiveProfile::live()).await.unwrap();
+        let first = sub.frames.borrow_and_update().clone().unwrap();
+        assert_eq!(first.metadata.frame_seq, 1);
+        assert!(!first.metadata.repeated);
+
+        // Wait for Live keepalive heartbeat on static desktop (>800 ms).
+        let repeated = loop {
+            sub.frames.changed().await.unwrap();
+            let f = sub.frames.borrow_and_update().clone().unwrap();
+            if f.metadata.repeated {
+                break f;
+            }
+        };
+        assert_eq!(repeated.metadata.frame_seq, first.metadata.frame_seq);
+        assert_eq!(
+            repeated.metadata.captured_at_ms,
+            first.metadata.captured_at_ms
+        );
+        assert_eq!(repeated.metadata.cause, Cause::Idle);
+        src.stop().await.unwrap();
     }
 }

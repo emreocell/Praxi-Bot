@@ -12,9 +12,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use desktop_api::DesktopError;
 use desktop_api::live_view::{
     AvailabilityProbeFn, CaptureDriver, CaptureDriverFactory, CaptureFailure, CaptureScope,
-    CapturedRawInfo, DesktopViewTarget, DesktopViewTargetConfig, InputDriver,
-    InputDriverFactory, LiveViewOptions, MonitorDescriptor, PixelFormat, PixelRect,
-    map_normalized_point, select_capture_rect, wheel_pixels_to_x11_steps,
+    CapturedRawInfo, DesktopViewTarget, DesktopViewTargetConfig, InputDriver, InputDriverFactory,
+    LiveViewOptions, MonitorDescriptor, PixelFormat, PixelRect, map_normalized_point,
+    select_capture_rect, validate_positional_geometry, wheel_pixels_to_x11_steps,
 };
 use live_view::{
     Button, InputEvent, KeyPhase, Modifier, PointerPhase, Reason, SourceRect, ViewError,
@@ -142,6 +142,17 @@ pub trait X11InputConnection: Send + 'static {
     ///
     /// Returns [`ViewError::Unavailable`] if `XTest` injection fails.
     fn key(&mut self, keycode: u8, press: bool) -> Result<(), ViewError>;
+
+    /// Optionally query the current X11 root window rectangle before injecting
+    /// positional pointer/wheel events so stale coordinates after a resolution
+    /// change are rejected immediately.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ViewError::Unavailable`] if querying root geometry fails.
+    fn root_rect(&mut self) -> Result<Option<PixelRect>, ViewError> {
+        Ok(None)
+    }
 }
 
 /// Map X11 depth/bpp/endianness into a supported [`PixelFormat`].
@@ -301,7 +312,11 @@ impl<C: X11InputConnection> X11InputDriver<C> {
                 .values()
                 .filter_map(|r| r.modifier.as_ref())
                 .any(has_non_shift)
-            || self.transient_mods.iter().map(|(m, _)| m).any(has_non_shift)
+            || self
+                .transient_mods
+                .iter()
+                .map(|(m, _)| m)
+                .any(has_non_shift)
     }
 
     fn resolve_keycode(&mut self, keysym: u32) -> Result<(u8, bool), ViewError> {
@@ -350,16 +365,18 @@ impl<C: X11InputConnection> X11InputDriver<C> {
         Ok((scratch, true))
     }
 
-    fn unbind_if_unused(&mut self, kc: u8) {
+    fn unbind_if_unused(&mut self, kc: u8) -> Result<(), ViewError> {
         if !self.scratch_bindings.contains_key(&kc) {
-            return;
+            return Ok(());
         }
         let still_held = self.pressed_keys.values().any(|r| r.keycode == kc)
             || self.transient_mods.iter().any(|&(_, mkc)| mkc == kc);
-        if !still_held {
-            let _ = self.conn.unbind_scratch_keycode(kc);
-            self.scratch_bindings.remove(&kc);
+        if still_held {
+            return Ok(());
         }
+        self.conn.unbind_scratch_keycode(kc)?;
+        self.scratch_bindings.remove(&kc);
+        Ok(())
     }
 
     fn apply_transient_modifiers(&mut self, mods: &[Modifier]) -> Result<(), ViewError> {
@@ -385,11 +402,18 @@ impl<C: X11InputConnection> X11InputDriver<C> {
 
     fn release_transient_modifiers(&mut self) -> Result<(), ViewError> {
         let mut had_err = false;
-        while let Some((_m, kc)) = self.transient_mods.pop() {
-            if self.conn.key(kc, false).is_err() {
+        let mut idx = self.transient_mods.len();
+        while idx > 0 {
+            idx -= 1;
+            let kc = self.transient_mods[idx].1;
+            if self.conn.key(kc, false).is_ok() {
+                let _ = self.transient_mods.remove(idx);
+                if self.unbind_if_unused(kc).is_err() {
+                    had_err = true;
+                }
+            } else {
                 had_err = true;
             }
-            self.unbind_if_unused(kc);
         }
         if had_err {
             Err(ViewError::PartialInjection)
@@ -409,6 +433,14 @@ impl<C: X11InputConnection> X11InputDriver<C> {
         modifiers: &[Modifier],
         source_rect: &SourceRect,
     ) -> Result<(), ViewError> {
+        let btn_code = match phase {
+            PointerPhase::Move => None,
+            PointerPhase::Down | PointerPhase::Up => Some(
+                button
+                    .map(x11_button_code)
+                    .ok_or(ViewError::InvalidRecord)?,
+            ),
+        };
         let (px, py) = map_normalized_point(x, y, source_rect);
         // Physical coordinates are finite; clamp cleanly to X11 `i16` range.
         #[allow(clippy::cast_possible_truncation)]
@@ -428,25 +460,35 @@ impl<C: X11InputConnection> X11InputDriver<C> {
         match phase {
             PointerPhase::Move => Ok(()),
             PointerPhase::Down => {
-                let btn = button.map(x11_button_code).ok_or(ViewError::InvalidRecord)?;
-                if self.pressed_buttons.insert(btn) && self.conn.button(btn, true).is_err() {
-                    self.pressed_buttons.remove(&btn);
-                    return Err(ViewError::PartialInjection);
+                let btn = btn_code.expect("checked above");
+                if !self.pressed_buttons.contains(&btn) {
+                    if self.conn.button(btn, true).is_err() {
+                        let _ = self.release_transient_modifiers();
+                        return Err(ViewError::PartialInjection);
+                    }
+                    self.pressed_buttons.insert(btn);
                 }
                 Ok(())
             }
             PointerPhase::Up => {
-                let btn = button.map(x11_button_code).ok_or(ViewError::InvalidRecord)?;
-                let res = if self.pressed_buttons.remove(&btn) {
-                    self.conn
-                        .button(btn, false)
-                        .map_err(|_| ViewError::PartialInjection)
+                let btn = btn_code.expect("checked above");
+                let res = if self.pressed_buttons.contains(&btn) {
+                    match self.conn.button(btn, false) {
+                        Ok(()) => {
+                            self.pressed_buttons.remove(&btn);
+                            Ok(())
+                        }
+                        Err(_) => Err(ViewError::PartialInjection),
+                    }
                 } else {
                     // Preserve physical mouse state if we did not press this button.
                     Ok(())
                 };
                 if buttons == 0 && self.pressed_buttons.is_empty() {
-                    let _ = self.release_transient_modifiers();
+                    let mod_res = self.release_transient_modifiers();
+                    if res.is_ok() {
+                        return mod_res;
+                    }
                 }
                 res
             }
@@ -490,7 +532,16 @@ impl<C: X11InputConnection> X11InputDriver<C> {
                     ViewError::Unavailable
                 });
             }
-            if self.conn.button(v_btn, true).is_err() || self.conn.button(v_btn, false).is_err() {
+            if self.conn.button(v_btn, true).is_err() {
+                let _ = self.release_transient_modifiers();
+                return Err(if sent_any {
+                    ViewError::PartialInjection
+                } else {
+                    ViewError::Unavailable
+                });
+            }
+            if self.conn.button(v_btn, false).is_err() {
+                self.pressed_buttons.insert(v_btn);
                 let _ = self.release_transient_modifiers();
                 return Err(ViewError::PartialInjection);
             }
@@ -508,7 +559,16 @@ impl<C: X11InputConnection> X11InputDriver<C> {
                     ViewError::Unavailable
                 });
             }
-            if self.conn.button(h_btn, true).is_err() || self.conn.button(h_btn, false).is_err() {
+            if self.conn.button(h_btn, true).is_err() {
+                let _ = self.release_transient_modifiers();
+                return Err(if sent_any {
+                    ViewError::PartialInjection
+                } else {
+                    ViewError::Unavailable
+                });
+            }
+            if self.conn.button(h_btn, false).is_err() {
+                self.pressed_buttons.insert(h_btn);
                 let _ = self.release_transient_modifiers();
                 return Err(ViewError::PartialInjection);
             }
@@ -540,9 +600,31 @@ impl<C: X11InputConnection> X11InputDriver<C> {
                 }
                 let chord = self.has_chord_modifier(modifiers);
                 let (sym, mod_tag) = dom_key_to_x11_keysym(code, key, chord)?;
-                let (kc, scratch) = self.resolve_keycode(sym)?;
+                let mod_only: Vec<Modifier> = modifiers
+                    .iter()
+                    .filter(|m| Some(*m) != mod_tag.as_ref())
+                    .cloned()
+                    .collect();
+                let had_transient_before = !self.transient_mods.is_empty();
+                if !mod_only.is_empty() {
+                    self.apply_transient_modifiers(&mod_only)?;
+                }
+                let added_transient = !had_transient_before && !self.transient_mods.is_empty();
+                let (kc, scratch) = match self.resolve_keycode(sym) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        if added_transient {
+                            let _ = self.release_transient_modifiers();
+                        }
+                        return Err(e);
+                    }
+                };
                 if self.conn.key(kc, true).is_err() {
-                    self.unbind_if_unused(kc);
+                    let _ = self.unbind_if_unused(kc);
+                    if added_transient {
+                        let _ = self.release_transient_modifiers();
+                        return Err(ViewError::PartialInjection);
+                    }
                     return Err(ViewError::Unavailable);
                 }
                 self.pressed_keys.insert(
@@ -556,15 +638,27 @@ impl<C: X11InputConnection> X11InputDriver<C> {
                 Ok(())
             }
             KeyPhase::Up => {
-                let Some(rec) = self.pressed_keys.remove(code) else {
+                let Some(rec) = self.pressed_keys.get(code).cloned() else {
                     // Only release keys originally pressed by our session.
                     return Ok(());
                 };
-                let rel = self.conn.key(rec.keycode, false);
-                if rec.scratch {
-                    self.unbind_if_unused(rec.keycode);
+                if self.conn.key(rec.keycode, false).is_err() {
+                    // Keep `code` recorded in `pressed_keys` (and keep any scratch keycode bound)
+                    // so `release_all` will retry releasing the stuck key.
+                    return Err(ViewError::PartialInjection);
                 }
-                rel.map_err(|_| ViewError::PartialInjection)
+                self.pressed_keys.remove(code);
+                let mut res = Ok(());
+                if rec.scratch && self.unbind_if_unused(rec.keycode).is_err() {
+                    res = Err(ViewError::PartialInjection);
+                }
+                if self.pressed_keys.is_empty() {
+                    let mod_res = self.release_transient_modifiers();
+                    if res.is_ok() {
+                        res = mod_res;
+                    }
+                }
+                res
             }
         }
     }
@@ -583,7 +677,7 @@ impl<C: X11InputConnection> X11InputDriver<C> {
         }
 
         let mut sent_any = false;
-        for sym in syms {
+        for (idx, sym) in syms.into_iter().enumerate() {
             if cancelled.load(Ordering::Acquire) {
                 return Err(if sent_any {
                     ViewError::PartialInjection
@@ -602,20 +696,31 @@ impl<C: X11InputConnection> X11InputDriver<C> {
                 }
             };
             let down_ok = self.conn.key(kc, true).is_ok();
-            let up_ok = if down_ok {
-                self.conn.key(kc, false).is_ok()
-            } else {
-                false
-            };
-            if scratch {
-                self.unbind_if_unused(kc);
-            }
-            if !down_ok || !up_ok {
-                return Err(if sent_any || down_ok {
+            if !down_ok {
+                if scratch {
+                    let _ = self.unbind_if_unused(kc);
+                }
+                return Err(if sent_any {
                     ViewError::PartialInjection
                 } else {
                     ViewError::Unavailable
                 });
+            }
+            if self.conn.key(kc, false).is_err() {
+                // Record the stuck keycode in `pressed_keys` without unbinding its scratch
+                // keycode so `release_all` retries releasing and unbinding it.
+                self.pressed_keys.insert(
+                    format!("__text_{kc}_{idx}"),
+                    PressedKeyRecord {
+                        keycode: kc,
+                        modifier: None,
+                        scratch,
+                    },
+                );
+                return Err(ViewError::PartialInjection);
+            }
+            if scratch {
+                let _ = self.unbind_if_unused(kc);
             }
             sent_any = true;
         }
@@ -628,11 +733,20 @@ impl<C: X11InputConnection> InputDriver for X11InputDriver<C> {
         &mut self,
         event: &InputEvent,
         source_rect: SourceRect,
-        _virtual_rect: PixelRect,
+        virtual_rect: PixelRect,
         cancelled: &AtomicBool,
     ) -> Result<(), ViewError> {
         if cancelled.load(Ordering::Acquire) {
             return Err(ViewError::Unavailable);
+        }
+        if event.positional() {
+            validate_positional_geometry(&source_rect, virtual_rect)?;
+            if let Some(live_root) = self.conn.root_rect()? {
+                if live_root != virtual_rect {
+                    return Err(ViewError::Unavailable);
+                }
+                validate_positional_geometry(&source_rect, live_root)?;
+            }
         }
         match event {
             InputEvent::Pointer {
@@ -642,7 +756,15 @@ impl<C: X11InputConnection> InputDriver for X11InputDriver<C> {
                 button,
                 buttons,
                 modifiers,
-            } => self.handle_pointer(phase, *x, *y, button.as_ref(), *buttons, modifiers, &source_rect),
+            } => self.handle_pointer(
+                phase,
+                *x,
+                *y,
+                button.as_ref(),
+                *buttons,
+                modifiers,
+                &source_rect,
+            ),
             InputEvent::Wheel {
                 x,
                 y,
@@ -679,9 +801,10 @@ impl<C: X11InputConnection> InputDriver for X11InputDriver<C> {
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        self.pressed_keys.clear();
-        for (_code, rec) in keys.into_iter().rev() {
-            if self.conn.key(rec.keycode, false).is_err() {
+        for (code, rec) in keys.into_iter().rev() {
+            if self.conn.key(rec.keycode, false).is_ok() {
+                self.pressed_keys.remove(&code);
+            } else {
                 failed = true;
             }
         }
@@ -691,17 +814,25 @@ impl<C: X11InputConnection> InputDriver for X11InputDriver<C> {
         }
 
         let buttons: Vec<u8> = self.pressed_buttons.iter().copied().collect();
-        self.pressed_buttons.clear();
         for btn in buttons {
-            if self.conn.button(btn, false).is_err() {
+            if self.conn.button(btn, false).is_ok() {
+                self.pressed_buttons.remove(&btn);
+            } else {
                 failed = true;
             }
         }
 
         let scratches: Vec<u8> = self.scratch_bindings.keys().copied().collect();
-        self.scratch_bindings.clear();
         for kc in scratches {
-            if self.conn.unbind_scratch_keycode(kc).is_err() {
+            let still_held = self.pressed_keys.values().any(|r| r.keycode == kc)
+                || self.transient_mods.iter().any(|&(_, mkc)| mkc == kc);
+            if still_held {
+                failed = true;
+                continue;
+            }
+            if self.conn.unbind_scratch_keycode(kc).is_ok() {
+                self.scratch_bindings.remove(&kc);
+            } else {
                 failed = true;
             }
         }
@@ -726,10 +857,10 @@ const fn x11_button_code(b: &Button) -> u8 {
 
 const fn modifier_to_x11_keysym(m: &Modifier) -> u32 {
     match m {
-        Modifier::Shift => 0xFFE1,   // XK_Shift_L
-        Modifier::Ctrl => 0xFFE3,    // XK_Control_L
-        Modifier::Alt => 0xFFE9,     // XK_Alt_L
-        Modifier::Meta => 0xFFEB,    // XK_Super_L
+        Modifier::Shift => 0xFFE1, // XK_Shift_L
+        Modifier::Ctrl => 0xFFE3,  // XK_Control_L
+        Modifier::Alt => 0xFFE9,   // XK_Alt_L
+        Modifier::Meta => 0xFFEB,  // XK_Super_L
     }
 }
 
@@ -979,29 +1110,29 @@ mod linux_x11 {
                 .map_err(|_| CaptureFailure::ConnectionLost(Reason::Disconnected))?
                 .reply()
                 .map_err(|_| CaptureFailure::ConnectionLost(Reason::Disconnected))?;
-            let live_w = u32::from(geom_reply.width).max(1);
-            let live_h = u32::from(geom_reply.height).max(1);
             let root_rect = PixelRect {
                 x: 0,
                 y: 0,
-                width: if live_w > 0 { live_w } else { root_w },
-                height: if live_h > 0 { live_h } else { root_h },
+                width: if geom_reply.width > 0 {
+                    u32::from(geom_reply.width)
+                } else {
+                    root_w.max(1)
+                },
+                height: if geom_reply.height > 0 {
+                    u32::from(geom_reply.height)
+                } else {
+                    root_h.max(1)
+                },
             };
 
-            let bpp = setup
+            let pf = setup
                 .pixmap_formats
                 .iter()
-                .find(|pf| pf.depth == root_depth)
-                .map_or(32, |pf| pf.bits_per_pixel);
-            let scanline_pad = setup
-                .pixmap_formats
-                .iter()
-                .find(|pf| pf.depth == root_depth)
-                .map_or(32, |pf| pf.scanline_pad);
+                .find(|pf| pf.depth == root_depth);
             let format = X11PixmapFormat {
                 depth: root_depth,
-                bits_per_pixel: bpp,
-                scanline_pad,
+                bits_per_pixel: pf.map_or(32, |p| p.bits_per_pixel),
+                scanline_pad: pf.map_or(32, |p| p.scanline_pad),
                 big_endian: setup.image_byte_order == ImageOrder::MSB_FIRST,
             };
 
@@ -1073,9 +1204,29 @@ mod linux_x11 {
             let width = u16::try_from(rect.width).map_err(|_| CaptureFailure::LimitExceeded)?;
             let height = u16::try_from(rect.height).map_err(|_| CaptureFailure::LimitExceeded)?;
 
-            let layout = self.query_layout()?;
-            let px_fmt = x11_pixel_format(layout.format)?;
-            let root = self.conn.setup().roots[self.screen_num].root;
+            let setup = self.conn.setup();
+            let screen = setup
+                .roots
+                .get(self.screen_num)
+                .ok_or(CaptureFailure::ConnectionLost(Reason::Disconnected))?;
+            let root = screen.root;
+            let root_depth = screen.root_depth;
+            let bpp = setup
+                .pixmap_formats
+                .iter()
+                .find(|pf| pf.depth == root_depth)
+                .map_or(32, |pf| pf.bits_per_pixel);
+            let scanline_pad = setup
+                .pixmap_formats
+                .iter()
+                .find(|pf| pf.depth == root_depth)
+                .map_or(32, |pf| pf.scanline_pad);
+            let px_fmt = x11_pixel_format(X11PixmapFormat {
+                depth: root_depth,
+                bits_per_pixel: bpp,
+                scanline_pad,
+                big_endian: setup.image_byte_order == ImageOrder::MSB_FIRST,
+            })?;
             let reply = self
                 .conn
                 .get_image(ImageFormat::Z_PIXMAP, root, left, top, width, height, !0)
@@ -1182,6 +1333,21 @@ mod linux_x11 {
                 .map_err(|_| ViewError::Unavailable)?;
             self.conn.sync().map_err(|_| ViewError::Unavailable)
         }
+
+        fn root_rect(&mut self) -> Result<Option<PixelRect>, ViewError> {
+            let geom = self
+                .conn
+                .get_geometry(self.root)
+                .map_err(|_| ViewError::Unavailable)?
+                .reply()
+                .map_err(|_| ViewError::Unavailable)?;
+            Ok(Some(PixelRect {
+                x: 0,
+                y: 0,
+                width: u32::from(geom.width).max(1),
+                height: u32::from(geom.height).max(1),
+            }))
+        }
     }
 
     /// Create an X11 live-view target on Linux, checking session type, `DISPLAY`,
@@ -1194,7 +1360,8 @@ mod linux_x11 {
     pub fn open_x11_live_view_target(
         options: &LiveViewOptions,
     ) -> Result<Arc<DesktopViewTarget>, Reason> {
-        type RealCaptureFactory = Arc<dyn Fn() -> Result<RealX11Capture, CaptureFailure> + Send + Sync>;
+        type RealCaptureFactory =
+            Arc<dyn Fn() -> Result<RealX11Capture, CaptureFailure> + Send + Sync>;
         type RealInputFactory = Arc<dyn Fn() -> Result<RealX11Input, ViewError> + Send + Sync>;
 
         let xdg = std::env::var("XDG_SESSION_TYPE").ok();
@@ -1232,10 +1399,7 @@ mod linux_x11 {
 
         let (input_factory, input_reason): (Option<RealInputFactory>, Option<Reason>) = if xtest_ok
         {
-            (
-                Some(Arc::new(move || RealX11Input::open(&dpy_in))),
-                None,
-            )
+            (Some(Arc::new(move || RealX11Input::open(&dpy_in))), None)
         } else {
             (None, Some(Reason::Unsupported))
         };
@@ -1313,6 +1477,7 @@ mod tests {
         keymap: X11KeymapSnapshot,
         calls: Vec<X11Call>,
         fail_after_n: Option<usize>,
+        root_rect: Option<PixelRect>,
     }
 
     struct MockX11Input {
@@ -1372,6 +1537,10 @@ mod tests {
 
         fn key(&mut self, keycode: u8, press: bool) -> Result<(), ViewError> {
             self.record(X11Call::Key(keycode, press))
+        }
+
+        fn root_rect(&mut self) -> Result<Option<PixelRect>, ViewError> {
+            Ok(self.state.lock().root_rect)
         }
     }
 
@@ -1460,7 +1629,10 @@ mod tests {
             CaptureScope::VirtualDesktop,
         );
         let mut buf = Vec::new();
-        assert_eq!(drv.capture(&mut buf).err(), Some(CaptureFailure::LimitExceeded));
+        assert_eq!(
+            drv.capture(&mut buf).err(),
+            Some(CaptureFailure::LimitExceeded)
+        );
         assert_eq!(state.lock().get_image_calls.load(Ordering::SeqCst), 0);
     }
 
@@ -1519,7 +1691,11 @@ mod tests {
             },
             Arc::new({
                 let s = Arc::clone(&cap_state);
-                move || Ok(MockX11Capture { state: Arc::clone(&s) })
+                move || {
+                    Ok(MockX11Capture {
+                        state: Arc::clone(&s),
+                    })
+                }
             }),
             Arc::new(|_| Ok(())),
             None,
@@ -1571,6 +1747,7 @@ mod tests {
             keymap: base_keymap(false),
             calls: Vec::new(),
             fail_after_n: None,
+            root_rect: None,
         }));
         let mut drv = X11InputDriver::new(MockX11Input {
             state: Arc::clone(&in_state),
@@ -1607,38 +1784,28 @@ mod tests {
         )
         .unwrap();
         // Hold ShiftLeft + KeyA ('A' hits col 1 of permanent kc 9, NO scratch binding!)
-        drv.inject(
-            &InputEvent::Key {
-                phase: KeyPhase::Down,
-                code: "ShiftLeft".into(),
-                key: "Shift".into(),
-                location: 1,
-                repeat: false,
-                modifiers: vec![Modifier::Shift],
-            },
-            sr.clone(),
-            vr,
-            &cancel,
-        )
-        .unwrap();
-        drv.inject(
-            &InputEvent::Key {
-                phase: KeyPhase::Down,
-                code: "KeyA".into(),
-                key: "A".into(),
-                location: 0,
-                repeat: false,
-                modifiers: vec![Modifier::Shift],
-            },
-            sr.clone(),
-            vr,
-            &cancel,
-        )
-        .unwrap();
+        for (code, key) in [("ShiftLeft", "Shift"), ("KeyA", "A")] {
+            drv.inject(
+                &InputEvent::Key {
+                    phase: KeyPhase::Down,
+                    code: code.into(),
+                    key: key.into(),
+                    location: 0,
+                    repeat: false,
+                    modifiers: vec![Modifier::Shift],
+                },
+                sr.clone(),
+                vr,
+                &cancel,
+            )
+            .unwrap();
+        }
 
         // Turkish Unicode text binds scratch kc 12 cleanly and unbinds right after each char.
         drv.inject(
-            &InputEvent::Text { text: "ğİ".into() },
+            &InputEvent::Text {
+                text: "ğİ".into()
+            },
             sr.clone(),
             vr,
             &cancel,
@@ -1655,7 +1822,7 @@ mod tests {
                     repeat: false,
                     modifiers: vec![],
                 },
-                sr.clone(),
+                sr,
                 vr,
                 &cancel,
             ),
@@ -1685,6 +1852,7 @@ mod tests {
                 keymap: base_keymap(true),
                 calls: Vec::new(),
                 fail_after_n: None,
+                root_rect: None,
             })),
         })
         .unwrap();
@@ -1719,6 +1887,7 @@ mod tests {
             keymap: base_keymap(false),
             calls: Vec::new(),
             fail_after_n: Some(2), // first char down+up succeeds, second char down fails
+            root_rect: None,
         }));
         let mut drv = X11InputDriver::new(MockX11Input {
             state: Arc::clone(&in_state),
@@ -1739,14 +1908,314 @@ mod tests {
         };
         assert_eq!(
             drv.inject(
-                &InputEvent::Text {
-                    text: "aa".into()
-                },
+                &InputEvent::Text { text: "aa".into() },
                 sr,
                 vr,
                 &AtomicBool::new(false)
             ),
             Err(ViewError::PartialInjection)
         );
+    }
+
+    #[test]
+    fn xtest_failed_key_up_and_button_up_stay_held_until_release_all_succeeds() {
+        let in_state = Arc::new(Mutex::new(MockX11InputState {
+            has_xtest: true,
+            keymap: base_keymap(false),
+            calls: Vec::new(),
+            fail_after_n: None,
+            root_rect: None,
+        }));
+        let mut drv = X11InputDriver::new(MockX11Input {
+            state: Arc::clone(&in_state),
+        })
+        .unwrap();
+        let sr = SourceRect {
+            x: 0.0,
+            y: 0.0,
+            width: 200,
+            height: 100,
+            units: live_view::Units::PhysicalPx,
+        };
+        let vr = PixelRect {
+            x: 0,
+            y: 0,
+            width: 200,
+            height: 100,
+        };
+        let cancel = AtomicBool::new(false);
+
+        // Press Left mouse button (btn 1) and scratch-bound 'ğ' key (binds scratch kc 12).
+        for ev in [
+            InputEvent::Pointer {
+                phase: PointerPhase::Down,
+                x: 0.25,
+                y: 0.25,
+                button: Some(Button::Left),
+                buttons: 1,
+                modifiers: vec![],
+            },
+            InputEvent::Key {
+                phase: KeyPhase::Down,
+                code: "BracketRight".into(),
+                key: "ğ".into(),
+                location: 0,
+                repeat: false,
+                modifiers: vec![],
+            },
+        ] {
+            drv.inject(&ev, sr.clone(), vr, &cancel).unwrap();
+        }
+
+        // Simulate button-up failing after motion succeeds (`fail_after_n = Some(1)`).
+        in_state.lock().fail_after_n = Some(1);
+        assert_eq!(
+            drv.inject(
+                &InputEvent::Pointer {
+                    phase: PointerPhase::Up,
+                    x: 0.25,
+                    y: 0.25,
+                    button: Some(Button::Left),
+                    buttons: 0,
+                    modifiers: vec![],
+                },
+                sr.clone(),
+                vr,
+                &cancel,
+            ),
+            Err(ViewError::PartialInjection)
+        );
+
+        // Simulate key-up failing immediately (`fail_after_n = Some(0)`).
+        // Must NOT forget the held key AND must NOT unbind scratch kc 12 while it is still held!
+        in_state.lock().calls.clear();
+        in_state.lock().fail_after_n = Some(0);
+        assert_eq!(
+            drv.inject(
+                &InputEvent::Key {
+                    phase: KeyPhase::Up,
+                    code: "BracketRight".into(),
+                    key: "ğ".into(),
+                    location: 0,
+                    repeat: false,
+                    modifiers: vec![],
+                },
+                sr,
+                vr,
+                &cancel,
+            ),
+            Err(ViewError::PartialInjection)
+        );
+        assert!(!in_state.lock().calls.contains(&X11Call::Unbind(12)));
+
+        // First `release_all()` attempt: allow key(12, false) to succeed (1 call) then fail button(1, false).
+        in_state.lock().calls.clear();
+        in_state.lock().fail_after_n = Some(1);
+        assert_eq!(drv.release_all(), Err(ViewError::Unavailable));
+        assert_eq!(in_state.lock().calls, vec![X11Call::Key(12, false)]);
+
+        // Second `release_all()` attempt with healthy connection: must release still-held button 1
+        // and unbind scratch kc 12.
+        in_state.lock().calls.clear();
+        in_state.lock().fail_after_n = None;
+        drv.release_all().expect("retry release_all succeeds");
+        let retry_calls = in_state.lock().calls.clone();
+        assert!(retry_calls.contains(&X11Call::Button(1, false)));
+        assert!(retry_calls.contains(&X11Call::Unbind(12)));
+
+        // Third `release_all()` is an idempotent no-op.
+        in_state.lock().calls.clear();
+        drv.release_all().unwrap();
+        assert_eq!(in_state.lock().calls.len(), 0);
+    }
+
+    #[test]
+    fn xtest_drag_wheel_and_stale_geometry_rejection() {
+        let vr = PixelRect {
+            x: 0,
+            y: 0,
+            width: 1000,
+            height: 800,
+        };
+        let sr = SourceRect {
+            x: 0.0,
+            y: 0.0,
+            width: 1000,
+            height: 800,
+            units: live_view::Units::PhysicalPx,
+        };
+        let in_state = Arc::new(Mutex::new(MockX11InputState {
+            has_xtest: true,
+            keymap: base_keymap(false),
+            calls: Vec::new(),
+            fail_after_n: None,
+            root_rect: Some(vr),
+        }));
+        let mut drv = X11InputDriver::new(MockX11Input {
+            state: Arc::clone(&in_state),
+        })
+        .unwrap();
+        let cancel = AtomicBool::new(false);
+
+        // Multi-event drag: Down -> Move -> Up
+        for (phase, x, y, buttons) in [
+            (PointerPhase::Down, 0.1, 0.1, 1),
+            (PointerPhase::Move, 0.5, 0.5, 1),
+            (PointerPhase::Up, 0.9, 0.9, 0),
+        ] {
+            drv.inject(
+                &InputEvent::Pointer {
+                    phase,
+                    x,
+                    y,
+                    button: Some(Button::Left),
+                    buttons,
+                    modifiers: vec![],
+                },
+                sr.clone(),
+                vr,
+                &cancel,
+            )
+            .unwrap();
+        }
+        let drag_calls = in_state.lock().calls.clone();
+        assert!(drag_calls.contains(&X11Call::Button(1, true)));
+        assert!(drag_calls.contains(&X11Call::Motion(500, 400)));
+        assert!(drag_calls.contains(&X11Call::Button(1, false)));
+
+        // Wheel vertical + horizontal steps
+        in_state.lock().calls.clear();
+        drv.inject(
+            &InputEvent::Wheel {
+                x: 0.5,
+                y: 0.5,
+                delta_x: 80.0,
+                delta_y: -40.0,
+                modifiers: vec![],
+            },
+            sr.clone(),
+            vr,
+            &cancel,
+        )
+        .unwrap();
+        let wheel_calls = in_state.lock().calls.clone();
+        assert!(wheel_calls.contains(&X11Call::Button(4, true)));
+        assert!(wheel_calls.contains(&X11Call::Button(7, true)));
+
+        // Simulate X11 root window resize before frame geometry catches up: positional input rejected!
+        in_state.lock().root_rect = Some(PixelRect {
+            x: 0,
+            y: 0,
+            width: 800,
+            height: 600,
+        });
+        in_state.lock().calls.clear();
+        assert_eq!(
+            drv.inject(
+                &InputEvent::Pointer {
+                    phase: PointerPhase::Down,
+                    x: 0.5,
+                    y: 0.5,
+                    button: Some(Button::Left),
+                    buttons: 1,
+                    modifiers: vec![],
+                },
+                sr,
+                vr,
+                &cancel,
+            ),
+            Err(ViewError::Unavailable)
+        );
+        assert_eq!(in_state.lock().calls.len(), 0);
+    }
+
+    #[test]
+    fn xtest_key_chord_and_repeat_handling() {
+        let vr = PixelRect {
+            x: 0,
+            y: 0,
+            width: 1000,
+            height: 800,
+        };
+        let sr = SourceRect {
+            x: 0.0,
+            y: 0.0,
+            width: 1000,
+            height: 800,
+            units: live_view::Units::PhysicalPx,
+        };
+        let in_state = Arc::new(Mutex::new(MockX11InputState {
+            has_xtest: true,
+            keymap: base_keymap(false),
+            calls: Vec::new(),
+            fail_after_n: None,
+            root_rect: Some(vr),
+        }));
+        let mut drv = X11InputDriver::new(MockX11Input {
+            state: Arc::clone(&in_state),
+        })
+        .unwrap();
+        let cancel = AtomicBool::new(false);
+
+        drv.inject(
+            &InputEvent::Key {
+                phase: KeyPhase::Down,
+                code: "KeyA".into(),
+                key: "a".into(),
+                location: 0,
+                repeat: false,
+                modifiers: vec![Modifier::Ctrl],
+            },
+            sr.clone(),
+            vr,
+            &cancel,
+        )
+        .unwrap();
+        // Duplicate Down with repeat=false is a no-op; repeat=true re-sends Key(9, true).
+        let len_after_first = in_state.lock().calls.len();
+        drv.inject(
+            &InputEvent::Key {
+                phase: KeyPhase::Down,
+                code: "KeyA".into(),
+                key: "a".into(),
+                location: 0,
+                repeat: false,
+                modifiers: vec![Modifier::Ctrl],
+            },
+            sr.clone(),
+            vr,
+            &cancel,
+        )
+        .unwrap();
+        assert_eq!(in_state.lock().calls.len(), len_after_first);
+        drv.inject(
+            &InputEvent::Key {
+                phase: KeyPhase::Down,
+                code: "KeyA".into(),
+                key: "a".into(),
+                location: 0,
+                repeat: true,
+                modifiers: vec![Modifier::Ctrl],
+            },
+            sr.clone(),
+            vr,
+            &cancel,
+        )
+        .unwrap();
+        assert_eq!(in_state.lock().calls.len(), len_after_first + 1);
+        drv.inject(
+            &InputEvent::Key {
+                phase: KeyPhase::Up,
+                code: "KeyA".into(),
+                key: "a".into(),
+                location: 0,
+                repeat: false,
+                modifiers: vec![],
+            },
+            sr,
+            vr,
+            &cancel,
+        )
+        .unwrap();
     }
 }
