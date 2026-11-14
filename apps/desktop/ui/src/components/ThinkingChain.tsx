@@ -4,9 +4,10 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { brandIcon } from "../lib/brandIcons";
 import { type Chain, chainSeconds, type ChainStep } from "../lib/thinkingChain";
-import { describeTool } from "../lib/toolLabels";
+import { describeTool, stepPhase } from "../lib/toolLabels";
 import type { ToolItem } from "../state/timeline";
 import { ToolBody } from "./ChatCards";
+import { Markdown } from "./Markdown";
 import { StepIcon } from "./StepIcon";
 import styles from "./ThinkingChain.module.css";
 
@@ -44,7 +45,8 @@ function ToolStep({ tool }: { tool: ToolItem }) {
     tool.status === "error" ||
     tool.status === "denied" ||
     tool.status === "expired";
-  const text = t(`${label.key}.${active ? "running" : "done"}`, label.values);
+  const phase = stepPhase(tool.status);
+  const text = t(`${label.key}.${phase}`, label.values);
   return (
     <li
       className={[styles.step, bad ? styles.stepBad : ""]
@@ -97,7 +99,9 @@ function ToolStep({ tool }: { tool: ToolItem }) {
 
 function Step({ step }: { step: ChainStep }) {
   return step.kind === "thought" ? (
-    <li className={styles.thought}>{step.text}</li>
+    <li className={styles.thought}>
+      <Markdown text={step.text} />
+    </li>
   ) : (
     <ToolStep tool={step.tool} />
   );
@@ -140,7 +144,7 @@ export function ThinkingChain({
       >
         {avatar}
         <span className={chain.live ? styles.shim : styles.title}>{title}</span>
-        {chain.problems > 0 && !chain.live ? (
+        {chain.problems > 0 ? (
           <span className={styles.problems}>
             {counted(t, "chain.problems", chain.problems)}
           </span>

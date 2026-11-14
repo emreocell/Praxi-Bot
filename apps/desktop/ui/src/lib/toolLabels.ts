@@ -85,6 +85,12 @@ const pathChip = (i: Record<string, unknown>): StepChip[] => {
   return p ? [{ text: clip(baseName(p)) }] : [];
 };
 
+/*
+ * Only tools whose effect is known get a specific sentence. There are no
+ * prefix rows on purpose: a family name must never turn an unlisted (possibly
+ * writing or scripting) tool into a "read" or "used" line. Unlisted names fall
+ * through to the generic wording, which still contains the tool name.
+ */
 const TABLE: Record<string, Entry> = {
   web_search: { id: "web_search", icon: "search", chips: queryChip },
   web_extract: { id: "web_read", icon: "globe", chips: urlChip },
@@ -103,6 +109,30 @@ const TABLE: Record<string, Entry> = {
   "shell.run": { id: "shell", icon: "terminal" },
   script_run: { id: "shell", icon: "terminal" },
   browser_open: { id: "browser_open", icon: "globe", chips: urlChip },
+  browser_click: { id: "browser_click", icon: "globe" },
+  browser_fill: { id: "browser_fill", icon: "globe" },
+  browser_eval: { id: "browser_eval", icon: "terminal" },
+  browser_press: { id: "browser_press", icon: "globe" },
+  browser_select: { id: "browser_select", icon: "globe" },
+  browser_scroll: { id: "browser_view", icon: "globe" },
+  browser_back: { id: "browser_view", icon: "globe" },
+  browser_tabs: { id: "browser_view", icon: "globe" },
+  browser_wait: { id: "browser_view", icon: "globe" },
+  browser_snapshot: { id: "browser_view", icon: "globe" },
+  browser_screenshot: { id: "browser_view", icon: "globe" },
+  browser_idle: { id: "browser_view", icon: "globe" },
+  desktop_click: { id: "desktop_pointer", icon: "desktop" },
+  desktop_drag: { id: "desktop_pointer", icon: "desktop" },
+  desktop_scroll: { id: "desktop_pointer", icon: "desktop" },
+  desktop_type: { id: "desktop_type", icon: "desktop" },
+  desktop_key: { id: "desktop_key", icon: "desktop" },
+  desktop_set_value: { id: "desktop_set", icon: "desktop" },
+  desktop_launch: { id: "desktop_launch", icon: "desktop" },
+  desktop_get_state: { id: "desktop_look", icon: "desktop" },
+  desktop_list_apps: { id: "desktop_look", icon: "desktop" },
+  skill_write: { id: "skill_write", icon: "skill" },
+  skill_read: { id: "skill_look", icon: "skill" },
+  skill_list: { id: "skill_look", icon: "skill" },
   workflow_run: { id: "workflow", icon: "workflow" },
   todo_write: { id: "todo", icon: "list" },
   todo_list: { id: "todo", icon: "list" },
@@ -117,22 +147,35 @@ const TABLE: Record<string, Entry> = {
   email_search: { id: "email_read", icon: "mail", chips: queryChip },
   email_read: { id: "email_read", icon: "mail" },
   email_list_folders: { id: "email_read", icon: "mail" },
-  email_mark_read: { id: "email_read", icon: "mail" },
+  email_mark_read: { id: "email_mark", icon: "mail" },
   spawn_subagent: { id: "agent", icon: "agent" },
   ask_user: { id: "ask", icon: "agent" }
 };
 
-/** Families matched by prefix when the exact name is not in the table. */
-const PREFIXES: [prefix: string, entry: Entry][] = [
-  ["browser_", { id: "browser", icon: "globe" }],
-  ["desktop_", { id: "desktop", icon: "desktop" }],
-  ["email_", { id: "email_read", icon: "mail" }],
-  ["memory_", { id: "memory", icon: "memory" }],
-  ["skill_", { id: "skill", icon: "skill" }],
-  ["fs_", { id: "fs_read", icon: "file", chips: pathChip }],
-  ["web_", { id: "web_read", icon: "globe", chips: urlChip }],
-  ["schedule_", { id: "schedule_update", icon: "calendar" }]
-];
+export const KNOWN_TOOL_NAMES: readonly string[] = Object.keys(TABLE);
+
+/**
+ * Which wording a step uses. A call that errored, was denied or expired must
+ * never read as done ("Deleted a file").
+ */
+export function stepPhase(
+  status: string
+): "running" | "failed" | "done" {
+  if (status === "requested" || status === "running") {
+    return "running";
+  }
+  return status === "error" || status === "denied" || status === "expired"
+    ? "failed"
+    : "done";
+}
+
+/** Tools that really send something out (not merely mention mail). */
+export function isSendTool(name: string): boolean {
+  return name
+    .toLowerCase()
+    .split(/[._\-:]+/)
+    .some((t) => ["send", "post", "reply", "publish", "tweet"].includes(t));
+}
 
 /** `get_open_PRs` / `getOpenPRs` -> `get open PRs`. */
 export function humanizeName(raw: string): string {
@@ -175,8 +218,7 @@ export function describeTool(
 ): StepLabel {
   const rec = asRecord(input);
   const exact = TABLE[name];
-  const entry =
-    exact ?? PREFIXES.find(([p]) => name.startsWith(p))?.[1] ?? null;
+  const entry = exact ?? null;
   if (entry) {
     return {
       key: `chat.step.${entry.id}`,

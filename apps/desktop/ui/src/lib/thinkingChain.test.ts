@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { TextItem, TimelineItem, ToolItem, ToolStatus } from "../state/timeline.ts";
-import { chainSeconds, groupRunItems } from "./thinkingChain.ts";
+import { chainOrderTs, chainSeconds, groupRunItems } from "./thinkingChain.ts";
 
 const text = (key: string, ts: number, t = key): TextItem => ({ kind: "text", key, ts, text: t });
 const tool = (key: string, ts: number, status: ToolStatus = "done", name = "web_search"): ToolItem => ({
@@ -61,4 +61,27 @@ test("live only while the run is unfinished; failures are counted", () => {
 test("a chain followed by the streaming answer is not live", () => {
   const segs = groupRunItems([tool("t1", 0), text("a", 5000, "partial")], false);
   assert.equal((segs[0] as { kind: "chain"; chain: import("./thinkingChain.ts").Chain }).chain.live, false);
+});
+
+test("a long or multi-line text before a tool call stays the answer, not a thought", () => {
+  const long = "x".repeat(400);
+  assert.deepEqual(kinds([text("a", 0, long), tool("t1", 1000)], true), ["item", "chain"]);
+  assert.deepEqual(kinds([text("a", 0, "## Summary\n| a | b |"), tool("t1", 1000)], true), ["item", "chain"]);
+});
+
+test("the first chain counts the model time before its first call", () => {
+  const segs = groupRunItems([tool("t1", 40000)], true, 10000);
+  const c = (segs[0] as { kind: "chain"; chain: import("./thinkingChain.ts").Chain }).chain;
+  assert.equal(chainSeconds(c), 32);
+  const second = groupRunItems([tool("t1", 40000), text("m", 50000, "long ".repeat(80)), tool("t2", 60000)], true, 10000);
+  const c2 = (second[2] as { kind: "chain"; chain: import("./thinkingChain.ts").Chain }).chain;
+  assert.equal(c2.spanStartMs, 60000);
+  assert.equal(groupRunItems([tool("t1", 1000)], true, 5000)[0]?.kind, "chain");
+});
+
+test("a chain sorts at its end, never after the next row nor before its start", () => {
+  const chain = { startMs: 1000, endMs: 9000 };
+  assert.equal(chainOrderTs(chain), 9000);
+  assert.equal(chainOrderTs(chain, 5000), 5000);
+  assert.equal(chainOrderTs(chain, 500), 1000);
 });

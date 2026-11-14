@@ -21,6 +21,8 @@ export interface Chain {
   key: string;
   steps: ChainStep[];
   startMs: number;
+  /** Where the "thought for N s" span begins (the run start for the first chain). */
+  spanStartMs: number;
   /** Last moment anything in the chain finished (or was said). */
   endMs: number;
   /** The run is still going and this is its last stretch. */
@@ -32,6 +34,33 @@ export interface Chain {
 export type Segment =
   | { kind: "chain"; chain: Chain }
   | { kind: "item"; item: TimelineItem };
+
+/** A thought is short and one line; anything longer is the answer. */
+export const MAX_THOUGHT_CHARS = 200;
+
+export function isShortThought(text: string): boolean {
+  const t = text.trim();
+  return t.length > 0 && t.length <= MAX_THOUGHT_CHARS && !/\n/.test(t);
+}
+
+/** The first chain of a run also counts the model's time before its first call. */
+function spanStart(
+  first: number,
+  end: number,
+  isFirst: boolean,
+  runStartedMs?: number
+): number {
+  if (
+    isFirst &&
+    runStartedMs !== undefined &&
+    runStartedMs > 0 &&
+    runStartedMs < first &&
+    end - runStartedMs < 24 * 3600 * 1000
+  ) {
+    return runStartedMs;
+  }
+  return first;
+}
 
 /** A tool call the chain may absorb. */
 export function chainable(item: TimelineItem): item is ToolItem {
@@ -58,7 +87,8 @@ function stepEnd(step: ChainStep): number {
  */
 export function groupRunItems(
   items: readonly TimelineItem[],
-  runFinished: boolean
+  runFinished: boolean,
+  runStartedMs?: number
 ): Segment[] {
   const out: Segment[] = [];
   let steps: ChainStep[] = [];
@@ -89,6 +119,7 @@ export function groupRunItems(
         key: `chain-${first.key}`,
         steps,
         startMs: stepTs(first),
+        spanStartMs: spanStart(stepTs(first), endMs, out.length === 0, runStartedMs),
         endMs,
         live: !runFinished && (live || isLast),
         problems
@@ -110,7 +141,7 @@ export function groupRunItems(
         j++;
       }
       const next = items[j];
-      if (next !== undefined && chainable(next) && item.text.trim()) {
+      if (next !== undefined && chainable(next) && isShortThought(item.text)) {
         steps.push({
           kind: "thought",
           key: item.key,
@@ -129,6 +160,21 @@ export function groupRunItems(
 }
 
 /** Whole seconds a chain took, at least 1. */
-export function chainSeconds(chain: Pick<Chain, "startMs" | "endMs">): number {
-  return Math.max(1, Math.round((chain.endMs - chain.startMs) / 1000));
+export function chainSeconds(chain: Pick<Chain, "spanStartMs" | "endMs">): number {
+  return Math.max(1, Math.round((chain.endMs - chain.spanStartMs) / 1000));
+}
+
+/**
+ * Where a chain sorts among the chat messages: when it finished, so a message
+ * the user sent while the run was still working is never shown after work that
+ * had not happened yet. Never before its own start nor after the next row of
+ * the same run.
+ */
+export function chainOrderTs(
+  chain: Pick<Chain, "startMs" | "endMs">,
+  nextRowTs?: number
+): number {
+  const capped =
+    nextRowTs === undefined ? chain.endMs : Math.min(chain.endMs, nextRowTs);
+  return Math.max(chain.startMs, capped);
 }

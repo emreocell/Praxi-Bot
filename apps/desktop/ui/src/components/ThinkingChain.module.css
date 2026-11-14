@@ -67,7 +67,7 @@
   color: var(--color-text-muted);
   line-height: var(--line-height-normal);
   overflow-wrap: anywhere;
-  white-space: pre-wrap;
+  font-size: var(--font-size-sm);
 }
 
 .step {

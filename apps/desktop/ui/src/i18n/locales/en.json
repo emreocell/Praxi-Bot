@@ -405,115 +405,198 @@
     "step": {
       "web_search": {
         "running": "Searching the web",
-        "done": "Searched the web"
+        "done": "Searched the web",
+        "failed": "Couldn't search the web"
       },
       "web_read": {
         "running": "Reading a page",
-        "done": "Read a page"
+        "done": "Read a page",
+        "failed": "Couldn't read a page"
       },
       "doc_read": {
         "running": "Reading a document",
-        "done": "Read a document"
+        "done": "Read a document",
+        "failed": "Couldn't read a document"
       },
       "fs_read": {
         "running": "Reading a file",
-        "done": "Read a file"
+        "done": "Read a file",
+        "failed": "Couldn't read a file"
       },
       "fs_write": {
         "running": "Writing a file",
-        "done": "Wrote a file"
+        "done": "Wrote a file",
+        "failed": "Couldn't write a file"
       },
       "fs_move": {
         "running": "Moving a file",
-        "done": "Moved a file"
+        "done": "Moved a file",
+        "failed": "Couldn't move a file"
       },
       "fs_delete": {
         "running": "Deleting a file",
-        "done": "Deleted a file"
+        "done": "Deleted a file",
+        "failed": "Didn't delete a file"
       },
       "fs_list": {
         "running": "Looking through a folder",
-        "done": "Looked through a folder"
+        "done": "Looked through a folder",
+        "failed": "Couldn't look through a folder"
       },
       "fs_search": {
         "running": "Searching files",
-        "done": "Searched files"
+        "done": "Searched files",
+        "failed": "Couldn't search files"
       },
       "shell": {
         "running": "Running a command",
-        "done": "Ran a command"
+        "done": "Ran a command",
+        "failed": "Didn't run a command"
       },
       "browser_open": {
         "running": "Opening a page",
-        "done": "Opened a page"
+        "done": "Opened a page",
+        "failed": "Didn't open a page"
       },
-      "browser": {
-        "running": "Using the browser",
-        "done": "Used the browser"
+      "browser_click": {
+        "running": "Clicking on a page",
+        "done": "Clicked on a page",
+        "failed": "Didn't click on a page"
       },
-      "desktop": {
-        "running": "Using the computer",
-        "done": "Used the computer"
+      "browser_fill": {
+        "running": "Filling in a field",
+        "done": "Filled in a field",
+        "failed": "Didn't fill in a field"
+      },
+      "browser_eval": {
+        "running": "Running a script in the browser",
+        "done": "Ran a script in the browser",
+        "failed": "Didn't run a script in the browser"
+      },
+      "browser_press": {
+        "running": "Pressing a key in the browser",
+        "done": "Pressed a key in the browser",
+        "failed": "Didn't press a key in the browser"
+      },
+      "browser_select": {
+        "running": "Choosing an option on a page",
+        "done": "Chose an option on a page",
+        "failed": "Didn't choose an option"
+      },
+      "browser_view": {
+        "running": "Looking at a page",
+        "done": "Looked at a page",
+        "failed": "Couldn't look at a page"
+      },
+      "desktop_pointer": {
+        "running": "Using the mouse",
+        "done": "Used the mouse",
+        "failed": "Didn't use the mouse"
+      },
+      "desktop_type": {
+        "running": "Typing on the computer",
+        "done": "Typed on the computer",
+        "failed": "Didn't type on the computer"
+      },
+      "desktop_key": {
+        "running": "Pressing keys on the computer",
+        "done": "Pressed keys on the computer",
+        "failed": "Didn't press keys"
+      },
+      "desktop_set": {
+        "running": "Setting a field on the computer",
+        "done": "Set a field on the computer",
+        "failed": "Didn't set a field"
+      },
+      "desktop_launch": {
+        "running": "Opening an app",
+        "done": "Opened an app",
+        "failed": "Didn't open an app"
+      },
+      "desktop_look": {
+        "running": "Looking at the computer",
+        "done": "Looked at the computer",
+        "failed": "Couldn't look at the computer"
+      },
+      "skill_write": {
+        "running": "Writing a skill",
+        "done": "Wrote a skill",
+        "failed": "Didn't write a skill"
+      },
+      "skill_look": {
+        "running": "Looking up a skill",
+        "done": "Looked up a skill",
+        "failed": "Couldn't look up a skill"
       },
       "workflow": {
         "running": "Running a workflow",
-        "done": "Ran a workflow"
+        "done": "Ran a workflow",
+        "failed": "Didn't run a workflow"
       },
       "todo": {
         "running": "Updating the plan",
-        "done": "Updated the plan"
+        "done": "Updated the plan",
+        "failed": "Couldn't update the plan"
       },
       "schedule_create": {
         "running": "Creating a recurring task",
-        "done": "Created a recurring task"
+        "done": "Created a recurring task",
+        "failed": "Didn't create a recurring task"
       },
       "schedule_update": {
         "running": "Changing a recurring task",
-        "done": "Changed a recurring task"
+        "done": "Changed a recurring task",
+        "failed": "Didn't change a recurring task"
       },
       "schedule_delete": {
         "running": "Deleting a recurring task",
-        "done": "Deleted a recurring task"
+        "done": "Deleted a recurring task",
+        "failed": "Didn't delete a recurring task"
       },
       "schedule_list": {
         "running": "Checking recurring tasks",
-        "done": "Checked recurring tasks"
+        "done": "Checked recurring tasks",
+        "failed": "Couldn't check recurring tasks"
       },
       "email_send": {
         "running": "Sending an email",
-        "done": "Sent an email"
+        "done": "Sent an email",
+        "failed": "Didn't send an email"
       },
       "email_draft": {
         "running": "Drafting an email",
-        "done": "Drafted an email"
+        "done": "Drafted an email",
+        "failed": "Didn't draft an email"
       },
       "email_read": {
         "running": "Reading email",
-        "done": "Read email"
+        "done": "Read email",
+        "failed": "Couldn't read email"
       },
-      "memory": {
-        "running": "Using memory",
-        "done": "Used memory"
-      },
-      "skill": {
-        "running": "Using a skill",
-        "done": "Used a skill"
+      "email_mark": {
+        "running": "Changing the read state of email",
+        "done": "Changed the read state of email",
+        "failed": "Didn't change the read state of email"
       },
       "agent": {
         "running": "Handing off to a helper",
-        "done": "Handed off to a helper"
+        "done": "Handed off to a helper",
+        "failed": "Didn't hand off to a helper"
       },
       "ask": {
         "running": "Asking you",
-        "done": "Asked you"
+        "done": "Asked you",
+        "failed": "Couldn't ask you"
       },
       "mcp": {
         "running": "Using {{app}} ({{action}})",
-        "done": "Used {{app}} ({{action}})"
+        "done": "Used {{app}} ({{action}})",
+        "failed": "Didn't complete {{app}} ({{action}})"
       },
       "generic": {
         "running": "Running {{name}}",
-        "done": "Ran {{name}}"
+        "done": "Ran {{name}}",
+        "failed": "Didn't complete {{name}}"
       }
     }
   },

@@ -41,7 +41,7 @@ import {
   parseModelRef
 } from "../lib/botProfile";
 import { modelGroups } from "../lib/modelPicker";
-import { type Chain, groupRunItems } from "../lib/thinkingChain";
+import { type Chain, chainOrderTs, groupRunItems } from "../lib/thinkingChain";
 import { type SendWith, shouldSend } from "../lib/settingsPrefs";
 import { rank } from "../lib/fuzzy";
 import {
@@ -303,12 +303,23 @@ export function ChatView({
           run
         });
       }
-      for (const seg of groupRunItems(run.items, run.finishedMs !== undefined)) {
+      const segs = groupRunItems(
+        run.items,
+        run.finishedMs !== undefined,
+        run.startedMs
+      );
+      segs.forEach((seg, si) => {
+        const next = segs[si + 1];
+        const nextTs = next
+          ? next.kind === "chain"
+            ? next.chain.startMs
+            : itemTs(next.item)
+          : undefined;
         if (seg.kind === "chain") {
           out.push({
             kind: "chain",
             key: `${run.id}-${seg.chain.key}`,
-            ts: seg.chain.startMs,
+            ts: chainOrderTs(seg.chain, nextTs),
             chain: seg.chain,
             runId: run.id
           });
@@ -321,7 +332,7 @@ export function ChatView({
             runId: run.id
           });
         }
-      }
+      });
       if (run.finishedMs !== undefined && run.error) {
         out.push({
           kind: "runError",
@@ -382,8 +393,10 @@ export function ChatView({
   const triggerKey = trigger ? `${trigger.kind}:${trigger.start}` : null;
   const triggerKind = trigger?.kind ?? null;
   const triggerQuery = trigger?.query ?? "";
+  // a dismissal holds for this exact trigger and query only
+  const dismissKey = triggerKey ? `${triggerKey}|${triggerQuery}` : null;
   const menuItems = useMemo(() => {
-    if (!triggerKind || triggerKey === menuDismissed) {
+    if (!triggerKind || dismissKey === menuDismissed) {
       return [];
     }
     if (triggerKind === "slash") {
@@ -412,8 +425,15 @@ export function ChatView({
           | undefined
       };
     });
-  }, [triggerKind, triggerQuery, triggerKey, menuDismissed, bots, t]);
+  }, [triggerKind, triggerQuery, dismissKey, menuDismissed, bots, t]);
+  // once the trigger is gone a later one (even an identical one) starts fresh
+  useEffect(() => {
+    if (dismissKey === null) {
+      setMenuDismissed(null);
+    }
+  }, [dismissKey]);
   const menuId = useId();
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const menuOpen = menuItems.length > 0;
   const menuActive = Math.min(menuIdx, Math.max(menuItems.length - 1, 0));
 
@@ -520,7 +540,7 @@ export function ChatView({
       }
       if (e.key === "Escape") {
         e.preventDefault();
-        setMenuDismissed(triggerKey);
+        setMenuDismissed(dismissKey);
         return;
       }
     }
@@ -893,7 +913,12 @@ export function ChatView({
         ) : null}
         <div className={styles.boxWrap}>
           {menuOpen ? (
-            <div className={styles.menu} data-testid="composer-menu">
+            <div
+              className={styles.menu}
+              data-testid="composer-menu"
+              ref={menuRef}
+              onMouseDown={(e) => e.preventDefault()}
+            >
               <p className={styles.menuHead}>
                 {triggerKind === "slash"
                   ? t("chat.slash.menu")
@@ -976,7 +1001,17 @@ export function ChatView({
             }}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onKeyDown={onKeyDown}
-            onBlur={() => setMenuDismissed(triggerKey)}
+            onFocus={() => setMenuDismissed(null)}
+            onBlur={(e) => {
+              // focus moving into the menu (scrollbar, heading) is not a dismissal
+              if (
+                e.relatedTarget instanceof Node &&
+                menuRef.current?.contains(e.relatedTarget)
+              ) {
+                return;
+              }
+              setMenuDismissed(dismissKey);
+            }}
           />
           <div className={styles.tools}>
             {bot ? (

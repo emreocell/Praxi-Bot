@@ -20,7 +20,7 @@ import {
   type ScheduleApprovalDetails
 } from "../lib/approvalDetails";
 import { brandIcon } from "../lib/brandIcons";
-import { describeTool } from "../lib/toolLabels";
+import { describeTool, isSendTool } from "../lib/toolLabels";
 import { StepIcon } from "./StepIcon";
 import formStyles from "./Form.module.css";
 import styles from "./ChatCards.module.css";
@@ -323,7 +323,9 @@ export function ApprovalCard({
             disabled={disabled}
             onClick={() => void decide("approve", "once")}
           >
-            {outbound ? t("chat.approval.sendOnce") : t("chat.approval.once")}
+            {isSendTool(tool.name)
+              ? t("chat.approval.sendOnce")
+              : t("chat.approval.once")}
           </Button>
           {/* The daemon refuses a standing grant for any card with details. */}
           {tool.details != null ? null : (
