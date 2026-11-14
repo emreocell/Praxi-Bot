@@ -20,7 +20,7 @@ import { brandIcon } from "../lib/brandIcons";
 import { botHasAccess } from "../lib/mcpApps";
 import { FAKE_PROVIDER_ID } from "../lib/providers";
 import { isCliProvider, nonCliProviderIds, providersView } from "../lib/providerView";
-import { BrandIcon } from "./BrandIcon";
+import { BrandMark } from "./BrandMark";
 import formStyles from "./Form.module.css";
 import styles from "./BotAdvancedFields.module.css";
 
@@ -393,7 +393,7 @@ export function BotAppsFields({
                 data-testid={`bot-app-${s.name}`}
                 onChange={(e) => onToggle(s.name, e.target.checked)}
               />
-              <BrandIcon name={s.name} small />
+              <BrandMark name={s.name} size={18} />
               <span className={styles.appName}>
                 {brandIcon(s.name).known ? brandIcon(s.name).name : s.name}
               </span>

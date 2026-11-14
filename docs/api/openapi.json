@@ -3336,6 +3336,182 @@
         ]
       }
     },
+    "/v1/web/search": {
+      "get": {
+        "tags": [
+          "web"
+        ],
+        "summary": "Current web search configuration (API keys are write-only: `brave_key_set`\nand `tavily_key_set` indicate whether a key is stored, never its value).",
+        "operationId": "get_web_search",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebSearchConfigDto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "web search management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "web"
+        ],
+        "summary": "Update web search configuration (`web.toml` and write-only API keys in the\nsecret store) and apply immediately for the next tool call.",
+        "operationId": "update_web_search",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebSearchConfigInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebSearchConfigDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid config",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "web search management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/web/search/test": {
+      "post": {
+        "tags": [
+          "web"
+        ],
+        "summary": "Run a sample live search against the current web search configuration and\nreport which backend answered and how long it took. At most two probes run\nat once (`429`).",
+        "operationId": "test_web_search",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebSearchTestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebSearchTestReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "query too long",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid backend",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "too many probes running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "web search management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/webhooks/{id}": {
       "post": {
         "tags": [
@@ -4888,9 +5064,19 @@
         "required": [
           "status",
           "version",
+          "api_version",
+          "host",
           "uptime_secs"
         ],
         "properties": {
+          "api_version": {
+            "type": "string",
+            "description": "HTTP API compatibility version."
+          },
+          "host": {
+            "$ref": "#/components/schemas/HostInfo",
+            "description": "Capabilities of this host; probes never launch a browser."
+          },
           "status": {
             "type": "string",
             "description": "`ok` when ready for inference, or `setup_required` before provider setup."
@@ -4927,6 +5113,37 @@
           }
         },
         "additionalProperties": false
+      },
+      "HostInfo": {
+        "type": "object",
+        "description": "Host capabilities, independent of provider readiness.",
+        "required": [
+          "os",
+          "arch",
+          "has_display",
+          "has_browser",
+          "total_ram_mb"
+        ],
+        "properties": {
+          "arch": {
+            "type": "string"
+          },
+          "has_browser": {
+            "type": "boolean"
+          },
+          "has_display": {
+            "type": "boolean"
+          },
+          "os": {
+            "type": "string"
+          },
+          "total_ram_mb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Physical memory in MiB (1024 * 1024 bytes).",
+            "minimum": 0
+          }
+        }
       },
       "HumanAction": {
         "type": "string",
@@ -7229,6 +7446,213 @@
           "unavailable",
           "closed"
         ]
+      },
+      "WebSearchConfigDto": {
+        "type": "object",
+        "description": "Current web search configuration (`GET /v1/web/search`): non-secret fields\nonly.",
+        "required": [
+          "order",
+          "active_backends",
+          "brave_key_set",
+          "tavily_key_set",
+          "duckduckgo",
+          "duckduckgo_lite",
+          "bing"
+        ],
+        "properties": {
+          "active_backends": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Effective ordered list of enabled and usable backends that `web_search`\nwill try."
+          },
+          "bing": {
+            "type": "boolean",
+            "description": "Whether the Bing HTML fallback is enabled."
+          },
+          "brave_key_set": {
+            "type": "boolean",
+            "description": "Whether a Brave Search API key is stored (never returned)."
+          },
+          "config_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Parse or validation warning when `<data dir>/web.toml` could not be\nloaded cleanly (the daemon fell back to defaults until saved)."
+          },
+          "duckduckgo": {
+            "type": "boolean",
+            "description": "Whether the `DuckDuckGo` HTML fallback is enabled."
+          },
+          "duckduckgo_lite": {
+            "type": "boolean",
+            "description": "Whether the `DuckDuckGo` Lite fallback is enabled."
+          },
+          "order": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Priority order of backend ids (`searxng`, `brave`, `tavily`,\n`duckduckgo`, `duckduckgo_lite`, `bing`)."
+          },
+          "searxng_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Configured `SearXNG` base URL; `null` if unset."
+          },
+          "tavily_key_set": {
+            "type": "boolean",
+            "description": "Whether a Tavily Search API key is stored (never returned)."
+          }
+        }
+      },
+      "WebSearchConfigInput": {
+        "type": "object",
+        "description": "Body of `PUT /v1/web/search`. Every field is optional: omitted fields keep\ntheir stored values.",
+        "properties": {
+          "bing": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Enable or disable the Bing HTML fallback."
+          },
+          "brave_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Brave Search API key (**write-only**: stored in secret store, never\nreturned or logged)."
+          },
+          "clear_brave_key": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Remove the stored Brave Search API key."
+          },
+          "clear_tavily_key": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Remove the stored Tavily Search API key."
+          },
+          "duckduckgo": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Enable or disable the `DuckDuckGo` HTML fallback."
+          },
+          "duckduckgo_lite": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Enable or disable the `DuckDuckGo` Lite fallback."
+          },
+          "order": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Desired priority order of backend ids."
+          },
+          "searxng_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`SearXNG` base URL; empty string clears it."
+          },
+          "tavily_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Tavily Search API key (**write-only**: stored in secret store, never\nreturned or logged)."
+          }
+        }
+      },
+      "WebSearchTestInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/web/search/test`.",
+        "properties": {
+          "backend": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional backend id to probe directly; omit to test the active fallback\nchain."
+          },
+          "query": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Sample query to run; defaults to `\"rust programming\"`."
+          }
+        }
+      },
+      "WebSearchTestReport": {
+        "type": "object",
+        "description": "Result of a live web search probe (`POST /v1/web/search/test`).",
+        "required": [
+          "ok",
+          "query",
+          "result_count",
+          "elapsed_ms"
+        ],
+        "properties": {
+          "backend": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Backend that answered (`null` when all failed)."
+          },
+          "elapsed_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Elapsed wall-clock time in milliseconds.",
+            "minimum": 0
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Error summary when the probe failed (`null` on success)."
+          },
+          "fallback_errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Errors from earlier backends in the chain before the answering one."
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "`true` when at least one backend answered with results."
+          },
+          "query": {
+            "type": "string",
+            "description": "Query that was run."
+          },
+          "result_count": {
+            "type": "integer",
+            "description": "Number of search results returned.",
+            "minimum": 0
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -7287,6 +7711,9 @@
     },
     {
       "name": "email"
+    },
+    {
+      "name": "web"
     }
   ]
 }

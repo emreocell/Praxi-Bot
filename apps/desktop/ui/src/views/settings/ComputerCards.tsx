@@ -7,6 +7,7 @@ import {
 import styles from "../SettingsModal.module.css";
 import { PermissionsSection } from "../SettingsSections";
 import { EmailCard } from "./EmailCard";
+import { WebSearchCard } from "./WebSearchCard";
 import type { CardDef, SettingsBridge } from "./types";
 
 /** Where the bot runs: this PC, a browser tab, a remote host (soon) or nowhere. */
@@ -103,6 +104,15 @@ export function computerCards(b: SettingsBridge, t: TFunction): CardDef[] {
       description: t("settingsModal.email.description"),
       keywords: "mail e-posta eposta imap smtp gmail outlook yahoo icloud mailbox posta kutusu",
       node: <EmailCard />
+    },
+    {
+      id: "web-search",
+      section: "computer",
+      kind: "block",
+      title: t("settingsModal.webSearch.title"),
+      description: t("settingsModal.webSearch.description"),
+      keywords: "web search searxng brave tavily duckduckgo bing arama internet",
+      node: <WebSearchCard />
     }
   ];
 }

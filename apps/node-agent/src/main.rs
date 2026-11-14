@@ -12,11 +12,13 @@
 //!   usually the right choice for desktop control).
 //! * Linux: a `systemd --user` unit with `ExecStart=/path/bot-node run`.
 
+#[path = "../../cli/src/host_runtime.rs"]
+mod host_runtime;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
-use desktop_api::DesktopBackend;
 use peer_network::{
     DesktopRpcHandler, HeartbeatConfig, LinkState, PairTicket, PeerConfig, PeerNetwork,
     RelayConfig, Role, desktop::detect_browser,
@@ -35,6 +37,9 @@ struct Cli {
     /// Relay: `default` (public n0 relays), `none` (direct IP only) or a relay URL.
     #[arg(long, global = true, default_value = "default")]
     relay: RelayConfig,
+    /// X11 display for desktop RPC (for example :99).
+    #[arg(long, global = true)]
+    display: Option<String>,
     #[command(subcommand)]
     command: Command,
 }
@@ -79,22 +84,6 @@ fn capabilities() -> Vec<String> {
     caps
 }
 
-#[cfg(windows)]
-fn local_backend() -> Result<Arc<dyn DesktopBackend>, String> {
-    desktop_windows::WindowsBackend::new()
-        .map(|b| Arc::new(b) as Arc<dyn DesktopBackend>)
-        .map_err(|e| format!("cannot start the Windows backend: {e}"))
-}
-
-#[cfg(not(windows))]
-fn local_backend() -> Result<Arc<dyn DesktopBackend>, String> {
-    // The Linux backend (desktop-linux) has no implementation yet; macOS neither.
-    Err(format!(
-        "desktop control is not supported on {} yet",
-        std::env::consts::OS
-    ))
-}
-
 fn config(cli: &Cli, name: String) -> Result<PeerConfig, String> {
     let mut cfg = PeerConfig::new(peer_dir(cli)?);
     cfg.relay = cli.relay.clone();
@@ -104,10 +93,36 @@ fn config(cli: &Cli, name: String) -> Result<PeerConfig, String> {
     Ok(cfg)
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let cli = Cli::parse();
-    if let Err(e) = real_main(&cli).await {
+    // Set the child's environment before a multi-threaded Tokio runtime exists.
+    // Re-exec avoids unsafe process-wide environment mutation.
+    if let Some(display) = &cli.display {
+        if display.trim().is_empty() {
+            eprintln!("error: --display cannot be empty");
+            std::process::exit(1);
+        }
+        if std::env::var("DISPLAY").as_deref() != Ok(display.as_str())
+            || std::env::var("XDG_SESSION_TYPE").as_deref() != Ok("x11")
+            || std::env::var_os("WAYLAND_DISPLAY").is_some()
+        {
+            let status = std::env::current_exe().and_then(|exe| {
+                std::process::Command::new(exe)
+                    .args(std::env::args_os().skip(1))
+                    .env("DISPLAY", display)
+                    .env("XDG_SESSION_TYPE", "x11")
+                    .env_remove("WAYLAND_DISPLAY")
+                    .status()
+            });
+            std::process::exit(status.ok().and_then(|s| s.code()).unwrap_or(1));
+        }
+    }
+    if let Err(e) = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())
+        .and_then(|rt| rt.block_on(real_main(&cli)))
+    {
         eprintln!("error: {e}");
         std::process::exit(1);
     }
@@ -146,7 +161,8 @@ async fn real_main(cli: &Cli) -> Result<(), String> {
             Ok(())
         }
         Command::Run => {
-            let backend = local_backend()?;
+            let backend = host_runtime::local_desktop(&mut |w| eprintln!("warning: {w}"))
+                .ok_or("desktop RPC requires a reachable display and BOT_DESKTOP enabled")?;
             let handler = Arc::new(DesktopRpcHandler::new(backend));
             let net = PeerNetwork::start(config(cli, host_name())?, Some(handler))
                 .await
@@ -154,7 +170,7 @@ async fn real_main(cli: &Cli) -> Result<(), String> {
             let cores: Vec<_> = net
                 .devices()
                 .into_iter()
-                .filter(|d| d.role == Role::Desktop)
+                .filter(|d| matches!(d.role, Role::Desktop | Role::Host))
                 .collect();
             if cores.is_empty() {
                 net.shutdown().await;
@@ -191,5 +207,16 @@ async fn real_main(cli: &Cli) -> Result<(), String> {
             net.shutdown().await;
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn display_flag_is_global_and_parses_without_mutating_the_process() {
+        let cli = Cli::try_parse_from(["bot-node", "run", "--display", ":99"]).unwrap();
+        assert_eq!(cli.display.as_deref(), Some(":99"));
+        assert!(matches!(cli.command, Command::Run));
     }
 }

@@ -45,10 +45,34 @@ pub fn ensure_x11_session() -> Result<String, DesktopError> {
     detect_display_session(xdg.as_deref(), wayland.as_deref(), x11.as_deref())
 }
 
-/// Check whether a valid X11 display is currently reachable.
+/// Cached, authenticated startup reachability. Capability queries are synchronous
+/// and run inside async tool calls, so never connect on their calling thread.
 #[must_use]
 pub fn has_x11_display() -> bool {
-    ensure_x11_session().is_ok() && x11rb::connect(None).is_ok()
+    static DISPLAY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    cached_display_probe(&DISPLAY, Duration::from_millis(200), || {
+        ensure_x11_session().is_ok() && x11rb::connect(None).is_ok()
+    })
+}
+
+fn cached_display_probe(
+    cache: &std::sync::OnceLock<bool>,
+    timeout: Duration,
+    probe: impl FnOnce() -> bool + Send + 'static,
+) -> bool {
+    *cache.get_or_init(|| {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        if thread::Builder::new()
+            .name("desktop-display-probe".into())
+            .spawn(move || {
+                let _ = sender.send(probe());
+            })
+            .is_err()
+        {
+            return false;
+        }
+        receiver.recv_timeout(timeout).unwrap_or(false)
+    })
 }
 
 fn connect() -> Result<(RustConnection, usize), DesktopError> {
@@ -576,4 +600,28 @@ pub fn screenshot(region: &Region, quality: Quality) -> Result<Image, DesktopErr
         height: hu,
         mime_type: mime_type.to_string(),
     })
+}
+
+#[cfg(test)]
+mod display_tests {
+    use super::*;
+
+    #[test]
+    fn capability_probe_times_out_and_does_not_reconnect() {
+        let cache = std::sync::OnceLock::new();
+        let (release, blocked) = std::sync::mpsc::sync_channel(1);
+        let started = std::time::Instant::now();
+        assert!(!cached_display_probe(
+            &cache,
+            Duration::from_millis(10),
+            move || { blocked.recv().unwrap_or(false) }
+        ));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        let _ = release.send(true);
+        assert!(!cached_display_probe(
+            &cache,
+            Duration::from_millis(10),
+            || { panic!("capabilities must reuse the cached probe") }
+        ));
+    }
 }

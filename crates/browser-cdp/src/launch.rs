@@ -127,6 +127,34 @@ fn candidate_paths() -> Vec<PathBuf> {
 
 /// Command line flags for a launch (excluding the binary).
 pub fn build_args(opts: &LaunchOptions, profile: &Path) -> Vec<String> {
+    build_args_for_host(
+        opts,
+        profile,
+        cfg!(target_os = "linux"),
+        crate::host::has_display(),
+        running_as_root(),
+    )
+}
+
+fn running_as_root() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        rustix::process::geteuid().is_root()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
+/// Pure policy entry point for server launch tests. Extra flags cannot disable the sandbox.
+pub fn build_args_for_host(
+    opts: &LaunchOptions,
+    profile: &Path,
+    linux: bool,
+    display: bool,
+    root: bool,
+) -> Vec<String> {
     let mut a = vec![
         "--remote-debugging-port=0".to_string(),
         format!("--user-data-dir={}", profile.display()),
@@ -145,11 +173,30 @@ pub fn build_args(opts: &LaunchOptions, profile: &Path) -> Vec<String> {
             opts.window_size.0, opts.window_size.1
         ),
     ];
-    if opts.headless {
+    if opts.headless || (linux && !display) {
         a.push("--headless=new".into());
         a.push("--hide-scrollbars".into());
     }
-    a.extend(opts.args.iter().cloned());
+    a.extend(
+        opts.args
+            .iter()
+            .filter(|arg| {
+                !linux
+                    || (!arg.starts_with("--no-sandbox")
+                        && !arg.starts_with("--disable-setuid-sandbox")
+                        && !arg.starts_with("--headless"))
+            })
+            .cloned(),
+    );
+    if linux && root {
+        let warning = "Chromium is running as root; --no-sandbox is required. Run the host as an unprivileged user to keep the browser sandbox";
+        // The CLI may have no tracing subscriber; systemd still captures stderr.
+        if !tracing::enabled!(tracing::Level::WARN) {
+            eprintln!("warning: {warning}");
+        }
+        tracing::warn!("{warning}");
+        a.push("--no-sandbox".into());
+    }
     a.push("about:blank".into());
     a
 }
@@ -260,20 +307,48 @@ mod tests {
             args: vec!["--foo".into()],
             ..Default::default()
         };
-        let a = build_args(&o, Path::new("/tmp/p"));
+        let a = build_args_for_host(&o, Path::new("/tmp/p"), false, true, false);
         assert!(a.contains(&"--remote-debugging-port=0".to_string()));
         assert!(a.iter().any(|x| x.starts_with("--user-data-dir=")));
         assert!(a.contains(&"--headless=new".to_string()));
         assert!(a.contains(&"--foo".to_string()));
         assert_eq!(a.last().unwrap(), "about:blank");
-        let headed = build_args(
+        let headed = build_args_for_host(
             &LaunchOptions {
                 headless: false,
                 ..Default::default()
             },
             Path::new("/tmp/p"),
+            true,
+            true,
+            false,
         );
         assert!(!headed.contains(&"--headless=new".to_string()));
+    }
+
+    #[test]
+    fn linux_flags_follow_display_and_effective_uid() {
+        let opts = LaunchOptions {
+            headless: false,
+            args: vec!["--no-sandbox".into(), "--headless=false".into()],
+            ..Default::default()
+        };
+        for display in [false, true] {
+            for root in [false, true] {
+                let args = build_args_for_host(&opts, Path::new("/profile"), true, display, root);
+                assert_eq!(args.iter().any(|s| s == "--headless=new"), !display);
+                assert_eq!(args.iter().any(|s| s == "--no-sandbox"), root);
+                assert!(!args.iter().any(|s| s == "--headless=false"));
+                assert!(args.iter().any(|s| s == "--disable-gpu"));
+                assert!(args.iter().any(|s| s == "--disable-dev-shm-usage"));
+            }
+        }
+        let opts = LaunchOptions::default();
+        assert!(
+            build_args_for_host(&opts, Path::new("/p"), true, true, false)
+                .iter()
+                .any(|s| s == "--headless=new")
+        );
     }
 
     #[tokio::test]

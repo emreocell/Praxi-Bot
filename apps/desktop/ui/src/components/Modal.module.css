@@ -52,3 +52,6 @@
     inset 0 var(--size-border) 0 color-mix(in srgb, var(--color-text) 14%, transparent),
     var(--shadow-overlay);
 }
+
+/* Apps dialog: narrower than Settings, as tall as the content up to a cap. */
+.apps { max-width: calc(var(--size-content-max) + var(--space-16)); height: min(100%, calc(var(--size-modal-height) * 0.88)); }

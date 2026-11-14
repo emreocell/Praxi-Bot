@@ -23,7 +23,7 @@ export function Modal({
   onClose: () => void;
   /** Accessible name of the dialog. */
   label: string;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "apps";
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);

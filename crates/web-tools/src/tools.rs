@@ -113,6 +113,7 @@ struct WebTool {
 pub fn tools(cfg: WebToolsConfig) -> Result<Vec<Arc<dyn Tool>>, WebError> {
     let fetcher = HttpFetcher::new(Arc::clone(&cfg.policy), cfg.http.clone())?;
     let search = cfg.search.build(&fetcher, &cfg.http, cfg.secrets.clone())?;
+    let backend_names = search.backend_names();
     let shared = Arc::new(Shared {
         fetcher,
         search,
@@ -136,16 +137,45 @@ pub fn tools(cfg: WebToolsConfig) -> Result<Vec<Arc<dyn Tool>>, WebError> {
             shared: Arc::clone(&shared),
         })
     };
+    let search_desc = if backend_names.is_empty() {
+        "Search the web (no search backends are currently configured).".to_string()
+    } else {
+        format!(
+            "Search the web (automatic fallback chain: {}) and return titles, URLs and snippets. Prefer this over the browser for finding pages; open results with web_extract.",
+            backend_names.join(" -> ")
+        )
+    };
+    let mut search_props = serde_json::Map::new();
+    search_props.insert(
+        "query".into(),
+        json!({"type":"string","description":"Search query"}),
+    );
+    search_props.insert(
+        "limit".into(),
+        json!({"type":"integer","minimum":1,"maximum":25,"description":"Max results (default 10)"}),
+    );
+    search_props.insert(
+        "language".into(),
+        json!({"type":"string","description":"Preferred language, e.g. en or tr"}),
+    );
+    if !backend_names.is_empty() {
+        search_props.insert(
+            "backend".into(),
+            json!({
+                "type": "string",
+                "enum": backend_names,
+                "description": format!(
+                    "Optional: force one configured backend ({}); omit to use the automatic fallback chain",
+                    backend_names.join(", ")
+                ),
+            }),
+        );
+    }
     Ok(vec![
         make(
             "web_search",
-            "Search the web (SearXNG, Brave or DuckDuckGo backends) and return titles, URLs and snippets. Prefer this over the browser for finding pages; open results with web_extract.",
-            json!({"type":"object","required":["query"],"properties":{
-                "query":{"type":"string","description":"Search query"},
-                "limit":{"type":"integer","minimum":1,"maximum":25,"description":"Max results (default 10)"},
-                "language":{"type":"string","description":"Preferred language, e.g. en or tr"},
-                "backend":{"type":"string","enum":["searxng","brave","duckduckgo"],"description":"Force one backend; default tries them in order"}
-            }}),
+            &search_desc,
+            json!({"type":"object","required":["query"],"properties": Value::Object(search_props)}),
             Kind::Search,
         ),
         make(

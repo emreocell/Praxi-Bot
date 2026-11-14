@@ -1,6 +1,6 @@
 import { type FormEvent, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, ChevronUp, Sparkles, X } from "lucide-react";
+import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { BotAvatar, Button } from "ui";
 import type { Bot } from "../api/types";
 import {
@@ -14,8 +14,11 @@ import {
 import { CharacterColorRow, CharacterShapeGrid } from "../components/CharacterPicker";
 import formStyles from "../components/Form.module.css";
 import { Modal } from "../components/Modal";
+import { ModelPicker } from "../components/ModelPicker";
+import { Segmented, SettingGroup, SettingRow } from "../components/SettingsUi";
 import {
   AUTONOMY_LEVELS,
+  type AutonomyLevel,
   autonomyToPreset,
   BOT_TEMPLATES,
   type BotDraft,
@@ -62,7 +65,6 @@ function NewBotDialogContent({
     color: DEFAULT_NEW_BOT_COLOR
   }));
   const [brainMode, setBrainMode] = useState<"auto" | "manual">("auto");
-  const [brainMenuOpen, setBrainMenuOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,8 +83,12 @@ function NewBotDialogContent({
   );
 
   const groups = useMemo(
-    () => modelGroups(providersDto, formatModelRef(effectiveExecutor)),
-    [providersDto, effectiveExecutor]
+    () =>
+      modelGroups(
+        providersDto,
+        brainMode === "manual" ? formatModelRef(draft.executor) : undefined
+      ),
+    [providersDto, brainMode, draft.executor]
   );
 
   const applyTemplate = (tpl: BotTemplate) => {
@@ -97,11 +103,6 @@ function NewBotDialogContent({
   const activeAutonomy = presetToAutonomy(draft.preset);
   const nameMissing = draft.name.trim() === "";
   const executorMissing = effectiveExecutor.model.trim() === "";
-
-  const brainButtonLabel =
-    brainMode === "auto"
-      ? t("newBot.brainAuto")
-      : effectiveExecutor.model.trim() || t("newBot.brainAuto");
 
   const save = async () => {
     if (!client || nameMissing || executorMissing || saving) {
@@ -264,113 +265,59 @@ function NewBotDialogContent({
           }}
         />
 
-        <div className={styles.settings}>
-          <div className={styles.kvRow}>
-            <div className={styles.kvMeta}>
-              <span className={styles.kvLabel}>{t("newBot.brain")}</span>
-              <p className={styles.kvHint}>{t("newBot.brainHint")}</p>
-            </div>
-            <button
-              type="button"
-              className={styles.brainButton}
-              aria-expanded={brainMenuOpen}
-              data-testid="new-bot-brain"
-              onClick={() => setBrainMenuOpen((v) => !v)}
+        <div className={styles.settingsGroup}>
+          <SettingGroup>
+            <SettingRow
+              title={t("newBot.brain")}
+              description={t("newBot.brainHint")}
             >
-              <Sparkles aria-hidden="true" />
-              <span className={styles.brainLabel}>{brainButtonLabel}</span>
-              <ChevronDown aria-hidden="true" />
-            </button>
-          </div>
-
-          {brainMenuOpen ? (
-            <div className={styles.brainMenu} role="listbox" aria-label={t("newBot.brain")}>
-              <button
-                type="button"
-                role="option"
-                aria-selected={brainMode === "auto"}
-                className={[styles.brainOption, brainMode === "auto" ? styles.brainOptionActive : ""]
-                  .filter(Boolean)
-                  .join(" ")}
-                onClick={() => {
-                  setBrainMode("auto");
-                  setBrainMenuOpen(false);
+              <ModelPicker
+                groups={groups}
+                value={brainMode === "auto" ? "" : formatModelRef(draft.executor)}
+                autoOption={{
+                  label: t("newBot.brainAuto"),
+                  sub: formatModelRef(autoExecutor) || undefined,
+                  selected: brainMode === "auto",
+                  onPick: () => setBrainMode("auto")
                 }}
-              >
-                <span>{t("newBot.brainAuto")}</span>
-                {autoExecutor.model ? (
-                  <span className={styles.brainSub}>{formatModelRef(autoExecutor)}</span>
-                ) : null}
-              </button>
-              {groups.map((g) => (
-                <div key={g.provider}>
-                  <div className={styles.brainGroupTitle}>{g.provider}</div>
-                  {g.models.map((m) => {
-                    const selected =
-                      brainMode === "manual" &&
-                      formatModelRef(draft.executor) === m.ref;
-                    return (
-                      <button
-                        key={m.ref}
-                        type="button"
-                        role="option"
-                        aria-selected={selected}
-                        className={[
-                          styles.brainOption,
-                          selected ? styles.brainOptionActive : ""
-                        ]
-                          .filter(Boolean)
-                          .join(" ")}
-                        onClick={() => {
-                          setBrainMode("manual");
-                          patch({ executor: { provider: m.provider, model: m.model } });
-                          setBrainMenuOpen(false);
-                        }}
-                      >
-                        <span>{m.model}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          <div className={styles.kvRow}>
-            <span className={styles.kvLabel}>{t("newBot.autonomy")}</span>
-            <div
-              className={styles.segmented}
-              role="radiogroup"
-              aria-label={t("newBot.autonomy")}
+                reviewOpen={false}
+                placement="bottom-end"
+                testId="new-bot-brain"
+                onPick={(ref) => {
+                  const i = ref.indexOf("/");
+                  setBrainMode("manual");
+                  patch({
+                    executor:
+                      i < 0
+                        ? { provider: "", model: ref }
+                        : { provider: ref.slice(0, i), model: ref.slice(i + 1) }
+                  });
+                }}
+              />
+            </SettingRow>
+            <SettingRow
+              stacked
+              title={t("newBot.autonomy")}
+              description={
+                activeAutonomy
+                  ? t(`newBot.autonomyHints.${activeAutonomy}`)
+                  : t("newBot.autonomyCustom", {
+                      preset: t(`botForm.preset.${draft.preset}.name`)
+                    })
+              }
             >
-              {AUTONOMY_LEVELS.map((level) => {
-                const selected = activeAutonomy === level;
-                return (
-                  <button
-                    key={level}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    className={[styles.segButton, selected ? styles.segActive : ""]
-                      .filter(Boolean)
-                      .join(" ")}
-                    data-testid={`autonomy-${level}`}
-                    onClick={() => patch({ preset: autonomyToPreset(level) })}
-                  >
-                    {t(`newBot.autonomyLevels.${level}`)}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <p className={styles.kvHint}>
-            {activeAutonomy
-              ? t(`newBot.autonomyHints.${activeAutonomy}`)
-              : t("newBot.autonomyCustom", {
-                  preset: t(`botForm.preset.${draft.preset}.name`)
-                })}
-          </p>
+              <Segmented
+                label={t("newBot.autonomy")}
+                value={activeAutonomy ?? ("" as AutonomyLevel)}
+                options={AUTONOMY_LEVELS.map((level) => ({
+                  value: level,
+                  label: t(`newBot.autonomyLevels.${level}`),
+                  testId: `autonomy-${level}`
+                }))}
+                onChange={(level) => patch({ preset: autonomyToPreset(level) })}
+              />
+            </SettingRow>
+          </SettingGroup>
         </div>
 
         <button
