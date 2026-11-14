@@ -1,4 +1,6 @@
 //! Streaming HTTP/1.1 over the paired-only `bot/api/1` ALPN.
+mod budget;
+mod guard;
 mod proxy;
 #[cfg(feature = "server")]
 mod server;
@@ -19,6 +21,20 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Concurrent bidirectional streams one `bot/api/1` connection may carry.
 pub const STREAMS: usize = 32;
+/// Active live-view frame streams per `bot/api/1` connection (and per proxy).
+pub const VIEW_STREAMS: usize = 4;
+/// Streams per connection kept for ordinary requests (heartbeat, input,
+/// release, cancel, health). Long-lived bodies can never use them.
+pub const CONTROL_RESERVE: usize = 8;
+/// Active live-view frame streams across all connections of one daemon.
+pub const SERVER_VIEW_STREAMS: usize = 16;
+/// Streams across all connections of one daemon.
+pub const SERVER_STREAMS: usize = 256;
+/// Daemon-wide streams kept for ordinary requests.
+pub const SERVER_CONTROL_RESERVE: usize = 64;
+/// A live-view body whose next chunk is not requested this long after the
+/// previous one was handed to the transport is cancelled (the consumer stalled).
+pub const VIEW_STALL: Duration = Duration::from_secs(10);
 /// Request-body bytes one API connection may have in flight.
 ///
 /// [`STREAMS`] requests, each up to [`MAX_REQUEST_BYTES`].
@@ -67,6 +83,28 @@ pub(crate) fn oversized(headers: &axum::http::HeaderMap) -> bool {
         .and_then(|v| v.parse::<u64>().ok())
         .is_some_and(|size| size > MAX_REQUEST_BYTES as u64)
 }
+
+/// Deadlines that tests shorten; production uses the public constants.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Tuning {
+    pub response_timeout: Duration,
+    pub view_stall: Duration,
+}
+
+impl Default for Tuning {
+    fn default() -> Self {
+        Self {
+            response_timeout: RESPONSE_TIMEOUT,
+            view_stall: VIEW_STALL,
+        }
+    }
+}
+
+pub(crate) const CONNECTION_CAPACITY: budget::Capacity = budget::Capacity {
+    total: STREAMS,
+    long: STREAMS - CONTROL_RESERVE,
+    view: VIEW_STREAMS,
+};
 
 pub(crate) struct AbortTask(pub tokio::task::JoinHandle<()>);
 impl Drop for AbortTask {

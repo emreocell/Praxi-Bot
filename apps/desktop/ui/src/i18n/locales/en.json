@@ -651,11 +651,11 @@
       },
       "full": {
         "name": "Full",
-        "hint": "Everything is allowed without asking."
+        "hint": "Runs without asking (including ordinary file deletes and sends), except Money, schedule activations, and catastrophic never-list commands."
       },
       "read-and-draft": {
         "name": "Read & draft",
-        "hint": "The bot reads and drafts, but never sends or changes things."
+        "hint": "Reads are free; drafts, file changes, page fetches, clicks, commands, and sends all ask first (same effective policy as Approve destructive)."
       },
       "custom": {
         "name": "Custom",
@@ -812,9 +812,9 @@
       "whatItMeansTitle": "What the bot can do on your computer",
       "explain": {
         "read-only": "The bot can inspect your screen, read files, and look at web pages, but it can never click, type, edit files, or run commands.",
-        "read-and-draft": "The bot can read and prepare drafts, but it still asks before changing files, clicking, or running commands.",
+        "read-and-draft": "The bot can read files, search the web, and inspect your screen freely, and asks before drafting, changing or deleting files, fetching pages, clicking, typing, running commands, or sending messages (same effective policy as Approve destructive).",
         "approve-destructive": "The bot can read files and inspect your screen freely, and shows you a live approval card before clicking, typing, editing files, running shell commands, or sending messages.",
-        "full": "The bot can read, click, type, edit files, and run commands without asking first (except hard safety floors below)."
+        "full": "The bot can read, click, type, edit or delete ordinary files, run shell commands, and send messages without asking first (except the hard safety floors below)."
       },
       "floorsTitle": "Always-on safety protections",
       "floorMoney": "Financial & payment actions always require your explicit confirmation.",
@@ -1305,6 +1305,54 @@
           "bot": "Pick the bot, or choose any bot."
         }
       }
+    },
+    "webSearch": {
+      "title": "Web search",
+      "description": "Search backend priority order, API keys, and live connectivity probe.",
+      "note": "Web search tries active backends in priority order until one returns results. Changes apply immediately on the next bot turn without restarting.",
+      "loadError": "Could not load web search settings: {{message}}",
+      "configError": "web.toml could not be loaded ({{message}}). Showing defaults — saving changes below will replace it.",
+      "orderTitle": "Backend order & fallbacks",
+      "orderHint": "Move preferred backends up. Keyless fallbacks work without an API key but may occasionally hit upstream rate limits.",
+      "credentialsTitle": "Self-hosted & API backends",
+      "searxngLabel": "SearXNG URL",
+      "searxngHint": "Base URL of your own SearXNG instance (clear and save to disable).",
+      "braveKeyLabel": "Brave Search API key",
+      "tavilyKeyLabel": "Tavily Search API key",
+      "tavilyHint": "Optional API key for Tavily Search (stored write-only in the secret store).",
+      "keyStoredPlaceholder": "Key stored (enter a new key to replace)",
+      "keyEmptyPlaceholder": "Enter API key…",
+      "keyWriteOnlyHint": "Write-only: stored in the OS secret store and never read back.",
+      "clearKey": "Clear key",
+      "save": "Save changes",
+      "testTitle": "Connectivity test",
+      "testQueryLabel": "Test search query",
+      "test": "Test",
+      "testing": "Testing…",
+      "testOk": "{{backend}} answered ({{count}} results in {{ms}} ms)",
+      "testFailed": "Search probe failed ({{ms}} ms): {{error}}",
+      "fallbackNotes": "Earlier fallback errors before success: {{details}}",
+      "moveUp": "Move {{name}} up",
+      "moveDown": "Move {{name}} down",
+      "toggleBackend": "Toggle {{name}}",
+      "status": {
+        "active": "Active",
+        "needsKey": "Needs API key",
+        "needsUrl": "Needs URL",
+        "disabled": "Disabled"
+      },
+      "backends": {
+        "searxng": "SearXNG",
+        "brave": "Brave Search API",
+        "tavily": "Tavily Search API",
+        "duckduckgo": "DuckDuckGo (HTML)",
+        "duckduckgo_lite": "DuckDuckGo Lite",
+        "bing": "Bing (HTML)"
+      },
+      "toast": {
+        "saved": "Web search settings saved",
+        "keyCleared": "API key removed from secret store"
+      }
     }
   },
   "palette": {
@@ -1466,6 +1514,54 @@
         "other": "Other"
       }
     }
+  },
+  "newBot": {
+    "title": "New bot",
+    "templatesLabel": "Templates",
+    "templates": {
+      "blank": "Blank",
+      "researcher": "Researcher",
+      "coder": "Coder",
+      "assistant": "Assistant",
+      "social": "Social"
+    },
+    "namePlaceholder": "Bot name",
+    "shapeGroup": "Character shape",
+    "shapes": {
+      "pebble": "Pebble",
+      "cube": "Cube",
+      "diamond": "Diamond",
+      "cloud": "Cloud",
+      "tri": "Triangle",
+      "flower": "Flower",
+      "gem": "Gem",
+      "drop": "Drop",
+      "star": "Star",
+      "ghost": "Ghost",
+      "capsule": "Capsule",
+      "ears": "Ears",
+      "gumdrop": "Gumdrop",
+      "heart": "Heart",
+      "clover": "Clover",
+      "boulder": "Boulder"
+    },
+    "brain": "Brain",
+    "brainHint": "You can change this later in chat",
+    "brainAuto": "Auto",
+    "autonomy": "Autonomy",
+    "autonomyLevels": {
+      "ask": "Ask",
+      "balanced": "Balanced",
+      "auto": "Free"
+    },
+    "autonomyHints": {
+      "ask": "Reads files, checks the screen, and searches the web without asking; asks before drafting, sending, changing or deleting files, fetching pages, clicking, or running commands (same effective policy as Balanced).",
+      "balanced": "Reads files, checks the screen, and searches the web freely; asks before every file write or delete, draft, send, page fetch, click, or command (same effective policy as Ask).",
+      "auto": "Runs without asking—including deleting ordinary files, running shell commands, and sending messages—pausing only for Money, schedule activations, and never-list commands (disk format, system/home wipes, credential paths)."
+    },
+    "autonomyCustom": "Using the {{preset}} permission preset.",
+    "advanced": "Advanced settings",
+    "create": "Create"
   },
   "quota": {
     "title": "Quota left",

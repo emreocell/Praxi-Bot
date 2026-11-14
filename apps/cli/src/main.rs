@@ -17,6 +17,7 @@ mod prompt;
 mod remote;
 mod serve;
 mod update;
+mod web_host;
 mod wizard;
 
 use std::path::PathBuf;
