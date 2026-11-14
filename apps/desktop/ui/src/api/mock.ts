@@ -688,12 +688,20 @@ export class MockApiClient extends ApiClient {
 export function mockReviewEvents(): { ts_ms: number; event: GlobalEnvelope["event"] }[] {
   const out: { ts_ms: number; event: GlobalEnvelope["event"] }[] = [];
   const screen = new URLSearchParams(window.location.search).get("screen");
-  if (screen === "approval" || screen?.startsWith("approval-schedule") || screen === "streaming") {
+  if (screen === "approval" || screen?.startsWith("approval-schedule") || screen === "streaming" || screen === "working") {
     const bot_id = "11111111-1111-4111-8111-111111111111";
     const chat_id = "33333333-3333-4333-8333-333333333333";
     const events: GlobalEnvelope["event"][] = [
       { type: "run_started", run_id: "mock-live", bot_id, chat_id },
       { type: "message_delta", run_id: "mock-live", text: screen === "approval" ? "Raporu hazırladım. Paylaşmadan önce eski taslakları temizlemem gerekiyor." : "Taslağı oluşturuyorum, önce kaynakları karşılaştırıyorum…" },
+      ...(screen === "working" ? [
+        { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-w1", tool_name: "web_search", input: { query: "cpu llm benchmark 2026" } },
+        { type: "tool_call_completed", run_id: "mock-live", call_id: "mock-w1", error: null },
+        { type: "message_delta", run_id: "mock-live", text: "Kaynakları okuyup ölçümleri karşılaştırıyorum." },
+        { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-w2", tool_name: "web_extract", input: { url: "https://huggingface.co/blog/cpu-inference" } },
+        { type: "tool_call_completed", run_id: "mock-live", call_id: "mock-w2", error: null },
+        { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-w3", tool_name: "github.search_issues", input: { query: "gguf arm" } }
+      ] as GlobalEnvelope["event"][] : []),
       ...(screen?.startsWith("approval-schedule") ? [
         { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-sch", tool_name: "schedule_create", input: {} },
         { type: "approval_needed", run_id: "mock-live", call_id: "mock-sch", tool_name: "schedule_create", input: {}, summary: "Create a schedule", details: { kind: "schedule", action: "create", name: "Pazartesi özeti", prompt: screen === "approval-schedule-long" ? LONG_PROMPT : "Geçen haftanın GitHub ve takvim hareketlerinden kısa bir özet hazırla ve bana gönder.", prompt_chars: screen === "approval-schedule-long" ? LONG_PROMPT.length : 76, previous: null, schedule: "Her pazartesi 09:00", timezone: "Europe/Istanbul", next_runs: ["2026-11-16T09:00:00+03:00", "2026-11-23T09:00:00+03:00"], permission: { level: "mixed", allow: ["github.*"], ask: ["email_send"], deny: [] } } }
