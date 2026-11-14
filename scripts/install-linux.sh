@@ -543,7 +543,7 @@ if [ "\$(id -u)" -eq 0 ]; then
   if [ "${cmd}" = praxi ] && [ "\${1:-}" = self-update ]; then
     # Only this explicit maintenance command retains root. Do not source the
     # service environment (which includes provider/daemon secrets).
-    exec env -i PATH=/usr/bin:/bin HOME=/root ${PREFIX}/bin/${bin} "\$@"
+    exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/root ${PREFIX}/bin/${bin} "\$@"
   fi
   if [ "${cmd}" = praxi ] && [ "\${1:-}" = doctor ]; then
     exec systemd-run --quiet --wait --pipe --collect --unit="praxi-doctor-\$\$" \
