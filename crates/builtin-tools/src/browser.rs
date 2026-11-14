@@ -537,11 +537,10 @@ impl BrowserDriver for CdpDriver {
                     let mode = if headless { "headless" } else { "headed" };
                     settings.profile_dir = settings.profile_dir.map(|p| p.join(mode));
                     settings.profiles_root = settings.profiles_root.join(mode);
-                    let driver = Arc::new(CdpDriver::new(settings));
-                    if let Some(probe) = self.activity.read().ok().and_then(|p| p.clone()) {
-                        driver.set_activity_probe(probe);
-                    }
-                    driver
+                    let mut driver = CdpDriver::new(settings);
+                    driver.takeover_pin = Arc::clone(&self.takeover_pin);
+                    driver.activity = Arc::clone(&self.activity);
+                    Arc::new(driver)
                 })
                 .clone(),
         )
@@ -2949,6 +2948,8 @@ mod tests {
         let alternate = drv.alternate_mode.lock().clone().unwrap();
         assert!(!alternate.desired_headless());
         assert!(!Arc::ptr_eq(&drv, &alternate));
+        assert!(Arc::ptr_eq(&drv.takeover_pin, &alternate.takeover_pin));
+        assert!(Arc::ptr_eq(&drv.activity, &alternate.activity));
         let written = std::fs::read_to_string(&log).unwrap_or_default();
         assert!(written.contains("launched"));
 
