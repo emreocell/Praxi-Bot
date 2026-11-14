@@ -11,6 +11,7 @@ import type {
 import {
   type BotMeta,
   ControlBridge,
+  createBridgeRegistry,
   type PanelActionHighlight,
   type Rect,
   refusalReason,
@@ -321,6 +322,7 @@ test("owned takeover: Bitirdim uses releaseControl, heartbeats never release, St
       target_id: "target-1"
     }
   });
+  t.bridge.setOwnedTakeoverId("to-1");
   await t.bridge.onNativeState("human_driving");
   await t.bridge.heartbeat();
   assert.equal(t.calls.release.some(Boolean), false);
@@ -339,7 +341,7 @@ test("owned takeover: Bitirdim uses releaseControl, heartbeats never release, St
   assert.deepEqual(t.calls.cancel, []);
   assert.equal(t.bridge.takeover(), null);
 
-  // Local Pause while another takeover is active triggers overrideControl.
+  // A peer's takeover is not ours: a local Pause does not override on its behalf.
   await t.feed({
     type: "control_state_changed",
     state: "active",
@@ -347,6 +349,28 @@ test("owned takeover: Bitirdim uses releaseControl, heartbeats never release, St
     target_id: "target-1",
     reason: null
   });
+  await t.bridge.onNativeState("paused");
+  assert.equal(t.calls.override, 0);
+
+  // Our own live takeover: a local Pause overrides instead of fighting the latch.
+  await t.bridge.syncControlState({
+    app_connected: true,
+    expires_in_ms: 15_000,
+    latched: "human_driving",
+    mode: "human_driving",
+    release: null,
+    takeover: {
+      id: "to-2",
+      control_epoch: 4,
+      input_expires_in_ms: 10_000,
+      owner: "local-ui:1",
+      session_id: "sess-1",
+      state: "active",
+      target_id: "target-1"
+    }
+  });
+  t.bridge.setOwnedTakeoverId("to-2");
+  await t.bridge.onNativeState("idle");
   await t.bridge.onNativeState("paused");
   assert.equal(t.calls.override, 1);
 
@@ -503,4 +527,167 @@ test("startRun preserves explicit botShape even when it differs from ID hash fal
   assert.equal(calls.length, 1);
   assert.equal(calls[0].bot.botId, "bot-cube-0");
   assert.equal(calls[0].bot.botShape, "heart");
+});
+
+// ---- review of PR 56: bridge lifecycle, release failure, ownership by id ----
+
+function idle(): ControlStateDto {
+  return {
+    app_connected: true,
+    expires_in_ms: 15_000,
+    latched: null,
+    mode: "idle",
+    release: null,
+    takeover: null
+  };
+}
+
+function owned(id: string, state = "active"): ControlStateDto {
+  return {
+    ...idle(),
+    latched: "human_driving",
+    mode: "human_driving",
+    takeover: {
+      id,
+      control_epoch: 3,
+      input_expires_in_ms: 10_000,
+      owner: "local-ui:1",
+      session_id: "sess-1",
+      state: state as "active",
+      target_id: "target-1"
+    }
+  };
+}
+
+function bareBridge(client: Partial<ConstructorParameters<typeof ControlBridge>[0]["client"]> = {}) {
+  const log = { cancel: [] as string[], put: [] as boolean[], override: 0 };
+  const bridge = new ControlBridge({
+    client: {
+      putControlState: async (_m, release) => void log.put.push(release === true),
+      decideControl: async () => undefined,
+      cancelRun: async (id) => void log.cancel.push(id),
+      overrideControl: async () => {
+        log.override += 1;
+        return idle();
+      },
+      ...client
+    },
+    native: {
+      beginAction: async () => true,
+      startRun: async () => undefined,
+      stopRun: async () => undefined,
+      click: async () => undefined
+    },
+    botMeta: (id) => ({ botId: id, botName: id }),
+    startingStep: "x",
+    now: () => NOW
+  });
+  const feed = (event: DaemonEvent) =>
+    bridge.handleEvent({ v: 1, seq: 1, ts_ms: NOW, gseq: 1, event });
+  return { bridge, log, feed };
+}
+
+test("control-state refreshes keep the same bridge: its live runs survive and Stop still cancels them", async () => {
+  const { bridge, log, feed } = bareBridge();
+  let latest: ControlStateDto | null = null;
+  const registry = createBridgeRegistry(() => latest);
+  registry.register(bridge);
+  await feed({ type: "run_started", run_id: "run-1", chat_id: "c", bot_id: "b1" });
+  assert.deepEqual(bridge.liveRuns(), ["run-1"]);
+
+  // many refreshes (viewer open, control_state_changed, takeover, release ...)
+  for (let i = 0; i < 4; i += 1) {
+    latest = i % 2 ? idle() : owned("to-1");
+    registry.syncControlState(latest);
+    registry.setOwnedTakeoverId(i % 2 ? null : "to-1");
+  }
+  await bridge.syncControlState(idle());
+  assert.equal(registry.current(), bridge, "same bridge instance");
+  assert.deepEqual(bridge.liveRuns(), ["run-1"], "live runs not reset");
+
+  await registry.current()?.emergencyStop();
+  assert.deepEqual(log.cancel, ["run-1"], "Stop cancels the run");
+});
+
+test("registering a bridge hands it the current snapshot and owned takeover id", async () => {
+  const { bridge, log } = bareBridge();
+  const registry = createBridgeRegistry(() => owned("to-9"));
+  registry.setOwnedTakeoverId("to-9");
+  registry.register(bridge);
+  await bridge.syncControlState(owned("to-9"));
+  await bridge.heartbeat(true);
+  assert.deepEqual(log.put, [false], "owned takeover blocks the legacy release");
+});
+
+test("a failed release rejects (not null) and leaves the bridge usable", async () => {
+  let fail = true;
+  const { bridge } = bareBridge({
+    releaseControl: async () => {
+      if (fail) {
+        throw new Error("409");
+      }
+      return idle();
+    }
+  });
+  const req: ReleaseRequest = {
+    takeover_id: "to-1",
+    control_epoch: 3,
+    request_id: "req-1",
+    outcome: "completed"
+  };
+  await assert.rejects(() => bridge.releaseOwnedTakeover(req), /409/);
+  fail = false;
+  const dto = await bridge.releaseOwnedTakeover(req);
+  assert.equal(dto?.takeover, null, "chain still works after a failure");
+});
+
+test("legacy release is blocked only for OUR live takeover, not a peer's or a paused one", async () => {
+  const { bridge, log } = bareBridge();
+  bridge.setOwnedTakeoverId("to-mine");
+
+  await bridge.syncControlState(owned("to-peer"));
+  await bridge.heartbeat(true);
+  assert.deepEqual(log.put.at(-1), true, "a peer's takeover does not block");
+
+  await bridge.syncControlState(owned("to-mine", "paused"));
+  await bridge.heartbeat(true);
+  assert.deepEqual(log.put.at(-1), true, "a paused takeover does not block");
+
+  await bridge.syncControlState(owned("to-mine"));
+  await bridge.heartbeat(true);
+  assert.deepEqual(log.put.at(-1), false, "our live takeover blocks");
+});
+
+test("a missed control_state_changed 'released' event is healed from GET /control/state", async () => {
+  let snapshot: ControlStateDto = owned("to-mine");
+  const { bridge, log } = bareBridge({
+    getControlState: async () => snapshot
+  });
+  bridge.setOwnedTakeoverId("to-mine");
+  await bridge.refreshControlState();
+  await bridge.heartbeat(true);
+  assert.equal(log.put.at(-1), false);
+
+  // the release event was never delivered; the daemon snapshot says it is gone
+  snapshot = idle();
+  await bridge.refreshControlState();
+  await bridge.heartbeat(true);
+  assert.equal(log.put.at(-1), true, "no stale tracker blocks Resume");
+});
+
+test("control_state_changed events re-read the snapshot (events carry no takeover id)", async () => {
+  const { bridge, log, feed } = bareBridge({
+    getControlState: async () => owned("to-mine")
+  });
+  bridge.setOwnedTakeoverId("to-mine");
+  await feed({
+    type: "control_state_changed",
+    state: "active",
+    owner: "local-ui:1",
+    target_id: "target-1",
+    reason: null
+  });
+  assert.equal(bridge.takeover()?.id, "to-mine");
+  await bridge.heartbeat(true);
+  assert.equal(log.put.at(-1), false);
 });

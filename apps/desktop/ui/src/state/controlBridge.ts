@@ -114,6 +114,7 @@ export interface BridgeDeps {
       reason?: string
     ): Promise<unknown>;
     cancelRun(runId: string): Promise<unknown>;
+    getControlState?(): Promise<ControlStateDto>;
     releaseControl?(req?: ReleaseRequest): Promise<ControlStateDto>;
     overrideControl?(): Promise<ControlStateDto>;
     recoverControl?(): Promise<ControlStateDto>;
@@ -174,6 +175,8 @@ export class ControlBridge {
   private chain: Promise<void> = Promise.resolve();
   private activeTakeover: TrackedTakeover | null = null;
   private releasingTakeover = false;
+  /** Id of the takeover THIS app owns (set by the live-view controller). */
+  private ownedTakeoverId: string | null = null;
 
   constructor(deps: BridgeDeps) {
     this.deps = deps;
@@ -188,6 +191,25 @@ export class ControlBridge {
   /** Currently tracked daemon takeover (owned or peer), if any. */
   takeover(): TrackedTakeover | null {
     return this.activeTakeover;
+  }
+
+  /** Tell the bridge which takeover this app owns; only that one blocks legacy release. */
+  setOwnedTakeoverId(id: string | null): void {
+    this.ownedTakeoverId = id;
+  }
+
+  /** Re-read `GET /v1/control/state` (events are notifications only and are not replayed). */
+  refreshControlState(): Promise<void> {
+    const get = this.deps.client.getControlState;
+    if (!get) {
+      return this.chain;
+    }
+    this.chain = this.chain
+      .then(async () => {
+        this.applyControlDto(await get.call(this.deps.client));
+      })
+      .catch(() => undefined);
+    return this.chain;
   }
 
   /** Sync authoritative daemon control snapshot into the bridge. */
@@ -216,24 +238,30 @@ export class ControlBridge {
     return this.chain;
   }
 
-  /** Explicitly hand back an owned takeover ("Bitirdim") without cancelling live runs. */
+  /**
+   * Explicitly hand back an owned takeover ("Bitirdim") without cancelling live
+   * runs. A failed release rejects (the caller decides what the daemon state
+   * means); the internal serialisation chain stays usable.
+   */
   releaseOwnedTakeover(req: ReleaseRequest): Promise<ControlStateDto | null> {
-    let result: ControlStateDto | null = null;
-    this.chain = this.chain
-      .then(async () => {
-        if (!this.deps.client.releaseControl) {
-          return;
-        }
-        this.releasingTakeover = true;
-        try {
-          result = await this.deps.client.releaseControl(req);
-          this.applyControlDto(result);
-        } finally {
-          this.releasingTakeover = false;
-        }
-      })
-      .catch(() => undefined);
-    return this.chain.then(() => result);
+    const run = this.chain.then(async () => {
+      if (!this.deps.client.releaseControl) {
+        return null;
+      }
+      this.releasingTakeover = true;
+      try {
+        const result = await this.deps.client.releaseControl(req);
+        this.applyControlDto(result);
+        return result;
+      } finally {
+        this.releasingTakeover = false;
+      }
+    });
+    this.chain = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
   }
 
   /** Explicit user Stop override: pauses any active takeover and cancels live runs. */
@@ -289,8 +317,18 @@ export class ControlBridge {
     this.applyTakeoverInfo(dto.takeover);
   }
 
+  /** True only for this app's own live takeover, never a peer's or a stale one. */
   private hasOwnedTakeover(): boolean {
-    return this.activeTakeover !== null || this.releasingTakeover;
+    if (this.releasingTakeover) {
+      return true;
+    }
+    const t = this.activeTakeover;
+    return (
+      t !== null &&
+      this.ownedTakeoverId !== null &&
+      t.id === this.ownedTakeoverId &&
+      (t.state === "active" || t.state === "acquiring")
+    );
   }
 
   private scopeFor(info: { runId?: string; botId?: string }): TargetScope {
@@ -369,12 +407,25 @@ export class ControlBridge {
         if (e.state === "released" || e.state === "recovered") {
           this.activeTakeover = null;
         } else {
+          // The event never carries a takeover id: keep a known id for the same
+          // actor/target and let the snapshot below fill in the rest.
+          const prev = this.activeTakeover;
+          const same =
+            prev !== null && prev.owner === e.owner && prev.targetId === e.target_id;
           this.activeTakeover = {
+            id: same ? prev.id : undefined,
             state: e.state,
             owner: e.owner,
             targetId: e.target_id,
             reason: e.reason ?? null
           };
+        }
+        if (this.deps.client.getControlState) {
+          try {
+            this.applyControlDto(await this.deps.client.getControlState());
+          } catch {
+            // the next refresh / heartbeat re-syncs
+          }
         }
         return;
       case "run_started":
@@ -468,4 +519,43 @@ export class ControlBridge {
       // 404: the daemon already timed out; nothing to do
     }
   }
+}
+
+/**
+ * Owner of the single `ControlBridge` for the live-view controller. Its
+ * identity never changes, so control-state refreshes only *sync* the existing
+ * bridge (its live-run set, `startedAt` and mode must survive them).
+ */
+export interface BridgeRegistry {
+  register(bridge: ControlBridge | null): void;
+  current(): ControlBridge | null;
+  syncControlState(dto: ControlStateDto): void;
+  setOwnedTakeoverId(id: string | null): void;
+}
+
+export function createBridgeRegistry(
+  getControlState: () => ControlStateDto | null
+): BridgeRegistry {
+  let bridge: ControlBridge | null = null;
+  let ownedId: string | null = null;
+  return {
+    register(next) {
+      bridge = next;
+      if (next) {
+        next.setOwnedTakeoverId(ownedId);
+        const dto = getControlState();
+        if (dto) {
+          void next.syncControlState(dto);
+        }
+      }
+    },
+    current: () => bridge,
+    syncControlState(dto) {
+      void bridge?.syncControlState(dto);
+    },
+    setOwnedTakeoverId(id) {
+      ownedId = id;
+      bridge?.setOwnedTakeoverId(id);
+    }
+  };
 }

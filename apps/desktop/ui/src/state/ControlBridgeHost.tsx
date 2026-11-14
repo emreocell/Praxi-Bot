@@ -110,7 +110,11 @@ export function ControlBridgeHost() {
     void getControlState()
       .then((snap) => bridge.onNativeState(snap.mode))
       .catch(() => bridge.heartbeat());
-    const beat = window.setInterval(() => void bridge.heartbeat(), HEARTBEAT_MS);
+    const beat = window.setInterval(() => {
+      void bridge.heartbeat();
+      // events are notifications only and never replayed: re-read the snapshot
+      void bridge.refreshControlState();
+    }, HEARTBEAT_MS);
     return () => {
       alive = false;
       registerBridge(null);
