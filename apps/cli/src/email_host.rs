@@ -518,6 +518,8 @@ impl EmailHost {
             .ok_or_else(|| invalid("an API key is required"))?;
         let secret = SecretRef::new(managed_api_key(&input.name))
             .map_err(|_| invalid("invalid account name for a secret"))?;
+        // Reject local input before allocating an inbox at the provider.
+        let allowed_senders = senders(&input.allowed_senders)?;
         let _guard = self.ops.lock().await;
         let mut list = self.connector.accounts();
         if list.iter().any(|a| a.name == input.name) {
@@ -551,7 +553,7 @@ impl EmailHost {
             extra_root_pem: None,
             timeout_secs: 30,
             bot: input.bot.clone(),
-            allowed_senders: senders(&input.allowed_senders)?,
+            allowed_senders,
             kind: AccountKind::AgentMail,
             inbox_id: Some(inbox.inbox_id.clone()),
         };
