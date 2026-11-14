@@ -33,6 +33,40 @@ export type ErrorBody = S["ErrorBody"];
 export type ControlStateDto = S["ControlStateDto"];
 export type ControlModeName = NonNullable<ControlStateDto["mode"]>;
 export type ControlVerdict = S["ControlVerdict"];
+export type ControlStateChanged = S["ControlStateChanged"];
+export type ReleaseResult = S["ReleaseResult"];
+export type ScreenPrivilegesInput = S["ScreenPrivilegesInput"];
+export type TargetInfo = S["TargetInfo"];
+export type TargetKind = S["TargetKind"];
+export type ViewCapabilities = S["Capabilities"];
+export type Codec = S["Codec"];
+export type ViewProfile = S["Profile"];
+export type EffectiveProfile = S["EffectiveProfile"];
+export type ViewState = S["ViewState"];
+export type ViewReason = S["Reason"];
+export type FrameCause = S["Cause"];
+export type SourceUnits = S["Units"];
+export type SourceRect = S["SourceRect"];
+export type CreateSessionInput = S["CreateSession"];
+export type SessionInfo = S["SessionInfo"];
+export type SessionUpdate = S["SessionUpdate"];
+export type ViewHeartbeat = S["Heartbeat"];
+export type TakeoverRequest = S["TakeoverRequest"];
+export type TakeoverAccepted = S["TakeoverAccepted"];
+export type TakeoverInfo = S["TakeoverInfo"];
+export type RecoveryReason = S["RecoveryReason"];
+export type ReleaseRequest = S["ReleaseRequest"];
+export type HumanAction = S["HumanAction"];
+export type ReleaseOutcome = S["Outcome"];
+export type InputBatch = S["InputBatch"];
+export type InputEvent = S["InputEvent"];
+export type InputResult = S["InputResult"];
+export type PointerPhase = S["PointerPhase"];
+export type KeyPhase = S["KeyPhase"];
+export type MouseButton = S["Button"];
+export type InputModifier = S["Modifier"];
+export type RecordHeader = S["RecordHeader"];
+export type FrameMetadata = S["FrameMetadata"];
 export type PolicyDto = S["PolicyDto"];
 export type PolicyInput = S["PolicyInput"];
 export type ProvidersDto = S["ProvidersDto"];
@@ -200,6 +234,13 @@ export type DaemonEvent =
       rect: { x: number; y: number; width: number; height: number } | null;
       label: string;
       action: string;
+    }
+  | {
+      type: "control_state_changed";
+      state: string;
+      owner: string;
+      target_id: string;
+      reason?: ViewReason | null;
     }
   | { type: "error"; run_id: string; message: string; recoverable: boolean }
   | { type: "mcp_server_changed"; name: string; status: McpStatus }

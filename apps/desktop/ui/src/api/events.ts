@@ -66,6 +66,69 @@ export function createSseParser(
   };
 }
 
+/**
+ * Convert an SSE message into a `GlobalEnvelope`, handling unsequenced
+ * notification events such as `control_state_changed` without mutating the
+ * replay cursor. Returns `null` if malformed or unsupported.
+ */
+export function parseSseEnvelope(
+  m: SseMessage,
+  currentCursor: number | null,
+  nowMs = Date.now()
+): { envelope: GlobalEnvelope; nextCursor: number | null } | null {
+  try {
+    const raw = JSON.parse(m.data) as Record<string, unknown>;
+    if (m.event === "control_state_changed" || raw.type === "control_state_changed") {
+      if (
+        typeof raw.state !== "string" ||
+        typeof raw.owner !== "string" ||
+        typeof raw.target_id !== "string"
+      ) {
+        return null;
+      }
+      const event: DaemonEvent = {
+        type: "control_state_changed",
+        state: raw.state,
+        owner: raw.owner,
+        target_id: raw.target_id,
+        reason: (raw.reason ?? null) as Extract<
+          DaemonEvent,
+          { type: "control_state_changed" }
+        >["reason"]
+      };
+      return {
+        envelope: {
+          v: 1,
+          seq: 0,
+          gseq: currentCursor ?? 0,
+          ts_ms: nowMs,
+          event
+        },
+        nextCursor: currentCursor
+      };
+    }
+    const env = raw as unknown as {
+      v: number;
+      seq: number;
+      ts_ms: number;
+      parent_run_id?: string;
+      event: DaemonEvent;
+    };
+    if (!env.event || typeof env.event !== "object") {
+      return null;
+    }
+    const parsed = m.id === null ? Number.NaN : Number(m.id);
+    const hasGseq = Number.isFinite(parsed) && m.event !== "schedule_changed";
+    const gseq = hasGseq ? parsed : (currentCursor ?? 0);
+    return {
+      envelope: { ...env, gseq },
+      nextCursor: hasGseq ? parsed : currentCursor
+    };
+  } catch {
+    return null;
+  }
+}
+
 const BACKOFF_MS = [500, 1000, 2000, 4000, 8000];
 
 /**
@@ -102,22 +165,12 @@ export function subscribeEvents(
         opts.onConnection(true);
         attempt = 0;
         const parse = createSseParser((m) => {
-          try {
-            const env = JSON.parse(m.data) as {
-              v: number;
-              seq: number;
-              ts_ms: number;
-              event: DaemonEvent;
-            };
-            const parsed = m.id === null ? Number.NaN : Number(m.id);
-            const gseq = Number.isFinite(parsed) ? parsed : (cursor ?? 0);
-            if (Number.isFinite(parsed)) {
-              cursor = parsed;
-            }
-            opts.onEvent({ ...env, gseq });
-          } catch {
-            // ignore malformed events
+          const parsed = parseSseEnvelope(m, cursor);
+          if (!parsed) {
+            return;
           }
+          cursor = parsed.nextCursor;
+          opts.onEvent(parsed.envelope);
         });
         const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
         for (;;) {

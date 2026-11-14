@@ -1,6 +1,7 @@
 import { MessageSquare, SlidersHorizontal, UserRound, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, type BotAvatarState, type BotIdentity } from "ui";
+import { BotComputerBlock } from "./BotComputerBlock";
 import { QuotaBlock } from "./QuotaRings";
 import styles from "./BotPanel.module.css";
 
@@ -82,6 +83,7 @@ export function BotPanel({
           </ul>
         )}
       </section>
+      <BotComputerBlock />
       <QuotaBlock />
     </div>
   );
