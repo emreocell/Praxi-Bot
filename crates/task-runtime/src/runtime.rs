@@ -337,7 +337,22 @@ impl Runtime {
                 (prev.id, StepSpec::from_row(&prev), attempt)
             } else {
                 let history = st.list_steps(run_id)?;
-                match self.executor.next_step(&run, &history).await {
+                // Planning can await providers too (for example the routing
+                // classifier). Stop must cancel that work before any intent
+                // or terminal result is committed.
+                let next = tokio::select! {
+                    biased;
+                    () = token.cancelled() => {
+                        return self.transition(run_id, self.stop_state(run_id), None);
+                    }
+                    next = self.executor.next_step(&run, &history) => next,
+                };
+                // A graceful pause does not cancel the in-flight future. It
+                // still forbids admitting a new step once planning returns.
+                if token.is_cancelled() || self.pausing.lock().contains(&run_id) {
+                    return self.transition(run_id, self.stop_state(run_id), None);
+                }
+                match next {
                     Ok(None) => return self.transition(run_id, RunState::Succeeded, None),
                     Err(e) => return self.transition(run_id, RunState::Failed, Some(&e.0)),
                     Ok(Some(spec)) => {
@@ -761,6 +776,100 @@ mod tests {
             vec![("a".into(), "interrupted".into(), 1)]
         );
         assert!(rt.cancel(run).is_err(), "already terminal");
+    }
+
+    struct Planning {
+        entered: tokio::sync::Notify,
+        release: tokio::sync::Notify,
+        next: Option<StepSpec>,
+    }
+
+    #[async_trait]
+    impl StepExecutor for Planning {
+        async fn next_step(
+            &self,
+            _: &Run,
+            _: &[RunStep],
+        ) -> std::result::Result<Option<StepSpec>, ExecError> {
+            self.entered.notify_one();
+            self.release.notified().await;
+            Ok(self.next.clone())
+        }
+
+        async fn execute(
+            &self,
+            _: &Run,
+            _: &StepSpec,
+            _: &CancellationToken,
+        ) -> std::result::Result<Value, ExecError> {
+            panic!("a stop received during planning must prevent the next step");
+        }
+    }
+
+    async fn stop_during_planning(pause: bool, interrupt: bool, next: Option<StepSpec>) {
+        let dir = tempfile::tempdir().unwrap();
+        let (st, u, b) = setup(dir.path());
+        let planner = Arc::new(Planning {
+            entered: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+            next,
+        });
+        let rt = Arc::new(Runtime::new(st.clone(), planner.clone()));
+        let run = rt.create_run(u, b, None, "turn").unwrap();
+        let mut handle = tokio::spawn({
+            let rt = rt.clone();
+            async move { rt.start(run).await }
+        });
+        tokio::time::timeout(Duration::from_secs(5), planner.entered.notified())
+            .await
+            .expect("planner never entered");
+        if pause {
+            assert!(rt.request_pause(run, interrupt));
+        } else {
+            rt.cancel(run).unwrap();
+        }
+        if !interrupt {
+            // A graceful pause lets planning finish, but cannot commit its
+            // answer or start another step after that pause was requested.
+            planner.release.notify_one();
+        }
+        let outcome = tokio::time::timeout(Duration::from_secs(5), &mut handle).await;
+        if outcome.is_err() {
+            handle.abort();
+        }
+        assert_eq!(
+            outcome
+                .expect("planning ignored the stop")
+                .unwrap()
+                .unwrap(),
+            if pause {
+                RunState::Paused
+            } else {
+                RunState::Cancelled
+            }
+        );
+        assert_eq!(st.list_steps(run).unwrap().len(), 0);
+        assert_eq!(rt.active_runs(), Vec::<RunId>::new());
+    }
+
+    #[tokio::test]
+    async fn cancellation_interrupts_pending_planning() {
+        stop_during_planning(false, true, None).await;
+    }
+
+    #[tokio::test]
+    async fn shutdown_pause_interrupts_pending_planning() {
+        stop_during_planning(true, true, None).await;
+    }
+
+    #[tokio::test]
+    async fn graceful_pause_during_planning_does_not_start_a_step() {
+        stop_during_planning(true, false, Some(spec("write", false))).await;
+    }
+
+    #[tokio::test]
+    async fn graceful_pause_during_planning_does_not_report_success() {
+        stop_during_planning(true, false, None).await;
     }
 
     #[tokio::test]
