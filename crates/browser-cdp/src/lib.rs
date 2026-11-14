@@ -26,6 +26,7 @@ pub mod client;
 pub mod diff;
 pub mod dom;
 pub mod error;
+pub mod host;
 pub mod launch;
 pub mod live_view;
 pub mod page;

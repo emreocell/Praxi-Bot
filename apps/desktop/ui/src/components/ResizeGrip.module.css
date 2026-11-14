@@ -1,0 +1,38 @@
+.grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  width: calc(var(--space-2) + var(--size-border));
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.end {
+  right: 0;
+}
+
+.start {
+  left: 0;
+}
+
+/* A short accent bar fades in on hover, drag and keyboard focus. */
+.grip::after {
+  content: "";
+  position: absolute;
+  inset: 25% calc(var(--space-1) * 0.75);
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  opacity: 0;
+  transition: opacity var(--motion-duration-fast) ease-out;
+}
+
+.grip:hover::after,
+.grip:focus-visible::after,
+:global(:root[data-resizing]) .grip::after {
+  opacity: 0.55;
+}
+
+.grip:focus-visible {
+  outline: none;
+}

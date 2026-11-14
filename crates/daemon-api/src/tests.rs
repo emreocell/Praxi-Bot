@@ -2995,3 +2995,19 @@ async fn providers_cli_enable_preserves_existing_default_model_and_model_caps() 
     assert_eq!(saved.default_model.as_deref(), Some("claude-sonnet-4-5"));
     assert_eq!(saved.model_caps["claude-sonnet-4-5"].vision, Some(true));
 }
+
+#[tokio::test]
+async fn health_includes_host_capabilities_without_starting_a_browser() {
+    let t = setup();
+    let response = call(&t, Method::GET, "/v1/health", None).await;
+    let value = response.json();
+    assert_eq!(value["api_version"], "1.0");
+    assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(value["host"]["os"], std::env::consts::OS);
+    assert_eq!(value["host"]["arch"], std::env::consts::ARCH);
+    assert!(value["host"]["has_display"].is_boolean());
+    assert!(value["host"]["has_browser"].is_boolean());
+    assert!(value["host"]["total_ram_mb"].as_u64().unwrap() > 0);
+    let dto: crate::dto::Health = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(serde_json::to_value(dto).unwrap(), value);
+}

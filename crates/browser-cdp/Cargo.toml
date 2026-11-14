@@ -18,9 +18,18 @@ live-view.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 similar.workspace = true
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 tokio.workspace = true
 tokio-tungstenite.workspace = true
+tracing = "0.1"
 uuid.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb.workspace = true
+rustix = { version = "1", features = ["process"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_System_StationsAndDesktops"] }

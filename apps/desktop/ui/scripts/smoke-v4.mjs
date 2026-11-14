@@ -54,7 +54,7 @@ try {
   await call('Runtime.enable');
   await call('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
   await navigate('theme=obsidian');
-  await check('four bot characters and rich conversation', 'document.querySelectorAll("aside [data-state]").length === 5 && !!document.querySelector("table") && !!document.querySelector("[data-testid=code-block]") && !!document.querySelector("[data-testid=tool-card]")');
+  await check('four bot characters and rich conversation', 'document.querySelectorAll("aside [data-state]").length === 5 && !!document.querySelector("table") && !!document.querySelector("[data-testid=code-block]") && !!document.querySelector("[data-testid=thinking-chain]")');
   await check('normal UI hides connected/provider/dev badges', '!document.body.innerText.includes("Daemon bağlı") && !document.body.innerText.includes("Sahte sağlayıcı") && !document.body.innerText.includes("Bot çalışmasını simüle et")');
   await check('icon buttons expose labels and tooltips', '[...document.querySelectorAll("button")].filter(b => b.children.length && !b.innerText.trim() && b.querySelector("svg") && !b.querySelector("[role=img]")).every(b => b.getAttribute("aria-label") && b.title)');
   await evaluate('document.querySelector("[data-testid=account-menu]").click()'); await delay(100);

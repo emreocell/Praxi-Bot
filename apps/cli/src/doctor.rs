@@ -133,8 +133,30 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         check_web(env),
         check_schedule_tools(env.data_dir),
         check_disk(env.data_dir),
+        check_resources(),
         check_telegram(env),
     ]
+}
+
+fn check_resources() -> Check {
+    let bytes = browser_cdp::host::total_ram_bytes();
+    let mut detail = format!(
+        "{} MiB physical RAM; default computer-run cap {}",
+        bytes / (1024 * 1024),
+        browser_cdp::host::default_computer_runs(bytes)
+    );
+    #[cfg(target_os = "linux")]
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        use std::fmt::Write;
+        for line in status
+            .lines()
+            .filter(|l| l.starts_with("VmRSS:") || l.starts_with("VmHWM:"))
+        {
+            let _ = write!(detail, "; {line}");
+        }
+    }
+    detail.push_str("; doctor process only; measure the complete daemon + Xvfb + Chromium process tree on the host");
+    Check::ok("resources", detail)
 }
 
 fn check_data_dir(dir: &Path) -> Check {

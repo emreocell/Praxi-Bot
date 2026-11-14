@@ -1,0 +1,51 @@
+/*
+ * Generic popover surface (card 198-B).  Raised, softly gradient, ringed instead of bordered,
+ * with a deep soft shadow; frosted in the glass style, outlined in the line style.
+ * Rows inside never carry separator lines.
+ */
+.popover {
+  --shadow-overlay-y: calc(var(--space-8) - var(--space-1));
+  --shadow-overlay-blur: calc(var(--space-16) + var(--space-2));
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  max-width: calc(100vw - var(--space-4));
+  max-height: var(--pop-max-h, 70vh);
+  padding: var(--space-2);
+  border: none;
+  border-radius: calc(var(--radius-card) * 1.3);
+  background-color: var(--color-surface-elevated-opaque);
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--color-text) 5%, transparent), transparent 70%);
+  box-shadow:
+    0 0 0 var(--size-border) color-mix(in srgb, var(--color-text) 13%, transparent),
+    0 var(--shadow-overlay-y) var(--shadow-overlay-blur) calc(var(--space-4) * -1) var(--color-shadow),
+    0 var(--size-border-heavy) var(--space-2) calc(var(--space-1) / -2) var(--color-shadow);
+  color: var(--color-text);
+  animation: rise var(--motion-duration-fast) ease-out;
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(var(--space-2)) scale(0.985); }
+}
+
+:global(:root[data-style="glass"]) .popover {
+  background-color: color-mix(in srgb, var(--color-surface-elevated-opaque) 72%, transparent);
+  backdrop-filter: blur(var(--blur-glass)) saturate(1.5);
+  box-shadow:
+    inset 0 var(--size-border) 0 color-mix(in srgb, var(--color-text) 12%, transparent),
+    0 0 0 var(--size-border) color-mix(in srgb, var(--color-text) 14%, transparent),
+    0 var(--shadow-overlay-y) var(--shadow-overlay-blur) calc(var(--space-4) * -1) var(--color-shadow);
+}
+
+:global(:root[data-style="line"]) .popover {
+  background-color: var(--color-background);
+  background-image: none;
+  box-shadow:
+    0 0 0 var(--size-border) color-mix(in srgb, var(--color-text) 22%, transparent),
+    0 var(--space-5) calc(var(--space-12) + var(--size-border-thick)) calc(var(--space-4) * -1) var(--color-shadow);
+}
+
+.popover:focus-visible {
+  outline: none;
+}

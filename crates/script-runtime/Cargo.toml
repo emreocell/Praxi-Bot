@@ -20,4 +20,4 @@ thiserror.workspace = true
 tokio = { version = "1", features = ["rt", "time"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt", "time", "macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["rt", "time", "macros", "rt-multi-thread", "test-util"] }

@@ -4888,9 +4888,19 @@
         "required": [
           "status",
           "version",
+          "api_version",
+          "host",
           "uptime_secs"
         ],
         "properties": {
+          "api_version": {
+            "type": "string",
+            "description": "HTTP API compatibility version."
+          },
+          "host": {
+            "$ref": "#/components/schemas/HostInfo",
+            "description": "Capabilities of this host; probes never launch a browser."
+          },
           "status": {
             "type": "string",
             "description": "`ok` when ready for inference, or `setup_required` before provider setup."
@@ -4927,6 +4937,37 @@
           }
         },
         "additionalProperties": false
+      },
+      "HostInfo": {
+        "type": "object",
+        "description": "Host capabilities, independent of provider readiness.",
+        "required": [
+          "os",
+          "arch",
+          "has_display",
+          "has_browser",
+          "total_ram_mb"
+        ],
+        "properties": {
+          "arch": {
+            "type": "string"
+          },
+          "has_browser": {
+            "type": "boolean"
+          },
+          "has_display": {
+            "type": "boolean"
+          },
+          "os": {
+            "type": "string"
+          },
+          "total_ram_mb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Physical memory in MiB (1024 * 1024 bytes).",
+            "minimum": 0
+          }
+        }
       },
       "HumanAction": {
         "type": "string",
