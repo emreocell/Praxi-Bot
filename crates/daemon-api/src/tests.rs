@@ -1682,12 +1682,27 @@ async fn human_driving_waits_then_discards_stale_click_without_model_retry() {
     let instruction = click_after_state(3);
     let pending = run_and_reply_seen(&t, &chat, &instruction);
     tokio::pin!(pending);
-    assert!(
-        tokio::time::timeout(Duration::from_millis(100), &mut pending)
-            .await
-            .is_err(),
-        "paused call must wait"
-    );
+    // A fixed 100 ms is not enough on a slow runner: the click may still be in
+    // the model or the egress approval, and releasing then sends it to the
+    // overlay instead of the pause wait. Release only once the hub has parked
+    // this run on the latch. Keep polling the run so that approval can proceed.
+    let already = t.state.hub().affected_run_count();
+    let park = async {
+        loop {
+            if t.state.hub().affected_run_count() > already {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    };
+    tokio::select! {
+        outcome = &mut pending => {
+            panic!("paused call finished before the click parked: {outcome:?}");
+        }
+        result = tokio::time::timeout(Duration::from_secs(10), park) => {
+            result.expect("click never parked on the pause");
+        }
+    }
     assert_eq!(desktop.actions.load(std::sync::atomic::Ordering::SeqCst), 1);
 
     // Handing the wheel back lets the bot continue (an idle registration that

@@ -332,6 +332,14 @@ impl ControlHub {
         Ok(was)
     }
 
+    /// Runs that have observed the latch and are waiting it out. Test-only:
+    /// the desktop pause test releases only after the click has parked, so a
+    /// slow runner cannot resume before the wait begins.
+    #[cfg(test)]
+    pub(crate) fn affected_run_count(&self) -> usize {
+        self.state.lock().affected_runs.len()
+    }
+
     /// The mode of a live registration and the time left, `None` when no app
     /// is registered or the heartbeat expired.
     #[must_use]
