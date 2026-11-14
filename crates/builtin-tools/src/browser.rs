@@ -45,6 +45,8 @@ pub trait BrowserDriver: Send + Sync {
     fn on_desktop(&self) -> bool {
         false
     }
+    /// Override headless/headed mode before launching or ensuring a session.
+    fn set_headless(&self, _headless: bool) {}
     /// Navigate to `url` (starting the browser if needed); returns the page snapshot.
     async fn open(&self, url: &str, profile: Option<&str>) -> Result<String, String>;
     /// Navigate to `url` with dialog options.
@@ -134,6 +136,7 @@ struct Session {
     browser: Browser,
     page: Page,
     profile: Option<String>,
+    headless: bool,
     last_work: tokio::time::Instant,
 }
 
@@ -143,6 +146,7 @@ type BrowserPeers =
 
 pub struct CdpDriver {
     settings: BrowserSettings,
+    desired_headless: std::sync::atomic::AtomicBool,
     session: Arc<Mutex<Option<Session>>>,
     takeover_pin: Arc<std::sync::atomic::AtomicBool>,
     /// True while a bot run that used the computer is still active.
@@ -236,14 +240,21 @@ impl CdpDriver {
     /// Create a driver; nothing is launched until the first call.
     #[must_use]
     pub fn new(settings: BrowserSettings) -> Self {
+        let headless = settings.headless;
         Self {
             settings,
+            desired_headless: std::sync::atomic::AtomicBool::new(headless),
             peers: None,
             session: Arc::new(Mutex::new(None)),
             takeover_pin: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             activity: Arc::new(std::sync::RwLock::new(None)),
             reaper_started: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    fn desired_headless(&self) -> bool {
+        self.desired_headless
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     fn profile_path(&self, profile: Option<&str>) -> Result<Option<PathBuf>, String> {
@@ -304,9 +315,10 @@ impl CdpDriver {
                 }
             }
         }
+        let headless = self.desired_headless();
         let opts = LaunchOptions {
             executable: self.settings.executable.clone(),
-            headless: self.settings.headless,
+            headless,
             user_data_dir: self.profile_path(profile)?,
             ..LaunchOptions::default()
         };
@@ -324,6 +336,7 @@ impl CdpDriver {
                     })
                     .to_owned(),
             ),
+            headless,
             last_work: tokio::time::Instant::now(),
         })
     }
@@ -335,12 +348,15 @@ impl CdpDriver {
         allow_launch: bool,
     ) -> Result<&'a mut Session, String> {
         self.start_idle_reaper();
-        // A crashed or closed browser must not stay cached until daemon restart.
+        let desired_headless = self.desired_headless();
+        // A crashed, closed, or mode-mismatched (headless vs headed) browser
+        // must not stay cached across runs.
         if guard
             .as_ref()
-            .is_some_and(|sess| !Self::session_alive(sess))
+            .is_some_and(|sess| !Self::session_alive(sess) || sess.headless != desired_headless)
+            && let Some(old) = guard.take()
         {
-            *guard = None;
+            let _ = old.browser.close().await;
         }
         if let Some(existing) = guard.as_ref() {
             if let Some(p) = profile
@@ -504,7 +520,12 @@ macro_rules! with_session {
 #[async_trait]
 impl BrowserDriver for CdpDriver {
     fn on_desktop(&self) -> bool {
-        !self.settings.headless && browser_cdp::host::has_display()
+        !self.desired_headless() && browser_cdp::host::has_display()
+    }
+
+    fn set_headless(&self, headless: bool) {
+        self.desired_headless
+            .store(headless, std::sync::atomic::Ordering::SeqCst);
     }
 
     async fn open_opts(
@@ -1536,10 +1557,19 @@ impl Tool for BrowserTool {
     }
 
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
+        let shared = self.shared.for_bot(ctx.bot_id.as_deref())?;
+        if let Some(headless) = self
+            .shared
+            .control
+            .as_ref()
+            .and_then(|gate| gate.browser_headless_for_run(&ctx.run_id))
+        {
+            shared.driver.set_headless(headless);
+        }
         let selected = BrowserTool {
             spec: self.spec.clone(),
             op: self.op,
-            shared: self.shared.for_bot(ctx.bot_id.as_deref())?,
+            shared,
         };
         let text = selected.run(&ctx.run_id, input).await?;
         Ok(finish_text(ctx, &self.shared.data_dir.join("spill"), text))
@@ -2509,6 +2539,7 @@ mod tests {
             browser,
             page,
             profile: None,
+            headless: true,
             last_work: tokio::time::Instant::now(),
         });
         let active = Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -2604,6 +2635,7 @@ mod tests {
             browser,
             page,
             profile: None,
+            headless: true,
             last_work: tokio::time::Instant::now(),
         });
         driver.set_takeover_pin(true);
@@ -2648,6 +2680,7 @@ mod tests {
             browser,
             page,
             profile: None,
+            headless: true,
             last_work: tokio::time::Instant::now(),
         });
         // Connected over real I/O; from here the clock is frozen and advanced by hand.
@@ -2703,6 +2736,7 @@ mod tests {
             browser,
             page,
             profile: None,
+            headless: true,
             last_work: tokio::time::Instant::now(),
         });
         tokio::time::pause();
@@ -2770,6 +2804,7 @@ mod tests {
             browser,
             page,
             profile: None,
+            headless: true,
             last_work: tokio::time::Instant::now(),
         });
         let tools = tools(drv, dir.path(), None);
@@ -2785,5 +2820,81 @@ mod tests {
             written.contains("launched"),
             "dead session was reused instead of relaunching the fake browser: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn browser_headless_for_run_toggles_mode_and_replaces_mismatched_session() {
+        struct HeadlessControl;
+
+        #[async_trait]
+        impl DesktopControlGate for HeadlessControl {
+            async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+                Ok(())
+            }
+
+            fn browser_headless_for_run(&self, run_id: &str) -> Option<bool> {
+                match run_id {
+                    "run-host" => Some(false),
+                    "run-browser" => Some(true),
+                    _ => None,
+                }
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("launches.txt");
+        let launcher = write_fake_launcher(dir.path(), &log);
+        let server = FakeCdp::start();
+        let browser = Browser::connect(&server.url)
+            .await
+            .expect("connect fake cdp");
+        let page = browser.first_page().await.expect("attach fake page");
+
+        let drv = Arc::new(CdpDriver::new(BrowserSettings {
+            executable: Some(launcher),
+            headless: true,
+            ..BrowserSettings::isolated(dir.path())
+        }));
+        *drv.session.lock().await = Some(Session {
+            browser,
+            page,
+            profile: None,
+            headless: true,
+            last_work: tokio::time::Instant::now(),
+        });
+        let tools = tools(
+            Arc::clone(&drv) as Arc<dyn BrowserDriver>,
+            dir.path(),
+            Some(Arc::new(HeadlessControl)),
+        );
+        let open = get(&tools, "browser_open");
+
+        let host_ctx = ToolContext {
+            run_id: "run-host".into(),
+            ..ToolContext::default()
+        };
+        let _ = open
+            .call(&host_ctx, json!({"url": "https://example.com"}))
+            .await
+            .expect_err("fake launcher exits without CDP");
+        assert!(!drv.desired_headless());
+        assert!(
+            drv.session.lock().await.is_none(),
+            "mode change headless->headed must drop the mismatched cached session"
+        );
+        let written = std::fs::read_to_string(&log).unwrap_or_default();
+        assert!(written.contains("launched"));
+
+        // Switching back to run-browser flips desired_headless back to true.
+        let browser_ctx = ToolContext {
+            run_id: "run-browser".into(),
+            ..ToolContext::default()
+        };
+        let _ = open
+            .call(&browser_ctx, json!({"url": "https://example.com"}))
+            .await
+            .expect_err("fake launcher exits without CDP");
+        assert!(drv.desired_headless());
+        server.kill();
     }
 }

@@ -68,8 +68,13 @@ pub struct BuiltinConfig {
     /// Existing platform/CDP adapters only. No screenshot-tool fallback or new browser.
     pub view_registry: Option<Arc<live_view::TargetRegistry>>,
     pub view_targets: Vec<Arc<dyn live_view::ViewTarget>>,
-    /// Desktop backend (local or remote). Desktop tools are skipped when `None`.
+    /// Desktop backend (local or remote). Desktop tools are skipped when `None`
+    /// unless `dynamic_desktop` is true.
     pub desktop: Option<Arc<dyn DesktopBackend>>,
+    /// Register desktop tools without an upfront static backend so a per-run
+    /// backend resolved via [`DesktopControlGate::desktop_for_run`] can supply one
+    /// (e.g. a remote PC node coming online later).
+    pub dynamic_desktop: bool,
     /// OCR engine used for set-of-marks when the accessibility tree is weak.
     pub ocr: Option<SharedOcr>,
     /// Desktop timing settings.
@@ -107,6 +112,7 @@ impl BuiltinConfig {
             browser_settings: BrowserSettings::isolated(&data_dir),
             data_dir,
             desktop: None,
+            dynamic_desktop: false,
             view_registry: None,
             view_targets: Vec::new(),
             ocr: None,
@@ -141,9 +147,9 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         }
     }
     let mut all: Vec<Arc<dyn Tool>> = Vec::new();
-    if let Some(backend) = cfg.desktop {
-        all.extend(desktop::tools(
-            backend,
+    if cfg.desktop.is_some() || cfg.dynamic_desktop {
+        all.extend(desktop::tools_dynamic(
+            cfg.desktop,
             cfg.ocr,
             &cfg.data_dir,
             cfg.desktop_settings,

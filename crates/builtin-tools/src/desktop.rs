@@ -177,7 +177,7 @@ impl ObsFilter {
 }
 
 struct Shared {
-    backend: Arc<dyn DesktopBackend>,
+    default_backend: Option<Arc<dyn DesktopBackend>>,
     ocr: Option<SharedOcr>,
     state: Mutex<RunStates>,
     data_dir: PathBuf,
@@ -421,8 +421,21 @@ impl Shared {
             .ok_or_else(|| exec_err(NO_OBSERVATION_MSG))
     }
 
-    async fn act(&self, action: Action, permit: &ActionPermit) -> Result<String, ToolError> {
-        let backend = Arc::clone(&self.backend);
+    fn backend(&self, run_id: &str) -> Result<Arc<dyn DesktopBackend>, ToolError> {
+        self.control
+            .as_ref()
+            .and_then(|gate| gate.desktop_for_run(run_id))
+            .or_else(|| self.default_backend.clone())
+            .ok_or_else(|| exec_err("desktop backend is unavailable for this run"))
+    }
+
+    async fn act(
+        &self,
+        run_id: &str,
+        action: Action,
+        permit: &ActionPermit,
+    ) -> Result<String, ToolError> {
+        let backend = self.backend(run_id)?;
         let res = permit
             .protect(async move { backend.act(action).await })
             .await
@@ -443,8 +456,9 @@ impl Shared {
         filter: &ObsFilter,
     ) -> Result<String, ToolError> {
         async {
+            let backend = self.backend(run_id)?;
             let observation_epoch=self.control.as_ref().map_or(0,|gate|gate.observation_epoch());
-            let snap = self.backend.snapshot(scope).await.map_err(|e| derr(&e))?;
+            let snap = backend.snapshot(scope).await.map_err(|e| derr(&e))?;
             if self.control.as_ref().map_or(0,|gate|gate.observation_epoch()) != observation_epoch {
                 self.state.lock().map.remove(run_id);
                 return Err(exec_err("human intervention changed the display during observation; obtain a fresh observation"));
@@ -517,10 +531,13 @@ impl Shared {
         let Some(ocr) = self.ocr.clone() else {
             return "\n(accessibility tree is weak and no OCR engine is configured)\n".into();
         };
-        if !self.backend.capabilities().screenshot {
+        let Ok(backend) = self.backend(run_id) else {
+            return "\n(accessibility tree is weak; desktop backend is unavailable)\n".into();
+        };
+        if !backend.capabilities().screenshot {
             return "\n(accessibility tree is weak; screenshots are unavailable)\n".into();
         }
-        match self.build_marks(run_id, snap, ocr).await {
+        match self.build_marks(backend, run_id, snap, ocr).await {
             Ok(s) => s,
             Err(e) => format!("\n(accessibility tree is weak; OCR failed: {e})\n"),
         }
@@ -528,13 +545,13 @@ impl Shared {
 
     async fn build_marks(
         &self,
+        backend: Arc<dyn DesktopBackend>,
         run_id: &str,
         snap: &Snapshot,
         ocr: SharedOcr,
     ) -> Result<String, String> {
         let bounds = snap.window.bounds;
-        let image = self
-            .backend
+        let image = backend
             .screenshot(Region::Rect(bounds), Quality::Lossless)
             .await
             .map_err(|e| e.to_string())?;
@@ -609,16 +626,18 @@ impl Shared {
     /// `launch_settle` and the worst case is not slower than the old fixed sleep.
     async fn poll_launched_windows(
         &self,
+        run_id: &str,
         before: &HashSet<u64>,
         pid: u32,
         deadline: tokio::time::Instant,
     ) -> Result<Vec<desktop_api::WindowInfo>, ToolError> {
+        let backend = self.backend(run_id)?;
         let matches_launch = |w: &desktop_api::WindowInfo| -> bool {
             !before.contains(&w.id) && !w.title.is_empty() && (pid == 0 || w.pid == pid)
         };
         async {
             loop {
-                let wins = self.backend.windows().await.map_err(|e| derr(&e))?;
+                let wins = backend.windows().await.map_err(|e| derr(&e))?;
                 let found: Vec<_> = wins.into_iter().filter(&matches_launch).collect();
                 let now = tokio::time::Instant::now();
                 if !found.is_empty() || now >= deadline {
@@ -636,7 +655,7 @@ impl Shared {
     }
 }
 
-/// Build the desktop tools.
+/// Build the desktop tools with a fixed default backend.
 #[must_use]
 pub fn tools(
     backend: Arc<dyn DesktopBackend>,
@@ -645,8 +664,21 @@ pub fn tools(
     settings: DesktopSettings,
     control: Option<Arc<dyn DesktopControlGate>>,
 ) -> Vec<Arc<dyn Tool>> {
+    tools_dynamic(Some(backend), ocr, data_dir, settings, control)
+}
+
+/// Build the desktop tools with optional fallback backend and per-run routing
+/// via [`DesktopControlGate::desktop_for_run`].
+#[must_use]
+pub fn tools_dynamic(
+    default_backend: Option<Arc<dyn DesktopBackend>>,
+    ocr: Option<SharedOcr>,
+    data_dir: &Path,
+    settings: DesktopSettings,
+    control: Option<Arc<dyn DesktopControlGate>>,
+) -> Vec<Arc<dyn Tool>> {
     let shared = Arc::new(Shared {
-        backend,
+        default_backend,
         ocr,
         state: Mutex::new(RunStates::default()),
         data_dir: data_dir.to_path_buf(),
@@ -958,8 +990,8 @@ impl DesktopTool {
         }
         match self.op {
             Op::ListApps => {
-                let wins = sh
-                    .backend
+                let backend = sh.backend(run_id)?;
+                let wins = backend
                     .windows()
                     .instrument(tracing::info_span!("desktop.act", op = "list_apps"))
                     .await
@@ -993,8 +1025,8 @@ impl DesktopTool {
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
                 }
-                let before: HashSet<u64> = sh
-                    .backend
+                let backend = sh.backend(run_id)?;
+                let before: HashSet<u64> = backend
                     .windows()
                     .await
                     .map_err(|e| derr(&e))?
@@ -1005,7 +1037,6 @@ impl DesktopTool {
                 // `launch_settle` budget. Zero settle makes the deadline "now":
                 // one sample, no sleep.
                 let deadline = tokio::time::Instant::now() + sh.settings.launch_settle;
-                let backend = Arc::clone(&sh.backend);
                 let pid = permit
                     .protect(async move {
                         backend
@@ -1018,7 +1049,9 @@ impl DesktopTool {
                     .await
                     .map_err(exec_err)?
                     .map_err(|e| derr(&e))?;
-                let wins = sh.poll_launched_windows(&before, pid, deadline).await?;
+                let wins = sh
+                    .poll_launched_windows(run_id, &before, pid, deadline)
+                    .await?;
                 let mut out = format!("launched pid={pid}\nwindows:\n");
                 for w in wins.iter().take(MAX_WINDOWS_SHOWN) {
                     let _ = writeln!(out, "{}", window_line(w));
@@ -1031,7 +1064,8 @@ impl DesktopTool {
                     Some(id)
                 } else if let Some(t) = &i.title {
                     let needle = t.to_lowercase();
-                    let wins = sh.backend.windows().await.map_err(|e| derr(&e))?;
+                    let backend = sh.backend(run_id)?;
+                    let wins = backend.windows().await.map_err(|e| derr(&e))?;
                     let found = wins
                         .iter()
                         .find(|w| w.title.to_lowercase().contains(&needle))
@@ -1057,8 +1091,8 @@ impl DesktopTool {
                 if i.screenshot {
                     let region =
                         scope.map_or(Region::FullScreen, |window_id| Region::Window { window_id });
-                    let img = sh
-                        .backend
+                    let backend = sh.backend(run_id)?;
+                    let img = backend
                         .screenshot(region, Quality::Medium)
                         .await
                         .map_err(|e| derr(&e))?;
@@ -1096,7 +1130,9 @@ impl DesktopTool {
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
                 }
-                let head = sh.act(Action::Click { target, method }, &permit).await?;
+                let head = sh
+                    .act(run_id, Action::Click { target, method }, &permit)
+                    .await?;
                 sh.settle_and_refresh(run_id, head).await
             }
             Op::Type => {
@@ -1124,6 +1160,7 @@ impl DesktopTool {
                 }
                 // Focus the element with a real click, then type into the focus.
                 sh.act(
+                    run_id,
                     Action::Click {
                         target,
                         method: ClickMethod::Global,
@@ -1131,7 +1168,9 @@ impl DesktopTool {
                     &permit,
                 )
                 .await?;
-                let head = sh.act(Action::TypeText { text: i.text }, &permit).await?;
+                let head = sh
+                    .act(run_id, Action::TypeText { text: i.text }, &permit)
+                    .await?;
                 sh.settle_and_refresh(run_id, head).await
             }
             Op::SetValue => {
@@ -1159,6 +1198,7 @@ impl DesktopTool {
                 }
                 let head = sh
                     .act(
+                        run_id,
                         Action::SetValue {
                             target,
                             value: i.value,
@@ -1205,6 +1245,7 @@ impl DesktopTool {
                 }
                 if let Some(target) = focus_target {
                     sh.act(
+                        run_id,
                         Action::Click {
                             target,
                             method: ClickMethod::Global,
@@ -1213,7 +1254,7 @@ impl DesktopTool {
                     )
                     .await?;
                 }
-                let head = sh.act(Action::KeyPress { keys }, &permit).await?;
+                let head = sh.act(run_id, Action::KeyPress { keys }, &permit).await?;
                 sh.settle_and_refresh(run_id, head).await
             }
             Op::Scroll => {
@@ -1257,6 +1298,7 @@ impl DesktopTool {
                 }
                 let head = sh
                     .act(
+                        run_id,
                         Action::Scroll {
                             target,
                             delta_x: i.dx,
@@ -1296,7 +1338,9 @@ impl DesktopTool {
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
                 }
-                let head = sh.act(Action::Drag { from, to, method }, &permit).await?;
+                let head = sh
+                    .act(run_id, Action::Drag { from, to, method }, &permit)
+                    .await?;
                 sh.settle_and_refresh(run_id, head).await
             }
         }
@@ -2682,5 +2726,75 @@ mod tests {
         let q = text(&st.call(&ctx, json!({"query": "edit"})).await.unwrap());
         assert!(q.contains("[3] edit"), "{q}");
         assert!(q.contains("(5 nodes omitted"), "{q}");
+    }
+
+    #[tokio::test]
+    async fn dynamic_tools_route_desktop_calls_per_run_id() {
+        struct RunRouter {
+            routes: std::collections::HashMap<String, Arc<dyn DesktopBackend>>,
+        }
+
+        #[async_trait]
+        impl DesktopControlGate for RunRouter {
+            async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+                Ok(())
+            }
+
+            fn desktop_for_run(&self, run_id: &str) -> Option<Arc<dyn DesktopBackend>> {
+                self.routes.get(run_id).cloned()
+            }
+        }
+
+        let a = Arc::new(FakeDesktop::new(false));
+        let b = Arc::new(FakeDesktop::new(false));
+        let mut routes: std::collections::HashMap<String, Arc<dyn DesktopBackend>> =
+            std::collections::HashMap::new();
+        routes.insert("run-a".into(), a.clone());
+        routes.insert("run-b".into(), b.clone());
+        let gate = Arc::new(RunRouter { routes });
+
+        let d = tempfile::tempdir().unwrap();
+        let t = tools_dynamic(None, None, d.path(), settings(), Some(gate));
+
+        let ctx_a = ToolContext {
+            run_id: "run-a".into(),
+            ..ToolContext::default()
+        };
+        let ctx_b = ToolContext {
+            run_id: "run-b".into(),
+            ..ToolContext::default()
+        };
+        let ctx_none = ToolContext {
+            run_id: "run-none".into(),
+            ..ToolContext::default()
+        };
+
+        get(&t, "desktop_get_state")
+            .call(&ctx_a, json!({}))
+            .await
+            .unwrap();
+        get(&t, "desktop_click")
+            .call(&ctx_a, json!({"index": 1, "gen": 1}))
+            .await
+            .unwrap();
+        assert_eq!(a.actions.lock().len(), 1);
+        assert!(b.actions.lock().is_empty());
+
+        get(&t, "desktop_get_state")
+            .call(&ctx_b, json!({}))
+            .await
+            .unwrap();
+        get(&t, "desktop_click")
+            .call(&ctx_b, json!({"index": 2, "gen": 1}))
+            .await
+            .unwrap();
+        assert_eq!(a.actions.lock().len(), 1);
+        assert_eq!(b.actions.lock().len(), 1);
+
+        let err = get(&t, "desktop_get_state")
+            .call(&ctx_none, json!({}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("unavailable"), "{err}");
     }
 }

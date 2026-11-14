@@ -42,6 +42,19 @@ pub trait DesktopControlGate: Send + Sync {
     fn computer_in_use_for_bot(&self, _bot_id: &str) -> bool {
         self.computer_in_use()
     }
+    /// Per-run desktop backend resolved for `run_id`, overriding the static
+    /// backend passed to `desktop::tools` when present.
+    fn desktop_for_run(
+        &self,
+        _run_id: &str,
+    ) -> Option<std::sync::Arc<dyn desktop_api::DesktopBackend>> {
+        None
+    }
+    /// Per-run browser headless override (`Some(false)` for headed on Xvfb,
+    /// `Some(true)` for headless). `None` keeps `BrowserSettings::headless`.
+    fn browser_headless_for_run(&self, _run_id: &str) -> Option<bool> {
+        None
+    }
     /// While the human drives, observation tools (snapshots, screenshots, OCR,
     /// tab and window listings) are refused too: the model must not read what
     /// the user types. `Some(message)` is returned to the model.
