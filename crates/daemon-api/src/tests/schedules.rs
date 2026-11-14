@@ -787,7 +787,7 @@ async fn shutdown_stops_the_scheduler_before_the_agent_loop() {
         }
         tokio::task::yield_now().await;
     }
-    assert!(t.state.scheduler().is_ok(), "serve started the scheduler");
+    let scheduler = t.state.scheduler().expect("serve started the scheduler");
     tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(10), server)
         .await
@@ -796,7 +796,11 @@ async fn shutdown_stops_the_scheduler_before_the_agent_loop() {
         .unwrap();
     assert_eq!(t.state.shutdown_order(), ["scheduler", "agent"]);
     // A stopped scheduler does not tick any more.
-    tokio::time::timeout(Duration::from_secs(5), t.state.scheduler().unwrap().tick())
+    assert!(
+        t.state.scheduler().is_err(),
+        "stopped engine is detached for a future activation"
+    );
+    tokio::time::timeout(Duration::from_secs(5), scheduler.tick())
         .await
         .expect("tick returns at once on a stopped scheduler");
     let _ = auth();

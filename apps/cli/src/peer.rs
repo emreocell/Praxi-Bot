@@ -3,7 +3,7 @@ use crate::Result;
 use peer_network::{ALPN_API, PeerConfig, PeerNetwork, Role};
 use std::{path::Path, sync::Arc};
 
-fn config(data: &Path, host: bool) -> Result<(PeerConfig, Option<bool>)> {
+pub(crate) fn config(data: &Path, host: bool) -> Result<(PeerConfig, Option<bool>)> {
     let mut cfg = PeerConfig::new(data.join("peer"));
     cfg.local_role = if host { Role::Host } else { Role::Desktop };
     cfg.display_name = if host { "Praxi host" } else { "Praxi desktop" }.into();

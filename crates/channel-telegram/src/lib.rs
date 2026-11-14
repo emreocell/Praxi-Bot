@@ -47,7 +47,7 @@ pub use bot_api::{
     ThrottledEditor, Update, clamp_telegram_text,
 };
 pub use bridge::{
-    DEFAULT_POLL_BACKOFF, DEFAULT_POLL_TIMEOUT_SECS, TelegramChannel, TelegramConfig,
+    ChannelStatus, DEFAULT_POLL_BACKOFF, DEFAULT_POLL_TIMEOUT_SECS, TelegramChannel, TelegramConfig,
 };
 pub use channel_trait::{
     Channel, ChannelCaps, ChatRef, IncomingKind, IncomingMessage, InlineButton, OutgoingMessage,

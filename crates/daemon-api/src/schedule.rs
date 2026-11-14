@@ -31,6 +31,7 @@ pub(crate) struct DaemonExecutor {
     pub agent: AgentLoop,
     pub storage: Arc<Storage>,
     pub user_id: UserId,
+    pub leader: crate::host::LeaderControl,
 }
 
 fn exec_err(e: impl std::fmt::Display) -> SchedulerError {
@@ -115,8 +116,9 @@ impl ScheduleExecutor for DaemonExecutor {
         let chat = self.chat_for(schedule)?;
         let work = work_of(&schedule.payload)?;
         let run = self
-            .agent
-            .run_scheduled(chat, schedule.id, work)
+            .leader
+            .with_active(|| self.agent.run_scheduled(chat, schedule.id, work))
+            .map_err(exec_err)?
             .map_err(|e| match e {
                 LoopError::Busy(c) => exec_err(format!("chat {c} is busy with another turn")),
                 other => exec_err(other),
