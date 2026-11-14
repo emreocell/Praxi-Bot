@@ -3786,7 +3786,7 @@
               },
               {
                 "$ref": "#/components/schemas/RuntimeConfigDto",
-                "description": "Optional `[runtime]` override (applied over `config` / `profile_toml` when present)."
+                "description": "Optional `[runtime]` declaration. Must agree with `config` / `profile_toml`\nwhen both are supplied. Omission on update preserves the stored target."
               }
             ]
           }
@@ -5024,6 +5024,13 @@
           "granted_at_ms"
         ],
         "properties": {
+          "computer": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Computer scope of this grant, when it controls a desktop/browser."
+          },
           "granted_at_ms": {
             "type": "integer",
             "format": "int64",
@@ -6735,6 +6742,20 @@
             "format": "uuid",
             "description": "Chat, if any."
           },
+          "computer_node": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable key of the PC used by this run (`local` for the daemon desktop)."
+          },
+          "computer_node_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name captured at target binding."
+          },
           "computer_target": {
             "type": [
               "string",
@@ -6778,6 +6799,14 @@
             ],
             "description": "Reason the run is currently `paused` (e.g. `waiting_for_pc`)."
           },
+          "paused_at_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Start of the current pause in Unix milliseconds."
+          },
           "schedule_id": {
             "type": [
               "string",
@@ -6799,7 +6828,7 @@
       },
       "RuntimeConfigDto": {
         "type": "object",
-        "description": "A bot.\nBot `[runtime]` settings (ADR-0027 §7).",
+        "description": "Bot `[runtime]` settings (ADR-0027 §7).",
         "required": [
           "computer"
         ],

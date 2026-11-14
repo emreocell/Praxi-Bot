@@ -47,7 +47,6 @@ impl HostInfo {
     }
 }
 
-/// A bot.
 /// Bot `[runtime]` settings (ADR-0027 §7).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct RuntimeConfigDto {
@@ -117,6 +116,9 @@ pub enum GrantTargetDto {
 /// A persisted "always allow" rule of a bot.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct GrantDto {
+    /// Computer scope of this grant, when it controls a desktop/browser.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub computer: Option<String>,
     /// What it covers.
     pub target: GrantTargetDto,
     /// When it was granted.
@@ -157,7 +159,8 @@ pub struct BotInput {
     /// Profile as TOML text (the contents of a bot profile file).
     #[serde(default)]
     pub profile_toml: Option<String>,
-    /// Optional `[runtime]` override (applied over `config` / `profile_toml` when present).
+    /// Optional `[runtime]` declaration. Must agree with `config` / `profile_toml`
+    /// when both are supplied. Omission on update preserves the stored target.
     #[serde(default)]
     pub runtime: Option<RuntimeConfigDto>,
 }
@@ -357,6 +360,15 @@ pub struct RunDto {
     /// Resolved computer target label fixed at run start (`pc`, `host`, `browser`, `off`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub computer_target: Option<String>,
+    /// Stable key of the PC used by this run (`local` for the daemon desktop).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub computer_node: Option<String>,
+    /// Display name captured at target binding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub computer_node_name: Option<String>,
+    /// Start of the current pause in Unix milliseconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paused_at_ms: Option<i64>,
     /// Reason the run is currently `paused` (e.g. `waiting_for_pc`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pause_reason: Option<String>,

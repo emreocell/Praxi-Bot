@@ -378,7 +378,7 @@ impl Storage {
     /// Fails on SQLite errors.
     pub fn insert_run(&self, r: &Run) -> Result<()> {
         self.conn().execute(
-            "INSERT INTO runs (id, user_id, bot_id, chat_id, kind, state, error, created_at_ms, updated_at_ms, parent_run_id, spec_json, computer_target, pause_reason) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            "INSERT INTO runs (id, user_id, bot_id, chat_id, kind, state, error, created_at_ms, updated_at_ms, parent_run_id, spec_json, computer_target, pause_reason, computer_node, computer_node_name, paused_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 r.id.to_string(),
                 r.user_id.to_string(),
@@ -393,6 +393,7 @@ impl Storage {
                 r.spec.as_ref().map(serde_json::to_string).transpose()?,
                 r.computer_target,
                 r.pause_reason,
+                r.computer_node, r.computer_node_name, r.paused_at_ms,
             ],
         )?;
         Ok(())
@@ -458,7 +459,7 @@ impl Storage {
     /// Fails on SQLite errors or if the run does not exist.
     pub fn update_run_state(&self, id: RunId, state: &str, error: Option<&str>) -> Result<()> {
         let n = self.conn().execute(
-            "UPDATE runs SET state = ?2, error = ?3, updated_at_ms = ?4, pause_reason = CASE WHEN ?2 = 'paused' THEN pause_reason ELSE NULL END WHERE id = ?1",
+            "UPDATE runs SET state = ?2, error = ?3, updated_at_ms = ?4, paused_at_ms = CASE WHEN ?2 = 'paused' THEN COALESCE(paused_at_ms, ?4) ELSE NULL END, pause_reason = CASE WHEN ?2 = 'paused' THEN pause_reason ELSE NULL END WHERE id = ?1",
             params![id.to_string(), state, error, now_ms()],
         )?;
         if n == 0 {
@@ -476,6 +477,27 @@ impl Storage {
         let n = self.conn().execute(
             "UPDATE runs SET computer_target = ?2, updated_at_ms = ?3 WHERE id = ?1",
             params![id.to_string(), target, now_ms()],
+        )?;
+        if n == 0 {
+            return Err(StorageError::NotFound(format!("run {id}")));
+        }
+        Ok(())
+    }
+
+    /// Persist label and concrete target together before any tool can run.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors or if the run does not exist.
+    pub fn bind_run_computer(
+        &self,
+        id: RunId,
+        label: &str,
+        node: Option<&str>,
+        name: Option<&str>,
+    ) -> Result<()> {
+        let n = self.conn().execute(
+            "UPDATE runs SET computer_target = ?2, computer_node = ?3, computer_node_name = ?4 WHERE id = ?1 AND (computer_target IS NULL OR computer_target = ?2) AND (computer_node IS NULL OR computer_node = ?3)",
+            params![id.to_string(), label, node, name],
         )?;
         if n == 0 {
             return Err(StorageError::NotFound(format!("run {id}")));
@@ -781,7 +803,7 @@ impl Storage {
     }
 }
 
-const RUN_SELECT: &str = "SELECT id, user_id, bot_id, chat_id, kind, state, error, created_at_ms, updated_at_ms, parent_run_id, spec_json, computer_target, pause_reason FROM runs";
+const RUN_SELECT: &str = "SELECT id, user_id, bot_id, chat_id, kind, state, error, created_at_ms, updated_at_ms, parent_run_id, spec_json, computer_target, pause_reason, computer_node, computer_node_name, paused_at_ms FROM runs";
 const STEP_SELECT: &str = "SELECT id, run_id, user_id, idx, name, input_json, idempotent, retry_json, status, attempt, output_json, error, started_at_ms, finished_at_ms FROM run_steps";
 const APPROVAL_SELECT: &str = "SELECT id, user_id, run_id, step_id, summary, decision, requested_at_ms, decided_at_ms FROM approvals";
 
@@ -839,6 +861,9 @@ fn run_row(r: &Row<'_>) -> rusqlite::Result<Run> {
         parent_run_id: opt_uuid_at(r, 9)?.map(RunId),
         spec: opt_json_at(r, 10)?,
         computer_target: r.get(11)?,
+        computer_node: r.get(13)?,
+        computer_node_name: r.get(14)?,
+        paused_at_ms: r.get(15)?,
         pause_reason: r.get(12)?,
     })
 }
@@ -945,6 +970,9 @@ mod tests {
             parent_run_id: None,
             spec: None,
             computer_target: None,
+            computer_node: None,
+            computer_node_name: None,
+            paused_at_ms: None,
             pause_reason: None,
         };
         f.st.insert_run(&r).unwrap();
@@ -1291,11 +1319,15 @@ mod tests {
                 parent_run_id: None,
                 spec: None,
                 computer_target: None,
+                computer_node: None,
+                computer_node_name: None,
+                paused_at_ms: None,
                 pause_reason: None,
             };
             run_id = r.id;
             st.insert_run(&r).unwrap();
-            st.set_run_computer_target(run_id, Some("pc")).unwrap();
+            st.bind_run_computer(run_id, "pc", Some("pc-A"), Some("My PC"))
+                .unwrap();
             st.update_run_state(run_id, "paused", None).unwrap();
             st.set_run_pause_reason(run_id, Some("waiting_for_pc"))
                 .unwrap();
@@ -1310,8 +1342,35 @@ mod tests {
         let got = st.get_run(run_id).unwrap().unwrap();
         assert_eq!(got.computer_target.as_deref(), Some("pc"));
         assert_eq!(got.pause_reason.as_deref(), Some("waiting_for_pc"));
+        assert_eq!(got.computer_node.as_deref(), Some("pc-A"));
+        assert_eq!(got.computer_node_name.as_deref(), Some("My PC"));
+        assert!(
+            st.bind_run_computer(run_id, "pc", Some("pc-B"), Some("Other PC"))
+                .is_err()
+        );
+        assert_eq!(
+            st.get_run(run_id)
+                .unwrap()
+                .unwrap()
+                .computer_node
+                .as_deref(),
+            Some("pc-A")
+        );
+        assert!(got.paused_at_ms.is_some());
+        st.conn()
+            .execute(
+                "UPDATE runs SET paused_at_ms = 123 WHERE id = ?1",
+                [run_id.to_string()],
+            )
+            .unwrap();
+        st.set_run_computer_target(run_id, Some("pc")).unwrap();
+        st.set_run_pause_reason(run_id, Some("waiting_for_pc"))
+            .unwrap();
+        st.update_run_state(run_id, "paused", None).unwrap();
+        assert_eq!(st.get_run(run_id).unwrap().unwrap().paused_at_ms, Some(123));
         st.update_run_state(run_id, "running", None).unwrap();
         let running = st.get_run(run_id).unwrap().unwrap();
         assert_eq!(running.pause_reason, None);
+        assert_eq!(running.paused_at_ms, None);
     }
 }

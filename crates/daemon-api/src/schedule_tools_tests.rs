@@ -112,6 +112,9 @@ fn fx_at(l: ScheduleLimits, start_ms: i64, known_user: bool) -> Fx {
             parent_run_id: None,
             spec: None,
             computer_target: None,
+            computer_node: None,
+            computer_node_name: None,
+            paused_at_ms: None,
             pause_reason: None,
         })
         .unwrap();

@@ -129,6 +129,9 @@ impl Runtime {
             parent_run_id: parent,
             spec,
             computer_target: None,
+            computer_node: None,
+            computer_node_name: None,
+            paused_at_ms: None,
             pause_reason: None,
         };
         self.storage.insert_run(&run)?;

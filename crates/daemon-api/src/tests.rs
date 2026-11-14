@@ -1923,6 +1923,9 @@ async fn listing_runs_writes_nothing_to_disk() {
         parent_run_id: None,
         spec: None,
         computer_target: None,
+        computer_node: None,
+        computer_node_name: None,
+        paused_at_ms: None,
         pause_reason: None,
     })
     .unwrap();
@@ -3164,7 +3167,7 @@ async fn runs_expose_computer_target_and_waiting_for_pc_pause_reason() {
         Method::POST,
         "/v1/bots",
         Some(json!({
-            "profile_toml": format!("{PROFILE}\n[runtime]\ncomputer = \"pc\"\n")
+            "profile_toml": format!("{PROFILE}\n[runtime]\ncomputer = \"node:workstation-1\"\n")
         })),
     )
     .await;
@@ -3197,6 +3200,9 @@ async fn runs_expose_computer_target_and_waiting_for_pc_pause_reason() {
     assert_eq!(get_pc.json()["state"], "paused");
     assert_eq!(get_pc.json()["computer_target"], "pc");
     assert_eq!(get_pc.json()["pause_reason"], "waiting_for_pc");
+    assert_eq!(get_pc.json()["computer_node"], "workstation-1");
+    assert_eq!(get_pc.json()["computer_node_name"], "workstation-1");
+    assert!(get_pc.json()["paused_at_ms"].as_i64().is_some());
 
     // GET /v1/runs list also surfaces computer_target and pause_reason.
     let list_r = call(&t, Method::GET, "/v1/runs", None).await;
@@ -3218,4 +3224,42 @@ async fn runs_expose_computer_target_and_waiting_for_pc_pause_reason() {
     assert_eq!(get_pc_after.json()["state"], "cancelled");
     assert_eq!(get_pc_after.json()["computer_target"], "pc");
     assert!(get_pc_after.json()["pause_reason"].is_null());
+}
+
+#[tokio::test]
+async fn put_bot_without_runtime_preserves_target_and_rejects_conflicting_override() {
+    let t = setup();
+    let created = call(
+        &t,
+        Method::POST,
+        "/v1/bots",
+        Some(json!({
+            "profile_toml": format!("{PROFILE}\n[runtime]\ncomputer = \"pc\"\n")
+        })),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::CREATED);
+    let path = format!("/v1/bots/{}", created.json()["id"].as_str().unwrap());
+    let updated = call(
+        &t,
+        Method::PUT,
+        &path,
+        Some(json!({"profile_toml": PROFILE})),
+    )
+    .await;
+    assert_eq!(updated.status, StatusCode::OK);
+    assert_eq!(updated.json()["runtime"]["computer"], "pc");
+    let conflict = call(
+        &t,
+        Method::PUT,
+        &path,
+        Some(json!({
+            "profile_toml": format!("{PROFILE}\n[runtime]\ncomputer = \"host\"\n"),
+            "runtime": {"computer": "pc"}
+        })),
+    )
+    .await;
+    assert_eq!(conflict.status, StatusCode::BAD_REQUEST);
+    let current = call(&t, Method::GET, &path, None).await;
+    assert_eq!(current.json()["runtime"]["computer"], "pc");
 }

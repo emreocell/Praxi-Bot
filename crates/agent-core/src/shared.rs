@@ -115,6 +115,8 @@ pub struct Grant {
     pub target: GrantTarget,
     /// When it was granted (ms since the Unix epoch).
     pub granted_at_ms: i64,
+    /// Concrete computer scope for desktop/browser grants.
+    pub computer: Option<String>,
 }
 
 /// What to do with a user message arriving while a turn is running.
@@ -546,15 +548,22 @@ pub(crate) struct Pending {
 
 #[derive(Default)]
 pub(crate) struct Grants {
-    pub this_chat: HashSet<(ChatId, String)>,
+    pub this_chat: HashSet<(ChatId, String, Option<String>)>,
     /// Persisted rules, in creation order.
     pub always: Vec<Grant>,
 }
 
 impl Grants {
-    pub fn covers(&self, bot: BotId, tool: &str, category: PermissionCategory) -> bool {
+    pub fn covers(
+        &self,
+        bot: BotId,
+        tool: &str,
+        category: PermissionCategory,
+        computer: Option<&str>,
+    ) -> bool {
         self.always.iter().any(|g| {
             g.bot_id == bot
+                && g.computer.as_deref() == computer
                 && match &g.target {
                     GrantTarget::Tool(t) => t == tool,
                     GrantTarget::Category(c) => *c == category,
@@ -573,6 +582,8 @@ pub(crate) struct CtxState {
 /// Per-run resolved computer placement fixed at run start.
 #[derive(Clone)]
 pub(crate) struct RunComputer {
+    pub node: Option<computer_target::ComputerNode>,
+    pub unavailable_reason: Option<String>,
     pub label: ComputerLabel,
     pub desktop: Option<Arc<dyn DesktopBackend>>,
     pub desktop_available: bool,
@@ -625,6 +636,23 @@ pub(crate) struct RunCtx {
 }
 
 impl RunCtx {
+    pub(crate) fn grant_scope(&self, category: PermissionCategory) -> Option<String> {
+        matches!(
+            category,
+            PermissionCategory::Desktop | PermissionCategory::Browser
+        )
+        .then(|| {
+            format!(
+                "{}:{}",
+                self.resolved_computer.label.as_str(),
+                self.resolved_computer
+                    .node
+                    .as_ref()
+                    .map_or("local", |n| n.id.as_str())
+            )
+        })
+    }
+
     /// Subagent nesting level: 0 for a top-level run.
     pub fn depth(&self) -> u32 {
         self.sub.as_ref().map_or(0, |s| s.depth)
@@ -820,11 +848,30 @@ impl Shared {
 
     /// Warm up any async remote desktop connection on the installed
     /// [`ComputerProvider`] before resolving a run's target synchronously.
-    pub(crate) async fn prepare_computer_provider(&self) {
+    pub(crate) async fn prepare_computer_provider(&self, target: &ComputerTarget) {
+        if !matches!(
+            target,
+            ComputerTarget::Auto | ComputerTarget::Pc | ComputerTarget::Node(_)
+        ) {
+            return;
+        }
         let provider = self.computer_provider.read().clone();
         if let Some(p) = provider {
-            p.prepare().await;
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), p.prepare()).await;
         }
+    }
+
+    pub(crate) async fn prepare_run_computer(&self, profile: &BotProfile, run: &Run) {
+        let target = match run.computer_target.as_deref() {
+            Some("pc") => match run.computer_node.as_deref() {
+                Some("local") => ComputerTarget::Host,
+                Some(id) => ComputerTarget::Node(id.into()),
+                None => ComputerTarget::Pc,
+            },
+            Some(_) => return,
+            None => profile.runtime.computer.clone(),
+        };
+        self.prepare_computer_provider(&target).await;
     }
 
     fn desktop_tools_registered(&self) -> bool {
@@ -846,99 +893,130 @@ impl Shared {
     pub(crate) fn resolve_computer_for_run(
         &self,
         profile: &BotProfile,
-        persisted_label: Option<&str>,
+        persisted: Option<&Run>,
     ) -> RunComputer {
         let provider = self.computer_provider.read().clone();
-        if let Some(label) = persisted_label.and_then(ComputerLabel::parse) {
-            return match label {
-                ComputerLabel::Off => RunComputer {
-                    label: ComputerLabel::Off,
-                    desktop: None,
-                    desktop_available: false,
-                    browser: false,
-                    browser_headless: None,
-                    wait_for_pc: false,
-                },
-                ComputerLabel::Browser => {
-                    let browser = provider.as_deref().map_or_else(
-                        || self.browser_tools_registered(),
-                        ComputerProvider::browser_available,
+        if let Some(run) = persisted
+            && let Some(label) = run.computer_target.as_deref()
+        {
+            let Some(label) = ComputerLabel::parse(label) else {
+                let mut rc = self.resolve_fallback_computer(profile);
+                rc.desktop = None;
+                rc.desktop_available = false;
+                rc.browser = false;
+                rc.unavailable_reason = Some("Unknown persisted computer target".into());
+                return rc;
+            };
+            if label == ComputerLabel::Pc {
+                // A never-bound initial wait may select its first PC. A previously
+                // used PC with a missing key cannot safely be reconstructed.
+                if run.computer_node.is_none()
+                    && run.pause_reason.as_deref() == Some(WAIT_FOR_PC_REASON)
+                {
+                    return provider.as_deref().map_or_else(
+                        || Self::offline_pc(None),
+                        |p| {
+                            Self::run_computer(
+                                resolve_computer(&ComputerTarget::Pc, p),
+                                p.has_display(),
+                            )
+                        },
                     );
-                    RunComputer {
-                        label: ComputerLabel::Browser,
-                        desktop: None,
-                        desktop_available: false,
-                        browser,
-                        browser_headless: browser.then_some(true),
-                        wait_for_pc: false,
-                    }
                 }
-                ComputerLabel::Host => self.resolve_persisted_desktop_label(
-                    ComputerLabel::Host,
-                    provider.as_deref(),
-                    |p| p.local(),
-                ),
-                ComputerLabel::Pc => self.resolve_persisted_desktop_label(
-                    ComputerLabel::Pc,
-                    provider.as_deref(),
-                    |p| match &profile.runtime.computer {
-                        ComputerTarget::Node(id) => {
-                            let norm = profile.runtime.computer.node_id().unwrap_or(id.as_str());
-                            p.node(norm)
-                        }
-                        _ if p.is_host() => p.pc(),
-                        _ => p.pc().or_else(|| p.local()),
-                    },
-                ),
+                let mut node = Some(computer_target::ComputerNode {
+                    id: run
+                        .computer_node
+                        .clone()
+                        .unwrap_or_else(|| "unresolved".into()),
+                    name: run
+                        .computer_node_name
+                        .clone()
+                        .unwrap_or_else(|| "Unknown PC".into()),
+                });
+                let desktop =
+                    provider
+                        .as_deref()
+                        .and_then(|p| match run.computer_node.as_deref() {
+                            Some("local") if !p.is_host() => p.local(),
+                            Some("local") | None => None,
+                            Some(id) => p.node_target(id).filter(|d| d.node.id == id).map(|d| {
+                                node = Some(d.node);
+                                d.backend
+                            }),
+                        });
+                let mut rc = Self::offline_pc(node);
+                rc.wait_for_pc = desktop.is_none();
+                rc.desktop_available = desktop.is_some();
+                rc.desktop = desktop;
+                if rc.wait_for_pc && provider.as_deref().is_some_and(|p| !p.pc_network_enabled()) {
+                    rc.wait_for_pc = false;
+                    rc.unavailable_reason =
+                        Some("PC desktop unavailable: peer networking is disabled".into());
+                }
+                let local = run.computer_node.as_deref() == Some("local");
+                rc.browser = local
+                    && provider
+                        .as_deref()
+                        .is_some_and(ComputerProvider::browser_available);
+                rc.browser_headless = rc.browser.then_some(true);
+                return rc;
+            }
+            let target = match label {
+                ComputerLabel::Host => ComputerTarget::Host,
+                ComputerLabel::Browser => ComputerTarget::Browser,
+                _ => ComputerTarget::Off,
+            };
+            return if let Some(p) = provider.as_deref() {
+                Self::run_computer(resolve_computer(&target, p), p.has_display())
+            } else {
+                let mut fixed = profile.clone();
+                fixed.runtime.computer = target;
+                self.resolve_fallback_computer(&fixed)
             };
         }
-
         if let Some(p) = provider.as_deref() {
-            let res = resolve_computer(&profile.runtime.computer, p);
-            let browser_headless = res.browser.then(|| res.browser_headless(p.has_display()));
-            return RunComputer {
-                label: res.label,
-                desktop_available: res.desktop.is_some(),
-                desktop: res.desktop,
-                browser: res.browser,
-                browser_headless,
-                wait_for_pc: res.wait_for_pc,
-            };
+            return Self::run_computer(
+                resolve_computer(&profile.runtime.computer, p),
+                p.has_display(),
+            );
         }
-
         self.resolve_fallback_computer(profile)
     }
 
-    fn resolve_persisted_desktop_label(
-        &self,
-        label: ComputerLabel,
-        provider: Option<&dyn ComputerProvider>,
-        pick_desktop: impl FnOnce(&dyn ComputerProvider) -> Option<Arc<dyn desktop_api::DesktopBackend>>,
-    ) -> RunComputer {
-        let desktop = provider.map_or_else(|| self.static_desktop.read().clone(), pick_desktop);
-        let desktop_available =
-            desktop.is_some() || (provider.is_none() && self.desktop_tools_registered());
-        let browser = provider.map_or_else(
-            || self.browser_tools_registered(),
-            ComputerProvider::browser_available,
-        );
-        let browser_headless = provider.and_then(|p| {
-            let res = Resolution {
-                desktop: desktop.clone(),
-                browser,
-                label,
-                wait_for_pc: false,
-            };
-            browser.then(|| res.browser_headless(p.has_display()))
-        });
+    fn offline_pc(node: Option<computer_target::ComputerNode>) -> RunComputer {
         RunComputer {
-            label,
-            desktop,
-            desktop_available,
-            browser,
-            browser_headless,
-            wait_for_pc: false,
+            node,
+            unavailable_reason: None,
+            label: ComputerLabel::Pc,
+            desktop: None,
+            desktop_available: false,
+            browser: false,
+            browser_headless: None,
+            wait_for_pc: true,
         }
+    }
+
+    fn run_computer(res: Resolution, has_display: bool) -> RunComputer {
+        let browser_headless = res.browser.then(|| res.browser_headless(has_display));
+        RunComputer {
+            label: res.label,
+            node: res.node,
+            unavailable_reason: res.unavailable_reason,
+            desktop_available: res.desktop.is_some(),
+            desktop: res.desktop,
+            browser: res.browser,
+            browser_headless,
+            wait_for_pc: res.wait_for_pc,
+        }
+    }
+
+    pub(crate) fn bind_computer(&self, run_id: RunId, rc: &RunComputer) -> storage::Result<()> {
+        self.storage.bind_run_computer(
+            run_id,
+            rc.label.as_str(),
+            rc.node.as_ref().map(|n| n.id.as_str()),
+            rc.node.as_ref().map(|n| n.name.as_str()),
+        )
     }
 
     fn resolve_fallback_computer(&self, profile: &BotProfile) -> RunComputer {
@@ -949,13 +1027,21 @@ impl Shared {
             desktop: static_desktop.clone(),
             browser: browser_tools,
         };
+        if matches!(
+            profile.runtime.computer,
+            ComputerTarget::Pc | ComputerTarget::Node(_)
+        ) {
+            return Self::offline_pc(profile.runtime.computer.node_id().map(|id| {
+                computer_target::ComputerNode {
+                    id: id.into(),
+                    name: id.into(),
+                }
+            }));
+        }
         let mut res = resolve_computer(&profile.runtime.computer, &fallback);
         let allow_manual_desktop = static_desktop.is_none()
             && desktop_tools
-            && matches!(
-                profile.runtime.computer,
-                ComputerTarget::Auto | ComputerTarget::Host | ComputerTarget::Pc
-            );
+            && matches!(profile.runtime.computer, ComputerTarget::Auto);
         if allow_manual_desktop {
             res.label = match profile.runtime.computer {
                 ComputerTarget::Host => ComputerLabel::Host,
@@ -966,6 +1052,8 @@ impl Shared {
         let browser_headless = (res.label == ComputerLabel::Browser && res.browser).then_some(true);
         let desktop_available = res.desktop.is_some() || allow_manual_desktop;
         RunComputer {
+            node: res.node,
+            unavailable_reason: res.unavailable_reason,
             label: res.label,
             desktop: res.desktop,
             desktop_available,
@@ -990,14 +1078,7 @@ impl Shared {
                     .run_computers
                     .lock()
                     .remove(&run.id)
-                    .unwrap_or_else(|| {
-                        let persisted = if run.pause_reason.as_deref() == Some(WAIT_FOR_PC_REASON) {
-                            None
-                        } else {
-                            run.computer_target.as_deref()
-                        };
-                        self.resolve_computer_for_run(&raw_profile, persisted)
-                    });
+                    .unwrap_or_else(|| self.resolve_computer_for_run(&raw_profile, Some(run)));
                 let profile =
                     Arc::new(raw_profile.with_computer_access(rc.desktop_available, rc.browser));
                 (

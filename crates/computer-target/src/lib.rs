@@ -162,13 +162,49 @@ impl fmt::Display for ComputerLabel {
     }
 }
 
+/// Stable identity of a resolved desktop. `local` denotes this daemon's desktop.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComputerNode {
+    pub id: String,
+    pub name: String,
+}
+
+/// A backend and its identity, sampled atomically by the provider.
+pub struct ComputerDesktop {
+    pub node: ComputerNode,
+    pub backend: Arc<dyn DesktopBackend>,
+}
+
 /// Runtime availability queried when resolving a bot's [`ComputerTarget`].
 pub trait ComputerProvider: Send + Sync {
     /// Local desktop backend (host Xvfb on Linux host, or PC desktop on non-host install).
     fn local(&self) -> Option<Arc<dyn DesktopBackend>>;
 
+    /// Display identity of this daemon's local computer.
+    fn local_node(&self) -> ComputerNode {
+        ComputerNode {
+            id: "local".into(),
+            name: "Local computer".into(),
+        }
+    }
+
     /// Connected paired PC desktop backend (from the host daemon).
     fn pc(&self) -> Option<Arc<dyn DesktopBackend>>;
+
+    /// Atomically select a remote PC and its stable key. No anonymous remote is safe.
+    fn pc_target(&self) -> Option<ComputerDesktop> {
+        None
+    }
+
+    /// Identity of an explicit node, matched by key only.
+    fn node_target(&self, _id: &str) -> Option<ComputerDesktop> {
+        None
+    }
+
+    /// Whether remote PC networking can become available.
+    fn pc_network_enabled(&self) -> bool {
+        true
+    }
 
     /// Whether this daemon runs in always-on host mode (`--host`).
     fn is_host(&self) -> bool;
@@ -197,6 +233,8 @@ pub trait ComputerProvider: Send + Sync {
 /// Resolved computer capabilities fixed at the start of a run.
 #[derive(Clone)]
 pub struct Resolution {
+    pub node: Option<ComputerNode>,
+    pub unavailable_reason: Option<String>,
     /// Desktop automation backend for this run (`None` hides desktop tools).
     pub desktop: Option<Arc<dyn DesktopBackend>>,
     /// Whether browser tools are enabled for this run.
@@ -221,6 +259,8 @@ impl Resolution {
 impl fmt::Debug for Resolution {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Resolution")
+            .field("node", &self.node)
+            .field("unavailable_reason", &self.unavailable_reason)
             .field("has_desktop", &self.desktop.is_some())
             .field("browser", &self.browser)
             .field("label", &self.label)
@@ -232,6 +272,8 @@ impl fmt::Debug for Resolution {
 fn browser_or_off(browser: bool) -> Resolution {
     if browser {
         Resolution {
+            node: None,
+            unavailable_reason: None,
             desktop: None,
             browser: true,
             label: ComputerLabel::Browser,
@@ -239,6 +281,8 @@ fn browser_or_off(browser: bool) -> Resolution {
         }
     } else {
         Resolution {
+            node: None,
+            unavailable_reason: None,
             desktop: None,
             browser: false,
             label: ComputerLabel::Off,
@@ -247,39 +291,42 @@ fn browser_or_off(browser: bool) -> Resolution {
     }
 }
 
-fn pc_desktop(provider: &dyn ComputerProvider) -> Option<Arc<dyn DesktopBackend>> {
-    if provider.is_host() {
-        provider.pc()
-    } else {
-        provider.pc().or_else(|| provider.local())
-    }
+fn pc_desktop(provider: &dyn ComputerProvider) -> Option<ComputerDesktop> {
+    provider.pc_target().or_else(|| {
+        if provider.is_host() {
+            return None;
+        }
+        provider.local().map(|backend| ComputerDesktop {
+            node: provider.local_node(),
+            backend,
+        })
+    })
 }
 
-fn pc_resolution(desktop: Option<Arc<dyn DesktopBackend>>, browser: bool) -> Resolution {
-    match desktop {
-        Some(d) => Resolution {
-            desktop: Some(d),
-            browser,
-            label: ComputerLabel::Pc,
-            wait_for_pc: false,
-        },
-        None => Resolution {
-            desktop: None,
-            browser: false,
-            label: ComputerLabel::Pc,
-            wait_for_pc: true,
-        },
+fn pc_resolution(desktop: Option<ComputerDesktop>, provider: &dyn ComputerProvider) -> Resolution {
+    let unavailable_reason = (desktop.is_none() && !provider.pc_network_enabled())
+        .then(|| "PC desktop unavailable: peer networking is disabled".into());
+    let local = desktop.as_ref().is_some_and(|d| d.node.id == "local");
+    Resolution {
+        wait_for_pc: desktop.is_none() && unavailable_reason.is_none(),
+        browser: local && provider.browser_available(),
+        label: ComputerLabel::Pc,
+        node: desktop.as_ref().map(|d| d.node.clone()),
+        desktop: desktop.map(|d| d.backend),
+        unavailable_reason,
     }
 }
 
 fn resolve_auto(provider: &dyn ComputerProvider, browser: bool) -> Resolution {
     if let Some(d) = pc_desktop(provider) {
-        return pc_resolution(Some(d), browser);
+        return pc_resolution(Some(d), provider);
     }
     if provider.is_host()
         && let Some(d) = provider.local()
     {
         return Resolution {
+            node: Some(provider.local_node()),
+            unavailable_reason: None,
             desktop: Some(d),
             browser,
             label: ComputerLabel::Host,
@@ -299,17 +346,35 @@ pub fn resolve(target: &ComputerTarget, provider: &dyn ComputerProvider) -> Reso
         ComputerTarget::Browser => browser_or_off(browser),
         ComputerTarget::Host => match provider.local() {
             Some(d) => Resolution {
+                node: Some(provider.local_node()),
+                unavailable_reason: None,
                 desktop: Some(d),
                 browser,
                 label: ComputerLabel::Host,
                 wait_for_pc: false,
             },
-            None => browser_or_off(browser),
+            None => Resolution {
+                node: None,
+                unavailable_reason: Some(
+                    "Host desktop unavailable: no local desktop/display".into(),
+                ),
+                desktop: None,
+                browser: false,
+                label: ComputerLabel::Host,
+                wait_for_pc: false,
+            },
         },
-        ComputerTarget::Pc => pc_resolution(pc_desktop(provider), browser),
+        ComputerTarget::Pc => pc_resolution(pc_desktop(provider), provider),
         ComputerTarget::Node(id) => {
             let norm = target.node_id().unwrap_or(id.as_str());
-            pc_resolution(provider.node(norm), browser)
+            let mut res = pc_resolution(provider.node_target(norm), provider);
+            if res.node.is_none() {
+                res.node = Some(ComputerNode {
+                    id: norm.into(),
+                    name: norm.into(),
+                });
+            }
+            res
         }
         ComputerTarget::Auto => resolve_auto(provider, browser),
     }
@@ -372,6 +437,24 @@ mod tests {
         }
         fn pc(&self) -> Option<Arc<dyn DesktopBackend>> {
             self.pc.clone()
+        }
+        fn pc_target(&self) -> Option<ComputerDesktop> {
+            self.pc.clone().map(|backend| ComputerDesktop {
+                node: ComputerNode {
+                    id: "pc-key".into(),
+                    name: "PC".into(),
+                },
+                backend,
+            })
+        }
+        fn node_target(&self, id: &str) -> Option<ComputerDesktop> {
+            self.node(id).map(|backend| ComputerDesktop {
+                node: ComputerNode {
+                    id: id.into(),
+                    name: "Node".into(),
+                },
+                backend,
+            })
         }
         fn is_host(&self) -> bool {
             self.is_host
@@ -445,7 +528,7 @@ mod tests {
         let r = resolve(&ComputerTarget::Auto, &all_online);
         assert_eq!(r.label, ComputerLabel::Pc);
         assert_eq!(r.desktop.as_ref().unwrap().capabilities().platform, "pc");
-        assert!(r.browser);
+        assert!(!r.browser);
         assert!(!r.wait_for_pc);
 
         let r = resolve(&ComputerTarget::Host, &all_online);
@@ -520,9 +603,10 @@ mod tests {
         assert!(!r.wait_for_pc);
 
         let r = resolve(&ComputerTarget::Host, &host_browser_only);
-        assert_eq!(r.label, ComputerLabel::Browser);
+        assert_eq!(r.label, ComputerLabel::Host);
         assert!(r.desktop.is_none());
-        assert!(r.browser);
+        assert!(!r.browser);
+        assert!(r.unavailable_reason.unwrap().contains("no local desktop"));
     }
 
     #[test]

@@ -1715,6 +1715,8 @@ export interface components {
         GapReason: "log_line_missing" | "log_unreadable";
         /** @description A persisted "always allow" rule of a bot. */
         GrantDto: {
+            /** @description Computer scope of this grant, when it controls a desktop/browser. */
+            computer?: string | null;
             /**
              * Format: int64
              * @description When it was granted.
@@ -2326,6 +2328,10 @@ export interface components {
              * @description Chat, if any.
              */
             chat_id?: string | null;
+            /** @description Stable key of the PC used by this run (`local` for the daemon desktop). */
+            computer_node?: string | null;
+            /** @description Display name captured at target binding. */
+            computer_node_name?: string | null;
             /** @description Resolved computer target label fixed at run start (`pc`, `host`, `browser`, `off`). */
             computer_target?: string | null;
             /**
@@ -2350,6 +2356,11 @@ export interface components {
             /** @description Reason the run is currently `paused` (e.g. `waiting_for_pc`). */
             pause_reason?: string | null;
             /**
+             * Format: int64
+             * @description Start of the current pause in Unix milliseconds.
+             */
+            paused_at_ms?: number | null;
+            /**
              * Format: uuid
              * @description The schedule that started this run (`null` for runs the user started).
              */
@@ -2362,10 +2373,7 @@ export interface components {
              */
             updated_at_ms: number;
         };
-        /**
-         * @description A bot.
-         *     Bot `[runtime]` settings (ADR-0027 §7).
-         */
+        /** @description Bot `[runtime]` settings (ADR-0027 §7). */
         RuntimeConfigDto: {
             /** @description Configured computer target (`auto`, `pc`, `host`, `browser`, `off`, or `node:<id>`). */
             computer: string;

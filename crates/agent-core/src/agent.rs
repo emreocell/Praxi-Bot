@@ -613,6 +613,7 @@ impl AgentLoop {
                 bot_id,
                 target: target.clone(),
                 granted_at_ms: 0,
+                computer: None,
             };
             self.sh.storage.append_audit(
                 bot.user_id,
@@ -743,7 +744,10 @@ impl AgentLoop {
             .list_paused_runs_with_reason(computer_target::WAIT_FOR_PC_REASON)?
         {
             let elapsed = Duration::from_millis(
-                u64::try_from(storage::now_ms().saturating_sub(run.updated_at_ms)).unwrap_or(0),
+                u64::try_from(
+                    storage::now_ms().saturating_sub(run.paused_at_ms.unwrap_or(run.updated_at_ms)),
+                )
+                .unwrap_or(0),
             );
             if elapsed >= limit {
                 self.fail_waiting_pc_run(run.id, limit);
@@ -760,7 +764,6 @@ impl AgentLoop {
         if self.sh.shutting_down.load(Ordering::SeqCst) {
             return Vec::new();
         }
-        self.sh.prepare_computer_provider().await;
         let Ok(paused) = self
             .sh
             .storage
@@ -773,8 +776,8 @@ impl AgentLoop {
             let Ok(profile) = self.sh.profile_for(run.bot_id) else {
                 continue;
             };
-            let rc = self.sh.resolve_computer_for_run(&profile, None);
-            if rc.wait_for_pc {
+            let rc = self.sh.resolve_computer_for_run(&profile, Some(&run));
+            if rc.wait_for_pc || rc.unavailable_reason.is_some() {
                 continue;
             }
             for attempt in 0..5 {
@@ -1187,17 +1190,21 @@ impl AgentLoop {
                     let run = self.sh.storage.get_run(run_id).ok().flatten();
                     let is_child = run.as_ref().is_some_and(|r| r.parent_run_id.is_some());
                     let mut wait_for_pc = false;
-                    if !is_child && let Some(run) = &run {
-                        self.sh.prepare_computer_provider().await;
-                        if let Ok(profile) = self.sh.profile_for(run.bot_id) {
-                            let rc = self.sh.resolve_computer_for_run(&profile, None);
-                            wait_for_pc = rc.wait_for_pc;
-                            let _ = self
-                                .sh
-                                .storage
-                                .set_run_computer_target(run_id, Some(rc.label.as_str()));
-                            self.sh.run_computers.lock().insert(run_id, rc);
+                    let mut unavailable = None;
+                    if !is_child
+                        && let Some(run) = &run
+                        && let Ok(profile) = self.sh.profile_for(run.bot_id)
+                    {
+                        self.sh.prepare_run_computer(&profile, run).await;
+                        let rc = self.sh.resolve_computer_for_run(&profile, None);
+                        wait_for_pc = rc.wait_for_pc;
+                        unavailable.clone_from(&rc.unavailable_reason);
+                        if let Err(e) = self.sh.bind_computer(run_id, &rc) {
+                            let _ = self.rt.pause_queued(run_id, None);
+                            self.conclude(run_id, &self.rt.fail_paused(run_id, &e.to_string()));
+                            return;
                         }
+                        self.sh.run_computers.lock().insert(run_id, rc);
                     }
                     // A child announces itself with `subagent_started` instead.
                     if !is_child && let Some(ctx) = self.ctx_of(run_id) {
@@ -1211,6 +1218,13 @@ impl AgentLoop {
                             }),
                         );
                     }
+                    if let Some(reason) = unavailable {
+                        let result = self.rt.pause_queued(run_id, None);
+                        if result.is_ok() {
+                            self.conclude(run_id, &self.rt.fail_paused(run_id, &reason));
+                        }
+                        return;
+                    }
                     if wait_for_pc {
                         let pause_res = self
                             .rt
@@ -1223,58 +1237,53 @@ impl AgentLoop {
                         self.rt.start(run_id).await
                     }
                 }
-                Start::Resume => {
-                    self.cancel_wait_pc_timer(run_id);
-                    let run = self.sh.storage.get_run(run_id).ok().flatten();
-                    let is_child = run.as_ref().is_some_and(|r| r.parent_run_id.is_some());
-                    let mut stay_paused_for_pc = false;
-                    if !is_child && let Some(run) = &run {
-                        self.sh.prepare_computer_provider().await;
-                        if let Ok(profile) = self.sh.profile_for(run.bot_id) {
-                            let waiting_pc = run.pause_reason.as_deref()
-                                == Some(computer_target::WAIT_FOR_PC_REASON);
-                            let persisted = if waiting_pc {
-                                None
-                            } else {
-                                run.computer_target.as_deref()
-                            };
-                            let rc = self.sh.resolve_computer_for_run(&profile, persisted);
-                            if waiting_pc && rc.wait_for_pc {
-                                stay_paused_for_pc = true;
-                                let elapsed = Duration::from_millis(
-                                    u64::try_from(
-                                        storage::now_ms().saturating_sub(run.updated_at_ms),
-                                    )
-                                    .unwrap_or(0),
-                                );
-                                let remaining =
-                                    self.sh.cfg.wait_for_pc_timeout.saturating_sub(elapsed);
-                                self.spawn_wait_pc_timer(run_id, remaining);
-                            } else {
-                                if run.computer_target.is_none() || waiting_pc {
-                                    let _ = self
-                                        .sh
-                                        .storage
-                                        .set_run_computer_target(run_id, Some(rc.label.as_str()));
-                                }
-                                self.sh.run_computers.lock().insert(run_id, rc);
-                            }
-                        }
-                    }
-                    if stay_paused_for_pc {
-                        Ok(RunState::Paused)
-                    } else {
-                        match self.rt.resume(run_id).await {
-                            Err(RuntimeError::NeedsDecision(_)) => {
-                                self.rt.resume_skipping_interrupted(run_id).await
-                            }
-                            other => other,
-                        }
-                    }
-                }
+                Start::Resume => self.drive_resume(run_id).await,
             };
             self.conclude(run_id, &res);
         })
+    }
+
+    async fn drive_resume(&self, run_id: RunId) -> std::result::Result<RunState, RuntimeError> {
+        self.cancel_wait_pc_timer(run_id);
+        let run = self
+            .sh
+            .storage
+            .get_run(run_id)?
+            .ok_or(RuntimeError::NotFound(run_id))?;
+        if run.parent_run_id.is_none()
+            && let Ok(profile) = self.sh.profile_for(run.bot_id)
+        {
+            self.sh.prepare_run_computer(&profile, &run).await;
+            let rc = self.sh.resolve_computer_for_run(&profile, Some(&run));
+            if let Some(reason) = &rc.unavailable_reason {
+                return self.rt.fail_paused(run_id, reason);
+            }
+            self.sh.bind_computer(run_id, &rc)?;
+            if rc.wait_for_pc {
+                self.sh
+                    .storage
+                    .set_run_pause_reason(run_id, Some(computer_target::WAIT_FOR_PC_REASON))?;
+                let elapsed = Duration::from_millis(
+                    u64::try_from(
+                        storage::now_ms()
+                            .saturating_sub(run.paused_at_ms.unwrap_or(run.updated_at_ms)),
+                    )
+                    .unwrap_or(0),
+                );
+                self.spawn_wait_pc_timer(
+                    run_id,
+                    self.sh.cfg.wait_for_pc_timeout.saturating_sub(elapsed),
+                );
+                return Ok(RunState::Paused);
+            }
+            self.sh.run_computers.lock().insert(run_id, rc);
+        }
+        match self.rt.resume(run_id).await {
+            Err(RuntimeError::NeedsDecision(_)) => {
+                self.rt.resume_skipping_interrupted(run_id).await
+            }
+            other => other,
+        }
     }
 
     pub(crate) fn ctx_of(&self, run_id: RunId) -> Option<Arc<crate::shared::RunCtx>> {
@@ -1476,14 +1485,18 @@ fn load_grants(storage: &Storage) -> Grants {
             let (Some(bot_id), Some(target)) = (bot, grant_target(&e.detail)) else {
                 continue;
             };
-            grants
-                .always
-                .retain(|g| !(g.bot_id == bot_id && g.target == target));
+            let computer = e.detail["computer"].as_str().map(str::to_owned);
+            grants.always.retain(|g| {
+                !(g.bot_id == bot_id
+                    && g.target == target
+                    && (e.action == AUDIT_GRANT_REVOKED || g.computer == computer))
+            });
             if e.action == AUDIT_GRANT_ALWAYS {
                 grants.always.push(Grant {
                     bot_id,
                     target,
                     granted_at_ms: e.ts_ms,
+                    computer,
                 });
             }
         }
