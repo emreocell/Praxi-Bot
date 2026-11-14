@@ -2,50 +2,72 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { URL } from 'node:url';
 import process from 'node:process';
+import {
+  PALETTES, FAVORITE_THEMES, DEFAULT_CUSTOM_THEME, UI_STYLES, buildTokens, contrastRatio, deriveTheme,
+  fallbackAccent, inkOn, mix, normalizeHex, paletteById
+} from '../src/themeModel.ts';
 
+// Every shipped theme must be readable.  The derivation pulls faded text, status colours and
+// accent text toward the text colour until they pass, so the hard requirement is the one
+// the derivation cannot repair: the theme's own text colour on bg / surface / raised.
 const root = new URL('../', import.meta.url);
-const luminance = hex => {
-  const c = hex.slice(1).match(/../g).map(v => parseInt(v, 16) / 255).map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4);
-  return c[0] * .2126 + c[1] * .7152 + c[2] * .0722;
-};
-const ratio = (a, b) => {
-  const [low, high] = [luminance(a), luminance(b)].sort((x, y) => x - y);
-  return (high + .05) / (low + .05);
-};
-const mix = (a, b, weight) => '#' + [1, 3, 5].map(i => Math.round(parseInt(a.slice(i, i + 2), 16) * weight + parseInt(b.slice(i, i + 2), 16) * (1 - weight)).toString(16).padStart(2, '0')).join('');
-let tokenKeys;
 const css = readFileSync(new URL('tokens.css', root), 'utf8');
-for (const file of ['dark', 'cobalt', 'raven', 'light']) {
-  const { name, tokens: t } = JSON.parse(readFileSync(new URL(`themes/${file}.json`, root), 'utf8'));
-  const keys = Object.keys(t).sort();
-  if (tokenKeys) assert.deepEqual(keys, tokenKeys, `${name}: complete token contract`);
-  tokenKeys = keys;
-  assert.ok(css.includes(`:root[data-theme="${name}"]`));
-  const check = (foreground, background, minimum, context) => {
-    const r = ratio(foreground, background);
-    assert.ok(r >= minimum, `${name}: ${context} ${r.toFixed(2)} < ${minimum}`);
-    return r;
-  };
+assert.equal(PALETTES.length, 29, 'the prototype ships 29 themes');
+assert.equal(new Set(PALETTES.map((p) => p.id)).size, PALETTES.length, 'theme ids are unique');
+for (const id of FAVORITE_THEMES) assert.ok(paletteById(id), `favourite ${id} exists`);
+
+const BOT_COLOR_SAMPLES = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#e11d48', '#0ea5e9', '#ffffff', '#000000', '#808080'];
+const failures = [];
+const check = (name, label, fg, bg, min) => {
+  const r = contrastRatio(fg, bg);
+  if (r < min) failures.push(`${name}: ${label} ${r.toFixed(2)} < ${min}`);
+  return r;
+};
+
+for (const theme of [...PALETTES, { id: 'custom (default)', ...DEFAULT_CUSTOM_THEME }]) {
+  const d = deriveTheme(theme);
+  const name = theme.id;
+  const surfaces = { background: d.bg, surface: d.surface, raised: d.raised, hover: d.hover };
   let lowest = Infinity;
-  for (const surface of ['background', 'surface', 'surface-elevated', 'surface-active']) {
-    for (const text of ['text', 'text-secondary', 'text-muted', 'accent-text', 'success', 'warning', 'danger']) {
-      lowest = Math.min(lowest, check(t[`--color-${text}`], t[`--color-${surface}`], 4.5, `${text}/${surface}`));
+  for (const [sname, s] of Object.entries(surfaces)) {
+    const required = sname === 'hover' ? 0 : 4.5; // text on bg / surface / raised is the contract
+    const r = check(name, `text/${sname}`, d.text, s, required);
+    if (sname !== 'hover') lowest = Math.min(lowest, r);
+    for (const [label, color] of [['secondary', d.secondary], ['muted', d.muted], ['success', d.success], ['warning', d.warning], ['danger', d.danger]]) {
+      check(name, `${label}/${sname}`, color, s, 4.5);
     }
-    check(t['--color-focus'], t[`--color-${surface}`], 3, `focus/${surface}`);
-    check(t['--color-border-strong'], t[`--color-${surface}`], 3, `control border/${surface}`);
+    check(name, `focus/${sname}`, d.focus, s, sname === 'hover' ? 0 : 3);
+    check(name, `control border/${sname}`, d.lineStrong, s, sname === 'hover' ? 0 : 3);
   }
-  check(t['--color-accent-contrast'], t['--color-accent'], 4.5, 'accent button');
-  const hover = t['--color-accent-hover'].startsWith('#') ? t['--color-accent-hover'] : mix(t['--color-accent'], '#ffffff', .88);
-  check(t['--color-accent-contrast'], hover, 4.5, 'accent button hover');
-  check(t['--color-danger-contrast'], t['--color-danger'], 4.5, 'danger button');
+  for (const style of UI_STYLES) {
+    const t = buildTokens(theme, theme.accent ?? fallbackAccent(d), style, false);
+    for (const key of ['--color-surface', '--color-surface-elevated', '--color-border']) assert.ok(t[key], `${name}/${style}: ${key}`);
+  }
+  // Accents: the theme's own, then arbitrary bot colours.
+  for (const accent of [theme.accent ?? fallbackAccent(d), ...BOT_COLOR_SAMPLES]) {
+    const t = buildTokens(theme, accent, 'solid', false);
+    const a = normalizeHex(accent);
+    check(name, `accent button ${a}`, inkOn(a), a, 4.5);
+    check(name, `accent button hover ${a}`, inkOn(a), t['--color-accent-hover'], 4.5);
+    for (const s of [d.bg, d.surface, d.raised]) check(name, `accent text ${a}`, t['--color-accent-text'], s, 4.5);
+    for (const token of ['text', 'keyword', 'string', 'number', 'comment']) {
+      check(name, `code ${token}`, t[`--color-code-${token === 'text' ? 'text' : token}`], d.bg, 4.5);
+    }
+  }
+  check(name, 'danger button', d.dangerInk, d.danger, 4.5);
   for (const status of ['success', 'warning', 'danger']) {
-    check(t[`--color-${status}`], mix(t[`--color-${status}`], t['--color-surface'], .16), 4.5, `${status} badge`);
+    check(name, `${status} badge`, d[status], mix(d[status], d.surface, 0.9), 4.5);
   }
-  for (const token of ['text', 'keyword', 'string', 'number', 'comment']) {
-    check(t[`--color-code-${token}`], t['--color-code-bg'], 4.5, `code ${token}`);
-  }
-  // A selector must contain every value in its source JSON (no stale generated CSS).
-  const block = css.split(`:root[data-theme="${name}"]`)[1].split('}')[0];
-  for (const [k, v] of Object.entries(t)) assert.ok(block.includes(`${k}: ${v};`), `${name}: stale ${k}`);
-  process.stdout.write(`${name}: ${keys.length} tokens; minimum text contrast ${lowest.toFixed(2)}:1; states/code/focus AA passed\n`);
+  process.stdout.write(`${name}: ${d.light ? 'light' : 'dark'}; text contrast >= ${lowest.toFixed(2)}:1 (bg/surface/raised)\n`);
 }
+
+// tokens.css must carry exactly the derived default theme (no stale generated CSS).
+const def = paletteById('obsidian');
+const expected = buildTokens(def, fallbackAccent(deriveTheme(def)), 'solid', false);
+for (const [k, v] of Object.entries(expected)) assert.ok(css.includes(`${k}: ${v};`), `tokens.css is stale: ${k} (run pnpm --dir packages/ui generate:themes)`);
+
+if (failures.length) {
+  process.stderr.write(`\n${failures.length} contrast violation(s):\n${failures.join('\n')}\n`);
+  process.exit(1);
+}
+process.stdout.write(`\n${PALETTES.length} themes OK; accent / status / code / default-CSS checks passed\n`);

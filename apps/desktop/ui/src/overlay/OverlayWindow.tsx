@@ -2,17 +2,16 @@ import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  applyTheme,
   isReducedMotionPreferred,
-  resolveTheme,
-  subscribeReducedMotion,
-  subscribeSystemTheme
+  subscribeReducedMotion
 } from "ui";
 import { i18n } from "../i18n";
+import { useApplyAppearance } from "../state/useApplyAppearance";
 import {
   type AppSettings,
   DEFAULT_SETTINGS,
-  loadSettings
+  loadSettings,
+  loadSettingsSync
 } from "../store/settingsStore";
 import {
   type ControlSnapshot,
@@ -37,7 +36,7 @@ interface RippleInstance {
 
 export function OverlayWindow() {
   const { t } = useTranslation();
-  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<AppSettings>(() => loadSettingsSync() ?? DEFAULT_SETTINGS);
   const [monitor, setMonitor] = useState<MonitorGeometry>(() =>
     readMonitorGeometryFromUrl()
   );
@@ -85,21 +84,7 @@ export function OverlayWindow() {
     };
   }, []);
 
-  useEffect(() => {
-    const activeTheme = resolveTheme(settings.themeMode);
-    applyTheme(activeTheme, {
-      accentColor: settings.accentColor
-    });
-
-    if (settings.themeMode === "system") {
-      return subscribeSystemTheme((sysTheme) => {
-        applyTheme(sysTheme, {
-          accentColor: settings.accentColor
-        });
-      });
-    }
-    return undefined;
-  }, [settings.themeMode, settings.accentColor]);
+  useApplyAppearance(settings, undefined, true);
 
   useEffect(() => {
     let rippleCounter = 0;

@@ -1,0 +1,68 @@
+.root { width: 100%; display: flex; flex-direction: column; gap: var(--space-3); }
+
+.tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--space-3); }
+
+.tile { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-0); border: none; background: none; color: var(--color-text-muted); font: inherit; font-size: var(--font-size-xs); text-align: left; cursor: pointer; min-width: var(--space-0); }
+.tile:hover .preview { transform: translateY(calc(var(--size-border-thick) * -1)); }
+.tile[aria-pressed="true"] { color: var(--color-text); }
+.tile[aria-pressed="true"] .preview { box-shadow: 0 0 0 var(--size-border-thick) var(--color-background), 0 0 0 var(--size-border-heavy) var(--color-accent); }
+.tile:focus-visible { outline: none; }
+.tile:focus-visible .preview { box-shadow: var(--shadow-focus); }
+
+.preview { position: relative; display: grid; place-items: center; height: calc(var(--space-12) * 1.35); overflow: hidden; border: var(--size-border) solid var(--color-border-strong); border-radius: var(--radius-card); background: var(--color-background); color: var(--color-text-muted); transition: transform var(--motion-duration-fast) var(--motion-easing-standard), box-shadow var(--motion-duration-fast) var(--motion-easing-standard); }
+.preview canvas { display: block; width: 100%; height: 100%; }
+.more { border-style: dashed; }
+.more svg { width: var(--size-icon); height: var(--size-icon); }
+
+.label { display: flex; align-items: center; justify-content: space-between; gap: var(--space-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.label svg { width: var(--size-icon-sm); height: var(--size-icon-sm); color: var(--color-accent-text); }
+
+/* Style / bubble previews */
+.shape { display: flex; flex-direction: column; justify-content: center; gap: var(--space-2); padding: var(--space-3); background: linear-gradient(135deg, var(--color-surface-active), var(--color-surface-elevated)); }
+.shape i { display: block; height: var(--space-4); border-radius: var(--radius-md); }
+.shape i:first-child { width: 70%; }
+.shape i:last-child { width: 50%; align-self: flex-end; }
+.sampleSolid i { background: var(--color-accent); opacity: 0.85; }
+.sampleGlass i { background: color-mix(in srgb, var(--color-text) 22%, transparent); border: var(--size-border) solid color-mix(in srgb, var(--color-text) 45%, transparent); backdrop-filter: blur(var(--space-1)); }
+.sampleLine i { background: transparent; border: var(--size-border-thick) solid var(--color-text); }
+.samplePlain i { background: var(--color-text-muted); height: var(--space-1); border-radius: var(--radius-pill); }
+
+.hint { margin: var(--space-0); font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+
+/* Accent swatches */
+.swatches { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.swatch { position: relative; width: var(--space-6); height: var(--space-6); padding: var(--space-0); border: none; border-radius: var(--radius-pill); background: var(--swatch-color); cursor: pointer; display: grid; place-items: center; box-shadow: 0 0 0 var(--size-border) var(--color-border-strong); }
+.swatch:focus-visible { box-shadow: var(--shadow-focus); outline: none; }
+.swatch[aria-pressed="true"] { box-shadow: 0 0 0 var(--size-border-thick) var(--color-background), 0 0 0 var(--size-border-heavy) var(--swatch-color); }
+.swatch svg { width: var(--size-icon-sm); height: var(--size-icon-sm); color: var(--color-accent-contrast); }
+.custom { overflow: hidden; background: conic-gradient(var(--color-danger), var(--color-warning), var(--color-success), var(--color-accent), var(--color-danger)); }
+.custom input { position: absolute; inset: var(--space-0); width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+
+/* Gallery modal (themes / backdrops) */
+.gallery { display: flex; flex-direction: column; width: 100%; max-height: calc(var(--size-modal-height) * 0.9); }
+.galleryHead { display: flex; align-items: center; justify-content: space-between; padding: var(--space-5) var(--space-6) var(--space-2); }
+.galleryHead h3 { margin: var(--space-0); font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); }
+.galleryBody { display: flex; flex-direction: column; gap: var(--space-6); padding: var(--space-3) var(--space-6) var(--space-6); overflow-y: auto; }
+.gallerySection { display: flex; flex-direction: column; gap: var(--space-3); }
+.gallerySection h4 { margin: var(--space-0); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); letter-spacing: var(--letter-spacing-wide); color: var(--color-text-muted); }
+.gallery .tiles { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.gallery .preview { height: calc(var(--space-12) * 1.6); }
+
+.customBox { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4); border: var(--size-border) solid var(--color-border); border-radius: var(--radius-card); background: var(--color-surface-elevated); }
+.customText { flex: 1; min-width: var(--space-0); display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.customText strong { font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); color: var(--color-text); }
+.warn { color: var(--color-warning); }
+.colorPick { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); font-size: var(--font-size-xs); color: var(--color-text-muted); cursor: pointer; }
+.colorPick input { width: var(--size-control-md); height: var(--size-control-md); padding: var(--space-0); border: none; background: none; cursor: pointer; }
+
+.range { display: flex; align-items: center; gap: var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-muted); max-width: calc(var(--size-widget-width) * 1.2); }
+.range input { flex: 1; accent-color: var(--color-accent); }
+
+/* stylelint-disable-next-line unit-disallowed-list -- responsive viewport boundary */
+@media (width <= 56em) {
+  .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .gallery .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+.cover { display: block; width: 100%; height: 100%; object-fit: cover; }

@@ -1,12 +1,61 @@
-import darkThemeJson from "../themes/dark.json";
-import lightThemeJson from "../themes/light.json";
-import cobaltThemeJson from "../themes/cobalt.json";
-import ravenThemeJson from "../themes/raven.json";
+import {
+  buildTokens,
+  colorSchemeFor,
+  DEFAULT_CUSTOM_THEME,
+  deriveTheme,
+  fallbackAccent,
+  normalizeHex,
+  resolveAccent,
+  themeFor,
+  type AccentPreference,
+  type BubbleStyle,
+  type Corners,
+  type CustomTheme,
+  type OwnBubble,
+  type ThemeDef,
+  type UiStyle
+} from "./themeModel";
 
-export type ThemeName = "obsidian" | "cobalt" | "raven" | "clay";
-/** light/dark remain valid for existing saved preferences. */
-export type ThemeMode = ThemeName | "light" | "dark" | "system";
-export const THEME_NAMES: readonly ThemeName[] = ["obsidian", "cobalt", "raven", "clay"];
+export {
+  accentAfterThemeChange,
+  accentKind,
+  buildTokens,
+  contrastRatio,
+  CUSTOM_THEME_ID,
+  customThemeContrast,
+  DEFAULT_CUSTOM_THEME,
+  DEFAULT_THEME_ID,
+  deriveTheme,
+  FAVORITE_THEMES,
+  isLightColor,
+  mix,
+  normalizeHex,
+  PALETTE_IDS,
+  PALETTES,
+  paletteById,
+  parseAccentPreference,
+  parseCustomTheme,
+  parseThemeMode,
+  resolveAccent,
+  themeFor,
+  BUBBLE_STYLES,
+  CORNERS,
+  OWN_BUBBLES,
+  UI_STYLES,
+  type AccentKind,
+  type AccentPreference,
+  type BubbleStyle,
+  type Corners,
+  type CustomTheme,
+  type DerivedTheme,
+  type OwnBubble,
+  type ThemeDef,
+  type UiStyle
+} from "./themeModel";
+
+/** A saved theme choice: a palette id, `custom`, `system`, or legacy `light` / `dark`. */
+export type ThemeMode = string;
+export type { ThemeDef as Theme };
 
 export interface ThemeBackground {
   url?: string;
@@ -14,37 +63,16 @@ export interface ThemeBackground {
   dim?: string;
 }
 
-export interface Theme {
-  name: string;
-  mode?: "light" | "dark";
-  tokens: Record<string, string>;
-  background?: ThemeBackground;
-}
-
 export interface ThemeOverrides {
+  /** Already-resolved accent colour (see `resolveAccent`). */
   accentColor?: string;
+  style?: UiStyle;
+  corners?: Corners;
+  bubble?: BubbleStyle;
+  ownBubble?: OwnBubble;
+  /** A canvas backdrop (or own image) is active: panels float, line style turns see-through. */
+  backdropActive?: boolean;
   background?: ThemeBackground;
-}
-
-export const lightTheme: Theme = lightThemeJson as Theme;
-export const darkTheme: Theme = darkThemeJson as Theme;
-export const themes: Record<ThemeName, Theme> = {
-  obsidian: darkTheme,
-  cobalt: cobaltThemeJson as Theme,
-  raven: ravenThemeJson as Theme,
-  clay: lightTheme
-};
-
-export function contrastRatio(foreground: string, background: string): number {
-  const luminance = (hex: string) => {
-    const values = hex.replace("#", "").match(/.{2}/g)?.slice(0, 3).map((v) => {
-      const c = parseInt(v, 16) / 255;
-      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    }) ?? [0, 0, 0];
-    return values[0] * 0.2126 + values[1] * 0.7152 + values[2] * 0.0722;
-  };
-  const a = luminance(foreground), b = luminance(background);
-  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
 export function isReducedMotionPreferred(): boolean {
@@ -70,28 +98,25 @@ export function subscribeReducedMotion(
   };
 }
 
-export function resolveTheme(mode: ThemeMode): Theme {
-  if (Object.hasOwn(themes, mode)) return themes[mode as ThemeName];
-  if (mode === "light") {
-    return lightTheme;
+function systemPrefersDark(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return false;
   }
-  if (mode === "dark") {
-    return darkTheme;
-  }
-  if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
-    const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    return isDark ? darkTheme : lightTheme;
-  }
-  return lightTheme;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
-export function subscribeSystemTheme(onChange: (theme: Theme) => void): () => void {
+/** The theme a saved mode stands for (resolves `system`, legacy names, `custom`). */
+export function resolveTheme(mode: ThemeMode, custom: CustomTheme = DEFAULT_CUSTOM_THEME): ThemeDef {
+  return themeFor(mode, custom, systemPrefersDark());
+}
+
+export function subscribeSystemTheme(onChange: (dark: boolean) => void): () => void {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
     return () => {};
   }
   const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
   const handler = (event: MediaQueryListEvent) => {
-    onChange(event.matches ? darkTheme : lightTheme);
+    onChange(event.matches);
   };
   mediaQuery.addEventListener("change", handler);
   return () => {
@@ -99,51 +124,29 @@ export function subscribeSystemTheme(onChange: (theme: Theme) => void): () => vo
   };
 }
 
-export function applyTheme(theme: Theme, overrides?: ThemeOverrides): void {
+/** Accent for the given preference, theme and active bot. */
+export function accentFor(pref: AccentPreference, theme: ThemeDef, botColor?: string): string {
+  return resolveAccent(pref, theme, botColor, fallbackAccent(deriveTheme(theme)));
+}
+
+/** Custom properties set inline on the previous `applyTheme` call. */
+let appliedProps: string[] = [];
+
+export function applyTheme(theme: ThemeDef, overrides?: ThemeOverrides): void {
   if (typeof document === "undefined") {
     return;
   }
   const root = document.documentElement;
+  for (const prop of appliedProps) root.style.removeProperty(prop);
 
-  // Built-ins are driven by :root[data-theme]; custom JSON themes still work.
-  for (const token of Object.keys(darkTheme.tokens)) root.style.removeProperty(token);
-  for (const [token, value] of Object.entries(theme.tokens)) {
-    if (THEME_NAMES.includes(theme.name as ThemeName)) continue;
-    const propName = token.startsWith("--") ? token : `--${token}`;
-    root.style.setProperty(propName, value);
-  }
+  const style = overrides?.style ?? "solid";
+  const accent = normalizeHex(overrides?.accentColor) ?? accentFor("", theme);
+  const tokens = buildTokens(theme, accent, style, overrides?.backdropActive === true);
+  appliedProps = Object.keys(tokens);
+  for (const [prop, value] of Object.entries(tokens)) root.style.setProperty(prop, value);
+  root.style.colorScheme = colorSchemeFor(theme);
 
-  const accent = overrides?.accentColor?.trim();
-  if (accent && /^#[0-9a-f]{6}$/i.test(accent)) {
-    const contrast = contrastRatio(accent, "#111111") >= contrastRatio(accent, "#FFFFFF") ? "#111111" : "#FFFFFF";
-    root.style.setProperty("--color-accent", accent);
-    root.style.setProperty("--color-accent-contrast", contrast);
-    root.style.setProperty("--color-text-inverse", contrast);
-    // Arbitrary custom colors cannot make small links unreadable.
-    root.style.setProperty("--color-accent-text", contrastRatio(accent, theme.tokens["--color-surface-active"]) >= 4.5 ? accent : theme.tokens["--color-text"]);
-    root.style.setProperty(
-      "--color-accent-hover",
-      accent
-    );
-    root.style.setProperty(
-      "--color-accent-subtle",
-      `color-mix(in srgb, ${accent} 12%, var(--color-surface))`
-    );
-    root.style.setProperty(
-      "--color-overlay-target-bg",
-      `color-mix(in srgb, ${accent} 16%, transparent)`
-    );
-    root.style.setProperty(
-      "--color-overlay-ripple",
-      `color-mix(in srgb, ${accent} 48%, transparent)`
-    );
-  }
-
-  const bg: ThemeBackground = {
-    ...theme.background,
-    ...overrides?.background
-  };
-
+  const bg = overrides?.background ?? {};
   const rawUrl = bg.url?.trim() ?? "";
   const isGif =
     rawUrl.toLowerCase().endsWith(".gif") ||
@@ -159,8 +162,15 @@ export function applyTheme(theme: Theme, overrides?: ThemeOverrides): void {
     root.style.setProperty("--background-image", "none");
     root.dataset.hasBackground = "false";
   }
-
   root.style.setProperty("--background-blur", bg.blur?.trim() || "0px");
   root.style.setProperty("--background-dim", bg.dim?.trim() || "0");
-  root.dataset.theme = theme.name;
+
+  root.dataset.theme = theme.id;
+  root.dataset.style = style;
+  root.dataset.corners = overrides?.corners ?? "soft";
+  root.dataset.bubble = overrides?.bubble ?? "soft";
+  root.dataset.meb = overrides?.ownBubble ?? "tint";
+  const backdropActive = overrides?.backdropActive === true;
+  root.dataset.backdrop = backdropActive ? "on" : "off";
+  root.dataset.float = backdropActive || style === "glass" ? "on" : "off";
 }

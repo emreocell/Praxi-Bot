@@ -1,10 +1,11 @@
-import { BrainCircuit, ChartNoAxesCombined, Monitor, Search, Settings2, RefreshCw, X } from "lucide-react";
+import { BrainCircuit, ChartNoAxesCombined, Monitor, Palette, Search, Settings2, RefreshCw, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "../components/Modal";
 import { SettingGroup } from "../components/SettingsUi";
 import { matchesQuery } from "../lib/searchText";
 import { aiCards } from "./settings/AiCards";
+import { appearanceCards } from "./settings/AppearanceCards";
 import { computerCards } from "./settings/ComputerCards";
 import { generalCards } from "./settings/GeneralCards";
 import { otherCards } from "./settings/OtherCards";
@@ -16,7 +17,7 @@ import {
 } from "./settings/types";
 import styles from "./SettingsModal.module.css";
 
-const SECTION_ICONS = { general: Settings2, ai: BrainCircuit, computer: Monitor, usage: ChartNoAxesCombined, updates: RefreshCw };
+const SECTION_ICONS = { general: Settings2, appearance: Palette, ai: BrainCircuit, computer: Monitor, usage: ChartNoAxesCombined, updates: RefreshCw };
 
 
 /** Consecutive `row` cards share one rounded group; `block` cards stand alone. */
@@ -26,7 +27,7 @@ function renderCards(cards: CardDef[], groupLabel: (key: string) => string): Rea
   const flush = () => {
     if (run.length > 0) {
       const first = run[0].id;
-      const group = first === "account" ? "account" : first === "theme" ? "appearance" : first === "language" ? "behavior" : null;
+      const group = first === "account" ? "account" : first === "language" ? "behavior" : null;
       if (group) out.push(<h3 key={`label-${first}`} className={styles.sectionLabel}>{groupLabel(group)}</h3>);
       out.push(
         <SettingGroup key={`group-${first}`}>
@@ -41,7 +42,7 @@ function renderCards(cards: CardDef[], groupLabel: (key: string) => string): Rea
     }
   };
   for (const c of cards) {
-    if (["theme", "language"].includes(c.id)) flush();
+    if (c.id === "language") flush();
     if (c.kind === "row") {
       run.push(c);
     } else {
@@ -86,6 +87,7 @@ export function SettingsModal({
   const cards = useMemo(
     () => [
       ...generalCards(bridge, t),
+      ...appearanceCards(bridge, t),
       ...aiCards(t),
       ...computerCards(bridge, t),
       ...otherCards(t)
