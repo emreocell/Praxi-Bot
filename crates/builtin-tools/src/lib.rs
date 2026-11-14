@@ -26,6 +26,8 @@ pub mod script;
 pub mod shell;
 mod util;
 
+pub use util::classify;
+
 /// Windows drive letters (DOS devices) live in the logon session, not in one
 /// test, and PowerShell enumerates all of them while it starts. A test that
 /// defines a drive letter pointing at an unreachable share therefore stalls
@@ -265,6 +267,25 @@ mod tests {
             );
         }
         assert!(crate::util::classify("not_a_builtin").is_none());
+        for name in [
+            "desktop_launch",
+            "desktop_type",
+            "desktop_set_value",
+            "desktop_key",
+            "desktop_click",
+            "desktop_scroll",
+            "desktop_drag",
+            "browser_scroll",
+            "browser_tabs",
+        ] {
+            assert!(
+                crate::util::classify(name).unwrap().egress,
+                "{name} sends data off the machine"
+            );
+        }
+        assert!(!crate::util::classify("desktop_list_apps").unwrap().egress);
+        assert!(!crate::util::classify("desktop_get_state").unwrap().egress);
+        assert!(!crate::util::classify("browser_snapshot").unwrap().egress);
     }
 
     fn registry() -> (tempfile::TempDir, ToolRegistry) {

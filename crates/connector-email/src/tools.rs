@@ -63,12 +63,46 @@ fn spec(name: &str, description: &str, schema: Value, effect: Effect) -> ToolSpe
         category: PermissionCategory::Messaging,
         platforms: vec![Platform::All],
         content: match name {
-            READ | SEARCH => ContentClass::untrusted_private(),
-            LIST_FOLDERS => ContentClass::private_read(),
-            DRAFT | SEND => ContentClass::egress(),
-            // mark_read changes a flag and does not put message content in context.
+            // The call sends model-controlled fields (folder, query, ids) to
+            // the mail server and the reply can be untrusted private mail.
+            READ | SEARCH => ContentClass::all(),
+            // Folder names come back; the account name is sent to the server.
+            LIST_FOLDERS => ContentClass::declared(false, true, true),
+            // mark_read does not return the message, but the folder and the
+            // message id are sent to the remote mailbox, same as a draft or a send.
+            DRAFT | SEND | MARK_READ => ContentClass::egress(),
             _ => ContentClass::none(),
         },
+    }
+}
+
+#[cfg(test)]
+mod class_tests {
+    use super::*;
+
+    #[test]
+    fn remote_mailbox_calls_are_egress() {
+        let schema = json!({});
+        assert!(spec(READ, "", schema.clone(), Effect::Read).content.egress);
+        assert!(
+            spec(SEARCH, "", schema.clone(), Effect::Read)
+                .content
+                .egress
+        );
+        assert!(
+            spec(SEARCH, "", schema.clone(), Effect::Read)
+                .content
+                .ingests_untrusted
+        );
+        assert!(
+            spec(MARK_READ, "", schema.clone(), Effect::Write)
+                .content
+                .egress
+        );
+        let folders = spec(LIST_FOLDERS, "", schema.clone(), Effect::Read).content;
+        assert!(folders.egress);
+        assert!(folders.reads_private);
+        assert!(spec(SEND, "", schema, Effect::Write).content.egress);
     }
 }
 
@@ -196,6 +230,7 @@ fn json_out(v: Value) -> ToolOutput {
     ToolOutput {
         content: vec![ContentPart::Json { data: v }],
         spill: None,
+        exposure: None,
     }
 }
 

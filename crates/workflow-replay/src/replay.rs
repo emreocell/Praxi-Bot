@@ -39,18 +39,11 @@ tokio::task_local! {
 }
 
 /// Classification for a workflow step that is not a registered tool (native
-/// browser and desktop actions). Unknown names stay undeclared, which the
-/// loop treats as private and untrusted.
+/// browser and desktop actions). The same table as [`builtin_tools::classify`],
+/// so a desktop launch is egress here too. Unknown names stay undeclared,
+/// which the loop treats as private and untrusted.
 fn content_for_unnamed(name: &str) -> ContentClass {
-    match name {
-        "browser_snapshot" | "browser_screenshot" | "browser_wait" | "browser_scroll"
-        | "browser_tabs" | "desktop_list_apps" | "desktop_launch" | "desktop_get_state"
-        | "desktop_click" | "desktop_type" | "desktop_set_value" | "desktop_key"
-        | "desktop_scroll" | "desktop_drag" => ContentClass::untrusted_private(),
-        "browser_open" | "browser_back" | "browser_click" | "browser_fill" | "browser_select"
-        | "browser_press" | "browser_eval" | "shell_run" | "script_run" => ContentClass::all(),
-        _ => ContentClass::unspecified(),
-    }
+    builtin_tools::classify(name).unwrap_or_else(ContentClass::unspecified)
 }
 
 /// Workflows currently being replayed (outermost first) on this task.
@@ -1288,4 +1281,31 @@ enum Hit {
     None,
     Ref(String, Found),
     Css(String),
+}
+
+#[cfg(test)]
+mod class_tests {
+    use super::*;
+
+    #[test]
+    fn unnamed_steps_use_the_builtin_classification() {
+        for name in [
+            "desktop_launch",
+            "desktop_type",
+            "desktop_key",
+            "browser_scroll",
+            "browser_tabs",
+            "fs_read",
+            "desktop_list_apps",
+        ] {
+            assert_eq!(
+                content_for_unnamed(name),
+                builtin_tools::classify(name).unwrap(),
+                "{name}"
+            );
+        }
+        assert!(content_for_unnamed("desktop_launch").egress);
+        assert!(content_for_unnamed("browser_scroll").egress);
+        assert!(!content_for_unnamed("browser_snapshot").egress);
+    }
 }

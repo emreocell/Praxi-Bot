@@ -15,27 +15,29 @@ use tool_registry::{
 ///
 /// Arms that share a class are one pattern. Comments name the family.
 #[must_use]
-pub(crate) fn classify(name: &str) -> Option<ContentClass> {
+pub fn classify(name: &str) -> Option<ContentClass> {
     Some(match name {
         // Questions, todos, and schedule lifecycle do not bring content in
         // and do not send data out.
         "ask_user" | "todo_write" | "schedule_pause" | "schedule_delete" => ContentClass::none(),
-        // File, browser and desktop observation.
+        // Observation. Scrolling and tab changes are not in this list: a page
+        // can turn those into network requests.
         "fs_read" | "fs_list" | "fs_search" | "browser_snapshot" | "browser_screenshot"
-        | "browser_wait" | "browser_scroll" | "browser_tabs" | "desktop_list_apps"
-        | "desktop_launch" | "desktop_get_state" | "desktop_click" | "desktop_type"
-        | "desktop_set_value" | "desktop_key" | "desktop_scroll" | "desktop_drag" => {
+        | "browser_wait" | "desktop_list_apps" | "desktop_get_state" => {
             ContentClass::untrusted_private()
         }
         // Writes and listings of private state that do not leave the machine.
         "fs_write" | "fs_edit" | "fs_move" | "fs_delete" | "checkpoint_list"
         | "checkpoint_restore" | "schedule_list" => ContentClass::private_read(),
-        // A shell, a script, or browser navigation and input can read, and
-        // can send data out.
+        // A shell, a script, browser navigation and input, or a desktop
+        // mutation (launch, type, replace a value, press a key, click, scroll,
+        // drag) can read and can send data off the machine. The desktop
+        // control gate is about who owns the computer, not about egress.
         "shell_run" | "script_run" | "browser_open" | "browser_back" | "browser_click"
-        | "browser_fill" | "browser_select" | "browser_press" | "browser_eval" => {
-            ContentClass::all()
-        }
+        | "browser_fill" | "browser_select" | "browser_press" | "browser_eval"
+        | "browser_scroll" | "browser_tabs" | "desktop_launch" | "desktop_click"
+        | "desktop_type" | "desktop_set_value" | "desktop_key" | "desktop_scroll"
+        | "desktop_drag" => ContentClass::all(),
         "schedule_create" | "schedule_update" | "schedule_resume" => ContentClass::egress(),
         _ => return None,
     })
@@ -115,6 +117,7 @@ pub(crate) fn finish_text(ctx: &ToolContext, spill_dir: &Path, text: String) -> 
                 mime_type: "text/plain".into(),
                 size_bytes: total as u64,
             }),
+            exposure: None,
         }
     } else {
         const MARK: &str = "
