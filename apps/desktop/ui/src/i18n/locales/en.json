@@ -1767,6 +1767,7 @@
       "quarantined": "Quarantined"
     },
     "auth": {
+      "expiredToast": "The {{name}} sign-in was not finished within {{minutes}} minutes and was cancelled.",
       "pasteLabel": "Redirect address from the browser",
       "pasteSubmit": "Finish sign-in",
       "pasteHint": "If the browser runs on another computer and shows an error page after you sign in, copy that page's full address and paste it here.",
@@ -1863,6 +1864,21 @@
       "tokenHint": "These ask for a personal token you create yourself. Most services connect without one through Composio on the main screen.",
       "localTitle": "Local developer servers"
     },
+    "sheet": {
+      "title": "Connect {{name}}",
+      "progress": "Step {{current}} of {{total}}",
+      "login": "The sign-in page opened in your browser. Finish it there and {{name}} opens next by itself.",
+      "app": "Opening {{name}}'s own page…",
+      "opened": "{{name}}'s page is open in your browser. Allow access there; it shows up as Connected here.",
+      "timedOut": "The sign-in was not finished in time. Press Connect to start again.",
+      "cancelled": "Cancelled.",
+      "failed": {
+        "login_open": "The sign-in page could not be opened.",
+        "login_failed": "The sign-in did not finish. Try again.",
+        "app_link": "The page for {{name}} could not be prepared. Try again.",
+        "app_open": "The page for {{name}} could not be opened."
+      }
+    },
     "composio": {
       "title": "Composio",
       "getKey": "Open the Composio key page",
@@ -1954,6 +1970,7 @@
     "intro": "Handy shortcuts while the app is open.",
     "palette": "Command palette",
     "send": "Send message",
+    "recall": "Earlier messages of this chat (empty box or first line; Esc brings your draft back)",
     "stop": "Stop all bot runs"
   },
   "modelPicker": {

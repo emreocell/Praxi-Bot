@@ -47,6 +47,31 @@ fn composio(s: &AppState) -> Result<Arc<dyn ComposioControl>, ApiError> {
         .ok_or_else(|| ApiError::unavailable("Composio is not available in this daemon"))
 }
 
+/// `GET /v1/composio/logos/{slug}`: the app's logo, fetched and validated by the daemon (the
+/// webview's CSP allows no remote images). Authenticated like every route; the bytes are served
+/// with `nosniff` and a CSP that forbids anything active even if a viewer rendered them as a page.
+pub(crate) async fn composio_logo(
+    State(s): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<axum::response::Response, ApiError> {
+    check_slug(&slug)?;
+    let logo = composio(&s)?
+        .logo(&slug)
+        .await?
+        .ok_or_else(|| ApiError::not_found("logo"))?;
+    axum::response::Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", logo.content_type)
+        .header("x-content-type-options", "nosniff")
+        .header(
+            "content-security-policy",
+            "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        )
+        .header("cache-control", "private, max-age=86400")
+        .body(axum::body::Body::from(logo.bytes))
+        .map_err(ApiError::internal)
+}
+
 /// `app` slugs are `[a-z0-9_]`, at most 64 characters.
 fn check_slug(slug: &str) -> Result<(), ApiError> {
     if slug.is_empty()

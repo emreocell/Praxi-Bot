@@ -1,6 +1,6 @@
-import { siGithub, siGitlab, siNotion, siGoogledrive, siGooglecalendar, siGmail, siDiscord, siFigma, siLinear, siAnthropic, siGooglegemini, siOllama, siClaude, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siTodoist, siObsidian, siHomeassistant, siOpenrouter, siDeepseek, siMistralai, siCursor, siGithubcopilot, siLmstudio } from 'simple-icons';
+import { siGithub, siGitlab, siNotion, siGoogledrive, siGooglecalendar, siGmail, siDiscord, siFigma, siLinear, siAnthropic, siGooglegemini, siOllama, siClaude, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siTodoist, siObsidian, siHomeassistant, siOpenrouter, siDeepseek, siMistralai, siCursor, siGithubcopilot, siLmstudio, siStripe, siAtlassian, siJira, siConfluence, siTrello, siAsana, siHubspot, siShopify, siDropbox, siZoom, siX, siFacebook, siInstagram, siYoutube, siReddit, siTelegram, siWhatsapp, siSpotify, siAirtable, siClickup, siZendesk, siIntercom, siMailchimp, siCalendly, siDocker, siVercel, siNetlify, siSupabase, siCloudflare, siGooglesheets, siGoogledocs, siGoogleslides, siGooglemeet, siGooglemaps, siGooglephotos, siBitbucket, siDatadog, siPagerduty, siMongodb, siRedis, siMiro, siBox, siEvernote, siPaypal, siSquare, siQuickbooks, siXero, siWordpress, siMedium, siGhost, siSubstack, siZapier, siMake, siN8n, siResend, siMixpanel, siPosthog, siFirebase, siDigitalocean } from 'simple-icons';
 
-const icons = [siGithub, siGitlab, siNotion, siGoogledrive, siGooglecalendar, siGmail, siDiscord, siFigma, siLinear, siAnthropic, siGooglegemini, siOllama, siClaude, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siTodoist, siObsidian, siHomeassistant, siOpenrouter, siDeepseek, siMistralai, siCursor, siGithubcopilot, siLmstudio];
+const icons = [siGithub, siGitlab, siNotion, siGoogledrive, siGooglecalendar, siGmail, siDiscord, siFigma, siLinear, siAnthropic, siGooglegemini, siOllama, siClaude, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siTodoist, siObsidian, siHomeassistant, siOpenrouter, siDeepseek, siMistralai, siCursor, siGithubcopilot, siLmstudio, siStripe, siAtlassian, siJira, siConfluence, siTrello, siAsana, siHubspot, siShopify, siDropbox, siZoom, siX, siFacebook, siInstagram, siYoutube, siReddit, siTelegram, siWhatsapp, siSpotify, siAirtable, siClickup, siZendesk, siIntercom, siMailchimp, siCalendly, siDocker, siVercel, siNetlify, siSupabase, siCloudflare, siGooglesheets, siGoogledocs, siGoogleslides, siGooglemeet, siGooglemaps, siGooglephotos, siBitbucket, siDatadog, siPagerduty, siMongodb, siRedis, siMiro, siBox, siEvernote, siPaypal, siSquare, siQuickbooks, siXero, siWordpress, siMedium, siGhost, siSubstack, siZapier, siMake, siN8n, siResend, siMixpanel, siPosthog, siFirebase, siDigitalocean];
 const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 const aliases: Record<string, string> = {
   'bravesearch': 'brave',
@@ -13,7 +13,12 @@ const aliases: Record<string, string> = {
   codex: 'openai',
   clicodex: 'openai',
   chatgptplan: 'openai',
-  google: 'googlegemini'
+  google: 'googlegemini',
+  notionremote: 'notion',
+  twitter: 'x',
+  googlecal: 'googlecalendar',
+  atlassianjira: 'jira',
+  jiracloud: 'jira'
 };
 export function brandIcon(name: string) {
   const key = aliases[normalize(name)] ?? normalize(name);

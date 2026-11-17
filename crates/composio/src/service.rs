@@ -1227,6 +1227,42 @@ impl ComposioService {
             .unwrap_or_default()
     }
 
+    /// The logo of toolkit `slug`: from the disk cache, else fetched once from the URL the
+    /// catalog carries (see [`crate::logo`] for every limit) and cached. `Ok(None)`: no logo is
+    /// known for this app.
+    ///
+    /// # Errors
+    /// The slug is malformed, or the download / validation failed.
+    pub async fn logo(&self, slug: &str) -> Result<Option<crate::logo::Logo>> {
+        if !valid_slug(slug) {
+            return Err(ComposioError::Invalid("malformed app slug".into()));
+        }
+        let data = self
+            .0
+            .path
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .ok_or_else(|| ComposioError::Internal("no data directory".into()))?;
+        if let Some(logo) = crate::logo::cached(&data, slug) {
+            return Ok(Some(logo));
+        }
+        let url = self
+            .0
+            .catalog_file
+            .lock()
+            .as_ref()
+            .and_then(|f| f.items.iter().find(|t| t.slug == slug))
+            .and_then(|t| t.logo.clone());
+        let Some(url) = url else {
+            return Ok(None);
+        };
+        let logo = crate::logo::fetch(&url)
+            .await
+            .map_err(|_| ComposioError::Upstream("logo unavailable".into()))?;
+        crate::logo::store(&data, slug, &logo);
+        Ok(Some(logo))
+    }
+
     /// Directory of `composio.toml` (tests).
     #[must_use]
     pub fn state_path(&self) -> &Path {

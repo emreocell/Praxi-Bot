@@ -1,5 +1,5 @@
 import { Check, ChevronDown, Search, Server, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { upsertApp } from "../lib/composioApps";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, Button } from "ui";
@@ -36,11 +36,13 @@ import {
 import { useDaemon } from "../state/DaemonContext";
 import { useMcp } from "../state/useMcp";
 import styles from "./AppsModal.module.css";
-import { AppTile, ComposioCell, GroupChips, LinkStep, SkeletonTiles } from "./AppsGrid";
+import { AppTile, ComposioCell, GroupChips, SkeletonTiles } from "./AppsGrid";
+import { ConnectSheet } from "./ConnectSheet";
+import { type FlowCancel, type FlowState, runConnectFlow } from "../lib/connectFlow";
 import { ComposioAdvanced } from "./ComposioAdvanced";
 import { MissingComponent, componentFor } from "./MissingComponent";
 import { useComposio } from "../state/useComposio";
-import { composioTileState, directEntries, filterDirect, isRemoteServer, visibleToolkits } from "../lib/appTiles";
+import { SIGN_IN_WAIT_MINUTES, composioTileState, directEntries, filterDirect, isRemoteServer, settledApps, unsettledApps, visibleToolkits } from "../lib/appTiles";
 import { openComposioLink } from "../lib/externalLink";
 import type { McpServer as McpServerT } from "../api/types";
 import own from "./AppsGrid.module.css";
@@ -262,7 +264,7 @@ function ConnectedCell({
           <ChevronDown aria-hidden="true" />
         </button>
       </div>
-      {server.error ? (
+      {server.error && !signingIn && !needsSignIn ? (
         <McpErrorBlock server={server} busy={busy} onChooseFolder={onChooseFolder} onReconnect={onReconnect} />
       ) : null}
       {open ? (
@@ -661,21 +663,36 @@ export function AppsModal({
   const [group, setGroup] = useState("all");
   const [busy, setBusy] = useState<string | null>(null);
   const c = useComposio(open, query, group);
-  const [wantLink, setWantLink] = useState<{ slug: string; name: string } | null>(null);
   const [linking, setLinking] = useState<string | null>(null);
+  // The one connect flow that runs now (anchored to its tile), and its stop flag.
+  const [flow, setFlow] = useState<FlowState | null>(null);
+  const flowCancel = useRef<FlowCancel>({ cancelled: false });
   // Pending sign-ins by server; the flag stops the poll and cancels the flow.
   const [signing, setSigning] = useState<Record<string, { aborted: boolean }>>({});
+  // Servers this session created for a sign-in that has not finished: they are tiles with a
+  // Cancel, never "Connected", and are removed again when the sign-in is cancelled or expires.
+  const [fresh, setFresh] = useState<Record<string, true>>({});
 
   const signIn = async (name: string) => {
     if (!client || signing[name]) {
       return;
     }
     const signal = { aborted: false };
+    let expired = false;
+    // A sign-in nobody finishes expires (the documented wait) and is cleaned up.
+    const timer = setTimeout(() => {
+      expired = true;
+      signal.aborted = true;
+    }, SIGN_IN_WAIT_MINUTES * 60 * 1000);
     setSigning((m) => ({ ...m, [name]: signal }));
+    let signedIn = false;
     try {
       const state = await signInMcpServer(client, name, openExternal, { signal });
-      if (state === "signed_in") {
+      signedIn = state === "signed_in";
+      if (signedIn) {
         toast.show(t("apps.auth.signedInToast", { name }), "success");
+      } else if (expired) {
+        toast.show(t("apps.auth.expiredToast", { name, minutes: SIGN_IN_WAIT_MINUTES }), "info");
       } else if (!signal.aborted) {
         toast.show(t("apps.auth.failedToast", { name }), "danger");
       }
@@ -685,7 +702,17 @@ export function AppsModal({
         "danger"
       );
     } finally {
+      clearTimeout(timer);
       setSigning((m) => {
+        const next = { ...m };
+        delete next[name];
+        return next;
+      });
+      // A connection that never finished is not kept as a half-made server.
+      if (!signedIn && fresh[name]) {
+        await client.deleteMcpServer(name).catch(() => undefined);
+      }
+      setFresh((m) => {
         const next = { ...m };
         delete next[name];
         return next;
@@ -698,7 +725,7 @@ export function AppsModal({
     if (open) {
       setQuery("");
       setGroup("all");
-      setWantLink(null);
+      setFlow(null);
       setAdvanced(false);
     }
   }, [open]);
@@ -717,9 +744,10 @@ export function AppsModal({
     () => catalog.filter((e) => e.install.transport === "http" && e.install.required_secrets.length === 0),
     [catalog]
   );
+  const pendingNames = useMemo(() => new Set([...Object.keys(signing), ...Object.keys(fresh)]), [signing, fresh]);
   const directShown = useMemo(
-    () => filterDirect(directEntries(catalog, servers), query, group),
-    [catalog, servers, query, group]
+    () => filterDirect(directEntries(catalog, servers.filter((s) => !pendingNames.has(s.name))), query, group),
+    [catalog, servers, query, group, pendingNames]
   );
   const shownCatalog = useMemo(
     () =>
@@ -732,7 +760,10 @@ export function AppsModal({
     () => available.filter((e) => e.install.required_secrets.length > 0),
     [available]
   );
-  const remoteServers = useMemo(() => shownServers.filter(isRemoteServer), [shownServers]);
+  const remoteServers = useMemo(
+    () => shownServers.filter((s) => isRemoteServer(s) && !pendingNames.has(s.name)),
+    [shownServers, pendingNames]
+  );
   const localServers = useMemo(() => shownServers.filter((s) => !isRemoteServer(s)), [shownServers]);
   const toolkits = useMemo(
     () => visibleToolkits(c.items, c.apps, allDirect, []),
@@ -777,42 +808,78 @@ export function AppsModal({
     }
   };
 
-  /** Open Composio's consent page for one app (Composio is already linked). */
-  const connectComposio = (slug: string, name: string) =>
-    run(slug, async () => {
-      if (!client) {
-        return;
-      }
-      setLinking(slug);
-      try {
-        const link = await client.composioConnect(slug);
-        if (!(await openComposioLink(link.redirect_url))) {
-          toast.show(t("apps.composio.openFailed"), "danger");
+  /**
+   * One continuous Connect flow anchored to the app's tile: with a Composio credential the app's
+   * own consent page opens at once; without one the Composio sign-in opens first and the flow
+   * carries on to the app by itself when it finishes (nothing to press twice).
+   */
+  const connectApp = (slug: string, name: string) => {
+    if (!client) {
+      return;
+    }
+    flowCancel.current.cancelled = true; // a flow of another tile is replaced
+    const cancel: FlowCancel = { cancelled: false };
+    flowCancel.current = cancel;
+    setLinking(slug);
+    void runConnectFlow(
+      {
+        configured: () => c.status?.configured === true,
+        loginStart: () => client.composioLoginStart(),
+        loginStatus: () => client.composioLoginStatus(),
+        appConnect: (s) => client.composioConnect(s),
+        open: (url, login) => openComposioLink(url, login),
+        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        now: () => Date.now()
+      },
+      slug,
+      name,
+      (state) => {
+        if (flowCancel.current !== cancel) {
           return;
         }
-        c.setApps((prev) =>
-          upsertApp(prev, { slug, name, state: "pending", enabled: true, native_first: false, bots: null, tools: 0 })
-        );
-      } finally {
+        setFlow(state);
+        if (state.step === "app") {
+          void c.reloadStatus();
+        }
+        if (state.step === "opened") {
+          c.setApps((prev) =>
+            upsertApp(prev, { slug, name, state: "pending", enabled: true, native_first: false, bots: null, tools: 0 })
+          );
+        }
+      },
+      cancel
+    ).finally(() => {
+      if (flowCancel.current === cancel) {
         setLinking(null);
       }
     });
-
-  /** First Connect on a Composio app: the one-time browser link comes first. */
-  const pressComposio = (slug: string, name: string) => {
-    if (c.status?.configured) {
-      void connectComposio(slug, name);
-    } else {
-      setWantLink({ slug, name });
-    }
   };
 
+  /** Stop the flow of this tile; a consent page that was already opened is cancelled too. */
+  const cancelFlow = (slug: string) => {
+    flowCancel.current.cancelled = true;
+    setFlow(null);
+    setLinking(null);
+    void run(slug, async () => {
+      await client?.composioDisconnect(slug);
+      await c.reloadApps();
+    });
+  };
+
+  const pressComposio = (slug: string, name: string) => connectApp(slug, name);
+
   const connectDirect = async (entry: McpCatalogEntry) => {
-    try {
-      await connect(entry, {});
-    } catch {
+    if (!client) {
       return;
     }
+    try {
+      // Created only to be signed in: not "connected" until the sign-in finishes.
+      await connectCatalogEntry(client, entry, {});
+    } catch (e) {
+      toast.show(errorText(e), "danger");
+      return;
+    }
+    setFresh((m) => ({ ...m, [entry.id]: true }));
     await signIn(entry.id);
   };
 
@@ -987,11 +1054,11 @@ export function AppsModal({
             </>
           ) : (
             <>
-              {c.apps.length > 0 || remoteServers.length > 0 ? (
+              {settledApps(c.apps).length > 0 || remoteServers.length > 0 ? (
                 <section className={styles.section} aria-labelledby="apps-connected-h">
                   <h3 className={styles.sectionLabel} id="apps-connected-h">{t("apps.connectedSection")}</h3>
                   <ul className={styles.grid}>
-                    {c.apps.map((a) => (
+                    {settledApps(c.apps).map((a) => (
                       <ComposioCell
                         key={a.slug}
                         app={a}
@@ -1026,23 +1093,6 @@ export function AppsModal({
 
               <GroupChips value={group} onChange={setGroup} />
 
-              {wantLink ? (
-                <LinkStep
-                  phase={c.login}
-                  onCancel={() => {
-                    c.cancelLogin();
-                    setWantLink(null);
-                  }}
-                  onStart={() => {
-                    const w = wantLink;
-                    void c.startLogin(() => {
-                      setWantLink(null);
-                      void connectComposio(w.slug, w.name);
-                    });
-                  }}
-                />
-              ) : null}
-
               <section className={styles.section} aria-labelledby="apps-all-h">
                 <h3 className={styles.sectionLabel} id="apps-all-h">{t("apps.catalogSection")}</h3>
                 {firstLoad ? (
@@ -1058,13 +1108,58 @@ export function AppsModal({
                   <p className={styles.empty}><Search aria-hidden="true" />{t("apps.composio.noResults")}</p>
                 ) : (
                   <ul className={styles.grid} data-testid="apps-grid">
+                    {unsettledApps(c.apps).map((a) => (
+                      <AppTile
+                        key={`pending-${a.slug}`}
+                        testId={`composio-tile-${a.slug}`}
+                        slug={a.slug}
+                        name={a.name}
+                        description={a.name}
+                        state={composioTileState(a, false)}
+                        onConnect={() => pressComposio(a.slug, a.name)}
+                        onCancel={() => cancelFlow(a.slug)}
+                        sheet={
+                          flow?.slug === a.slug ? (
+                            <ConnectSheet
+                              flow={flow}
+                              onCancel={() => cancelFlow(a.slug)}
+                              onRetry={() => pressComposio(a.slug, a.name)}
+                              onClose={() => setFlow(null)}
+                            />
+                          ) : null
+                        }
+                      />
+                    ))}
+                    {[...Object.keys(signing), ...Object.keys(fresh)]
+                      .filter((n, i, all) => all.indexOf(n) === i)
+                      .map((n) => {
+                        const e = entryOf(n);
+                        return e ? (
+                          <AppTile
+                            key={`signing-${n}`}
+                            testId={`mcp-catalog-${n}`}
+                            name={e.name}
+                            logo={e.icon ?? e.name}
+                            description={e.description}
+                            state="waiting"
+                            onConnect={() => undefined}
+                            onCancel={() => {
+                              const sig = signing[n];
+                              if (sig) {
+                                sig.aborted = true;
+                              }
+                            }}
+                          />
+                        ) : null;
+                      })}
                     {directShown.map((e) => (
                       <AppTile
                         key={e.id}
                         testId={`mcp-catalog-${e.id}`}
                         name={e.name}
+                        logo={e.icon ?? e.name}
                         description={e.description}
-                        state={signing[e.id] ? "waiting" : busy === e.id ? "linking" : "idle"}
+                        state={busy === e.id ? "linking" : "idle"}
                         onConnect={() => void connectDirect(e)}
                       />
                     ))}
@@ -1072,10 +1167,22 @@ export function AppsModal({
                       <AppTile
                         key={tk.slug}
                         testId={`composio-tile-${tk.slug}`}
+                        slug={tk.slug}
                         name={tk.name}
                         description={tk.description || tk.categories.join(", ")}
                         state={composioTileState(undefined, linking === tk.slug)}
                         onConnect={() => pressComposio(tk.slug, tk.name)}
+                        onCancel={() => cancelFlow(tk.slug)}
+                        sheet={
+                          flow?.slug === tk.slug ? (
+                            <ConnectSheet
+                              flow={flow}
+                              onCancel={() => cancelFlow(tk.slug)}
+                              onRetry={() => pressComposio(tk.slug, tk.name)}
+                              onClose={() => setFlow(null)}
+                            />
+                          ) : null
+                        }
                       />
                     ))}
                   </ul>

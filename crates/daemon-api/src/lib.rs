@@ -1270,6 +1270,7 @@ fn api_routes() -> Router<AppState> {
             get(c::composio_login_status).post(c::composio_login_start),
         )
         .route("/v1/composio/toolkits", get(c::composio_catalog))
+        .route("/v1/composio/logos/{slug}", get(c::composio_logo))
         .route("/v1/composio/apps", get(c::composio_list_apps))
         .route(
             "/v1/composio/apps/{slug}",

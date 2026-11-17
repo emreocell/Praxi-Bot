@@ -12,6 +12,7 @@ mod client;
 mod curated;
 mod error;
 mod keys;
+pub mod logo;
 mod schema;
 mod service;
 mod state;

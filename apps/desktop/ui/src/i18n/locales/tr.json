@@ -1767,6 +1767,7 @@
       "quarantined": "Karantinada"
     },
     "auth": {
+      "expiredToast": "{{name}} girişi {{minutes}} dakika içinde bitirilmedi ve iptal edildi.",
       "pasteLabel": "Tarayıcıdaki yönlendirme adresi",
       "pasteSubmit": "Oturum açmayı bitir",
       "pasteHint": "Tarayıcı başka bir bilgisayarda çalışıyorsa ve oturum açtıktan sonra hata sayfası gösteriyorsa, o sayfanın tam adresini kopyalıp buraya yapıştırın.",
@@ -1863,6 +1864,21 @@
       "tokenHint": "Bunlar kendi oluşturduğun kişisel bir anahtar ister. Çoğu hizmet ana ekrandaki Composio ile anahtarsız bağlanır.",
       "localTitle": "Yerel geliştirici sunucuları"
     },
+    "sheet": {
+      "title": "{{name}} uygulamasını bağla",
+      "progress": "{{total}} adımın {{current}}.",
+      "login": "Giriş sayfası tarayıcında açıldı. Orada bitir; {{name}} sayfası ardından kendiliğinden açılır.",
+      "app": "{{name}} sayfası açılıyor…",
+      "opened": "{{name}} sayfası tarayıcında açık. Orada izin ver; burada Bağlı olarak görünür.",
+      "timedOut": "Giriş zamanında bitirilmedi. Yeniden başlamak için Bağlan'a bas.",
+      "cancelled": "Vazgeçildi.",
+      "failed": {
+        "login_open": "Giriş sayfası açılamadı.",
+        "login_failed": "Giriş tamamlanmadı. Yeniden dene.",
+        "app_link": "{{name}} sayfası hazırlanamadı. Yeniden dene.",
+        "app_open": "{{name}} sayfası açılamadı."
+      }
+    },
     "composio": {
       "title": "Composio",
       "getKey": "Composio anahtar sayfasını aç",
@@ -1953,6 +1969,7 @@
     "title": "Klavye kısayolları",
     "intro": "Uygulama açıkken kullanışlı kısayollar.",
     "palette": "Komut paleti",
+    "recall": "Bu sohbetin önceki mesajları (boş kutuda ya da ilk satırda; Esc taslağını geri getirir)",
     "send": "Mesaj gönder",
     "stop": "Tüm bot çalışmalarını durdur"
   },

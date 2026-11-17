@@ -12970,6 +12970,13 @@
       "Heartbeat": {
         "type": "object",
         "properties": {
+          "active": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`false`: the viewer is hidden or unfocused right now. Leave it out (or\n`true`) while someone is looking; a session whose viewer reports\ninactive for the idle limit is ended by the host."
+          },
           "control_epoch": {
             "type": [
               "integer",
@@ -16303,6 +16310,8 @@
         "type": "string",
         "enum": [
           "browser_idle",
+          "viewer_idle",
+          "time_limit",
           "remote_node_live_view",
           "unsupported",
           "unavailable",

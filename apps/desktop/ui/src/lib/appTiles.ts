@@ -97,3 +97,20 @@ export function filterDirect(
       (q === "" || e.name.toLowerCase().includes(q) || e.description.toLowerCase().includes(q))
   );
 }
+
+/**
+ * Composio apps that belong under "Connected": signed in (`active`) or once signed in and now
+ * needing a fresh sign-in (`expired`). An unfinished connection (`pending`, `failed`) never
+ * does: it is a tile in the grid that says what is going on and can be cancelled or retried.
+ */
+export function settledApps(apps: readonly ComposioApp[]): ComposioApp[] {
+  return apps.filter((a) => a.state === "active" || a.state === "expired");
+}
+
+/** The apps whose connection is not finished, shown as tiles in the grid. */
+export function unsettledApps(apps: readonly ComposioApp[]): ComposioApp[] {
+  return apps.filter((a) => a.state === "pending" || a.state === "failed");
+}
+
+/** How long a pending sign-in is waited for before the tile says it expired (minutes). */
+export const SIGN_IN_WAIT_MINUTES = 10;

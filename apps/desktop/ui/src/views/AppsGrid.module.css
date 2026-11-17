@@ -4,6 +4,7 @@
 .chip:hover { background-color: var(--color-surface-elevated); color: var(--color-text); }
 .chipOn { border-color: var(--color-accent); color: var(--color-text); background-color: var(--color-surface-active); }
 
+.anchor { position: relative; }
 .link { display: flex; flex-direction: column; gap: var(--space-3); max-width: var(--size-content-max); padding: var(--space-4); border: var(--size-border) solid var(--color-border); border-radius: var(--radius-card); background-color: color-mix(in srgb, var(--color-surface-active) 55%, transparent); }
 .linkHead { display: flex; align-items: flex-start; gap: var(--space-3); font-size: var(--font-size-sm); color: var(--color-text); }
 .linkHead svg { flex-shrink: 0; width: var(--size-icon); height: var(--size-icon); margin-top: var(--space-1); color: var(--color-accent-text); }

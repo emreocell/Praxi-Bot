@@ -223,6 +223,12 @@ export class ApiClient {
     return (await res.json()) as T;
   }
 
+  /** Like `request`, for routes that answer with binary data (an image). */
+  protected async requestBlob(method: string, path: string): Promise<Blob> {
+    const res = await this.send(method, path);
+    return res.blob();
+  }
+
   /** Like `request`, for routes that answer with text (Markdown). */
   protected async requestText(method: string, path: string): Promise<string> {
     const res = await this.send(method, path);
@@ -891,6 +897,10 @@ export class ApiClient {
   }
   composioApps(): Promise<ComposioApp[]> {
     return this.request("GET", "/composio/apps");
+  }
+  /** The app's logo as the daemon fetched, validated and cached it (404 when none is known). */
+  composioLogo(slug: string): Promise<Blob> {
+    return this.requestBlob("GET", `/composio/logos/${encodeURIComponent(slug)}`);
   }
   composioApp(slug: string): Promise<ComposioApp> {
     return this.request("GET", `/composio/apps/${encodeURIComponent(slug)}`);

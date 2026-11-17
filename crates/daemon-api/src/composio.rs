@@ -210,6 +210,14 @@ pub enum ComposioControlError {
     Internal(String),
 }
 
+/// A validated app logo (see `composio::logo`).
+#[derive(Debug, Clone)]
+pub struct ComposioLogo {
+    pub bytes: Vec<u8>,
+    /// `image/png`, `image/webp` or `image/svg+xml`.
+    pub content_type: &'static str,
+}
+
 /// What `/v1/composio/*` needs from the embedder.
 #[async_trait]
 pub trait ComposioControl: Send + Sync {
@@ -243,6 +251,13 @@ pub trait ComposioControl: Send + Sync {
         &self,
         query: ComposioCatalogQuery,
     ) -> Result<ComposioCatalogDto, ComposioControlError>;
+    /// The cached or freshly fetched logo of an app; `Ok(None)` when none is known.
+    ///
+    /// # Errors
+    /// [`ComposioControlError`].
+    async fn logo(&self, _slug: &str) -> Result<Option<ComposioLogo>, ComposioControlError> {
+        Ok(None)
+    }
     /// Apps the owner connected or started to connect.
     fn apps(&self) -> Vec<ComposioAppDto>;
     /// Refresh and return one app.

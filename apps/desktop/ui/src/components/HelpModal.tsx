@@ -22,6 +22,7 @@ export function HelpModal({
   const rows: ReadonlyArray<[string, string]> = [
     [t("help.palette"), "Ctrl+K"],
     [t("help.send"), sendKeys],
+    [t("help.recall"), "↑ / ↓"],
     [t("help.stop"), stopHotkey || DEFAULT_STOP_HOTKEY]
   ];
   return (

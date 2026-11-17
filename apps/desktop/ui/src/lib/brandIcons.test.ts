@@ -17,6 +17,15 @@ test('known brands use real simple-icons paths and official brand colors', () =>
   assert.ok(brandIcon('OpenAI').path.length > 1000);
 });
 
+test('the popular apps of the Apps grid have real marks, not monograms', () => {
+  for (const name of ['Stripe', 'Atlassian', 'Jira', 'Trello', 'Asana', 'HubSpot', 'Shopify', 'Dropbox', 'Zoom', 'Telegram', 'WhatsApp', 'Spotify', 'Airtable', 'Zendesk', 'Docker', 'Vercel', 'Supabase', 'Google Sheets', 'notion-remote']) {
+    const b = brandIcon(name);
+    assert.equal(b.known, true, name);
+    assert.ok(b.path.length > 20, name);
+    assert.equal(b.monogram, '', name);
+  }
+});
+
 test('unknown servers receive a deterministic colored monogram with safe empty fallback', () => {
   const first = brandIcon('My private server');
   assert.equal(first.known, false);

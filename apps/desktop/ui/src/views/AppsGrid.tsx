@@ -1,12 +1,10 @@
-import { Check, ChevronDown, ExternalLink, Link2, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { Check, ChevronDown } from "lucide-react";
+import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import type { ComposioApp, ComposioToolkit } from "../api/types";
-import { BrandIcon } from "../components/BrandIcon";
-import formStyles from "../components/Form.module.css";
+import { AppLogo } from "../components/AppLogo";
 import { GROUPS, composioTileState, tileAction, type TileState } from "../lib/appTiles";
-import type { LoginPhase } from "../state/useComposio";
 import styles from "./AppsModal.module.css";
 import own from "./AppsGrid.module.css";
 
@@ -41,20 +39,32 @@ export function AppTile({
   description,
   state,
   testId,
-  onConnect
+  slug,
+  logo,
+  sheet,
+  onConnect,
+  onCancel
 }: {
   name: string;
   description: string;
   state: TileState;
   testId: string;
+  /** Composio toolkit slug (its logo is fetched by the daemon when Praxi ships no mark). */
+  slug?: string;
+  /** What the logo is looked up by when it differs from the shown name (a catalog icon id). */
+  logo?: string;
+  /** The connect sheet anchored to this tile while Connect runs. */
+  sheet?: ReactNode;
   onConnect: () => void;
+  /** Stops a pending sign-in (shown next to the waiting state). */
+  onCancel?: () => void;
 }) {
   const { t } = useTranslation();
   const action = tileAction(state);
   return (
-    <li className={styles.cell} data-testid={testId} data-state={state}>
+    <li className={`${styles.cell} ${own.anchor} ${sheet ? styles.cellOpen : ""}`} data-testid={testId} data-state={state}>
       <div className={styles.cellRow}>
-        <BrandIcon name={name} bare size={26} />
+        <AppLogo name={logo ?? name} slug={slug} size={26} />
         <div className={styles.cellText}>
           <b className={styles.cellName}>
             <span className={styles.cellTitle}>{name}</span>
@@ -77,12 +87,20 @@ export function AppTile({
             {action === "connect" ? t("apps.connect") : action === "retry" ? t("apps.composio.retry") : t("apps.reconnect")}
           </button>
         ) : (
-          <span className={`${styles.state} ${styles.tone_busy}`} role="status">
-            <span className={styles.dot} aria-hidden="true" />
-            {t("apps.composio.waiting")}
-          </span>
+          <>
+            <span className={`${styles.state} ${styles.tone_busy}`} role="status">
+              <span className={styles.dot} aria-hidden="true" />
+              {t("apps.composio.waiting")}
+            </span>
+            {onCancel && (state === "waiting" || state === "linking") ? (
+              <button type="button" className={styles.connect} data-testid={`${testId}-cancel`} onClick={onCancel}>
+                {t("common.cancel")}
+              </button>
+            ) : null}
+          </>
         )}
       </div>
+      {sheet}
     </li>
   );
 }
@@ -122,7 +140,7 @@ export function ComposioCell({
   return (
     <li className={`${styles.cell} ${open ? styles.cellOpen : ""}`} data-testid={`composio-app-${app.slug}`} data-state={app.state}>
       <div className={styles.cellRow}>
-        <BrandIcon name={app.name} bare size={26} />
+        <AppLogo name={app.name} slug={app.slug} size={26} />
         <div className={styles.cellText}>
           <b className={styles.cellName}>
             <span className={styles.cellTitle}>{app.name}</span>
@@ -211,61 +229,6 @@ export function ComposioCell({
         </div>
       ) : null}
     </li>
-  );
-}
-
-/**
- * The one-time "Link Composio" step: shown only after the first Connect on an
- * app that goes through Composio.  A browser login, nothing to copy or paste.
- */
-export function LinkStep({
-  phase,
-  onStart,
-  onCancel
-}: {
-  phase: LoginPhase;
-  onStart: () => void;
-  onCancel: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <section className={own.link} data-testid="composio-link-step" aria-labelledby="composio-link-h">
-      <div className={own.linkHead}>
-        <Link2 aria-hidden="true" />
-        <div>
-          <b id="composio-link-h">{t("apps.composio.link.title")}</b>
-          <p className={formStyles.hint}>{t("apps.composio.link.body")}</p>
-        </div>
-      </div>
-      {phase === "waiting" ? (
-        <p className={styles.panelLabel} role="status">
-          {t("apps.composio.link.waiting")}
-        </p>
-      ) : null}
-      {phase === "failed" ? (
-        <p className={formStyles.error} role="alert">
-          {t("apps.composio.link.failed")}
-        </p>
-      ) : null}
-      <div className={styles.actions}>
-        <Button
-          size="sm"
-          variant="primary"
-          disabled={phase === "starting" || phase === "waiting"}
-          data-testid="composio-link-open"
-          onClick={onStart}
-        >
-          <ExternalLink aria-hidden="true" /> {phase === "failed" ? t("apps.composio.retry") : t("apps.composio.link.open")}
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onCancel}>
-          {t("common.cancel")}
-        </Button>
-      </div>
-      <p className={own.notice}>
-        <ShieldCheck aria-hidden="true" />
-        {t("apps.composio.link.privacy")}
-      </p>
-    </section>
   );
 }
 

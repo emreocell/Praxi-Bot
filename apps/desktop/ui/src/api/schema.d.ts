@@ -4192,6 +4192,12 @@ export interface components {
             version: string;
         };
         Heartbeat: {
+            /**
+             * @description `false`: the viewer is hidden or unfocused right now. Leave it out (or
+             *     `true`) while someone is looking; a session whose viewer reports
+             *     inactive for the idle limit is ended by the host.
+             */
+            active?: boolean | null;
             /** Format: int64 */
             control_epoch?: number | null;
             /** Format: uuid */
@@ -5340,7 +5346,7 @@ export interface components {
             names?: string[];
         };
         /** @enum {string} */
-        Reason: "browser_idle" | "remote_node_live_view" | "unsupported" | "unavailable" | "expired" | "revoked" | "disconnected" | "stale" | "geometry_changed" | "refresh_pending" | "frame_budget_exceeded" | "drain_timeout" | "audit_failed" | "reset_failed" | "partial_injection" | "rate_limited" | "restart" | "persistence_failed" | "local_override";
+        Reason: "browser_idle" | "viewer_idle" | "time_limit" | "remote_node_live_view" | "unsupported" | "unavailable" | "expired" | "revoked" | "disconnected" | "stale" | "geometry_changed" | "refresh_pending" | "frame_budget_exceeded" | "drain_timeout" | "audit_failed" | "reset_failed" | "partial_injection" | "rate_limited" | "restart" | "persistence_failed" | "local_override";
         ReclaimDto: {
             /** @description The local copy runs again (it was enabled before the move). */
             enabled: boolean;

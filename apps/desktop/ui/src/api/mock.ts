@@ -627,6 +627,16 @@ export class MockApiClient extends ApiClient {
     ];
   }
 
+  /** Review-state stand-in for the daemon's logo cache: a small neutral mark. */
+  protected override async requestBlob(_method: string, path: string): Promise<Blob> {
+    if (!path.startsWith("/composio/logos/")) {
+      throw new ApiError(404, "not_found", `mock: no blob route ${path}`);
+    }
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="6" cy="12" r="3.4" fill="#F6314D"/><circle cx="12" cy="12" r="3.4" fill="#FFCC00"/><circle cx="18" cy="12" r="3.4" fill="#00CA72"/></svg>';
+    return new Blob([svg], { type: "image/svg+xml" });
+  }
+
   protected override async requestText(method: string, path: string): Promise<string> {
     await Promise.resolve();
     if (method === "GET" && path === "/doctor/report") {
@@ -1469,9 +1479,18 @@ export class MockApiClient extends ApiClient {
     throw new ApiError(404, "not_found", "mock web");
   }
 
-  private mockComposioMode: "none" | "login" = "none";
+  // Review states: `?composio=connected` (linked, two apps connected) or `?composio=waiting`
+  // (linked, one app waiting in the browser). Default: not linked, nothing connected.
+  private mockComposioMode: "none" | "login" =
+    typeof window !== "undefined" && ["connected", "waiting"].includes(new URLSearchParams(window.location.search).get("composio") ?? "") ? "login" : "none";
   private mockLoginPolls = 0;
-  private mockComposioApps: ComposioApp[] = [];
+  private mockComposioApps: ComposioApp[] = typeof window === "undefined" ? [] : (() => {
+    const mode = new URLSearchParams(window.location.search).get("composio");
+    const app = (slug: string, name: string, state: ComposioApp["state"], tools: number): ComposioApp => ({ slug, name, state, enabled: true, native_first: false, bots: null, tools });
+    if (mode === "connected") return [app("gmail", "Gmail", "active", 12), app("github", "GitHub", "active", 31)];
+    if (mode === "waiting") return [app("gmail", "Gmail", "active", 12), app("asana", "Asana", "pending", 0)];
+    return [];
+  })();
   private mockUvState: "idle" | "installing" | "done" = "idle";
   private mockUvPolls = 0;
 
@@ -1543,7 +1562,10 @@ export class MockApiClient extends ApiClient {
         kit("spotify", "Spotify", "Playlists, playback and library.", "social"),
         kit("googledrive", "Google Drive", "Find and manage files and folders.", "productivity"),
         kit("hubspot", "HubSpot", "Contacts, deals and marketing.", "business"),
-        kit("quickbooks", "QuickBooks", "Invoices, expenses and accounting.", "finance")
+        kit("quickbooks", "QuickBooks", "Invoices, expenses and accounting.", "finance"),
+        kit("monday", "Monday", "Boards, items and updates.", "business"),
+        kit("stripe", "Stripe", "Payments, customers and invoices.", "finance"),
+        kit("asana", "Asana", "Tasks, projects and teams.", "productivity")
       ];
       const q = new URLSearchParams(seg.slice(2).join("")).get("x");
       void q;

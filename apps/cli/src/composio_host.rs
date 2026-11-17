@@ -195,6 +195,18 @@ impl ComposioControl for ComposioHost {
         })
     }
 
+    async fn logo(
+        &self,
+        slug: &str,
+    ) -> Result<Option<daemon_api::composio::ComposioLogo>, ComposioControlError> {
+        Ok(self.svc.logo(slug).await.map_err(map_err)?.map(|l| {
+            daemon_api::composio::ComposioLogo {
+                bytes: l.bytes,
+                content_type: l.content_type,
+            }
+        }))
+    }
+
     fn apps(&self) -> Vec<ComposioAppDto> {
         self.svc.apps().into_iter().map(Self::app_dto).collect()
     }

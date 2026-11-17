@@ -126,6 +126,17 @@ impl ComposioControl for Fake {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(app(slug))
     }
+    async fn logo(
+        &self,
+        slug: &str,
+    ) -> Result<Option<crate::composio::ComposioLogo>, ComposioControlError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok((slug == "gmail").then(|| crate::composio::ComposioLogo {
+            bytes: [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a].to_vec(),
+            content_type: "image/png",
+        }))
+    }
+
     async fn disconnect(&self, _: &str) -> Result<ComposioDisconnectDto, ComposioControlError> {
         self.before("composio.disconnected");
         self.calls.fetch_add(1, Ordering::SeqCst);
@@ -152,7 +163,40 @@ fn routes() -> Vec<(Method, &'static str, Option<serde_json::Value>)> {
             Some(json!({"enabled": false})),
         ),
         (Method::DELETE, "/v1/composio/apps/github", None),
+        (Method::GET, "/v1/composio/logos/gmail", None),
     ]
+}
+
+#[tokio::test]
+async fn a_logo_is_served_to_the_local_owner_with_nosniff_and_a_locked_down_csp() {
+    let t = setup();
+    t.state.set_composio(Arc::new(Fake::default()));
+    let r = call(&t, Method::GET, "/v1/composio/logos/gmail", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.headers["content-type"], "image/png");
+    assert_eq!(r.headers["x-content-type-options"], "nosniff");
+    assert!(
+        r.headers["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .contains("default-src 'none'")
+    );
+    // No logo known for the app: 404, not an error page. A malformed slug never reaches the service.
+    let none = call(&t, Method::GET, "/v1/composio/logos/unknownapp", None).await;
+    assert_eq!(none.status, StatusCode::NOT_FOUND);
+    let bad = call(
+        &t,
+        Method::GET,
+        "/v1/composio/logos/..%2F..%2Fsecrets",
+        None,
+    )
+    .await;
+    assert!(matches!(
+        bad.status,
+        StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND
+    ));
+    let denied = send(&t.app, Method::GET, "/v1/composio/logos/gmail", None, &[]).await;
+    assert_eq!(denied.status, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
