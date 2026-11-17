@@ -101,6 +101,10 @@ struct Registry {
     /// run id -> device
     runs: BTreeMap<String, String>,
     schedules: BTreeMap<String, SchedBind>,
+    /// The one-time "moved bots run on their own computer" normalisation ran
+    /// (see [`AppState::normalise_moved_bots`]).
+    #[serde(default)]
+    computer_normalised: bool,
 }
 
 const REGISTRY_FILE: &str = "host-imports.json";
@@ -219,10 +223,12 @@ pub(crate) async fn import_bot(
         )?;
         (b.id.0, "adopted")
     } else {
+        let mut config = input.config;
+        normalise_computer(&mut config);
         let body = BotInput {
             expected_version: None,
             name: Some(input.name.clone()),
-            config: Some(input.config),
+            config: Some(config),
             profile_toml: None,
             runtime: None,
         };
@@ -246,6 +252,71 @@ pub(crate) async fn import_bot(
         save(&data, &reg)?;
     }
     Ok(bot_result(host_bot.1, None, Some(host_bot.0)))
+}
+
+/// `runtime.computer` values that meant "the sending desktop" (`pc`/`local`) or
+/// one of ITS paired nodes. Once a bot lives on the host its computer is the
+/// host's own (`auto`); the owner may choose "my computer" for it again later,
+/// and that explicit choice is never rewritten.
+fn foreign_computer(value: &str) -> bool {
+    matches!(value, "pc" | "local")
+        || value.starts_with("node:")
+        || value.starts_with("peer:")
+        || (value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// Set a moved bot's `runtime.computer` to `auto` when it names the sending
+/// desktop. Returns the value that was replaced.
+fn normalise_computer(config: &mut serde_json::Value) -> Option<String> {
+    let slot = config.get_mut("runtime")?.get_mut("computer")?;
+    let old = slot.as_str()?.to_owned();
+    if !foreign_computer(&old) {
+        return None;
+    }
+    *slot = serde_json::Value::String("auto".into());
+    Some(old)
+}
+
+impl AppState {
+    /// One-time, logged fix for bots that were moved to this host before the import mapped their
+    /// computer: a stored `runtime.computer = "pc"` (the owner's desktop) becomes `auto` (this
+    /// host's own computer). Runs once per installation (a flag in the import registry);
+    /// returns how many bots changed.
+    pub fn normalise_moved_bots(&self) -> usize {
+        let data = self.data_dir();
+        let _g = REGISTRY_LOCK.lock();
+        let mut reg = load(&data);
+        if reg.computer_normalised || reg.bots.is_empty() {
+            return 0;
+        }
+        let mut changed = 0;
+        for id in reg.bots.values().copied().collect::<Vec<_>>() {
+            let mut from = None;
+            let patched = self.storage().modify_bot(BotId(id), |name, stored| {
+                let mut next = stored.clone();
+                from = normalise_computer(&mut next);
+                Ok((name.to_owned(), next))
+            });
+            let Some(old) = from else { continue };
+            if let Ok(storage::BotPatch::Applied { bot, .. }) = patched {
+                self.refresh_profile(&bot);
+                changed += 1;
+                let _ = self.storage().append_audit(
+                    self.user_id(),
+                    None,
+                    "host",
+                    "host.import.computer_normalised",
+                    &serde_json::json!({"bot": id, "from": old, "to": "auto"}),
+                );
+                eprintln!(
+                    "migration: moved bot {id} now runs on this host's own computer (was {old:?})"
+                );
+            }
+        }
+        reg.computer_normalised = true;
+        let _ = save(&data, &reg);
+        changed
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

@@ -250,6 +250,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/terminal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** `POST /v1/admin/terminal`: open a shell on this host for the calling admin desktop. */
+        post: operations["admin_terminal_open"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/terminal/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** `DELETE /v1/admin/terminal/{id}`: end the session. */
+        delete: operations["admin_terminal_close"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/terminal/{id}/input": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** `POST /v1/admin/terminal/{id}/input`. */
+        post: operations["admin_terminal_input"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/terminal/{id}/output": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * `GET /v1/admin/terminal/{id}/output?after=&wait_ms=`: the output since byte `after`
+         *     (waits up to 3 s for some).
+         */
+        get: operations["admin_terminal_output"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/terminal/{id}/resize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** `POST /v1/admin/terminal/{id}/resize`. */
+        post: operations["admin_terminal_resize"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/approvals": {
         parameters: {
             query?: never;
@@ -1692,6 +1780,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/hosts/{id}/terminal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** `POST /v1/hosts/{id}/terminal`: open a terminal on the host (owner key). */
+        post: operations["hosts_terminal_open"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/hosts/{id}/terminal/{tid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** `DELETE /v1/hosts/{id}/terminal/{tid}`. */
+        delete: operations["hosts_terminal_close"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/hosts/{id}/terminal/{tid}/input": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** `POST /v1/hosts/{id}/terminal/{tid}/input`. */
+        post: operations["hosts_terminal_input"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/hosts/{id}/terminal/{tid}/output": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /v1/hosts/{id}/terminal/{tid}/output?after=&wait_ms=`. */
+        get: operations["hosts_terminal_output"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/hosts/{id}/terminal/{tid}/resize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** `POST /v1/hosts/{id}/terminal/{tid}/resize`. */
+        post: operations["hosts_terminal_resize"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mcp-server/call": {
         parameters: {
             query?: never;
@@ -2652,6 +2825,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/view/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Where this viewer stands with the screen stream: idle (nothing runs), starting, live,
+         *     paused by the idle limit, or unavailable (with a fixed reason code). Same access rule
+         *     as `GET /v1/view/targets`; reading it never starts capture.
+         */
+        get: operations["view_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/view/targets": {
         parameters: {
             query?: never;
@@ -2660,6 +2854,28 @@ export interface paths {
             cookie?: never;
         };
         get: operations["targets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/view/targets/{id}/thumbnail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One still image of a screen, for the small preview in the panel. It is NOT a session:
+         *     the host captures a single frame (then stops capturing) and serves that frame again for
+         *     30 s, so a visible panel costs at most one frame per refresh. Same access rule as
+         *     `GET /v1/view/targets`.
+         */
+        get: operations["view_thumbnail"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4192,6 +4408,12 @@ export interface components {
             version: string;
         };
         Heartbeat: {
+            /**
+             * @description `false`: the viewer is hidden or unfocused right now. Leave it out (or
+             *     `true`) while someone is looking; a session whose viewer reports
+             *     inactive for the idle limit is ended by the host.
+             */
+            active?: boolean | null;
             /** Format: int64 */
             control_epoch?: number | null;
             /** Format: uuid */
@@ -5213,6 +5435,12 @@ export interface components {
         };
         /** @enum {string} */
         Modifier: "alt" | "ctrl" | "meta" | "shift";
+        OpenTerminalInput: {
+            /** Format: int32 */
+            cols: number;
+            /** Format: int32 */
+            rows: number;
+        };
         /** @enum {string} */
         Outcome: "completed";
         /** @description A skill learned by the bot itself (per-bot scope, read-only here). */
@@ -5340,7 +5568,7 @@ export interface components {
             names?: string[];
         };
         /** @enum {string} */
-        Reason: "browser_idle" | "remote_node_live_view" | "unsupported" | "unavailable" | "expired" | "revoked" | "disconnected" | "stale" | "geometry_changed" | "refresh_pending" | "frame_budget_exceeded" | "drain_timeout" | "audit_failed" | "reset_failed" | "partial_injection" | "rate_limited" | "restart" | "persistence_failed" | "local_override";
+        Reason: "browser_idle" | "viewer_idle" | "time_limit" | "remote_node_live_view" | "unsupported" | "unavailable" | "expired" | "revoked" | "disconnected" | "stale" | "geometry_changed" | "refresh_pending" | "frame_budget_exceeded" | "drain_timeout" | "audit_failed" | "reset_failed" | "partial_injection" | "rate_limited" | "restart" | "persistence_failed" | "local_override";
         ReclaimDto: {
             /** @description The local copy runs again (it was enabled before the move). */
             enabled: boolean;
@@ -5717,6 +5945,26 @@ export interface components {
             /** @description May watch the screen (`screen:view`). */
             view: boolean;
         };
+        /** @description `GET /v1/view/status`. */
+        ScreenStatus: {
+            /**
+             * Format: int64
+             * @description Longest a single live session may run, in seconds.
+             */
+            hard_cap_secs: number;
+            /**
+             * Format: int64
+             * @description Seconds without a sign of life after which the host stops the stream.
+             */
+            idle_timeout_secs: number;
+            reason?: null | components["schemas"]["UnavailableCode"];
+            state: components["schemas"]["ScreenStreamState"];
+        };
+        /**
+         * @description What a viewer needs to know before it asks for the live screen.
+         * @enum {string}
+         */
+        ScreenStreamState: "idle" | "starting" | "live" | "paused_idle" | "unavailable";
         /** @description `POST /v1/chats/{id}/messages`. */
         SendMessage: {
             /** @description Behaviour while a turn is running. */
@@ -6053,6 +6301,50 @@ export interface components {
             host_id: string;
             kind: components["schemas"]["TargetKind"];
             reason: components["schemas"]["Reason"];
+        };
+        TerminalInfo: {
+            /** Format: int32 */
+            cols: number;
+            /**
+             * Format: int64
+             * @description Seconds without any request after which the host ends the session.
+             */
+            disconnect_after_secs: number;
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: int64
+             * @description Seconds without input after which the host ends the session.
+             */
+            idle_after_secs: number;
+            /** Format: int32 */
+            rows: number;
+        };
+        TerminalInput: {
+            /** @description Base64 of the bytes to type (at most 16 KiB). */
+            data: string;
+        };
+        TerminalOutput: {
+            /** @description Base64 of the next output bytes (terminal output is bytes, not text). */
+            data: string;
+            /** @description Output older than the buffer was dropped before it was read. */
+            dropped: boolean;
+            /**
+             * Format: int32
+             * @description The shell has ended (exit code, -1 when it was killed) and all output was read.
+             */
+            exited?: number | null;
+            /**
+             * Format: int64
+             * @description Offset to pass as `after` next time.
+             */
+            next: number;
+        };
+        TerminalResize: {
+            /** Format: int32 */
+            cols: number;
+            /** Format: int32 */
+            rows: number;
         };
         TrustFolderInput: {
             /** @description An existing directory (an absolute path). */
@@ -6850,6 +7142,190 @@ export interface operations {
                 };
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    admin_terminal_open: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenTerminalInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalInfo"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    admin_terminal_close: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    admin_terminal_input: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TerminalInput"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    admin_terminal_output: {
+        parameters: {
+            query?: {
+                after?: number;
+                wait_ms?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalOutput"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    admin_terminal_resize: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TerminalResize"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10161,6 +10637,164 @@ export interface operations {
             };
         };
     };
+    hosts_terminal_open: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenTerminalInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalInfo"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    hosts_terminal_close: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    hosts_terminal_input: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TerminalInput"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    hosts_terminal_output: {
+        parameters: {
+            query?: {
+                after?: number;
+                wait_ms?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalOutput"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    hosts_terminal_resize: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TerminalResize"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     call_tool: {
         parameters: {
             query?: never;
@@ -12271,6 +12905,25 @@ export interface operations {
             };
         };
     };
+    view_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScreenStatus"];
+                };
+            };
+        };
+    };
     targets: {
         parameters: {
             query?: never;
@@ -12286,6 +12939,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TargetInfo"][];
+                };
+            };
+        };
+    };
+    view_thumbnail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": number[];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };

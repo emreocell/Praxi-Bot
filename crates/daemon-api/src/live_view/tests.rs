@@ -2038,6 +2038,7 @@ fn alice_actor() -> Actor {
         key: "peer:alice".into(),
         recovery: true,
         local: false,
+        admin: false,
     }
 }
 
@@ -3827,6 +3828,7 @@ async fn a_revoked_input_grant_stops_applying_while_the_executor_is_busy() {
         key: "peer:alice".into(),
         recovery: false,
         local: false,
+        admin: false,
     };
     assert!(live.allowed(&peer, true));
     let busy = live.executor.lock().await; // a long input batch holds it
@@ -4646,4 +4648,143 @@ async fn daemon_rejects_stale_revision_click_on_desktop_target_while_session_geo
     assert_eq!(res2["applied_through"], 1);
     assert_eq!(res2["state"], "active");
     assert_eq!(injected_calls.load(Ordering::SeqCst), 1);
+}
+
+fn view_actor(key: &str, admin: bool) -> Actor {
+    Actor {
+        key: format!("peer:{key}"),
+        recovery: true,
+        local: false,
+        admin,
+    }
+}
+
+#[tokio::test]
+async fn the_paired_admin_desktop_needs_no_manual_screen_grant_and_the_owners_off_sticks() {
+    let t = Test::new();
+    let live = Arc::clone(t.state.live_view());
+    let (admin, other) = (view_actor("adm", true), view_actor("adm", false));
+    // Administration is the grant: view AND input, with nothing typed on the server.
+    assert!(live.allowed(&admin, false) && live.allowed(&admin, true));
+    // Any other paired device (a phone, a desktop without administration) has nothing.
+    assert!(!live.allowed(&other, false));
+    // The host's owner can still switch it off (revocable), and a restart keeps that "off".
+    grant(&t, "adm", false, false).await;
+    assert!(!live.allowed(&admin, false));
+    let restarted = t.restarted();
+    restarted.state.load_screen_privileges().await;
+    assert!(!restarted.state.live_view().allowed(&admin, false));
+    // A fresh administrator grant clears the earlier "off".
+    t.state.clear_screen_denial("peer:adm");
+    assert!(live.allowed(&admin, true));
+    // A view-only choice made on the host is honoured as well.
+    grant(&t, "adm", true, false).await;
+    assert!(live.allowed(&admin, false) && !live.allowed(&admin, true));
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_host_captures_nothing_without_a_session_and_ends_a_viewer_that_went_idle() {
+    let t = Test::new();
+    let frames = |id: Uuid| format!("/v1/view/sessions/{id}/frames");
+    let status = |t: &Test| {
+        let t = t.state.clone();
+        async move {
+            let req = Request::builder()
+                .uri("/v1/view/status")
+                .header("host", "localhost")
+                .header("authorization", format!("Bearer {TOKEN}"))
+                .body(Body::empty())
+                .unwrap();
+            let r = crate::router(t).oneshot(req).await.unwrap();
+            let bytes = r.into_body().collect().await.unwrap().to_bytes();
+            serde_json::from_slice::<Value>(&bytes).unwrap()["state"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        }
+    };
+    // Reading targets and status never starts a capture.
+    assert_eq!(
+        t.call(None, Method::GET, "/v1/view/targets", None).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(status(&t).await, "idle");
+    assert_eq!(t.target.source.subscribers(), 0);
+    // A live session captures; a heartbeat that says "hidden/unfocused" keeps it alive but is no
+    // sign of life, so the idle limit (3 minutes) ends it and capture stops with it.
+    let id = t.session(None).await;
+    let _body = t
+        .response(None, Method::GET, &frames(id), None)
+        .await
+        .into_body();
+    tokio::task::yield_now().await;
+    assert_eq!(t.target.source.subscribers(), 1);
+    assert_eq!(status(&t).await, "live");
+    for _ in 0..8 {
+        tokio::time::advance(Duration::from_secs(25)).await;
+        tokio::task::yield_now().await;
+        let _ = t
+            .call(
+                None,
+                Method::PUT,
+                &format!("/v1/view/sessions/{id}/heartbeat"),
+                Some(json!({"active": false})),
+            )
+            .await;
+    }
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        t.target.source.subscribers(),
+        0,
+        "idle viewer must stop capture"
+    );
+    assert_eq!(status(&t).await, "paused_idle");
+    // The hard cap ends even an attentive viewer.
+    let id = t.session(None).await;
+    assert_eq!(status(&t).await, "starting");
+    for _ in 0..75 {
+        tokio::time::advance(Duration::from_secs(25)).await;
+        tokio::task::yield_now().await;
+        let _ = t
+            .call(
+                None,
+                Method::PUT,
+                &format!("/v1/view/sessions/{id}/heartbeat"),
+                Some(json!({})),
+            )
+            .await;
+    }
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+    assert!(t.state.live_view().sessions.lock().is_empty());
+    assert_eq!(status(&t).await, "paused_idle");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_thumbnail_is_one_captured_frame_then_served_from_the_cache_without_a_session() {
+    let t = Test::new();
+    let path = format!("/v1/view/targets/{}/thumbnail", t.target.info().target_id);
+    let (first, ()) = tokio::join!(t.response(None, Method::GET, &path, None), async {
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+            if t.target.source.subscribers() > 0 {
+                break;
+            }
+        }
+        t.target.frame(1, 1);
+    });
+    assert_eq!(first.status(), StatusCode::OK);
+    assert_eq!(first.headers()["content-type"], "image/jpeg");
+    let bytes = first.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&bytes[..], PIXEL_SECRET);
+    // The capture ended with the request: no session, no subscriber.
+    assert_eq!(t.target.source.subscribers(), 0);
+    assert!(t.state.live_view().sessions.lock().is_empty());
+    // A second look within the interval is the same image, with no new capture.
+    let again = t.response(None, Method::GET, &path, None).await;
+    assert_eq!(again.status(), StatusCode::OK);
+    assert_eq!(t.target.source.subscribers(), 0);
 }

@@ -86,6 +86,9 @@ import type {
   TakeoverRequest,
   TargetInfo,
   TargetUnavailable,
+  ScreenStatus,
+  TerminalInfo,
+  TerminalOutput,
   UsageSummary,
   ViewHeartbeat,
   WebSearchConfig,
@@ -680,6 +683,34 @@ export class ApiClient {
   /** Which kinds of screen this host cannot offer, and why. */
   listViewAvailability(): Promise<TargetUnavailable[]> {
     return this.request("GET", "/view/availability");
+  }
+  /** Idle / starting / live / paused-idle / unavailable, and the host's idle limit. */
+  viewStatus(): Promise<ScreenStatus> {
+    return this.request("GET", "/view/status");
+  }
+  /** One still image of a screen (the host captures a single frame, then stops capturing). */
+  async viewThumbnail(targetId: string, signal?: AbortSignal): Promise<Blob> {
+    const res = await this.send("GET", `/view/targets/${encodeURIComponent(targetId)}/thumbnail`, { signal });
+    return res.blob();
+  }
+  // ---- Server terminal (this computer's daemon forwards to the host; owner key is added by `send`)
+  terminalOpen(hostId: string, cols: number, rows: number): Promise<TerminalInfo> {
+    return this.request("POST", `/hosts/${encodeURIComponent(hostId)}/terminal`, { body: { cols, rows } });
+  }
+  terminalOutput(hostId: string, id: string, after: number, waitMs: number, signal?: AbortSignal): Promise<TerminalOutput> {
+    return this.request("GET", `/hosts/${encodeURIComponent(hostId)}/terminal/${encodeURIComponent(id)}/output`, {
+      query: { after, wait_ms: waitMs },
+      signal
+    });
+  }
+  terminalInput(hostId: string, id: string, data: string): Promise<void> {
+    return this.request("POST", `/hosts/${encodeURIComponent(hostId)}/terminal/${encodeURIComponent(id)}/input`, { body: { data } });
+  }
+  terminalResize(hostId: string, id: string, cols: number, rows: number): Promise<void> {
+    return this.request("POST", `/hosts/${encodeURIComponent(hostId)}/terminal/${encodeURIComponent(id)}/resize`, { body: { cols, rows } });
+  }
+  terminalClose(hostId: string, id: string): Promise<void> {
+    return this.request("DELETE", `/hosts/${encodeURIComponent(hostId)}/terminal/${encodeURIComponent(id)}`);
   }
   createViewSession(input: CreateSessionInput): Promise<SessionInfo> {
     return this.request("POST", "/view/sessions", { body: input });

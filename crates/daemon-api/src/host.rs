@@ -947,7 +947,14 @@ pub(crate) async fn set_admin(
         &serde_json::json!({"target":key.to_string(),"enabled":input.enabled,"phase":"requested"}),
     )?;
     match net.set_device_admin(&key, input.enabled) {
-        Ok(true) => Ok(StatusCode::NO_CONTENT),
+        Ok(true) => {
+            if input.enabled {
+                // A new administrator watches and drives the host's screen at once:
+                // an earlier "off" for this device no longer applies.
+                s.clear_screen_denial(&format!("peer:{}", peer_network::key_to_string(&key)));
+            }
+            Ok(StatusCode::NO_CONTENT)
+        }
         Ok(false) => Err(ApiError::not_found("device")),
         Err(peer_network::PeerError::Protocol(m)) => Err(ApiError::bad_request(m)),
         Err(e) => Err(ApiError::internal(e)),

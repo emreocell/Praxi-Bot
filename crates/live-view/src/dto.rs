@@ -98,6 +98,11 @@ pub enum Profile {
 #[serde(rename_all = "snake_case")]
 pub enum Reason {
     BrowserIdle,
+    /// The viewer showed no sign of life (no input, window hidden or unfocused)
+    /// for the idle limit: the host stopped producing images to save resources.
+    ViewerIdle,
+    /// The session reached its hard time limit.
+    TimeLimit,
     RemoteNodeLiveView,
     Unsupported,
     Unavailable,
@@ -289,6 +294,41 @@ pub struct SessionUpdate {
 pub struct Heartbeat {
     pub takeover_id: Option<Uuid>,
     pub control_epoch: Option<u64>,
+    /// `false`: the viewer is hidden or unfocused right now. Leave it out (or
+    /// `true`) while someone is looking; a session whose viewer reports
+    /// inactive for the idle limit is ended by the host.
+    #[serde(default)]
+    pub active: Option<bool>,
+}
+
+/// What a viewer needs to know before it asks for the live screen.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ScreenStreamState {
+    /// No live session: the host produces no images.
+    Idle,
+    /// A session exists, its first frame is not out yet.
+    Starting,
+    /// Frames are flowing to this viewer.
+    Live,
+    /// The last live session was ended by the idle or time limit.
+    PausedIdle,
+    /// There is no screen to show (see `reason`).
+    Unavailable,
+}
+
+/// `GET /v1/view/status`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ScreenStatus {
+    pub state: ScreenStreamState,
+    /// Fixed code when `unavailable` (the same codes as `GET /v1/view/availability`).
+    pub reason: Option<UnavailableCode>,
+    /// Seconds without a sign of life after which the host stops the stream.
+    pub idle_timeout_secs: u64,
+    /// Longest a single live session may run, in seconds.
+    pub hard_cap_secs: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

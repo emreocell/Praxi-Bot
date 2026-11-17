@@ -39,6 +39,12 @@ pub(super) fn spawn_reaper(s: &AppState, id: Uuid, actor: Actor) {
                 let _ = end_session(&s, &actor, id, Reason::Expired).await;
                 return;
             }
+            // The host stops producing images for a viewer that went quiet, even
+            // when its client keeps heartbeating (or has vanished with a live TTL).
+            if let Some(reason) = live.limit_reached(id) {
+                let _ = end_session(&s, &actor, id, reason).await;
+                return;
+            }
             let _executor = live.executor.lock().await;
             if let Some(t) = s.hub().takeover().filter(|t| {
                 t.info.session_id == id

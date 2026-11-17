@@ -978,6 +978,22 @@
         "title": "Bu bilgisayar o sunucuyu yönetemez",
         "hint": "Sunucunun kurulumunu yalnızca sahibinin eşleşmiş masaüstü uygulaması değiştirebilir."
       },
+      "terminal_unsupported": {
+        "title": "Terminal için Linux sunucu gerekir",
+        "hint": "Burada yalnızca Linux sunucuda terminal açılabilir."
+      },
+      "terminal_start_failed": {
+        "title": "Terminal başlatılamadı",
+        "hint": "Sunucu bir kabuk başlatamadı. Birazdan yeniden dene."
+      },
+      "terminal_busy": {
+        "title": "Sunucudaki tüm terminaller kullanımda",
+        "hint": "Sunucudaki başka bir terminali kapatıp yeniden dene."
+      },
+      "terminal_gone": {
+        "title": "Terminal oturumu bitti",
+        "hint": "Terminali yeniden aç."
+      },
       "host_admin_required": {
         "title": "Önce bu bilgisayarı sunucuda onayla",
         "hint": "Aşağıdaki komutu sunucuda bir kez çalıştırıp yeniden dene."
@@ -1449,6 +1465,7 @@
       "makeHome": "{{name}} botlarımın evi olsun",
       "sync": "Kurulumumu {{name}} ile eşitle",
       "viewScreen": "Ekranını gör",
+      "terminal": "Sunucuda terminal",
       "workHere": "Şimdilik bu bilgisayarda çalış",
       "backHome": "{{name}} bilgisayarına dön",
       "pcOn": "Açık · her işlem burada sana sorar",
@@ -2676,7 +2693,25 @@
       "version": "Bu uygulama ile {{name}} farklı sürümlerde. İkisini aynı sürüme güncelle."
     },
     "needsDesktop": "{{name}} sunucusunda masaüstü oturumu yok, bu yüzden gösterilecek ekran yok. Eklemek için bu bilgisayarda şunu çalıştır:",
-    "needsPermission": "{{name}} bu bilgisayarın ekranını izlemesine izin vermedi. Sunucuda şunu çalıştır:"
+    "pausedIdle": "Kaynak tasarrufu için duraklatıldı - devam etmek için tıkla",
+    "showScreen": "Ekranı göster",
+    "screenListFailed": "{{name}} ekran listesi yüklenemedi. Birazdan yeniden denenecek."
+  },
+  "terminal": {
+    "title": "Terminal - {{name}}",
+    "close": "Terminali kapat",
+    "note": "Bu, uygulamanın zaten kurduğu bağlantı üzerinden sunucudaki bir kabuktur. Bu paneli kapatınca biter.",
+    "failed": "Terminal açılamadı.",
+    "ended": "Kabuk sona erdi.",
+    "again": "Yeniden aç",
+    "runForMe": "Benim için çalıştır",
+    "runForMeHint": "Terminali açar ve komutu yazar; Enter'a sen basarsın.",
+    "state": {
+      "starting": "Başlıyor",
+      "live": "Bağlı",
+      "ended": "Bitti",
+      "failed": "Bağlı değil"
+    }
   },
   "knowledge": {
     "title": "Bilgi kaynakları ve ortak beyin",

@@ -332,6 +332,17 @@ impl ComputerProvider for CliComputerProvider {
         self.has_display
     }
 
+    fn display_name(&self) -> Option<String> {
+        // Only a display that really answered at start (`has_display`).
+        if cfg!(target_os = "linux") && self.has_display && self.local_desktop.is_some() {
+            std::env::var("DISPLAY")
+                .ok()
+                .filter(|d| !d.trim().is_empty())
+        } else {
+            None
+        }
+    }
+
     fn node(&self, id: &str) -> Option<Arc<dyn DesktopBackend>> {
         self.node_target(id).map(|d| d.backend)
     }

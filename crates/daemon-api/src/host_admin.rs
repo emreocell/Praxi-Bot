@@ -100,6 +100,14 @@ pub(crate) fn require_admin(s: &AppState, peer: Option<&PeerIdentity>) -> Result
     })
 }
 
+/// The audit identity of the admin desktop with key `peer_key` (for work that
+/// outlives the request that proved it, such as closing a terminal session).
+pub(crate) fn admin_for(peer_key: &str) -> Admin {
+    Admin {
+        actor: format!("desktop-admin:{peer_key}"),
+    }
+}
+
 pub(crate) fn audit(
     s: &AppState,
     admin: &Admin,
@@ -886,6 +894,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             put(put_provider).delete(delete_provider),
         )
         .layer(DefaultBodyLimit::max(MAX_ADMIN_BODY))
+        .merge(crate::terminal::routes())
 }
 
 #[cfg(test)]

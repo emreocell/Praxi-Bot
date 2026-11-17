@@ -1106,6 +1106,14 @@ pub fn serve(
         // reconciliation below still revokes devices that are gone.
         state.load_screen_privileges().await;
         step("screen privileges loaded");
+        if host_is_host {
+            // Bots moved here before the import mapped their computer still say "the
+            // owner's PC": once, logged, they run on this host's own computer.
+            let moved = state.normalise_moved_bots();
+            if moved > 0 {
+                eprintln!("migration: {moved} moved bot(s) now use this host's own computer");
+            }
+        }
         if let Some(pc) = pc_target {
             // This computer's links to paired hosts (`/v1/hosts`); the peer
             // endpoint starts lazily unless `--peer` already started one.

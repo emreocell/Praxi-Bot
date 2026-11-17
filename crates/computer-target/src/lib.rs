@@ -254,6 +254,12 @@ pub trait ComputerProvider: Send + Sync {
         self.local().is_some()
     }
 
+    /// Name of the X display the local desktop runs on (`:99`), when this
+    /// daemon really has one. Used only to tell the model the screen exists.
+    fn display_name(&self) -> Option<String> {
+        None
+    }
+
     /// Optional async warm-up before [`resolve`] runs at turn start (e.g.
     /// establishing or reconnecting an on-demand remote desktop RPC client).
     fn prepare(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {

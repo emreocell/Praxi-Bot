@@ -42,7 +42,11 @@ pub const MAX_FIND_K: usize = 25;
 /// mode (no `find_tool` round-trip), so a weak model answers "what is on my
 /// screen / which windows are open" in one step. Listed only when the tool is
 /// registered and visible to the caller.
-pub const PINNED_DIRECT: &[&str] = &["desktop_list_apps"];
+///
+/// `browser_open` is pinned so a weak model that is told "your computer has a
+/// browser" takes the one-step path instead of probing with the shell (it is
+/// listed only when the run's computer really has a browser, see `visible`).
+pub const PINNED_DIRECT: &[&str] = &["desktop_list_apps", "browser_open"];
 
 fn is_meta(name: &str) -> bool {
     matches!(name, FIND_TOOL | GET_TOOL_DETAILS | USE_TOOL)
@@ -809,14 +813,22 @@ mod tests {
     fn pinned_observation_tool_stays_directly_callable_in_discovery_mode() {
         let reg = registry_with(6);
         reg.register(fake("desktop_list_apps", "windows", Effect::Read));
+        reg.register(fake("browser_open", "open a page", Effect::Read));
         let surface = ToolSurface::new(reg, 5);
         assert_eq!(surface.mode(), SurfaceMode::Discovery);
         let names: Vec<_> = surface.specs().into_iter().map(|s| s.name).collect();
         assert_eq!(
             names,
-            [FIND_TOOL, GET_TOOL_DETAILS, USE_TOOL, "desktop_list_apps"]
+            [
+                FIND_TOOL,
+                GET_TOOL_DETAILS,
+                USE_TOOL,
+                "desktop_list_apps",
+                "browser_open"
+            ]
         );
         assert!(surface.resolve("desktop_list_apps").is_some());
+        assert!(surface.resolve("browser_open").is_some());
         assert!(surface.resolve("tool3").is_none());
         let hide = |s: &ToolSpec| s.name != "desktop_list_apps";
         assert!(surface.resolve_with("desktop_list_apps", &hide).is_none());

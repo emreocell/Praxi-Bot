@@ -23,6 +23,8 @@ import {
   buildSessionHeartbeat,
   canSendLiveInput,
   computeWantSession,
+  THUMBNAIL_REFRESH_MS,
+  thumbnailDue,
   controlSnapshotKey,
   createInitialLiveViewState,
   isControlBusy,
@@ -441,11 +443,10 @@ test("panel and viewer closed (or window hidden) stop the capture session", () =
     hasClient: true,
     documentHidden: false,
     target,
-    viewerOpen: false,
-    panelActive: false
+    viewerOpen: false
   };
+  // The card alone never holds a live session: the host stays idle until someone clicks.
   assert.equal(computeWantSession(base), false);
-  assert.equal(computeWantSession({ ...base, panelActive: true }), true);
   assert.equal(computeWantSession({ ...base, viewerOpen: true }), true);
   assert.equal(
     computeWantSession({ ...base, viewerOpen: true, documentHidden: true }),
@@ -460,6 +461,16 @@ test("panel and viewer closed (or window hidden) stop the capture session", () =
     false,
     "merely opening never launches a browser"
   );
+});
+
+test("the card's still image is due at most once a minute, only while seen and focused", () => {
+  const seen = { panelVisible: true, viewerOpen: false, windowActive: true, lastFetchMs: null, nowMs: 1_000 };
+  assert.equal(thumbnailDue(seen), true, "first one when the panel opens");
+  assert.equal(thumbnailDue({ ...seen, lastFetchMs: 1_000, nowMs: 30_000 }), false);
+  assert.equal(thumbnailDue({ ...seen, lastFetchMs: 1_000, nowMs: 1_000 + THUMBNAIL_REFRESH_MS }), true);
+  assert.equal(thumbnailDue({ ...seen, windowActive: false }), false, "unfocused window");
+  assert.equal(thumbnailDue({ ...seen, panelVisible: false }), false, "panel closed");
+  assert.equal(thumbnailDue({ ...seen, viewerOpen: true }), false, "the live viewer has its own stream");
 });
 
 // ---- finding 5: Stop stays independent ------------------------------------

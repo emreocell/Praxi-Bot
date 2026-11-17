@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { AdminCliEngine, AdminCliInstall, AdminState } from "../../api/types";
 import { humanError } from "../../lib/humanError";
 import { useDaemon } from "../../state/DaemonContext";
+import { RunOnServer } from "../../components/RunOnServer";
 import { ServerSignInModal } from "../../components/ServerSignInModal";
 import { DetectedAccountsBlock } from "./DetectedAccountsBlock";
 import styles from "./AiPage.module.css";
@@ -31,6 +32,7 @@ export function CopyBlock({ text }: { text: string }) {
         {done ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
         {done ? t("errors.copied") : t("home.copy")}
       </button>
+      <RunOnServer command={text} className={styles.textBtn} />
     </span>
   );
 }

@@ -29,8 +29,11 @@ pub enum HostCmd {
         #[arg(long)]
         force: bool,
     },
-    /// Let a paired desktop watch (and take over) this host's screen. Local
-    /// only: run it on the host. The grant survives restarts.
+    /// Set what a paired desktop may do with this host's screen. The paired ADMIN
+    /// desktop (the owner's own) may already watch and drive it by default, so
+    /// nothing has to be run for that; use `--revoke` to switch it off and
+    /// `--view-only` to allow watching only. Other devices need this grant.
+    /// Local only: run it on the host. The choice survives restarts.
     Screen {
         /// Paired device key from `bot host devices`.
         #[arg(required_unless_present = "all_desktops")]

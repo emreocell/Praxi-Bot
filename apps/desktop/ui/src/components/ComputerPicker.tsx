@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, ChevronDown, House, Maximize2, Monitor, Plus, RefreshCw, Server, Square } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, House, Maximize2, Monitor, Plus, RefreshCw, Server, Square, Terminal } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { isMockMode } from "../api/mockMode";
@@ -7,6 +7,7 @@ import { homeStatus } from "../lib/home";
 import { hostAcceptsWork } from "../lib/hostState";
 import { useDaemon } from "../state/DaemonContext";
 import { useLiveView } from "../state/LiveViewContext";
+import { useServerTerminal } from "../state/ServerTerminalContext";
 import styles from "./ComputerPicker.module.css";
 import { AddServerModal } from "./AddServerModal";
 import { setHostComputerAccess } from "./ComputerAccess";
@@ -26,6 +27,7 @@ export function ComputerPicker() {
   const toast = useToast();
   const { home, workLocalNow, setWorkLocalNow, hostState, hostList, stopHostRuns, localApi, refreshHosts } = useDaemon();
   const { openViewer } = useLiveView();
+  const serverTerminal = useServerTerminal();
   // Design review (mock mode only): `?menu=1` opens the menu.
   const [open, setOpen] = useState(() => isMockMode() && new URLSearchParams(window.location.search).get("menu") === "1");
   const [addOpen, setAddOpen] = useState(false);
@@ -137,6 +139,9 @@ export function ComputerPicker() {
             {item("home-sync", <RefreshCw aria-hidden="true" className={styles.icon} />, t("home.menu.sync", { name }), () => setSyncHost(home.hostId))}
             {status === "online"
               ? item("home-view-screen", <Maximize2 aria-hidden="true" className={styles.icon} />, t("home.menu.viewScreen"), () => openViewer())
+              : null}
+            {serverTerminal.available && status === "online"
+              ? item("home-terminal", <Terminal aria-hidden="true" className={styles.icon} />, t("home.menu.terminal"), () => serverTerminal.open())
               : null}
             {hostState && hostAcceptsWork(hostState) && !workLocalNow
               ? item("computer-stop-host", <Square aria-hidden="true" className={styles.icon} />, t("home.menu.stop", { name }), () => void stop(), {

@@ -978,6 +978,22 @@
         "title": "This computer may not manage that server",
         "hint": "Only the owner's paired desktop can change the server's setup."
       },
+      "terminal_unsupported": {
+        "title": "The terminal needs a Linux server",
+        "hint": "Only a Linux server can open a terminal here."
+      },
+      "terminal_start_failed": {
+        "title": "The terminal could not start",
+        "hint": "The server could not start a shell. Try again in a moment."
+      },
+      "terminal_busy": {
+        "title": "All terminals on the server are in use",
+        "hint": "Close another terminal on the server, then try again."
+      },
+      "terminal_gone": {
+        "title": "The terminal session ended",
+        "hint": "Open the terminal again."
+      },
       "host_admin_required": {
         "title": "Confirm this computer on the server first",
         "hint": "Run the command shown below on the server once, then try again."
@@ -1449,6 +1465,7 @@
       "makeHome": "Make {{name}} my bots' home",
       "sync": "Sync my setup to {{name}}",
       "viewScreen": "View its screen",
+      "terminal": "Terminal on the server",
       "workHere": "Work on this computer for now",
       "backHome": "Back to {{name}}",
       "pcOn": "On · every action asks you here",
@@ -2676,7 +2693,25 @@
       "version": "This app and {{name}} are on different versions. Update both to the same version."
     },
     "needsDesktop": "{{name}} has no desktop session, so there is no screen to show. To add one, run this on this computer:",
-    "needsPermission": "{{name}} has not allowed this computer to watch its screen. On the server, run:"
+    "pausedIdle": "Paused to save resources - click to resume",
+    "showScreen": "Show screen",
+    "screenListFailed": "{{name}}'s screen list could not be loaded. It will be tried again in a moment."
+  },
+  "terminal": {
+    "title": "Terminal - {{name}}",
+    "close": "Close the terminal",
+    "note": "This is a shell on the server, through the connection your app already has. It ends when you close this panel.",
+    "failed": "The terminal could not be opened.",
+    "ended": "The shell ended.",
+    "again": "Open again",
+    "runForMe": "Run it for me",
+    "runForMeHint": "Opens the terminal and types the command; you press Enter.",
+    "state": {
+      "starting": "Starting",
+      "live": "Connected",
+      "ended": "Ended",
+      "failed": "Not connected"
+    }
   },
   "knowledge": {
     "title": "Knowledge and shared brain",

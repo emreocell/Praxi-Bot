@@ -894,13 +894,16 @@ export function reconnectDelayMs(attempt: number): number {
   return Math.min(15_000, 1000 * 2 ** (n - 1));
 }
 
-/** Whether a capture session (network, decode, heartbeat) is wanted right now. */
+/**
+ * Whether a capture session (network, decode, heartbeat) is wanted right now. Only the OPEN
+ * viewer wants one: the right-panel card never holds a live session (it shows a placeholder and
+ * at most one still image a minute), so the host produces no images until someone clicks.
+ */
 export function computeWantSession(a: {
   hasClient: boolean;
   documentHidden: boolean;
   target: TargetInfo | null;
   viewerOpen: boolean;
-  panelActive: boolean;
 }): boolean {
   return (
     a.hasClient &&
@@ -908,7 +911,29 @@ export function computeWantSession(a: {
     a.target !== null &&
     summarizeTarget(a.target).canView &&
     !a.target.unavailable_reason &&
-    (a.viewerOpen || a.panelActive)
+    a.viewerOpen
+  );
+}
+
+/** How often the panel may refresh its still image while it is visible and the window is focused. */
+export const THUMBNAIL_REFRESH_MS = 60_000;
+
+/**
+ * Whether the card should (re)fetch its still image now: the panel is on screen, the window is
+ * visible and focused, no live viewer is open, and the last image is at least a minute old.
+ */
+export function thumbnailDue(a: {
+  panelVisible: boolean;
+  viewerOpen: boolean;
+  windowActive: boolean;
+  lastFetchMs: number | null;
+  nowMs: number;
+}): boolean {
+  return (
+    a.panelVisible &&
+    !a.viewerOpen &&
+    a.windowActive &&
+    (a.lastFetchMs === null || a.nowMs - a.lastFetchMs >= THUMBNAIL_REFRESH_MS)
   );
 }
 

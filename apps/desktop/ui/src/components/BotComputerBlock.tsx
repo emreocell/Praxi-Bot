@@ -80,6 +80,8 @@ export function BotComputerBlock({
     availability,
     state,
     frameUrl,
+    thumbUrl,
+    pausedIdle,
     panelAction,
     openViewer,
     releaseTakeover,
@@ -150,8 +152,17 @@ export function BotComputerBlock({
   const desktopCommand = onHost
     ? serverDesktopCommand(noScreenCode(availability), serverName)
     : null;
-  // The server answered but would not list screens: this computer has no screen permission there.
-  const permissionMissing = onHost && !issue && targetsStatus === "failed";
+  // The server answered but would not list screens. Never a server command here: the paired
+  // administrator desktop may watch the screen by default, so this is a plain failure to retry.
+  const listFailed = onHost && !issue && targetsStatus === "failed";
+  // Nothing is streaming while the card is only visible: a still image (at most one a minute)
+  // or a placeholder that starts the live view when clicked.
+  const shownImage = frameUrl ?? thumbUrl;
+  const idleText = pausedIdle
+    ? t("botPanel.pausedIdle")
+    : summary?.available
+      ? t("botPanel.showScreen")
+      : null;
 
   return (
     <section className={styles.block} aria-labelledby="bot-panel-computer">
@@ -206,10 +217,10 @@ export function BotComputerBlock({
         onClick={() => openViewer(selectedTarget?.target_id)}
       >
         <div className={styles.preview}>
-          {frameUrl ? (
+          {shownImage ? (
             <img
               className={styles.thumb}
-              src={frameUrl}
+              src={shownImage}
               alt={t("liveView.stageAlt", {
                 target: selectedTarget
                   ? t(`liveView.kind.${selectedTarget.kind}`)
@@ -220,7 +231,7 @@ export function BotComputerBlock({
           ) : (
             <div className={styles.placeholder}>
               <KindIcon aria-hidden="true" />
-              <span>{say(panel.preview)}</span>
+              <span data-testid="bot-computer-idle">{idleText ?? say(panel.preview)}</span>
             </div>
           )}
           {actionPercent ? (
@@ -257,10 +268,9 @@ export function BotComputerBlock({
           <code className={styles.command}>{desktopCommand}</code>
         </div>
       ) : null}
-      {permissionMissing ? (
-        <div className={styles.note} data-testid="bot-computer-permission">
-          {t("botPanel.needsPermission", { name: serverName })}
-          <code className={styles.command}>bot host screen --all-desktops</code>
+      {listFailed ? (
+        <div className={styles.note} data-testid="bot-computer-list-failed">
+          {t("botPanel.screenListFailed", { name: serverName })}
         </div>
       ) : null}
 

@@ -8,6 +8,7 @@ import { openExternal } from "../lib/externalLink";
 import { signInPhase, apiKeyProvider, type SignInPhase } from "../lib/serverSignIn";
 import { useDaemon } from "../state/DaemonContext";
 import { Modal } from "./Modal";
+import { RunOnServer } from "./RunOnServer";
 import styles from "./ServerSignInModal.module.css";
 
 const ACTIVE = new Set<SignInPhase>(["starting", "needs_browser", "needs_code", "verifying"]);
@@ -172,6 +173,7 @@ function Content({
         <div className={styles.notice} data-testid="signin-manual">
           <p>{t(engine.id === "opencode" ? "serverSignIn.manual.opencode" : "serverSignIn.manual.generic", { name: engine.name, server: serverName })}</p>
           <code className={styles.command}>{manual}</code>
+          <RunOnServer command={manual} beforeOpen={onClose} />
         </div>
       ) : null}
 

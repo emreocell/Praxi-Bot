@@ -59,6 +59,7 @@ pub mod skill_management;
 pub mod skills;
 mod sse;
 mod stop;
+pub mod terminal;
 pub mod web;
 mod web_routes;
 
@@ -250,6 +251,7 @@ struct Inner {
     /// CLI provider detector (`GET /v1/providers/detected`).
     detector: parking_lot::RwLock<Arc<cli_provider::Detector>>,
     cli_installs: cli_engines::InstallBook,
+    terminals: terminal::Terminals,
     cli_logins: cli_login::LoginBook,
     /// Live model lists of the coding CLIs (disk-cached, refreshed in the background).
     cli_models: Arc<cli_provider::models::ModelCache>,
@@ -419,6 +421,7 @@ impl AppState {
             policy_load_error: parking_lot::Mutex::new(policy_load_error),
             detector: parking_lot::RwLock::new(Arc::new(cli_provider::Detector::new())),
             cli_installs: cli_engines::InstallBook::default(),
+            terminals: terminal::Terminals::default(),
             cli_logins: cli_login::LoginBook::default(),
             cli_models,
             scheduler: parking_lot::Mutex::new(None),
@@ -1006,6 +1009,23 @@ fn api_routes() -> Router<AppState> {
         .route("/v1/hosts", get(host_links::list))
         .route("/v1/hosts/pair", post(host_links::pair))
         .route("/v1/hosts/{id}", axum::routing::delete(host_links::forget))
+        .route("/v1/hosts/{id}/terminal", post(terminal::host_open))
+        .route(
+            "/v1/hosts/{id}/terminal/{tid}",
+            axum::routing::delete(terminal::host_close),
+        )
+        .route(
+            "/v1/hosts/{id}/terminal/{tid}/output",
+            get(terminal::host_output),
+        )
+        .route(
+            "/v1/hosts/{id}/terminal/{tid}/input",
+            post(terminal::host_input),
+        )
+        .route(
+            "/v1/hosts/{id}/terminal/{tid}/resize",
+            post(terminal::host_resize),
+        )
         .route(
             "/v1/hosts/computer-requests",
             get(host_links::computer_requests),
@@ -1050,6 +1070,8 @@ fn api_routes() -> Router<AppState> {
         .route("/v1/health", get(r::health))
         .route("/v1/view/targets", get(v::targets))
         .route("/v1/view/availability", get(v::availability))
+        .route("/v1/view/status", get(v::status))
+        .route("/v1/view/targets/{id}/thumbnail", get(v::thumbnail))
         .route("/v1/view/sessions", post(v::create_session))
         .route(
             "/v1/view/sessions/{id}",

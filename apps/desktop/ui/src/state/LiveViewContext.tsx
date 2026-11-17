@@ -12,6 +12,7 @@ import type {
   ControlStateDto,
   HumanAction,
   InputEvent,
+  ScreenStatus,
   SessionInfo,
   TargetInfo,
   TargetUnavailable
@@ -51,6 +52,8 @@ import {
   pickDefaultTarget,
   planViewerClose,
   sessionProfile,
+  THUMBNAIL_REFRESH_MS,
+  thumbnailDue,
   type RecoveryPrompt,
   shouldOverrideOnStop,
   type LiveViewControllerState
@@ -90,6 +93,15 @@ interface LiveViewContextValue {
   controlState: ControlStateDto | null;
   state: LiveViewControllerState;
   frameUrl: string | null;
+  /**
+   * One still image of the screen for the card (never a live stream): fetched when the panel
+   * opens and at most once a minute while it is visible and the window is focused.
+   */
+  thumbUrl: string | null;
+  /** The host's own idle/starting/live/paused/unavailable answer; `null` until asked. */
+  screenStatus: ScreenStatus | null;
+  /** The host stopped the stream to save resources: show "click to resume". */
+  pausedIdle: boolean;
   viewerOpen: boolean;
   loadingTargets: boolean;
   targetsStatus: TargetsStatus;
@@ -217,6 +229,8 @@ export function LiveViewProvider({
     typeof document !== "undefined" ? document.visibilityState === "hidden" : false
   );
   const [frameUrl, setFrameUrl] = useState<string | null>(null);
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const [screenStatus, setScreenStatus] = useState<ScreenStatus | null>(null);
   const [panelAction, setPanelAction] = useState<PanelActionHighlight | null>(
     null
   );
@@ -471,9 +485,104 @@ export function LiveViewProvider({
     hasClient: Boolean(client),
     documentHidden,
     target: selectedTarget,
-    viewerOpen,
-    panelActive: thumbDemand.active
+    viewerOpen
   });
+
+  const refreshStatus = useCallback(async (): Promise<ScreenStatus | null> => {
+    if (!client) {
+      return null;
+    }
+    try {
+      const status = await client.viewStatus();
+      if (clientRef.current === client) {
+        setScreenStatus(status);
+      }
+      return status;
+    } catch {
+      return null;
+    }
+  }, [client]);
+
+  // The card's still image: one when the panel opens, then at most one a minute while the panel is
+  // visible and the window focused. No session: the host captures a single frame each time and
+  // produces nothing in between.
+  const thumbTargetId = computeWantSession({
+    hasClient: Boolean(client),
+    documentHidden: false,
+    target: selectedTarget,
+    viewerOpen: true
+  })
+    ? (selectedTarget?.target_id ?? null)
+    : null;
+  useEffect(() => {
+    if (!client || !thumbDemand.active || !thumbTargetId || viewerOpen) {
+      return undefined;
+    }
+    let stopped = false;
+    let last: number | null = null;
+    let current: string | null = null;
+    const abort = new AbortController();
+    const windowActive = () => document.visibilityState === "visible" && document.hasFocus();
+    const tick = async () => {
+      if (
+        stopped ||
+        !thumbnailDue({
+          panelVisible: true,
+          viewerOpen: false,
+          windowActive: windowActive(),
+          lastFetchMs: last,
+          nowMs: Date.now()
+        })
+      ) {
+        return;
+      }
+      last = Date.now();
+      try {
+        const blob = await client.viewThumbnail(thumbTargetId, abort.signal);
+        if (stopped) {
+          return;
+        }
+        const url = URL.createObjectURL(blob);
+        const old = current;
+        current = url;
+        setThumbUrl(url);
+        if (old) {
+          URL.revokeObjectURL(old);
+        }
+      } catch {
+        // The placeholder stays.
+      }
+    };
+    void tick();
+    // Look often, fetch rarely: `thumbnailDue` holds the one-minute spacing.
+    const id = window.setInterval(() => void tick(), Math.min(15_000, THUMBNAIL_REFRESH_MS));
+    const onFocus = () => void tick();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      stopped = true;
+      abort.abort();
+      window.clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+      if (current) {
+        URL.revokeObjectURL(current);
+      }
+      setThumbUrl(null);
+    };
+  }, [client, thumbDemand.active, thumbTargetId, viewerOpen]);
+
+  // Where the host stands with the stream (idle / live / paused to save resources / unavailable).
+  useEffect(() => {
+    if (!client || !(thumbDemand.active || viewerOpen)) {
+      return undefined;
+    }
+    void refreshStatus();
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshStatus();
+      }
+    }, 20_000);
+    return () => window.clearInterval(id);
+  }, [client, thumbDemand.active, viewerOpen, refreshStatus]);
 
   const owning = isActivelyOwningTakeover(state);
   const desiredProfile = sessionProfile(state);
@@ -706,12 +815,24 @@ export function LiveViewProvider({
       }
       // After a Stop this app no longer renews its input lease.
       const body = takeoverStopRef.current?.inputAllowed() === false ? {} : buildSessionHeartbeat(cur);
+      // "Someone is looking": the host ends a session whose viewer reports hidden/unfocused for
+      // its idle limit, and stops producing images.
+      const looking = document.visibilityState === "visible" && document.hasFocus();
       void client
-        .heartbeatViewSession(cur.session.session_id, body)
-        .catch(() => undefined);
+        .heartbeatViewSession(cur.session.session_id, { ...body, active: looking })
+        .catch((e: unknown) => {
+          // The host ended the session (idle or time limit): say so instead of showing a frozen frame.
+          if (e instanceof ApiError && (e.status === 404 || e.status === 410)) {
+            void refreshStatus().then((status) => {
+              if (status?.state === "paused_idle" && !isActivelyOwningTakeover(stateRef.current)) {
+                setViewerOpen(false);
+              }
+            });
+          }
+        });
     }, SESSION_HEARTBEAT_MS);
     return () => window.clearInterval(id);
-  }, [client, wantSession, state.session]);
+  }, [client, wantSession, state.session, refreshStatus]);
 
   // Periodic stream staleness watchdog so silent drops disable interactive input safely.
   useEffect(() => {
@@ -1107,6 +1228,9 @@ export function LiveViewProvider({
       controlState,
       state,
       frameUrl,
+      thumbUrl,
+      screenStatus,
+      pausedIdle: screenStatus?.state === "paused_idle" && !viewerOpen,
       viewerOpen,
       loadingTargets,
       targetsStatus,
@@ -1140,6 +1264,8 @@ export function LiveViewProvider({
       controlState,
       state,
       frameUrl,
+      thumbUrl,
+      screenStatus,
       viewerOpen,
       loadingTargets,
       targetsStatus,

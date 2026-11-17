@@ -2989,9 +2989,62 @@ async fn desktop_window_list_is_callable_on_the_first_turn_and_prompt_says_to_lo
         .filter_map(|t| t["function"]["name"].as_str())
         .collect();
     assert!(names.contains(&"find_tool") && names.contains(&"desktop_list_apps"));
-    assert!(!names.contains(&"browser_open"), "{names:?}");
+    // `browser_open` is pinned too: the one-step path for "open a browser".
+    assert!(names.contains(&"browser_open"), "{names:?}");
+    assert!(!names.contains(&"fs_read"), "{names:?}");
     let prompt = system_text(&req);
     assert!(prompt.contains("separate managed browser") && prompt.contains("desktop_list_apps"));
+}
+
+#[tokio::test]
+async fn host_homed_run_with_a_display_offers_browser_open_first_and_says_the_screen_exists() {
+    // The owner's real test: a bot on the server probed the shell for a browser
+    // and said "no GUI". With more tools than the direct limit, `browser_open`
+    // must still be in the first request, and the environment block must state
+    // that the desktop and the browser exist.
+    let env = setup();
+    let mut desktop = tool("desktop_list_apps", Effect::Read, "ok");
+    desktop.spec.category = PermissionCategory::Desktop;
+    let mut browser = tool("browser_open", Effect::Read, "ok");
+    browser.spec.category = PermissionCategory::Browser;
+    let (desktop, browser) = (Arc::new(desktop), Arc::new(browser));
+    let files = Arc::new(tool("fs_read", Effect::Read, "ok"));
+    let fake = Fake::new(vec![text("done")]);
+    let mut config = cfg(Policy::full());
+    config.discovery_threshold = 0;
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[&desktop, &browser, &files],
+        profile(""),
+        config,
+    );
+    lp.set_computer_provider(Arc::new(MockComputerProvider {
+        local: parking_lot::RwLock::new(Some(NamedDesktop::new("host"))),
+        pc: parking_lot::RwLock::new(None),
+        is_host: true,
+        browser_available: true,
+        has_display: true,
+    }));
+    let run = lp
+        .run_turn(env.chat, "kendi bilgisayarında tarayıcı aç")
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let req = fake.request(0);
+    let names: Vec<&str> = req
+        .tools
+        .iter()
+        .filter_map(|t| t["function"]["name"].as_str())
+        .collect();
+    assert!(names.contains(&"find_tool"), "{names:?}");
+    assert!(names.contains(&"browser_open"), "{names:?}");
+    let prompt = system_text(&req);
+    assert!(
+        prompt.contains("graphical desktop (display :99) and the browser are available"),
+        "{prompt}"
+    );
+    assert!(prompt.contains("call browser_open"), "{prompt}");
 }
 
 #[tokio::test]
@@ -6292,6 +6345,10 @@ impl computer_target::ComputerProvider for MockComputerProvider {
 
     fn has_display(&self) -> bool {
         self.has_display
+    }
+
+    fn display_name(&self) -> Option<String> {
+        self.has_display.then(|| ":99".to_owned())
     }
 
     fn node(&self, _id: &str) -> Option<Arc<dyn desktop_api::DesktopBackend>> {

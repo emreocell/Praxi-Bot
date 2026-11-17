@@ -9,6 +9,7 @@ import {
 import { LOCAL_COMPUTER, useDaemon } from "../state/DaemonContext";
 import { useLiveView } from "../state/LiveViewContext";
 import { Modal } from "./Modal";
+import { RunOnServer } from "./RunOnServer";
 import styles from "./HostEmptyState.module.css";
 
 /**
@@ -46,6 +47,7 @@ function HostModelDialog({ open, onClose }: { open: boolean; onClose: () => void
           >
             {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
           </button>
+          <RunOnServer command={HOST_MODEL_SETUP_COMMAND} className={styles.copy} beforeOpen={onClose} />
         </div>
         <p className={styles.dialogHint}>{t("hostMode.model.afterwards")}</p>
         <div className={styles.dialogActions}>

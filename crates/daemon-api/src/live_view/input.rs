@@ -222,6 +222,7 @@ pub(crate) async fn input(
     drop(waiter);
     let _executor = executor;
     let (target, generation, _) = live.session(&actor, id)?;
+    live.touch(id);
     let batch: InputBatch = match parse(&body) {
         Ok(b) => b,
         Err(e) => {

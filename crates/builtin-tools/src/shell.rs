@@ -186,6 +186,12 @@ const CHILD_ENV_ALLOWLIST: &[&str] = &[
     "LC_TIME",
     "TZ",
     "TERM",
+    // Where this computer's screen is (Linux host: Xvfb `:99` and its cookie
+    // file; plain paths and a display name, no secret). Without them a GUI
+    // program started from the shell, or a probe for "is there a display",
+    // wrongly says there is no screen.
+    "DISPLAY",
+    "XAUTHORITY",
 ];
 
 fn child_env_allowed(name: &OsStr) -> bool {
@@ -207,14 +213,60 @@ fn retained_child_env(
         .collect()
 }
 
-/// Replace the child's environment with the allowlist, read from the daemon
+/// The environment of a shell child on this computer: the allowlist read from the
+/// daemon (no secret: vault, bearer, owner key and provider credentials are not
+/// on it), `PATH` with the directory of the running `bot` binary appended so that
+/// `bot ...` exists there (owner-key guarded commands still need the owner key,
+/// which the child does not get), and the managed browser's path as
+/// `PRAXI_BROWSER_PATH` so a script can start it on the screen named by `DISPLAY`.
+/// The in-app terminal of a host uses the same environment.
+#[must_use]
+pub fn child_env() -> Vec<(OsString, OsString)> {
+    let mut env = retained_child_env(std::env::vars_os());
+    if let Some(path) = path_with_bot_dir(
+        std::env::var_os("PATH").as_deref(),
+        std::env::current_exe().ok().as_deref(),
+    ) {
+        match env
+            .iter_mut()
+            .find(|(k, _)| k.to_string_lossy().eq_ignore_ascii_case("PATH"))
+        {
+            Some((_, v)) => *v = path,
+            None => env.push(("PATH".into(), path)),
+        }
+    }
+    #[cfg(unix)]
+    if let Ok(browser) = browser_cdp::find_browser() {
+        env.push((browser_cdp::BROWSER_ENV.into(), browser.into_os_string()));
+    }
+    env
+}
+
+/// Replace the child's environment with [`child_env`], read from the daemon
 /// without modifying it.
 fn apply_child_env(cmd: &mut Command) {
-    let kept = retained_child_env(std::env::vars_os());
     cmd.env_clear();
-    for (key, value) in kept {
+    for (key, value) in child_env() {
         cmd.env(key, value);
     }
+}
+
+/// `path` with the directory of `exe` appended, when `exe` is the `bot`
+/// binary and its directory is not on `path` yet; `None` when nothing changes.
+fn path_with_bot_dir(path: Option<&OsStr>, exe: Option<&Path>) -> Option<OsString> {
+    let exe = exe?;
+    if exe.file_stem()? != "bot" {
+        return None;
+    }
+    let dir = exe.parent()?;
+    let mut dirs: Vec<PathBuf> = path
+        .map(|p| std::env::split_paths(p).collect())
+        .unwrap_or_default();
+    if dirs.iter().any(|d| d == dir) {
+        return None;
+    }
+    dirs.push(dir.to_path_buf());
+    std::env::join_paths(dirs).ok()
 }
 
 /// Unix process group so `killpg` reaches the tree, Windows job object so
@@ -1179,6 +1231,39 @@ mod tests {
         assert!(
             stays_alive(pid, Duration::from_secs(5)).await,
             "background child {pid} was killed after a successful shell_run"
+        );
+    }
+
+    #[test]
+    fn child_env_keeps_the_display_and_gets_the_bot_directory_on_path() {
+        let vars = [
+            ("DISPLAY", ":99"),
+            ("XAUTHORITY", "/run/praxi/xauth"),
+            ("BOT_DATA_DIR", "/var/lib/praxi"),
+            ("BOT_API_TOKEN", "token-sentinel"),
+        ];
+        let kept = retained_child_env(
+            vars.into_iter()
+                .map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v))),
+        );
+        let names: Vec<String> = kept
+            .iter()
+            .map(|(k, _)| k.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["DISPLAY", "XAUTHORITY"]);
+        // `bot` (not any other program) puts its directory on PATH, once.
+        let path = OsString::from(if cfg!(windows) { r"C:\x" } else { "/usr/bin" });
+        let bot = if cfg!(windows) {
+            PathBuf::from(r"C:\praxi\bin\bot.exe")
+        } else {
+            PathBuf::from("/opt/praxi/bin/bot")
+        };
+        let joined = path_with_bot_dir(Some(&path), Some(&bot)).expect("dir appended");
+        let dirs: Vec<PathBuf> = std::env::split_paths(&joined).collect();
+        assert_eq!(dirs.last().map(PathBuf::as_path), bot.parent());
+        assert!(path_with_bot_dir(Some(&joined), Some(&bot)).is_none());
+        assert!(
+            path_with_bot_dir(Some(&path), Some(Path::new("/tmp/other-test-binary"))).is_none()
         );
     }
 

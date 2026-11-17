@@ -461,7 +461,7 @@ async fn guard(State(state): State<AppState>, mut req: Request, next: Next) -> R
         return ApiError::bad_request("URL credentials are forbidden").into_response();
     }
     req.extensions_mut()
-        .insert(crate::live_view::Actor::peer(&peer));
+        .insert(crate::live_view::Actor::peer_for(&state, &peer));
     // New schedule source/read capabilities remain local-owner only even on
     // encoded or slash-normalized aliases. Existing plain timer requests keep
     // their earlier peer policy; handlers also guard already-configured rows.
@@ -498,7 +498,7 @@ async fn guard(State(state): State<AppState>, mut req: Request, next: Next) -> R
         // denial is coalesced there): it must not write a decision row per try.
         let granted = state
             .live_view()
-            .allowed(&crate::live_view::Actor::peer(&peer), true);
+            .allowed(&crate::live_view::Actor::peer_for(&state, &peer), true);
         let changed = granted && (input.release || state.hub().reported_mode() != Some(input.mode));
         (
             Request::from_parts(parts, axum::body::Body::from(bytes)),
@@ -519,7 +519,7 @@ async fn guard(State(state): State<AppState>, mut req: Request, next: Next) -> R
             | "/v1/control/recover"
     ) && !state
         .live_view()
-        .allowed(&crate::live_view::Actor::peer(&peer), true);
+        .allowed(&crate::live_view::Actor::peer_for(&state, &peer), true);
     if (req.method() == Method::POST
         && !refused_control
         && (path.starts_with("/v1/approvals/")

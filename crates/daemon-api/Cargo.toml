@@ -59,7 +59,7 @@ uuid.workspace = true
 zeroize = "1"
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1", default-features = false, features = ["fs", "process", "std"] }
+rustix = { version = "1", default-features = false, features = ["fs", "process", "pty", "termios", "std"] }
 
 [dev-dependencies]
 tokio-tungstenite.workspace = true

@@ -27,7 +27,8 @@ export const DAEMON_ERROR_CODES = [
   "skill_storage", "skill_too_large", "too_many_requests", "too_many_skills", "too_many_streams",
   "unauthorized", "unavailable", "unsupported_media_type", "version_conflict", "view_media_type",
   "view_quota", "schedule_moved", "host_unreachable", "login_busy", "login_manual", "not_installed", "login_files_changed", "login_untrusted_location", "login_forbidden", "login_stale",
-  "prerequisite_missing", "install_copy_only", "host_admin_forbidden", "host_admin_required", "secrets_unavailable", "secret_store_failed", "owner_key_required"
+  "prerequisite_missing", "install_copy_only", "host_admin_forbidden", "host_admin_required", "secrets_unavailable", "secret_store_failed", "owner_key_required",
+  "terminal_unsupported", "terminal_start_failed", "terminal_busy", "terminal_gone"
 ] as const;
 
 export type ErrorAction = "retry" | "reload" | "restartService" | "settings";

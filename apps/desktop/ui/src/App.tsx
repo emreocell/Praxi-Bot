@@ -92,6 +92,7 @@ import { useBotReorder } from "./components/useBotReorder";
 import { setBotOrderSnapshot } from "./store/botOrderStore";
 import { computerScopePlan } from "./lib/hostState";
 import { ComputerPicker } from "./components/ComputerPicker";
+import { ServerTerminalProvider } from "./state/ServerTerminalContext";
 import { ComputerRequestModal } from "./components/ComputerAccess";
 import { HostEmptyState } from "./components/HostEmptyState";
 import { HostStateBanner } from "./components/HostStateBanner";
@@ -1086,12 +1087,14 @@ export function App() {
   return (
     <ToastProvider>
       <DaemonProvider>
-        <ComputerRequestModal />
-        <ComputerScope>
-          <LeaveGuardProvider>
-            <AppShell />
-          </LeaveGuardProvider>
-        </ComputerScope>
+        <ServerTerminalProvider>
+          <ComputerRequestModal />
+          <ComputerScope>
+            <LeaveGuardProvider>
+              <AppShell />
+            </LeaveGuardProvider>
+          </ComputerScope>
+        </ServerTerminalProvider>
       </DaemonProvider>
     </ToastProvider>
   );

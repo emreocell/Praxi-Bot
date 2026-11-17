@@ -1,0 +1,129 @@
+/*
+ * The server terminal: a docked panel (not a modal, so Tab and Esc reach the shell).
+ * Colours come from the theme tokens only; the terminal widget reads them at run time.
+ */
+.panel {
+  position: fixed;
+  z-index: 70;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  width: min(calc(var(--space-16) * 13), calc(100vw - var(--space-8)));
+  height: min(calc(var(--space-16) * 7), 60vh);
+  min-height: calc(var(--space-16) * 3);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-elevated-opaque, var(--color-background));
+  box-shadow:
+    0 0 0 var(--size-border) var(--color-border-strong),
+    0 var(--space-8) calc(var(--space-16) + var(--space-2)) calc(var(--space-4) * -1) var(--color-shadow);
+  color: var(--color-text);
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--size-border) solid var(--color-border);
+}
+
+.title {
+  flex: 1;
+  min-width: var(--space-0);
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title svg {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+  margin-inline-end: var(--space-2);
+  vertical-align: middle;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.state i {
+  width: var(--size-status-dot);
+  height: var(--size-status-dot);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-warning);
+}
+
+.state[data-state="live"] i {
+  background-color: var(--color-success);
+}
+
+.state[data-state="ended"] i,
+.state[data-state="failed"] i {
+  background-color: var(--color-danger);
+}
+
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-control-sm);
+  height: var(--size-control-sm);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.close:hover {
+  background-color: var(--color-surface-active);
+  color: var(--color-text);
+}
+
+.close:focus-visible {
+  box-shadow: var(--shadow-focus);
+  outline: none;
+}
+
+.close svg {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+}
+
+.screen {
+  flex: 1;
+  min-height: var(--space-0);
+  padding: var(--space-2);
+  background-color: var(--term-background, var(--color-background));
+}
+
+.screen :global(.xterm) {
+  height: 100%;
+}
+
+.note {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-top: var(--size-border) solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.again {
+  margin-inline-start: var(--space-2);
+  border: none;
+  background: transparent;
+  color: var(--color-accent-text);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}

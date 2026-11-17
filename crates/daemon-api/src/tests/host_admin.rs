@@ -1639,3 +1639,228 @@ async fn an_engine_whose_files_changed_since_installation_is_refused_before_anyt
     assert!(!home.join("login-pid").exists());
     r.net.shutdown().await;
 }
+
+// ------------------------------------------------------------------ the in-app terminal
+
+/// Poll a terminal until `needle` shows up in its output (or give up); returns what was read.
+#[cfg(target_os = "linux")]
+async fn read_until(r: &Rig, id: &str, needle: &str) -> String {
+    use base64::Engine as _;
+    let (mut after, mut text) = (0u64, String::new());
+    for _ in 0..20 {
+        let out = admin_call(
+            r,
+            Method::GET,
+            &format!("/v1/admin/terminal/{id}/output?after={after}&wait_ms=1000"),
+            None,
+        )
+        .await;
+        assert_eq!(out.status, StatusCode::OK, "{:?}", out.json());
+        let j = out.json();
+        after = j["next"].as_u64().unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(j["data"].as_str().unwrap())
+            .unwrap();
+        text.push_str(&String::from_utf8_lossy(&bytes));
+        if text.contains(needle) {
+            break;
+        }
+    }
+    text
+}
+
+#[tokio::test]
+async fn only_the_admin_desktop_may_open_or_use_a_terminal() {
+    let r = rig().await;
+    let open = json!({"cols": 80, "rows": 24});
+    let fake = "/v1/admin/terminal/018f0000-0000-7000-8000-000000000000";
+    // A desktop without administration, a phone, a node and a caller with no pairing at all
+    // (a bot, tool, schedule or token holder has no peer identity) get nothing: not a session,
+    // not output, not input, not a kill.
+    let callers = [
+        Some((r.legacy_key.as_str(), crate::PeerRole::Desktop)),
+        Some((r.admin_key.as_str(), crate::PeerRole::Phone)),
+        Some((r.admin_key.as_str(), crate::PeerRole::Node)),
+        None,
+    ];
+    for who in callers {
+        for (method, path, body) in [
+            (
+                Method::POST,
+                "/v1/admin/terminal".to_owned(),
+                Some(open.clone()),
+            ),
+            (Method::GET, format!("{fake}/output?after=0"), None),
+            (
+                Method::POST,
+                format!("{fake}/input"),
+                Some(json!({"data": "bHM="})),
+            ),
+            (
+                Method::POST,
+                format!("{fake}/resize"),
+                Some(json!({"cols": 90, "rows": 30})),
+            ),
+            (Method::DELETE, fake.to_owned(), None),
+        ] {
+            let resp = peer_call(&r.t, who, method.clone(), &path, body).await;
+            assert_eq!(
+                resp.status,
+                StatusCode::FORBIDDEN,
+                "{who:?} {method} {path}"
+            );
+        }
+    }
+    // The admin desktop passes the authority check: a real session on Linux, a clear
+    // "needs a Linux host" elsewhere. A session id that is not its own is simply gone.
+    let opened = admin_call(&r, Method::POST, "/v1/admin/terminal", Some(open)).await;
+    if cfg!(target_os = "linux") {
+        assert_eq!(opened.status, StatusCode::OK, "{:?}", opened.json());
+    } else {
+        assert_eq!(opened.status, StatusCode::CONFLICT);
+        assert_eq!(opened.json()["error"]["code"], "terminal_unsupported");
+    }
+    let gone = admin_call(&r, Method::GET, &format!("{fake}/output?after=0"), None).await;
+    assert_eq!(gone.status, StatusCode::NOT_FOUND);
+    assert_eq!(gone.json()["error"]["code"], "terminal_gone");
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn a_terminal_session_runs_a_shell_without_secrets_and_audits_open_and_close_only() {
+    use base64::Engine as _;
+    let r = rig().await;
+    let opened = admin_call(
+        &r,
+        Method::POST,
+        "/v1/admin/terminal",
+        Some(json!({"cols": 100, "rows": 30})),
+    )
+    .await;
+    assert_eq!(opened.status, StatusCode::OK, "{:?}", opened.json());
+    let id = opened.json()["id"].as_str().unwrap().to_owned();
+    let type_line = |line: &str| json!({"data": base64::engine::general_purpose::STANDARD.encode(format!("{line}\n"))});
+    let typed = admin_call(
+        &r,
+        Method::POST,
+        &format!("/v1/admin/terminal/{id}/input"),
+        Some(type_line("echo marker$((40+2)); env")),
+    )
+    .await;
+    assert_eq!(typed.status, StatusCode::NO_CONTENT);
+    let text = read_until(&r, &id, "marker42").await;
+    assert!(text.contains("marker42"), "no shell output: {text}");
+    // The environment is the shell tool's allowlist plus the data dir: no owner key, no token.
+    assert!(
+        !text.contains(OWNER) && !text.contains("BOT_API_TOKEN"),
+        "{text}"
+    );
+    // Resize works; the session belongs to this desktop only (another one cannot see it).
+    let resized = admin_call(
+        &r,
+        Method::POST,
+        &format!("/v1/admin/terminal/{id}/resize"),
+        Some(json!({"cols": 120, "rows": 40})),
+    )
+    .await;
+    assert_eq!(resized.status, StatusCode::NO_CONTENT);
+    let other = peer_call(
+        &r.t,
+        Some((r.legacy_key.as_str(), crate::PeerRole::Desktop)),
+        Method::GET,
+        &format!("/v1/admin/terminal/{id}/output?after=0"),
+        None,
+    )
+    .await;
+    assert_eq!(other.status, StatusCode::FORBIDDEN);
+    let closed = admin_call(
+        &r,
+        Method::DELETE,
+        &format!("/v1/admin/terminal/{id}"),
+        None,
+    )
+    .await;
+    assert_eq!(closed.status, StatusCode::NO_CONTENT);
+    let gone = admin_call(
+        &r,
+        Method::GET,
+        &format!("/v1/admin/terminal/{id}/output?after=0"),
+        None,
+    )
+    .await;
+    assert_eq!(gone.status, StatusCode::NOT_FOUND);
+    // Open and close are audited; what was typed and what came back never are.
+    let audit = format!(
+        "{:?}",
+        r.t.state.storage().list_audit(r.t.state.user_id()).unwrap()
+    );
+    assert!(
+        audit.contains("host.admin.terminal_open") && audit.contains("host.admin.terminal_close")
+    );
+    assert!(
+        !audit.contains("marker") && !audit.contains("echo"),
+        "{audit}"
+    );
+}
+
+// ------------------------------------------------------------------ moved bots' computer
+
+#[tokio::test]
+async fn a_moved_bot_runs_on_the_hosts_own_computer_and_old_moves_are_fixed_once() {
+    let r = rig().await;
+    let source = uuid::Uuid::now_v7();
+    let moved = admin_call(
+        &r,
+        Method::POST,
+        "/v1/admin/import/bots",
+        Some(json!({
+            "source_bot_id": source,
+            "name": "Atlas",
+            "config": {
+                "bot": {"id": "atlas", "name": "Atlas"},
+                "models": {"executor": "fake/echo"},
+                "runtime": {"computer": "pc"}
+            }
+        })),
+    )
+    .await;
+    assert_eq!(moved.status, StatusCode::OK, "{:?}", moved.json());
+    let id = moved.json()["host_bot_id"].as_str().unwrap().to_owned();
+    let computer = |r: &Rig| {
+        let bot =
+            r.t.state
+                .storage()
+                .get_bot(protocol::BotId(id.parse().unwrap()))
+                .unwrap()
+                .unwrap();
+        bot.config["runtime"]["computer"]
+            .as_str()
+            .unwrap_or("")
+            .to_owned()
+    };
+    // The desktop's "pc" (its own PC) is mapped to the host's own computer on import.
+    assert_eq!(computer(&r), "auto");
+    // A bot moved before this fix still says "pc": fixed once, logged, and only that once.
+    let set = |value: &str| {
+        r.t.state
+            .storage()
+            .modify_bot(protocol::BotId(id.parse().unwrap()), |name, stored| {
+                let mut next = stored.clone();
+                next["runtime"]["computer"] = json!(value);
+                Ok((name.to_owned(), next))
+            })
+            .unwrap();
+    };
+    set("pc");
+    assert_eq!(r.t.state.normalise_moved_bots(), 1);
+    assert_eq!(computer(&r), "auto");
+    // The owner choosing "my computer" for it afterwards is theirs to keep.
+    set("pc");
+    assert_eq!(r.t.state.normalise_moved_bots(), 0);
+    assert_eq!(computer(&r), "pc");
+    let audit = format!(
+        "{:?}",
+        r.t.state.storage().list_audit(r.t.state.user_id()).unwrap()
+    );
+    assert!(audit.contains("host.import.computer_normalised"));
+}

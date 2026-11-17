@@ -65,6 +65,20 @@ pub(crate) struct Place<'a> {
     pub desktop_platform: Option<&'a str>,
     /// Whether the browser tools (`browser_open`...) are usable in this run.
     pub browser: bool,
+    /// The X display this computer's desktop backend really runs on (from the
+    /// daemon's own environment, set only when the backend started), else `None`.
+    pub display: Option<&'a str>,
+}
+
+/// A `DISPLAY` value reduced to a short, known shape (`:99`, `localhost:10.0`).
+pub(crate) fn clean_display(raw: &str) -> Option<String> {
+    let d: String = raw
+        .trim()
+        .chars()
+        .take(32)
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '.' | '_' | '-' | '/'))
+        .collect();
+    (!d.is_empty()).then_some(d)
 }
 
 /// This daemon's own OS and the shell `shell_run` uses on it.
@@ -113,6 +127,19 @@ Use {SERVER_OS} commands and paths only; never mix in commands or programs of an
             if place.label == ComputerLabel::Host {
                 out.push_str(
                     " desktop_* tools see and control this server's own virtual screen, not the user's screen.",
+                );
+            }
+            if let (ComputerLabel::Host, Some(display)) = (place.label, place.display) {
+                let and_browser = if place.browser {
+                    " and the browser"
+                } else {
+                    ""
+                };
+                let _ = write!(
+                    out,
+                    "\nA graphical desktop (display {display}){and_browser} are available on this computer: \
+it has a screen even though no monitor is attached. Programs started from shell_run can use it (DISPLAY is set); \
+do not conclude there is no GUI from a probe."
                 );
             }
             if place.browser {
@@ -285,7 +312,38 @@ mod tests {
             node_name: Some("Praxi desktop"),
             desktop_platform: Some("windows"),
             browser,
+            display: None,
         }
+    }
+
+    #[test]
+    fn host_bot_with_a_display_is_told_the_screen_and_browser_exist() {
+        let mut p = place(ComputerLabel::Host, true);
+        p.display = Some(":99");
+        let t = place_block(&p).unwrap();
+        assert!(t.contains("graphical desktop (display :99) and the browser are available"));
+        // No display detected: no such claim.
+        assert!(
+            !place_block(&place(ComputerLabel::Host, true))
+                .unwrap()
+                .contains("graphical desktop")
+        );
+        assert_eq!(
+            clean_display(
+                " :99
+"
+            )
+            .as_deref(),
+            Some(":99")
+        );
+        assert_eq!(
+            clean_display(
+                "
+\"; rm"
+            )
+            .as_deref(),
+            Some("rm")
+        );
     }
 
     #[test]
