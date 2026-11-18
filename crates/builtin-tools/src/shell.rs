@@ -213,16 +213,27 @@ fn retained_child_env(
         .collect()
 }
 
-/// The environment of a shell child on this computer: the allowlist read from the
-/// daemon (no secret: vault, bearer, owner key and provider credentials are not
-/// on it), `PATH` with the directory of the running `bot` binary appended so that
-/// `bot ...` exists there (owner-key guarded commands still need the owner key,
-/// which the child does not get), and the managed browser's path as
-/// `PRAXI_BROWSER_PATH` so a script can start it on the screen named by `DISPLAY`.
-/// The in-app terminal of a host uses the same environment.
+/// The environment of a shell child (`shell_run`, `script_run`) on this computer: the allowlist
+/// read from the daemon (no secret: vault, bearer, owner key and provider credentials are not on
+/// it), and the managed browser's path as `PRAXI_BROWSER_PATH` so a script can start it on the
+/// screen named by `DISPLAY`. The `bot` binary is deliberately NOT on its `PATH`: the CLI reads
+/// the owner key file itself, so a bot's shell must not get it for free.
 #[must_use]
 pub fn child_env() -> Vec<(OsString, OsString)> {
+    #[allow(unused_mut)] // only unix adds the browser path
     let mut env = retained_child_env(std::env::vars_os());
+    #[cfg(unix)]
+    if let Ok(browser) = browser_cdp::find_browser() {
+        env.push((browser_cdp::BROWSER_ENV.into(), browser.into_os_string()));
+    }
+    env
+}
+
+/// The environment of the owner's in-app terminal: [`child_env`] plus the directory of the
+/// running `bot` binary on `PATH`, so `bot ...` exists in the owner's own shell.
+#[must_use]
+pub fn terminal_env() -> Vec<(OsString, OsString)> {
+    let mut env = child_env();
     if let Some(path) = path_with_bot_dir(
         std::env::var_os("PATH").as_deref(),
         std::env::current_exe().ok().as_deref(),
@@ -234,10 +245,6 @@ pub fn child_env() -> Vec<(OsString, OsString)> {
             Some((_, v)) => *v = path,
             None => env.push(("PATH".into(), path)),
         }
-    }
-    #[cfg(unix)]
-    if let Ok(browser) = browser_cdp::find_browser() {
-        env.push((browser_cdp::BROWSER_ENV.into(), browser.into_os_string()));
     }
     env
 }
@@ -1246,6 +1253,13 @@ mod tests {
             vars.into_iter()
                 .map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v))),
         );
+        // A shell tool child never gets the bot directory (the owner's terminal does).
+        let path_of = |env: &[(OsString, OsString)]| {
+            env.iter()
+                .find(|(k, _)| k.to_string_lossy().eq_ignore_ascii_case("PATH"))
+                .map(|(_, v)| v.clone())
+        };
+        assert_eq!(path_of(&child_env()), std::env::var_os("PATH"));
         let names: Vec<String> = kept
             .iter()
             .map(|(k, _)| k.to_string_lossy().into_owned())

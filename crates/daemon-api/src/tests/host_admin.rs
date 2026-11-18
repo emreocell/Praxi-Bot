@@ -1864,3 +1864,41 @@ async fn a_moved_bot_runs_on_the_hosts_own_computer_and_old_moves_are_fixed_once
     );
     assert!(audit.contains("host.import.computer_normalised"));
 }
+
+#[tokio::test]
+async fn the_migration_is_one_time_even_when_it_first_runs_on_an_empty_host() {
+    let r = rig().await;
+    // A fresh host starts (nothing imported yet): the one-time pass is spent here.
+    assert_eq!(r.t.state.normalise_moved_bots(), 0);
+    let moved = admin_call(
+        &r,
+        Method::POST,
+        "/v1/admin/import/bots",
+        Some(json!({
+            "source_bot_id": uuid::Uuid::now_v7(),
+            "name": "Atlas",
+            "config": {"bot": {"id": "atlas", "name": "Atlas"}, "models": {"executor": "fake/echo"}}
+        })),
+    )
+    .await;
+    assert_eq!(moved.status, StatusCode::OK, "{:?}", moved.json());
+    let id = protocol::BotId(
+        moved.json()["host_bot_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap(),
+    );
+    // The owner deliberately picks "my computer" for it, then the daemon restarts.
+    r.t.state
+        .storage()
+        .modify_bot(id, |name, stored| {
+            let mut next = stored.clone();
+            next["runtime"] = json!({"computer": "pc"});
+            Ok((name.to_owned(), next))
+        })
+        .unwrap();
+    assert_eq!(r.t.state.normalise_moved_bots(), 0);
+    let bot = r.t.state.storage().get_bot(id).unwrap().unwrap();
+    assert_eq!(bot.config["runtime"]["computer"], "pc");
+}

@@ -2700,7 +2700,7 @@
   "terminal": {
     "title": "Terminal - {{name}}",
     "close": "Terminali kapat",
-    "note": "Bu, uygulamanın zaten kurduğu bağlantı üzerinden sunucudaki bir kabuktur. Bu paneli kapatınca biter.",
+    "note": "Bu, uygulamanın zaten kurduğu bağlantı üzerinden sunucudaki bir kabuktur. Sunucunun hizmet kullanıcısı olarak çalışır ve sunucunun anahtarlarını okuyabilir. Bu paneli kapatınca biter.",
     "failed": "Terminal açılamadı.",
     "ended": "Kabuk sona erdi.",
     "again": "Yeniden aç",

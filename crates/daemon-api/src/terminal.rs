@@ -16,7 +16,7 @@
 //! * it ends when the desktop stops polling ([`DISCONNECT_AFTER`]), after [`IDLE_AFTER`]
 //!   without input, at the hard cap, when the desktop loses administration or is unpaired,
 //!   and when the shell exits;
-//! * the environment is the shell tool's allowlist (see `builtin_tools::shell::child_env`)
+//! * the environment is the shell tool's allowlist (see `builtin_tools::shell::terminal_env`: the bot shell's allowlist plus the `bot` directory on PATH, which a bot's own shell does not get)
 //!   plus the data dir: no owner key, API token, vault passphrase or provider key;
 //! * audit: session open and close (peer, size, duration, byte counts, reason). Keystrokes
 //!   and output are never recorded.
@@ -233,6 +233,46 @@ mod pty {
         Ok((Pty { master, pid }, child, reader))
     }
 
+    /// `(pid, ppid, session)` of every process (Linux `/proc`; empty elsewhere).
+    fn process_table() -> Vec<(i32, i32, i32)> {
+        let Ok(dir) = std::fs::read_dir("/proc") else {
+            return Vec::new();
+        };
+        dir.filter_map(|e| {
+            let pid: i32 = e.ok()?.file_name().to_str()?.parse().ok()?;
+            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+            // `pid (comm) state ppid pgrp session ...`; comm may hold spaces and parentheses.
+            let rest = &stat[stat.rfind(')')? + 1..];
+            let mut f = rest.split_whitespace().skip(1);
+            let ppid: i32 = f.next()?.parse().ok()?;
+            let _pgrp = f.next()?;
+            let session: i32 = f.next()?.parse().ok()?;
+            Some((pid, ppid, session))
+        })
+        .collect()
+    }
+
+    /// `root`, the processes in session `root`, and all their descendants.
+    fn tree_of(root: i32) -> Vec<i32> {
+        let table = process_table();
+        let mut tree: Vec<i32> = table
+            .iter()
+            .filter(|(pid, _, session)| *pid == root || *session == root)
+            .map(|(pid, _, _)| *pid)
+            .collect();
+        let mut i = 0;
+        while i < tree.len() {
+            let parent = tree[i];
+            for (pid, ppid, _) in &table {
+                if *ppid == parent && !tree.contains(pid) {
+                    tree.push(*pid);
+                }
+            }
+            i += 1;
+        }
+        tree
+    }
+
     impl Pty {
         pub(super) fn write_all(&self, bytes: &[u8]) -> std::io::Result<()> {
             let mut f = self.master.try_clone()?;
@@ -244,10 +284,22 @@ mod pty {
             tcsetwinsize(&self.master, size(cols, rows)).map_err(std::io::Error::from)
         }
 
-        /// SIGHUP, then SIGKILL, to the shell's whole process group.
+        /// `sig` to the shell's whole process group AND to every process of its tree: its
+        /// descendants and everything still in its session (`nohup` / own-pgid jobs). The caller
+        /// must only call this while the shell has not been reaped, so the pid is still ours.
         pub(super) fn kill_group(&self, sig: Signal) {
-            if let Some(pid) = i32::try_from(self.pid).ok().and_then(Pid::from_raw) {
+            let Ok(root) = i32::try_from(self.pid) else {
+                return;
+            };
+            let mut victims = tree_of(root);
+            victims.retain(|p| *p != root);
+            if let Some(pid) = Pid::from_raw(root) {
                 let _ = rustix::process::kill_process_group(pid, sig);
+            }
+            for p in victims {
+                if let Some(pid) = Pid::from_raw(p) {
+                    let _ = rustix::process::kill_process(pid, sig);
+                }
             }
         }
 
@@ -352,13 +404,16 @@ fn close(s: &AppState, session: &Arc<Session>, reason: &str) {
             map.remove(&session.peer);
         }
     }
+    // Only while the shell has not been reaped: after that its pid may belong to someone else.
     #[cfg(unix)]
-    {
+    if session.exit.lock().is_none() {
         session.pty.hangup();
         let session = Arc::clone(session);
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_secs(2)).await;
-            session.pty.kill();
+            if session.exit.lock().is_none() {
+                session.pty.kill();
+            }
         });
     }
     let out_bytes = session.out.lock().end();
@@ -488,7 +543,7 @@ fn open_session(
             "all terminal slots of this host are in use",
         ));
     }
-    let mut env = builtin_tools::shell::child_env();
+    let mut env = builtin_tools::shell::terminal_env();
     env.push(("TERM".into(), "xterm-256color".into()));
     env.push(("BOT_DATA_DIR".into(), s.data_dir().into_os_string()));
     // Start in HOME when the service has one (under the hardened unit `/home` is hidden), else

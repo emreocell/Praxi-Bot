@@ -110,7 +110,9 @@ export function ServerTerminal({
       setPhase((p) => (p === "starting" ? "live" : p));
       if (prefill) {
         // One line, typed but not run.
-        live.send(prefill.replace(/\s*[\r\n]+\s*/g, " "));
+        // Every control character (newline, escape, backspace...) becomes a space.
+        // eslint-disable-next-line no-control-regex
+        live.send(prefill.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").trim());
       }
       term.focus();
     })();

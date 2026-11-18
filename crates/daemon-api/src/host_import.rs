@@ -286,9 +286,11 @@ impl AppState {
         let data = self.data_dir();
         let _g = REGISTRY_LOCK.lock();
         let mut reg = load(&data);
-        if reg.computer_normalised || reg.bots.is_empty() {
+        if reg.computer_normalised {
             return 0;
         }
+        // Also with nothing imported yet: the flag is what makes this one-time, so a later
+        // deliberate "my computer" choice for an imported bot is never rewritten.
         let mut changed = 0;
         for id in reg.bots.values().copied().collect::<Vec<_>>() {
             let mut from = None;

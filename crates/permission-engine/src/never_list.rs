@@ -920,6 +920,50 @@ impl CliStores {
     }
 }
 
+/// Subcommands of the Praxi CLI (`bot`) that carry authority: pairing and invites, host
+/// administration, keys, providers, approvals, tool servers, and starting a daemon.
+const PRAXI_CLI_AUTHORITY: &[&str] = &["host", "secrets", "providers", "approve", "mcp", "serve"];
+
+/// Whether `token` is the Praxi CLI binary: `bot` / `bot.exe` (any directory), or the absolute
+/// path of the binary that is running this process, under any name.
+fn is_praxi_binary(token: &str) -> bool {
+    let norm = token.replace('\\', "/");
+    let base = norm.rsplit('/').next().unwrap_or_default().to_lowercase();
+    if base == "bot" || base == "bot.exe" {
+        return true;
+    }
+    std::env::current_exe().is_ok_and(|exe| {
+        let exe = exe.to_string_lossy().replace('\\', "/");
+        norm.contains('/') && norm.eq_ignore_ascii_case(&exe)
+    })
+}
+
+/// A command that runs the Praxi CLI with an authority-bearing subcommand or `--data-dir`
+/// (which points the CLI at a data directory and the owner key stored in it). The CLI reads the
+/// owner key file itself, so these never auto-run from a bot shell, at any level. Damping, not a
+/// boundary: the binary can be reached under a name assembled at run time.
+fn runs_praxi_cli(raw_command: &str) -> bool {
+    raw_command
+        .split([';', '|', '&', '\n', '\r'])
+        .any(|segment| {
+            let tokens: Vec<&str> = segment
+                .split(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '(' | ')' | '`'))
+                .filter(|t| !t.is_empty())
+                .collect();
+            tokens
+                .iter()
+                .position(|t| is_praxi_binary(t))
+                .is_some_and(|i| {
+                    tokens[i + 1..].iter().any(|t| {
+                        let t = t.to_lowercase();
+                        PRAXI_CLI_AUTHORITY.contains(&t.as_str())
+                            || t == "--data-dir"
+                            || t.starts_with("--data-dir=")
+                    })
+                })
+        })
+}
+
 fn names_daemon_state(raw_command: &str) -> bool {
     let lower = raw_command.to_lowercase();
     DAEMON_STATE_NAMES.iter().any(|name| lower.contains(name))
@@ -975,6 +1019,7 @@ impl NeverList {
         // `sudo -S` vs `-s` differ); extra glob patterns use the normalised form.
         structural_match(raw_command.trim(), 0)
             || names_daemon_state(raw_command)
+            || runs_praxi_cli(raw_command)
             || CliStores::from_env().names_store(raw_command, cwd)
             || self.extra_set.is_match(Self::normalize(raw_command))
     }
@@ -997,6 +1042,25 @@ impl NeverList {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_praxi_cli_with_authority_needs_approval_from_a_bot_shell() {
+        let list = NeverList::default_list();
+        for cmd in [
+            "/opt/praxi/bin/bot host invite --role desktop",
+            "bot --data-dir /var/lib/praxi host invite --role desktop",
+            "cd /tmp && bot host admin --all-desktops",
+            "sudo bot secrets list",
+            "bot.exe serve --host",
+            r"C:\praxi\bin\bot.exe providers",
+            "bot status --data-dir=/var/lib/praxi",
+        ] {
+            assert!(list.matches(cmd), "{cmd}");
+        }
+        for cmd in ["echo hello bot", "ls /opt/praxi/bin", "cargo test host"] {
+            assert!(!list.matches(cmd), "{cmd}");
+        }
+    }
 
     fn check(cmd: &str) -> bool {
         NeverList::default_list().matches(cmd)
