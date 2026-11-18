@@ -79,7 +79,8 @@
       "title": "Language",
       "description": "Select the display language for the interface.",
       "en": "English",
-      "tr": "Türkçe"
+      "tr": "Türkçe",
+      "de": "Deutsch"
     },
     "hotkey": {
       "title": "Stop All Shortcut",

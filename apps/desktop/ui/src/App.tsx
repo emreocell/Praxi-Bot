@@ -277,7 +277,7 @@ function AppShell() {
       const params = new URLSearchParams(window.location.search);
       const mock = isMockMode();
       const merged: AppSettings = { ...loaded, autostart: osAutostart,
-        ...(mock ? { onboardingCompleted: true, language: params.get("lang") === "en" ? "en" as const : "tr" as const } : {}),
+        ...(mock ? { onboardingCompleted: true, language: (["en", "de"] as const).find((l) => l === params.get("lang")) ?? ("tr" as const) } : {}),
       };
       if (mock) Object.assign(merged, appearanceFromQuery(params, merged));
       if (mock) {
