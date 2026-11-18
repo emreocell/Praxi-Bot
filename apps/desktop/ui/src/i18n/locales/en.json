@@ -2482,6 +2482,8 @@
       "khaki": "Sand and khaki",
       "frost": "Frost",
       "chalk": "Chalk",
+      "contrast-dark": "High contrast dark",
+      "contrast-light": "High contrast light",
       "custom": "Your own theme"
     }
   },

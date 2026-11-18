@@ -2482,6 +2482,8 @@
       "khaki": "Kum ve haki",
       "frost": "Buz",
       "chalk": "Tebeşir",
+      "contrast-dark": "Yüksek kontrast koyu",
+      "contrast-light": "Yüksek kontrast açık",
       "custom": "Kendi teman"
     }
   },
