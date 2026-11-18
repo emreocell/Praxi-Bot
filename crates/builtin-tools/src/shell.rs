@@ -224,7 +224,7 @@ pub fn child_env() -> Vec<(OsString, OsString)> {
     let mut env = retained_child_env(std::env::vars_os());
     #[cfg(unix)]
     if let Ok(browser) = browser_cdp::find_browser() {
-        env.push((browser_cdp::BROWSER_ENV.into(), browser.into_os_string()));
+        env.push(("PRAXI_BROWSER_PATH".into(), browser.into_os_string()));
     }
     env
 }
