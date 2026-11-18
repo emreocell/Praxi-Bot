@@ -1801,6 +1801,7 @@
       "quarantined": "In Quarantäne"
     },
     "auth": {
+      "expiredToast": "Die Anmeldung bei {{name}} wurde nicht innerhalb von {{minutes}} Minuten abgeschlossen und abgebrochen.",
       "pasteLabel": "Weiterleitungsadresse aus dem Browser",
       "pasteSubmit": "Anmeldung abschließen",
       "pasteHint": "Wenn der Browser auf einem anderen Computer läuft und nach der Anmeldung eine Fehlerseite zeigt, kopiere die vollständige Adresse dieser Seite und füge sie hier ein.",
@@ -1811,6 +1812,21 @@
       "signedOutToast": "{{name}}: abgemeldet",
       "failedToast": "{{name}}: Anmeldung nicht abgeschlossen",
       "openFailed": "{{name}}: Die Anmeldeseite konnte nicht im Browser geöffnet werden"
+    },
+    "sheet": {
+      "title": "{{name}} verbinden",
+      "progress": "Schritt {{current}} von {{total}}",
+      "login": "Die Anmeldeseite wurde in deinem Browser geöffnet. Schließe die Anmeldung dort ab, danach öffnet sich {{name}} von selbst.",
+      "app": "Die eigene Seite von {{name}} wird geöffnet …",
+      "opened": "Die Seite von {{name}} ist in deinem Browser geöffnet. Erlaube dort den Zugriff; hier erscheint die App dann als Verbunden.",
+      "timedOut": "Die Anmeldung wurde nicht rechtzeitig abgeschlossen. Klicke auf Verbinden, um neu zu starten.",
+      "cancelled": "Abgebrochen.",
+      "failed": {
+        "login_open": "Die Anmeldeseite konnte nicht geöffnet werden.",
+        "login_failed": "Die Anmeldung wurde nicht abgeschlossen. Versuche es erneut.",
+        "app_link": "Die Seite für {{name}} konnte nicht vorbereitet werden. Versuche es erneut.",
+        "app_open": "Die Seite für {{name}} konnte nicht geöffnet werden."
+      }
     },
     "toolCount": "{{count}} Werkzeuge",
     "toolCount_one": "{{count}} Werkzeug",
@@ -1987,6 +2003,7 @@
     "title": "Tastenkürzel",
     "intro": "Praktische Kürzel, solange die App geöffnet ist.",
     "palette": "Befehlspalette",
+    "recall": "Frühere Nachrichten dieses Chats (leeres Feld oder erste Zeile; Esc bringt deinen Entwurf zurück)",
     "send": "Nachricht senden",
     "stop": "Alle Bot-Läufe stoppen",
     "settings": "Einstellungen öffnen",
