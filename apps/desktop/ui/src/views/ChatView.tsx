@@ -42,6 +42,8 @@ import { RunBar } from "../components/RunBar";
 import { RunChangesGate } from "../components/RunChangesGate";
 import { ThinkingChain } from "../components/ThinkingChain";
 import { useToast } from "../components/Toast";
+import { useEngineConsent } from "../state/EngineConsent";
+import { OPEN_AI_SETTINGS_EVENT } from "../state/useCliEngineRows";
 import {
   botView,
   configFromDraft,
@@ -58,7 +60,7 @@ import { botWriteMessage, writeBotProfile } from "../lib/botWrite";
 import { splitMentions } from "../lib/mentionText";
 import { dayHeader, type MessageTimes } from "../lib/messageTime";
 import { modelGroups } from "../lib/modelPicker";
-import { type ChatRunPhase, runBarModel, singleRunStop } from "../lib/runBar";
+import { type ChatRunPhase, runBarModel, runStopUi, STOP_CONFIRM_MS } from "../lib/runBar";
 import {
   giveBackControl,
   type ControlSnapshot,
@@ -97,7 +99,7 @@ import {
 } from "../state/timeline";
 import ccStyles from "../components/ChatCards.module.css";
 import styles from "./ChatView.module.css";
-import { type HumanError, humanError, humanLine, humanToolError } from "../lib/humanError";
+import { type ErrorAction, type HumanError, humanError, humanLine, humanToolError } from "../lib/humanError";
 import { ComputerTargetChip } from "../components/ComputerTargetChip";
 import { ErrorNotice } from "../components/ErrorNotice";
 
@@ -130,6 +132,7 @@ type Entry =
   | { kind: "item"; key: string; ts: number; item: TimelineItem; runId: string }
   | { kind: "chain"; key: string; ts: number; chain: Chain; runId: string }
   | { kind: "runError"; key: string; ts: number; message: string }
+  | { kind: "runStopped"; key: string; ts: number }
   | { kind: "route"; key: string; ts: number; run: RunState }
   | { kind: "changes"; key: string; ts: number; run: RunState }
   | { kind: "remember"; key: string; ts: number; run: RunState };
@@ -197,6 +200,7 @@ export function ChatView({
   const bot = bots.find((b) => b.id === chat?.bot_id);
   const view = bot ? botView(bot) : null;
   const { dto: providersDto } = useProviders();
+  const { askEngine, applyEngine, fixBotEngine } = useEngineConsent();
   const pickerGroups = useMemo(
     () => modelGroups(providersDto, view?.executor),
     [providersDto, view?.executor]
@@ -208,15 +212,34 @@ export function ChatView({
       return;
     }
     try {
-      await writeBotProfile(client, bot, (current) => {
+      // A CLI that only works with its own tools: the one consent step, here, before saving.
+      const answer = await askEngine(ref, bot.config);
+      if (answer === null) {
+        return;
+      }
+      const saved = await writeBotProfile(client, bot, (current) => {
         const draft = draftFromBot(current);
         draft.executor = parseModelRef(ref);
         return { name: current.name, config: configFromDraft(draft, current) };
       });
+      await applyEngine(saved.id, answer);
       await refreshBots();
       toast.show(t("modelPicker.switched", { model: ref }), "success");
     } catch (e) {
       toast.show(botWriteMessage(e, t), "danger");
+    }
+  };
+
+  // A failed turn: only the actions this view can carry out get a button.
+  const runErrorFor = (message: string): HumanError => {
+    const h = humanToolError(message);
+    return h.action === "fixEngine" || h.action === "settings" ? h : { ...h, action: undefined };
+  };
+  const onRunErrorAction = (action: ErrorAction) => {
+    if (action === "fixEngine" && bot) {
+      void fixBotEngine(bot).then((ok) => ok && toast.show(t("engineConsent.fixed"), "success"));
+    } else if (action === "settings") {
+      window.dispatchEvent(new CustomEvent(OPEN_AI_SETTINGS_EVENT));
     }
   };
 
@@ -227,6 +250,12 @@ export function ChatView({
   const pendingCaret = useRef<number | null>(null);
   const [mode, setMode] = useState<SendMode>("queue");
   const [sending, setSending] = useState(false);
+  /** The run the daemon named for the message just sent, until the run list shows it. */
+  const [ackedRunId, setAckedRunId] = useState<string | null>(null);
+  /** Stop was pressed while the send was still unanswered: it is applied when the run is named. */
+  const [stopPending, setStopPending] = useState(false);
+  const stopWhileSending = useRef(false);
+  const activeRunIdRef = useRef<string | null>(null);
   const [caret, setCaret] = useState(0);
   const [menuIdx, setMenuIdx] = useState(0);
   const [menuDismissed, setMenuDismissed] = useState<string | null>(null);
@@ -328,9 +357,18 @@ export function ChatView({
       (r) =>
         r.finishedMs === undefined && !serverRuns.some((s) => s.id === r.id)
     );
-  const activeRunId = serverLive?.id ?? eventLive?.id ?? null;
+  const ackedLive =
+    ackedRunId !== null &&
+    !serverRuns.some((r) => r.id === ackedRunId && !LIVE_STATES.has(r.state)) &&
+    !chatRuns.some((r) => r.id === ackedRunId && r.finishedMs !== undefined)
+      ? ackedRunId
+      : null;
+  const activeRunId = serverLive?.id ?? eventLive?.id ?? ackedLive;
+  activeRunIdRef.current = activeRunId;
   const pausedRunId = activeRunId ? null : (serverPaused?.id ?? null);
   const active = activeRunId !== null;
+  /** The run bar (with its Stop) is up from the moment a message is sent, before any event. */
+  const running = active || sending;
 
   const entries = useMemo(() => {
     const out: Entry[] = [];
@@ -400,6 +438,9 @@ export function ChatView({
           });
         }
       });
+      if (run.finishedMs !== undefined && run.stopped) {
+        out.push({ kind: "runStopped", key: `${run.id}-stopped`, ts: run.finishedMs });
+      }
       if (run.finishedMs !== undefined && run.error) {
         out.push({
           kind: "runError",
@@ -601,6 +642,19 @@ export function ChatView({
         active ? mode : undefined,
         await ownerKey(client.baseUrl)
       );
+      if (res.run_id) {
+        setAckedRunId(res.run_id);
+      }
+      if (stopWhileSending.current) {
+        // Stop was pressed before the daemon named the run: stop it now. A queued message
+        // has no run of its own; Stop then ends the turn it waits behind (and drops the queue).
+        stopWhileSending.current = false;
+        setStopPending(false);
+        const victim = res.delivery === "stopped" ? null : (res.run_id ?? activeRunIdRef.current);
+        if (victim) {
+          cancelRun(victim);
+        }
+      }
       if (res.delivery === "stopped") {
         toast.show(t("chat.stopped"), "info");
       }
@@ -609,9 +663,12 @@ export function ChatView({
       scrollToEnd();
       await Promise.all([loadMessages(), refreshRuns()]);
     } catch (e) {
+      stopWhileSending.current = false;
+      setStopPending(false);
       setSendFailure(humanError(e));
     } finally {
       setSending(false);
+      setAckedRunId(null);
     }
   };
 
@@ -688,10 +745,22 @@ export function ChatView({
       requestStop("banner");
       return;
     }
-    if (!client || !activeRunId) {
+    if (!client) {
       return;
     }
-    cancelRun(activeRunId);
+    if (!activeRunId) {
+      if (sending) {
+        // The daemon has not named the run yet: remember the Stop, send() applies it.
+        stopWhileSending.current = true;
+        setStopPending(true);
+      }
+      return;
+    }
+    // A second press while the first is still unconfirmed is the hard stop.
+    const hard = appLedger().runEntries().some(
+      (e) => e.id === activeRunId && (e.phase === "held" || e.phase === "cancel_requested" || e.phase === "failed")
+    );
+    cancelRun(activeRunId, hard ? { force: true } : undefined);
     try {
       await refreshRuns();
     } catch (e) {
@@ -712,7 +781,7 @@ export function ChatView({
   };
 
   const awaitingApproval = serverLive?.state === "waiting_approval" || chatRuns.some(run => run.finishedMs === undefined && run.items.some(item => item.kind === "tool" && item.status === "awaiting_approval"));
-  const chatPhase: ChatRunPhase = active
+  const chatPhase: ChatRunPhase = running
     ? awaitingApproval
       ? "waiting_approval"
       : "live"
@@ -723,7 +792,29 @@ export function ChatView({
   const ledgerRun = activeRunId
     ? appLedger().runEntries().find((e) => e.id === activeRunId)
     : undefined;
-  const stopProgress = singleRunStop(ledgerRun?.phase);
+  const stopRecord = ledgerRun?.stopId
+    ? appLedger().stopRecords().find((r) => r.id === ledgerRun.stopId)
+    : undefined;
+  const stopUi = runStopUi({
+    ledgerPhase: ledgerRun?.phase,
+    pending: stopPending,
+    decidedMono: stopRecord?.decidedMono ?? null,
+    now: performance.now(),
+    error: ledgerRun?.error ?? null,
+    unreachable: stopRecord?.phase === "retrying" && stopRecord.lastError !== null
+  });
+  // Re-render once the daemon has had STOP_CONFIRM_MS to confirm, so "not confirmed" shows up.
+  const stopWaiting = stopUi?.phase === "stopping" && stopRecord !== undefined;
+  const stopDecided = stopRecord?.decidedMono;
+  const [, setStopTick] = useState(0);
+  useEffect(() => {
+    if (!stopWaiting || stopDecided === undefined) {
+      return undefined;
+    }
+    const left = Math.max(STOP_CONFIRM_MS - (performance.now() - stopDecided), 0) + 50;
+    const id = window.setTimeout(() => setStopTick((n) => n + 1), left);
+    return () => window.clearTimeout(id);
+  }, [stopWaiting, stopDecided]);
   const barModel = runBarModel({ chat: chatPhase, native: control.mode });
   const liveRunState = chatRuns.find((r) => r.id === activeRunId);
   const barStartedMs =
@@ -1002,10 +1093,16 @@ export function ChatView({
                     <MessageTime ts={e.ts} mode={messageTimes} />
                   </div>
                 );
+              case "runStopped":
+                return (
+                  <div key={e.key} className={styles.runStopped} data-testid="run-stopped">
+                    {t("chat.runStopped")}
+                  </div>
+                );
               case "runError":
                 return (
                   <div key={e.key} className={styles.runError}>
-                    <ErrorNotice compact error={humanToolError(e.message)} />
+                    <ErrorNotice compact error={runErrorFor(e.message)} onAction={onRunErrorAction} />
                   </div>
                 );
               case "route": {
@@ -1134,7 +1231,7 @@ export function ChatView({
             botName={barBotName}
             detail={barDetail}
             startedMs={barStartedMs}
-            runStop={stopProgress ? { phase: stopProgress, error: ledgerRun?.error ?? null } : null}
+            runStop={stopUi}
             humanDriving={control.mode === "human_driving"}
             onStop={() => void stop()}
             onPause={() => void pauseBotRun().then(onControl).catch(() => {})}

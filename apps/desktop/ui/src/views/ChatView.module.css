@@ -128,7 +128,8 @@
 .routeRow,
 .rememberRow,
 .laneRow,
-.runError {
+.runError,
+.runStopped {
   margin-left: var(--lane);
 }
 
@@ -151,6 +152,13 @@
 .runError {
   margin-block: var(--space-0);
   overflow-wrap: anywhere;
+}
+
+.runStopped {
+  margin-block: var(--space-0);
+  margin-left: var(--lane);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
 }
 
 .jump {

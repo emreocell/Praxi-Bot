@@ -221,14 +221,14 @@ mod tests {
     #[test]
     fn the_scan_file_is_parsed_for_the_right_endpoint_only() {
         let text = format!(
-            "130.61.218.49 ssh-ed25519 {ED}\n[130.61.218.49]:2222 ssh-ed25519 {ED}\nother.example ssh-ed25519 {ED}\n"
+            "203.0.113.10 ssh-ed25519 {ED}\n[203.0.113.10]:2222 ssh-ed25519 {ED}\nother.example ssh-ed25519 {ED}\n"
         );
-        let default = parse_known_hosts_scan(&text, "130.61.218.49", 22);
+        let default = parse_known_hosts_scan(&text, "203.0.113.10", 22);
         assert_eq!(default.len(), 1);
         assert!(default[0].fingerprint().starts_with("SHA256:"));
-        let custom = parse_known_hosts_scan(&text, "130.61.218.49", 2222);
+        let custom = parse_known_hosts_scan(&text, "203.0.113.10", 2222);
         assert_eq!(custom.len(), 1);
-        assert_eq!(parse_known_hosts_scan(&text, "130.61.218.49", 2200), []);
+        assert_eq!(parse_known_hosts_scan(&text, "203.0.113.10", 2200), []);
         assert_eq!(parse_known_hosts_scan("", "h", 22), []);
     }
 

@@ -14,7 +14,7 @@ export interface ProviderBrand {
 
 const PROVIDERS: Record<string, ProviderBrand> = {
   anthropic: { company: "anthropic", label: "Anthropic" },
-  "claude-code": { company: "anthropic", label: "Anthropic", note: "Claude Code CLI" },
+  "claude-code": { company: "claude", label: "Anthropic", note: "Claude Code CLI" },
   openai: { company: "openai", label: "OpenAI" },
   codex: { company: "openai", label: "OpenAI", note: "Codex CLI" },
   gemini: { company: "googlegemini", label: "Google" },
@@ -28,7 +28,8 @@ const CLI_LABELS: Record<string, string> = {
   codex: "Codex",
   cursor: "Cursor",
   opencode: "OpenCode",
-  gemini: "Gemini CLI"
+  gemini: "Gemini CLI",
+  agy: "Antigravity"
 };
 
 function pretty(id: string): string {
@@ -42,7 +43,8 @@ export function providerBrand(providerId: string): ProviderBrand {
   const bare = providerId.replace(/^cli:/, "");
   const cliLabel = providerId.startsWith("cli:") ? CLI_LABELS[bare] : undefined;
   if (cliLabel) {
-    const company = { claude: "anthropic", codex: "openai", gemini: "googlegemini" }[bare] ?? bare;
+    // Claude Code wears the Claude mark; the Anthropic API (`anthropic`) keeps the Anthropic "A".
+    const company = { claude: "claude", codex: "openai", gemini: "googlegemini", agy: "antigravity" }[bare] ?? bare;
     return { company, label: cliLabel, note: "CLI" };
   }
   const base = PROVIDERS[bare];

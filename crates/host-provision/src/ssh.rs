@@ -419,7 +419,7 @@ mod tests {
     #[test]
     fn a_failed_key_exchange_is_not_reported_as_unreachable() {
         // Windows OpenSSH 9.5 against an OpenSSH 9.6 server: TCP worked.
-        let kex = "Unable to negotiate with 130.61.218.49 port 22: choose_kex: unsupported KEX method sntrup761x25519-sha512@openssh.com";
+        let kex = "Unable to negotiate with 203.0.113.10 port 22: choose_kex: unsupported KEX method sntrup761x25519-sha512@openssh.com";
         assert!(matches!(
             classify_hostkey_failure(kex),
             TransportError::NoHostKey(_)
@@ -489,7 +489,7 @@ mod tests {
         let key = "C:\\Users\\emreo\\OneDrive\\Masa\u{fc}st\u{fc} oracle\\free-a1.key";
         let target = SshTarget {
             user: "ubuntu".into(),
-            host: "130.61.218.49".into(),
+            host: "203.0.113.10".into(),
             port: 22,
             key: Some(key.into()),
         };

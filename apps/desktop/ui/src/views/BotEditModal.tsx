@@ -35,6 +35,7 @@ import {
 } from "../components/DialogParts";
 import { BotEngineBlock } from "../components/BotEngineBlock";
 import { Modal } from "../components/Modal";
+import { useEngineConsent } from "../state/EngineConsent";
 import { SkillsEditor } from "../components/SkillsEditor";
 import { useToast } from "../components/Toast";
 import {
@@ -47,7 +48,7 @@ import {
   stepSection
 } from "../lib/botEditor";
 import { botChats } from "../lib/botLanding";
-import { type BotDraft, draftFromBot, runtimeTargetLabel } from "../lib/botProfile";
+import { type BotDraft, draftFromBot, formatModelRef, runtimeTargetLabel } from "../lib/botProfile";
 import { performEditorSave, type ProfilePart } from "../lib/botSave";
 import { buildPutSkillsPayload, isBotSkillsDirty } from "../lib/botSkills";
 import { useDaemon } from "../state/DaemonContext";
@@ -149,6 +150,7 @@ function BotEditDialog({
   const toast = useToast();
   const uid = useId();
   const { client, bots, chats, refreshBots } = useDaemon();
+  const { askEngine, applyEngine } = useEngineConsent();
   const { providersDto, servers, setServers, allowed, setAllowed, initialApps, setInitialApps } =
     useBotFormDeps(client, bot.id, true);
 
@@ -249,6 +251,12 @@ function BotEditDialog({
     if (!client || saving) return;
     setSaving(true);
     setError(null);
+    // A CLI model that only works with its own tools: the one consent step, before anything is saved.
+    const answer = await askEngine(formatModelRef(draft.executor), baseline.config);
+    if (answer === null) {
+      setSaving(false);
+      return;
+    }
     const out = await performEditorSave({
       client,
       baseline,
@@ -280,6 +288,7 @@ function BotEditDialog({
         setError(out.message);
       } else {
         setConflict(null);
+        await applyEngine(out.bot.id, answer).catch((e) => setError(humanLine(e)));
         if (out.profileWritten) {
           const next = draftFromBot(out.bot);
           setBaseline(out.bot);

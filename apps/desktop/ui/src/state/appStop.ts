@@ -86,8 +86,8 @@ export function requestStop(origin: Exclude<StopOrigin, "native" | "chat">): Sto
 }
 
 /** The chat's Stop / subagent cancel: one run, its own decision. */
-export function cancelRun(runId: string): StopRecord {
-  return appRuntime().cancelOne(runId);
+export function cancelRun(runId: string, opts?: { force?: boolean }): StopRecord {
+  return appRuntime().cancelOne(runId, opts);
 }
 
 /** Re-render on every ledger change. */

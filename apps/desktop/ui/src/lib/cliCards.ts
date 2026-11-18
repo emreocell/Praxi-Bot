@@ -47,11 +47,11 @@ export function displayPath(path: string): string {
 }
 
 /**
- * Brand mark of an engine/product header: the tool's own maker (Claude Code: Anthropic; Antigravity
- * has no mark of its own: Google's). Model rows use `productBrandKey` instead (the model's logo).
+ * Brand mark of an engine header: the tool's own logo (Claude Code: the Claude starburst, not the
+ * Anthropic "A" of the API; Antigravity: its own arch). Model rows use `productBrandKey` (the model's logo).
  */
 export function brandOf(id: string): string {
-  return id === "agy" ? "gemini" : id === "claude" ? "anthropic" : id;
+  return id === "agy" ? "antigravity" : id === "claude" ? "claude" : id;
 }
 
 /** Version for display: `claude 2.1.325 (Claude Code)` and `v2.3.0` read as the number. */

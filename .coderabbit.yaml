@@ -1,0 +1,77 @@
+# CodeRabbit configuration (advisory automated review; free for public OSS repos).
+# Comments are suggestions only. CI plus a human review remain the merge gate.
+# Reference: https://docs.coderabbit.ai/reference/configuration
+language: "en-US"
+
+reviews:
+  # Few comments: "chill" rather than "assertive".
+  profile: "chill"
+  # Advisory only: the bot must never block a merge.
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  collapse_walkthrough: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "^main$"
+    ignore_title_keywords:
+      - "WIP"
+
+  # Generated, lock and build files are not worth reviewing.
+  path_filters:
+    - "!docs/api/openapi.json"
+    - "!docs/api/schema.d.ts"
+    - "!apps/desktop/ui/src/api/schema.d.ts"
+    - "!**/Cargo.lock"
+    - "!**/pnpm-lock.yaml"
+    - "!**/node_modules/**"
+    - "!**/dist/**"
+    - "!**/target/**"
+    - "!**/*.snap"
+
+  path_instructions:
+    - path: "crates/**/*.rs"
+      instructions: |
+        Rust crates. Code must stay clippy clean with -D warnings.
+        No unwrap or expect in non-test code when the value comes from external input
+        (network, files, model output, user input). Errors must be human-readable and
+        reach the user through the UI error layer, not as raw internal text.
+    - path: "apps/desktop/ui/**"
+      instructions: |
+        Desktop UI. Every user-facing string needs both a tr and an en entry in the
+        locale files. Never show raw daemon error text to the user. Colours come from
+        theme tokens, not literal values. Generated API files (schema.d.ts and
+        similar) are never edited by hand.
+    - path: "crates/daemon-api/**"
+      instructions: |
+        Daemon HTTP API. Every new mutating route must be classified in the
+        OWNER_ROUTES or TOKEN_OK_ROUTES table. Peers and bots must never be able to
+        reach owner-only operations. Flag any route that is missing from both tables.
+    - path: "crates/{permission-engine,secret-store,peer-network,host-provision}/**"
+      instructions: |
+        Security-sensitive code (approvals, permissions, egress, secrets, pairing,
+        host administration, protected paths). Flag any weakening of an existing check.
+        Flag any new way for model output or tool output to trigger an action without
+        going through the approval path. Flag any secret that could reach logs or events.
+        State clearly that a maintainer must review this change.
+    - path: "**/*{approval,permission,egress,secret,pairing,protected_path}*"
+      instructions: |
+        Security-sensitive code. Flag any weakening of an existing check or any new
+        path from model or tool output to an action that skips the approval path.
+        Flag secrets in logs or events. A maintainer must review this change.
+    - path: ".github/workflows/**"
+      instructions: |
+        CI workflows. Secrets must never be exposed to pull requests from forks.
+        Never use pull_request_target to run code from the pull request. Prefer
+        least-privilege permissions and pinned action versions.
+    - path: "docs/**"
+      instructions: |
+        This is a public repository. Docs must not contain private hosts, e-mail
+        addresses, IP addresses of personal servers or local file paths.
+
+chat:
+  # Reply only when mentioned, to keep PR threads quiet.
+  auto_reply: false

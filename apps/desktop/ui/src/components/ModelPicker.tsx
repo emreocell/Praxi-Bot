@@ -12,6 +12,7 @@ import {
   type RowHint,
   type SourceGroup
 } from "../lib/modelPicker";
+import type { EngineBlock } from "../lib/engineConsent";
 import { productBrandKey, providerBrand, sourceLabel } from "../lib/modelBrand";
 import { modelDisplayName } from "../lib/modelName";
 import { matchesQuery } from "../lib/searchText";
@@ -179,6 +180,28 @@ function EngineSection({
  * Under an open coding-CLI group: where its list came from and a Refresh button. The list is the
  * CLI's own (kept on disk, refreshed in the background); a built-in fallback is marked as such.
  */
+/** Loads which CLI engines cannot answer right now (renders nothing); mounted only while the picker is open. */
+function EngineBlocksProbe({ onBlocks }: { onBlocks: (blocks: Record<string, EngineBlock>) => void }) {
+  const { blocks } = useCliEngineRows(true);
+  const key = JSON.stringify(blocks);
+  useEffect(() => {
+    onBlocks(blocks);
+    // `key` is the content of `blocks`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, onBlocks]);
+  return null;
+}
+
+/** Why a CLI model row is disabled, in words (the engine is installed, enabled and still cannot answer). */
+function blockReason(t: (key: string) => string, reason: string): string {
+  switch (reason) {
+    case "not_installed": return t("modelPicker.blocked.not_installed");
+    case "outdated": return t("modelPicker.blocked.outdated");
+    case "sign_in": return t("modelPicker.blocked.sign_in");
+    default: return t("modelPicker.blocked.unsupported");
+  }
+}
+
 function CliListNote({ provider, testId }: { provider: string; testId: string }) {
   const { t } = useTranslation();
   const { client } = useDaemon();
@@ -244,6 +267,7 @@ export function ModelPicker({
   placement = "bottom-end",
   testId = "model-picker",
   engines = false,
+  cliNote,
   changeLink
 }: {
   groups: ModelGroup[];
@@ -259,6 +283,8 @@ export function ModelPicker({
   testId?: string;
   /** Offer "Connect"/"Install" rows for coding CLIs (off where CLI models cannot be chosen). */
   engines?: boolean;
+  /** Where CLI models cannot be chosen (planner, classifier, fallback): a greyed CLI section with this one line why. */
+  cliNote?: string;
   /** Render the trigger as a quiet text link with this label (first run: "Change") instead of the model chip. */
   changeLink?: string;
 }) {
@@ -278,6 +304,10 @@ export function ModelPicker({
   const [full, setFull] = useState<ReadonlySet<string>>(() => new Set(mockParam("showall")?.split(",") ?? []));
   const [level, setLevel] = useThinkingLevel();
   const trigger = useRef<HTMLButtonElement | null>(null);
+  // Engines that cannot answer right now (not installed, outdated, signed out): their rows are disabled with the reason.
+  const [blocks, setBlocks] = useState<Record<string, EngineBlock>>({});
+  const hasCli = groups.some((g) => g.provider.startsWith("cli:"));
+  const blockOf = (provider: string) => (provider.startsWith("cli:") ? blocks[provider.slice(4)] : undefined);
   // Search results: every model, grouped by source, CLI engines first.
   const shown = useMemo(() => {
     const found = filterModelGroups(
@@ -371,8 +401,10 @@ export function ModelPicker({
   const optionRow = (m: ModelOption, opts: { hint?: RowHint; raw?: boolean }) => {
     const active = !autoOption?.selected && m.ref === value;
     const primary = label(m);
+    const block = blockOf(m.provider);
     // Second line: why it is recommended, then the raw id (OpenCode / OpenRouter ids name the maker).
     const secondary = [
+      block ? blockReason(t, block) : null,
       opts.hint ? t(`modelPicker.hint.${opts.hint}`) : null,
       opts.raw && !isCliDefault(m) && primary !== m.model ? m.model : null
     ].filter(Boolean).join(" · ");
@@ -382,7 +414,10 @@ export function ModelPicker({
         type="button"
         role="option"
         aria-selected={active}
-        className={[styles.option, active ? styles.optionActive : ""].filter(Boolean).join(" ")}
+        aria-disabled={block ? true : undefined}
+        disabled={block ? true : undefined}
+        data-blocked={block}
+        className={[styles.option, active ? styles.optionActive : "", block ? styles.optionBlocked : ""].filter(Boolean).join(" ")}
         onClick={() => pick(m.ref)}
       >
         <BrandMark name={productBrandKey(m.provider, m.model)} size={16} />
@@ -490,6 +525,7 @@ export function ModelPicker({
         width={360}
         initialFocus="none"
       >
+        {open && hasCli ? <EngineBlocksProbe onBlocks={setBlocks} /> : null}
         <label className={styles.search}>
           <Search aria-hidden="true" />
           <input
@@ -592,6 +628,12 @@ export function ModelPicker({
                     ) : null}
                   </>
                 )}
+              {cliNote && !searching ? (
+                <div className={styles.group} role="group" aria-label={t("modelPicker.sectionCli")} data-testid={`${testId}-cli-greyed`}>
+                  {sectionLabel("modelPicker.sectionCli")}
+                  <p className={styles.noModels}>{cliNote}</p>
+                </div>
+              ) : null}
               {engines ? (
                 <EngineSection query={query} testId={testId} onInstall={close} onConnected={() => undefined} />
               ) : null}

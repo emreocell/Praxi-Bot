@@ -1292,6 +1292,16 @@ impl AgentLoop {
         let idle_paused = !self.sh.tasks.lock().contains_key(&run_id)
             && self.rt.state(run_id).ok() == Some(RunState::Paused);
         self.rt.cancel(run_id)?;
+        // Stop means stop: messages queued behind this turn are dropped, otherwise
+        // `conclude` would start the next one the moment this run ends and the
+        // user would see the bot carry on as if Stop did nothing. Only messages
+        // queued up to now are dropped; one sent after this call is kept.
+        if let Ok(Some(run)) = self.sh.storage.get_run(run_id)
+            && run.parent_run_id.is_none()
+            && let Some(chat_id) = run.chat_id
+        {
+            self.sh.queued.lock().remove(&chat_id);
+        }
         // A cancelled parent takes its subagents with it.
         self.cancel_descendants(run_id);
         crate::usage::finish(&self.sh, run_id);
@@ -1317,6 +1327,58 @@ impl AgentLoop {
             }
         }
         Ok(())
+    }
+
+    /// Hard stop: the polite [`Self::cancel`] first, then the drive task of the run
+    /// and of its subagents is aborted. Dropping the task drops what it was
+    /// awaiting (a provider request, a shell or CLI process tree, a browser or
+    /// desktop action) even where that work ignores the cancel token. The run is
+    /// then finished as `Cancelled` here, because an aborted task never
+    /// concludes itself.
+    ///
+    /// # Errors
+    /// Fails if the run is terminal (and was not drivable) or storage fails.
+    pub fn force_cancel(&self, run_id: RunId) -> Result<()> {
+        let polite = self.cancel(run_id);
+        self.force_stop_tree(run_id, None);
+        let run = self
+            .sh
+            .storage
+            .get_run(run_id)?
+            .ok_or(RuntimeError::NotFound(run_id))?;
+        if RunState::parse(&run.state).is_some_and(RunState::is_terminal) {
+            // Concluded by the polite path or by the abort just now.
+            if self.sh.runs.lock().contains_key(&run_id) {
+                self.conclude(run_id, &Ok(RunState::Cancelled));
+            }
+            return Ok(());
+        }
+        polite
+    }
+
+    /// Abort the drive tasks of `run_id` and its descendants and mark them cancelled.
+    fn force_stop_tree(&self, run_id: RunId, parent: Option<RunId>) {
+        if let Ok(kids) = self.sh.storage.list_child_runs(run_id) {
+            for kid in kids {
+                self.force_stop_tree(kid.id, Some(run_id));
+            }
+        }
+        let task = self.sh.tasks.lock().remove(&run_id);
+        if let Some(task) = &task {
+            task.abort();
+        }
+        let changed = self.rt.finish_aborted(run_id).unwrap_or(false);
+        if changed {
+            crate::usage::finish(&self.sh, run_id);
+            if let Some(parent) = parent
+                && let Some(pctx) = self.ctx_of(parent)
+            {
+                self.sh.emit(
+                    &pctx,
+                    crate::subagent::finished_event(run_id, parent, "cancelled", "cancelled", None),
+                );
+            }
+        }
     }
 
     /// Startup recovery: every run left `Running` **or** `WaitingApproval` gets
@@ -1839,6 +1901,7 @@ impl AgentLoop {
     }
 
     // Boxed so the spawn / `conclude` / next-turn recursion has a nameable type.
+    #[allow(clippy::too_many_lines)] // one ordered start-up pass; the order is the contract
     fn drive(self, run_id: RunId, start: Start) -> BoxFuture<'static, ()> {
         let activity = crate::usage::Activity::new(&self.sh, run_id);
         Box::pin(async move {
@@ -1855,7 +1918,22 @@ impl AgentLoop {
                         && let Some(run) = &run
                         && let Ok(profile) = self.sh.profile_for(run.bot_id)
                     {
-                        prepare_timed_out = self.sh.prepare_run_computer(&profile, run).await;
+                        // Preparing the computer can take a while and the run has no
+                        // cancel token yet: Stop in that window cancels the queued run in
+                        // storage, so look for it here instead of finishing the wait.
+                        let prepare = self.sh.prepare_run_computer(&profile, run);
+                        tokio::pin!(prepare);
+                        prepare_timed_out = loop {
+                            tokio::select! {
+                                done = &mut prepare => break done,
+                                () = tokio::time::sleep(Duration::from_millis(200)) => {
+                                    if self.rt.state(run_id).ok() == Some(RunState::Cancelled) {
+                                        self.conclude(run_id, &Ok(RunState::Cancelled));
+                                        return;
+                                    }
+                                }
+                            }
+                        };
                         let rc = self.sh.resolve_computer_for_run(&profile, None);
                         computer_notice.clone_from(&rc.notice);
                         wait_for_pc = rc.wait_for_pc;
@@ -1919,6 +1997,15 @@ impl AgentLoop {
                     }
                 }
                 Start::Resume => self.drive_resume(run_id).await,
+            };
+            // Stopped before the run could start: that is a stop, not an error.
+            let res = match res {
+                Err(RuntimeError::IllegalTransition { .. })
+                    if self.rt.state(run_id).ok() == Some(RunState::Cancelled) =>
+                {
+                    Ok(RunState::Cancelled)
+                }
+                other => other,
             };
             self.conclude(run_id, &res);
         })

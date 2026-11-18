@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Contributing guide
+    url: https://github.com/emreocell/Praxi-Bot/blob/main/CONTRIBUTING.md
+    about: How to build, test and send a pull request. Read this before opening a large change.
+  - name: Report a security vulnerability
+    url: https://github.com/emreocell/Praxi-Bot/blob/main/SECURITY.md
+    about: Do not open a public issue for a vulnerability; follow SECURITY.md.
+  - name: User guide and troubleshooting
+    url: https://github.com/emreocell/Praxi-Bot/blob/main/docs/guide/troubleshooting.md
+    about: Common problems and how to fix them.

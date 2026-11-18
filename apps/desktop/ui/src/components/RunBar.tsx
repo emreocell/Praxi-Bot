@@ -13,7 +13,7 @@ import {
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
-import { formatElapsed, type RunBarModel, runBarVisible } from "../lib/runBar";
+import { formatElapsed, type RunBarModel, type RunStopUi, runBarVisible } from "../lib/runBar";
 import { appLedger, requestStop, useStopStatus } from "../state/appStop";
 import { stopDetail, stopTitleKey } from "../state/stopStatus";
 import { STOP_ICONS } from "./StopStatusNotice";
@@ -55,7 +55,7 @@ export interface RunBarProps {
   /** When the run began (epoch ms); drives the elapsed time. */
   startedMs?: number | null;
   /** Stop progress of this chat's run, from the run ledger (a single-run Stop). */
-  runStop?: { phase: "stopping" | "failed"; error: string | null } | null;
+  runStop?: RunStopUi | null;
   /** Whether the desktop control is currently the human's. */
   humanDriving: boolean;
   onStop: () => void;
@@ -182,7 +182,8 @@ export function RunBar({
     );
   } else if (shownModel) {
     const m = shownModel;
-    const stopping = runStop?.phase === "stopping";
+    const stopping = runStop?.phase === "stopping" || runStop?.phase === "unconfirmed";
+    const unconfirmed = runStop?.phase === "unconfirmed";
     const stopFailed = runStop?.phase === "failed";
     const title = stopping
       ? t("stopStatus.title.stopping")
@@ -228,7 +229,15 @@ export function RunBar({
               {runStop.error}
             </span>
           ) : stopping ? (
-            <span className={styles.detail}>{t("chat.runBar.stoppingDetail")}</span>
+            <span className={styles.detail}>
+              {t(
+                runStop?.unreachable
+                  ? "chat.runBar.stopUnreachable"
+                  : unconfirmed
+                    ? "chat.runBar.stopUnconfirmed"
+                    : "chat.runBar.stoppingDetail"
+              )}
+            </span>
           ) : detail ? (
             <span className={styles.detail}>{detail}</span>
           ) : null}
@@ -286,17 +295,16 @@ export function RunBar({
               <Expand aria-hidden="true" />
             </button>
           ) : null}
-          {stopping ? null : (
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={onStop}
-              data-testid="run-bar-stop"
-            >
-              <Square aria-hidden="true" />
-              <span>{t("chat.stop")}</span>
-            </Button>
-          )}
+          {/* While a Stop is unconfirmed the same control stays: pressing it again is the hard stop. */}
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={onStop}
+            data-testid="run-bar-stop"
+          >
+            <Square aria-hidden="true" />
+            <span>{t(stopping || stopFailed ? "chat.runBar.forceStop" : "chat.stop")}</span>
+          </Button>
         </span>
       </div>
     );

@@ -7,11 +7,10 @@ reachable only from the machine itself.
 
 > **Status.** The daemon (`bot serve`) and the Telegram channel work on Linux.
 > The node-agent (`bot-node`) and the iroh peer network are **experimental**:
-> the core side is not connected to the daemon yet, and the Linux desktop
-> backend (`desktop-linux`) has no implementation yet, so `bot-node run`
-> currently refuses to start on Linux. Xvfb and Chromium are installed for the
-> planned desktop and browser automation, not because every tool already uses
-> them.
+> the Linux desktop backend (`desktop-linux`, X11 with AT-SPI2) exists, so
+> `bot-node run` can serve a display on Linux, but the Linux node path has not
+> been verified end to end. Xvfb and Chromium are installed for desktop and
+> browser automation, not because every tool already uses them.
 
 > **Releasing (maintainers).** Pushing a `v*` tag does **not** publish
 > anything. Publishing needs a manual dispatch of **Linux Server Packages** on
@@ -288,11 +287,13 @@ answered. Put the key on the host with `praxi setup` (see section 3).
 
 ### Letting another core control this machine (experimental)
 
-This is **not functional on Linux yet**. `bot-node run` exits because there is
-no Linux desktop backend, and enabling `praxi-node.service` would restart it
-every 10 seconds. Leave that unit disabled.
+`bot-node run` needs a reachable X11 display (a physical one or the Xvfb
+display from `--with-desktop`; Wayland is refused) and at least one paired
+core. Without them it exits, and `praxi-node.service` would restart it every
+10 seconds, so the unit is installed but not enabled. Pair first, then enable
+it.
 
-When the backend exists, `bot-node` connects **outward** over iroh (QUIC with
+`bot-node` connects **outward** over iroh (QUIC with
 relay fallback), so no inbound port is needed. On the machine that should be
 controlled:
 
@@ -302,7 +303,7 @@ sudo praxi-node join '<bot-pair:...>'     # one-time ticket from the core
 
 The ticket is single-use; afterwards the devices use stored keys. See ADR-0006
 in the design documents for the model. Enable `praxi-node.service` only after
-`bot-node run` works on Linux.
+`bot-node join` has succeeded and `bot-node run` starts by hand.
 
 ## 4. Firewall notes (Oracle Cloud)
 

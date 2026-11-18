@@ -24,7 +24,8 @@ pub struct BotEngineInput {
     /// `ask` (default), `accept_edits`, `auto` or `full`.
     #[serde(default)]
     pub approval_level: Option<String>,
-    /// Absolute workspace folder; required for `native_tools`.
+    /// Absolute workspace folder for `native_tools`; when omitted the daemon creates
+    /// `<home>/Praxi/<bot>` for the bot.
     #[serde(default)]
     pub workspace: Option<String>,
     /// The owner confirms that a CLI runs this bot's file and shell actions.
@@ -47,6 +48,30 @@ fn refuse(message: impl Into<String>) -> ApiError {
 fn executor_driver(executor: &str) -> Option<Driver> {
     let id = executor.strip_prefix("cli:")?.split('/').next()?;
     Driver::from_id(id)
+}
+
+/// The folder a bot works in when the owner did not choose one: `<home>/Praxi/<bot name>-<id>`,
+/// created on demand. The same refusals as for a chosen folder apply afterwards.
+fn default_workspace(bot: &storage::Bot) -> Option<String> {
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(std::path::PathBuf::from)?;
+    let slug: String = bot
+        .name
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .trim_matches('-')
+        .chars()
+        .take(40)
+        .collect();
+    let short = bot.id.to_string().chars().take(8).collect::<String>();
+    let dir = home.join("Praxi").join(format!(
+        "{}-{short}",
+        if slug.is_empty() { "bot" } else { &slug }
+    ));
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir.display().to_string())
 }
 
 /// Validate a change and return the settings to store. Pure apart from the
@@ -172,10 +197,18 @@ pub(crate) async fn put_engine(
     State(s): State<AppState>,
     Extension(actor): Extension<Actor>,
     Path(bid): Path<String>,
-    ApiJson(input): ApiJson<BotEngineInput>,
+    ApiJson(mut input): ApiJson<BotEngineInput>,
 ) -> Result<Json<BotDto>, ApiError> {
     crate::cli_engines::local_owner(&actor)?;
     let mut bot = s.bot_of_user(BotId(crate::routes::id(&bid)?))?;
+    if input.mode == EngineMode::NativeTools.as_str()
+        && input
+            .workspace
+            .as_deref()
+            .is_none_or(|w| w.trim().is_empty())
+    {
+        input.workspace = default_workspace(&bot);
+    }
     let profile: agent_core::BotProfile =
         serde_json::from_value(bot.config.clone()).map_err(ApiError::internal)?;
     let data_dir = s.storage().data_dir().to_path_buf();

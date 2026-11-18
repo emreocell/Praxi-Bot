@@ -1,0 +1,73 @@
+name: Bug report
+description: Something does not work as the guide or the app says it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **Do not paste API keys, tokens, pairing tickets or other secrets.**
+        For a security problem, do not file an issue: see SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The pre-release tag (for example v0.1.0-alpha.1), or the commit you built; `bot --version` prints the version.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where does the bot run?
+      options:
+        - This computer
+        - A server (always-on host)
+        - Both / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What happened instead? Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: '"Copy details" output'
+      description: When the app shows an error, its "Copy details" button copies a technical summary. Paste it here, after removing anything private.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (optional)
+      description: |
+        The daemon writes logs under its data directory (`logs/`; the data directory is `--data-dir` / `BOT_DATA_DIR`, otherwise your OS's per-user app-data folder for praxi-bot).
+        **Redact secrets, hostnames, e-mail addresses and personal paths before pasting.**
+      render: text

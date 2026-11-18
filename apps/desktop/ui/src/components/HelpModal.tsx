@@ -1,43 +1,44 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import { DEFAULT_STOP_HOTKEY } from "../config/product";
+import { resolveKeys, SHORTCUT_GROUPS, SHORTCUTS } from "../lib/shortcuts";
 import { Modal } from "./Modal";
 import styles from "./HelpModal.module.css";
 
-/** Quick help: the shortcuts that matter and a way back into the setup wizard. */
+/** Quick help: every shortcut in `lib/shortcuts.ts`, grouped, and a way back into the setup wizard. */
 export function HelpModal({
   open,
   onClose,
   stopHotkey,
-  sendKeys,
+  sendWith,
   onSetup
 }: {
   open: boolean;
   onClose: () => void;
   stopHotkey: string;
-  sendKeys: string;
+  sendWith: "enter" | "ctrl-enter";
   onSetup: () => void;
 }) {
   const { t } = useTranslation();
-  const rows: ReadonlyArray<[string, string]> = [
-    [t("help.palette"), "Ctrl+K"],
-    [t("help.send"), sendKeys],
-    [t("help.recall"), "↑ / ↓"],
-    [t("help.stop"), stopHotkey || DEFAULT_STOP_HOTKEY]
-  ];
+  const ctx = { stopHotkey: stopHotkey || DEFAULT_STOP_HOTKEY, sendWith };
   return (
     <Modal open={open} onClose={onClose} label={t("help.title")} size="md">
       <div className={styles.root}>
         <h2 className={styles.title}>{t("help.title")}</h2>
         <p className={styles.text}>{t("help.intro")}</p>
-        <ul className={styles.list}>
-          {rows.map(([label, keys]) => (
-            <li key={label} className={styles.row}>
-              <span>{label}</span>
-              <kbd className={styles.kbd}>{keys}</kbd>
-            </li>
-          ))}
-        </ul>
+        {SHORTCUT_GROUPS.map((group) => (
+          <section key={group} className={styles.group}>
+            <h3 className={styles.groupTitle}>{t(`help.group.${group}`)}</h3>
+            <ul className={styles.list}>
+              {SHORTCUTS.filter((s) => s.group === group).map((s) => (
+                <li key={s.id} className={styles.row}>
+                  <span>{t(s.labelKey)}</span>
+                  <kbd className={styles.kbd}>{resolveKeys(s.keys, ctx)}</kbd>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
         <div className={styles.actions}>
           <Button variant="secondary" size="sm" onClick={onSetup}>
             {t("main.runSetupWizard")}

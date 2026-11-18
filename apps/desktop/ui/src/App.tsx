@@ -110,6 +110,7 @@ import { AppsModal } from "./views/AppsModal";
 import { NewBotModal } from "./views/NewBotModal";
 import { SettingsModal } from "./views/SettingsModal";
 import { OPEN_AI_SETTINGS_EVENT } from "./state/useCliEngineRows";
+import { EngineConsentProvider } from "./state/EngineConsent";
 import type { SettingsSectionId } from "./views/settings/types";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { i18n, type SupportedLanguage } from "./i18n";
@@ -1047,7 +1048,7 @@ function AppShell() {
         open={helpOpen}
         onClose={() => setHelpOpen(false)}
         stopHotkey={controlState.stopHotkey || settings.stopHotkey}
-        sendKeys={settings.sendWith === "enter" ? "Enter" : "Ctrl+Enter"}
+        sendWith={settings.sendWith}
         onSetup={() => {
           setHelpOpen(false);
           handleOpenOnboarding(false);
@@ -1089,7 +1090,9 @@ export function App() {
         <ComputerRequestModal />
         <ComputerScope>
           <LeaveGuardProvider>
-            <AppShell />
+            <EngineConsentProvider>
+              <AppShell />
+            </EngineConsentProvider>
           </LeaveGuardProvider>
         </ComputerScope>
       </DaemonProvider>

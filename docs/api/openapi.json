@@ -9911,7 +9911,7 @@
               "string",
               "null"
             ],
-            "description": "Absolute workspace folder; required for `native_tools`."
+            "description": "Absolute workspace folder for `native_tools`; when omitted the daemon creates\n`<home>/Praxi/<bot>` for the bot."
           }
         },
         "additionalProperties": false
@@ -12970,13 +12970,6 @@
       "Heartbeat": {
         "type": "object",
         "properties": {
-          "active": {
-            "type": [
-              "boolean",
-              "null"
-            ],
-            "description": "`false`: the viewer is hidden or unfocused right now. Leave it out (or\n`true`) while someone is looking; a session whose viewer reports\ninactive for the idle limit is ended by the host."
-          },
           "control_epoch": {
             "type": [
               "integer",
@@ -16310,8 +16303,6 @@
         "type": "string",
         "enum": [
           "browser_idle",
-          "viewer_idle",
-          "time_limit",
           "remote_node_live_view",
           "unsupported",
           "unavailable",
@@ -17877,6 +17868,10 @@
           "scope"
         ],
         "properties": {
+          "force": {
+            "type": "boolean",
+            "description": "Hard stop: besides firing the cancel token, abort the run's task so a\nrun stuck in work that ignores the token still ends (its process\ntrees and requests are dropped). Applies to this receipt and to repeats."
+          },
           "run_ids": {
             "type": "array",
             "items": {

@@ -23,7 +23,7 @@ Three ideas run through the whole product:
   model calls. See [Workflows](workflows.md).
 
 > **Status: early development.** The README says it plainly: there is no stable
-> API and no releases yet. Expect breaking changes. This guide documents what
+> API and only a pre-release (`v0.1.0-alpha.1`) so far. Expect breaking changes. This guide documents what
 > the code does today and marks everything else as **Planned**.
 
 ## What is where
@@ -36,7 +36,7 @@ Three ideas run through the whole product:
 | Run something every morning | [Scheduled tasks](scheduled-tasks.md) |
 | Replay a recorded sequence of steps without a model | [Workflows](workflows.md) |
 | Teach a bot how to handle a tricky web page or app | [Skills](skills.md) |
-| Add external tool servers | [MCP servers](mcp-servers.md) (Planned in the daemon) |
+| Add external tool servers | [MCP servers](mcp-servers.md) |
 | Let another MCP agent use a selected Praxi bot | [Praxi as an MCP server](mcp-server.md) |
 | Pick a provider, use the Gemini free tier | [Providers and models](providers-and-models.md) |
 | Talk to your bots from your phone | [Telegram](telegram.md) |

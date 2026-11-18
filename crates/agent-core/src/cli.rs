@@ -375,8 +375,9 @@ impl TurnExecutor {
                 ConfigEngine::Codex => Engine::Codex,
                 other => {
                     return Err(xe(format!(
-                        "{} only runs with its own tools: set this bot's engine mode to \"native tools\" in its settings",
-                        other.as_str()
+                        "{name} only works with its own tools. Allow that in this bot's engine settings. (engine_needs_native)",
+                        name = cli_provider::Driver::from_id(other.as_str())
+                            .map_or(other.as_str(), cli_provider::Driver::display_name)
                     )));
                 }
             };
@@ -456,7 +457,7 @@ fn cli_exec_error_for(name: &str, cmd: &str, err: &CliError) -> ExecError {
             "The {name} binary changed while starting the turn. Try sending your message again. ({code})"
         ),
         CliError::CodexUnconfinable => format!(
-            "The installed Codex cannot disable unified_exec, so Praxi will not run it. ({code})"
+            "{name} only works with its own tools. Allow that in this bot's engine settings. (engine_needs_native)"
         ),
         CliError::WorkspaceUnavailable => format!(
             "The workspace folder chosen for this bot is missing. Choose it again in the bot's engine settings. ({code})"

@@ -165,13 +165,22 @@ fn main() {
         log("stdin", &prompt.to_string());
         assert_eq!(prompt["type"], "user");
         if mode == "unknown-frame" {
-            emit(json!({"type":"system","subtype":"init"}));
+            emit(json!({"type":"tool_runner","subtype":"init"}));
             emit(
                 json!({"type":"stream_event","event":{"delta":{"type":"text_delta","text":"SHOULD_NOT_APPLY"}}}),
             );
             std::thread::sleep(std::time::Duration::from_secs(120));
             return;
         }
+        if mode == "bash-listed" {
+            emit(json!({"type":"system","subtype":"init","tools":["Bash"]}));
+            std::thread::sleep(std::time::Duration::from_secs(120));
+            return;
+        }
+        // What a real Claude Code prints around the answer (2.1.325).
+        emit(json!({"type":"system","subtype":"init","tools":[]}));
+        emit(json!({"type":"system","subtype":"status","status":"requesting"}));
+        emit(json!({"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}));
         if mode == "bash" {
             emit(
                 json!({"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","name":"Bash","input":{"command":"bad"}}}}),

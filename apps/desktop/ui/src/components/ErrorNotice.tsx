@@ -37,7 +37,8 @@ export function ErrorNotice({
     retry: t("errors.retry"),
     reload: t("errors.reload"),
     restartService: busy ? t("errors.restarting") : t("errors.restartService"),
-    settings: t("errors.openSettings")
+    settings: t("errors.openSettings"),
+    fixEngine: t("errors.fixEngine")
   };
   const copy = async () => {
     try {

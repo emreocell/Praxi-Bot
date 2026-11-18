@@ -75,6 +75,10 @@ fn main() {
             let mut typed = String::new();
             std::io::stdin().lock().read_line(&mut typed).unwrap();
             let code = typed.trim();
+            if typed.is_empty() {
+                // EOF: the sign-in was cancelled and its stdin closed; nothing was typed.
+                std::process::exit(1);
+            }
             // Proof that the code arrived on stdin (and where it must never appear).
             std::fs::write(home().join("stdin-code"), code).unwrap();
             if code == "GOODCODE#abc" {

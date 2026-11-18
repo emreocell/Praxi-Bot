@@ -35,3 +35,22 @@ test("the bar shows Stop progress of a single chat run from its ledger phase", (
   assert.equal(singleRunStop("cancel_requested"), "stopping");
   assert.equal(singleRunStop("failed"), "failed");
 });
+
+import { runStopUi, STOP_CONFIRM_MS } from "./runBar.ts";
+
+test("runStopUi: stopping, unconfirmed after 5 s, failed, pending before the run is named", () => {
+  const base = { pending: false, decidedMono: 1000, now: 1000, error: null };
+  assert.deepEqual(runStopUi({ ...base, ledgerPhase: "held" }), {
+    phase: "stopping",
+    error: null,
+    unreachable: false
+  });
+  assert.equal(runStopUi({ ...base, ledgerPhase: "held", unreachable: true })?.phase, "unconfirmed");
+  assert.equal(
+    runStopUi({ ...base, ledgerPhase: "cancel_requested", now: 1000 + STOP_CONFIRM_MS })?.phase,
+    "unconfirmed"
+  );
+  assert.equal(runStopUi({ ...base, ledgerPhase: "failed", error: "x" })?.phase, "failed");
+  assert.equal(runStopUi({ ...base, ledgerPhase: "tracked" }), null);
+  assert.equal(runStopUi({ ...base, ledgerPhase: undefined, pending: true })?.phase, "stopping");
+});

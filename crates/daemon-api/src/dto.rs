@@ -1052,6 +1052,11 @@ pub struct StopRunsInput {
     pub run_ids: Vec<Uuid>,
     /// Which runs the Stop targets besides `run_ids`.
     pub scope: StopScope,
+    /// Hard stop: besides firing the cancel token, abort the run's task so a
+    /// run stuck in work that ignores the token still ends (its process
+    /// trees and requests are dropped). Applies to this receipt and to repeats.
+    #[serde(default)]
+    pub force: bool,
 }
 
 /// What happened to one run of a Stop's target set.

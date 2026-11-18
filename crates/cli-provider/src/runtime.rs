@@ -1052,6 +1052,21 @@ fn claude_frame(
             read_usage(&v["usage"], usage);
             return Ok(true);
         }
+        // Claude Code announces itself (`init`), reports status and rate limits and echoes tool
+        // results. None of that runs anything; the init frame lists the tools the session has,
+        // and only Praxi's own MCP tools may be there (the built-ins are switched off).
+        "system" => {
+            if v["subtype"] == "init"
+                && v["tools"].as_array().is_some_and(|tools| {
+                    tools
+                        .iter()
+                        .any(|t| !t.as_str().is_some_and(|n| n.starts_with("mcp__praxi")))
+                })
+            {
+                return Err(CliError::NativeToolsOpen);
+            }
+        }
+        "rate_limit_event" | "user" => {}
         _ => return Err(CliError::NativeToolsOpen),
     }
     Ok(false)
@@ -1336,6 +1351,21 @@ mod tests {
         assert!(!claude_launch_accepted(
             "--permission-mode <mode> (choices: \"manual\")"
         ));
+    }
+    #[test]
+    fn wrapped_claude_help_is_still_accepted() {
+        // `claude --help` 2.1.325 piped: "disable all" and "tools" sit on two lines.
+        let wrapped = "  --permission-mode <mode>              Permission mode (choices: \"acceptEdits\", \"auto\",
+                                        \"bypassPermissions\", \"manual\", \"dontAsk\", \"plan\")
+  --disallowedTools, --disallowed-tools <tools...>
+  --settings <file-or-json>             Path to a settings JSON file
+  --tools <tools...>                    Specify the list of tools. Use \"\" to disable all
+                                        tools, \"default\" to use the default set
+";
+        assert!(!claude_launch_accepted(wrapped));
+        assert!(claude_launch_accepted(&crate::detect::normalize_help(
+            wrapped
+        )));
     }
     #[test]
     fn codex_mcp_config_names_are_closed_or_refused() {

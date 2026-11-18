@@ -86,8 +86,8 @@ export class StopRuntime {
   }
 
   /** Chat Stop / subagent cancel: one run, its own decision. */
-  cancelOne(runId: string): StopRecord {
-    return this.ledger.cancelOne(runId);
+  cancelOne(runId: string, opts?: { force?: boolean }): StopRecord {
+    return this.ledger.cancelOne(runId, opts);
   }
 
   // ── native ─────────────────────────────────────────────────────────────────

@@ -1,0 +1,14 @@
+# Changes to these paths are reviewed by a maintainer (see "Areas that need extra care" in CONTRIBUTING.md).
+/crates/permission-engine/        @emreocell
+/crates/secret-store/             @emreocell
+/crates/peer-network/             @emreocell
+/crates/remote-api/               @emreocell
+/crates/agent-core/src/approval.rs @emreocell
+/crates/agent-core/src/taint.rs   @emreocell
+/crates/builtin-tools/src/files.rs @emreocell
+/crates/builtin-tools/src/shell.rs @emreocell
+/crates/daemon-api/src/owner.rs   @emreocell
+/crates/daemon-api/src/host_admin.rs @emreocell
+/.github/workflows/               @emreocell
+/deny.toml                        @emreocell
+/SECURITY.md                      @emreocell

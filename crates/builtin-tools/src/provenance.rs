@@ -55,7 +55,15 @@ impl Provenance for StorageProvenance {
         let _ = self.0.mark_untrusted_path(normalized, tree, origin);
     }
     fn is_trusted_folder(&self, normalized: &str) -> bool {
-        self.0.is_trusted_path(normalized).unwrap_or(false)
+        // Stored entries may predate identity normalization (8.3 names, junctions, case).
+        // Never grant trust from an entry whose filesystem identity cannot be resolved.
+        self.0.trusted_folders().is_ok_and(|paths| {
+            paths.into_iter().any(|path| {
+                identity(Path::new(&path)).is_some_and(|key| {
+                    key == normalized || normalized.starts_with(&format!("{key}/"))
+                })
+            })
+        })
     }
 }
 
@@ -63,7 +71,9 @@ impl Provenance for StorageProvenance {
 #[must_use]
 pub fn normalize(path: &Path) -> String {
     let mut s = path.to_string_lossy().replace('\\', "/");
-    if let Some(rest) = s.strip_prefix("//?/") {
+    if let Some(rest) = s.strip_prefix("//?/UNC/") {
+        s = format!("//{rest}");
+    } else if let Some(rest) = s.strip_prefix("//?/") {
         s = rest.to_owned();
     }
     while s.len() > 1 && s.ends_with('/') {
@@ -81,7 +91,16 @@ pub fn normalize(path: &Path) -> String {
 pub fn identity(path: &Path) -> Option<String> {
     fn resolve(path: &Path) -> Option<PathBuf> {
         match std::fs::canonicalize(path) {
-            Ok(real) => Some(real),
+            Ok(real) => {
+                #[cfg(windows)]
+                {
+                    windows_long_path(&real)
+                }
+                #[cfg(not(windows))]
+                {
+                    Some(real)
+                }
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 // A dangling link is not a known new destination.
                 if !std::fs::symlink_metadata(path)
@@ -96,6 +115,28 @@ pub fn identity(path: &Path) -> Option<String> {
         }
     }
     resolve(&std::path::absolute(path).ok()?).map(|p| normalize(&p))
+}
+
+/// Canonicalization resolves junctions but can retain DOS 8.3 components on Windows.
+/// Expand every existing component before deriving a comparison key; failure is unknown identity.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn windows_long_path(path: &Path) -> Option<PathBuf> {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows::{Win32::Storage::FileSystem::GetLongPathNameW, core::PCWSTR};
+    let input: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    // SAFETY: input is NUL-terminated; the API only reads it during each call.
+    let needed = unsafe { GetLongPathNameW(PCWSTR(input.as_ptr()), None) };
+    if needed == 0 {
+        return None;
+    }
+    let mut output = vec![0; needed as usize];
+    // SAFETY: both buffers live through the call; the output slice supplies its size.
+    let written = unsafe { GetLongPathNameW(PCWSTR(input.as_ptr()), Some(&mut output)) };
+    if written == 0 || written as usize >= output.len() {
+        return None;
+    }
+    Some(std::ffi::OsString::from_wide(&output[..written as usize]).into())
 }
 
 // An unresolved fetch may have written anywhere through an alias. Persist a fail-closed
@@ -557,6 +598,76 @@ mod tests {
         }
     }
 
+    #[cfg(windows)]
+    fn assert_windows_spellings_share_provenance(repo: &Path, alias: &Path) {
+        assert_eq!(identity(repo), identity(alias));
+        let file = repo.join("payload.txt");
+        let alias_file = alias.join("payload.txt");
+        // A new destination must retain its identity when the fetch completes.
+        assert_eq!(identity(&file), identity(&alias_file));
+        std::fs::write(&file, "download").unwrap();
+        for (trusted, marked, read) in [(repo, &alias_file, &file), (alias, &file, &alias_file)] {
+            let storage = std::sync::Arc::new(storage::Storage::open_in_memory(repo).unwrap());
+            storage.trust_folder(&normalize(trusted)).unwrap();
+            let ledger = StorageProvenance(storage.clone());
+            assert!(
+                !is_untrusted(Some(&ledger), read),
+                "owner trust must match aliases"
+            );
+            // Simulate a legacy literal mark, then exercise new marks too.
+            storage
+                .mark_untrusted_path(&normalize(marked), false, "legacy curl")
+                .unwrap();
+            assert!(
+                is_untrusted(Some(&ledger), read),
+                "a legacy fetch overrides trust"
+            );
+            mark_path(&ledger, marked, false, "curl");
+            assert!(is_untrusted(Some(&ledger), read), "a fetch overrides trust");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_mixed_case_paths_share_trust_and_fetch_marks() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("OwnerFolderMixedCase");
+        std::fs::create_dir(&repo).unwrap();
+        let alias = dir.path().join("oWNERfOLDERmIXEDcASE");
+        assert_windows_spellings_share_provenance(&repo, &alias);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[allow(unsafe_code)]
+    fn windows_short_names_share_trust_and_fetch_marks() {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        use windows::{Win32::Storage::FileSystem::GetShortPathNameW, core::PCWSTR};
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("Owner Folder With Long Name");
+        std::fs::create_dir(&repo).unwrap();
+        let input: Vec<u16> = repo.as_os_str().encode_wide().chain(Some(0)).collect();
+        // SAFETY: input is NUL-terminated and output is a valid, sized writable buffer.
+        let needed = unsafe { GetShortPathNameW(PCWSTR(input.as_ptr()), None) };
+        if needed == 0 {
+            eprintln!("8.3 names unavailable; skipping");
+            return;
+        }
+        let mut output = vec![0; needed as usize];
+        // SAFETY: both buffers remain valid for the call.
+        let written = unsafe { GetShortPathNameW(PCWSTR(input.as_ptr()), Some(&mut output)) };
+        if written == 0 || written as usize >= output.len() {
+            eprintln!("8.3 names unavailable; skipping");
+            return;
+        }
+        let alias = PathBuf::from(std::ffi::OsString::from_wide(&output[..written as usize]));
+        if normalize(&alias) == normalize(&repo) {
+            eprintln!("volume has no short-name alias; skipping");
+            return;
+        }
+        assert_windows_spellings_share_provenance(&repo, &alias);
+    }
+
     #[test]
     fn a_trusted_folder_lifts_the_rules_but_not_what_a_bot_fetched_there() {
         let dir = tempfile::tempdir().unwrap();
@@ -580,7 +691,7 @@ mod tests {
             Some(repo.as_path()),
             "the folder to offer"
         );
-        ledger.1.lock().push(normalize(&repo));
+        ledger.1.lock().push(identity(&repo).unwrap());
         assert!(
             !is_untrusted(Some(&ledger), &readme),
             "trusted by the owner"

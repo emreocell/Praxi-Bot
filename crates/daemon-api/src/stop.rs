@@ -176,7 +176,7 @@ fn state_of(s: &AppState, run: RunId) -> Option<(String, Option<RunState>)> {
         })
 }
 
-fn attempt_cancel(s: &AppState, run: RunId) -> Result<(), String> {
+fn attempt_cancel(s: &AppState, run: RunId, force: bool) -> Result<(), String> {
     #[cfg(test)]
     {
         s.stop_seam().trace.lock().push(format!("cancel:{}", run.0));
@@ -187,13 +187,17 @@ fn attempt_cancel(s: &AppState, run: RunId) -> Result<(), String> {
             return Ok(());
         }
     }
-    s.agent().cancel(run).map_err(|e| e.to_string())
+    if force {
+        s.agent().force_cancel(run).map_err(|e| e.to_string())
+    } else {
+        s.agent().cancel(run).map_err(|e| e.to_string())
+    }
 }
 
 /// Cancel one member through the per-run cancel path and classify the result.
-fn cancel_member(s: &AppState, m: &mut Member) {
+fn cancel_member(s: &AppState, m: &mut Member, force: bool) {
     m.error = None;
-    match attempt_cancel(s, m.run) {
+    match attempt_cancel(s, m.run, force) {
         Ok(()) => refresh(s, m),
         Err(e) => match state_of(s, m.run) {
             // Cancelled meanwhile: by this stop (a parent took the child with
@@ -298,6 +302,7 @@ fn repeat(
     actor: &Actor,
     stop_id: Uuid,
     entry: &mut Entry,
+    force: bool,
 ) -> Result<StopRunsResponse, ApiError> {
     // Members cancelled earlier but not terminal then: settle them, no cancel.
     for m in &mut entry.members {
@@ -327,7 +332,7 @@ fn repeat(
             m.outcome,
             StopOutcome::Failed | StopOutcome::CancelRequested
         ) {
-            cancel_member(s, m);
+            cancel_member(s, m, force);
         }
     }
     Ok(respond(s, stop_id, false, audited, &entry.members))
@@ -404,7 +409,7 @@ fn first_receipt(
     };
     for m in &mut members {
         if m.outcome == StopOutcome::Failed {
-            cancel_member(s, m);
+            cancel_member(s, m, input.force);
         }
     }
     Ok((members, audited))
@@ -422,7 +427,7 @@ fn process(
     book.prune(Instant::now());
     let key = (actor.key.clone(), input.stop_id);
     if let Some(entry) = book.entries.get_mut(&key) {
-        return repeat(s, actor, input.stop_id, entry);
+        return repeat(s, actor, input.stop_id, entry, input.force);
     }
     if book.is_seen(&key.0, key.1) {
         // Known id whose target set is gone: never sweep again.
