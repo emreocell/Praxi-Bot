@@ -9,11 +9,11 @@ the checks tell you what is missing.
 All paths are under `apps/desktop/ui/src/`.
 
 1. **Copy the English file.** `cp i18n/locales/en.json i18n/locales/<code>.json` (use the
-   [ISO 639-1](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes) code, for example `de`).
+   [ISO 639-1](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes) code, for example `fr`).
    Translate the *values*, never the keys. Keep placeholders such as `{{name}}` and `{{count}}`
    exactly as they are; you may move them inside the sentence.
 2. **Register it** in `i18n/index.ts`: import the file, add it to `resources`, and extend
-   `SupportedLanguage` (`"en" | "tr" | "<code>"`).
+   `SupportedLanguage` (`"en" | "tr" | "de" | "<code>"`).
 3. **Offer it in the pickers.**
    - First-run wizard: add the code to `LANGUAGES` in `views/OnboardingView.tsx`.
    - Settings: add an option in `views/settings/GeneralCards.tsx` and the language's own name
@@ -26,8 +26,8 @@ All paths are under `apps/desktop/ui/src/`.
    pnpm --dir apps/desktop/ui typecheck
    pnpm --dir apps/desktop/ui test
    ```
-   `check:i18n` currently compares `en.json` with `tr.json`; extend `scripts/check-i18n.mjs` so it
-   compares every file in `i18n/locales/` (this is part of the same pull request).
+   `check:i18n` compares every file in `i18n/locales/` against `en.json`, so a new locale only has to be
+   added there.
 6. **Look at it.** Run the UI in mock mode (`pnpm --dir apps/desktop/ui dev`, then
    `http://localhost:1420/?mock=1&lang=<code>`) and check long strings do not break the layout
    (buttons, the Apps grid, the right panel). Add screenshots of a dark and the light theme to the
