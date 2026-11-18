@@ -79,10 +79,10 @@ test("faded text stays readable on every derived surface", () => {
   }
 });
 
-test("ships the 29 prototype themes with the five favourites", () => {
-  assert.equal(PALETTES.length, 29);
+test("ships the 31 themes (29 + 2 high contrast) with the five favourites", () => {
+  assert.equal(PALETTES.length, 31);
   assert.deepEqual(FAVORITE_THEMES, ["obsidian", "cobalt", "clay", "porcelain", "moss"]);
-  assert.equal(PALETTES.filter((p) => p.accent).length, 15);
+  assert.equal(PALETTES.filter((p) => p.accent).length, 17);
   // cobalt and raven keep the accents they had before v6.
   assert.equal(paletteById("cobalt")!.accent, "#9DBBFF");
   assert.equal(paletteById("raven")!.accent, "#E4B683");

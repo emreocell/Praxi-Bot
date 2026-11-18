@@ -3,6 +3,7 @@ import {
   DEFAULT_CUSTOM_THEME,
   deriveTheme,
   fallbackAccent,
+  isHighContrastTheme,
   normalizeHex,
   resolveAccent,
   themeFor,
@@ -171,13 +172,14 @@ export function applyTheme(theme: ThemeDef, overrides?: ThemeOverrides): void {
   for (const prop of appliedProps) root.style.removeProperty(prop);
 
   const env = surfaceSupport();
-  const style = effectiveUiStyle(overrides?.style ?? "solid", env);
+  const highContrast = isHighContrastTheme(theme.id);
+  const style = highContrast ? "solid" : effectiveUiStyle(overrides?.style ?? "solid", env);
   const accent = normalizeHex(overrides?.accentColor) ?? accentFor("", theme);
   const surface = overrides?.surface ?? DEFAULT_SURFACE;
   // Reduced transparency: the chat area keeps its background too.
-  const clearChat = surface.transparentChat && !env.reducedTransparency;
+  const clearChat = surface.transparentChat && !env.reducedTransparency && !highContrast;
   // Reduced transparency: the line style keeps its outlines but loses its see-through fill.
-  const seeThrough = overrides?.backdropActive === true && !env.reducedTransparency;
+  const seeThrough = overrides?.backdropActive === true && !env.reducedTransparency && !highContrast;
   const tokens = buildThemeTokens(theme, accent, style, seeThrough, {
     ...surface,
     transparentChat: clearChat

@@ -1048,7 +1048,7 @@ function AppShell() {
         open={helpOpen}
         onClose={() => setHelpOpen(false)}
         stopHotkey={controlState.stopHotkey || settings.stopHotkey}
-        sendKeys={settings.sendWith === "enter" ? "Enter" : "Ctrl+Enter"}
+        sendWith={settings.sendWith}
         onSetup={() => {
           setHelpOpen(false);
           handleOpenOnboarding(false);
