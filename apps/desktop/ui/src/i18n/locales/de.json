@@ -1988,7 +1988,24 @@
     "intro": "Praktische Kürzel, solange die App geöffnet ist.",
     "palette": "Befehlspalette",
     "send": "Nachricht senden",
-    "stop": "Alle Bot-Läufe stoppen"
+    "stop": "Alle Bot-Läufe stoppen",
+    "settings": "Einstellungen öffnen",
+    "closePanel": "Seitenpanel schließen",
+    "exitLiveFocus": "Tastatursteuerung der Live-Ansicht verlassen",
+    "newline": "Neue Zeile",
+    "menuMove": "Durch das Slash-/Erwähnungsmenü navigieren",
+    "menuAccept": "Markierten Eintrag auswählen",
+    "menuDismiss": "Menü schließen",
+    "dialogClose": "Dialog schließen",
+    "dialogFocus": "Fokus im Dialog verschieben",
+    "paletteMove": "Befehlspalette: navigieren und ausführen",
+    "menuNav": "Durch Popup-Menüs navigieren",
+    "popoverClose": "Popup-Menü schließen",
+    "group": {
+      "global": "Global",
+      "composer": "Chat-Eingabe",
+      "dialogs": "Dialoge"
+    }
   },
   "modelPicker": {
     "title": "Modell",
@@ -2483,6 +2500,8 @@
       "khaki": "Sand und Khaki",
       "frost": "Frost",
       "chalk": "Kreide",
+      "contrast-dark": "Hoher Kontrast dunkel",
+      "contrast-light": "Hoher Kontrast hell",
       "custom": "Dein eigenes Design"
     }
   },
