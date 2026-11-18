@@ -36,3 +36,17 @@ test('bare logos that would vanish on a surface follow the text colour', () => {
   assert.equal(brandIcon('openrouter').known, true);
   assert.equal(brandIcon('deepseek').known, true);
 });
+
+test('every CLI engine and the Anthropic API provider wear a real logo, never a letter fallback', async () => {
+  const { brandOf } = await import('./cliCards.ts');
+  const { providerBrand } = await import('./modelBrand.ts');
+  for (const id of ['claude', 'codex', 'opencode', 'agy', 'gemini']) {
+    for (const key of [brandOf(id), providerBrand(`cli:${id}`).company]) {
+      const b = brandIcon(key);
+      assert.equal(b.known, true, `${id} -> ${key}`);
+      assert.ok(b.path.length > 0 && b.monogram === '', `${id} -> ${key}`);
+    }
+  }
+  assert.equal(brandIcon(providerBrand('claude-code').company).name, 'Claude');
+  assert.equal(brandIcon(providerBrand('anthropic').company).name, 'Anthropic');
+});
