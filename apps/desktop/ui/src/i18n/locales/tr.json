@@ -1987,7 +1987,24 @@
     "intro": "Uygulama açıkken kullanışlı kısayollar.",
     "palette": "Komut paleti",
     "send": "Mesaj gönder",
-    "stop": "Tüm bot çalışmalarını durdur"
+    "stop": "Tüm bot çalışmalarını durdur",
+    "settings": "Ayarları aç",
+    "closePanel": "Yan paneli kapat",
+    "exitLiveFocus": "Canlı görünümde klavye denetiminden çık",
+    "newline": "Yeni satır",
+    "menuMove": "Eğik çizgi / anma menüsünde gezin",
+    "menuAccept": "Vurgulanan öğeyi seç",
+    "menuDismiss": "Menüyü kapat",
+    "dialogClose": "Pencereyi kapat",
+    "dialogFocus": "Pencere içinde odağı taşı",
+    "paletteMove": "Komut paleti: gezin ve çalıştır",
+    "menuNav": "Açılır menülerde gezin",
+    "popoverClose": "Açılır menüyü kapat",
+    "group": {
+      "global": "Genel",
+      "composer": "Sohbet yazma kutusu",
+      "dialogs": "Pencereler"
+    }
   },
   "modelPicker": {
     "title": "Model",

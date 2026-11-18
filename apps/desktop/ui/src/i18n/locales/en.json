@@ -1987,7 +1987,24 @@
     "intro": "Handy shortcuts while the app is open.",
     "palette": "Command palette",
     "send": "Send message",
-    "stop": "Stop all bot runs"
+    "stop": "Stop all bot runs",
+    "settings": "Open settings",
+    "closePanel": "Close the side panel",
+    "exitLiveFocus": "Leave keyboard control of the live view",
+    "newline": "New line",
+    "menuMove": "Move through the slash / mention menu",
+    "menuAccept": "Pick the highlighted item",
+    "menuDismiss": "Close the menu",
+    "dialogClose": "Close the dialog",
+    "dialogFocus": "Move focus inside the dialog",
+    "paletteMove": "Command palette: move and run",
+    "menuNav": "Move through popup menus",
+    "popoverClose": "Close a popup menu",
+    "group": {
+      "global": "Global",
+      "composer": "Chat composer",
+      "dialogs": "Dialogs"
+    }
   },
   "modelPicker": {
     "title": "Model",
