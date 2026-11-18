@@ -1,6 +1,6 @@
 # Adding a language to the desktop app
 
-The desktop UI is translated with `i18next`. Today it ships **English** (`en`, the fallback) and
+The desktop UI is translated with `i18next`. Today it ships **English** (`en`, the fallback), **German** (`de`) and
 **Turkish** (`tr`). A new language is a good first contribution: it is mostly translation work, and
 the checks tell you what is missing.
 
