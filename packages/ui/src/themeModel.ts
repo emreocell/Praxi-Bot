@@ -1,5 +1,5 @@
 /**
- * Derived theme model (card 198-A).
+ * Derived theme model.
  *
  * A theme is only `{ id, bg, text, accent? }`.  Surfaces, hover, muted text,
  * lines and shadows are *derived* from those colours; `buildTokens` maps the

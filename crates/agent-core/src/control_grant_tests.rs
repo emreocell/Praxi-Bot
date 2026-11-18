@@ -1,4 +1,4 @@
-//! The run-scoped control grant (card 243-1): after untrusted content, one
+//! The run-scoped control grant: after untrusted content, one
 //! card per program lets a run type into that one program, and nothing else.
 
 #![allow(clippy::too_many_lines, clippy::unnecessary_wraps)]
@@ -146,7 +146,7 @@ fn control_loop(env: &Env, fake: &Arc<Fake>, waiver: bool, with_computer: bool) 
         cfg(Policy::full()),
     );
     lp.sh.tools.register(read_tool() as Arc<dyn Tool>);
-    // A desktop observation reads untrusted text too (card 238's class).
+    // A desktop observation reads untrusted text too.
     lp.sh.tools.register(Arc::new(with_class(
         "desktop_get_state",
         Effect::Read,
@@ -727,7 +727,7 @@ async fn a_waived_bot_keeps_asking_for_every_executor_call_without_a_grant() {
     assert_eq!(cards.len(), 2);
 }
 
-// ------------------------------------------------ review round (r-96) tests
+// ------------------------------------------------ review round tests
 
 /// A run that read, typed (and was granted), then parks on an egress card, so a
 /// test can inspect and probe the live context.

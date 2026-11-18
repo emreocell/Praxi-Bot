@@ -1,4 +1,4 @@
-//! Folders the owner trusts as their own content (card 265). A git work tree with a remote is
+//! Folders the owner trusts as their own content. A git work tree with a remote is
 //! otherwise outside content (its README can carry injected text); the owner lifts that per
 //! folder. Changing the list takes the owner key; it is never offered to a peer.
 

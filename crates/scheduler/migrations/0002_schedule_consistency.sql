@@ -2,7 +2,7 @@ ALTER TABLE schedules ADD COLUMN revision INTEGER NOT NULL DEFAULT 0 CHECK (type
 
 -- The identity of a timer occurrence is schedule_id || ':' || due_ms. A
 -- dispatched row is deliberately NOT called started: the legacy executor
--- cannot return a durably deduplicated run_id yet (task 136).
+-- cannot return a durably deduplicated run_id yet.
 CREATE TABLE occurrences (
     schedule_id TEXT NOT NULL REFERENCES schedules(id) ON DELETE CASCADE,
     due_ms      INTEGER NOT NULL,

@@ -1,5 +1,5 @@
 /**
- * Validation of one browser layout probe (card 233).  Pure, so the failure paths are unit-tested:
+ * Validation of one browser layout probe.  Pure, so the failure paths are unit-tested:
  * a probe that did not measure the requested UI (missing shell, wrong open state, wrong appearance,
  * empty panel, non-finite or zero-size boxes, or a probe error) is a FAILURE, never a pass.
  */

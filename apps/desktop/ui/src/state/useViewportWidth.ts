@@ -6,7 +6,7 @@ const RESIZE_QUIET_MS = 150;
 /**
  * Window width.  While the window is being resized the panel's width transition is disabled
  * (`data-window-resizing`), so the panel and the fitted rail jump together instead of the rail
- * following the new target while the panel still slides from its old width (card 233).
+ * following the new target while the panel still slides from its old width.
  */
 export function useViewportWidth(): number {
   const [width, setWidth] = useState(() => window.innerWidth);

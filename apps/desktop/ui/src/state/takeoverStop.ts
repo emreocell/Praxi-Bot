@@ -1,7 +1,7 @@
 import type { ControlStateDto } from "../api/types.ts";
 
 /**
- * The takeover half of a Stop (card 237, reviews r-94 #2 / #9, r-94b #3 / #5). Pure.
+ * The takeover half of a Stop. Pure.
  *
  * - `stop()` SYNCHRONOUSLY revokes this app's takeover input: from that call on no
  *   pointer / key event is queued or sent and the lease heartbeat stops renewing,

@@ -1,5 +1,5 @@
 /**
- * Single-regression mutations of the real shell CSS / policy (card 233).  Each one, applied ALONE,
+ * Single-regression mutations of the real shell CSS / policy.  Each one, applied ALONE,
  * must make the layout check fail; the self-test in `check-layout.mjs` and the unit tests run them all.
  */
 import type { MatrixOptions } from "./shellGeometry.ts";

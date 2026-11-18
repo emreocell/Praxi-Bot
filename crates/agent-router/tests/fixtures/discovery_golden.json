@@ -1,5 +1,5 @@
 {
-  "_note": "Frozen discovery golden fixture (task 039). Builtin tool specs (source=builtin) copied from crates/builtin-tools, crates/skills and crates/workflow-replay on 2026-11-07; mcp tools are synthetic. Queries were written before inspecting lexical.rs synonyms. Do not tune queries to pass; update the floors in tests/discovery_golden.rs deliberately.",
+  "_note": "Frozen discovery golden fixture. Builtin tool specs (source=builtin) copied from crates/builtin-tools, crates/skills and crates/workflow-replay on 2026-11-07; mcp tools are synthetic. Queries were written before inspecting lexical.rs synonyms. Do not tune queries to pass; update the floors in tests/discovery_golden.rs deliberately.",
   "tools": [
     {"name": "browser_open", "description": "Open a URL in the browser and return the page snapshot. Example: {\"url\":\"https://example.com\"}", "params": ["url"], "effect": "write", "source": "builtin"},
     {"name": "browser_snapshot", "description": "Read the page as lines like [e12] button \"Sign in\". Use the refs in other browser tools. Example: {\"interactive_only\":true}", "params": ["interactive_only"], "effect": "read", "source": "builtin"},

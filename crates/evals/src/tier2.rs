@@ -103,7 +103,7 @@ struct Ctx {
 /// windows).  A Notepad killed with `taskkill /F` leaves its tabs there and the
 /// *next* launch restores them: extra windows steal focus and keystrokes, and
 /// show dialogs for files that no longer exist.  This was the cause of the
-/// stalled notepad run in task 030.
+/// stalled notepad run.
 fn notepad_state_dirs() -> Vec<PathBuf> {
     let Some(local) = std::env::var_os("LOCALAPPDATA") else {
         return Vec::new();

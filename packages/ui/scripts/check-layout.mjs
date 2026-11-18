@@ -5,7 +5,7 @@ import { evaluateShell, APP_FNS } from '../../../apps/desktop/ui/src/lib/shellGe
 import { MUTATIONS } from '../../../apps/desktop/ui/src/lib/shellMutations.ts';
 import { LEGACY_FNS, LEGACY_SIDEBAR_CSS } from '../../../apps/desktop/ui/src/lib/shellLegacy.ts';
 
-// Deterministic v6 shell layout check (card 233).  No browser: the geometry functions are the
+// Deterministic v6 shell layout check.  No browser: the geometry functions are the
 // ones the app uses, the border / padding numbers are read from the CSS.  Run with `--selftest`
 // for the mutation test only; the default run does the real check and then the mutation test.
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');

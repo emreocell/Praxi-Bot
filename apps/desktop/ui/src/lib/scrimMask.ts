@@ -1,5 +1,5 @@
 /**
- * The readable scrim under a transparent chat area (card 244-E): geometry of its mask, shared by
+ * The readable scrim under a transparent chat area: geometry of its mask, shared by
  * `App.module.css` (which paints it) and the tests (which check that no text sits on a feather).
  *
  * The scrim covers the whole pane width up to a plateau that is at least as wide as the reading

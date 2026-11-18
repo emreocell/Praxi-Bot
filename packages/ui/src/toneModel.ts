@@ -1,5 +1,5 @@
 /**
- * Backdrop tone (card 244-E): the lightest and darkest colours that sit behind the panels, so the
+ * Backdrop tone: the lightest and darkest colours that sit behind the panels, so the
  * surface model can make them exactly as clear as legibility allows.  Pure functions (no DOM).
  *
  * "Lightest / darkest" always means WCAG relative luminance of the colour *as the panel sees it*:

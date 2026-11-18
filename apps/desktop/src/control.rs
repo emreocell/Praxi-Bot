@@ -690,7 +690,7 @@ impl OverlayEventSink for NoopEventSink {
     fn on_state_changed(&self, _snapshot: &ControlSnapshot) {}
 }
 
-/// Messages accepted by the internal control channel for agent/daemon integration (Task 017).
+/// Messages accepted by the internal control channel for agent/daemon integration.
 #[derive(Debug)]
 pub enum ControlChannelMessage {
     /// Request permission to perform an action on `rect` with `label`.
@@ -789,7 +789,7 @@ impl ControlHandle {
     }
 
     /// Returns a clone of the internal `mpsc::UnboundedSender<ControlChannelMessage>`
-    /// so the agent/daemon integration (Task 017) can communicate over the channel.
+    /// so the agent/daemon integration can communicate over the channel.
     #[must_use]
     pub fn channel_sender(&self) -> mpsc::UnboundedSender<ControlChannelMessage> {
         self.tx.clone()

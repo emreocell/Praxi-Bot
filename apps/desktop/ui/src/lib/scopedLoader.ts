@@ -1,5 +1,5 @@
 /**
- * Loads one thing for the SELECTED computer (card 257-A, stale state after switching computers).
+ * Loads one thing for the SELECTED computer.
  *
  * A result is applied only while it still belongs to the current target and is the newest
  * request: a slow answer from the host that arrives after the user went back to this computer

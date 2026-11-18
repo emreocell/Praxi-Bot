@@ -21,7 +21,7 @@
   animation: toast-in var(--motion-duration-normal) var(--motion-easing-standard);
 }
 
-/* Toasts float over everything: they take the floating-surface tokens (card 244-E). */
+/* Toasts float over everything: they take the floating-surface tokens. */
 :global(:root[data-style="glass"]) .toast:not(.danger),
 :global(:root[data-style="tinted"]) .toast:not(.danger) {
   background-color: var(--float-fill);

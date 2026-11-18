@@ -148,7 +148,7 @@ test("widget: pending while stopSeq > stopAckedSeq, confirmed briefly only once 
   assert.equal(nextWidgetStop(s, null, 21 + WIDGET_CONFIRMED_MS).kind, "none");
 });
 
-test("widget: a stale pre-Stop snapshot or a failed read never confirms (r-94 #7)", () => {
+test("widget: a stale pre-Stop snapshot or a failed read never confirms", () => {
   const pending = nextWidgetStop(WIDGET_STOP_INITIAL, { stopSeq: 1, stopAckedSeq: 0 }, 0);
   // an older snapshot delivered late (stopSeq 0, ack 0)
   const stale = nextWidgetStop(pending, { stopSeq: 0, stopAckedSeq: 0 }, 5);

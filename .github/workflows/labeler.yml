@@ -1,0 +1,31 @@
+name: Label pull requests
+
+# SAFETY: this workflow uses `pull_request_target`, which runs with the base repository's
+# permissions even for fork PRs. It therefore must NEVER check out, build or run code from the
+# pull request. It only reads the list of changed files through the API and applies labels from
+# .github/labeler.yml, which is read from the base branch (the default for this event).
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions: {}
+
+concurrency:
+  group: labeler-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    name: Label by changed files
+    # Skipped on forks of the repository itself; the labels belong to the main repository.
+    if: github.repository == 'emreocell/Praxi-Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # No checkout step on purpose.
+      - uses: actions/labeler@v5
+        with:
+          sync-labels: true

@@ -101,7 +101,7 @@ pub enum ControlKind {
 }
 
 /// The program and window a desktop input call would reach, resolved by the
-/// tool before the permission decision (card 243-1).
+/// tool before the permission decision.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControlTarget {
     /// What the call sends.
@@ -260,7 +260,7 @@ pub trait Tool: Send + Sync {
     }
 
     /// The program and window this call would send input to, for a run-scoped
-    /// control grant (card 243-1). Resolved before the permission decision.
+    /// control grant. Resolved before the permission decision.
     /// `None` (the default) means the tool has no such target, so no grant is
     /// offered for it and behaviour is unchanged.
     async fn control_target(&self, _ctx: &ToolContext, _input: &Value) -> Option<ControlTarget> {

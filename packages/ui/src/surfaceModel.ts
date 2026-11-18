@@ -1,5 +1,5 @@
 /**
- * Panel surfaces (card 244-E): solid, tinted and glass shell panels, a transparent chat area,
+ * Panel surfaces: solid, tinted and glass shell panels, a transparent chat area,
  * and the legibility floor that keeps text readable over any backdrop.
  *
  * The idea: every translucent layer that carries text has an opacity of at least the

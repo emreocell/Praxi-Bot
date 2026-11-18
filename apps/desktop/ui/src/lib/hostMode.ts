@@ -1,5 +1,5 @@
 /**
- * What the app does while a paired always-on host is the selected computer (card 257-A).
+ * What the app does while a paired always-on host is the selected computer.
  *
  * Pure helpers: the local first-run wizard never runs against a host, the host's refusals
  * (`crates/daemon-api/src/peer.rs`) are shown as one human sentence by `humanError`, and the entry point for
@@ -10,8 +10,7 @@
 const LOCAL = "local";
 
 /**
- * Sending a provider key from this computer to a host is NOT built yet (owner approval pending,
- * card 247 S1). While this is `false` the "Connect a model on this server" row only explains the
+ * Sending a provider key from this computer to a host is NOT built yet (owner approval pending). While this is `false` the "Connect a model on this server" row only explains the
  * command to run on the server. The real flow is enabled by flipping this flag and rendering the
  * key form where `HostEmptyState` renders `HostModelDialog`.
  */

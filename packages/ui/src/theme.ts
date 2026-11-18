@@ -101,7 +101,7 @@ export interface ThemeOverrides {
   ownBubble?: OwnBubble;
   /** A canvas backdrop (or own image) is active: panels float, line style turns see-through. */
   backdropActive?: boolean;
-  /** Panel transparency / blur / transparent chat area and the sampled backdrop tone (card 244-E). */
+  /** Panel transparency / blur / transparent chat area and the sampled backdrop tone. */
   surface?: SurfaceOptions;
   background?: ThemeBackground;
 }

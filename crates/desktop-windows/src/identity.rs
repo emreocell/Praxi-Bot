@@ -1,5 +1,5 @@
 //! Process identity, elevation and window class for the run-scoped control
-//! grant (card 243-1). Every function returns `None` / an empty value on any
+//! grant. Every function returns `None` / an empty value on any
 //! failure; the callers treat that as "unknown" and refuse.
 #![allow(unsafe_code)]
 

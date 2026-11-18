@@ -703,7 +703,7 @@ impl ScheduleStore {
     /// The per-occurrence linearization point: check the current definition
     /// and atomically claim one pending intent before entering the executor.
     /// A claim is `dispatched`, never `started`: the legacy executor neither
-    /// accepts an idempotency key nor returns a durable run id (task 136).
+    /// accepts an idempotency key nor returns a durable run id.
     pub(crate) fn claim_occurrence(
         &self,
         id: TaskId,
@@ -738,7 +738,7 @@ impl ScheduleStore {
 
     /// Record only the legacy executor's outcome; no fabricated run id or
     /// `started` acknowledgment. An interrupted dispatch stays uncertain and
-    /// is NOT retried until task 136 supplies durable start idempotency.
+    /// is NOT retried until the store supplies durable start idempotency.
     /// Terminal history of the schedule is pruned in the same transaction.
     pub(crate) fn finish_occurrence(&self, id: TaskId, due_ms: i64, succeeded: bool) -> Result<()> {
         let mut conn = self.conn();
@@ -758,7 +758,7 @@ impl ScheduleStore {
     }
 
     /// Startup crash recovery, without replaying anything (replay needs the
-    /// durable start API of task 136): `pending` rows become `missed`,
+    /// durable start API): `pending` rows become `missed`,
     /// `dispatched` rows become `interrupted`, so they stop looking like live
     /// work and show up in [`Schedule::missed_occurrences`]. An enabled
     /// one-shot whose only timer was consumed by such an occurrence is

@@ -55,7 +55,7 @@ pub trait DesktopBackend: Send + Sync {
     async fn launch(&self, app: AppSpec) -> Result<Pid, DesktopError>;
 
     /// The window and program that keyboard input would reach right now, with
-    /// its process identity, elevation and class (card 243-1).
+    /// its process identity, elevation and class.
     ///
     /// `Ok(None)` (the default) means this backend cannot bind input to one
     /// program, so a run-scoped control grant is never offered or applied.

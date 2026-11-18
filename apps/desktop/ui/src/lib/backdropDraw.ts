@@ -1,5 +1,5 @@
 /**
- * Backdrop scenes drawn once onto a canvas (card 198-A).  No animation loop:
+ * Backdrop scenes drawn once onto a canvas.  No animation loop:
  * callers redraw on resize (debounced) and when a theme-aware scene's colours
  * change.  Ported from the approved prototype (`SCENES` + `drawBackdrop`).
  */

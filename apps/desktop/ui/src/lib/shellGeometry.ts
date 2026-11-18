@@ -1,5 +1,5 @@
 /**
- * Pure geometry of the v6 shell (card 233): where the rail, the chat, the right panel and the
+ * Pure geometry of the v6 shell: where the rail, the chat, the right panel and the
  * panel's inner column land for a window width, using the SAME clamp functions the app uses
  * (`shellLayout.ts`) and the border / padding numbers read from the CSS (`shellContract.ts`).
  * `checkMatrix` asserts the layout invariants over the whole width x rail x panel x style grid.

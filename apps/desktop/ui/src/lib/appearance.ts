@@ -39,7 +39,7 @@ export interface AppearanceSettings {
   backdrop: string;
   /** 20..88: how much of the theme background covers the scene. */
   backdropDim: number;
-  /** 0..100: tinted / glass panels, 0 = most opaque, 100 = the legibility floor (card 244-E). */
+  /** 0..100: tinted / glass panels, 0 = most opaque, 100 = the legibility floor. */
   panelTransparency: number;
   /** Glass blur radius, px (12..48). */
   panelBlur: number;

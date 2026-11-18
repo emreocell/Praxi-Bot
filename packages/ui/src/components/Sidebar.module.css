@@ -135,7 +135,7 @@
   flex-direction: column;
 }
 
-/* Shell surfaces (card 244-E): fill, blur, hairline, top edge and shadow all come from the surface tokens. */
+/* Shell surfaces: fill, blur, hairline, top edge and shadow all come from the surface tokens. */
 .sidebar {
   background-color: var(--shell-fill);
   background-image: var(--shell-grain);
@@ -178,7 +178,7 @@
   background-image: none;
 }
 
-/* ── v6 shell (card 198-B): resizable rail, collapsible right panel ── */
+/* ── v6 shell: resizable rail, collapsible right panel ── */
 .sidebar {
   position: relative;
 }
@@ -204,7 +204,7 @@
 }
 
 /* The inner column fills the panel's content box, i.e. the panel width minus its borders
-   (--panel-edge), so the panel's overflow clip never cuts its right edge (card 233).  While the
+   (--panel-edge), so the panel's overflow clip never cuts its right edge.  While the
    panel is closed it keeps the full width so the content does not reflow during the slide. */
 .panelInner {
   width: calc(var(--panel-w) - var(--panel-edge, var(--space-0)));

@@ -1,5 +1,5 @@
 /**
- * Backdrop tone sampling (card 244-E): reads what is drawn behind the panels so the surface model
+ * Backdrop tone sampling: reads what is drawn behind the panels so the surface model
  * can make them as clear as legibility allows.  The maths lives in `ui/tone-model`; this file only
  * touches the DOM: it reads a canvas or an image into a `ToneSource` and publishes the drawn
  * scene's source.  Reads happen once per draw / resize, never per frame.

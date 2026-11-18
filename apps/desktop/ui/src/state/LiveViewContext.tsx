@@ -205,7 +205,7 @@ export function LiveViewProvider({
     [sequencer]
   );
   // The takeover half of every Stop: input halts synchronously, the override is owed
-  // until delivered through the current client (review r-94 #2, #9).
+  // until delivered through the current client.
   const takeoverStopRef = useRef<TakeoverStop<ApiClient> | null>(null);
   const applyOverrideRef = useRef<(dto: ControlStateDto) => void>(() => {});
   const [viewerOpen, setViewerOpen] = useState<boolean>(initialMockViewerOpen);

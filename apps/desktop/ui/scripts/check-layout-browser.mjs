@@ -1,4 +1,4 @@
-// Bounded headless-Chrome layout run (card 233).  Local and optional, not part of CI.
+// Bounded headless-Chrome layout run.  Local and optional, not part of CI.
 //   node scripts/check-layout-browser.mjs [--require] [--only=<n,n|substring>] [--budget=<seconds>]
 // Builds the mock bundle, serves it with `vite preview`, opens each case in a fresh headless Chrome
 // with `--dump-dom` and reads the JSON the dev-only layout probe appended.  Everything it creates

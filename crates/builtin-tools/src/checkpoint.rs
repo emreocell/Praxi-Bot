@@ -3802,7 +3802,7 @@ mod tests {
 
     #[test]
     fn checkpoint_marked_partial_restores_captured_entries_and_reports_skipped() {
-        // Card 181 item 1: a skipped entry no longer makes the whole
+        // a skipped entry no longer makes the whole
         // checkpoint unrestorable. Captured payloads still restore.
         let data = tempfile::tempdir().unwrap();
         let work = tempfile::tempdir().unwrap();
@@ -3844,7 +3844,7 @@ mod tests {
 
     #[test]
     fn restore_aborts_before_any_change_when_safety_checkpoint_is_partial() {
-        // Card 181 item 2: the pre-restore safety checkpoint must be complete
+        // the pre-restore safety checkpoint must be complete
         // or the restore would delete bytes that were never saved.
         let _reset = test_hooks::Reset;
         let data = tempfile::tempdir().unwrap();
@@ -3875,7 +3875,6 @@ mod tests {
 
     #[test]
     fn file_appended_during_copy_is_retried_not_refused() {
-        // Card 181 item 4.
         let _reset = test_hooks::Reset;
         let work = tempfile::tempdir().unwrap();
         let source = work.path().join("log.txt");
@@ -3983,7 +3982,7 @@ mod tests {
 
     #[test]
     fn long_file_names_still_get_usable_temporary_names() {
-        // Card 181 item 8: 40+ characters of suffix must not push a legal
+        // 40+ characters of suffix must not push a legal
         // 255 byte name over the filesystem limit.
         let work = tempfile::tempdir().unwrap();
         let name = format!("{}.txt", "n".repeat(240));

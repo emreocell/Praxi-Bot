@@ -37,7 +37,7 @@ signatures per tool-call id and re-injects them. Without that proxy every Gemini
 `gemini-2.5-flash-lite` needs no signatures but has only 20 requests per day on this key; `gemma-4-31b-it` returned
 intermittent 500s and leaks `<thought>` text into the content.
 
-## Regression run after the provider-robustness fixes (task 030)
+## Regression run after the provider-robustness fixes
 
 Model: `gemini/gemini-3.5-flash-lite` through the **native** Gemini provider (the `gemini` preset, see below),
 throttled to one request per 6.5 s. File: `gemfix-run1.jsonl`. About 59 model requests in total.
@@ -65,7 +65,7 @@ BOT_EVAL_LIVE=1 bot-eval run --tier 2 --model gemini/gemini-3.5-flash-lite --min
 
 Failed HTTP 400 request bodies (redacted, never the key) are written to `<data_dir>/debug/last-failed-request-<provider>.json`.
 
-## Round 2 (task 035): native Gemini, 15 tasks, slow-call diagnosis
+## Round 2: native Gemini, 15 tasks, slow-call diagnosis
 
 Model: `gemini/gemini-3.1-flash-lite` (native provider), throttled to one request per 6.5 s (about 9 RPM).
 Fallback `gemini/gemini-3.5-flash-lite` for three tasks (see below). About **239 model requests** in total.
@@ -137,7 +137,7 @@ Re-run: pass in 3 calls.
 - Eval runs on a real desktop with the user's own browsers installed: a model that launches `chrome.exe` opens the
   user's Chrome. Tasks now clean up the processes they started (never pre-existing ones).
 
-## Discovery baseline (task 039, 2026-11-07)
+## Discovery baseline
 
 Frozen golden-query test for tool discovery, run before anyone changes ranking, lexical rules, the surface or embeddings:
 `cargo test -p agent-router --test discovery_golden -- --nocapture`

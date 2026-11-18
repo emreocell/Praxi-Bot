@@ -11,7 +11,7 @@ import { LIST_STALE_MS, StopRuntime } from "./stopRuntime.ts";
 import { TakeoverStop } from "./takeoverStop.ts";
 
 /**
- * The installed wiring (review r-94 #13): StopRuntime (what ControlBridgeHost forwards
+ * The installed wiring: StopRuntime (what ControlBridgeHost forwards
  * to) + the real ControlBridge + the real RunLedger + the real TakeoverStop, with fakes
  * only at the native (Tauri commands / events) and daemon (HTTP) boundary.
  */
@@ -261,7 +261,7 @@ test("chat Stop through the host cancels only its run, with no native or takeove
   assert.equal(h.ledger.mayAct("r2"), true);
 });
 
-test("a Stop during a local click through the host refuses the pending proceed (r-94 #1)", async () => {
+test("a Stop during a local click through the host refuses the pending proceed", async () => {
   const h = host();
   await h.runtime.readNative();
   h.runtime.attach(h.client, h.makeBridge());
@@ -276,7 +276,7 @@ test("a Stop during a local click through the host refuses the pending proceed (
   assert.deepEqual(h.calls.decide, ["refuse"]);
 });
 
-test("the global hotkey firing during a local action is caught by the host's last-moment read (r-94 #1)", async () => {
+test("the global hotkey firing during a local action is caught by the host's last-moment read", async () => {
   const h = host();
   await h.runtime.readNative();
   h.runtime.attach(h.client, h.makeBridge());
@@ -291,7 +291,7 @@ test("the global hotkey firing during a local action is caught by the host's las
   assert.equal(h.ledger.stopRecords().length, 1, "the read revealed the Stop");
 });
 
-test("an older native revision never reaches the bridge or the host cache (r-94 #8)", async () => {
+test("an older native revision never reaches the bridge or the host cache", async () => {
   const h = host();
   h.native.mode = "bot_driving";
   const older = { ...h.native.touch(), mode: "bot_driving" } as NativeControlSnapshot; // rev 1
@@ -306,7 +306,7 @@ test("an older native revision never reaches the bridge or the host cache (r-94 
   assert.equal(bridge.mode, "idle");
 });
 
-test("a failed native read is never applied as Idle: the human keeps the wheel (r-94 #8)", async () => {
+test("a failed native read is never applied as Idle: the human keeps the wheel", async () => {
   const h = host({ runs: [["r1", "running"]] });
   const bridge = h.makeBridge();
   h.runtime.attach(h.client, bridge);
@@ -325,7 +325,7 @@ test("a failed native read is never applied as Idle: the human keeps the wheel (
   assert.equal(h.calls.start, startsBefore);
 });
 
-test("the host keeps one run list in flight; a stale one does not block forever (r-94 #3)", async () => {
+test("the host keeps one run list in flight; a stale one does not block forever", async () => {
   const h = host();
   h.holdLists(true);
   h.runtime.attach(h.client, null);
@@ -337,7 +337,7 @@ test("the host keeps one run list in flight; a stale one does not block forever 
   assert.equal(h.listCalls.length, 2, "a hung list is superseded (tickets keep it ordered)");
 });
 
-test("restore drives a local run once the scope becomes known, without another daemon event (r-94 #10)", async () => {
+test("restore drives a local run once the scope becomes known, without another daemon event", async () => {
   let scope: ScopeAnswer = "unknown";
   const h = host({ scope: () => scope, runs: [["r1", "running"]] });
   await h.runtime.readNative();
@@ -350,7 +350,7 @@ test("restore drives a local run once the scope becomes known, without another d
   assert.equal(h.calls.start, 1);
 });
 
-test("Stop with no daemon client: input halts at once and the status says what the late Stop will cancel (r-94 #2, #12)", async () => {
+test("Stop with no daemon client: input halts at once and the status says what the late Stop will cancel", async () => {
   const h = host();
   await h.runtime.readNative();
   h.runtime.requestStop("hotkey");
@@ -363,9 +363,9 @@ test("Stop with no daemon client: input halts at once and the status says what t
   assert.equal(h.takeover.owes(), true);
 });
 
-// ---- review r-94b ----------------------------------------------------------------
+// ---- late and unconfirmed Stop replies ----------------------------------------------
 
-test("r-94b #1: a Stop reply accepted before its native event still reaches the bridge and the cache", async () => {
+test("a Stop reply accepted before its native event still reaches the bridge and the cache", async () => {
   const h = host();
   h.native.mode = "bot_driving";
   h.native.touch();
@@ -387,7 +387,7 @@ test("r-94b #1: a Stop reply accepted before its native event still reaches the 
   assert.equal(replacement.mode, "idle", "a replacement bridge starts Idle");
 });
 
-test("r-94b #2: a missing echo never mints another Stop or cancels a run started after the presses", async () => {
+test("a missing echo never mints another Stop or cancels a run started after the presses", async () => {
   const h = host();
   await h.runtime.readNative();
   h.runtime.attach(h.client, h.makeBridge());
@@ -418,7 +418,7 @@ test("r-94b #2: a missing echo never mints another Stop or cancels a run started
   assert.deepEqual(h.native.acks, [], "seq 1 stays unconfirmed (no ack past it)");
 });
 
-test("r-94b #3: a permanently hung override does not block the replacement client or a later Stop", async () => {
+test("a permanently hung override does not block the replacement client or a later Stop", async () => {
   const h = host();
   await h.runtime.readNative();
   h.runtime.attach(h.client, null);
@@ -443,7 +443,7 @@ test("r-94b #3: a permanently hung override does not block the replacement clien
   assert.equal(h.takeover.inputAllowed(), false, "local input stays disabled meanwhile");
 });
 
-test("r-94b #4: an unconfirmed Stop requests its own reconciliation and keeps its status until resolved", async () => {
+test("an unconfirmed Stop requests its own reconciliation and keeps its status until resolved", async () => {
   const h = host();
   await h.runtime.readNative();
   h.runtime.attach(h.client, null);
@@ -474,7 +474,7 @@ test("r-94b #4: an unconfirmed Stop requests its own reconciliation and keeps it
   assert.equal(h.ledger.run("R")?.phase, "cancel_requested", "R is held by B, not released");
 });
 
-test("r-94b #5: a delayed override answer cannot pause a takeover the user acquired afterwards", async () => {
+test("a delayed override answer cannot pause a takeover the user acquired afterwards", async () => {
   const h = host();
   await h.runtime.readNative();
   h.runtime.attach(h.client, null);
@@ -491,7 +491,7 @@ test("r-94b #5: a delayed override answer cannot pause a takeover the user acqui
   assert.equal(h.takeover.inputAllowed(), true);
 });
 
-test("r-94b #8: connected but unsynced, the late-sweep warning is shown at once (en + tr text)", async () => {
+test("connected but unsynced, the late-sweep warning is shown at once (en + tr text)", async () => {
   const { readFileSync } = await import("node:fs");
   const { stopDetail } = await import("./stopStatus.ts");
   const h = host();
@@ -511,7 +511,7 @@ test("r-94b #8: connected but unsynced, the late-sweep warning is shown at once 
   assert.match(text("tr"), /TÜM çalışmaları durduracak; arada başka bir cihazdan veya bir zamanlamadan başlatılanlar dahil/);
 });
 
-test("r-94b #4: with the reconciliation list hung, a later user Stop that sweeps resolves the older uncertainty", async () => {
+test("with the reconciliation list hung, a later user Stop that sweeps resolves the older uncertainty", async () => {
   const h = host();
   await h.runtime.readNative();
   h.runtime.attach(h.client, null);
@@ -537,7 +537,7 @@ test("r-94b #4: with the reconciliation list hung, a later user Stop that sweeps
   assert.deepEqual(h.native.acks, [1], "A's sequence is acknowledged; B's waits for R");
 });
 
-test("r-94c #1: a later sweeping Stop resolves an older unconfirmed Stop's runs that already finished", async () => {
+test("a later sweeping Stop resolves an older unconfirmed Stop's runs that already finished", async () => {
   const h = host();
   await h.runtime.readNative();
   h.runtime.attach(h.client, null);
@@ -569,7 +569,7 @@ test("r-94c #1: a later sweeping Stop resolves an older unconfirmed Stop's runs 
   assert.ok(h.status()?.kind !== "unconfirmed", "no stuck 'not confirmed' notice");
 });
 
-test("r-94c #2: a user's Clear pause / release retires the owed override; input stays halted", async () => {
+test("a user's Clear pause / release retires the owed override; input stays halted", async () => {
   const h = host();
   await h.runtime.readNative();
   h.runtime.attach(h.client, null);
@@ -586,7 +586,7 @@ test("r-94c #2: a user's Clear pause / release retires the owed override; input 
   assert.equal(h.takeover.inputAllowed(), false, "only taking control again re-enables input");
 });
 
-test("r-94c #2: LiveViewContext retires on Clear pause / release and pumps only after the state ref is current", async () => {
+test("LiveViewContext retires on Clear pause / release and pumps only after the state ref is current", async () => {
   const { readFileSync } = await import("node:fs");
   const src = readFileSync(new URL("./LiveViewContext.tsx", import.meta.url), "utf8");
   const body = (name: string, next: string) => {

@@ -1,4 +1,4 @@
-# Skill scopes (task 139 / ARCH-02)
+# Skill scopes
 
 The daemon configures `SkillRoots::from_data_dir(data_dir)`. The root index is
 read-only for learned skills. Every `skill_*` tool call resolves the supplied

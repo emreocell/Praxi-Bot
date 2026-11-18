@@ -4,7 +4,7 @@
  * without a browser.
  */
 
-/** Tools whose effects the checkpoint store records (card 80). */
+/** Tools whose effects the checkpoint store records. */
 const FILE_CHECKPOINT_TOOLS = new Set([
   "fs_write",
   "fs_edit",

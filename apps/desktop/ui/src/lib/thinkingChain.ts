@@ -1,5 +1,5 @@
 /**
- * Folds a run's timeline into "thinking chains" (card 198 D).
+ * Folds a run's timeline into "thinking chains".
  *
  * A chain is a maximal stretch of ordinary tool calls plus the short thoughts
  * the bot wrote right before a tool call. Everything else keeps its own row:

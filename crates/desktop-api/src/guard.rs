@@ -1,6 +1,6 @@
 //! Who may receive keyboard input: process identity, the window the input would
 //! reach, and the pure rules that decide whether a run-scoped control grant may
-//! cover that window (card 243-1).
+//! cover that window.
 //!
 //! Nothing here talks to the OS. A backend fills an [`InputTarget`] from its own
 //! window and process APIs; these functions only judge it. Every check fails

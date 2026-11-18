@@ -2171,7 +2171,7 @@ mod tests {
         assert!(matches!(&actions[1], Action::TypeText { text } if text == "hello"));
     }
 
-    // ---- run-scoped control grant (card 243-1): target and guarded dispatch ----
+    // ---- run-scoped control grant: target and guarded dispatch ----
 
     fn ctx_for(run: &str) -> ToolContext {
         ToolContext {

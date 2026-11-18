@@ -1143,7 +1143,7 @@ async fn remote_pc_replay_cannot_navigate_host_browser() {
     assert!(browser.calls.lock().is_empty());
 }
 
-// ---- run-scoped control grant (card 243-1): replay goes through the guard ----
+// ---- run-scoped control grant: replay goes through the guard ----
 
 fn typed_step(kind: DesktopActionKind, value: &str) -> Workflow {
     screen_wf(vec![Step::DesktopAction(DesktopAction {

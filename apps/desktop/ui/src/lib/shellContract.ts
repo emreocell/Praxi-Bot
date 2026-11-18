@@ -1,7 +1,7 @@
 import { parseDurationMs } from "./shellLayout.ts";
 
 /**
- * CSS contract of the v6 shell (card 233): a conservative reader for the rules of
+ * CSS contract of the v6 shell: a conservative reader for the rules of
  * `Sidebar.module.css` / `tokens.css` / `global.css` / `theme.ts` that decide the shell's
  * horizontal geometry.  No parser dependency.  It does NOT guess a cascade it cannot follow:
  * every rule that touches a contracted class and sets a geometry property must be one of the
@@ -386,7 +386,7 @@ export function readShellContract(
   if (!/\*\s*,\s*\*::before\s*,\s*\*::after\s*\{[^}]*box-sizing:\s*border-box/.test(stripComments(src.globalCss))) {
     fail(FILE.global, "*, *::before, *::after box-sizing", "border-box", undefined);
   }
-  // float flag of the theme engine: glass, tinted (card 244-E) or a backdrop.
+  // float flag of the theme engine: glass, tinted or a backdrop.
   if (!/root\.dataset\.float\s*=\s*backdropActive\s*\|\|\s*style\s*===\s*"glass"\s*\|\|\s*style\s*===\s*"tinted"/.test(src.themeTs)) {
     fail(FILE.theme, "data-float", 'backdropActive || style === "glass" || style === "tinted"', undefined);
   }

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 /**
- * Performance contract (card 244-E): backdrop-filter is expensive in WebView2, so every blur in the
+ * Performance contract: backdrop-filter is expensive in WebView2, so every blur in the
  * UI is listed here.  A new one has to be added on purpose, with a reason.  The shell has one blur
  * per panel (sidebar, center pane XOR composer, right panel); floating surfaces live in body portals;
  * nothing inside a panel, a list or a scrolling child blurs.

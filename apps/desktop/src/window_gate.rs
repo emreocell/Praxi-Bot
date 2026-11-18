@@ -1,4 +1,4 @@
-//! Defence in depth for the custom Tauri commands (card 239).
+//! Defence in depth for the custom Tauri commands.
 //!
 //! The capability files decide which window label may call which command; this
 //! module repeats the decision inside the highest-impact commands, so one

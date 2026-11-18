@@ -1,5 +1,5 @@
 /**
- * Connection state of a paired always-on host as the app shows it (card 252).
+ * Connection state of a paired always-on host as the app shows it.
  * Pure: the inputs are what the local daemon reports about the link
  * (`GET /v1/hosts`) and what the host answered on its public health route.
  */
@@ -136,7 +136,7 @@ function sameState(a: HostUiState, b: HostUiState): boolean {
 }
 
 /**
- * One stable state per connection (card 257-A). The raw state is recomputed on every poll and
+ * One stable state per connection. The raw state is recomputed on every poll and
  * flips whenever one health read is missed; the banner only follows it when that lasts:
  * connected stays connected for `HOST_STATE_HOLD_MS` of bad polls (then it is "offline", never
  * "connecting" again), connecting becomes offline after `HOST_CONNECT_GIVEUP_MS`, and any

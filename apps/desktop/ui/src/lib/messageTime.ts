@@ -1,5 +1,5 @@
 /**
- * Message and step times in the chat (card 268): the per-message stamp, its
+ * Message and step times in the chat: the per-message stamp, its
  * hover / tooltip forms, the day separator and tool-step durations. Pure, so
  * the wording is tested without a browser. Times are local; the stored
  * millisecond timestamps are the daemon's, never invented here.

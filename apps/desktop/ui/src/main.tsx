@@ -15,7 +15,7 @@ import { WidgetWindow } from "./overlay/WidgetWindow";
 import { paintSavedAppearanceEarly } from "./state/useApplyAppearance";
 
 // The owner key of this app's daemon (main window only; the overlay and widget windows get none).
-// Requested once and kept in memory; every call to THIS computer's daemon carries it (card 262).
+// Requested once and kept in memory; every call to THIS computer's daemon carries it.
 let ownerKey: Promise<string | null> | null = null;
 if (isTauriRuntime()) {
   ApiClient.ownerKeyProvider = () => (ownerKey ??= invoke<string>("owner_key").catch(() => null));
@@ -57,7 +57,7 @@ document.documentElement.dataset.windowKind = windowKind;
 
 paintSavedAppearanceEarly(windowKind !== "main");
 
-// Layout probe (card 233): same guard as state/useQuotas.ts, so production builds drop it.
+// Layout probe: same guard as state/useQuotas.ts, so production builds drop it.
 if (
   (import.meta.env.DEV || import.meta.env.VITE_MOCK === "1") &&
   ["layout", "search", "content"].includes(new URLSearchParams(window.location.search).get("probe") ?? "")

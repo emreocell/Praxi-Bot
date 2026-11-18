@@ -47,7 +47,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Task 029: tauri.conf.json bundles the `bot` CLI/daemon via
+      # tauri.conf.json bundles the `bot` CLI/daemon via
       # externalBin "binaries/bot", expected as bot-<target-triple>.exe.
       - name: Build and stage bot sidecar
         shell: pwsh

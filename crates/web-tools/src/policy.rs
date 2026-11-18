@@ -1,7 +1,7 @@
 //! URL policy: the SSRF guard injected into every outbound request.
 //!
 //! The [`UrlPolicy`] trait is deliberately small so the shared URL guard of
-//! task 048 (`builtin-tools::net`) can implement it and be plugged in. The
+//! `builtin-tools::net` can implement it and be plugged in. The
 //! [`DefaultUrlPolicy`] shipped here is conservative: only `http`/`https`,
 //! no loopback, private, link-local, CGNAT, multicast, unspecified or cloud
 //! metadata addresses, with optional host allow/deny lists.

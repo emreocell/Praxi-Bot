@@ -115,7 +115,7 @@ pub trait DaemonClient: Send + Sync {
     async fn send_message(&self, chat_id: ChatId, text: &str) -> Result<SendOutcome>;
 
     /// Deliver with a stable key such as `tg:123`. HTTP adapters forward this in
-    /// `Idempotency-Key`; in-process adapters can override it when task 136 is available.
+    /// `Idempotency-Key`; in-process adapters can override it when durable start idempotency is available.
     ///
     /// The compatibility default cannot deduplicate an ambiguous remote acceptance.
     async fn send_message_idempotent(

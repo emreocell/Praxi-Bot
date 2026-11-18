@@ -3,7 +3,7 @@
 //! via monotonic vs. wall time, applying [`MisfirePolicy`], reserving durable
 //! occurrence intents, and enforcing a per-schedule concurrency limit of 1.
 //!
-//! Recovery boundary (task 136): the current executor cannot accept the
+//! Recovery boundary: the current executor cannot accept the
 //! `schedule_id:due_ms` idempotency key or return a durable `run_id`. Pending
 //! and interrupted dispatches survive in SQLite but are deliberately NOT
 //! replayed on startup. Retrying a dispatch could duplicate an agent run.
@@ -160,7 +160,7 @@ impl Scheduler {
             Ok(0) => {}
             Ok(count) => tracing::warn!(
                 count,
-                "marked unresolved schedule occurrences missed/interrupted; automatic replay awaits durable idempotent starts (task 136)"
+                "marked unresolved schedule occurrences missed/interrupted; automatic replay awaits durable idempotent starts"
             ),
             Err(error) => tracing::error!(%error, "failed to recover unresolved schedule intents"),
         }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repeatable Praxi Linux host resource & budget measurement tool (Task 174-B).
+"""Repeatable Praxi Linux host resource & budget measurement tool.
 
 Collects per-process RSS/PSS/CPU from procfs, cgroup v2 memory/CPU/OOM stats,
 and host memory/swap counters. Never reads /proc/<pid>/cmdline, /proc/<pid>/environ,

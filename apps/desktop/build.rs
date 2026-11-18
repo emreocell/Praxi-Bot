@@ -44,7 +44,7 @@ fn main() {
 
     // Every custom command needs an explicit `allow-<command>` permission in a
     // capability; without the app manifest they would be callable from every
-    // window (card 239).
+    // window.
     if let Err(error) = tauri_build::try_build(
         tauri_build::Attributes::new()
             .app_manifest(tauri_build::AppManifest::new().commands(COMMAND_NAMES)),

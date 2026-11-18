@@ -6,7 +6,7 @@ import type {
 } from "../api/types.ts";
 
 /**
- * The app's single owner of run lifecycle and Stop decisions (card 237, PR C).
+ * The app's single owner of run lifecycle and Stop decisions.
  *
  * Pure TypeScript: no React, no globals. Time, ids, timers, native commands, the
  * daemon transport and storage are injected, so every rule below is unit tested.

@@ -1,5 +1,5 @@
 /**
- * The shell as it was before card 233, kept as a fixture so the layout check can prove it still
+ * The shell as it was before the shell redesign, kept as a fixture so the layout check can prove it still
  * catches the bug (mutation self-test): the inner column as wide as the panel's border box, and
  * the clamp that ignores the floating chrome and never narrows the rail.
  */

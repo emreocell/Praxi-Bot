@@ -1,5 +1,5 @@
 /**
- * Layout probe (card 233, mock/dev only): after the shell settled, measure the shell boxes and
+ * Layout probe: after the shell settled, measure the shell boxes and
  * append them as `<script id="layout-probe" type="application/json">` so a headless
  * `--dump-dom` run can read them without a debugging connection.  Enabled by `?probe=layout`.
  */

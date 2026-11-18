@@ -1,4 +1,4 @@
-//! Tool-discovery golden-query baseline (task 039).
+//! Tool-discovery golden-query baseline.
 //!
 //! Ranks a frozen set of Turkish / English queries against a frozen tool corpus
 //! with the two lexical discovery indexes that exist today:

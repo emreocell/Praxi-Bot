@@ -799,7 +799,7 @@ test("control_state_changed events re-read the snapshot (events carry no takeove
   assert.equal(log.put.at(-1), false);
 });
 
-test("a Stop during the click await turns the pending proceed into a refusal (r-94 #1)", async () => {
+test("a Stop during the click await turns the pending proceed into a refusal", async () => {
   let finishClick: () => void = () => {};
   const t = setup(true, undefined, {
     click: () => new Promise<void>((resolve) => {

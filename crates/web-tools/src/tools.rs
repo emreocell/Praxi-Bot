@@ -61,7 +61,7 @@ fn check_len(what: &str, v: &str, max: usize) -> Result<(), ToolError> {
 #[derive(Clone)]
 pub struct WebToolsConfig {
     /// SSRF guard applied to every fetched URL and redirect hop. Replace with
-    /// the shared URL guard of task 048 once it lands.
+    /// the shared URL guard once it lands.
     pub policy: Arc<dyn UrlPolicy>,
     /// Timeouts, size caps and redirect limit.
     pub http: HttpConfig,

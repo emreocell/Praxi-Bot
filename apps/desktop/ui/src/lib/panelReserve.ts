@@ -1,5 +1,5 @@
 /**
- * Timing of the panel reserve (card 233) as a small controller with injected timers, so the
+ * Timing of the panel reserve as a small controller with injected timers, so the
  * behaviour behind `usePanelReserve` is unit-tested without a renderer: reserved immediately on
  * open, kept for `delayMs()` after closing starts, restored at once when there is no transition
  * (delay 0), a reopen cancels the pending release and unmounting clears the timer.

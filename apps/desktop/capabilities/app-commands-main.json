@@ -1,6 +1,6 @@
 {
   "identifier": "app-commands-main",
-  "description": "Custom app commands the main window calls today, plus finish_bot_run and ack_stop (reserved for card 237 PR C)",
+  "description": "Custom app commands the main window calls today, plus finish_bot_run and ack_stop (reserved for a later change)",
   "windows": [
     "main"
   ],

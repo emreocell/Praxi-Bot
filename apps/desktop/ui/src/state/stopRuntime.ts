@@ -14,7 +14,7 @@ import {
 } from "./stopHost.ts";
 
 /**
- * Everything `ControlBridgeHost` does, without React (card 237 PR C, review r-94 #13).
+ * Everything `ControlBridgeHost` does, without React.
  * The React host only forwards subscriptions, effects and timers to these methods,
  * so the tests drive the same wiring the app installs: native snapshots, daemon
  * clients, run restore, bridge lifecycle and every Stop entry point.
@@ -231,7 +231,7 @@ export class StopRuntime {
 
   /**
    * The target scope may have become known (settings loaded, this client's targets
-   * listed): drive restored local runs that were waiting for it (review r-94 #10).
+   * listed): drive restored local runs that were waiting for it.
    */
   scopeChanged(): void {
     const session = this.session;

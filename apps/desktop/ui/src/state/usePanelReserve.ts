@@ -12,7 +12,7 @@ function currentDelayMs(): number {
 /**
  * Whether the right panel still takes room from the rail's fit: true while it is open and for the
  * panel's slide after it started closing, so the rail does not grow back into the panel's space
- * mid-slide and squeeze the chat (card 233).  The timing lives in `createPanelReserve`.
+ * mid-slide and squeeze the chat.  The timing lives in `createPanelReserve`.
  */
 export function usePanelReserve(open: boolean): boolean {
   const [settling, setSettling] = useState(open);

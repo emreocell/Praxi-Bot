@@ -39,7 +39,7 @@
 }
 
 /* Appearance axes: cards get a sheen (solid) or a light edge (glass, tinted).  Cards live inside a
-   shell panel that is already frosted, so they never blur again (card 244-E). */
+   shell panel that is already frosted, so they never blur again. */
 .card { background-image: var(--surface-sheen); }
 
 :global(:root[data-style="glass"]) .card,

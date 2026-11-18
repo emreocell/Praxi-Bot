@@ -1,6 +1,6 @@
 # Host leadership limits
 
-Demotion closes automatic admission and stops the scheduler and channels. Runs already admitted (scheduled, webhook, Telegram or chat) continue and can still execute approved tools. This card does not pause or transfer them. Before a planned handover, quiesce those runs; task 057 must implement the durable pause/transfer/resume protocol. Heartbeat demotion has the same in-flight limitation. Permission checks remain in force.
+Demotion closes automatic admission and stops the scheduler and channels. Runs already admitted (scheduled, webhook, Telegram or chat) continue and can still execute approved tools. This change does not pause or transfer them. Before a planned handover, quiesce those runs; task 057 must implement the durable pause/transfer/resume protocol. Heartbeat demotion has the same in-flight limitation. Permission checks remain in force.
 
 A fresh host that hears a higher active epoch records that leader and epoch and remains fresh, so a later import can still treat it as an empty handover target. The update persists that metadata only. Component startup stays on the normal boot path, and a failed scheduler open cannot replace fresh with a standby checkpoint.
 

@@ -1,5 +1,5 @@
 /**
- * Geometry of the app shell (card 198-B): the resizable left rail and right panel.
+ * Geometry of the app shell: the resizable left rail and right panel.
  * Pure functions plus a tolerant localStorage mirror, so the numbers are testable.
  */
 import { paintedUiStyle } from "ui/surface-model";

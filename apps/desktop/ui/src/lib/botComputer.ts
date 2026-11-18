@@ -1,5 +1,5 @@
 /**
- * Which computer the right panel's "Computer" card shows (card 266-A).
+ * Which computer the right panel's "Computer" card shows.
  *
  * Bots live at their home: the adopted server, or this computer. The card shows the computer the
  * bot RUNS ON. While a server is home the user can also look at "my computer" (the PC the app runs

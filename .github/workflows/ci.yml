@@ -1,13 +1,78 @@
 name: CI
 
+# Fork pull requests run this workflow with a read-only token and no secrets, and the
+# jobs below never use secrets. Keep it that way (see docs/contributing/MAINTAINING.md).
 on:
   push:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Decides which of the long jobs a pull request needs. A change that only touches
+  # documentation or repository metadata skips them; everything else, and every push to
+  # main, runs them all.
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      ui: ${{ steps.filter.outputs.ui }}
+    steps:
+      - name: Checkout (merge commit and its first parent)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Classify changed files
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "pull_request" ] || ! git rev-parse --verify -q HEAD^2 >/dev/null; then
+            echo "Not a pull request merge commit: run everything."
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+            echo "ui=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # HEAD is the merge of the PR into main; HEAD^1 is main.
+          git diff --name-only HEAD^1 HEAD > changed.txt
+          echo "Changed files:"; cat changed.txt
+          # Documentation and repository metadata only (generated docs/api stays "code").
+          docs_only='^(docs/.*|[^/]+\.md|LICENSE|NOTICE|\.github/(ISSUE_TEMPLATE/.*|CODEOWNERS|labeler\.yml|pull_request_template\.md|workflows/(labeler|installer|linux-release|linux-scripts)\.yml))$'
+          rust=false; ui=false
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            if [ "$f" = "docs/api/openapi.json" ] || ! printf '%s\n' "$f" | grep -Eq "$docs_only"; then rust=true; fi
+            if printf '%s\n' "$f" | grep -Eq '^(apps/desktop/ui/|packages/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|docs/api/openapi\.json$|\.github/workflows/ci\.yml$)'; then ui=true; fi
+          done < changed.txt
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"
+          echo "ui=$ui" >> "$GITHUB_OUTPUT"
+
+  # Always runs and is cheap: relative Markdown links must resolve.
+  docs-check:
+    name: Docs links
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check relative Markdown links
+        run: python3 scripts/check_markdown_links.py
+
   build-and-test:
     name: Build & Test (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ${{ matrix.os }}
     # A hung test must not stall the queue for hours.
     # Windows needs ~42 minutes for the whole workspace; Linux is much faster.
@@ -74,6 +139,8 @@ jobs:
 
   browser-integration:
     name: Browser integration (Chrome for Testing)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     continue-on-error: false
 
@@ -110,6 +177,8 @@ jobs:
 
   license-check:
     name: License Check
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -130,6 +199,8 @@ jobs:
 
   ui-lint-and-typecheck:
     name: UI Lint & Typecheck
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -167,3 +238,34 @@ jobs:
 
       - name: UI shell layout
         run: pnpm --dir apps/desktop/ui check:layout
+
+      # docs/api/openapi.json is checked by the `openapi_snapshot` test inside
+      # `cargo test --workspace` (Build & Test). This checks the file generated from it.
+      - name: Generated API types are up to date
+        run: |
+          pnpm --dir apps/desktop/ui gen:api
+          if ! git diff --exit-code -- apps/desktop/ui/src/api/schema.d.ts; then
+            echo "::error file=apps/desktop/ui/src/api/schema.d.ts::schema.d.ts is out of date with docs/api/openapi.json. Run 'pnpm --dir apps/desktop/ui gen:api' and commit the result."
+            exit 1
+          fi
+
+  # The one check to require in branch protection. It always runs, and it succeeds only when
+  # every job above either succeeded or was skipped on purpose (a docs-only change).
+  ci-result:
+    name: ci-result
+    if: always()
+    needs: [changes, docs-check, build-and-test, browser-integration, license-check, ui-lint-and-typecheck]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every needed job succeeded or was skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $RESULTS"
+          for r in $RESULTS; do
+            case "$r" in
+              success|skipped) ;;
+              *) echo "::error::At least one required job did not succeed ($r)."; exit 1 ;;
+            esac
+          done

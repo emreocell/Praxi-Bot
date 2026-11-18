@@ -177,7 +177,7 @@ async fn unresolved_intents_survive_restart_without_unsafe_replay() {
             Arc::new(FakeClock::new(1_000)),
         );
         scheduler.settle().await;
-        assert_eq!(exec.count(), 0, "task 136 must supply safe replay first");
+        assert_eq!(exec.count(), 0, "safe replay must come first");
         // The row is retained, but reclassified from live work to visible
         // history: nothing may stay `pending` / `dispatched` forever.
         assert_eq!(store.unresolved_occurrence_count().unwrap(), 0);

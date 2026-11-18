@@ -1,4 +1,4 @@
-// Independent check of the emitted surface tokens (card 244-E, review finding 5).
+// Independent check of the emitted surface tokens.
 //
 // It does NOT look at the resolver's plan.  It takes the CSS custom properties the app would set
 // (`buildThemeTokens`), parses the emitted fills, filters, scrim and modal overlay, and composites

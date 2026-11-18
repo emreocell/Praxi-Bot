@@ -63,7 +63,7 @@ for (const theme of [...PALETTES, { id: 'custom (default)', ...DEFAULT_CUSTOM_TH
   process.stdout.write(`${name}: ${d.light ? 'light' : 'dark'}; text contrast >= ${lowest.toFixed(2)}:1 (bg/surface/raised)\n`);
 }
 
-// Translucent surfaces (card 244-E): the EMITTED tokens (fills, filters, scrim, modal overlay) are
+// Translucent surfaces: the EMITTED tokens (fills, filters, scrim, modal overlay) are
 // composited over fixture backdrops by an independent CSS emulator (scripts/surfaceCheck.mjs: its own
 // saturate() matrix, Gaussian blur with mirrored edges, source-over compositing, WCAG contrast), for
 // every theme x style x chat area x transparency/blur extreme x dim x backdrop.  Primary text must reach

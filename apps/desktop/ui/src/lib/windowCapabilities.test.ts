@@ -67,7 +67,7 @@ test("window chrome grants stay local to the main window", () => {
   }
 });
 
-// ── Custom app commands (card 239) ───────────────────────────────────────────
+// ── Custom app commands ───────────────────────────────────────────
 // build.rs lists every #[tauri::command] in the app manifest, so each one needs
 // an `allow-<command>` permission in a capability that names the calling window.
 
@@ -113,7 +113,7 @@ test("the app manifest lists the commands the shell registers", () => {
 
 test("per-window custom command table", () => {
   // Commands with no UI caller are in the manifest but granted to no window,
-  // except finish_bot_run / ack_stop which card 237 PR C will call from main.
+  // except finish_bot_run / ack_stop which are reserved to be called from main later.
   assert.deepEqual(commandsFor("main"), manifestCommands.filter((c) => !UNGRANTED.includes(c)).sort());
   assert.ok(commandsFor("main").includes("finish_bot_run") && commandsFor("main").includes("ack_stop"));
   assert.deepEqual(commandsFor("widget"), widgetCommands);

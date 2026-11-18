@@ -1,4 +1,4 @@
-// Real-app smoke run (card 263): the REAL UI (vite dev, non-mock) against a REAL local daemon
+// Real-app smoke run: the REAL UI (vite dev, non-mock) against a REAL local daemon
 // (`bot serve`, debug build) that talks to a tiny scripted OpenAI-compatible stub. Local and
 // optional, not part of CI.
 //   node scripts/smoke.mjs [--no-build] [--only=<substring>] [--keep] [--headed]

@@ -2,7 +2,7 @@ import { useEffect, useRef, type KeyboardEvent, type PointerEvent } from "react"
 import styles from "./ResizeGrip.module.css";
 
 /**
- * Vertical drag handle on the edge of a column (card 198-B).  Pointer drags report the pointer's
+ * Vertical drag handle on the edge of a column.  Pointer drags report the pointer's
  * x (frame-coalesced); arrow keys report -1 / +1 steps.  The page-wide `data-resizing` flag
  * freezes transitions and text selection while a drag is on.
  */

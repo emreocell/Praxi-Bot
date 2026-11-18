@@ -43,7 +43,7 @@ export function taskTitle(t: TFunction, task: string, max = 56): string {
   return task.length > max ? `${task.slice(0, max - 1)}…` : task;
 }
 
-/** The compact live list of sub-agents (card 255 / 251). The caller renders it only with rows. */
+/** The compact live list of sub-agents. The caller renders it only with rows. */
 export function SubagentList({
   rows,
   onOpen,

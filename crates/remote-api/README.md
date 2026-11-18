@@ -107,7 +107,7 @@ After pairing via `PeerNetwork`, use
 `bot --remote <endpoint-id> --data-dir <client-data> status` (or other daemon
 client commands). Configuration, setup, secret-store and provider-installation
 commands remain local and reject `--remote`. This task does not add a pairing
-wizard; the UI pairing flow belongs to card 059.
+wizard; the UI pairing flow is not part of this crate.
 
 Hermetic verification uses in-process UDP loopback endpoints with relays and
 external discovery disabled, a fake provider, and ephemeral loopback HTTP:

@@ -191,7 +191,7 @@ test("expired after the app learned T, nothing held: no request at all, the user
   assert.equal(w.status()?.kind, "stopped");
 });
 
-test("expiry before the app ever learned T is never certified: unconfirmed, quarantine kept, no ack (r-94 #6)", async () => {
+test("expiry before the app ever learned T is never certified: unconfirmed, quarantine kept, no ack", async () => {
   const w = await world({ attach: false });
   const rec = w.ledger.stopAll("banner"); // no runs known, unsynced: all_existing
   w.pumpNative();
@@ -577,7 +577,7 @@ test("control_requested ids are answered once across bridges (replay after recon
   assert.equal(ledger.claimRequest("req-1"), false);
 });
 
-test("an older restore list never reconciles a run seen after it was issued (r-94 #3)", async () => {
+test("an older restore list never reconciles a run seen after it was issued", async () => {
   const w = await world({ attach: false });
   const h = w.attach();
   const a = w.ledger.beginList(h)!; // list A: captures an empty daemon
@@ -601,7 +601,7 @@ test("an older restore list never reconciles a run seen after it was issued (r-9
   assert.equal(w.ledger.run("later")?.phase, "tracked");
 });
 
-test("native: a Stop made before the first snapshot is bound by its token, never duplicated (r-94 #4a)", async () => {
+test("native: a Stop made before the first snapshot is bound by its token, never duplicated", async () => {
   const daemon = new FakeDaemon();
   const { ledger, native, clock } = makeLedger();
   const h = ledger.attachClient(daemon.transport());
@@ -625,7 +625,7 @@ test("native: a Stop made before the first snapshot is bound by its token, never
   assert.equal(ledger.mayAct("after"), true);
 });
 
-test("native: an independent untokened Stop is a new decision even while our own invoke is pending (r-94 #4b)", async () => {
+test("native: an independent untokened Stop is a new decision even while our own invoke is pending", async () => {
   const w = await world({ runs: [["r1", "paused"]] });
   w.native.deferCommands = true; // S's stop_bot_run has not executed yet
   const s = w.ledger.stopAll("banner");
@@ -648,7 +648,7 @@ test("native: an independent untokened Stop is a new decision even while our own
   assert.ok(w.daemon.requests.some((r) => r.body.stop_id === other?.id));
 });
 
-test("native: the in-window hotkey and the global listener on one press stay one decision after the reply (r-94 #4c)", async () => {
+test("native: the in-window hotkey and the global listener on one press stay one decision after the reply", async () => {
   const w = await world({ runs: [["r1", "paused"]] });
   const s = w.ledger.stopAll("hotkey");
   w.daemon.deliver(0); // the daemon answers before the global listener's event arrives
@@ -660,7 +660,7 @@ test("native: the in-window hotkey and the global listener on one press stay one
   assert.equal(w.ledger.stop(s.id)?.nativeSeqs.length, 2);
 });
 
-test("after the daemon told the app T, a restarted daemon never re-sweeps: retries are listed T (r-94 #5)", async () => {
+test("after the daemon told the app T, a restarted daemon never re-sweeps: retries are listed T", async () => {
   const w = await world({ runs: [["r1", "running"]] });
   const s = w.ledger.stopAll("banner");
   w.daemon.deliver(0); // T = {r1}, cancel_requested
@@ -679,7 +679,7 @@ test("after the daemon told the app T, a restarted daemon never re-sweeps: retri
   assert.equal(w.ledger.mayAct("phone-run"), true);
 });
 
-test("a list older than one already applied adds nothing: a run that ended in between never becomes a ghost (r-94 #3)", async () => {
+test("a list older than one already applied adds nothing: a run that ended in between never becomes a ghost", async () => {
   const w = await world({ attach: false });
   w.daemon.start("ghost", "running");
   const h = w.attach();

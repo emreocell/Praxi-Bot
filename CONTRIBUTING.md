@@ -3,14 +3,20 @@
 Thank you for considering a contribution. Praxi-Bot is a self-hosted AI agent that runs on
 your own machines: a local daemon, a desktop app, and an optional always-on Linux host. It is
 **alpha software** (the latest pre-release is the only supported version), so the code moves
-quickly and small, focused changes are the easiest to review and land.
+quickly and small, focused changes are the easiest to review and land. Pull requests of every
+size are welcome: fixes, improvements and new features, from first-timers and regulars alike.
+
+- **Never opened a PR here?** Follow [docs/contributing/FIRST_PR.md](docs/contributing/FIRST_PR.md): a 10-minute path from clone to pull request.
 
 - **Looking for something to work on?** Start with the issues labelled
   [`good first issue`](https://github.com/emreocell/Praxi-Bot/labels/good%20first%20issue) and
   [`help wanted`](https://github.com/emreocell/Praxi-Bot/labels/help%20wanted), and with the
   [tracking issue "Good first issues and where to start"](https://github.com/emreocell/Praxi-Bot/issues/192) (the full text of each is in [docs/contributing/starter-issues.md](docs/contributing/starter-issues.md)).
 - **Found a bug or have an idea?** Open an issue using one of the templates first when the change
-  is more than a few lines, so we can agree on the direction before you spend time on it.
+  is more than a few lines, so we can agree on the direction before you spend time on it. For
+  these areas, **discuss in an issue first, always** (they are where a good-looking change can
+  quietly break a safety guarantee): the chat screen, approvals and permissions, and the
+  host/server flows (pairing, host administration, moving bots between computers).
 - **Found a vulnerability?** Do not open a public issue. See [SECURITY.md](SECURITY.md).
 - **Be kind.** Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
@@ -128,7 +134,11 @@ pnpm --dir apps/desktop/ui test             # UI unit tests (node --test)
 CI runs, on **both Linux and Windows**: `cargo fmt --all --check`,
 `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`. It also runs
 `cargo deny check licenses bans advisories sources`, the browser integration tests (Chrome for
-Testing) and the UI checks below. A PR is merged only when CI is green.
+Testing) and the UI checks below. It also checks that `docs/api/openapi.json` and
+`apps/desktop/ui/src/api/schema.d.ts` are up to date: after an API change run
+`UPDATE_OPENAPI=1 cargo test -p daemon-api openapi_snapshot` and then
+`pnpm --dir apps/desktop/ui gen:api`, and commit both files. Pull requests that only change
+documentation skip the long Rust jobs. A PR is merged only when CI is green.
 
 **The real-app smoke run** drives the real UI (vite dev server, not mock mode) against a real local
 daemon (a debug `bot serve`) that talks to a tiny scripted OpenAI-compatible stub, using headless
@@ -206,9 +216,14 @@ cargo deny check                            # when you change dependencies
    the light theme, and both languages if text changed.
 6. **Fill in the pull request template.** Say what and why, how you tested it, which
    security-sensitive areas you touched, and whether generated files were regenerated.
-7. **CI must be green on Linux and Windows.** A maintainer reviews, may ask for changes, and
-   squash-merges. Security-sensitive changes get a deeper review and may take longer.
+7. **CI must be green.** The check that gates merging is `ci-result`; it runs on every PR and
+   passes when the jobs that were needed passed (a docs-only PR skips the long Rust jobs). A
+   maintainer reviews, may ask for changes, and squash-merges. Security-sensitive changes get a
+   deeper review and may take longer. Your first PR from a fork needs a maintainer to approve the
+   workflow run before CI starts; that is normal.
 8. Link the issue (`Closes #123`). By opening the PR you agree to the licensing terms below.
+
+Maintainers: the triage-and-merge routine is in [docs/contributing/MAINTAINING.md](docs/contributing/MAINTAINING.md).
 
 ## Areas that need extra care
 
@@ -247,6 +262,8 @@ A change touching these gets a maintainer review focused on the invariant below.
 ## Licence of contributions
 
 Praxi-Bot is licensed under the **Apache License 2.0** (see [LICENSE](LICENSE) and [NOTICE](NOTICE)).
-By submitting a contribution you agree that it is licensed under the same terms (Apache-2.0
-section 5), and that you have the right to submit it. Third-party material must be compatible with
-Apache-2.0 and listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Contributions are accepted under the same licence: **inbound = outbound**. By submitting a
+contribution you agree that it is licensed under Apache-2.0 (section 5 of the licence), and that
+you have the right to submit it. There is **no CLA** to sign, and a `Signed-off-by` line
+(DCO) is **not required**. Third-party material must be compatible with Apache-2.0 and listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

@@ -347,7 +347,7 @@ pub enum Payload {
         /// Prompt text (may reference `{input}` when fired via a webhook).
         text: String,
     },
-    /// Replay a deterministic parameterised workflow (task 022).
+    /// Replay a deterministic parameterised workflow.
     Workflow {
         /// Workflow name.
         name: String,
@@ -621,7 +621,7 @@ pub struct Schedule {
     pub origin: ScheduleOrigin,
     /// Occurrences that were reserved or dispatched but never confirmed
     /// because the process stopped (`missed` / `interrupted`). They are not
-    /// replayed automatically (task 136); UIs can show them as "missed".
+    /// replayed automatically; UIs can show them as "missed".
     #[serde(default)]
     pub missed_occurrences: u32,
 }

@@ -1,4 +1,4 @@
-//! When the floating widget is on screen (card 237 PR C; reviews r-94 #11, r-94b #6 / #7).
+//! When the floating widget is on screen.
 //!
 //! One policy, applied by every visibility update (state events, the post-ack linger
 //! timer and a user dismissal), always evaluated on the main thread against the CURRENT

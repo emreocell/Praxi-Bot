@@ -59,7 +59,7 @@
 
 .range { display: flex; align-items: center; gap: var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-muted); max-width: calc(var(--size-widget-width) * 1.2); }
 .range input { flex: 1; accent-color: var(--color-accent); }
-/* Panel style sliders (card 244-E). */
+/* Panel style sliders. */
 .sliders { display: grid; justify-content: start; grid-template-columns: max-content max-content minmax(var(--space-0), calc(var(--size-widget-width) * 0.8)) max-content; align-items: center; gap: var(--space-2) var(--space-3); }
 .sliders .range { display: contents; }
 /* Full-width rows must not size the slider columns (width 0, then stretch). */

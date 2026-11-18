@@ -20,7 +20,7 @@
 //! - [`parse_natural_language`] converts common English and Turkish schedule
 //!   phrases into a [`ScheduleSpec`] using a deterministic table-driven parser.
 //!
-//! # Durable dispatch boundary (task 136)
+//! # Durable dispatch boundary
 //! An occurrence is identified by `schedule_id:due_ms`. Pending/dispatched
 //! intents survive restart, but the current [`ScheduleExecutor`] cannot
 //! durably deduplicate a start or return its `run_id`. At startup the engine

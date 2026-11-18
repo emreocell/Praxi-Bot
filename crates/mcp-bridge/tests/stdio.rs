@@ -454,7 +454,7 @@ async fn shutdown_reaps_stdio_child_tree() {
     assert!(dead, "orphan {pid} survived MCP shutdown");
 }
 
-// ── fail-closed hardening (task 042) ────────────────────────────────────────
+// ── fail-closed hardening ────────────────────────────────────────
 
 mod hardening {
     use std::{collections::BTreeMap, sync::Arc};

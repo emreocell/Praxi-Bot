@@ -129,7 +129,7 @@ test("a failed override stays owed and is retried by the next snapshot (no retry
   assert.equal(h.applied.length, 1);
 });
 
-test("a replaced client's override reply writes nothing and the override is re-sent through the new client (r-94 #9)", async () => {
+test("a replaced client's override reply writes nothing and the override is re-sent through the new client", async () => {
   const h = harness();
   h.snapshot(dto("active"));
   h.gate.stop(false);

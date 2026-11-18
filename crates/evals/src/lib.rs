@@ -1,4 +1,4 @@
-//! Evaluation harness (task 019).
+//! Evaluation harness.
 //!
 //! Every change to the agent loop, tools or prompts can be measured here.
 //!

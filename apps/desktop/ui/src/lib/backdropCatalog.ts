@@ -1,5 +1,5 @@
 /**
- * Backdrop scenes (card 198-A).  The catalog is pure data so preference
+ * Backdrop scenes.  The catalog is pure data so preference
  * validation and the picker do not pull in the canvas drawing code.
  */
 

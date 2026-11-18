@@ -1,0 +1,87 @@
+# Applied automatically to pull requests by .github/workflows/labeler.yml.
+# Labels are chosen from the list of changed files only; nothing here runs PR code.
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "*.md"
+          - "crates/*/README.md"
+
+"area: desktop-ui":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/desktop/**"
+          - "packages/ui/**"
+
+"area: daemon":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/daemon-api/**"
+          - "crates/agent-core/**"
+          - "crates/agent-router/**"
+          - "crates/scheduler/**"
+          - "crates/task-runtime/**"
+          - "crates/storage/**"
+
+"area: host":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/remote-api/**"
+          - "crates/peer-network/**"
+          - "crates/host-provision/**"
+          - "crates/state-bundle/**"
+          - "apps/node-agent/**"
+          - "docs/guide/host-*.md"
+
+"area: cli-engines":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/cli-provider/**"
+          - "apps/cli/**"
+
+"area: apps":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/composio/**"
+          - "crates/connector-email/**"
+          - "crates/mcp-bridge/**"
+          - "crates/openapi-tools/**"
+          - "crates/channel-*/**"
+
+"area: security":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/permission-engine/**"
+          - "crates/secret-store/**"
+          - "crates/agent-core/src/approval.rs"
+          - "crates/agent-core/src/taint.rs"
+          - "crates/daemon-api/src/owner.rs"
+          - "crates/daemon-api/src/host_admin.rs"
+          - "deny.toml"
+          - "SECURITY.md"
+          - ".github/workflows/**"
+
+"area: i18n":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/desktop/ui/src/i18n/**"
+
+"platform: windows":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/desktop-windows/**"
+          - ".github/workflows/installer.yml"
+
+"platform: linux":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/desktop-linux/**"
+          - "scripts/linux/**"
+          - "scripts/install-linux.sh"
+          - ".github/workflows/linux-*.yml"
+
+"platform: macos":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/desktop-macos/**"

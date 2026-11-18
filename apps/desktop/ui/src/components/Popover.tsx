@@ -24,7 +24,7 @@ const EDGE = 8;
 const WANTED = 280;
 
 /**
- * Generic popover (card 198-B): drawn in a portal on <body> so it is never clipped by the rail
+ * Generic popover: drawn in a portal on <body> so it is never clipped by the rail
  * or a glass panel (a `backdrop-filter` ancestor would otherwise trap `position: fixed`).
  * Anchored to `anchor` (follows scrolling, flips when the other side has more room), closes on
  * outside press, Escape and Tab (menus), and hands focus back.  It takes part in the shared
