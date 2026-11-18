@@ -124,6 +124,8 @@ export interface StopRecord {
   origin: StopOrigin;
   /** `all`: a user Stop of everything; `single`: one run cancelled from the chat. */
   readonly kind: "all" | "single";
+  /** Hard stop: the daemon also aborts the run's task (a second press of Stop). */
+  force?: boolean;
   /** Native stop sequences this decision accounts for (acked once it settles). */
   nativeSeqs: number[];
   /** `stop_bot_run(token = id)` was invoked and its sequence has not been attributed yet. */
@@ -598,10 +600,13 @@ export class RunLedger {
   }
 
   /** Cancel one run (chat Stop button): its own decision, `listed`, no native effect. */
-  cancelOne(runId: string): StopRecord {
+  cancelOne(runId: string, opts?: { force?: boolean }): StopRecord {
     const now = this.deps.clock.now();
     const rec = this.blankRecord("chat", "single", now);
     rec.scope = "listed";
+    if (opts?.force) {
+      rec.force = true;
+    }
     const entry = this.runs.get(runId) ?? this.addRun(runId, null, false);
     if (entry.phase !== "stopped") {
       this.hold(entry, rec);
@@ -909,7 +914,8 @@ export class RunLedger {
     const body: StopRunsInput = {
       stop_id: rec.id,
       scope: rec.scope,
-      run_ids: rec.known.slice(0, 1024)
+      run_ids: rec.known.slice(0, 1024),
+      ...(rec.force ? { force: true } : {})
     };
     const controller = new AbortController();
     const timeout = clock.set(() => controller.abort(), STOP_ATTEMPT_TIMEOUT_MS);

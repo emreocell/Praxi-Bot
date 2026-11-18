@@ -562,6 +562,15 @@ test("cancelOne (chat) holds just that run and sends a listed Stop of its own", 
   assert.equal(w.status(), null, "not a global Stop");
 });
 
+test("a second Stop of a held run is a hard stop: its own decision with force", async () => {
+  const w = await world({ runs: [["r1", "running"]] });
+  const first = w.ledger.cancelOne("r1");
+  const hard = w.ledger.cancelOne("r1", { force: true });
+  assert.notEqual(hard.id, first.id);
+  assert.deepEqual(w.daemon.requests[1]?.body, { stop_id: hard.id, scope: "listed", run_ids: ["r1"], force: true });
+  assert.equal("force" in (w.daemon.requests[0]?.body ?? {}), false, "the first press is not forced");
+});
+
 test("control_requested ids are answered once across bridges (replay after reconnect)", () => {
   const { ledger } = makeLedger();
   assert.equal(ledger.claimRequest("req-1"), true);

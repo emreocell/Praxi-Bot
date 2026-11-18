@@ -271,10 +271,13 @@ function HostEnginesBlock() {
 export function EnginesCard() {
   const { home, workLocalNow, activeComputerId } = useDaemon();
   const onHome = home.kind === "host" && !workLocalNow && activeComputerId === home.hostId;
+  // Even when the bots live on a server, this computer's own CLIs are listed too: sign in and
+  // use them on Windows (bots that run "on this computer" use them), each part clearly titled.
   return onHome ? (
     <>
       <HostAdminNote />
       <HostEnginesBlock />
+      <DetectedAccountsBlock local />
     </>
   ) : (
     <DetectedAccountsBlock />

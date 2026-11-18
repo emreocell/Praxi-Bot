@@ -1,7 +1,7 @@
 import { ChevronDown, Info, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { CliEngineDto, CliInstallApproval } from "../../api/types";
+import type { CliEngineDto, CliInstallApproval, ProvidersDto } from "../../api/types";
 import { ApprovalCard, useCountdown } from "../../components/ChatCards";
 import { BrandIcon } from "../../components/BrandIcon";
 import { Switch } from "../../components/SettingsUi";
@@ -38,11 +38,24 @@ const STATUS_KEY: Record<CliStatus, string> = {
  * choice back (`POST /v1/providers/cli/enable|disable`), and an engine switched off stays off.
  * Engines that are not installed are one collapsed list at the bottom.
  */
-export function DetectedAccountsBlock() {
+export function DetectedAccountsBlock({ local = false }: { local?: boolean } = {}) {
   const { t } = useTranslation();
   const toast = useToast();
-  const { client } = useDaemon();
-  const { dto, reload: reloadProviders } = useProviders();
+  const { client: activeClient, localApi } = useDaemon();
+  // `local`: this computer's own CLIs while the bots' home is a server (the active client is the server's).
+  const client = local ? localApi : activeClient;
+  const shared = useProviders();
+  const [localDto, setLocalDto] = useState<ProvidersDto | null>(null);
+  const reloadLocal = useCallback(async () => {
+    setLocalDto(client ? await client.providers().catch(() => null) : null);
+  }, [client]);
+  useEffect(() => {
+    if (local) {
+      void reloadLocal();
+    }
+  }, [local, reloadLocal]);
+  const dto = local ? localDto : shared.dto;
+  const reloadProviders = local ? reloadLocal : shared.reload;
   const [engines, setEngines] = useState<CliEngineDto[]>([]);
   const [approval, setApproval] = useState<CliInstallApproval | null>(null);
   const approvalRemaining = useCountdown(approval?.expires_at_ms);
@@ -241,9 +254,9 @@ export function DetectedAccountsBlock() {
   };
 
   return (
-    <section className={styles.sec} data-testid="detected-accounts-block" aria-labelledby="ai-detected-h">
+    <section className={styles.sec} data-testid={local ? "detected-accounts-local" : "detected-accounts-block"} aria-labelledby="ai-detected-h">
       <div className={styles.head}>
-        <h3 id="ai-detected-h">{t("settingsModal.ai.detected.title")}</h3>
+        <h3 id="ai-detected-h">{local ? t("settingsModal.ai.detected.onThisComputer") : t("settingsModal.ai.detected.title")}</h3>
         <span className={styles.grow} />
         <button
           type="button"

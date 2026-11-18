@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest an improvement or a new capability.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before you start coding something large, please open this issue so we can agree on the
+        direction. Small, focused proposals are the easiest to land. See CONTRIBUTING.md.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What can you not do today, or what is painful? Describe the situation, not the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should happen? Sketches or mock-ups are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: who
+    attributes:
+      label: Who benefits
+      description: Which kind of user (desktop user, server host, developer, translator) and roughly how often.
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I would like to implement this myself.

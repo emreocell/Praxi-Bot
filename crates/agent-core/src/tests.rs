@@ -1369,6 +1369,75 @@ async fn queue_runs_as_next_turn_with_history() {
 }
 
 #[tokio::test]
+async fn stop_drops_queued_messages_instead_of_starting_the_next_turn() {
+    let env = setup();
+    let mut slow = tool("t.slow", Effect::Read, "r");
+    slow.delay = Duration::from_secs(30);
+    let slow = Arc::new(slow);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "t.slow", json!({}))]),
+        text("must not be asked for"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&slow)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "one").unwrap();
+    until(&mut rx, |e| matches!(e, Event::ToolCallRequested(_))).await;
+    assert_eq!(
+        lp.send_user_message(env.chat, "two", MessageMode::Queue)
+            .unwrap(),
+        Delivery::Queued
+    );
+    lp.cancel(run).unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Cancelled);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        fake.n_requests(),
+        1,
+        "the queued message started a turn after Stop"
+    );
+    assert!(
+        lp.run_turn(env.chat, "three").is_ok(),
+        "the chat is free again"
+    );
+}
+
+#[tokio::test]
+async fn force_cancel_ends_the_run_at_once_and_frees_the_chat() {
+    let env = setup();
+    let mut slow = tool("t.slow", Effect::Read, "r");
+    slow.delay = Duration::from_secs(30);
+    let slow = Arc::new(slow);
+    let fake = Fake::new(vec![calls(&[("c1", "t.slow", json!({}))]), text("after")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&slow)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "one").unwrap();
+    until(&mut rx, |e| matches!(e, Event::ToolCallRequested(_))).await;
+    lp.force_cancel(run).unwrap();
+    // No waiting for the task: the state is already final and the run announced its end.
+    let state = env.storage.get_run(run).unwrap().unwrap().state;
+    assert_eq!(state, RunState::Cancelled.as_str());
+    until(&mut rx, |e| matches!(e, Event::RunFinished(_))).await;
+    assert!(
+        lp.run_turn(env.chat, "two").is_ok(),
+        "the chat is free again"
+    );
+}
+
+#[tokio::test]
 async fn transient_provider_failure_is_retried() {
     let env = setup();
     let fake = Fake::new(vec![Reply::Fail("upstream"), text("recovered")]);

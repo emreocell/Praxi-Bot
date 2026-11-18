@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createScopedLoader } from "../lib/scopedLoader";
 import type { CliEngineDto } from "../api/types";
 import { engineRows, type EngineRow } from "../lib/modelPicker";
+import { type EngineBlock, engineBlock } from "../lib/engineConsent";
 import { configuredCliIds } from "../lib/detectedAccounts";
 import { useDaemon } from "./DaemonContext";
 import { notifyProvidersChanged, useProviders } from "./useProviders";
@@ -16,6 +17,8 @@ export const OPEN_AI_SETTINGS_EVENT = "praxi:open-ai-settings";
 export function useCliEngineRows(enabled: boolean): {
   rows: EngineRow[];
   run: (row: EngineRow) => Promise<void>;
+  /** Engines (by registry id) whose models cannot answer right now, and why. */
+  blocks: Record<string, EngineBlock>;
 } {
   const { client } = useDaemon();
   const { dto } = useProviders();
@@ -45,5 +48,14 @@ export function useCliEngineRows(enabled: boolean): {
   );
 
   const ids = new Set([...configuredCliIds(dto)].map((id) => id.slice(4)));
-  return { rows: enabled ? engineRows(engines, ids) : [], run };
+  const blocks: Record<string, EngineBlock> = {};
+  if (enabled) {
+    for (const e of engines) {
+      const reason = ids.has(e.detected.id) ? engineBlock(e) : null;
+      if (reason) {
+        blocks[e.detected.id] = reason;
+      }
+    }
+  }
+  return { rows: enabled ? engineRows(engines, ids) : [], run, blocks };
 }

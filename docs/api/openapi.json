@@ -10579,7 +10579,7 @@
               "string",
               "null"
             ],
-            "description": "Absolute workspace folder; required for `native_tools`."
+            "description": "Absolute workspace folder for `native_tools`; when omitted the daemon creates\n`<home>/Praxi/<bot>` for the bot."
           }
         },
         "additionalProperties": false
@@ -18613,6 +18613,10 @@
           "scope"
         ],
         "properties": {
+          "force": {
+            "type": "boolean",
+            "description": "Hard stop: besides firing the cancel token, abort the run's task so a\nrun stuck in work that ignores the token still ends (its process\ntrees and requests are dropped). Applies to this receipt and to repeats."
+          },
           "run_ids": {
             "type": "array",
             "items": {

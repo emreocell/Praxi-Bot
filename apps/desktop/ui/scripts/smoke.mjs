@@ -12,14 +12,14 @@
 //   get_autostart / autostart_supported / set_autostart, is_human_driving
 //   get_control_state and the other stop/pause/takeover commands -> an idle control snapshot
 //   plugin:store|*                   -> rejected, so settings fall back to localStorage (as in a browser)
-/* global fetch, URL */
+/* global fetch, URL, setTimeout, clearTimeout */
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -30,8 +30,8 @@ const args = process.argv.slice(2);
 const flag = (name) => args.find((a) => a.startsWith(`--${name}=`))?.split('=')[1];
 const root = fileURLToPath(new URL('../', import.meta.url));
 const repo = resolve(root, '../../..');
-const shots = process.env.SMOKE_SHOTS ?? 'C:/Users/emreo/OneDrive/Masaüstü/emre/bot/tasks/shots-263';
-const targetDir = process.env.CARGO_TARGET_DIR ?? 'D:/praxi-target-shared';
+const shots = process.env.SMOKE_SHOTS ?? join(tmpdir(), 'praxi-smoke-shots');
+const targetDir = process.env.CARGO_TARGET_DIR ?? join(repo, 'target');
 const exe = process.platform === 'win32' ? 'bot.exe' : 'bot';
 const bot = join(targetDir, 'debug', exe);
 const CHROMES = [process.env.CHROME_BIN, 'C:/Program Files/Google/Chrome/Application/chrome.exe',
@@ -71,6 +71,9 @@ function scripted(messages) {
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
   const calls = lines.length > 0 && lines.every((l) => l.startsWith('call:'))
     ? lines.map((l) => { const r = l.slice(5); const i = r.indexOf(' '); return i < 0 ? [r, '{}'] : [r.slice(0, i), r.slice(i + 1)]; }) : null;
+  // `slow:<ms>`: the model starts answering and then stalls (Stop cases hold the provider request open).
+  const slow = /^slow:(\d+)/.exec(text.trim());
+  if (slow) return { slow: Number(slow[1]) };
   const done = messages.slice((lastUser?.[1] ?? 0) + 1).filter((m) => m.role === 'tool').length;
   if (calls && done < calls.length) return { call: { name: calls[done][0], args: calls[done][1], id: `call_${done + 1}` } };
   const last = messages.at(-1);
@@ -106,6 +109,13 @@ function startStub(port) {
         }
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
         res.write(chunk({ role: 'assistant', content: '' }));
+        if (out.slow) {
+          stubLog.push('MODEL_OPEN');
+          res.write(chunk({ content: 'thinking ' }));
+          const timer = setTimeout(() => { res.write(chunk({ content: 'done' })); res.write(chunk({}, 'stop')); res.end('data: [DONE]\n\n'); }, out.slow);
+          res.on('close', () => { clearTimeout(timer); if (!res.writableEnded) stubLog.push('MODEL_ABORTED'); });
+          return;
+        }
         if (out.call) {
           res.write(chunk({ tool_calls: [{ index: 0, id: out.call.id, type: 'function', function: { name: out.call.name, arguments: out.call.args } }] }));
           res.write(chunk({}, 'tool_calls'));
@@ -131,6 +141,9 @@ async function main() {
     log('building `bot` (debug)...');
     const b = spawnSync('cargo', ['build', '-p', 'cli'], { cwd: repo, stdio: 'inherit', env: { ...process.env, CARGO_TARGET_DIR: targetDir, CARGO_INCREMENTAL: '0', CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? '3' } });
     if (b.status !== 0) throw new Error('cargo build failed');
+    // The hermetic fake coding CLI of the native-tools tests; the run installs it as `cursor-agent` (below).
+    const f = spawnSync('cargo', ['build', '-p', 'cli-provider', '--bin', 'native-cli-fixture'], { cwd: repo, stdio: 'inherit', env: { ...process.env, CARGO_TARGET_DIR: targetDir, CARGO_INCREMENTAL: '0', CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? '3' } });
+    if (f.status !== 0) throw new Error('cargo build of the fake CLI failed');
   }
   if (!existsSync(bot)) throw new Error(`missing ${bot}`);
   const tmp = mkdtempSync(join(tmpdir(), 'praxi-smoke-'));
@@ -143,7 +156,12 @@ async function main() {
   const [stubPort, daemonPort, uiPort] = [await freePort(), await freePort(), await freePort()];
   const ownerKey = randomBytes(32).toString('hex');
   const stubUrl = `http://127.0.0.1:${stubPort}/v1`;
-  const env = { ...process.env, BOT_DATA_DIR: dataDir, BOT_SECRETS_BACKEND: 'file', BOT_SECRETS_PASSPHRASE: 'smoke-passphrase-smoke-passphrase', BOT_ALLOWED_ORIGINS: `http://127.0.0.1:${uiPort},http://localhost:${uiPort}` };
+  // A fake `cursor-agent` first on the daemon's PATH: it speaks ACP and needs the CLI's own tools.
+  const fixture = join(targetDir, 'debug', process.platform === 'win32' ? 'native-cli-fixture.exe' : 'native-cli-fixture');
+  const fakeBin = join(tmp, 'fakebin');
+  mkdirSync(fakeBin, { recursive: true });
+  if (existsSync(fixture)) copyFileSync(fixture, join(fakeBin, process.platform === 'win32' ? 'cursor-agent.exe' : 'cursor-agent'));
+  const env = { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH ?? process.env.Path ?? ''}`, BOT_DATA_DIR: dataDir, BOT_SECRETS_BACKEND: 'file', BOT_SECRETS_PASSPHRASE: 'smoke-passphrase-smoke-passphrase', BOT_ALLOWED_ORIGINS: `http://127.0.0.1:${uiPort},http://localhost:${uiPort}` };
   // Async on purpose: the stub lives in this process and must keep answering while the CLI tests a provider.
   const cli = (a, extraEnv = {}) => new Promise((ok) => {
     const c = spawn(bot, ['--data-dir', dataDir, '--secrets-backend', 'file', ...a], { env: { ...env, ...extraEnv }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });

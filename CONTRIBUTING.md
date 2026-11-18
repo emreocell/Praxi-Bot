@@ -1,34 +1,252 @@
-# Contributing
+# Contributing to Praxi-Bot
 
-## Commit style
+Thank you for considering a contribution. Praxi-Bot is a self-hosted AI agent that runs on
+your own machines: a local daemon, a desktop app, and an optional always-on Linux host. It is
+**alpha software** (the latest pre-release is the only supported version), so the code moves
+quickly and small, focused changes are the easiest to review and land.
 
-Use [Conventional Commits](https://www.conventionalcommits.org/):
+- **Looking for something to work on?** Start with the issues labelled
+  [`good first issue`](https://github.com/emreocell/Praxi-Bot/labels/good%20first%20issue) and
+  [`help wanted`](https://github.com/emreocell/Praxi-Bot/labels/help%20wanted), and with the
+  [tracking issue "Good first issues and where to start"](https://github.com/emreocell/Praxi-Bot/issues/192) (the full text of each is in [docs/contributing/starter-issues.md](docs/contributing/starter-issues.md)).
+- **Found a bug or have an idea?** Open an issue using one of the templates first when the change
+  is more than a few lines, so we can agree on the direction before you spend time on it.
+- **Found a vulnerability?** Do not open a public issue. See [SECURITY.md](SECURITY.md).
+- **Be kind.** Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## The architecture on one screen
 
 ```
-feat(agent-core): add compaction step to agent loop
-fix(tool-registry): handle duplicate tool names gracefully
-docs: update build instructions
+                  ┌────────────────────────────┐
+  desktop app ───►│  bot  (daemon, 127.0.0.1)  │───► LLM providers (cloud API or local model)
+  (Tauri + React) │  agent loop · tools ·      │───► coding CLIs (Claude Code, Codex, ...)
+  CLI `bot ...`   │  permissions · scheduler   │───► MCP servers, Composio apps, e-mail, Telegram
+                  └─────────────┬──────────────┘
+                                │ paired, end-to-end encrypted (iroh)
+                       always-on Linux host  (the same daemon, in host mode)
 ```
 
-## Branch naming
+- **`bot`** (`apps/cli`) is the daemon and the command line. `bot serve` runs the local HTTP + SSE
+  API (`crates/daemon-api`) in front of the agent loop. It only listens on `127.0.0.1`.
+- **The desktop app** (`apps/desktop`) is a Tauri shell around a React UI (`apps/desktop/ui`). It
+  starts the bundled daemon, talks to it over the local API and can also talk to a paired host.
+- **The host** is the same daemon running on a Linux server (`bot host ...`, scripts in
+  `scripts/`), so bots keep working when your computer is off.
+- **`bot-node`** (`apps/node-agent`) is an experimental agent for controlled machines.
 
-Feature branches: `feat/<short-description>`
-Bug fixes: `fix/<short-description>`
+### Crates
 
-## Before opening a pull request
+| Crate | What it is for |
+| --- | --- |
+| `protocol` | Shared wire types (events, ids, permission categories) |
+| `agent-core` | The agent loop, history building, approvals plumbing, router glue |
+| `agent-router` | The "decision ladder": slash commands, remembered routes, workflow matching |
+| `permission-engine` | Policy resolution, the never-list of catastrophic commands, the egress rules |
+| `tool-registry` | Tool registration, discovery and search |
+| `builtin-tools` | Built-in tools: files, shell, desktop, browser, scripts, meta tools |
+| `browser-cdp` | Browser automation over the Chrome DevTools Protocol |
+| `desktop-api`, `desktop-windows`, `desktop-linux`, `desktop-macos` | OS-agnostic desktop trait and the per-OS backends (macOS is a stub today) |
+| `vision` | OCR and visual grounding helpers |
+| `provider-catalog` | LLM provider adapters and the provider catalog |
+| `cli-provider` | Detects and runs locally installed coding CLIs (Claude Code, Codex, Cursor, OpenCode, Antigravity), installs them and signs them in on a host |
+| `mcp-bridge` | MCP client and server bridge, OAuth for remote MCP servers |
+| `composio` | Composio app connections (REST client, curated catalog, logos) |
+| `connector-email` | IMAP/SMTP tools |
+| `web-tools`, `doc-tools`, `dev-tools`, `openapi-tools` | Web research, document/data, git/process and OpenAPI-import tools |
+| `scheduler`, `task-runtime` | Durable schedules (cron, interval, one-shot, triggers) and background jobs |
+| `workflow-replay`, `skills`, `script-runtime` | Recorded workflows, markdown skills, the script sandbox |
+| `memory-store` | Persistent memory and the knowledge/RAG store |
+| `storage` | SQLite + NDJSON event log, migrations |
+| `secret-store` | OS keychain / encrypted-file secrets and output redaction |
+| `daemon-api` | The local HTTP + SSE API (axum), OpenAPI generation, the owner-route tables |
+| `remote-api`, `peer-network`, `state-bundle`, `host-provision` | Pairing and the encrypted link to a host, state migration, server provisioning over SSH |
+| `channel-api`, `channel-telegram` | Client channel gateway and the Telegram adapter |
+| `computer-target`, `live-view` | Per-bot computer selection and the live screen contracts |
+| `plugin-host`, `evals` | Plugin manifests; the evaluation harness (`evals/`) |
 
-Run the full check suite locally and make sure all four commands pass:
+The user-facing behaviour is described in the [user guide](docs/guide/index.md); the HTTP API is
+documented in [`docs/api/openapi.json`](docs/api/openapi.json).
+
+## Building and running from source
+
+### Prerequisites
+
+| Tool | Version | Notes |
+| --- | --- | --- |
+| Rust | 1.89 or newer (`rust-version` in `Cargo.toml`; `rust-toolchain.toml` selects `stable` with `rustfmt` and `clippy`) | Edition 2024 |
+| Node.js | 24 or newer | CI uses 24 |
+| pnpm | 10 or newer (CI uses 12) | Workspace in `pnpm-workspace.yaml` |
+| C toolchain | MSVC build tools on Windows; a normal C toolchain on Linux/macOS | |
+
+- **Linux** also needs the desktop build dependencies (the same list CI installs):
+  `sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libdbus-1-dev pkg-config libxcb1-dev`.
+- **macOS:** the workspace is not built on macOS in CI and the macOS desktop backend
+  (`crates/desktop-macos`) is a stub, so desktop control does not work there yet. The daemon and
+  the UI are expected to build; reports and fixes are welcome (see the `platform: macos` label).
+- **Windows** is the best-supported desktop platform today (UI Automation backend, NSIS installer).
+
+### Build and run
 
 ```sh
-cargo fmt
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo deny check
+pnpm install --frozen-lockfile        # UI dependencies (workspace root)
+cargo build -p cli                    # the daemon + CLI: target/debug/bot
+./target/debug/bot --version
+./target/debug/bot setup              # interactive: provider, key, first bot, permission preset
+./target/debug/bot serve              # the daemon on 127.0.0.1:47821 (leave it running)
 ```
 
-No PR will be merged if any of these commands fail in CI.
+In a second terminal: `bot status`, `bot bots list`, `bot chat <bot-id> "hello"`. The full command
+list is the [CLI reference](docs/guide/cli-reference.md).
 
-## License
+- **Data.** Everything lives in the data directory (`--data-dir` / `BOT_DATA_DIR`; otherwise the
+  per-user app-data folder of your OS): a SQLite database, event logs, `providers.toml`, skills,
+  workflows and the API token (`api-token`, readable only by your user). API keys go to the OS
+  keychain or an encrypted file. Use a throwaway directory while developing:
+  `bot --data-dir ./.dev-data serve`.
+- **Desktop app in development** (Tauri; starts the daemon itself):
+  `PRAXIBOT_FAKE_PROVIDER=1 pnpm dev:desktop` uses a deterministic fake provider, so no API key is
+  needed. (`PRAXIBOT_BOT_BIN` points the app at a specific `bot` binary.)
+- **UI only, no daemon, no Tauri:** `pnpm --dir apps/desktop/ui dev` and open
+  `http://localhost:1420/?mock=1`. Mock mode (`apps/desktop/ui/src/api/mock.ts`) serves canned data
+  and is how design reviews and screenshots are made. Useful query parameters: `lang=en|tr`,
+  `theme=<name>`, `screen=<apps|schedules|settings|...>` (see `App.tsx` for the list).
+- **Windows installer:** see "Producing the Bundled Sidecar & Windows NSIS Installer" in the
+  [README](README.md#producing-the-bundled-sidecar--windows-nsis-installer-release-build).
+- **Linux host:** see [Running Praxi on a remote host](docs/guide/remote-host.md).
 
-By contributing, you agree that your contribution is submitted under the
-Apache-2.0 license (see LICENSE).
+## Testing
+
+Run the tests for the crates you touched; the whole workspace takes a long time (about 40 minutes
+on Windows in CI).
+
+```sh
+cargo test -p <crate>                       # e.g. cargo test -p scheduler
+cargo clippy -p <crate> --all-targets -- -D warnings
+pnpm --dir apps/desktop/ui test             # UI unit tests (node --test)
+```
+
+CI runs, on **both Linux and Windows**: `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`. It also runs
+`cargo deny check licenses bans advisories sources`, the browser integration tests (Chrome for
+Testing) and the UI checks below. A PR is merged only when CI is green.
+
+**The real-app smoke run** drives the real UI (vite dev server, not mock mode) against a real local
+daemon (a debug `bot serve`) that talks to a tiny scripted OpenAI-compatible stub, using headless
+Chrome (set `CHROME_BIN` if it is not found):
+
+```sh
+pnpm --dir apps/desktop/ui smoke                 # builds `bot`, starts everything, prints PASS/FAIL per step
+pnpm --dir apps/desktop/ui smoke -- --no-build   # reuse an existing debug build
+pnpm --dir apps/desktop/ui smoke -- --only=Apps  # steps whose name contains "Apps"
+```
+
+It covers: app start, creating bots, chatting, the model picker, tool calls and approval cards,
+the bot panel, `@mention` answers, Settings, the Apps modal, the add-server wizard, the
+human-takeover latch, the production origins and the owner-route checks. It is local and optional
+(not part of CI) and can be flaky on slow machines; `SMOKE_SHOTS` sets where screenshots go and
+`CARGO_TARGET_DIR` which build to use.
+
+## Conventions that are enforced
+
+Run these before pushing; CI runs them too.
+
+```sh
+cargo fmt --all -- --check                  # formatting (rustfmt.toml)
+cargo clippy --workspace --all-targets -- -D warnings   # pedantic lints are on workspace-wide
+pnpm typecheck                              # TypeScript, all packages
+pnpm lint                                   # eslint + stylelint
+pnpm --dir apps/desktop/ui check:i18n       # translations
+pnpm --dir apps/desktop/ui check:themes     # contrast of every theme
+pnpm --dir apps/desktop/ui check:layout     # shell layout
+cargo deny check                            # when you change dependencies
+```
+
+- **Rust.** `unsafe_code` is denied workspace-wide. Keep clippy pedantic clean; prefer fixing the
+  code over adding `#[allow]`, and give any `#[allow]` a one-line reason.
+- **i18n.** Every user-facing string lives in both `apps/desktop/ui/src/i18n/locales/en.json` and
+  `tr.json`; `check:i18n` fails when the key sets differ or a `t("...")` key is missing. Adding a
+  language: see [docs/contributing/adding-a-language.md](docs/contributing/adding-a-language.md).
+- **Themes and CSS.** Use design tokens (`packages/ui/tokens.css`); stylelint rejects raw `px`,
+  `rem`, `em` units and colour functions in component CSS. `check:themes` verifies contrast for
+  every theme.
+- **Generated files are never edited by hand.** `docs/api/openapi.json` and
+  `apps/desktop/ui/src/api/schema.d.ts` are generated:
+  ```sh
+  UPDATE_OPENAPI=1 cargo test -p daemon-api openapi_snapshot   # rewrites docs/api/openapi.json
+  pnpm --dir apps/desktop/ui gen:api                           # rewrites src/api/schema.d.ts
+  ```
+  Commit both together with the route/DTO change.
+- **Errors reach the user through the human-error layer.** Daemon errors carry a stable `code`;
+  `apps/desktop/ui/src/lib/humanError.ts` maps each code to a title and hint in both languages.
+  A test checks that every code the daemon can emit has text. New code → new entry in
+  `DAEMON_ERROR_CODES` and in the `errors.codes` block of both locale files.
+- **Owner-only routes are classified.** Routes that change authority, secrets, providers or keys,
+  install or run software, pair devices, take over control or decide an approval are listed in
+  `OWNER_ROUTES` (`crates/daemon-api/src/owner.rs`); ordinary mutating routes are in
+  `TOKEN_OK_ROUTES`. A test fails when a documented mutating route is in neither table, so a new
+  route cannot ship unclassified. When unsure, make it owner-only.
+- **Migrations are numbered and forward-only.** SQL files in `crates/storage/migrations/` and
+  `crates/scheduler/migrations/` are registered in order in `migrate.rs` / `store.rs`. Never edit a
+  migration that has shipped; add a new numbered file, check the number is not already taken by an
+  open PR, and keep the schema-version constant in step.
+- **Commits** follow [Conventional Commits](https://www.conventionalcommits.org/):
+  `feat(scheduler): ...`, `fix(daemon-api): ...`, `docs: ...`.
+
+## Opening a pull request
+
+1. **Fork** the repository and create a branch from an up-to-date `main`:
+   `feat/<short-description>`, `fix/<short-description>` or `docs/<short-description>`.
+2. **Keep it small and focused.** One topic per PR. A refactor and a feature are two PRs. If you
+   plan something big, open an issue first and wait for a maintainer's answer.
+3. **Add a test** for the behaviour you add or fix (one focused regression test is enough; see
+   existing tests next to the code). UI logic goes in `apps/desktop/ui/src/lib/*.ts` with a
+   `*.test.ts` file so it can be tested without a browser.
+4. **Run the gates** listed above for what you touched.
+5. **UI changes need screenshots** in the PR: in mock mode (`?mock=1`) at least one dark theme and
+   the light theme, and both languages if text changed.
+6. **Fill in the pull request template.** Say what and why, how you tested it, which
+   security-sensitive areas you touched, and whether generated files were regenerated.
+7. **CI must be green on Linux and Windows.** A maintainer reviews, may ask for changes, and
+   squash-merges. Security-sensitive changes get a deeper review and may take longer.
+8. Link the issue (`Closes #123`). By opening the PR you agree to the licensing terms below.
+
+## Areas that need extra care
+
+A change touching these gets a maintainer review focused on the invariant below. Say so in your PR.
+
+- **Approvals and permissions** (`permission-engine`, `agent-core/src/approval.rs`). Permissions are
+  decided by code, never by the model. Every tool call - including calls made from scripts and
+  workflows - passes the same gate; subagents are never more permissive than their parent; money
+  and the never-list always ask, even at the most permissive level.
+- **The egress gate** (`permission-engine/src/egress.rs`, `agent-core/src/taint.rs`). After a run has
+  read untrusted or private content, anything that can send data off the machine asks, even with a
+  standing grant. Do not add waivers; do not make a new tool "read-only" to avoid the check.
+- **Secrets** (`secret-store`, redaction). Keys live in the keychain / encrypted file, never in
+  config files, command lines, logs, audit rows or error messages. New code that touches a secret
+  must keep it out of `Debug` output and zeroise buffers where practical.
+- **Pairing and host administration** (`peer-network`, `remote-api`, `daemon-api/src/host_admin.rs`,
+  `owner.rs`). The daemon trusts a peer only by its authenticated key and role; host administration
+  needs an explicit, per-request check of the paired desktop's admin capability and the owner key
+  for authority changes. Bots and plain API tokens must never reach these routes.
+- **Protected paths** (`builtin-tools/src/files.rs`). File tools refuse the daemon's data
+  directory, credential files and the CLIs' sign-in stores. Do not widen what file tools may write.
+- **The shell tool and the never-list** (`builtin-tools/src/shell.rs`,
+  `permission-engine/src/never_list.rs`). Commands are parsed, not pattern-matched on the raw
+  string; the never-list is damping, not a sandbox - do not describe it as one.
+
+## What not to send
+
+- Drive-by reformatting or renames that bury a change; mass edits of generated files.
+- New dependencies without an issue first (they must pass `cargo deny` and be justified).
+- Anything that phones home, adds telemetry or analytics, or sends data to a service the user did not
+  configure. The project's decision is **no telemetry**.
+- Features that weaken a safety default (an approval, a protected path, a redaction) for convenience.
+- Secrets, real hostnames/IP addresses, personal paths or account names in code, tests, docs or
+  screenshots. Use documentation addresses (`203.0.113.0/24`) and `example.com`.
+
+## Licence of contributions
+
+Praxi-Bot is licensed under the **Apache License 2.0** (see [LICENSE](LICENSE) and [NOTICE](NOTICE)).
+By submitting a contribution you agree that it is licensed under the same terms (Apache-2.0
+section 5), and that you have the right to submit it. Third-party material must be compatible with
+Apache-2.0 and listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

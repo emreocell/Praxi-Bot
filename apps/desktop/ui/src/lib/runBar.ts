@@ -80,3 +80,46 @@ export function singleRunStop(
   }
   return phase === "failed" ? "failed" : null;
 }
+
+/** The daemon has not confirmed a Stop after this long: say so and offer the hard stop. */
+export const STOP_CONFIRM_MS = 5000;
+
+export interface RunStopUi {
+  /** `unconfirmed`: Stop was sent, the daemon has not said the run ended for `STOP_CONFIRM_MS`. */
+  phase: "stopping" | "unconfirmed" | "failed";
+  error: string | null;
+  /** The last attempt did not reach the daemon (link down): the Stop is being retried. */
+  unreachable: boolean;
+}
+
+/**
+ * What the chat shows about the Stop of its run: nothing, "Stopping…", "not confirmed
+ * by the daemon yet" (after 5 s, with the Force stop action) or a failed cancel. The
+ * end state itself is never assumed here: the run leaves this state only when the
+ * daemon reports it terminal (ledger phase `stopped`, `run_finished` or the run list).
+ */
+export function runStopUi(p: {
+  ledgerPhase: Parameters<typeof singleRunStop>[0];
+  /** Stop pressed before the daemon named the run (waiting for the send to be acknowledged). */
+  pending: boolean;
+  /** Monotonic time of the Stop decision, when the ledger holds one. */
+  decidedMono: number | null;
+  /** Same clock as `decidedMono`. */
+  now: number;
+  error: string | null;
+  /** The Stop's last request failed in transit (no daemon answer). */
+  unreachable?: boolean;
+}): RunStopUi | null {
+  const unreachable = p.unreachable === true;
+  const phase = singleRunStop(p.ledgerPhase);
+  if (phase === "failed") {
+    return { phase: "failed", error: p.error, unreachable };
+  }
+  if (phase === "stopping") {
+    const waited = p.decidedMono === null ? 0 : p.now - p.decidedMono;
+    // A link that is down is said at once; a slow daemon after STOP_CONFIRM_MS.
+    const late = unreachable || waited >= STOP_CONFIRM_MS;
+    return { phase: late ? "unconfirmed" : "stopping", error: null, unreachable };
+  }
+  return p.pending ? { phase: "stopping", error: null, unreachable: false } : null;
+}

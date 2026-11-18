@@ -143,7 +143,7 @@ export function selectionColors(
   return { background: ink, foreground: base };
 }
 
-/* ---------- the 29 shipped themes ---------- */
+/* ---------- the 31 shipped themes ---------- */
 
 /** `[id, bg, text, accent?]` — names live in i18n (`theme.names.<id>`). */
 const RAW: ReadonlyArray<readonly [string, string, string, string?]> = [
@@ -175,12 +175,22 @@ const RAW: ReadonlyArray<readonly [string, string, string, string?]> = [
   ["seafoam", "#d2e5de", "#22302c", "#2f6b5c"],
   ["khaki", "#dbd1b6", "#3a3c26", "#5b5e3c"],
   ["frost", "#f1f3f5", "#3b3f46", "#4a6fa5"],
-  ["chalk", "#f4f4f2", "#121214", "#121214"]
+  ["chalk", "#f4f4f2", "#121214", "#121214"],
+  // High contrast (AAA): pure black / white ground and text, one strong accent each.
+  ["contrast-dark", "#000000", "#ffffff", "#ffd60a"],
+  ["contrast-light", "#ffffff", "#000000", "#0033cc"]
 ];
 
 export const PALETTES: readonly ThemeDef[] = RAW.map(([id, bg, text, accent]) =>
   accent ? { id, bg, text, accent } : { id, bg, text }
 );
+
+/** High-contrast themes: always painted solid (no translucency, blur or see-through chat area). */
+export const HIGH_CONTRAST_THEMES: readonly string[] = ["contrast-dark", "contrast-light"];
+
+export function isHighContrastTheme(id: string): boolean {
+  return HIGH_CONTRAST_THEMES.includes(id);
+}
 
 export const PALETTE_IDS: readonly string[] = PALETTES.map((p) => p.id);
 
@@ -278,7 +288,10 @@ export function deriveTheme(theme: ThemeDef): DerivedTheme {
   const surfaces = [bg, surface, raised, hover];
   const muted = fade(text, bg, 0.38, surfaces, 4.5);
   const secondary = mix(text, muted, 0.5); // halfway: readable because both ends are
-  const lineStrong = fade(text, bg, 0.5, [bg, surface, raised], 3);
+  // High-contrast themes: strong borders and focus ring (>= 4.5:1 on every surface, hover included).
+  const lineStrong = isHighContrastTheme(theme.id)
+    ? fade(text, bg, 0.3, surfaces, 4.5)
+    : fade(text, bg, 0.5, [bg, surface, raised], 3);
   const base = light ? LIGHT_STATUS : DARK_STATUS;
   // A status colour is also the text of its own 10 % badge, so test that too.
   const status = (c: string) => {

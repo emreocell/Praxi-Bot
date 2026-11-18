@@ -52,7 +52,6 @@ export function BotEngineBlock({ bot }: { bot: Bot }) {
   const patch = (p: Partial<EngineState>) => { setDraft((d) => ({ ...d, ...p })); setError(null); };
   const missing = consentMissing(draft, current, consent);
   const changed = draft.mode !== current.mode || draft.approvalLevel !== current.approvalLevel || draft.workspace !== current.workspace;
-  const workspaceMissing = draft.mode === "native_tools" && draft.workspace.trim() === "";
 
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -158,7 +157,7 @@ export function BotEngineBlock({ bot }: { bot: Bot }) {
           <div className={styles.actions}>
             <Button
               variant="primary"
-              disabled={!client || busy || !changed || missing || workspaceMissing}
+              disabled={!client || busy || !changed || missing}
               onClick={() => client && void run(() => client.putBotEngine(bot.id, engineRequest(draft, current, consent)))}
             >
               {t("botEngine.apply")}

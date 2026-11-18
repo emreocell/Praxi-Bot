@@ -38,7 +38,8 @@ export function engineRequest(
   return {
     mode: next.mode,
     approval_level: next.approvalLevel,
-    workspace: next.workspace.trim(),
+    // Left empty, the daemon makes a folder for the bot.
+    ...(next.workspace.trim() ? { workspace: next.workspace.trim() } : {}),
     consent_native_tools: current.mode !== "native_tools" && consent.native,
     consent_full_access:
       next.approvalLevel === "full" &&

@@ -1,6 +1,7 @@
 import type { CliEngineDto, ProvidersDto } from "../api/types.ts";
 import { type AutonomyLevel } from "./botProfile.ts";
 import { cliStatus } from "./cliCards.ts";
+import { type ProviderTestProblem, providerTestProblem } from "./humanError.ts";
 import { providerBrand } from "./modelBrand.ts";
 import { modelDisplayName } from "./modelName.ts";
 import { isCliDefault, modelGroups, sourceRecommendations } from "./modelPicker.ts";
@@ -27,7 +28,7 @@ export type BrainChoice =
   | { kind: "api"; group: ApiGroup };
 
 /** Human reasons a connection failed; each maps to one sentence in the user's language. */
-export type ConnectError = "badKey" | "offline" | "ollamaDown" | "noModels" | "unavailable" | "unknown";
+export type ConnectError = "badKey" | "offline" | "ollamaDown" | "noModels" | "unavailable" | "unknown" | ProviderTestProblem;
 
 export interface FirstRunState {
   step: FirstRunStep;
@@ -138,13 +139,17 @@ export function firstRunReducer(state: FirstRunState, action: FirstRunAction): F
  */
 export function classifyConnectError(raw: string, group: ApiGroup | null): ConnectError {
   const text = raw.toLowerCase();
-  if (/401|403|unauthori[sz]ed|forbidden|invalid[^a-z]*(api)?[^a-z]*key|api key not valid|permission denied|incorrect api key/.test(text)) {
+  if (/\b(?:401|403)\b|authentication failed|unauthori[sz]ed|forbidden|invalid[^a-z]*(api)?[^a-z]*key|api key not valid|permission denied|incorrect api key/.test(text)) {
     return "badKey";
+  }
+  const problem = group ? providerTestProblem(raw) : undefined;
+  if (problem) {
+    return problem;
   }
   if (group === "ollama" && /refused|econnrefused|unreachable|not running|connect|timed out|timeout/.test(text)) {
     return "ollamaDown";
   }
-  if (/network|dns|resolve|timed out|timeout|offline|unreachable|connection|econn|enotfound/.test(text)) {
+  if (/network|dns|resolve|timed out|timeout|offline|unreachable|connection|econn|enotfound|failed to fetch/.test(text)) {
     return "offline";
   }
   if (/providers_require_app_daemon|outside_tauri|local daemon|not.*local/.test(text)) {

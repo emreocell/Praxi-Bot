@@ -550,6 +550,7 @@
       "failed": "Bu çalıştırma hatırlanamadı: {{message}}"
     },
     "stopped": "Çalışan tur durduruldu.",
+    "runStopped": "Durduruldu.",
     "newChatStarted": "Yeni sohbet başlatıldı.",
     "md": {
       "copy": "Kopyala",
@@ -825,7 +826,10 @@
       "paused": "Duraklatıldı",
       "human": "Kontrol sizde",
       "elapsed": "{{time}} süredir çalışıyor",
-      "stoppingDetail": "Çalışmanın bitmesi bekleniyor…"
+      "stoppingDetail": "Çalışmanın bitmesi bekleniyor…",
+      "stopUnconfirmed": "Servis durdurmayı 5 saniyedir onaylamadı, çalışma hâlâ sürüyor olabilir. Bitirmek için Zorla durdur'a bas.",
+      "stopUnreachable": "Durdurma, bu botun çalıştığı bilgisayara ulaşamadı. Yeniden deniyor; bağlantıyı kontrol et.",
+      "forceStop": "Zorla durdur"
     }
   },
   "botForm": {
@@ -993,6 +997,14 @@
       "terminal_gone": {
         "title": "Terminal oturumu bitti",
         "hint": "Terminali yeniden aç."
+      },
+      "provider_endpoint": {
+        "title": "Sağlayıcının API adresi bulunamadı",
+        "hint": "Ayarlar → Yapay Zekâ bölümünde temel adresi ve API yolunu kontrol edin."
+      },
+      "provider_model": {
+        "title": "Sağlayıcı, ayarlanan modeli bulamadı",
+        "hint": "Ayarlar → Yapay Zekâ bölümünde model kimliğini kontrol edin ve hesabınızda kullanılabilen bir model seçin."
       },
       "host_admin_required": {
         "title": "Önce bu bilgisayarı sunucuda onayla",
@@ -1421,7 +1433,28 @@
       "openLogs": "Günlük klasörünü aç",
       "logTitle": "Servis günlüğünün son satırları",
       "waited": "{{seconds}} sn'dir bekleniyor"
-    }
+    },
+    "engineNeedsNative": {
+      "title": "Bu model için önce onayın gerekiyor",
+      "hint": "Kendi araçlarıyla çalışıyor. Bu bot için buna izin vermek için Düzelt'e bas."
+    },
+    "cliSignedOut": {
+      "title": "O kodlama CLI'ının oturumu kapalı",
+      "hint": "Ayarlar, Yapay zeka bölümünden oturum aç, sonra yeniden dene."
+    },
+    "cliNotInstalled": {
+      "title": "O kodlama CLI'ı kurulu değil ya da güncellenmeli",
+      "hint": "Ayarlar, Yapay zeka bölümünden kur ya da güncelle, sonra yeniden dene."
+    },
+    "cliQuota": {
+      "title": "O aboneliğin kullanım sınırı doldu",
+      "hint": "Sıfırlanmasını bekle ya da başka bir model seç."
+    },
+    "modelFailed": {
+      "title": "Model yanıt veremedi",
+      "hint": "Yeniden dene ya da başka bir model seç. Aşağıdaki ayrıntılar modelin ne bildirdiğini söyler."
+    },
+    "fixEngine": "Düzelt"
   },
   "home": {
     "hint": "{{name}} üzerinde",
@@ -1971,7 +2004,24 @@
     "intro": "Uygulama açıkken kullanışlı kısayollar.",
     "palette": "Komut paleti",
     "send": "Mesaj gönder",
-    "stop": "Tüm bot çalışmalarını durdur"
+    "stop": "Tüm bot çalışmalarını durdur",
+    "settings": "Ayarları aç",
+    "closePanel": "Yan paneli kapat",
+    "exitLiveFocus": "Canlı görünümde klavye denetiminden çık",
+    "newline": "Yeni satır",
+    "menuMove": "Eğik çizgi / anma menüsünde gezin",
+    "menuAccept": "Vurgulanan öğeyi seç",
+    "menuDismiss": "Menüyü kapat",
+    "dialogClose": "Pencereyi kapat",
+    "dialogFocus": "Pencere içinde odağı taşı",
+    "paletteMove": "Komut paleti: gezin ve çalıştır",
+    "menuNav": "Açılır menülerde gezin",
+    "popoverClose": "Açılır menüyü kapat",
+    "group": {
+      "global": "Genel",
+      "composer": "Sohbet yazma kutusu",
+      "dialogs": "Pencereler"
+    }
   },
   "modelPicker": {
     "title": "Model",
@@ -2012,7 +2062,13 @@
     },
     "notOnServer": "{{name}} · {{server}} üzerinde henüz yok",
     "howToInstall": "Nasıl kurulur",
-    "noteLocalClis": "Bu bilgisayardaki abonelik CLI'ları, bot \"bu bilgisayarda\" çalışırken kullanılır."
+    "noteLocalClis": "Bu bilgisayardaki abonelik CLI'ları, bot \"bu bilgisayarda\" çalışırken kullanılır.",
+    "blocked": {
+      "not_installed": "Kurulu değil",
+      "outdated": "Güncelleme gerekli",
+      "sign_in": "Önce oturum aç",
+      "unsupported": "Burada desteklenmiyor"
+    }
   },
   "settingsModal": {
     "title": "Ayarlar",
@@ -2126,7 +2182,8 @@
           "timeout": "Kurulum on dakikayı aştığı için durduruldu. Yeniden denemeden önce çıktıyı kontrol edin.",
           "output_limit": "Kurulum çıktısı sınırı aştığı için kurulum durduruldu. Devam etmek için terminalinizi kullanın.",
           "install_failed": "Kurulum başarıyla tamamlanamadı. Çıktıyı kontrol edin veya komutu terminalinizden çalıştırın."
-        }
+        },
+        "onThisComputer": "Bu bilgisayarda"
       },
       "advanced": "Gelişmiş sağlayıcı ayarları"
     },
@@ -2459,6 +2516,8 @@
       "khaki": "Kum ve haki",
       "frost": "Buz",
       "chalk": "Tebeşir",
+      "contrast-dark": "Yüksek kontrast koyu",
+      "contrast-light": "Yüksek kontrast açık",
       "custom": "Kendi teman"
     }
   },
@@ -3042,7 +3101,12 @@
       "off": "Kapalı"
     },
     "deleteBlocked": "Bu botun sohbetleri var ({{count}}); bu yüzden silinemez. Yalnızca sohbeti ve çalıştırması olmayan bot silinebilir.",
-    "deleteBlockedRuns": "Bu botun saklanan {{count}} çalıştırması var; bu yüzden silinemez. Yalnızca sohbeti ve çalıştırması olmayan bot silinebilir."
+    "deleteBlockedRuns": "Bu botun saklanan {{count}} çalıştırması var; bu yüzden silinemez. Yalnızca sohbeti ve çalıştırması olmayan bot silinebilir.",
+    "cliNote": {
+      "planner": "Kodlama CLI'ı her çağrıda tam bir oturum başlatır; kısa bir planlama adımı için fazla yavaş ve pahalı. \"Ana modelle aynı\"yı ya da bir API modeli kullan.",
+      "classifier": "Kodlama CLI'ı her çağrıda tam bir oturum başlatır; yönlendirme için fazla yavaş ve pahalı. \"Ana modelle aynı\"yı ya da bir API modeli kullan.",
+      "fallback": "Kodlama CLI'ı yedek olamaz: bot başına kendi onayı ve klasörü gerekir. Bir API modeli seç."
+    }
   },
   "addSkill": {
     "open": "Beceri ekle",
@@ -3305,7 +3369,7 @@
       "notOffered": "{{cli}} bu düzeyi sağlayamaz ({{setting}}); {{applied}} olarak çalışırdı, bu yüzden sunulmuyor."
     },
     "workspace": "Çalışma klasörü",
-    "workspacePlaceholder": "Mutlak yol, örneğin C:/Projeler/uygulamam",
+    "workspacePlaceholder": "Boş: Praxi bu bot için bir klasör açar. Ya da C:/Projeler/uygulamam gibi bir yol yaz",
     "workspaceHint": "CLI bu klasörde çalışır. Praxi veri klasörü, ana klasörünüz, sürücü kökleri ve kimlik bilgisi ya da CLI ayar klasörleri reddedilir.",
     "consentNative": "{{cli}} dosya ve komut işlemlerini bu bilgisayarda, bu klasörde yürüteceğini ve Praxi'nin bunları denetlemeyeceğini anlıyorum.",
     "consentFull": "Tam erişimin, {{cli}} dosyaları değiştirmeden veya komut çalıştırmadan önce sormayacağı anlamına geldiğini anlıyorum.",
@@ -3551,5 +3615,39 @@
     "empty": "Henüz güvenilen klasör yok. Bir klasörü okuduktan sonra onay kartından güvenebilirsiniz.",
     "remove": "{{folder}} klasörüne güveni kaldır",
     "ownerRequired": "Klasör güvenini değiştirmek için bu bilgisayardaki masaüstü uygulamasını açın."
+  },
+  "engineConsent": {
+    "title": "{{cli}} kendi araçlarıyla çalışacak",
+    "text": "{{cli}} dosyaları kendisi okur, düzenler ve komut çalıştırır; Praxi bu bot için bir klasör açar. Praxi'nin kendi araçları (tarayıcı, uygulamalar, bellek) Praxi'nin onaylarını korur.",
+    "levelLabel": "Sormadan ne kadar yapabilir",
+    "level": {
+      "ask": {
+        "name": "Sor",
+        "text": "{{cli}} bir şeyi değiştirmeden önce sorar. Her soru bir onay kartı olarak gelir."
+      },
+      "accept_edits": {
+        "name": "Düzenlemeleri kabul et",
+        "text": "Klasöründeki dosya düzenlemeleri geçer; komutlar ve geri kalan her şey yine sorar."
+      },
+      "auto": {
+        "name": "Otomatik",
+        "text": "{{cli}} kendi otomatik denetleyicisiyle neyin güvenli olduğuna karar verir."
+      },
+      "full": {
+        "name": "Tam erişim",
+        "text": "Onay sorusu yok. {{cli}} sormadan dosya değiştirebilir ve komut çalıştırabilir."
+      }
+    },
+    "onlyFull": "{{cli}} değişiklikten önce soramıyor; kendi araçlarıyla çalışmasının tek yolu Tam erişim.",
+    "fullConsent": "{{cli}} bu bilgisayarda dosya değiştirmeden ya da komut çalıştırmadan önce sormayacak, bunu anlıyorum.",
+    "notNow": "Şimdi değil",
+    "allow": "{{cli}} için izin ver",
+    "fixed": "Tamam. Mesajını yeniden gönder.",
+    "blocked": {
+      "not_installed": "{{cli}} burada kurulu değil. Ayarlar, Yapay zeka'dan kur.",
+      "outdated": "Praxi'nin kullanabilmesi için {{cli}} güncellenmeli. Ayarlar, Yapay zeka'dan güncelle.",
+      "sign_in": "{{cli}} oturumu kapalı. Ayarlar, Yapay zeka'dan oturum aç.",
+      "unsupported": "Praxi bu bilgisayarda {{cli}} çalıştıramıyor."
+    }
   }
 }

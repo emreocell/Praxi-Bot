@@ -192,6 +192,7 @@ export function ModelFields({
         value={ref}
        
         reviewOpen={false}
+        cliNote={t(`botEdit.cliNote.${role}`)}
         testId={`bot-edit-${role}`}
         autoOption={{
           label: t("botEdit.sameAsMain"),
@@ -261,6 +262,7 @@ export function ModelFields({
             value=""
            
             reviewOpen={false}
+            cliNote={t("botEdit.cliNote.fallback")}
             placement="bottom-start"
             placeholder={t("botEdit.addFallback")}
             testId="bot-edit-fallback"

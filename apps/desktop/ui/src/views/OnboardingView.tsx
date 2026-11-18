@@ -25,6 +25,7 @@ import {
   refLabel
 } from "../lib/firstRun";
 import { useDaemon } from "../state/DaemonContext";
+import { useEngineConsent } from "../state/EngineConsent";
 import type { AppSettings } from "../store/settingsStore";
 import { BotStep, type BotLook } from "./firstrun/BotStep";
 import { BrainStep } from "./firstrun/BrainStep";
@@ -58,6 +59,7 @@ function reviewStep(): FirstRunStep | undefined {
 export function OnboardingView({ settings, onLanguageChange, onSkip, onComplete, initialStep }: OnboardingViewProps) {
   const { t, i18n } = useTranslation();
   const { phase, client, bots, refreshBots, retry } = useDaemon();
+  const { askEngine, applyEngine } = useEngineConsent();
   const [state, dispatch] = useReducer(firstRunReducer, undefined, () => {
     const start = initialStep ?? reviewStep();
     if (!start || start === "brain") {
@@ -103,6 +105,12 @@ export function OnboardingView({ settings, onLanguageChange, onSkip, onComplete,
     setCreating(true);
     setBotError(null);
     try {
+      // "Use Claude Code" and the other CLI cards: an engine that only works with its own tools
+      // gets its one consent step here, before the bot exists, never as an error later.
+      const answer = await askEngine(state.model, created.current?.config);
+      if (answer === null) {
+        return;
+      }
       // Planner, classifier and fallback stay empty: the daemon assigns them from the brain.
       const draft: BotDraft = {
         ...draftFromBot(undefined),
@@ -123,6 +131,7 @@ export function OnboardingView({ settings, onLanguageChange, onSkip, onComplete,
         bots.map((b) => b.id)
       );
       created.current = bot;
+      await applyEngine(bot.id, answer);
       await refreshBots().catch(() => {});
       dispatch({ type: "started" });
       onComplete({ botId: bot.id });

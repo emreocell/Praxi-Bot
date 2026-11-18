@@ -24,6 +24,7 @@ import {
   refLabel
 } from "../../lib/firstRun";
 import { productBrandKey, providerBrand } from "../../lib/modelBrand";
+import { humanProviderTestError } from "../../lib/humanError";
 import { isCliDefault, modelGroups } from "../../lib/modelPicker";
 import { canManageProviders, PROVIDERS_LOCAL_ONLY } from "../../lib/providerConnection";
 import { addProvider, setDefaultProvider, testProvider } from "../../lib/providers";
@@ -257,7 +258,12 @@ export function BrainStep({
   const busy = state.phase === "connecting";
   const connected = state.phase === "connected";
   const errorName = subject || groupName;
-  const error = state.error ? t(`firstRun.errors.${state.error}`, { name: errorName }) : null;
+  const providerError = state.error === "provider_endpoint" || state.error === "provider_model"
+    ? humanProviderTestError(state.error)
+    : null;
+  const error = providerError
+    ? `${providerError.title}. ${providerError.hint}`
+    : state.error ? t(`firstRun.errors.${state.error}`, { name: errorName }) : null;
   const ollamaFound = dto?.configured.some((p) => p.id === "ollama" && p.enabled && p.models.length > 0) === true;
   const keyOpen = group !== null && group !== "ollama" && !connected;
 

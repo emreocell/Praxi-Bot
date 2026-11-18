@@ -279,7 +279,7 @@ async fn claude_cmd_prompt_absent() {
 }
 #[tokio::test]
 async fn native_tools_are_refused() {
-    for (engine, mode) in [(Engine::Claude, "bash")] {
+    for (engine, mode) in [(Engine::Claude, "bash"), (Engine::Claude, "bash-listed")] {
         let (_dir, cli) = fixture(engine, mode, false);
         let host = Host::new(true);
         assert_eq!(

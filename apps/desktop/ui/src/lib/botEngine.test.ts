@@ -18,4 +18,6 @@ test("engine settings: default Ask, consent per widening switch, CLI from the ex
     consent_native_tools: false, consent_full_access: true
   });
   assert.deepEqual(engineRequest(DEFAULT_ENGINE, full, none), { mode: "praxi_governed" });
+  // No folder typed: none is sent and the daemon makes one for the bot.
+  assert.equal("workspace" in engineRequest({ ...native, workspace: "  " }, DEFAULT_ENGINE, { native: true, full: false }), false);
 });

@@ -3197,7 +3197,10 @@ export interface components {
             consent_native_tools?: boolean;
             /** @description `praxi_governed` (Praxi runs files and shell) or `native_tools` (the CLI does). */
             mode: string;
-            /** @description Absolute workspace folder; required for `native_tools`. */
+            /**
+             * @description Absolute workspace folder for `native_tools`; when omitted the daemon creates
+             *     `<home>/Praxi/<bot>` for the bot.
+             */
             workspace?: string | null;
         };
         /**
@@ -6194,6 +6197,12 @@ export interface components {
         };
         /** @description Body of `POST /v1/runs/stop`. */
         StopRunsInput: {
+            /**
+             * @description Hard stop: besides firing the cancel token, abort the run's task so a
+             *     run stuck in work that ignores the token still ends (its process
+             *     trees and requests are dropped). Applies to this receipt and to repeats.
+             */
+            force?: boolean;
             /** @description Runs the caller knew about (at most 1024). Only the first receipt reads them. */
             run_ids?: string[];
             /** @description Which runs the Stop targets besides `run_ids`. */

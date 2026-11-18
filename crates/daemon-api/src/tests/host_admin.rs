@@ -1170,11 +1170,16 @@ async fn the_plan_asks_about_same_named_bots_and_the_answer_is_remembered() {
 static LOGIN_TURN: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn login_fixture() -> std::path::PathBuf {
+    // Cargo puts unit-test executables in `target/debug/deps` or, with the split build-dir
+    // layout (CI), in `target/debug/build/<pkg>/<hash>/out`; the crate's own binaries are in
+    // `target/debug`. Walk up from the test executable instead of assuming one depth.
+    let name = format!("daemon-login-fixture{}", std::env::consts::EXE_SUFFIX);
     let exe = std::env::current_exe().unwrap();
-    exe.parent().unwrap().parent().unwrap().join(format!(
-        "daemon-login-fixture{}",
-        std::env::consts::EXE_SUFFIX
-    ))
+    exe.ancestors()
+        .skip(1)
+        .map(|d| d.join(&name))
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| panic!("{name} not found above {}", exe.display()))
 }
 
 /// A host whose `claude` and `codex` are the hermetic fixture, with its own HOME. With `pin`,

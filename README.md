@@ -6,8 +6,9 @@ LLM providers you choose (cloud APIs or local models).
 The core daemon is written in Rust (tokio + axum); node-agents dial out to it
 from every machine you want to control, requiring no inbound ports.
 
-**Status: early development — not usable yet.**
-No stable API, no releases. Expect breaking changes at any time.
+**Project status: alpha.** A first pre-release (`v0.1.0-alpha.1`) exists, but there is no stable
+API and things change quickly. Expect breaking changes; back up your data directory before
+updating. Only the latest pre-release is supported (see [SECURITY.md](SECURITY.md)).
 
 ## Documentation
 
@@ -125,6 +126,14 @@ are pre-configured as placeholders under `bundle.windows` in
 
 Talk to your bots from Telegram (`bot channels telegram setup` / `pair`); see [docs/telegram.md](docs/telegram.md)
 or the [user guide page](docs/guide/telegram.md).
+
+## Contributing
+
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) (build, test, conventions,
+how to open a pull request), pick something from the
+[starter issues](docs/contributing/starter-issues.md), and see the [roadmap](docs/ROADMAP.md).
+Please follow the [Code of Conduct](CODE_OF_CONDUCT.md) and report vulnerabilities privately as
+described in [SECURITY.md](SECURITY.md).
 
 ## License
 

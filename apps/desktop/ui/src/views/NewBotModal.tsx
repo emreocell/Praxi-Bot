@@ -35,6 +35,7 @@ import { botHasAccess, changedApps, saveBotAndApps } from "../lib/mcpApps";
 import { botWriteMessage } from "../lib/botWrite";
 import { modelGroups } from "../lib/modelPicker";
 import { LOCAL_COMPUTER, useDaemon } from "../state/DaemonContext";
+import { useEngineConsent } from "../state/EngineConsent";
 import { useCustomText } from "../state/useCustomText";
 import styles from "./NewBotModal.module.css";
 import { HomeHint } from "../components/HomeHint";
@@ -48,6 +49,7 @@ function NewBotDialogContent({
 }) {
   const { t } = useTranslation();
   const { client, bots, conn, refreshBots, activeComputerId, activeHostName } = useDaemon();
+  const { askEngine, applyEngine } = useEngineConsent();
   const host = activeComputerId === LOCAL_COMPUTER ? null : { name: activeHostName ?? t("computerPicker.host") };
   const {
     providersDto,
@@ -121,6 +123,11 @@ function NewBotDialogContent({
     setSaving(true);
     setError(null);
     try {
+      // A CLI model that only works with its own tools: the one consent step, before creating.
+      const answer = await askEngine(formatModelRef(effectiveDraft.executor), createdBot?.config);
+      if (answer === null) {
+        return;
+      }
       const target = createdBot ?? undefined;
       const config = configFromDraft(effectiveDraft, target);
       const input = { name: effectiveDraft.name.trim(), config };
@@ -135,6 +142,7 @@ function NewBotDialogContent({
       if (!target) {
         setCreatedBot(bot);
       }
+      await applyEngine(bot.id, answer);
       await refreshBots().catch(() => {});
       if (failed.length > 0 || notApplied.length > 0) {
         const fresh = await client.listMcpServers().catch(() => null);

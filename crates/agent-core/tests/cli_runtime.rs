@@ -326,10 +326,7 @@ async fn child(case: &str) {
         assert!(!root.join("pid").exists(), "codex fixture was spawned");
         let events = storage::read_event_log(root.join("store").as_path(), run).unwrap();
         let event_text = format!("{events:?}");
-        assert!(
-            event_text.contains(cli_provider::detect::CODEX_UNCONFINABLE_MESSAGE),
-            "{event_text}"
-        );
+        assert!(event_text.contains("engine_needs_native"), "{event_text}");
         assert!(!event_text.contains("ToolCallRequested"));
         lp.shutdown(Duration::ZERO).await;
         return;

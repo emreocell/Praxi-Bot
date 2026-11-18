@@ -42,7 +42,7 @@ test("modelLine splits provider and model and names CLI defaults after the CLI",
   assert.deepEqual(modelLine("claude-code/default"), {
     name: "Claude Code CLI",
     provider: "Anthropic",
-    brand: "anthropic",
+    brand: "claude",
     isDefault: true
   });
   // A ref without a provider is still named.

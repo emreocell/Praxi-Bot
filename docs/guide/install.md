@@ -1,8 +1,9 @@
 # Install and first run
 
 There are two ways to get Praxi: the Windows installer (no terminal needed) or
-a build from source (any OS for the CLI and daemon). There are no published
-releases yet, so today you either build the installer yourself or build the CLI.
+a build from source (any OS for the CLI and daemon). The only release so far is
+the pre-release `v0.1.0-alpha.1` (a Windows installer), so otherwise you build
+the installer yourself or build the CLI.
 
 ## Option A: Windows desktop app
 

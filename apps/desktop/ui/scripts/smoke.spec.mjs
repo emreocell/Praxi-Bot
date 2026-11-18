@@ -1,7 +1,8 @@
 // The flows of the real-app smoke run (card 263). Driven by scripts/smoke.mjs; no test framework:
 // each step is a function, a thrown error fails it, and every step ends with a screenshot plus a
 // check for error banners, danger toasts, console errors and failed requests.
-/* global window, document, location, fetch, URL, console, setInterval, clearInterval */
+/* global window, document, location, fetch, URL, console, setInterval, clearInterval, setTimeout */
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import process from 'node:process';
 import { join } from 'node:path';
 
@@ -375,6 +376,136 @@ export async function flows(ctx) {
       if (ownerCode === 'owner_key_required') throw new Error(`${path}: refused even with the owner key`);
     }
   });
+  // ---- Stop must work every time (card 280): press Stop in the real UI, then ask the daemon.
+  const api = (path, init = {}) => fetch(`${ctx.base}/v1${path}`, { ...init, headers: auth(init.headers) });
+  const runsNow = async () => (await api('/runs')).json();
+  const isTerminal = (st) => ['succeeded', 'failed', 'cancelled'].includes(st);
+  const until = async (what, fn, ms) => {
+    const end = Date.now() + ms;
+    for (;;) {
+      const v = await fn();
+      if (v) return v;
+      if (Date.now() > end) throw new Error(`timed out (${ms} ms): ${what}`);
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  };
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const holdScript = join(ctx.workDir, 'hold.js');
+  writeFileSync(holdScript, "require('fs').writeFileSync(process.argv[2], String(process.pid)); setInterval(() => {}, 1000);\n");
+  const STOP_WITHIN = 3000;
+  const composerEmpty = (page) => page.waitForFunction(() => { const el = document.querySelector('textarea[role="combobox"]'); return !el || el.value === ''; }, null, { timeout: 30000 });
+  const openCount = () => ctx.stubLog.filter((l) => l === 'MODEL_OPEN').length;
+  const abortCount = () => ctx.stubLog.filter((l) => l === 'MODEL_ABORTED').length;
+  /** Press Stop, then within 3 s: run cancelled in the daemon, UI out of the running state, composer usable. */
+  const stopAndCheck = async (page, before, { appearWithin = 15000 } = {}) => {
+    const stopBtn = page.getByTestId('run-bar-stop');
+    await stopBtn.waitFor({ timeout: appearWithin });
+    const t0 = Date.now();
+    await stopBtn.click();
+    await until('run reaches "cancelled" in the daemon', async () => (await runsNow()).find((r) => !before.has(r.id) && !r.parent_run_id && r.state === 'cancelled'), STOP_WITHIN);
+    await page.getByTestId('run-bar').waitFor({ state: 'hidden', timeout: Math.max(STOP_WITHIN - (Date.now() - t0), 500) });
+    if (await page.getByTestId('run-bar-stop').isVisible()) throw new Error('the Stop button is still shown after the run stopped');
+    const c = composer(page);
+    await c.fill('x');
+    await page.getByRole('button', { name: /^send$/i }).and(page.locator(':enabled')).waitFor({ timeout: 3000 });
+    await c.fill('');
+  };
+  const gotoBot = async (page, name) => {
+    await page.locator('[class*="railItem"]', { hasText: name }).first().click();
+    await openFirstChat(page);
+    await page.getByTestId('run-bar').waitFor({ state: 'hidden', timeout: 30000 }).catch(() => {});
+  };
+  await run(s, 'Stop (a): during a slow model response the request is aborted and the run is cancelled', async (page) => {
+    await gotoBot(page, 'Fulla');
+    const before = new Set((await runsNow()).map((r) => r.id));
+    const open0 = openCount();
+    const abort0 = abortCount();
+    await send(page, 'slow:60000');
+    await until('provider request open', () => openCount() > open0, 20000);
+    await stopAndCheck(page, before);
+    await until('provider request aborted', () => abortCount() > abort0, STOP_WITHIN);
+  });
+  await run(s, 'Stop (b): during a long shell_run the process tree is gone and nothing else runs', async (page) => {
+    await gotoBot(page, 'Fulla');
+    const before = new Set((await runsNow()).map((r) => r.id));
+    const pidFile = join(ctx.workDir, 'hold.pid');
+    rmSync(pidFile, { force: true });
+    const command = `& '${process.execPath}' '${holdScript}' '${pidFile}'`;
+    await sendLines(page, [`call:shell_run ${JSON.stringify({ command })}`, `call:shell_run ${JSON.stringify({ command: 'echo must-not-run' })}`]);
+    const pid = await until('hold process started', () => (existsSync(pidFile) ? Number(readFileSync(pidFile, 'utf8')) : 0), 60000);
+    await stopAndCheck(page, before);
+    await until('hold process gone', () => !alive(pid), STOP_WITHIN);
+    await new Promise((r) => setTimeout(r, 1000));
+    if ((await page.getByText(/tool said: .*must-not-run/).count()) > 0) throw new Error('the second tool call ran after Stop');
+  });
+  await run(s, 'Stop (c): while an approval card is open the run is cancelled and the card is dead', async (page) => {
+    await gotoBot(page, 'Nova');
+    const before = new Set((await runsNow()).map((r) => r.id));
+    const target = join(ctx.workDir, 'stop-approval.txt');
+    await send(page, `call:fs_write ${JSON.stringify({ path: target, content: 'hi' })}`);
+    await cards(page).first().waitFor(T);
+    await stopAndCheck(page, before);
+    if ((await page.getByRole('button', { name: /allow once|^allow/i }).count()) > 0) throw new Error('an approval card can still be answered after Stop');
+    if (existsSync(target)) throw new Error('the gated tool ran');
+  });
+  await run(s, 'Stop (d): pressed right after Send, before the first event, still stops the run', async (page) => {
+    await gotoBot(page, 'Fulla');
+    const before = new Set((await runsNow()).map((r) => r.id));
+    const c = composer(page);
+    await c.fill('slow:60000');
+    await c.press('Enter');
+    // No waiting for any event: the Stop control must already be there and must work.
+    await stopAndCheck(page, before, { appearWithin: 1500 });
+    await new Promise((r) => setTimeout(r, 1000));
+    const live = (await runsNow()).filter((r) => !before.has(r.id) && !isTerminal(r.state));
+    if (live.length) throw new Error(`a run is still live after Stop: ${live.map((r) => r.state).join(',')}`);
+  });
+  await run(s, 'Stop (e): with a second message queued, Stop ends the run and the queued message does not start', async (page) => {
+    await gotoBot(page, 'Fulla');
+    const before = new Set((await runsNow()).map((r) => r.id));
+    const open0 = openCount();
+    await send(page, 'slow:60000');
+    await until('provider request open', () => openCount() > open0, 20000);
+    await composerEmpty(page);
+    await send(page, 'echo second queued message');
+    await composerEmpty(page);
+    await stopAndCheck(page, before);
+    await new Promise((r) => setTimeout(r, 2000));
+    const started = (await runsNow()).filter((r) => !before.has(r.id) && !r.parent_run_id);
+    if (started.length !== 1) throw new Error(`Stop left ${started.length} runs (${started.map((r) => r.state).join(',')}); the queued message started a new turn`);
+    if (openCount() !== open0 + 1) throw new Error('a further model request was made after Stop');
+  });
   await s.context.close();
+
+  // ---- a coding CLI that only works with its own tools (a fake `cursor-agent` on PATH speaking ACP; the harness
+  // cannot use real subscriptions): pick it in the wizard, give the one consent, the reply arrives.
+  const cli = await newSession(ctx, { onboarded: false });
+  await run(cli, 'a CLI model that needs its own tools: one consent step, then its reply arrives', async (page) => {
+    await page.goto(ctx.uiUrl);
+    await page.getByTestId('onboarding-view').waitFor(T);
+    await page.getByTestId('fr-cli-cursor').click();
+    await page.getByTestId('fr-connected').waitFor({ timeout: 60000 });
+    await page.getByTestId('fr-next').click();
+    await page.getByTestId('fr-level-balanced').waitFor(T);
+    await page.getByTestId('fr-next').click();
+    await page.getByTestId('new-bot-name').fill('Cliy');
+    await page.getByTestId('fr-next').click();
+    // The consent is asked here, with Ask preselected, not as an error after the first message.
+    await page.getByTestId('engine-consent').waitFor(T);
+    if (!(await page.getByTestId('engine-consent-level-ask').locator('input').isChecked())) throw new Error('Ask is not preselected');
+    await page.getByTestId('engine-consent-allow').click();
+    await page.getByTestId('bot-empty-state').waitFor(T);
+    const bots = await (await fetch(`${ctx.base}/v1/bots`, { headers: { authorization: `Bearer ${ctx.token}` } })).json();
+    const engine = bots.find((x) => x.name === 'Cliy')?.config?.engine;
+    if (engine?.mode !== 'native_tools' || engine?.approval_level !== 'ask') throw new Error(`the bot was stored as ${JSON.stringify(engine)}`);
+    await openFirstChat(page);
+    await send(page, 'hello cli');
+    await page.getByText(/native acp/).first().waitFor(SLOW);
+    // The fake CLI asks to run a command at the Ask level: the question is a Praxi approval card.
+    const allow = page.getByRole('button', { name: /allow once|^allow/i }).first();
+    await allow.waitFor(T);
+    await allow.click();
+  });
+  await cli.context.close();
   return results;
 }

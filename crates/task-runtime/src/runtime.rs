@@ -261,6 +261,31 @@ impl Runtime {
         Ok(())
     }
 
+    /// Finish a run whose drive task was aborted (a hard stop): its token is
+    /// dropped, unfinished steps become `Interrupted` and a non-terminal run is
+    /// set to `Cancelled` without waiting for the task. Returns `true` when the
+    /// state changed.
+    ///
+    /// # Errors
+    /// Fails if the run is missing or storage fails.
+    pub fn finish_aborted(&self, run_id: RunId) -> Result<bool> {
+        self.tokens.lock().remove(&run_id);
+        self.pausing.lock().remove(&run_id);
+        let run = self.require_run(run_id)?;
+        let from = RunState::parse(&run.state).ok_or(RuntimeError::UnknownState(run.state))?;
+        if from.is_terminal() {
+            return Ok(false);
+        }
+        self.storage.relabel_steps(
+            run_id,
+            StepStatus::Intent.as_str(),
+            StepStatus::Interrupted.as_str(),
+        )?;
+        self.storage
+            .update_run_state(run_id, RunState::Cancelled.as_str(), None)?;
+        Ok(true)
+    }
+
     /// Runs currently driven by this runtime (a task is executing them).
     #[must_use]
     pub fn active_runs(&self) -> Vec<RunId> {

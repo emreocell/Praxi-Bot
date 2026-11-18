@@ -1,18 +1,36 @@
-## Summary
+## What and why
 
-<!-- One sentence: what does this PR do? -->
+<!-- What does this change, and why? Link the issue: Closes #123 -->
 
-## Changes
+## How it was tested
 
-<!-- Bullet list of the main changes. -->
+- [ ] `cargo fmt --all -- --check`
+- [ ] `cargo clippy -p <crates you touched> --all-targets -- -D warnings`
+- [ ] `cargo test -p <crates you touched>`
+- [ ] `pnpm typecheck`, `pnpm lint` and `pnpm --dir apps/desktop/ui test` (UI changes)
+- [ ] `pnpm --dir apps/desktop/ui check:i18n` and `check:themes` (UI text or styles)
+- [ ] `cargo deny check` (dependencies changed)
+- [ ] Other (describe): 
 
-## Testing
+## Screenshots (UI changes)
 
-- [ ] `cargo fmt` passes
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings` passes
-- [ ] `cargo test --workspace` passes
-- [ ] `cargo deny check` passes (if dependencies changed)
+<!-- Mock mode (?mock=1): at least one dark theme and the light theme; both languages if text changed. -->
 
-## Related issue
+## Generated files
 
-<!-- Closes #NNN -->
+- [ ] No API change, or `docs/api/openapi.json` and `apps/desktop/ui/src/api/schema.d.ts` were regenerated with the repo scripts (never hand-edited)
+
+## Security-sensitive areas touched
+
+<!-- Tick what applies; maintainers review these more closely. See CONTRIBUTING.md. -->
+
+- [ ] Approvals / permissions / the never-list
+- [ ] The egress gate
+- [ ] Secrets or redaction
+- [ ] Pairing, host administration or owner-only routes (new routes are classified in `owner.rs`)
+- [ ] File protected paths or the shell tool
+- [ ] None of the above
+
+## Notes for the reviewer
+
+<!-- Not done / not verified / anything surprising. -->

@@ -1118,7 +1118,13 @@ pub(crate) async fn claude_version(
 /// CLI does not advertise the permission mode and tool flags this crate sends.
 pub(crate) async fn claude_help(resolved: &ResolvedCommand, env: &PathEnv) -> Option<String> {
     let (status, stdout, _) = run_process_probe(resolved, &["--help"], env).await.ok()?;
-    status.success().then_some(stdout)
+    status.success().then(|| normalize_help(&stdout))
+}
+
+/// `--help` is word-wrapped at the terminal width (80 columns when piped), so a phrase such as
+/// "disable all tools" can be split over two lines. Every probe matches on single-spaced text.
+pub(crate) fn normalize_help(help: &str) -> String {
+    help.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Probe Codex version without opening login files or exposing raw diagnostics.

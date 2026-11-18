@@ -124,6 +124,11 @@ fn acp(args: &[String]) {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // `cursor-agent status [--format json]`: the sign-in probe of the Cursor engine.
+    if args.first().is_some_and(|a| a == "status") {
+        println!("{{\"isAuthenticated\":true}}");
+        return;
+    }
     if args.iter().any(|a| a == "acp" || a == "--acp") {
         acp(&args);
     } else {

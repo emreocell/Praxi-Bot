@@ -170,6 +170,11 @@
   color: var(--color-accent-text);
 }
 
+.optionBlocked {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .optionText {
   flex: 1;
   min-width: var(--space-0);
