@@ -1687,6 +1687,7 @@
     "nextRun": "Sonraki çalışma",
     "lastRun": "Son çalışma",
     "never": "Hiç",
+    "missed": "Kapalıyken kaçırılan",
     "payload": {
       "workflow": "{{name}} iş akışını çalıştırır",
       "tool": "{{name}} aracını çağırır",

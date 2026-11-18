@@ -17089,6 +17089,12 @@
             "type": "string",
             "description": "`skip`, `run_once` or `run_all`: what happens to occurrences missed\nwhile the daemon was down."
           },
+          "missed_occurrences": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Occurrences that never ran because the daemon stopped (for example the\ncomputer was off or asleep). They are not replayed; shown as \"missed\".",
+            "minimum": 0
+          },
           "moved_to": {
             "type": [
               "string",

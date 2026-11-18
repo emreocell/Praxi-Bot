@@ -263,6 +263,12 @@ export function SchedulesView({
                             : t("schedules.never")}
                         </dd>
                       </div>
+                      {(s.missed_occurrences ?? 0) > 0 ? (
+                        <div data-testid="schedule-missed">
+                          <dt>{t("schedules.missed")}</dt>
+                          <dd>{s.missed_occurrences}</dd>
+                        </div>
+                      ) : null}
                     </dl>
 
                     {s.moved_to ? (

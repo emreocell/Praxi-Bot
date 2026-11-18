@@ -1687,6 +1687,7 @@
     "nextRun": "Next run",
     "lastRun": "Last run",
     "never": "Never",
+    "missed": "Missed while off",
     "payload": {
       "workflow": "Runs workflow {{name}}",
       "tool": "Calls tool {{name}}",

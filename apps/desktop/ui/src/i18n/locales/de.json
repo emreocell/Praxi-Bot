@@ -1687,6 +1687,7 @@
     "nextRun": "Nächster Lauf",
     "lastRun": "Letzter Lauf",
     "never": "Nie",
+    "missed": "Verpasst, während aus",
     "payload": {
       "workflow": "Führt Workflow {{name}} aus",
       "tool": "Ruft Werkzeug {{name}} auf",

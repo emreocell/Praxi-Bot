@@ -188,6 +188,7 @@ async fn schedule_crud_and_validation() {
     assert_eq!(s["misfire_policy"], "skip");
     assert!(s["next_run_at_ms"].as_i64().unwrap() > storage::now_ms());
     assert!(s["last_run_at_ms"].is_null());
+    assert_eq!(s["missed_occurrences"], 0);
 
     let list = call(&t, Method::GET, "/v1/schedules", None).await.json();
     assert_eq!(list.as_array().unwrap().len(), 1);

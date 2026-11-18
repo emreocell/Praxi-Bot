@@ -5636,6 +5636,12 @@ export interface components {
              */
             misfire_policy: string;
             /**
+             * Format: int32
+             * @description Occurrences that never ran because the daemon stopped (for example the
+             *     computer was off or asleep). They are not replayed; shown as "missed".
+             */
+            missed_occurrences?: number;
+            /**
              * @description Name of the server this schedule was moved to. The local copy is then disabled
              *     (not deleted) so nothing runs twice.
              */

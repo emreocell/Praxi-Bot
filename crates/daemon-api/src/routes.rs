@@ -1993,6 +1993,7 @@ fn schedule_dto(sc: &Schedule, has_webhook: bool) -> ScheduleDto {
         skipped_by_precheck: 0,
         consecutive_errors: 0,
         origin: sc.origin.as_str().to_owned(),
+        missed_occurrences: sc.missed_occurrences,
         moved_to: None,
     }
 }

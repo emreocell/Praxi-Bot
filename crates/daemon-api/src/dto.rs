@@ -835,6 +835,10 @@ pub struct ScheduleDto {
     /// Who created it: `user`, or `bot` (a bot's schedule tools, after you
     /// approved it). A bot may change only its own `bot` schedules.
     pub origin: String,
+    /// Occurrences that never ran because the daemon stopped (for example the
+    /// computer was off or asleep). They are not replayed; shown as "missed".
+    #[serde(default)]
+    pub missed_occurrences: u32,
     /// Name of the server this schedule was moved to. The local copy is then disabled
     /// (not deleted) so nothing runs twice.
     #[serde(default, skip_serializing_if = "Option::is_none")]
