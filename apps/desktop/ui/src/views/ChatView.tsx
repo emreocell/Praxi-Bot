@@ -78,7 +78,10 @@ import {
   applyCompletion,
   detectTrigger,
   mentionHandle,
-  SLASH_COMMANDS
+  SLASH_COMMANDS,
+  APP_COMMAND_EVENT,
+  APP_COMMANDS,
+  appCommandFor
 } from "../lib/slash";
 import {
   newChatIdFromText,
@@ -536,7 +539,7 @@ export function ChatView({
       return [];
     }
     if (triggerKind === "slash") {
-      return rank(SLASH_COMMANDS, triggerQuery, (c) => ({
+      return rank([...SLASH_COMMANDS, ...APP_COMMANDS], triggerQuery, (c) => ({
         text: c.name,
         keywords: [t(c.i18nKey)]
       })).map((r) => ({
@@ -617,6 +620,13 @@ export function ChatView({
   const send = async () => {
     const body = text.trim();
     if (!client || !body || sending) {
+      return;
+    }
+    // "/help", "/settings" ...: the app opens the place itself; nothing is sent to the bot.
+    const appCommand = appCommandFor(body);
+    if (appCommand) {
+      setText("");
+      window.dispatchEvent(new CustomEvent(APP_COMMAND_EVENT, { detail: appCommand.target }));
       return;
     }
     setSending(true);

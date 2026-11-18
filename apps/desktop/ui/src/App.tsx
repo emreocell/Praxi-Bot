@@ -45,6 +45,7 @@ import { AccountMenu, type AccountAction } from "./components/AccountMenu";
 import { Popover } from "./components/Popover";
 import { HealthIndicator } from "./components/HealthIndicator";
 import { HelpModal } from "./components/HelpModal";
+import { APP_COMMAND_EVENT, type AppCommandTarget } from "./lib/slash";
 import { editorSection } from "./lib/botEditor";
 import { BOT_COLORS, botView, draftFromBot } from "./lib/botProfile";
 import {
@@ -521,6 +522,18 @@ function AppShell() {
       setHelpOpen(true);
     }
   };
+
+  // Composer commands (/help, /settings ...) ask the shell to open the same places as the profile menu.
+  const accountActionRef = useRef(handleAccountAction);
+  accountActionRef.current = handleAccountAction;
+  useEffect(() => {
+    const onCommand = (e: Event) => {
+      const target = (e as CustomEvent<AppCommandTarget>).detail;
+      accountActionRef.current(target);
+    };
+    window.addEventListener(APP_COMMAND_EVENT, onCommand);
+    return () => window.removeEventListener(APP_COMMAND_EVENT, onCommand);
+  }, []);
 
   // Ctrl/Cmd + , opens settings (the shortcut the profile menu advertises).
   useEffect(() => {

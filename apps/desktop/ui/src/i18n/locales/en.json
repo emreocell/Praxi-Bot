@@ -560,6 +560,11 @@
     "slash": {
       "new": "Start a new chat",
       "stop": "Stop the current run",
+      "help": "Open help and shortcuts",
+      "settings": "Open settings",
+      "models": "Open the AI models settings",
+      "apps": "Open apps",
+      "schedules": "Open schedules",
       "menu": "Commands",
       "mentionMenu": "Bots",
       "noMatch": "No match"

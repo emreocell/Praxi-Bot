@@ -4,6 +4,8 @@ import {
   applyCompletion,
   detectTrigger,
   mentionHandle,
+  appCommandFor,
+  APP_COMMANDS,
   parseSlashInput,
   SLASH_COMMANDS
 } from "./slash.ts";
@@ -94,4 +96,14 @@ test("every slash command is lowercase and parses", () => {
 
 test("mention handle is the bot name without whitespace", () => {
   assert.equal(mentionHandle("Deep Work"), "DeepWork");
+});
+
+test("an app command is exactly /name; arguments or other text go to the bot", () => {
+  assert.equal(appCommandFor("/help")?.target, "help");
+  assert.equal(appCommandFor("  /Models ")?.target, "ai");
+  assert.equal(appCommandFor("/help me with my taxes"), null);
+  assert.equal(appCommandFor("/nope"), null);
+  for (const c of APP_COMMANDS) {
+    assert.ok(!SLASH_COMMANDS.some((d) => d.name === c.name), `${c.name} clashes with a daemon command`);
+  }
 });

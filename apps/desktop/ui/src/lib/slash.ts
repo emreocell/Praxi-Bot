@@ -15,6 +15,34 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: "stop", i18nKey: "chat.slash.stop" }
 ] as const;
 
+/** Window event a composer command uses to ask the app shell to open something (detail: the target). */
+export const APP_COMMAND_EVENT = "praxi:app-command";
+
+/** Where an app command goes: the same targets the profile menu offers. */
+export type AppCommandTarget = "help" | "settings" | "apps" | "schedules" | "ai";
+
+/** Commands the app itself runs (open a dialog or screen); they never reach the daemon. */
+export interface AppCommand extends SlashCommand {
+  target: AppCommandTarget;
+}
+
+export const APP_COMMANDS: readonly AppCommand[] = [
+  { name: "help", i18nKey: "chat.slash.help", target: "help" },
+  { name: "settings", i18nKey: "chat.slash.settings", target: "settings" },
+  { name: "models", i18nKey: "chat.slash.models", target: "ai" },
+  { name: "apps", i18nKey: "chat.slash.apps", target: "apps" },
+  { name: "schedules", i18nKey: "chat.slash.schedules", target: "schedules" }
+] as const;
+
+/** The app command a message is, when it is exactly `/name` (no arguments); otherwise `null`. */
+export function appCommandFor(text: string): AppCommand | null {
+  const parsed = parseSlashInput(text);
+  if (!parsed || parsed.args !== "") {
+    return null;
+  }
+  return APP_COMMANDS.find((c) => c.name === parsed.name) ?? null;
+}
+
 export type Trigger =
   | { kind: "slash"; query: string; start: number; end: number }
   | { kind: "mention"; query: string; start: number; end: number };
