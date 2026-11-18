@@ -18,8 +18,10 @@ has a usage screen).
 
 ### Which operating systems work?
 The CLI and daemon build on Windows, Linux and macOS. Desktop control (clicking
-and typing in other apps) is implemented for Windows only; the Linux and macOS
-backends are not usable yet. The desktop app and installer are Windows. Browser
+and typing in other apps) works on Windows (UI Automation) and on Linux under
+X11 or a virtual Xvfb display (AT-SPI2 and XTest; Wayland sessions are
+refused). The macOS backend is a stub and is not usable yet. The desktop app and
+installer are Windows. Browser
 tools drive a Chromium-based browser through the DevTools protocol and work
 where such a browser is available.
 
@@ -63,15 +65,18 @@ repository, but the daemon does not enable it yet (**Planned**). Chats keep
 their own history.
 
 ### Can I add MCP servers or plugins?
-MCP support exists as a library and is not wired into the daemon yet
-(**Planned**); see [MCP servers](mcp-servers.md). The design calls for plugins
-for tools, providers and channels; there is no plugin API for end users yet.
+Yes for MCP servers: `bot serve` loads `mcp.toml` and runs the enabled servers,
+and you can manage them through `/v1/mcp/servers`; see
+[MCP servers](mcp-servers.md). Plugins are still **Planned**: the design calls
+for plugins for tools, providers and channels, but there is no plugin API for
+end users yet.
 
 ### Can one bot control another computer?
-Not yet in the product. The repository contains a node-agent (`bot-node`) with
-pairing (`join`, `run`, `devices`) and the peer network code, intended so that a
-machine you own can be controlled by your core without inbound ports. The core
-side is not connected to the daemon yet, so treat it as **experimental**.
+Yes, experimentally. A bot can be pointed at a paired PC (the profile's computer
+target; see [Bots and profiles](bots-and-profiles.md)), and the daemon starts the
+peer network that serves it. The node-agent (`bot-node`, commands `join`, `run`,
+`devices`) lets a machine you own be controlled without inbound ports. Remote
+PC runs expose desktop tools only. Treat the whole path as **experimental**.
 
 ### Which other messaging apps are supported?
 Telegram only. Others, such as email or chat services, are in the design
