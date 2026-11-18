@@ -244,10 +244,10 @@ mod pty {
             // `pid (comm) state ppid pgrp session ...`; comm may hold spaces and parentheses.
             let rest = &stat[stat.rfind(')')? + 1..];
             let mut f = rest.split_whitespace().skip(1);
-            let ppid: i32 = f.next()?.parse().ok()?;
+            let parent: i32 = f.next()?.parse().ok()?;
             let _pgrp = f.next()?;
             let session: i32 = f.next()?.parse().ok()?;
-            Some((pid, ppid, session))
+            Some((pid, parent, session))
         })
         .collect()
     }
@@ -263,9 +263,9 @@ mod pty {
         let mut i = 0;
         while i < tree.len() {
             let parent = tree[i];
-            for (pid, ppid, _) in &table {
-                if *ppid == parent && !tree.contains(pid) {
-                    tree.push(*pid);
+            for (candidate, its_parent, _) in &table {
+                if *its_parent == parent && !tree.contains(candidate) {
+                    tree.push(*candidate);
                 }
             }
             i += 1;
@@ -553,7 +553,7 @@ fn open_session(
         .filter(|h| h.is_dir())
         .unwrap_or_else(|| s.data_dir());
     let (handle, mut child, reader) =
-        pty::spawn(&shell_path(), cols, rows, env, Some(start_dir.as_path())).map_err(|_| {
+        pty::spawn(&shell_path(), cols, rows, &env, Some(start_dir.as_path())).map_err(|_| {
             ApiError::new(
                 StatusCode::CONFLICT,
                 codes::START_FAILED,
