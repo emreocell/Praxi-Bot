@@ -17,15 +17,25 @@ Running `bot` with no command prints a hint to run `bot setup`.
 | `--data-dir <PATH>` | `BOT_DATA_DIR` | OS app-data dir | Data directory |
 | `--catalog-dir <PATH>` | `BOT_CATALOG_DIR` | built-in set | Directory of provider catalog `*.toml` files |
 | `--secrets-backend <auto\|keyring\|file>` | `BOT_SECRETS_BACKEND` | `auto` | `auto` = an existing encrypted file, else the OS keychain, else an encrypted file. The file passphrase comes from `BOT_SECRETS_PASSPHRASE` or a prompt |
-| `--json` | | off | Machine-readable output (JSON, or NDJSON for `chat`) for `status`, `chat`, `bots` and `approve`. Errors always go to stderr as text |
+| `--json` | | off | Machine-readable output (JSON, or NDJSON for `chat`) for `status`, `chat`, `bots`, `answer`, `approve`, `grants`, `schedules`, `email`, `mcp add`, `doctor`, `serve`, and `channels telegram pair` / `status`. `host status`, `devices`, `revoke`, `standby` and `activate` already print JSON; `--json` makes `host invite` print JSON instead of a QR. Errors always go to stderr as text |
 | `--port <PORT>` | `BOT_PORT` | `47821` | Port `serve` binds on `127.0.0.1`; clients connect to it |
 | `--url <URL>` | `BOT_URL` | | Full daemon URL for client commands (overrides `--port`) |
+| `--remote <ENDPOINT>` | | | Peer id of a paired daemon (iroh). Conflicts with `--url` |
 | `--version`, `--help` | | | |
 
+`keychain` is accepted as an alias of `keyring` for `--secrets-backend`.
+
 Commands that talk to a running daemon (`status`, `chat`, `bots`, `answer`,
-`approve`, `grants`, `schedules`, `email`, `channels telegram pair`) read the API token
-from `<data dir>/api-token`; make sure they use the same data directory as
-`bot serve`.
+`approve`, `grants`, `schedules`, `email`, `mcp add`, `token`,
+`channels telegram pair`, and every `host` command except `join`) read the
+API token from `BOT_API_TOKEN` when that variable is set, otherwise from
+`<data dir>/api-token`. Use the same data directory as `bot serve`.
+`--remote` reaches a paired daemon for `status`, `chat`, `bots`, `answer`,
+`approve`, `grants`, `schedules`, `email`, `channels telegram pair`, and
+`host invite`, `status`, `devices`, `revoke`, `standby` and `activate`.
+`host join`, `screen`, `admin`, `add`, `repair`, `upgrade` and `remove`,
+plus `token`, `mcp`, `doctor` and `setup`, stay on this machine.
+`screen`, `admin` and the SSH host commands still use the local daemon.
 
 ## Exit codes
 
@@ -68,8 +78,23 @@ provider.
 
 | Option | Meaning |
 | --- | --- |
+| `--host` | Run as an always-on host (peer networking defaults on) |
+| `--peer` | Enable paired remote API access over iroh |
 | `--shutdown-grace <SECONDS>` | Time running tool steps get to finish on shutdown (default 10); then live runs are paused for the next start |
+| `--owner-key-stdin` | Read the owner key (one line) from standard input, so it never appears in argv, a file or the environment |
 | `--fake-provider` | Only in builds with the `fake-provider` feature: use a built-in echo provider (demos, tests) |
+
+### `bot doctor`
+
+Check the installation (data dir, config, providers, daemon, browser, and so on).
+Never prompts. Exit 1 when any check fails.
+
+| Option | Meaning |
+| --- | --- |
+| `--online` | Also test provider connections over the network |
+| `--report <FILE>` | Write a redacted diagnostic bundle (JSON, no secrets) to this file |
+
+`--json` prints the checks as JSON.
 
 ### `bot status`
 
@@ -121,7 +146,7 @@ Answer a pending question card.
 | Subcommand | Meaning |
 | --- | --- |
 | `bot schedules list` | List schedules |
-| `bot schedules add <BOT_ID> <WHEN> <PROMPT>` | Add a schedule. Options: `--name <NAME>`, `--tz <IANA_TZ>`, `--chat <CHAT_ID>` |
+| `bot schedules add <BOT_ID> <WHEN> <PROMPT>` | Add a schedule. `<WHEN>` is a phrase such as "every 15 minutes", "in 2 hours" or "her gün 09:00" (English or Turkish, parsed by the daemon). Options: `--name <NAME>` (default: the start of the prompt), `--tz <IANA_TZ>` (default UTC), `--chat <CHAT_ID>` (default: a chat named after the schedule) |
 | `bot schedules rm <ID>` | Delete a schedule |
 | `bot schedules run-now <ID>` | Fire a schedule now, in the background |
 
@@ -132,10 +157,10 @@ Manage the e-mail accounts of the running daemon (see [email](email.md)). Change
 | Subcommand | Meaning |
 | --- | --- |
 | `bot email list` | List accounts (never shows passwords) |
-| `bot email add <NAME> <ADDRESS>` | Add an account. Options: `--preset gmail\|outlook\|yahoo\|icloud`, `--imap-host`, `--imap-port`, `--smtp-host`, `--smtp-port`, `--smtp-security implicit\|start_tls`, `--username`, `--bot <NAME_OR_ID>` (only this bot) or `--all-bots` (one of the two is required), `--allowed-sender <ADDR>` (repeatable), `--password-env <VAR>` (hidden prompt when omitted) |
-| `bot email add --provider agentmail --name <NAME> --bot <NAME_OR_ID>\|--all-bots` | Create an AgentMail inbox with **your own** AgentMail API key and add it as an account. Options: `--name-hint <TEXT>` (part before the `@`), `--domain <VERIFIED_DOMAIN>`, `--allowed-sender`, `--api-key-env <VAR>` (hidden prompt when omitted; the key is never an argument) |
+| `bot email add <NAME> <ADDRESS>` | Add an account (`--provider` defaults to `imap_smtp`). The name may instead be `--name <NAME>` (not both). Options: `--preset gmail\|outlook\|yahoo\|icloud`, `--imap-host` (port 993, TLS), `--imap-port`, `--smtp-host`, `--smtp-port` (465 with implicit TLS, 587 with `start_tls`), `--smtp-security implicit\|start_tls`, `--username` (when the login differs from the address), `--bot <NAME_OR_ID>` (only this bot) or `--all-bots` (one of the two is required), `--allowed-sender <ADDR>` (repeatable), `--password-env <VAR>` (hidden prompt when omitted) |
+| `bot email add --provider agentmail --name <NAME> --bot <NAME_OR_ID>\|--all-bots` | Create an AgentMail inbox with **your own** AgentMail API key and add it as an account. Options: `--name-hint <TEXT>` (part before the `@`; default: the account name), `--domain <VERIFIED_DOMAIN>` (default: the shared `agentmail.to`), `--allowed-sender`, `--api-key-env <VAR>` (hidden prompt when omitted; the key is never an argument) |
 | `bot email rm <NAME>` | Remove an account and its stored password or key. `--delete-inbox` also deletes the inbox at AgentMail (irreversible; off by default) |
-| `bot email test <NAME>` | IMAP login and SMTP authentication, nothing is sent; exit 6 when a server does not accept |
+| `bot email test <NAME>` | IMAP login and SMTP authentication, or the AgentMail key. Nothing is sent. Exit 6 when the check does not pass |
 
 ### `bot providers`
 
@@ -163,11 +188,78 @@ Manage the e-mail accounts of the running daemon (see [email](email.md)). Change
 | `status` | Show whether the channel is configured, running, and how many users are paired |
 | `disable` | Turn the channel off (the token stays stored) |
 
+### `bot skills`
+
+Review local skills and explicitly trust the reviewed content. This stays on
+this machine; it is not a daemon command.
+
+| Subcommand | Meaning |
+| --- | --- |
+| `bot skills review <NAME>` | Print every file in full and its review fingerprint. Option: `--bot-id <BOT_ID>` |
+| `bot skills trust <NAME> --reviewed <FINGERPRINT>` | Trust exactly the content `review` printed. Option: `--bot-id <BOT_ID>`. A later change needs another review |
+
+### `bot token`
+
+Create or revoke scoped MCP credentials on the local daemon (see
+[MCP server](mcp-server.md)). Prints JSON. Not available with `--remote`.
+
+| Subcommand | Meaning |
+| --- | --- |
+| `bot token create --bot <UUID>[,UUID...]` | Store a credential and print its public id (never the bearer). `--bot` is required (comma-separated). `--scope <mcp:tasks\|mcp:computer>[,...]` (default `mcp:tasks`). `--ttl <DURATION>` (default `30d`; for example `12h` or `600s`; from 60 seconds to 30 days) |
+| `bot token revoke <ID>` | Revoke a credential and cancel its running tasks |
+
+### `bot mcp`
+
+Manage the daemon's MCP servers (see [MCP servers](mcp-servers.md) and
+[MCP server](mcp-server.md)).
+
+| Subcommand | Meaning |
+| --- | --- |
+| `bot mcp add [OPTIONS] <PASTE>...` | Add servers from a paste: a server URL, a `claude mcp add ...` line, an `npx` / `uvx` command line, or MCP JSON (`{"mcpServers": ...}`). Quote the paste, or pass `-` to read it from stdin. Values in the paste (`-e KEY=value`, headers, `env`) go to the secret store, never the config. Put flags before the paste. `--name <NAME>` (default: derived from the URL or package). `--dry-run` shows what would be added and contacts nothing |
+| `bot mcp serve --bot <UUID>` | Expose that bot as a scoped Praxi MCP server on stdio, using a token from `bot token create`. Loopback daemon only (not `--remote`). `--allow <tasks\|computer>[,...]` (default `tasks`; `computer` must be requested explicitly). `--token-id <UUID>` is the public id from `token create` when more than one credential matches (never a bearer token) |
+
+### `bot host`
+
+Manage the active host and paired devices (see [remote host](remote-host.md)).
+
+| Subcommand | Meaning |
+| --- | --- |
+| `bot host join <TICKET>` | Pair this fresh installation with a desktop before starting the service. Local only |
+| `bot host invite --role <phone\|desktop\|node\|host>` | Create a single-use invite and print its QR and confirmation code. `--role` is required |
+| `bot host status` | Show host status (JSON) |
+| `bot host devices` | List paired devices (JSON) |
+| `bot host revoke <KEY>` | Revoke a paired device |
+| `bot host standby` | Stop automatic components and persist standby ownership |
+| `bot host activate` | Take ownership with an epoch above every known epoch. `--force` uses this installation's last local data; the command warns that newer changes on the other leader may be missing and that missed schedules can duplicate actions |
+| `bot host screen [KEY]` | Let a paired desktop watch, and take over, this host's screen. Run it on the host; the grant survives restarts. Give a device key from `bot host devices`, or `--all-desktops` (exactly one of the two). `--view-only` watches without takeover or input. `--revoke` removes the grant |
+| `bot host admin [KEY]` | Let a paired desktop send model keys, bots and settings to this host. Run it on the host. Give a device key, or `--all-desktops`. `--revoke` withdraws it. New desktop invites already grant this |
+| `bot host add <TARGET>` | Install Praxi on your own Ubuntu/Debian server over SSH and pair it with this computer (idempotent; run it again to resume). `<TARGET>` is `user@server` or a saved name. `--ssh-port <PORT>` (default 22; not the daemon `--port`). `--key <FILE>` (otherwise the ssh-agent; passwords are not supported). `--name <NAME>` (default: derived from the address). `--yes` accepts a new host key without asking; a changed key is never accepted. `--no-desktop` skips the virtual display and desktop session |
+| `bot host repair <TARGET>` | Re-run the install, migrating a plain `bot serve` install to host mode in place (data is kept and snapshotted first). Same target options as `add` |
+| `bot host upgrade <TARGET>` | Install this app's version on a server that runs an older one. Same target options as `add` |
+| `bot host remove <NAME>` | Forget a server and revoke this computer on it. `<NAME>` is a saved name or `user@server`. `--uninstall` also uninstalls Praxi on the server and keeps its data. `--purge` uninstalls and deletes the server's data, config and praxi user (conflicts with `--uninstall`); `--yes` skips the typed confirmation for `--purge`. `--ssh-port` and `--key` are the same as on `add` |
+
+`add`, `repair`, `upgrade` and `remove` run in this terminal over SSH. They are
+not daemon subcommands of their own, and `--remote` does not apply to them.
+
+### `bot self-update`
+
+Update the Linux installation. Restart is separate; this command does not
+restart a service. On other operating systems it prints `use the installer`
+and exits 0.
+
+| Option | Meaning |
+| --- | --- |
+| `--check` | Show the available release without downloading or installing it. Conflicts with `--rollback` |
+| `--version <TAG>` | Release tag (a leading `v` is optional). Conflicts with `--rollback` |
+| `--rollback` | Switch to the previously installed version |
+| `--prefix <PATH>` | Installation prefix (normally inferred from the installed executable) |
+
 ## Other binaries
 
 - `bot-node`: the node-agent for controlling another machine (experimental, see
   the [FAQ](faq.md)). Commands: `join <bot-pair:...> [--name]`, `run`, `devices`;
-  global `--data-dir` and `--relay <default|none|URL>`.
+  global `--data-dir`, `--relay <default|none|URL>` (default `default`) and
+  `--display <X11>` (for example `:99`).
 - `bot-desktop`: the Windows desktop app.
 
 ## The HTTP API
