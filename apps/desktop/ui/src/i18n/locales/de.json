@@ -983,6 +983,22 @@
         "title": "Dieser Computer darf diesen Server möglicherweise nicht verwalten",
         "hint": "Nur der gekoppelte Desktop des Besitzers kann die Einrichtung des Servers ändern."
       },
+      "terminal_unsupported": {
+        "title": "Das Terminal benötigt einen Linux-Server",
+        "hint": "Nur ein Linux-Server kann hier ein Terminal öffnen."
+      },
+      "terminal_start_failed": {
+        "title": "Das Terminal konnte nicht gestartet werden",
+        "hint": "Der Server konnte keine Shell starten. Versuche es gleich noch einmal."
+      },
+      "terminal_busy": {
+        "title": "Alle Terminals auf dem Server sind belegt",
+        "hint": "Schließe ein anderes Terminal auf dem Server und versuche es dann erneut."
+      },
+      "terminal_gone": {
+        "title": "Die Terminal-Sitzung wurde beendet",
+        "hint": "Öffne das Terminal erneut."
+      },
       "provider_endpoint": {
         "title": "Der Anbieter-Endpunkt wurde nicht gefunden",
         "hint": "Prüfe die Basis-URL und ihren API-Pfad unter Einstellungen → KI."
@@ -1483,6 +1499,7 @@
       "makeHome": "{{name}} zum Zuhause meiner Bots machen",
       "sync": "Meine Einrichtung mit {{name}} synchronisieren",
       "viewScreen": "Seinen Bildschirm ansehen",
+      "terminal": "Terminal auf dem Server",
       "workHere": "Vorerst auf diesem Computer arbeiten",
       "backHome": "Zurück zu {{name}}",
       "pcOn": "An · jede Aktion fragt dich hier",
@@ -2736,7 +2753,25 @@
       "version": "Diese App und {{name}} haben unterschiedliche Versionen. Aktualisiere beide auf dieselbe Version."
     },
     "needsDesktop": "{{name}} hat keine Desktop-Sitzung, daher gibt es keinen Bildschirm zum Anzeigen. Um eine hinzuzufügen, führe auf diesem Computer aus:",
-    "needsPermission": "{{name}} hat diesem Computer nicht erlaubt, seinen Bildschirm anzusehen. Führe auf dem Server aus:"
+    "pausedIdle": "Zum Ressourcensparen pausiert - zum Fortsetzen klicken",
+    "showScreen": "Bildschirm anzeigen",
+    "screenListFailed": "Die Bildschirmliste von {{name}} konnte nicht geladen werden. Es wird gleich noch einmal versucht."
+  },
+  "terminal": {
+    "title": "Terminal - {{name}}",
+    "close": "Terminal schließen",
+    "note": "Das ist eine Shell auf dem Server, über die Verbindung, die deine App bereits hat. Sie läuft als Dienstnutzer des Servers und kann dessen Schlüssel lesen. Sie endet, wenn du dieses Panel schließt.",
+    "failed": "Das Terminal konnte nicht geöffnet werden.",
+    "ended": "Die Shell wurde beendet.",
+    "again": "Erneut öffnen",
+    "runForMe": "Für mich ausführen",
+    "runForMeHint": "Öffnet das Terminal und tippt den Befehl ein; du drückst die Eingabetaste.",
+    "state": {
+      "starting": "Startet",
+      "live": "Verbunden",
+      "ended": "Beendet",
+      "failed": "Nicht verbunden"
+    }
   },
   "knowledge": {
     "title": "Wissen und gemeinsames Gehirn",
