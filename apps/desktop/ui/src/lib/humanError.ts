@@ -42,6 +42,24 @@ export interface HumanError {
   details: string;
 }
 
+export type ProviderTestProblem = "provider_endpoint" | "provider_model";
+
+/** Classify provider probe output in its own context, where a 404 can mean a bad endpoint. */
+export function providerTestProblem(raw: string): ProviderTestProblem | undefined {
+  if (/\bmodel_not_found\b|\bunknown model\b|\bmodel\b[^\r\n]{0,160}\b(?:not found|does not exist)\b|\bmodels\/[^\s'"]+ is not found\b/i.test(raw)) {
+    return "provider_model";
+  }
+  if (/\bprovider error \(404\)|\bHTTP 404\b|\binvalid (?:base )?URL\b|\b(?:relative URL without a base|URL scheme is not allowed)\b/i.test(raw)) {
+    return "provider_endpoint";
+  }
+  return undefined;
+}
+
+/** Render a provider-specific title and hint without including the probe's raw output. */
+export function humanProviderTestError(problem: ProviderTestProblem): HumanError {
+  return pack(`codes.${problem}`, problem, "");
+}
+
 /** Codes that are worth a Retry / Reload / restart button. */
 const ACTIONS: Record<string, ErrorAction> = {
   network: "restartService",

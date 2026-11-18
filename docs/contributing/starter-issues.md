@@ -72,12 +72,12 @@ Issue: #166
 labels: good first issue, documentation
 size: S · first-timer: yes
 
-**Context.** Parts of `docs/guide/` were written before some features landed. Examples to check
-against the code and the running app: `faq.md` says MCP servers are "not wired into the daemon yet",
-that memory is not enabled and that the node-agent is not connected; `index.md` says "no releases";
-`remote-host.md` says the Linux desktop backend "has no implementation yet"
-(`crates/desktop-linux` has an X11 and AT-SPI backend); `README.md` calls the project "not usable
-yet". Verify each statement and fix or remove it.
+**Context.** Parts of `docs/guide/` were written before some features landed. The MCP, release,
+Linux desktop backend and README statements have been refreshed (MCP servers are wired into the
+daemon, `v0.1.0-alpha.1` is published, `crates/desktop-linux` has an X11 and AT-SPI backend). Still
+to verify against the code and the running app: `faq.md` says memory is not enabled and that the
+node-agent is not connected, and the Linux node path has not been tried end to end. Verify each
+statement and fix or remove it.
 
 **Done when**
 - Every statement you change is backed by a file path or a command you ran (cite it in the PR).

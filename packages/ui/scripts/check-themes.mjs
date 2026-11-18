@@ -4,7 +4,7 @@ import { URL } from 'node:url';
 import process from 'node:process';
 import {
   PALETTES, FAVORITE_THEMES, DEFAULT_CUSTOM_THEME, UI_STYLES, buildTokens, contrastRatio, deriveTheme,
-  fallbackAccent, inkOn, mix, normalizeHex, paletteById
+  fallbackAccent, HIGH_CONTRAST_THEMES, inkOn, mix, normalizeHex, paletteById
 } from '../src/themeModel.ts';
 import { buildThemeTokens, effectiveUiStyle, TEXT_TARGET } from '../src/surfaceModel.ts';
 import { checkSurfaces, FIXTURES, MUTATIONS, selfTest as selfTestSurfaces } from './surfaceCheck.mjs';
@@ -14,10 +14,13 @@ import { checkSurfaces, FIXTURES, MUTATIONS, selfTest as selfTestSurfaces } from
 // the derivation cannot repair: the theme's own text colour on bg / surface / raised.
 const root = new URL('../', import.meta.url);
 const css = readFileSync(new URL('tokens.css', root), 'utf8');
-assert.equal(PALETTES.length, 29, 'the prototype ships 29 themes');
+assert.equal(PALETTES.length, 31, 'the prototype ships 31 themes (29 + 2 high contrast)');
 assert.equal(new Set(PALETTES.map((p) => p.id)).size, PALETTES.length, 'theme ids are unique');
 for (const id of FAVORITE_THEMES) assert.ok(paletteById(id), `favourite ${id} exists`);
 
+// High-contrast themes (issue #238): AAA text, 4.5 / 3 accent and status, 3:1 focus and borders.
+assert.deepEqual([...HIGH_CONTRAST_THEMES], ['contrast-dark', 'contrast-light'], 'both high-contrast themes are listed');
+const hcRows = [];
 const BOT_COLOR_SAMPLES = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#e11d48', '#0ea5e9', '#ffffff', '#000000', '#808080'];
 const failures = [];
 const check = (name, label, fg, bg, min) => {
@@ -56,12 +59,37 @@ for (const theme of [...PALETTES, { id: 'custom (default)', ...DEFAULT_CUSTOM_TH
       check(name, `code ${token}`, t[`--color-code-${token === 'text' ? 'text' : token}`], d.bg, 4.5);
     }
   }
+  if (HIGH_CONTRAST_THEMES.includes(theme.id)) {
+    const accent = theme.accent;
+    assert.ok(accent, `${name}: has its own accent`);
+    const grounds = [d.bg, d.surface, d.raised, d.hover];
+    const hcMin = (label, fg, min, list = grounds) => {
+      const worst = Math.min(...list.map((s) => check(name, `HC ${label}`, fg, s, min)));
+      hcRows.push(`${name}	${label}	${fg}	${worst.toFixed(2)}	>= ${min}`);
+    };
+    hcMin('text', d.text, 7);
+    hcMin('secondary text', d.secondary, 7);
+    hcMin('muted text', d.muted, 4.5);
+    hcMin('accent (text)', accent, 4.5);
+    hcMin('accent (component)', accent, 3);
+    for (const k of ['success', 'warning', 'danger']) { hcMin(`${k} (text)`, d[k], 4.5); hcMin(`${k} (component)`, d[k], 3); }
+    hcMin('focus ring', d.focus, 4.5);
+    hcMin('control border', d.lineStrong, 4.5);
+    check(name, 'HC accent button ink', inkOn(accent), accent, 7);
+    for (const key of ['--shell-fill', '--center-fill', '--float-fill', '--composer-fill']) {
+      const v = buildTokens(theme, accent, 'solid', false)[key];
+      assert.ok(v === undefined || !/rgba|transparent|blur/i.test(v), `${name}: ${key} is opaque`);
+    }
+  }
   check(name, 'danger button', d.dangerInk, d.danger, 4.5);
   for (const status of ['success', 'warning', 'danger']) {
     check(name, `${status} badge`, d[status], mix(d[status], d.surface, 0.9), 4.5);
   }
   process.stdout.write(`${name}: ${d.light ? 'light' : 'dark'}; text contrast >= ${lowest.toFixed(2)}:1 (bg/surface/raised)\n`);
 }
+
+if (process.env.HC_SUMMARY) for (const row of hcRows) process.stdout.write(`${row}
+`);
 
 // Translucent surfaces: the EMITTED tokens (fills, filters, scrim, modal overlay) are
 // composited over fixture backdrops by an independent CSS emulator (scripts/surfaceCheck.mjs: its own

@@ -7,9 +7,11 @@ import type { i18n as I18n } from "i18next";
 import { createServer, type ViteDevServer } from "vite";
 
 type Layer = typeof import("./humanError.ts");
+type FirstRun = typeof import("./firstRun.ts");
 
 let server: ViteDevServer;
 let layer: Layer;
+let firstRun: FirstRun;
 let i18n: I18n;
 
 before(async () => {
@@ -21,6 +23,7 @@ before(async () => {
   });
   ({ i18n } = await server.ssrLoadModule("/src/i18n/index.ts"));
   layer = (await server.ssrLoadModule("/src/lib/humanError.ts")) as Layer;
+  firstRun = (await server.ssrLoadModule("/src/lib/firstRun.ts")) as FirstRun;
 });
 
 after(async () => {
@@ -60,6 +63,31 @@ test("every daemon error code has a title and a hint in both languages", async (
       assert.ok(h.title && !h.title.startsWith("errors."), `${lng}/${code} title`);
       assert.ok(h.hint && !h.hint.startsWith("errors."), `${lng}/${code} hint`);
       assert.ok(!h.title.includes("raw daemon text"));
+    }
+  }
+});
+
+test("first-run provider failures distinguish credentials, network, endpoint and model", async () => {
+  assert.equal(firstRun.classifyConnectError("authentication failed: test credential rejected", "openai"), "badKey");
+  assert.equal(firstRun.classifyConnectError("connection error: error sending request", "openai"), "offline");
+  assert.equal(firstRun.classifyConnectError("request timed out", "ollama"), "ollamaDown");
+  assert.equal(firstRun.classifyConnectError("HTTP 404", null), "unknown");
+
+  const cases = [
+    ["provider error (404): no route for /v1/models", "provider_endpoint"],
+    ["connection error: relative URL without a base", "provider_endpoint"],
+    ['provider error (404): {"code":"model_not_found","message":"fixture model is unavailable"}', "provider_model"]
+  ] as const;
+  for (const lng of ["en", "tr"]) {
+    await i18n.changeLanguage(lng);
+    for (const [raw, problem] of cases) {
+      assert.equal(firstRun.classifyConnectError(raw, "openai"), problem);
+      const error = layer.humanProviderTestError(problem);
+      assert.equal(error.code, problem);
+      assert.ok(error.title && !error.title.startsWith("errors."));
+      assert.ok(error.hint && !error.hint.startsWith("errors."));
+      assert.ok(!error.title.includes(raw) && !error.hint.includes(raw));
+      assert.equal(error.details, "");
     }
   }
 });

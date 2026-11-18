@@ -982,6 +982,14 @@
         "title": "Bu bilgisayar o sunucuyu yönetemez",
         "hint": "Sunucunun kurulumunu yalnızca sahibinin eşleşmiş masaüstü uygulaması değiştirebilir."
       },
+      "provider_endpoint": {
+        "title": "Sağlayıcının API adresi bulunamadı",
+        "hint": "Ayarlar → Yapay Zekâ bölümünde temel adresi ve API yolunu kontrol edin."
+      },
+      "provider_model": {
+        "title": "Sağlayıcı, ayarlanan modeli bulamadı",
+        "hint": "Ayarlar → Yapay Zekâ bölümünde model kimliğini kontrol edin ve hesabınızda kullanılabilen bir model seçin."
+      },
       "host_admin_required": {
         "title": "Önce bu bilgisayarı sunucuda onayla",
         "hint": "Aşağıdaki komutu sunucuda bir kez çalıştırıp yeniden dene."
@@ -1979,7 +1987,24 @@
     "intro": "Uygulama açıkken kullanışlı kısayollar.",
     "palette": "Komut paleti",
     "send": "Mesaj gönder",
-    "stop": "Tüm bot çalışmalarını durdur"
+    "stop": "Tüm bot çalışmalarını durdur",
+    "settings": "Ayarları aç",
+    "closePanel": "Yan paneli kapat",
+    "exitLiveFocus": "Canlı görünümde klavye denetiminden çık",
+    "newline": "Yeni satır",
+    "menuMove": "Eğik çizgi / anma menüsünde gezin",
+    "menuAccept": "Vurgulanan öğeyi seç",
+    "menuDismiss": "Menüyü kapat",
+    "dialogClose": "Pencereyi kapat",
+    "dialogFocus": "Pencere içinde odağı taşı",
+    "paletteMove": "Komut paleti: gezin ve çalıştır",
+    "menuNav": "Açılır menülerde gezin",
+    "popoverClose": "Açılır menüyü kapat",
+    "group": {
+      "global": "Genel",
+      "composer": "Sohbet yazma kutusu",
+      "dialogs": "Pencereler"
+    }
   },
   "modelPicker": {
     "title": "Model",
@@ -2474,6 +2499,8 @@
       "khaki": "Kum ve haki",
       "frost": "Buz",
       "chalk": "Tebeşir",
+      "contrast-dark": "Yüksek kontrast koyu",
+      "contrast-light": "Yüksek kontrast açık",
       "custom": "Kendi teman"
     }
   },
