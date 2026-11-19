@@ -70,24 +70,44 @@ The daemon (`bot serve`) listens on `127.0.0.1` only. Node-agents (experimental)
 
 ## Screenshots
 
+### Make it yours: themes and backdrops
+
+Four themes (Obsidian, Cobalt, Raven, Clay) and 19 built-in backdrops in three families (Dotted, Grainy, and Glass and lines), plus your own image, with a calm/lively slider. Pick them in **Settings, Appearance**.
+
 <p align="center">
   <img src="docs/assets/readme/screens/theme-gallery.webp" alt="The same chat screen in four themes: Obsidian, Cobalt, Raven and Clay" width="100%">
 </p>
 
-<p align="center"><sub>Four themes (Obsidian, Cobalt, Raven, Clay). Demo data shown.</sub></p>
+<p align="center"><sub>Themes: Obsidian, Cobalt, Raven, Clay. Demo data shown.</sub></p>
+
+<p align="center">
+  <img src="docs/assets/readme/screens/backdrop-gallery.webp" alt="The same chat screen on six backdrops: Aurora, Sunset, Meadow, Ocean, Dawn and Reeded rose" width="100%">
+</p>
+
+<p align="center"><sub>Backdrops: Aurora, Sunset, Meadow / Ocean, Dawn, Reeded rose. Demo data shown.</sub></p>
+
+<p align="center">
+  <img src="docs/assets/readme/screens/screen-backdrops.webp" alt="The Backdrops dialog with the Dotted and Grainy groups, each backdrop named, Aurora selected" width="100%">
+</p>
+
+<p align="center"><sub>The Backdrops picker, grouped by family. Demo data shown.</sub></p>
+
+<details>
+<summary>Animations: switching themes and backdrops</summary>
+
+![Animation of the Appearance settings switching between Obsidian, Cobalt, Raven, Clay and Moss](docs/assets/readme/screens/themes-switch.gif)
+
+![Animation of the chat screen cycling through the Aurora, Sunset, Ocean, Meadow, Reeded rose and Dawn backdrops](docs/assets/readme/screens/backdrops-switch.gif)
+
+</details>
+
+### More screens
 
 | | |
 | --- | --- |
 | ![Bot editor with the clay characters, tints and a name field](docs/assets/readme/screens/screen-bots.webp)<br>**Bots.** Give each one a clay character, a tint and a name. | ![Model picker with recommended models, coding CLIs and API providers](docs/assets/readme/screens/screen-models.webp)<br>**Models.** Cloud APIs, local models or a coding CLI per bot. |
 | ![Scheduled tasks list with cron and interval schedules](docs/assets/readme/screens/screen-schedules.webp)<br>**Schedules.** Cron, every N hours, or plain English. | ![Large live view of the desktop target with Take control and Stop bots](docs/assets/readme/screens/screen-live-view.webp)<br>**Live view.** Watch the screen, take control, stop. |
 | ![Permission presets: Read-only, Approve destructive, Full, Read and draft, Custom](docs/assets/readme/screens/screen-permissions.webp)<br>**Permissions.** Pick a preset per bot. | ![Usage screen with quota rings, runs, tokens and cost per bot](docs/assets/readme/screens/screen-usage.webp)<br>**Usage.** Quota, runs, tokens and estimated cost. |
-
-<details>
-<summary>Switching themes (animation)</summary>
-
-![Animation of the Appearance settings switching between Obsidian, Cobalt, Raven, Clay and Moss](docs/assets/readme/screens/themes-switch.gif)
-
-</details>
 
 ## Security model
 
