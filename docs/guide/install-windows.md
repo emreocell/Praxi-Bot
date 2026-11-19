@@ -27,8 +27,8 @@ something goes wrong. For the first-run wizard see [Install and first run](insta
 | API keys | Windows Credential Manager (never in files) |
 | Start menu entry | `Praxi-Bot` |
 
-Autostart at sign-in is off by default; switch it on in **Settings**. Only one
-copy of the app runs at a time: starting it again just brings the existing
+Autostart at sign-in is off by default; switch it on in **Settings** (or pass
+`/AUTOSTART=1` to the installer). Only one copy of the app runs at a time: starting it again just brings the existing
 window to the front.
 
 ## Upgrading
@@ -42,8 +42,11 @@ backup over `bot.db`.
 
 ## Uninstalling
 
-Use **Settings, Apps** (or the Start menu entry). Your chats, bots and
-settings are kept unless you tick **Delete application data**. Keys stored in
+Use **Settings, Apps** (or the Start menu entry). The uninstaller stops any
+running `bot-desktop.exe` and `bot.exe` processes and removes the autostart
+registry value. Your chats, bots and settings (in `%APPDATA%\praxi\praxi-bot`
+and `%LOCALAPPDATA%\praxi\praxi-bot`) are kept unless you explicitly tick
+**Delete application data**. Keys stored in
 Credential Manager are not removed by the uninstaller; delete the `Praxi-Bot`
 entries there if you want them gone.
 

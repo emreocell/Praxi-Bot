@@ -118,8 +118,7 @@ list is the [CLI reference](docs/guide/cli-reference.md).
   `http://localhost:1420/?mock=1`. Mock mode (`apps/desktop/ui/src/api/mock.ts`) serves canned data
   and is how design reviews and screenshots are made. Useful query parameters: `lang=en|tr`,
   `theme=<name>`, `screen=<apps|schedules|settings|...>` (see `App.tsx` for the list).
-- **Windows installer:** see "Producing the Bundled Sidecar & Windows NSIS Installer" in the
-  [README](README.md#producing-the-bundled-sidecar--windows-nsis-installer-release-build).
+- **Windows installer:** see [Building the Windows installer yourself](docs/guide/install.md#building-the-windows-installer-yourself).
 - **Linux host:** see [Running Praxi on a remote host](docs/guide/remote-host.md).
 
 ## Testing

@@ -17,22 +17,30 @@ The installer is a single per-user NSIS `.exe`. It bundles the desktop shell
 3. On first launch the app starts the bundled daemon and opens a five-step
    wizard:
    1. **Welcome**: interface language (English or Turkish) and theme (light,
-      dark, system).
+      dark, system). Praxi is local-first with no telemetry.
    2. **Provider**: pick Google Gemini, Anthropic, an OpenAI-compatible
       service or local Ollama, paste the API key, and press **Test
       connection**. The key goes straight to Windows Credential Manager and is
-      never shown again.
+      never shown again. Google Gemini has a free API tier through Google AI
+      Studio, with no credit card.
    3. **Safety**: choose the default permission preset. The default is
-      **Approve destructive** (see [Chatting and approvals](chatting-and-approvals.md)).
-   4. **Your first bot**: a name, an avatar/colour and model roles filled in from
-      the provider you picked.
-   5. **Try it live**: send a sample request and watch an approval card appear.
+      **Approve destructive** (see [Chatting and approvals](chatting-and-approvals.md)):
+      reads are free, and anything that changes files, clicks or types on the
+      desktop, runs commands or sends messages asks first. Financial actions
+      always ask, critical credential and system paths are always blocked, and
+      `Ctrl+Alt+Esc` stops the bot at any time.
+   4. **Your first bot**: a name, an avatar/colour and model roles (`executor`,
+      `planner`, `classifier`) filled in from the provider you picked.
+   5. **Try it live**: click *"What's on my screen?"* or *"Open Notepad and
+      write hello"*, watch the bot respond, and approve or deny a live permission
+      card in real time.
 4. You can skip the wizard at any step and re-run it later from
    **Settings, First-run setup wizard**.
 
 Autostart at Windows sign-in is **off** unless you switch on *Launch at Windows
-sign-in* in Settings. Uninstalling keeps your chats, bots and settings unless
-you tick **Delete application data**.
+sign-in* in Settings (or pass `/AUTOSTART=1` to the installer). Uninstalling
+keeps your chats, bots and settings unless you tick **Delete application data**;
+see [Installing on Windows](install-windows.md).
 
 The global emergency stop hotkey of the app is `Ctrl+Alt+Esc` (configurable in
 the app).
@@ -50,8 +58,46 @@ cargo build --release -p cli      # produces target/release/bot
 ./target/release/bot --version
 ```
 
-To build the Windows installer yourself, see the "Producing the Bundled Sidecar
-& Windows NSIS Installer" section of the [README](../../README.md).
+To run the desktop app in development with the deterministic fake provider (no API
+key needed), use `PRAXIBOT_FAKE_PROVIDER=1 pnpm dev:desktop`. To build the Windows
+installer yourself, see
+[Building the Windows installer yourself](#building-the-windows-installer-yourself).
+
+## Building the Windows installer yourself
+
+Tauri bundles the `bot` CLI binary via `bundle.externalBin: ["binaries/bot"]`
+in [`apps/desktop/tauri.conf.json`](../../apps/desktop/tauri.conf.json). Tauri expects
+the sidecar binary to be named with the Rust target triple (`rustc -Vv | grep host`)
+inside `apps/desktop/binaries/` before `tauri build` runs:
+
+```powershell
+# 1. Determine target triple (e.g. x86_64-pc-windows-msvc on 64-bit Windows MSVC)
+$triple = (rustc -Vv | Select-String "host:").ToString().Split(":")[1].Trim()
+
+# 2. Build the CLI daemon in release mode
+cargo build --release -p cli
+
+# 3. Stage the sidecar binary with the target-triple suffix expected by Tauri externalBin
+New-Item -ItemType Directory -Force -Path apps/desktop/binaries | Out-Null
+Copy-Item "target/release/bot.exe" "apps/desktop/binaries/bot-$triple.exe" -Force
+
+# 4. Build the desktop UI and package the per-user NSIS installer
+pnpm build:desktop
+```
+
+The resulting installer is written to
+`target/release/bundle/nsis/Praxi-Bot_<version>_x64-setup.exe`. At runtime,
+[`apps/desktop/src/daemon.rs`](../../apps/desktop/src/daemon.rs) resolves the daemon
+binary in priority order:
+
+1. `PRAXIBOT_BOT_BIN` environment variable (if set)
+2. Bundled sidecar next to `bot-desktop.exe` (`bot-<target-triple>.exe` or `bot.exe`)
+3. Staged sidecar in `apps/desktop/binaries/bot-<target-triple>.exe`
+4. `bot` on `PATH`
+
+Code-signing fields (`certificateThumbprint`, `digestAlgorithm`, `timestampUrl`)
+are pre-configured as placeholders under `bundle.windows` in
+[`apps/desktop/tauri.conf.json`](../../apps/desktop/tauri.conf.json).
 
 ## First run from the terminal
 
