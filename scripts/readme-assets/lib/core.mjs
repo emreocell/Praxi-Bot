@@ -1,5 +1,5 @@
 // Shared building blocks for the README artwork: SVG helpers, themes, the
-// grainy mesh background, clay shapes and icon drawing. No dependencies.
+// grainy mesh background and icon drawing. No dependencies.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { lucide, brands } from './icons-data.mjs';
@@ -145,48 +145,4 @@ export function svgDoc({ width, height, title, desc, T, defs = '', body, radius 
     frame ? rect({ x: 0.5, y: 0.5, width: width - 1, height: height - 1, rx: radius - 0.5, fill: 'none',
       stroke: T.canvasStroke, 'stroke-opacity': T.canvasStrokeOpacity }) : '',
   ].join('\n')) + '\n';
-}
-
-// ----------------------------------------------------------- clay shapes
-// Matte, eyeless clay forms (the look of Praxi bots): a soft radial body gradient,
-// bounce light, a diffuse highlight and fine grain, with a contact shadow beneath.
-export const clayTints = {
-  cream: { hi: '#FFFCF6', base: '#EEE6DA', shade: '#BDB1A2', deep: '#7B7164', bounce: '#F2C9A8' },
-  ember: { hi: '#F9C3A3', base: '#D9794F', shade: '#9C4A2D', deep: '#5E2A19', bounce: '#F0A57F' },
-  amber: { hi: '#F7DDB2', base: '#DDB27B', shade: '#A5753F', deep: '#60401F', bounce: '#F1CC9B' },
-  sand: { hi: '#FFFFFF', base: '#E4DCCF', shade: '#B1A594', deep: '#6E6457', bounce: '#F0CDB2' },
-};
-let clayCounter = 0;
-export function clay({ kind, x, y, size, rotate = 0, tint = 'cream', T, shadow = 1, elongate = 1.0 }) {
-  const id = 'c' + (++clayCounter);
-  const C = clayTints[tint];
-  const w = kind === 'capsule' ? size * 0.5 : size;
-  const h = kind === 'capsule' ? size * elongate * 1.25 : size;
-  const shapeAttrs = kind === 'sphere'
-    ? { cx: 0, cy: 0, r: size / 2 }
-    : { x: -w / 2, y: -h / 2, width: w, height: h, rx: kind === 'capsule' ? w / 2 : size * 0.3 };
-  const shape = (extra = {}) => tag(kind === 'sphere' ? 'circle' : 'rect', { ...shapeAttrs, ...extra });
-  const defs = [
-    radial(id + 'b', [[0, C.hi], ['34%', C.base], ['78%', C.shade], [1, C.deep]], { cx: '36%', cy: '28%', r: '82%', fx: '36%', fy: '28%' }),
-    radial(id + 'r', [[0, C.bounce, 0.55], [1, C.bounce, 0]], { cx: '60%', cy: '96%', r: '52%' }),
-    tag('clipPath', { id: id + 'k' }, shape()),
-    linear(id + 'l', [[0, '#FFFFFF', 0.55], ['45%', '#FFFFFF', 0], [1, C.hi, 0.25]], { x1: 0, y1: 0, x2: 1, y2: 1 }),
-  ].join('');
-  const shadowColor = T.shadow;
-  const sOp = T.name === 'dark' ? 0.55 : 0.30;
-  const contact = ellipse({
-    cx: x + size * 0.06, cy: y + (kind === 'capsule' ? h : size) * 0.52 + size * 0.1,
-    rx: (kind === 'capsule' ? w : size) * 0.46, ry: size * 0.13, fill: shadowColor, opacity: sOp * shadow, filter: 'url(#blur-shadow)',
-  });
-  const body = g({ transform: 'translate(' + num(x) + ' ' + num(y) + ') rotate(' + rotate + ')' }, [
-    shape({ fill: 'url(#' + id + 'b)' }),
-    g({ 'clip-path': 'url(#' + id + 'k)' }, [
-      rect({ x: -w, y: -h, width: w * 2, height: h * 2, fill: 'url(#' + id + 'r)' }),
-      ellipse({ cx: -w * 0.2, cy: -h * 0.27, rx: w * 0.3, ry: h * 0.2, fill: '#FFFFFF', opacity: tint === 'ember' ? 0.3 : 0.5,
-        filter: 'url(#blur-sm)', transform: 'rotate(-18 ' + num(-w * 0.2) + ' ' + num(-h * 0.27) + ')' }),
-      rect({ x: -w, y: -h, width: w * 2, height: h * 2, filter: 'url(#grain)', opacity: 0.5, style: 'mix-blend-mode:soft-light' }),
-    ]),
-    shape({ fill: 'none', stroke: 'url(#' + id + 'l)', 'stroke-width': 1.5 }),
-  ]);
-  return { defs, svg: contact + body };
 }

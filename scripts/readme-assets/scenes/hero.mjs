@@ -1,5 +1,6 @@
-import { g, rect, ellipse, path, tag, caption, text, hair, grain, meshDefs, svgDoc, clay } from '../lib/core.mjs';
+import { g, rect, ellipse, path, tag, caption, text, hair, grain, meshDefs, svgDoc } from '../lib/core.mjs';
 import { wordmark } from '../lib/wordmark.mjs';
+import { character } from '../lib/characters.mjs';
 
 const TITLE = 'Praxi: a local-first, open-source AI agent platform';
 const DESC = 'Praxi-Bot is a self-hosted, open-source AI agent that works on your own computer under permission rules '
@@ -25,14 +26,17 @@ function mesh(T, mobile) {
 export function hero(T, mobile = false) {
   const W = mobile ? 640 : 1280, H = mobile ? 790 : 540;
   const inset = mobile ? 40 : 72;
+  // The real bot characters (see lib/characters.mjs): ghost in white at the front, others in app tints.
   const shapes = mobile ? [
-    clay({ kind: 'capsule', x: 175, y: 628, size: 118, rotate: 22, tint: 'amber', T, elongate: 0.9 }),
-    clay({ kind: 'squircle', x: 350, y: 600, size: 180, rotate: -11, tint: 'cream', T }),
-    clay({ kind: 'sphere', x: 515, y: 640, size: 104, tint: 'ember', T }),
+    character({ shape: 'cloud', tint: 'lilac', x: 134, y: 632, size: 176, rotate: -6, T }),
+    character({ shape: 'capsule', tint: 'teal', x: 506, y: 592, size: 196, rotate: 12, T }),
+    character({ shape: 'ghost', tint: 'white', x: 318, y: 610, size: 238, T }),
+    character({ shape: 'pebble', tint: 'amber', x: 498, y: 660, size: 110, T }),
   ] : [
-    clay({ kind: 'capsule', x: 892, y: 372, size: 112, rotate: 28, tint: 'amber', T, elongate: 1.0 }),
-    clay({ kind: 'squircle', x: 1035, y: 262, size: 230, rotate: -11, tint: 'cream', T }),
-    clay({ kind: 'sphere', x: 1175, y: 385, size: 112, tint: 'ember', T }),
+    character({ shape: 'cloud', tint: 'lilac', x: 912, y: 240, size: 184, rotate: -7, T }),
+    character({ shape: 'capsule', tint: 'teal', x: 1160, y: 262, size: 208, rotate: 13, T }),
+    character({ shape: 'ghost', tint: 'white', x: 1036, y: 318, size: 262, T }),
+    character({ shape: 'pebble', tint: 'amber', x: 1166, y: 398, size: 128, T }),
   ];
   const wm = wordmark(inset - (mobile ? 2 : 4), mobile ? 262 : 268, mobile ? 188 : 196, T);
   const defs = meshDefs(T) + wm.defs + shapes.map(c => c.defs).join('')

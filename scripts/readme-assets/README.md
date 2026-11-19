@@ -17,7 +17,7 @@ rebuild with unchanged sources produces byte-identical files.
 
 | File | Use |
 | --- | --- |
-| `hero-{dark,light}[-mobile].svg` | Top of the README: wordmark, tagline, clay shapes on a grainy mesh |
+| `hero-{dark,light}[-mobile].svg` | Top of the README: wordmark, tagline and the real bot characters on a grainy mesh |
 | `features-{dark,light}[-mobile].svg` | Eight capability cards |
 | `architecture-{dark,light}[-mobile].svg` | Daemon, clients, models, tools, node-agents, permission gate |
 | `steps-{dark,light}[-mobile].svg` | Install, create a bot, chat and approve |
@@ -46,10 +46,16 @@ Keep the same information in plain Markdown near the image so the page works wit
 ## How it is built
 
 - `lib/core.mjs`: SVG helpers, the two themes, the grain filter (`feTurbulence` fractal noise blended
-  with soft-light), the mesh gradients, icon drawing and the clay shape renderer (matte, eyeless forms
-  like the Praxi bots: radial body gradient, bounce light, diffuse highlight, fine grain).
+  with soft-light), the mesh gradients and icon drawing.
+- `lib/characters.mjs`: the real Praxi bot characters, drawn the way the desktop app draws them
+  (`packages/ui/src/components/BotAvatar.tsx`): the off-white 3D clay WebP from
+  `packages/ui/src/assets/chars/` is tinted with the app's gradient-map SVG filter (a port of
+  `gradientMapConfig` in `packages/ui/src/botShape.ts`) and gets two tilted dark pill eyes using the
+  per-shape eye coordinates parsed from that file. The hero uses the ghost in white (the app's white tint
+  `#f4f4f5`) plus cloud (lilac), capsule (teal) and pebble (amber) from the app's tint swatches. The art is
+  read from the repository at build time and embedded as base64 WebP, so a hero SVG is about 115 KB.
 - `lib/wordmark.mjs`: the "Praxi" wordmark. Manrope Bold with explicit per-glyph positions, so it is
-  laid out identically in every browser, and a dotless i topped with a clay sphere. The advances were
+  laid out identically in every browser, and a dotless i topped with a terracotta clay sphere. The advances were
   shaped once with HarfBuzz at `wght=700`.
 - `lib/bg.mjs`: canvas background, glass cards, icon tiles, beads.
 - `scenes/*.mjs`: one file per artwork. Copy lives in these files; the architecture file lists the
