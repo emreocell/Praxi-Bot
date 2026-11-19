@@ -300,6 +300,19 @@ impl Recorder {
                         reason: "no result was recorded (interrupted)".into(),
                     }),
                     Some(r) if r.is_error => {} // a failed attempt is simply not part of the flow
+                    // A batch becomes the single actions it ran, so the
+                    // workflow format (and its replay) stays unchanged.
+                    Some(r) if name == "browser_act" => {
+                        for (tool, single) in expand_browser_act(&input, &r.text) {
+                            match convert(tool, &single, cx) {
+                                Conv::Step(s) => cx.steps.push(s),
+                                Conv::Dropped(reason) => cx.dropped.push(DroppedStep {
+                                    tool: format!("browser_act/{tool}"),
+                                    reason,
+                                }),
+                            }
+                        }
+                    }
                     Some(_) => match convert(&name, &input, cx) {
                         Conv::Step(s) => cx.steps.push(s),
                         Conv::Dropped(reason) => cx.dropped.push(DroppedStep {
@@ -641,6 +654,41 @@ fn keys_string(v: &Value) -> Option<String> {
         ),
         _ => None,
     }
+}
+
+/// The single-action calls a `browser_act` batch stands for: only the steps
+/// that ran (`done: k/n` in its result), `scroll` and `wait` left out like
+/// the read-only single tools.
+fn expand_browser_act(input: &Value, result: &str) -> Vec<(&'static str, Value)> {
+    let done = result
+        .lines()
+        .next()
+        .and_then(|l| l.strip_prefix("done: "))
+        .and_then(|l| l.split('/').next())
+        .and_then(|k| k.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    input["steps"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .take(done)
+        .filter_map(|st| {
+            let tool = match st["action"].as_str()? {
+                "click" => "browser_click",
+                "fill" => "browser_fill",
+                "select" => "browser_select",
+                "press" => "browser_press",
+                _ => return None,
+            };
+            let mut single = Map::new();
+            for key in ["ref", "text", "value", "key"] {
+                if let Some(v) = st.get(key).filter(|v| !v.is_null()) {
+                    single.insert(key.to_owned(), v.clone());
+                }
+            }
+            Some((tool, Value::Object(single)))
+        })
+        .collect()
 }
 
 fn convert(name: &str, input: &Value, cx: &mut Cx) -> Conv {
@@ -993,6 +1041,95 @@ mod tests {
         let json = rec.workflow.to_json().unwrap();
         assert!(json.contains("login/github"));
         rec.workflow.validate().unwrap();
+    }
+
+    #[test]
+    fn a_browser_act_batch_is_recorded_as_the_single_actions_it_ran() {
+        let page = "# Form (https://shop.test/join)
+  [e1] textbox \"Name\"
+  [e2] textbox \"City\"
+  [e3] combobox \"Country\"
+  [e4] textbox \"Phone\"
+  [e5] textbox \"Notes\"
+  [e6] button \"Join\"
+  [e7] button \"Later\"
+";
+        let batch = json!({"steps": [
+            {"action": "fill", "ref": "e1", "text": "Ada Lovelace"},
+            {"action": "fill", "ref": "e2", "text": "London"},
+            {"action": "select", "ref": "e3", "value": "United Kingdom"},
+            {"action": "scroll", "dy": 300},
+            {"action": "fill", "ref": "e4", "text": "5550100"},
+            {"action": "press", "key": "Tab"},
+            {"action": "click", "ref": "e6"},
+            {"action": "click", "ref": "e7"},
+        ]});
+        let record = |result: &str| {
+            let steps = vec![
+                user_step("join the shop"),
+                tool_step(
+                    1,
+                    json!([call(
+                        "o",
+                        "browser_open",
+                        &json!({"url": "https://shop.test/join"})
+                    )]),
+                    json!([res("o", "browser_open", page, false)]),
+                ),
+                tool_step(
+                    2,
+                    json!([call("a", "browser_act", &batch)]),
+                    json!([res("a", "browser_act", result, false)]),
+                ),
+            ];
+            Recorder::new()
+                .from_steps(&steps, &RecordOptions::default())
+                .unwrap()
+                .workflow
+        };
+        let kinds = |wf: &Workflow| -> Vec<(BrowserActionKind, String)> {
+            wf.steps
+                .iter()
+                .filter_map(|s| match s {
+                    Step::BrowserAction(a) => Some((
+                        a.action,
+                        a.target
+                            .as_ref()
+                            .map(|t| t.name.clone())
+                            .unwrap_or_default(),
+                    )),
+                    _ => None,
+                })
+                .collect()
+        };
+        // Stopped after step 7: the eighth step never ran and is not recorded;
+        // the scroll is left out like `browser_scroll`.
+        let wf = record(
+            "done: 7/8
+stopped: after step 7 (click e6): the page navigated
+# Done (https://shop.test/ok)
+",
+        );
+        assert_eq!(
+            kinds(&wf),
+            vec![
+                (BrowserActionKind::Fill, "Name".to_owned()),
+                (BrowserActionKind::Fill, "City".to_owned()),
+                (BrowserActionKind::Select, "Country".to_owned()),
+                (BrowserActionKind::Fill, "Phone".to_owned()),
+                (BrowserActionKind::Press, String::new()),
+                (BrowserActionKind::Click, "Join".to_owned()),
+            ]
+        );
+        assert!(!wf.steps.iter().any(|s| matches!(s, Step::Tool(_))));
+        // Nothing ran: nothing is recorded.
+        assert!(
+            kinds(&record(
+                "done: 0/8
+stopped: step 1"
+            ))
+            .is_empty()
+        );
     }
 
     #[test]

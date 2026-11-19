@@ -246,6 +246,37 @@ export function formatFiring(rfc3339: string, locale?: string): string {
   return `${date}, ${m[4]}:${m[5]}`;
 }
 
+/** One row of a `browser_steps` approval card (`browser_act`, sensitive `browser_fill`). */
+export interface BrowserStepRow {
+  n: number;
+  action: string;
+  target: string;
+  /** Already replaced by a placeholder by the daemon when `hidden`. */
+  value: string | null;
+  hidden: boolean;
+}
+
+/** The steps of a `browser_steps` card, or `null` for any other card. */
+export function browserSteps(details: unknown): BrowserStepRow[] | null {
+  if (typeof details !== "object" || details === null) return null;
+  const d = details as Record<string, unknown>;
+  if (d.kind !== "browser_steps" || !Array.isArray(d.steps)) return null;
+  const rows: BrowserStepRow[] = [];
+  for (const raw of d.steps) {
+    if (typeof raw !== "object" || raw === null) return null;
+    const r = raw as Record<string, unknown>;
+    if (typeof r.n !== "number" || typeof r.action !== "string") return null;
+    rows.push({
+      n: r.n,
+      action: r.action,
+      target: typeof r.target === "string" ? r.target : "",
+      value: typeof r.value === "string" ? r.value : null,
+      hidden: r.hidden === true
+    });
+  }
+  return rows;
+}
+
 /** Approval becomes available only with the full view open and its end visible. */
 export function payloadReviewComplete(
   expanded: boolean,

@@ -1074,6 +1074,10 @@
       },
       "sendOnce": "Send",
       "sendTitle": "Send on your behalf?",
+      "steps": {
+        "hidden": "hidden (secret field)",
+        "title": "Run these {{count}} browser steps?"
+      },
       "thisChat": "This chat",
       "title": "Approval needed",
       "why": {

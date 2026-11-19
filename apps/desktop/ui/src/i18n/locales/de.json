@@ -1074,6 +1074,10 @@
       },
       "sendOnce": "Senden",
       "sendTitle": "In deinem Namen senden?",
+      "steps": {
+        "hidden": "verborgen (geheimes Feld)",
+        "title": "Diese {{count}} Browserschritte ausführen?"
+      },
       "thisChat": "Dieser Chat",
       "title": "Genehmigung erforderlich",
       "why": {

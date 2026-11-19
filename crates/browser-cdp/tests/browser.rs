@@ -314,3 +314,136 @@ async fn iframes_including_out_of_process() {
     assert_eq!(p.title().await.unwrap(), "paid");
     b.close().await.unwrap();
 }
+
+// -- actionability (card 248 item 1) ----------------------------------------------------------
+
+const BLOCKED: &str = r#"<html><body>
+<button id=buy onclick="window.n=(window.n||0)+1">Buy</button>
+<button id=off disabled onclick="window.offHit=1">Off</button>
+<div id=veil role=dialog aria-label="Cookie consent"
+  style="position:fixed;inset:0;background:#fff;z-index:9">We use cookies</div>
+<label><input id=cb type=checkbox onchange="window.c=(window.c||0)+1"> Agree</label>
+<label><input id=veto type=checkbox onchange="window.v=(window.v||0)+1; this.checked=false"> Veto</label>
+<label><input id=r1 type=radio name=g> One</label>
+<input id=short maxlength=3 oninput="this.value=this.value.slice(0,3)" aria-label="Short">
+</body></html>"#;
+
+async fn counter(p: &Page, expr: &str) -> i64 {
+    let v = p.evaluate(&format!("String({expr} || 0)")).await.unwrap();
+    let t = v.as_str().unwrap();
+    t.parse()
+        .unwrap_or_else(|_| panic!("counter {expr}: {t:?}"))
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn a_covered_or_disabled_target_is_refused_with_the_blocker_named() {
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let p = open(&b, BLOCKED).await;
+    let snap = p.snapshot(&SnapshotOptions::default()).await.unwrap();
+    let buy = ref_of(&snap, "button", "Buy");
+    let r = p.click(&buy).await.unwrap();
+    assert!(!r.ok);
+    let err = r.error.unwrap();
+    assert!(
+        err.contains("covered by dialog \u{ab}Cookie consent\u{bb}"),
+        "{err}"
+    );
+    assert_eq!(
+        counter(&p, "window.n").await,
+        0,
+        "nothing may be clicked through the overlay"
+    );
+
+    // A disabled button is refused too, and its handler never runs.
+    p.evaluate("document.getElementById('veil').remove()")
+        .await
+        .unwrap();
+    let off = ref_of(&snap, "button", "Off");
+    let r = p.click(&off).await.unwrap();
+    assert!(!r.ok);
+    assert!(r.error.unwrap().contains("disabled"));
+    assert_eq!(counter(&p, "window.offHit").await, 0);
+
+    // With the overlay gone the same ref is clickable.
+    assert!(p.click(&buy).await.unwrap().ok);
+    assert_eq!(counter(&p, "window.n").await, 1);
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn an_overlay_that_goes_away_is_waited_for_not_slept_for() {
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let p = open(&b, BLOCKED).await;
+    let snap = p.snapshot(&SnapshotOptions::default()).await.unwrap();
+    let buy = ref_of(&snap, "button", "Buy");
+    p.evaluate("setTimeout(() => document.getElementById('veil').remove(), 400)")
+        .await
+        .unwrap();
+    let r = p.click(&buy).await.unwrap();
+    assert!(r.ok, "{:?}", r.error);
+    assert_eq!(counter(&p, "window.n").await, 1);
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn set_checked_is_idempotent_and_never_clicks_twice_after_a_veto() {
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let p = open(&b, BLOCKED).await;
+    p.evaluate("document.getElementById('veil').remove()")
+        .await
+        .unwrap();
+    let snap = p.snapshot(&SnapshotOptions::default()).await.unwrap();
+    let cb = ref_of(&snap, "checkbox", "Agree");
+    assert!(p.set_checked(&cb, true).await.unwrap().ok);
+    assert!(
+        p.set_checked(&cb, true).await.unwrap().ok,
+        "already checked: no-op"
+    );
+    assert_eq!(
+        counter(&p, "window.c").await,
+        1,
+        "the second call must not click"
+    );
+    assert!(p.set_checked(&cb, false).await.unwrap().ok);
+    assert_eq!(counter(&p, "window.c").await, 2);
+
+    let veto = ref_of(&snap, "checkbox", "Veto");
+    let r = p.set_checked(&veto, true).await.unwrap();
+    assert!(!r.ok);
+    assert!(r.error.unwrap().contains("not clicking again"));
+    assert_eq!(counter(&p, "window.v").await, 1, "no blind second click");
+
+    let r1 = ref_of(&snap, "radio", "One");
+    assert!(p.set_checked(&r1, true).await.unwrap().ok);
+    let r = p.set_checked(&r1, false).await.unwrap();
+    assert!(!r.ok && r.error.unwrap().contains("radio"));
+    let r = p
+        .set_checked(&ref_of(&snap, "button", "Buy"), true)
+        .await
+        .unwrap();
+    assert!(!r.ok && r.error.unwrap().contains("not a checkbox"));
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn fill_reads_the_value_back_without_echoing_it() {
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let p = open(&b, BLOCKED).await;
+    p.evaluate("document.getElementById('veil').remove()")
+        .await
+        .unwrap();
+    let snap = p.snapshot(&SnapshotOptions::default()).await.unwrap();
+    let short = ref_of(&snap, "textbox", "Short");
+    assert!(p.fill(&short, "abc").await.unwrap().ok);
+    let r = p.fill(&short, "tooLongSecret").await.unwrap();
+    assert!(!r.ok);
+    let err = r.error.unwrap();
+    // The value is set through the field itself; a page that rewrites it is reported
+    // without echoing what was typed.
+    assert!(err.contains("did not accept the value"), "{err}");
+    assert!(
+        !err.contains("tooLongSecret") && !err.contains("too"),
+        "{err}"
+    );
+}

@@ -111,6 +111,7 @@ const TABLE: Record<string, Entry> = {
   browser_open: { id: "browser_open", icon: "globe", chips: urlChip },
   browser_click: { id: "browser_click", icon: "globe" },
   browser_fill: { id: "browser_fill", icon: "globe" },
+  browser_act: { id: "browser_fill", icon: "globe" },
   browser_eval: { id: "browser_eval", icon: "terminal" },
   browser_press: { id: "browser_press", icon: "globe" },
   browser_select: { id: "browser_select", icon: "globe" },

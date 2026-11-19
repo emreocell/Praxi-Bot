@@ -51,7 +51,10 @@ use std::sync::Arc;
 use desktop_api::DesktopBackend;
 use tool_registry::{Tool, ToolRegistry};
 
-pub use browser::{BrowserDriver, BrowserSettings, CdpDriver, Wait};
+pub use browser::{
+    ActStep, BrowserDriver, BrowserSettings, CdpDriver, HIDDEN_VALUE, MAX_ACT_STEPS, RefFact,
+    StepOutcome, Wait, act_can_egress, check_ref_identity, ref_identity,
+};
 pub use checkpoint::{
     ChangeKind, Checkpoint, CheckpointEntry, CheckpointStore, DiffOmittedReason, FileChange,
     MAX_DIFF_FILE_BYTES, MAX_DIFF_RUN_BYTES, RestoreAction, RestorePreviewEntry, RestoreReport,
@@ -460,6 +463,7 @@ mod tests {
             ("browser_tabs", W, B),
             ("browser_screenshot", R, B),
             ("browser_eval", W, Sc),
+            ("browser_act", W, B),
             ("fs_read", R, Fs),
             ("fs_list", R, Fs),
             ("fs_search", R, Fs),
@@ -1045,7 +1049,7 @@ mod tests {
         cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
         cfg.email = Some(connector.clone());
         let added = register_builtin_tools(&reg, cfg);
-        assert_eq!(added, 34 + 6);
+        assert_eq!(added, 35 + 6);
 
         // Verification of email tools and their effects
         let send_tool = reg

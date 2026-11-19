@@ -70,6 +70,32 @@ automatically yet; delete old ones by hand if they pile up.
 
 Search queries go to the configured backend that handles them (your SearXNG instance, Brave, Tavily, DuckDuckGo, or Bing), and fetched URLs go to the sites they point at, from your machine's IP address. Page fetches (`web_extract`, `web_feed`, `web_sitemap`, `web_metadata`) carry a `User-Agent: Praxi-Bot/<version> (web-tools)` header, while HTML search requests use standard browser `User-Agent` / `Accept` headers so search engines do not serve bot challenges. If query privacy matters to you, point `searxng_url` at an instance you control or remove the `web_*` tools from a bot's `allow` list.
 
+## Browser actions
+
+The `browser_*` tools click, fill and select by element reference from the last
+`browser_snapshot`.
+
+- **Checked before acting.** A click, fill, select or hover first waits (up to a few
+  seconds, polling the page, never a fixed sleep) until the element is visible,
+  enabled, not moving, scrolled into view and not covered by something else. If it
+  cannot act, the error names the blocker, for example
+  `covered by dialog «Cookie consent»`, instead of clicking the wrong thing.
+- **Read back.** After a fill the field is read back; if the page changed or
+  shortened the value the call fails (lengths only, the text is never repeated).
+  `browser_click` with `"checked": true/false` sets a checkbox, radio button or
+  switch: it does nothing when the state is already right, clicks once, reads the
+  state again, and never clicks a second time if the page vetoed the change.
+- **`browser_act`.** Up to 12 steps (`click`, `fill`, `select`, `press`, `scroll`,
+  `wait`) in one call. All steps are validated first. The batch is approved once,
+  as the strictest of its steps, and the approval card lists every step with its
+  target (text typed into password and card fields is hidden); a grant for a
+  single tool such as `browser_click` does not cover it. Every step also passes
+  the computer-control gate on its own. The batch stops at the
+  first navigation, dialog, changed or missing target, or error, and the result
+  lists what ran, what did not, and one combined page diff, so the bot continues
+  from the first unexecuted step. A batch is classified at least as strictly as
+  its strictest step.
+
 ## Safety
 
 - **Network limits.** The tools only fetch `http` and `https` URLs. Loopback

@@ -43,6 +43,220 @@ pub enum Wait {
     Idle,
 }
 
+/// Most steps one `browser_act` call may carry.
+pub const MAX_ACT_STEPS: usize = 12;
+
+/// One step of `browser_act`. Only the actions of the single-action tools:
+/// there is no `eval` and no navigation by URL.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ActStep {
+    /// Click the element. With `checked` the click is a state set for a checkbox, radio or
+    /// switch: idempotent, read back, never repeated.
+    Click { r: String, checked: Option<bool> },
+    /// Replace the text of the input.
+    Fill { r: String, text: String },
+    /// Choose an option of the select.
+    Select { r: String, value: String },
+    /// Press a key or chord.
+    Press { key: String },
+    /// Scroll the page or an element.
+    Scroll { r: Option<String>, dx: f64, dy: f64 },
+    /// Wait for a condition.
+    Wait {
+        cond: Wait,
+        timeout: Option<Duration>,
+    },
+}
+
+impl ActStep {
+    /// The element ref the step acts on, if any.
+    #[must_use]
+    pub fn target(&self) -> Option<&str> {
+        match self {
+            Self::Click { r, .. } | Self::Fill { r, .. } | Self::Select { r, .. } => Some(r),
+            Self::Scroll { r, .. } => r.as_deref(),
+            Self::Press { .. } | Self::Wait { .. } => None,
+        }
+    }
+
+    /// One line for the result. Entered text is never echoed (it may be a
+    /// secret): only its length.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Click {
+                r,
+                checked: Some(c),
+            } => format!(
+                "click {r} (set {})",
+                if *c { "checked" } else { "unchecked" }
+            ),
+            Self::Click { r, .. } => format!("click {r}"),
+            Self::Fill { r, text } => format!("fill {r} ({} chars)", text.chars().count()),
+            Self::Select { r, value } => {
+                format!(
+                    "select {r} {:?}",
+                    value.chars().take(40).collect::<String>()
+                )
+            }
+            Self::Press { key } => format!("press {key}"),
+            Self::Scroll { r, dx, dy } => {
+                format!("scroll {} dx={dx} dy={dy}", r.as_deref().unwrap_or("page"))
+            }
+            Self::Wait { cond, .. } => match cond {
+                Wait::Text(t) => format!("wait text {:?}", t.chars().take(40).collect::<String>()),
+                Wait::Selector(sel) => {
+                    format!(
+                        "wait selector {:?}",
+                        sel.chars().take(40).collect::<String>()
+                    )
+                }
+                Wait::Idle => "wait idle".to_owned(),
+            },
+        }
+    }
+
+    /// `(action, label)` for the control gate, the same pair the single tool uses.
+    fn gate_request(&self) -> Option<(&'static str, String)> {
+        match self {
+            Self::Click { r, .. } | Self::Select { r, .. } => Some(("click", r.clone())),
+            Self::Fill { r, .. } => Some(("type", r.clone())),
+            Self::Press { key } => Some(("key", key.clone())),
+            Self::Scroll { r, .. } => Some(("scroll", r.clone().unwrap_or_default())),
+            Self::Wait { .. } => None,
+        }
+    }
+}
+
+/// What one `browser_act` step did to the page.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StepOutcome {
+    /// The page URL changed (navigation): refs of later steps are gone.
+    pub url_changed: bool,
+    /// JavaScript dialogs the step opened, rendered as `~ dialog(...)` lines.
+    pub dialogs: Vec<String>,
+}
+
+/// Identity of the element behind a ref: role and accessible name.
+#[must_use]
+pub fn ref_identity(role: &str, name: &str) -> String {
+    format!("{role}\u{1f}{name}")
+}
+
+/// The ref must still carry the identity it had when the batch started.
+///
+/// # Errors
+/// A message for the model: the ref is gone, or it now names another element.
+pub fn check_ref_identity(
+    r: &str,
+    expected: &str,
+    now: Option<(&str, &str)>,
+) -> Result<(), String> {
+    match now {
+        None => Err(format!(
+            "ref {r} is no longer on the page (it changed since the snapshot)"
+        )),
+        Some((role, name)) if ref_identity(role, name) != expected => {
+            let shown: String = name.chars().filter(|c| !c.is_control()).take(60).collect();
+            Err(format!(
+                "ref {r} now points at a different element ({role} \"{}\"); nothing was done to it",
+                shown.replace('"', "'")
+            ))
+        }
+        Some(_) => Ok(()),
+    }
+}
+
+/// What the approval card needs to know about the element behind a ref.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefFact {
+    /// Role as shown in the snapshot.
+    pub role: String,
+    /// Accessible name (page content: untrusted).
+    pub name: String,
+    /// The field holds a secret (password, card number, one-time code).
+    pub sensitive: bool,
+}
+
+/// Shown on the approval card instead of a value that must not be displayed.
+pub const HIDDEN_VALUE: &str = "(hidden)";
+
+/// Whether a `browser_act` input can carry bytes out of the machine: `true`
+/// when any step enters text (`fill`, `select`, `press`), `false` for a batch
+/// of only `click` / `scroll` / `wait`. Input that cannot be read counts as
+/// carrying (fail closed). This is the hook for the egress gate: a batch must
+/// be classified at least like `browser_fill` when this returns `true`, and
+/// like `browser_click` otherwise.
+#[must_use]
+pub fn act_can_egress(input: &Value) -> bool {
+    let Some(steps) = input.get("steps").and_then(Value::as_array) else {
+        return true;
+    };
+    steps.iter().any(|st| {
+        !matches!(
+            st.get("action").and_then(Value::as_str),
+            Some("click" | "scroll" | "wait")
+        )
+    })
+}
+
+fn card_text(s: &str, max: usize) -> String {
+    s.chars().filter(|c| !c.is_control()).take(max).collect()
+}
+
+/// One approval-card row per step, in order. A value typed into a sensitive
+/// field, or into a field that cannot be inspected, is never put on the card.
+fn act_card_steps(steps: &[ActStep], facts: &[Option<RefFact>]) -> Vec<Value> {
+    let mut facts = facts.iter();
+    steps
+        .iter()
+        .enumerate()
+        .map(|(k, step)| {
+            let fact = step.target().and_then(|_| facts.next().cloned().flatten());
+            let target = match (step.target(), &fact) {
+                (Some(r), Some(f)) => {
+                    format!(
+                        "{r} {} \"{}\"",
+                        f.role,
+                        card_text(&f.name, 60).replace('"', "'")
+                    )
+                }
+                (Some(r), None) => format!("{r} (not on the current page)"),
+                (None, _) => String::new(),
+            };
+            let (action, value, hidden) = match step {
+                ActStep::Click { .. } => ("click", None, false),
+                ActStep::Fill { text, .. } => {
+                    if fact.as_ref().is_some_and(|f| !f.sensitive) {
+                        ("fill", Some(text.clone()), false)
+                    } else {
+                        ("fill", None, true)
+                    }
+                }
+                ActStep::Select { value, .. } => ("select", Some(value.clone()), false),
+                ActStep::Press { key } => ("press", Some(key.clone()), false),
+                ActStep::Scroll { dx, dy, .. } => {
+                    ("scroll", Some(format!("dx={dx} dy={dy}")), false)
+                }
+                ActStep::Wait { .. } => (
+                    "wait",
+                    Some(step.describe().trim_start_matches("wait ").to_owned()),
+                    false,
+                ),
+            };
+            json!({
+                "n": k + 1,
+                "action": action,
+                "target": target,
+                "value": if hidden { Some(HIDDEN_VALUE.to_owned()) } else { value },
+                "hidden": hidden,
+            })
+        })
+        .collect()
+}
+
+const ACT_UNSUPPORTED: &str = "this browser driver does not support browser_act";
+
 /// Abstraction over a controllable browser. Every mutating call returns a
 /// text view of what changed.
 #[async_trait]
@@ -85,6 +299,11 @@ pub trait BrowserDriver: Send + Sync {
     ) -> Result<String, String> {
         let _ = (dialog, prompt_text);
         self.click(r).await
+    }
+    /// Set the checkbox, radio button or switch `r` to `checked`: idempotent, read back.
+    async fn set_checked(&self, r: &str, checked: bool) -> Result<String, String> {
+        let _ = (r, checked);
+        Err("this browser driver cannot set checkbox state".into())
     }
     /// Replace the text of input `r`.
     async fn fill(&self, r: &str, text: &str) -> Result<String, String>;
@@ -132,6 +351,28 @@ pub trait BrowserDriver: Send + Sync {
     ) -> Result<(Vec<u8>, &'static str), String>;
     /// Evaluate JavaScript in the page.
     async fn eval(&self, js: &str) -> Result<Value, String>;
+    /// Start a `browser_act` batch: remember the current view as the baseline
+    /// of the one combined diff and return the identity ([`ref_identity`]) of
+    /// each ref, `None` for a ref the current page does not have.
+    async fn act_begin(&self, refs: &[String]) -> Result<Vec<Option<String>>, String> {
+        let _ = refs;
+        Err(ACT_UNSUPPORTED.into())
+    }
+    /// Run one step. With `expect`, the step's ref must still carry that
+    /// identity; the check and the action are one atomic driver operation.
+    async fn act_step(&self, step: &ActStep, expect: Option<&str>) -> Result<StepOutcome, String> {
+        let _ = (step, expect);
+        Err(ACT_UNSUPPORTED.into())
+    }
+    /// End the batch: one view of everything that changed since `act_begin`.
+    async fn act_end(&self) -> Result<String, String> {
+        Err(ACT_UNSUPPORTED.into())
+    }
+    /// Facts about refs for an approval card, read without changing the page.
+    /// `None` for a ref that cannot be inspected (the card then hides values).
+    async fn ref_facts(&self, refs: &[String]) -> Vec<Option<RefFact>> {
+        refs.iter().map(|_| None).collect()
+    }
     /// Browser-reported origin of the receiving ref, or the focused frame for a key press.
     async fn input_origin(&self, r: Option<&str>) -> Option<String> {
         self.field_target(r?).await.ok()?.frame_origin
@@ -260,6 +501,8 @@ pub struct CdpDriver {
     activity: Arc<std::sync::RwLock<Option<ActivityProbe>>>,
     reaper_started: std::sync::atomic::AtomicBool,
     peers: Option<(String, BrowserPeers)>,
+    /// The view at the start of the running `browser_act` batch.
+    act_mark: parking_lot::Mutex<Option<browser_cdp::Snapshot>>,
     /// Live-view slot of this bot's browser: idle until a session launches,
     /// then bound to its page. Capture stays lazy (viewer-driven).
     view: Option<Arc<browser_cdp::BrowserViewTarget>>,
@@ -297,6 +540,20 @@ pub(crate) fn sanitize_dialog_message(msg: &str) -> String {
     };
     out = out.replace('"', "\\\"");
     out
+}
+
+fn dialog_lines(r: &ActionResult) -> Vec<String> {
+    r.dialogs
+        .iter()
+        .map(|dl| {
+            format!(
+                "~ dialog({}) {} page content: \"{}\"",
+                dl.kind,
+                if dl.accepted { "accepted" } else { "dismissed" },
+                sanitize_dialog_message(&dl.message)
+            )
+        })
+        .collect()
 }
 
 fn render_action(r: &ActionResult) -> Result<String, String> {
@@ -358,6 +615,7 @@ impl CdpDriver {
             takeover_pin: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             activity: Arc::new(std::sync::RwLock::new(None)),
             reaper_started: std::sync::atomic::AtomicBool::new(false),
+            act_mark: parking_lot::Mutex::new(None),
             view: None,
         }
     }
@@ -693,6 +951,27 @@ macro_rules! with_session {
     }};
 }
 
+impl CdpDriver {
+    async fn read_ref_facts(&self, refs: &[String]) -> Result<Vec<Option<RefFact>>, String> {
+        with_session!(self, None, false, |sess| {
+            let mut out = Vec::with_capacity(refs.len());
+            for r in refs {
+                let fact = match sess.page.ref_identity(r).await {
+                    Some((role, name)) => Some(RefFact {
+                        role,
+                        name,
+                        // Unknown counts as sensitive.
+                        sensitive: sess.page.ref_is_sensitive(r).await.unwrap_or(true),
+                    }),
+                    None => None,
+                };
+                out.push(fact);
+            }
+            Ok::<_, browser_cdp::Error>(out)
+        })
+    }
+}
+
 #[async_trait]
 impl BrowserDriver for CdpDriver {
     fn on_desktop(&self) -> bool {
@@ -791,6 +1070,13 @@ impl BrowserDriver for CdpDriver {
 
     async fn click(&self, r: &str) -> Result<String, String> {
         self.click_opts(r, None, None).await
+    }
+
+    async fn set_checked(&self, r: &str, checked: bool) -> Result<String, String> {
+        let acted = with_session!(self, None, |sess| {
+            sess.page.set_checked(r, checked).await
+        })?;
+        render_action(&acted)
     }
 
     async fn fill(&self, r: &str, text: &str) -> Result<String, String> {
@@ -952,6 +1238,111 @@ impl BrowserDriver for CdpDriver {
         with_session!(self, None, |sess| { sess.page.evaluate(js).await })
     }
 
+    async fn act_begin(&self, refs: &[String]) -> Result<Vec<Option<String>>, String> {
+        let opts = snap_opts(false);
+        let (mark, ids) = with_session!(self, None, false, |sess| {
+            let got: Result<_, browser_cdp::Error> = async {
+                let mark = match sess.page.last_snapshot().await {
+                    Some(seen) => seen,
+                    None => sess.page.snapshot(&opts).await?,
+                };
+                let mut ids = Vec::with_capacity(refs.len());
+                for r in refs {
+                    ids.push(
+                        sess.page
+                            .ref_identity(r)
+                            .await
+                            .map(|(role, name)| ref_identity(&role, &name)),
+                    );
+                }
+                Ok((mark, ids))
+            }
+            .await;
+            got
+        })?;
+        *self.act_mark.lock() = Some(mark);
+        Ok(ids)
+    }
+
+    async fn act_step(&self, step: &ActStep, expect: Option<&str>) -> Result<StepOutcome, String> {
+        let acted = with_session!(self, None, false, |sess| {
+            let got: Result<Result<ActionResult, String>, browser_cdp::Error> = async {
+                if let (Some(want), Some(r)) = (expect, step.target()) {
+                    let now = sess.page.ref_identity(r).await;
+                    let now = now
+                        .as_ref()
+                        .map(|(role, name)| (role.as_str(), name.as_str()));
+                    if let Err(stale) = check_ref_identity(r, want, now) {
+                        return Ok(Err(stale));
+                    }
+                }
+                let page = &sess.page;
+                Ok(Ok(match step {
+                    ActStep::Click {
+                        r,
+                        checked: Some(c),
+                    } => page.set_checked(r, *c).await?,
+                    ActStep::Click { r, .. } => {
+                        page.click_with(r, &DialogOptions::default()).await?
+                    }
+                    ActStep::Fill { r, text } => page.fill(r, text).await?,
+                    ActStep::Select { r, value } => page.select_option(r, value).await?,
+                    ActStep::Press { key } => page.press_key(key).await?,
+                    ActStep::Scroll { r, dx, dy } => page.scroll(r.as_deref(), *dx, *dy).await?,
+                    ActStep::Wait { cond, timeout } => {
+                        let c = match cond {
+                            Wait::Text(t) => WaitCondition::Text(t.clone()),
+                            Wait::Selector(sel) => WaitCondition::Selector(sel.clone()),
+                            Wait::Idle => WaitCondition::NetworkIdle,
+                        };
+                        page.wait_for(&c, *timeout).await?
+                    }
+                }))
+            }
+            .await;
+            got
+        })??;
+        if !acted.ok {
+            return Err(render_action(&acted)
+                .err()
+                .unwrap_or_else(|| "action failed".into()));
+        }
+        Ok(StepOutcome {
+            url_changed: acted.new_snapshot_diff.url_changed.is_some(),
+            dialogs: dialog_lines(&acted),
+        })
+    }
+
+    async fn ref_facts(&self, refs: &[String]) -> Vec<Option<RefFact>> {
+        self.read_ref_facts(refs)
+            .await
+            .unwrap_or_else(|_| refs.iter().map(|_| None).collect())
+    }
+
+    async fn act_end(&self) -> Result<String, String> {
+        let mark = self.act_mark.lock().take();
+        let opts = snap_opts(false);
+        let last = with_session!(self, None, false, |sess| {
+            let got: Result<_, browser_cdp::Error> = async {
+                Ok(match sess.page.last_snapshot().await {
+                    Some(seen) => seen,
+                    None => sess.page.snapshot(&opts).await?,
+                })
+            }
+            .await;
+            got
+        })?;
+        let before = mark.unwrap_or_default();
+        render_action(&ActionResult {
+            ok: true,
+            error: None,
+            new_snapshot_diff: browser_cdp::diff(&before, &last),
+            snapshot: last,
+            dialogs: Vec::new(),
+            settle_note: None,
+        })
+    }
+
     async fn current_url(&self) -> Option<String> {
         // Never starts a browser just to ask.
         let listed: Result<Option<String>, String> = async {
@@ -984,6 +1375,7 @@ enum Op {
     Tabs,
     Screenshot,
     Eval,
+    Act,
 }
 
 struct Shared {
@@ -1207,7 +1599,8 @@ fn tools_with_pool(
                 json!({"type":"object","properties":{
                     "ref":ref_prop,
                     "dialog":{"type":"string","enum":["accept","dismiss"],"description":"How to handle any dialog (e.g. confirm, prompt, beforeunload) during click. Default is dismiss (alerts are still accepted)."},
-                    "prompt_text":{"type":"string","description":"Optional text to enter when accepting a prompt dialog."}
+                    "prompt_text":{"type":"string","description":"Optional text to enter when accepting a prompt dialog."},
+                    "checked":{"type":"boolean","description":"For a checkbox, radio button or switch: set it to this state instead of clicking. Does nothing when it is already in that state; reads the state back afterwards. Never clicks twice."}
                 },"required":["ref"]}),
                 Effect::Write,
                 b,
@@ -1330,6 +1723,31 @@ fn tools_with_pool(
                 PermissionCategory::Script,
             ),
         ),
+        (
+            Op::Act,
+            spec(
+                "browser_act",
+                "Run up to 12 browser actions in one call, in order (fill a whole form and submit it). Each step is checked first: if its ref no longer names the same element, or the page navigated or opened a dialog, the batch stops and the steps that did not run are listed. Returns done k/n and one combined change view. Actions: click, fill, select, press, scroll, wait. Example: {\"steps\":[{\"action\":\"fill\",\"ref\":\"e5\",\"text\":\"Ada\"},{\"action\":\"select\",\"ref\":\"e7\",\"value\":\"TR\"},{\"action\":\"click\",\"ref\":\"e9\"}]}",
+                json!({"type":"object","properties":{
+                    "steps":{"type":"array","minItems":1,"maxItems":MAX_ACT_STEPS,"items":{"type":"object","properties":{
+                        "action":{"type":"string","enum":["click","fill","select","press","scroll","wait"]},
+                        "ref":ref_prop,
+                        "text":{"type":"string","description":"fill: the new text. wait: text to wait for."},
+                        "value":{"type":"string","description":"select: option value or label."},
+                        "key":{"type":"string","description":"press: key such as Enter, Tab, Control+a."},
+                        "checked":{"type":"boolean","description":"click: set a checkbox, radio or switch to this state (no-op when already so, read back)."},
+                        "dx":{"type":"number"},
+                        "dy":{"type":"number"},
+                        "selector":{"type":"string","description":"wait: CSS selector to wait for."},
+                        "idle":{"type":"boolean","description":"wait: network idle."},
+                        "timeout_secs":{"type":"integer","minimum":1,"maximum":60}
+                    },"required":["action"]}},
+                    "stop_on_change":{"type":"boolean","description":"Stop when a step navigates or opens a dialog (default true)."}
+                },"required":["steps"]}),
+                Effect::Write,
+                b,
+            ),
+        ),
     ];
     defs.into_iter()
         .map(|(op, spec)| {
@@ -1361,6 +1779,8 @@ struct RefIn {
     r#ref: String,
     dialog: Option<String>,
     prompt_text: Option<String>,
+    /// Set a checkbox, radio button or switch to this state instead of clicking blindly.
+    checked: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -1417,6 +1837,107 @@ struct ShotIn {
 #[derive(Deserialize)]
 struct EvalIn {
     js: String,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ActIn {
+    steps: Vec<ActStepIn>,
+    #[serde(default = "default_true")]
+    stop_on_change: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ActStepIn {
+    action: String,
+    r#ref: Option<String>,
+    text: Option<String>,
+    value: Option<String>,
+    key: Option<String>,
+    /// `click` only: set a checkbox/radio/switch instead of toggling it.
+    checked: Option<bool>,
+    #[serde(default)]
+    dx: f64,
+    #[serde(default)]
+    dy: f64,
+    selector: Option<String>,
+    #[serde(default)]
+    idle: bool,
+    timeout_secs: Option<u64>,
+}
+
+/// Validate the whole batch before anything runs.
+fn parse_act_steps(steps: Vec<ActStepIn>) -> Result<Vec<ActStep>, ToolError> {
+    if steps.is_empty() || steps.len() > MAX_ACT_STEPS {
+        return Err(ToolError::InvalidInput(format!(
+            "steps must hold 1 to {MAX_ACT_STEPS} actions"
+        )));
+    }
+    steps
+        .into_iter()
+        .enumerate()
+        .map(|(i, st)| {
+            let n = i + 1;
+            let bad = |m: &str| ToolError::InvalidInput(format!("step {n}: {m}"));
+            let need_ref = |r: Option<String>| r.ok_or_else(|| bad("ref is required"));
+            Ok(match st.action.as_str() {
+                "click" => ActStep::Click {
+                    r: need_ref(st.r#ref)?,
+                    checked: st.checked,
+                },
+                // HOOK(PR #105, `secret` reference for browser_fill): when it lands, the
+                // `secret` field belongs HERE, resolved by the very function `browser_fill`
+                // uses (one code path, no second mechanism), and the value must never reach
+                // `describe`, the approval card or the result. Until then a fill step takes
+                // only `text`, exactly like `browser_fill` today.
+                "fill" => ActStep::Fill {
+                    r: need_ref(st.r#ref)?,
+                    text: st.text.ok_or_else(|| bad("text is required"))?,
+                },
+                "select" => ActStep::Select {
+                    r: need_ref(st.r#ref)?,
+                    value: st.value.ok_or_else(|| bad("value is required"))?,
+                },
+                "press" => ActStep::Press {
+                    key: st.key.ok_or_else(|| bad("key is required"))?,
+                },
+                "scroll" => ActStep::Scroll {
+                    r: st.r#ref,
+                    dx: st.dx,
+                    dy: st.dy,
+                },
+                "wait" => {
+                    let given = usize::from(st.text.is_some())
+                        + usize::from(st.selector.is_some())
+                        + usize::from(st.idle);
+                    if given != 1 {
+                        return Err(bad("wait needs exactly one of text, selector, idle"));
+                    }
+                    let cond = if let Some(t) = st.text {
+                        Wait::Text(t)
+                    } else if let Some(sel) = st.selector {
+                        Wait::Selector(sel)
+                    } else {
+                        Wait::Idle
+                    };
+                    ActStep::Wait {
+                        cond,
+                        timeout: Some(Duration::from_secs(st.timeout_secs.unwrap_or(15).min(60))),
+                    }
+                }
+                other => {
+                    return Err(bad(&format!(
+                        "unknown action {other:?}; allowed: click, fill, select, press, scroll, wait"
+                    )));
+                }
+            })
+        })
+        .collect()
 }
 
 /// Only `http`, `https` and `about:blank` may be opened. `file:`, `javascript:`,
@@ -1595,6 +2116,128 @@ impl BrowserTool {
         Ok(())
     }
 
+    /// `browser_act`: the steps run in order, each one admitted by the control
+    /// gate and identity-checked on its own, exactly like the single-action
+    /// tool it stands for. The batch stops at the first step that cannot run.
+    async fn run_act(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
+        let i: ActIn = parse(input)?;
+        let steps = parse_act_steps(i.steps)?;
+        self.refuse_observation_while_latched()?;
+        let d = Arc::clone(&self.shared.driver);
+        let refs: Vec<String> = steps
+            .iter()
+            .filter_map(|st| st.target().map(str::to_owned))
+            .collect();
+        let mut ids = d.act_begin(&refs).await.map_err(exec_err)?.into_iter();
+        let total = steps.len();
+        let mut done = 0usize;
+        let mut stopped: Option<String> = None;
+        let mut notes: Vec<String> = Vec::new();
+        for (k, step) in steps.iter().enumerate() {
+            let n = k + 1;
+            // Identity the ref had when the batch started (one per ref-carrying step).
+            let expect = if let Some(r) = step.target() {
+                let Some(id) = ids.next().flatten() else {
+                    stopped = Some(format!(
+                        "step {n} ({}): ref {r} is not on the current page",
+                        step.describe()
+                    ));
+                    break;
+                };
+                Some(id)
+            } else {
+                None
+            };
+            let permit = match step.gate_request() {
+                Some((action, label)) => match self.gate(run_id, action, label).await {
+                    Ok(permit) => permit,
+                    // Nothing ran yet: the refusal is the whole answer.
+                    Err(refused) if done == 0 => return Err(refused),
+                    Err(refused) => {
+                        stopped = Some(format!("step {n} ({}): {refused}", step.describe()));
+                        break;
+                    }
+                },
+                None => ActionPermit::default(),
+            };
+            let epoch = self
+                .shared
+                .control
+                .as_ref()
+                .map_or(0, |g| g.observation_epoch());
+            if permit.needs_observation()
+                || self
+                    .shared
+                    .observed_epoch
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    != epoch
+            {
+                self.shared
+                    .observed_epoch
+                    .store(epoch, std::sync::atomic::Ordering::SeqCst);
+                self.refuse_observation_while_latched()?;
+                let fresh = d.snapshot(false).await.map_err(exec_err)?;
+                permit.observed();
+                return Ok(format!(
+                    "done: {done}/{total}\nHuman intervention completed; the remaining {} step(s) were discarded. Fresh observation:\n{fresh}",
+                    total - done
+                ));
+            }
+            let (driver, owned) = (Arc::clone(&d), step.clone());
+            let outcome = permit
+                .protect(async move { driver.act_step(&owned, expect.as_deref()).await })
+                .await
+                .map_err(exec_err)?;
+            match outcome {
+                Err(why) => {
+                    stopped = Some(format!("step {n} ({}): {why}", step.describe()));
+                    break;
+                }
+                Ok(o) => {
+                    done += 1;
+                    let changed = if o.url_changed {
+                        Some("the page navigated")
+                    } else if o.dialogs.is_empty() {
+                        None
+                    } else {
+                        Some("a dialog opened")
+                    };
+                    notes.extend(o.dialogs);
+                    if let Some(what) = changed
+                        && i.stop_on_change
+                        && n < total
+                    {
+                        stopped = Some(format!("after step {n} ({}): {what}", step.describe()));
+                        break;
+                    }
+                }
+            }
+        }
+        let view = d.act_end().await.map_err(exec_err)?;
+        let mut out = format!("done: {done}/{total}\n");
+        if let Some(why) = &stopped {
+            let _ = writeln!(out, "stopped: {why}");
+            let rest: Vec<String> = steps
+                .iter()
+                .enumerate()
+                .skip(done)
+                .map(|(k, st)| format!("  {} {}", k + 1, st.describe()))
+                .collect();
+            if !rest.is_empty() {
+                let _ = writeln!(
+                    out,
+                    "not run (take the refs from the view below and plan again):\n{}",
+                    rest.join("\n")
+                );
+            }
+        }
+        for line in notes {
+            let _ = writeln!(out, "{line}");
+        }
+        out.push_str(&view);
+        Ok(out)
+    }
+
     /// Observation tools discard their result if control changed while they
     /// ran (a screenshot, a wait or a tab list that straddles a takeover).
     async fn run(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
@@ -1738,6 +2381,9 @@ impl BrowserTool {
                 }
                 permit
                     .protect(async move {
+                        if let Some(want) = i.checked {
+                            return d.set_checked(&i.r#ref, want).await;
+                        }
                         d.click_opts(&i.r#ref, i.dialog.as_deref(), i.prompt_text.as_deref())
                             .await
                     })
@@ -1992,6 +2638,7 @@ impl BrowserTool {
                 let path = save_file(&self.shared.data_dir.join("screenshots"), ext, &bytes)?;
                 Ok(format!("screenshot: {path}"))
             }
+            Op::Act => return self.run_act(run_id, input).await,
             Op::Eval => {
                 let i: EvalIn = parse(input)?;
                 let label: String = i.js.trim().chars().take(80).collect();
@@ -2073,28 +2720,53 @@ impl BrowserTool {
         ctx: &ToolContext,
         input: &Value,
     ) -> Result<Option<Value>, ToolError> {
-        let Some((name, target, grant)) = self.secret_fill_facts(ctx, input).await? else {
-            return Ok(None);
+        if let Some((name, target, grant)) = self.secret_fill_facts(ctx, input).await? {
+            let frame = target.frame_origin.clone().unwrap_or_default();
+            let top = target.top_origin.clone();
+            let differs = top.as_deref() != Some(frame.as_str());
+            return Ok(Some(json!({
+                "kind": "secret_fill",
+                "tool": "browser_fill",
+                "secret": sanitize_label(&name, 80),
+                "field": sanitize_label(&target.name, 80),
+                "field_role": sanitize_label(&target.role, 40),
+                "frame_origin": frame,
+                "top_origin": top,
+                "frame_differs_from_top": differs,
+                "has_standing_grant": grant.is_some(),
+                "note": if differs {
+                    "The field is inside an embedded frame whose origin differs from the page's: the secret goes to the frame origin shown."
+                } else {
+                    "The secret value is typed by Praxi; the assistant never sees it."
+                },
+            })));
+        }
+        let steps = match self.op {
+            Op::Act => parse_act_steps(parse::<ActIn>(input.clone())?.steps)?,
+            Op::Fill => {
+                let i: FillIn = parse(input.clone())?;
+                // A stored-secret fill has its own card above; only literal text lands here.
+                let Some(text) = input.get("text").and_then(Value::as_str) else {
+                    return Ok(None);
+                };
+                vec![ActStep::Fill {
+                    r: i.r#ref,
+                    text: text.to_owned(),
+                }]
+            }
+            _ => return Ok(None),
         };
-        let frame = target.frame_origin.clone().unwrap_or_default();
-        let top = target.top_origin.clone();
-        let differs = top.as_deref() != Some(frame.as_str());
-        Ok(Some(json!({
-            "kind": "secret_fill",
-            "tool": "browser_fill",
-            "secret": sanitize_label(&name, 80),
-            "field": sanitize_label(&target.name, 80),
-            "field_role": sanitize_label(&target.role, 40),
-            "frame_origin": frame,
-            "top_origin": top,
-            "frame_differs_from_top": differs,
-            "has_standing_grant": grant.is_some(),
-            "note": if differs {
-                "The field is inside an embedded frame whose origin differs from the page's: the secret goes to the frame origin shown."
-            } else {
-                "The secret value is typed by Praxi; the assistant never sees it."
-            },
-        })))
+        let shared = self.shared.for_bot(ctx.bot_id.as_deref())?;
+        let refs: Vec<String> = steps
+            .iter()
+            .filter_map(|st| st.target().map(str::to_owned))
+            .collect();
+        let facts = shared.driver.ref_facts(&refs).await;
+        let rows = act_card_steps(&steps, &facts);
+        if self.op == Op::Fill && rows.iter().all(|r| r["hidden"] != json!(true)) {
+            return Ok(None);
+        }
+        Ok(Some(json!({"kind": "browser_steps", "steps": rows})))
     }
 
     async fn call_in_lane(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
@@ -2317,6 +2989,9 @@ pub(crate) mod fake {
         async fn click(&self, r: &str) -> Result<String, String> {
             self.click_opts(r, None, None).await
         }
+        async fn set_checked(&self, r: &str, c: bool) -> Result<String, String> {
+            self.rec(&format!("set_checked:{r}:{c}"))
+        }
         async fn fill(&self, r: &str, t: &str) -> Result<String, String> {
             self.rec(&format!("fill:{r}:{t}"))
         }
@@ -2395,6 +3070,51 @@ pub(crate) mod fake {
         async fn eval(&self, js: &str) -> Result<Value, String> {
             self.calls.lock().push(format!("eval:{js}"));
             Ok(json!({"title": "Example"}))
+        }
+        // Scripted by ref name: `eGONE` is unknown at the start, `eSTALE`
+        // changed identity, `eNAV` navigates, `eDLG` opens a dialog.
+        async fn act_begin(&self, refs: &[String]) -> Result<Vec<Option<String>>, String> {
+            self.calls
+                .lock()
+                .push(format!("act_begin:{}", refs.join(",")));
+            Ok(refs
+                .iter()
+                .map(|r| (r != "eGONE").then(|| ref_identity("button", r)))
+                .collect())
+        }
+        async fn act_step(
+            &self,
+            step: &ActStep,
+            expect: Option<&str>,
+        ) -> Result<StepOutcome, String> {
+            if let (Some(want), Some(r)) = (expect, step.target()) {
+                let now = if r == "eSTALE" { "Delete account" } else { r };
+                check_ref_identity(r, want, Some(("button", now)))?;
+            }
+            self.rec(&format!("act:{}", step.describe()))?;
+            Ok(StepOutcome {
+                url_changed: step.target() == Some("eNAV"),
+                dialogs: if step.target() == Some("eDLG") {
+                    vec!["~ dialog(alert) accepted page content: \"hi\"".into()]
+                } else {
+                    Vec::new()
+                },
+            })
+        }
+        async fn ref_facts(&self, refs: &[String]) -> Vec<Option<RefFact>> {
+            refs.iter()
+                .map(|r| {
+                    (r != "eGONE").then(|| RefFact {
+                        role: "textbox".into(),
+                        name: format!("Field {r}"),
+                        sensitive: r == "e4",
+                    })
+                })
+                .collect()
+        }
+        async fn act_end(&self) -> Result<String, String> {
+            self.calls.lock().push("act_end".into());
+            Ok("# T (http://a/)\n(combined view)".into())
         }
     }
 }
@@ -2648,6 +3368,188 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn click_with_checked_sets_state_through_the_driver_and_never_plain_clicks() {
+        let (_d, fake, t) = build();
+        let ctx = ToolContext::default();
+        get(&t, "browser_click")
+            .call(&ctx, json!({"ref": "e1", "checked": true}))
+            .await
+            .unwrap();
+        get(&t, "browser_act")
+            .call(
+                &ctx,
+                json!({"steps": [{"action": "click", "ref": "e2", "checked": false}]}),
+            )
+            .await
+            .unwrap();
+        let calls = fake.calls.lock().clone();
+        assert!(
+            calls.contains(&"set_checked:e1:true".to_string()),
+            "{calls:?}"
+        );
+        assert!(
+            calls.contains(&"act:click e2 (set unchecked)".to_string()),
+            "{calls:?}"
+        );
+        assert!(!calls.iter().any(|c| c.starts_with("click:")), "{calls:?}");
+    }
+
+    fn step_json(kind: &str) -> Value {
+        match kind {
+            "click" => json!({"action": "click", "ref": "e1"}),
+            "fill" => json!({"action": "fill", "ref": "e2", "text": "x"}),
+            "select" => json!({"action": "select", "ref": "e3", "value": "v"}),
+            "press" => json!({"action": "press", "key": "Enter"}),
+            "scroll" => json!({"action": "scroll", "dy": 10}),
+            _ => json!({"action": "wait", "idle": true}),
+        }
+    }
+
+    const KINDS: [(&str, &str); 6] = [
+        ("click", "browser_click"),
+        ("fill", "browser_fill"),
+        ("select", "browser_select"),
+        ("press", "browser_press"),
+        ("scroll", "browser_scroll"),
+        ("wait", "browser_wait"),
+    ];
+
+    /// A batch is never classified more weakly than running its steps one by one:
+    /// its effect is at least the strictest single tool's, its category is the same,
+    /// and it can egress whenever any single step could. Checked for every subset of
+    /// step kinds.
+    #[test]
+    fn a_batch_is_never_weaker_than_its_steps_run_one_by_one() {
+        let (_d, _f, t) = build();
+        let act = get(&t, "browser_act");
+        for (_, single) in KINDS {
+            let s = get(&t, single);
+            assert!(
+                act.spec().effect >= s.spec().effect,
+                "browser_act weaker than {single}"
+            );
+            assert_eq!(act.spec().category, s.spec().category, "{single}");
+        }
+        for mask in 1u32..(1 << KINDS.len()) {
+            let picked: Vec<&str> = KINDS
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| mask & (1 << i) != 0)
+                .map(|(_, (k, _))| *k)
+                .collect();
+            let batch = json!({"steps": picked.iter().map(|k| step_json(k)).collect::<Vec<_>>()});
+            let union = picked
+                .iter()
+                .any(|k| act_can_egress(&json!({"steps": [step_json(k)]})));
+            assert_eq!(act_can_egress(&batch), union, "{picked:?}");
+            for k in &picked {
+                if act_can_egress(&json!({"steps": [step_json(k)]})) {
+                    assert!(act_can_egress(&batch), "{picked:?} hides {k}");
+                }
+            }
+        }
+        // Unknown actions and unreadable input fail closed.
+        assert!(act_can_egress(&json!({"steps": [{"action": "eval"}]})));
+        assert!(act_can_egress(&json!(null)));
+    }
+
+    /// Scripted tasks run against the fake driver, once step by step with the
+    /// single-action tools and once through `browser_act` (continuing from the
+    /// reported unexecuted suffix). One tool-call turn is one model call; the final
+    /// answer is one more. FIXTURE-BASED: counts the round trips the stop rules cause,
+    /// not real model behaviour or latency.
+    #[tokio::test]
+    async fn fixture_eval_model_calls_single_steps_versus_browser_act() {
+        // `eNAV` navigates, so a batch must stop after it.
+        let tasks: Vec<(&str, Vec<Value>)> = vec![
+            (
+                "form: 5 fills + submit",
+                vec![
+                    json!({"action": "fill", "ref": "e1", "text": "a"}),
+                    json!({"action": "fill", "ref": "e2", "text": "b"}),
+                    json!({"action": "fill", "ref": "e3", "text": "c"}),
+                    json!({"action": "select", "ref": "e4", "value": "TR"}),
+                    json!({"action": "fill", "ref": "e5", "text": "d"}),
+                    json!({"action": "click", "ref": "e6"}),
+                ],
+            ),
+            (
+                "search: fill, submit navigates, open result",
+                vec![
+                    json!({"action": "fill", "ref": "e1", "text": "q"}),
+                    json!({"action": "click", "ref": "eNAV"}),
+                    json!({"action": "click", "ref": "e7"}),
+                ],
+            ),
+            (
+                "wizard: 3 pages, navigation after step 3 and 6",
+                vec![
+                    json!({"action": "fill", "ref": "e1", "text": "a"}),
+                    json!({"action": "fill", "ref": "e2", "text": "b"}),
+                    json!({"action": "click", "ref": "eNAV"}),
+                    json!({"action": "fill", "ref": "e3", "text": "c"}),
+                    json!({"action": "select", "ref": "e4", "value": "x"}),
+                    json!({"action": "click", "ref": "eNAV"}),
+                    json!({"action": "fill", "ref": "e5", "text": "d"}),
+                    json!({"action": "click", "ref": "e6"}),
+                ],
+            ),
+        ];
+        let mut report = Vec::new();
+        for (name, steps) in &tasks {
+            // Single-step tools: one call per step.
+            let (_d, fake, t) = build();
+            let ctx = ToolContext::default();
+            for st in steps {
+                let tool = match st["action"].as_str().unwrap() {
+                    "fill" => "browser_fill",
+                    "select" => "browser_select",
+                    _ => "browser_click",
+                };
+                let mut input = st.clone();
+                input.as_object_mut().unwrap().remove("action");
+                get(&t, tool).call(&ctx, input).await.unwrap();
+            }
+            assert_eq!(fake.calls.lock().len(), steps.len());
+            let single_calls = steps.len() + 1;
+
+            // browser_act: send what is left, continue from the reported suffix.
+            let (_d, fake, t) = build();
+            let mut rest: &[Value] = steps;
+            let mut turns = 0;
+            while !rest.is_empty() {
+                let n = rest.len().min(MAX_ACT_STEPS);
+                let out = text(
+                    &get(&t, "browser_act")
+                        .call(&ctx, json!({"steps": &rest[..n]}))
+                        .await
+                        .unwrap(),
+                );
+                turns += 1;
+                let done: usize = out
+                    .strip_prefix("done: ")
+                    .and_then(|r| r.split('/').next())
+                    .and_then(|k| k.parse().ok())
+                    .unwrap_or_else(|| panic!("no done line: {out}"));
+                assert!(done >= 1, "a batch must make progress: {out}");
+                rest = &rest[done..];
+            }
+            let act_calls = turns + 1;
+            let ran = fake
+                .calls
+                .lock()
+                .iter()
+                .filter(|c| c.starts_with("act:"))
+                .count();
+            assert_eq!(ran, steps.len(), "every step ran exactly once");
+            report.push((*name, single_calls, act_calls));
+        }
+        let got: Vec<(usize, usize)> = report.iter().map(|(_, s, a)| (*s, *a)).collect();
+        eprintln!("fixture model calls (single, act): {report:?}");
+        assert_eq!(got, vec![(7, 2), (4, 3), (9, 4)], "{report:?}");
+    }
+
+    #[tokio::test]
     async fn results_say_whether_the_user_can_see_the_page() {
         let (_d, fake, t) = build();
         let ctx = ToolContext::default();
@@ -2695,6 +3597,330 @@ mod tests {
                 "back:accept",
             ]
         );
+    }
+
+    fn fills_and_click(third: &str) -> Value {
+        json!({"steps": [
+            {"action": "fill", "ref": "e1", "text": "Ada"},
+            {"action": "fill", "ref": "e2", "text": "Lovelace"},
+            {"action": "click", "ref": third},
+            {"action": "fill", "ref": "e4", "text": "hunter2-secret"},
+            {"action": "fill", "ref": "e5", "text": "x"},
+            {"action": "click", "ref": "e6"},
+        ]})
+    }
+
+    #[tokio::test]
+    async fn act_runs_every_step_in_order_with_one_combined_view() {
+        let (_d, fake, t) = build();
+        let out = get(&t, "browser_act")
+            .call(&ToolContext::default(), fills_and_click("e3"))
+            .await
+            .unwrap();
+        let out = text(&out);
+        assert!(out.starts_with("done: 6/6\n"), "{out}");
+        assert!(!out.contains("stopped"), "{out}");
+        assert_eq!(out.matches("(combined view)").count(), 1, "{out}");
+        assert!(
+            !out.contains("hunter2"),
+            "entered text must not be echoed: {out}"
+        );
+        assert_eq!(
+            fake.calls.lock().clone(),
+            vec![
+                "act_begin:e1,e2,e3,e4,e5,e6",
+                "act:fill e1 (3 chars)",
+                "act:fill e2 (8 chars)",
+                "act:click e3",
+                "act:fill e4 (14 chars)",
+                "act:fill e5 (1 chars)",
+                "act:click e6",
+                "act_end",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn act_stops_after_a_navigating_step_and_lists_the_rest() {
+        let (_d, fake, t) = build();
+        let out = text(
+            &get(&t, "browser_act")
+                .call(&ToolContext::default(), fills_and_click("eNAV"))
+                .await
+                .unwrap(),
+        );
+        assert!(out.starts_with("done: 3/6\n"), "{out}");
+        assert!(
+            out.contains("stopped: after step 3 (click eNAV): the page navigated"),
+            "{out}"
+        );
+        for line in [
+            "  4 fill e4 (14 chars)",
+            "  5 fill e5 (1 chars)",
+            "  6 click e6",
+        ] {
+            assert!(out.contains(line), "{out}");
+        }
+        assert!(!out.contains("  3 click"), "{out}");
+        let calls = fake.calls.lock().clone();
+        assert!(
+            !calls
+                .iter()
+                .any(|c| c.starts_with("act:") && c.contains("e4")),
+            "step 4 must not run: {calls:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn act_never_acts_on_a_ref_whose_identity_changed() {
+        let (_d, fake, t) = build();
+        let out = text(
+            &get(&t, "browser_act")
+                .call(&ToolContext::default(), fills_and_click("eSTALE"))
+                .await
+                .unwrap(),
+        );
+        assert!(out.starts_with("done: 2/6\n"), "{out}");
+        assert!(
+            out.contains("ref eSTALE now points at a different element"),
+            "{out}"
+        );
+        assert!(
+            out.contains("  3 click eSTALE") && out.contains("  6 click e6"),
+            "{out}"
+        );
+        let calls = fake.calls.lock().clone();
+        assert!(
+            !calls
+                .iter()
+                .any(|c| c.contains("eSTALE") && c.starts_with("act:")),
+            "{calls:?}"
+        );
+        // A ref the page does not have at the start stops at its step, too.
+        let out = text(
+            &get(&t, "browser_act")
+                .call(&ToolContext::default(), fills_and_click("eGONE"))
+                .await
+                .unwrap(),
+        );
+        assert!(
+            out.starts_with("done: 2/6\n") && out.contains("ref eGONE is not on"),
+            "{out}"
+        );
+    }
+
+    #[tokio::test]
+    async fn act_stops_on_a_dialog_unless_told_not_to() {
+        let (_d, _f, t) = build();
+        let steps =
+            json!([{"action": "click", "ref": "eDLG"}, {"action": "press", "key": "Enter"}]);
+        let out = text(
+            &get(&t, "browser_act")
+                .call(&ToolContext::default(), json!({"steps": steps}))
+                .await
+                .unwrap(),
+        );
+        assert!(
+            out.starts_with("done: 1/2\n") && out.contains("a dialog opened"),
+            "{out}"
+        );
+        assert!(
+            out.contains("~ dialog(alert)") && out.contains("  2 press Enter"),
+            "{out}"
+        );
+        let out = text(
+            &get(&t, "browser_act")
+                .call(
+                    &ToolContext::default(),
+                    json!({"steps": steps, "stop_on_change": false}),
+                )
+                .await
+                .unwrap(),
+        );
+        assert!(out.starts_with("done: 2/2\n"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn act_rejects_bad_batches_before_anything_runs() {
+        let (_d, fake, t) = build();
+        let act = get(&t, "browser_act");
+        let ctx = ToolContext::default();
+        let click = json!({"action": "click", "ref": "e1"});
+        for bad in [
+            json!({"steps": []}),
+            json!({"steps": vec![click.clone(); MAX_ACT_STEPS + 1]}),
+            json!({"steps": [click, {"action": "eval", "js": "1"}]}),
+            json!({"steps": [{"action": "eval", "text": "document.cookie"}]}),
+            json!({"steps": [{"action": "open", "text": "https://evil.test"}]}),
+            json!({"steps": [{"action": "fill", "ref": "e1"}]}),
+            json!({"steps": [{"action": "wait"}]}),
+        ] {
+            let err = act.call(&ctx, bad.clone()).await.unwrap_err();
+            assert!(matches!(err, ToolError::InvalidInput(_)), "{bad}: {err}");
+        }
+        assert!(fake.calls.lock().is_empty(), "{:?}", fake.calls.lock());
+    }
+
+    #[tokio::test]
+    async fn approval_card_lists_every_step_and_hides_secret_values() {
+        let (_d, fake, t) = build();
+        let ctx = ToolContext::default();
+        let card = get(&t, "browser_act")
+            .approval_details(&ctx, &fills_and_click("e3"))
+            .await
+            .unwrap()
+            .expect("a batch always has a card");
+        assert_eq!(card["kind"], "browser_steps");
+        let rows = card["steps"].as_array().unwrap();
+        assert_eq!(rows.len(), 6);
+        let shown: Vec<(u64, &str, &str)> = rows
+            .iter()
+            .map(|r| {
+                (
+                    r["n"].as_u64().unwrap(),
+                    r["action"].as_str().unwrap(),
+                    r["value"].as_str().unwrap_or(""),
+                )
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            vec![
+                (1, "fill", "Ada"),
+                (2, "fill", "Lovelace"),
+                (3, "click", ""),
+                (4, "fill", HIDDEN_VALUE),
+                (5, "fill", "x"),
+                (6, "click", ""),
+            ]
+        );
+        assert_eq!(rows[0]["target"], "e1 textbox \"Field e1\"");
+        assert!(!card.to_string().contains("hunter2"), "{card}");
+        // A field that cannot be inspected hides its value as well.
+        let card = get(&t, "browser_act")
+            .approval_details(
+                &ctx,
+                &json!({"steps": [{"action": "fill", "ref": "eGONE", "text": "pw"}]}),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(card["steps"][0]["value"], HIDDEN_VALUE);
+        // browser_fill: a card only when the field is sensitive, value hidden.
+        let fill = get(&t, "browser_fill");
+        let plain = fill
+            .approval_details(&ctx, &json!({"ref": "e1", "text": "Ada"}))
+            .await
+            .unwrap();
+        assert!(plain.is_none());
+        let secret = fill
+            .approval_details(&ctx, &json!({"ref": "e4", "text": "hunter2-secret"}))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!secret.to_string().contains("hunter2"), "{secret}");
+        // An invalid batch is never offered for approval, and nothing ran.
+        assert!(
+            get(&t, "browser_act")
+                .approval_details(&ctx, &json!({"steps": [{"action": "eval"}]}))
+                .await
+                .is_err()
+        );
+        assert!(fake.calls.lock().is_empty());
+    }
+
+    #[test]
+    fn egress_class_follows_the_steps() {
+        let batch = |actions: &[&str]| json!({"steps": actions.iter().map(|a| json!({"action": a})).collect::<Vec<_>>()});
+        assert!(!act_can_egress(&batch(&["click", "scroll", "wait"])));
+        for carrier in ["fill", "select", "press", "something-new"] {
+            assert!(act_can_egress(&batch(&["click", carrier])), "{carrier}");
+        }
+        assert!(act_can_egress(&json!({})), "unreadable input fails closed");
+        assert!(act_can_egress(&json!({"steps": "x"})));
+    }
+
+    /// Admits the first `allow` actions, then refuses (the human took over).
+    struct TakeoverAfter {
+        allow: usize,
+        seen: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl DesktopControlGate for TakeoverAfter {
+        async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+            if self.seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < self.allow {
+                Ok(())
+            } else {
+                Err("the user took control".into())
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_takeover_in_the_middle_of_a_batch_refuses_the_remaining_steps() {
+        let d = tempfile::tempdir().unwrap();
+        let fake = Arc::new(FakeBrowser::default());
+        let gate = Arc::new(TakeoverAfter {
+            allow: 2,
+            seen: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let t = tools(fake.clone(), d.path(), Some(gate.clone()));
+        let out = text(
+            &get(&t, "browser_act")
+                .call(&ToolContext::default(), fills_and_click("e3"))
+                .await
+                .unwrap(),
+        );
+        assert!(out.starts_with("done: 2/6\n"), "{out}");
+        assert!(
+            out.contains("stopped: step 3 (click e3):") && out.contains("the user took control"),
+            "{out}"
+        );
+        assert!(
+            out.contains("  3 click e3") && out.contains("  6 click e6"),
+            "{out}"
+        );
+        let acted: Vec<String> = fake
+            .calls
+            .lock()
+            .iter()
+            .filter(|c| c.starts_with("act:"))
+            .cloned()
+            .collect();
+        assert_eq!(
+            acted,
+            vec!["act:fill e1 (3 chars)", "act:fill e2 (8 chars)"]
+        );
+        // The gate was asked once per step it saw, never once for the batch.
+        assert_eq!(gate.seen.load(std::sync::atomic::Ordering::SeqCst), 3);
+        // Refused before the first step: the refusal is the tool error.
+        let gate = Arc::new(TakeoverAfter {
+            allow: 0,
+            seen: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let t = tools(fake.clone(), d.path(), Some(gate));
+        assert!(
+            get(&t, "browser_act")
+                .call(&ToolContext::default(), fills_and_click("e3"))
+                .await
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn ref_identity_check_catches_gone_and_renamed_elements() {
+        let id = ref_identity("button", "Save");
+        assert!(check_ref_identity("e1", &id, Some(("button", "Save"))).is_ok());
+        assert!(
+            check_ref_identity("e1", &id, None)
+                .unwrap_err()
+                .contains("no longer")
+        );
+        for now in [("button", "Delete"), ("link", "Save"), ("butto", "nSave")] {
+            let err = check_ref_identity("e1", &id, Some(now)).unwrap_err();
+            assert!(err.contains("different element"), "{err}");
+        }
     }
 
     #[tokio::test]

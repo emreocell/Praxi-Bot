@@ -21,6 +21,7 @@ import {
   payloadReviewComplete,
   appActionDetails,
   formatFiring,
+  browserSteps,
   brainDetails,
   memoryOffer,
   scheduleDetails,
@@ -368,6 +369,7 @@ export function ApprovalCard({
   const outbound = isOutboundSend(tool.name);
   const remaining = useCountdown(expiresAtMs);
   const schedule = scheduleDetails(tool.details);
+  const steps = browserSteps(tool.details);
   const egress = egressDetails(tool.details);
   const computer = computerDetails(tool.details);
   const control = controlGrantDetails(tool.details);
@@ -473,6 +475,28 @@ export function ApprovalCard({
               {t(`chat.approval.schedule.title.${schedule.action}`)}
             </p>
             <ScheduleApprovalBody d={schedule} />
+            <div className={styles.approvalMeta}>
+              <span className={styles.approvalTool}>{tool.name}</span>
+            </div>
+          </>
+        ) : steps ? (
+          <>
+            {/* The raw input is not shown: it can hold a value typed into a secret field. */}
+            <p className={styles.approvalSummary}>
+              {t("chat.approval.steps.title", { count: steps.length })}
+            </p>
+            <ol className={styles.bodyLabel} data-testid="approval-browser-steps">
+              {steps.map((s) => (
+                <li key={s.n}>
+                  {s.action} {s.target}
+                  {s.hidden
+                    ? ` = ${t("chat.approval.steps.hidden")}`
+                    : s.value !== null
+                      ? ` = ${s.value}`
+                      : ""}
+                </li>
+              ))}
+            </ol>
             <div className={styles.approvalMeta}>
               <span className={styles.approvalTool}>{tool.name}</span>
             </div>

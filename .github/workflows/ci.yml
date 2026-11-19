@@ -193,6 +193,9 @@ jobs:
       - name: Run browser-cdp integration tests
         run: cargo test -p browser-cdp --test browser --test dialogs -- --ignored --test-threads=1
 
+      - name: Run browser_act driver tests
+        run: cargo test -p builtin-tools --test browser_act_chrome -- --ignored --test-threads=1
+
   license-check:
     name: License Check
     needs: changes

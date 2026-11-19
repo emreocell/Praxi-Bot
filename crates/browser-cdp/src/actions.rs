@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use base64::Engine as _;
 use serde_json::{Value, json};
 
+use crate::actionability::{ACTION_WAIT, Need};
 use crate::diff::{self, SnapshotDiff};
 use crate::error::{Error, Result};
 use crate::page::{DEFAULT_WAIT, DialogInfo, DialogOptions, Page};
@@ -172,7 +173,7 @@ pub fn parse_key(spec: &str) -> Result<KeySpec> {
     })
 }
 
-fn quad_center(q: &[f64]) -> Option<(f64, f64)> {
+pub(crate) fn quad_center(q: &[f64]) -> Option<(f64, f64)> {
     if q.len() < 8 {
         return None;
     }
@@ -418,7 +419,12 @@ impl Page {
     // -- geometry -------------------------------------------------------------------------------
 
     /// Content-box quad of a node, in the coordinates of its own frame's viewport.
-    async fn quad(&self, session: Option<&str>, backend_id: i64, kind: &str) -> Result<Vec<f64>> {
+    pub(crate) async fn quad(
+        &self,
+        session: Option<&str>,
+        backend_id: i64,
+        kind: &str,
+    ) -> Result<Vec<f64>> {
         let r = self
             .cmd_on(
                 session,
@@ -473,7 +479,7 @@ impl Page {
             )
             .await;
         let q = self
-            .quad(e.session_id.as_deref(), e.backend_id, "content")
+            .quad(e.session_id.as_deref(), e.backend_id, "border")
             .await?;
         let (cx, cy) = quad_center(&q).ok_or_else(|| Error::Element("degenerate box".into()))?;
         let width = (q[2] - q[0]).abs();
@@ -498,7 +504,12 @@ impl Page {
         self.cmd("Input.dispatchMouseEvent", p).await.map(|_| ())
     }
 
-    async fn call_on(&self, e: &RefEntry, function: &str, args: &[Value]) -> Result<Value> {
+    pub(crate) async fn call_on(
+        &self,
+        e: &RefEntry,
+        function: &str,
+        args: &[Value],
+    ) -> Result<Value> {
         let obj = self
             .cmd_on(
                 e.session_id.as_deref(),
@@ -582,6 +593,8 @@ impl Page {
 
     async fn click_inner(&self, r: &str, clicks: u32, expected: Option<&str>) -> Result<()> {
         let e = self.locate(r).await?;
+        self.wait_actionable(r, &e, Need::Click, ACTION_WAIT)
+            .await?;
         let (x, y) = self.center(&e).await?;
         self.mouse("mouseMoved", x, y, json!({})).await?;
         self.check_input_origin(&e, expected).await?;
@@ -639,7 +652,139 @@ impl Page {
         .map(|_| ())
     }
 
+    /// Read the value back after a fill and fail when the field does not hold what was typed
+    /// (a script rewrote it, `maxlength` cut it, the page rejected it). Never echoes the
+    /// values: a fill may carry a secret, so only lengths are reported. A second attempt is the
+    /// caller's decision, never made here.
+    async fn verify_value(&self, r: &str, e: &RefEntry, wanted: &str) -> Result<()> {
+        let got = self
+            .call_on(
+                e,
+                "function(){ const t = (this.getAttribute && this.getAttribute('type') || '')                  .toLowerCase();                  if (['number','date','time','datetime-local','month','week','color','range',                 'email'].includes(t)) return {skip: true};                  const multi = this.tagName === 'TEXTAREA' || this.isContentEditable;                  const v = 'value' in this ? this.value : this.innerText;                  return {v: String(v == null ? '' : v), multi: !!multi}; }",
+                &[],
+            )
+            .await;
+        let Ok(got) = got else {
+            // The readback itself failed (page navigated away after the fill, ...): the fill
+            // went through, so do not turn that into an error.
+            return Ok(());
+        };
+        if got["skip"].as_bool() == Some(true) {
+            return Ok(());
+        }
+        let multi = got["multi"].as_bool().unwrap_or(false);
+        let norm = |t: &str| -> String {
+            let t = t.replace("\r\n", "\n");
+            if multi {
+                t.trim_end_matches('\n').to_string()
+            } else {
+                t.replace('\n', "")
+            }
+        };
+        let have = norm(got["v"].as_str().unwrap_or_default());
+        let want = norm(wanted);
+        if have == want {
+            return Ok(());
+        }
+        let target = crate::actionability::describe(r, e);
+        Err(Error::Element(format!(
+            "filled {target} but it now holds {} characters instead of the {} typed (the page              changed or limited the value); not retrying, check the field with browser_snapshot",
+            have.chars().count(),
+            want.chars().count()
+        )))
+    }
+
+    /// Current checked state of a checkbox, radio, switch or `aria-checked` widget. `None` when
+    /// the element is none of those.
+    async fn checked_state(&self, e: &RefEntry) -> Result<Option<bool>> {
+        let v = self
+            .call_on(
+                e,
+                "function(){ const t = (this.getAttribute('type') || '').toLowerCase();                  if (this.tagName === 'INPUT' && (t === 'checkbox' || t === 'radio'))                  return {c: this.checked, radio: t === 'radio'};                  const a = this.getAttribute('aria-checked');                  const role = (this.getAttribute('role') || '').toLowerCase();                  if (a === 'true' || a === 'false') return {c: a === 'true',                  radio: role === 'radio'};                  return null; }",
+                &[],
+            )
+            .await?;
+        Ok(v["c"].as_bool())
+    }
+
+    /// Make a checkbox/radio/switch checked or unchecked, idempotently. Reads the state first
+    /// (already right: nothing is clicked), clicks once through the normal actionability checks,
+    /// reads the state again, and fails, without a second click, when it is not what was asked.
+    pub async fn set_checked(&self, r: &str, want: bool) -> Result<ActionResult> {
+        let before = self.baseline().await?;
+        let mut clicked = false;
+        let res = async {
+            let e = self.locate(r).await?;
+            let target = crate::actionability::describe(r, &e);
+            let Some(now) = self.checked_state(&e).await? else {
+                return Err(Error::Element(format!(
+                    "{target} is not a checkbox, radio button or switch; use browser_click without `checked`"
+                )));
+            };
+            if now == want {
+                return Ok(());
+            }
+            let radio = self
+                .call_on(
+                    &e,
+                    "function(){ return (this.getAttribute('type') ||                      this.getAttribute('role') || '').toLowerCase() === 'radio'; }",
+                    &[],
+                )
+                .await?
+                .as_bool()
+                == Some(true);
+            if radio && !want {
+                return Err(Error::Element(format!(
+                    "{target} is a radio button; it cannot be unchecked directly, check another option of its group instead"
+                )));
+            }
+            self.click_inner(r, 1, None).await?;
+            clicked = true;
+            // Deterministic wait: poll the state until it matches, bounded.
+            let deadline = Instant::now() + Duration::from_millis(1500);
+            loop {
+                let s = self.checked_state(&e).await.ok().flatten();
+                if s == Some(want) {
+                    return Ok(());
+                }
+                if Instant::now() >= deadline {
+                    return Err(Error::Element(format!(
+                        "clicked {target} to make it {} but it is {}; not clicking again (the page may have                          vetoed the change or a script flipped it back)",
+                        if want { "checked" } else { "unchecked" },
+                        match s {
+                            Some(true) => "still checked",
+                            Some(false) => "still unchecked",
+                            None => "no longer a checkbox",
+                        }
+                    )));
+                }
+                tokio::time::sleep(Duration::from_millis(60)).await;
+            }
+        }
+        .await;
+        let _ = clicked;
+        self.finish(before, res).await
+    }
+
     // -- public actions -------------------------------------------------------------------------
+
+    /// Whether the field behind a ref holds a secret (password, card number, one-time code).
+    /// `None` when the ref is unknown or the element is gone: callers must treat that as secret.
+    pub async fn ref_is_sensitive(&self, r: &str) -> Option<bool> {
+        let e = self.locate(r).await.ok()?;
+        self.call_on(
+            &e,
+            "function(){ const t = (this.getAttribute && this.getAttribute('type') || '') \
+             .toLowerCase(); const a = (this.getAttribute && \
+             this.getAttribute('autocomplete') || '').toLowerCase(); \
+             return t === 'password' || a.includes('password') || a.includes('cc-') || \
+             a.includes('one-time-code'); }",
+            &[],
+        )
+        .await
+        .ok()?
+        .as_bool()
+    }
 
     /// Click an element with explicit dialog handling options.
     pub async fn click_with(&self, r: &str, opts: &DialogOptions) -> Result<ActionResult> {
@@ -675,6 +820,8 @@ impl Page {
         let before = self.baseline().await?;
         let res = async {
             let e = self.locate(r).await?;
+            self.wait_actionable(r, &e, Need::Present, ACTION_WAIT)
+                .await?;
             let (x, y) = self.center(&e).await?;
             self.mouse("mouseMoved", x, y, json!({})).await
         }
@@ -712,6 +859,7 @@ impl Page {
         let before = self.baseline().await?;
         let res = async {
             let e = self.locate(r).await?;
+            self.wait_actionable(r, &e, Need::Edit, ACTION_WAIT).await?;
             let nav = self.shared.nav_gen.load(Ordering::SeqCst);
             let first = self.frame_identity(&e).await?;
             if !accept(first.origin.clone()) {
@@ -749,7 +897,8 @@ impl Page {
                 _ => Err(Error::Element(
                     "this kind of field cannot be filled with a secret".into(),
                 )),
-            }
+            }?;
+            self.verify_value(r, &e, text).await
         }
         .await;
         self.finish(before, res).await
@@ -760,6 +909,7 @@ impl Page {
         let before = self.baseline().await?;
         let res = async {
             let e = self.locate(r).await?;
+            self.wait_actionable(r, &e, Need::Edit, ACTION_WAIT).await?;
             self.focus_entry(&e).await?;
             for ch in text.chars() {
                 if ch == '\n' {
@@ -796,6 +946,8 @@ impl Page {
         let before = self.baseline().await?;
         let res = async {
             let e = self.locate(r).await?;
+            self.wait_actionable(r, &e, Need::Present, ACTION_WAIT)
+                .await?;
             self.check_input_origin(&e, expected).await?;
             let ok = self
                 .call_on(

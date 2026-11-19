@@ -1074,6 +1074,10 @@
       },
       "sendOnce": "Gönder",
       "sendTitle": "Senin adına gönderilsin mi?",
+      "steps": {
+        "hidden": "gizli (parola alanı)",
+        "title": "Bu {{count}} tarayıcı adımı çalıştırılsın mı?"
+      },
       "thisChat": "Bu sohbet",
       "title": "Onay gerekiyor",
       "why": {

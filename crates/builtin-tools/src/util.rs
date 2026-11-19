@@ -58,7 +58,7 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         "shell_run" | "script_run" | "desktop_launch" | "desktop_type" | "desktop_set_value"
         | "desktop_key" | "desktop_drag" => ContentClass::all().executes(),
         "browser_open" | "browser_back" | "browser_click" | "browser_fill" | "browser_select"
-        | "browser_press" | "browser_eval" | "browser_tabs" => ContentClass::all(),
+        | "browser_press" | "browser_eval" | "browser_tabs" | "browser_act" => ContentClass::all(),
         "schedule_create" | "schedule_update" | "schedule_resume" => ContentClass::egress(),
         _ => return None,
     })

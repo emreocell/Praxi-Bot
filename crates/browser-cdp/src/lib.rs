@@ -20,6 +20,7 @@
     clippy::module_name_repetitions
 )]
 
+pub mod actionability;
 pub mod actions;
 pub mod browser;
 pub mod client;
