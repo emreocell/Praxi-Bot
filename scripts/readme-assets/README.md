@@ -53,7 +53,26 @@ Keep the same information in plain Markdown near the image so the page works wit
   `gradientMapConfig` in `packages/ui/src/botShape.ts`) and gets two tilted dark pill eyes using the
   per-shape eye coordinates parsed from that file. The hero uses the ghost in white (the app's white tint
   `#f4f4f5`) plus cloud (lilac), capsule (teal) and pebble (amber) from the app's tint swatches. The art is
-  read from the repository at build time and embedded as base64 WebP, so a hero SVG is about 115 KB.
+  read from the repository at build time and embedded as base64 WebP (about 150 KB per hero SVG).
+  On top of the app look the hero adds rim light and colour bleed from the mesh glow (SVG filters and
+  masks), haze on the back row, coloured contact shadows, expressions (pill, happy arcs, wink, wide eyes,
+  blush) and the animation described below.
+
+## Hero animation
+
+The hero SVGs animate with plain CSS inside the file, which runs when the SVG is shown through `<img>`
+(GitHub, browsers) with no script. Only `transform` and `opacity` are animated, and only on plain groups
+(never on filtered elements). 66 animations in total:
+
+- per character: float (4.3 to 6.4 s, 3 to 6 px) with a matching shadow scale and fade, breathing scale,
+  eye blink every 3.9 to 5.4 s, and an occasional glance left or right (6.6 to 8.2 s);
+- the approval card bobs slowly; about 20 dust grains drift and twinkle.
+
+Delays are negative and fixed, so the first frame is already a finished composition. With
+`prefers-reduced-motion: reduce` every animation is switched off and the static base pose is shown.
+The static background (mesh blur and grain filters) is repainted by the browser while the characters
+move. In headless Edge with software rendering the page kept 60 fps, and on a GPU it held the display
+refresh rate. A nested pre-rendered background image was tried and gave no gain, so it is not used.
 - `lib/wordmark.mjs`: the "Praxi" wordmark. Manrope Bold with explicit per-glyph positions, so it is
   laid out identically in every browser, and a dotless i topped with a terracotta clay sphere. The advances were
   shaped once with HarfBuzz at `wght=700`.
