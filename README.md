@@ -100,6 +100,12 @@ An agent that can use your computer is powerful, and a web page or document can 
   <img src="docs/assets/readme/stats-light.svg" alt="Four facts: the daemon listens on loopback only, no inbound ports to open, no telemetry by design, Apache-2.0" width="100%">
 </picture>
 
+<p align="center">
+  <img src="docs/assets/readme/screens/approval-card.webp" alt="An approval card: the bot wants to delete a folder with a shell command, with the buttons Allow once, This chat, Always and Deny and an optional reason" width="85%">
+</p>
+
+<p align="center"><sub>Every change asks first. Demo data shown.</sub></p>
+
 - **Permissions are enforced by code, not by the model.** Every tool call goes through a resolver; the model cannot talk its way past it.
 - **Defaults ask first.** Reads are free. Anything that changes files, clicks or types in apps, runs commands or sends messages needs your approval.
 - **Floors no setting removes.** Money actions always ask, and a never-list of catastrophic shell commands always asks, even in the `full` preset.
