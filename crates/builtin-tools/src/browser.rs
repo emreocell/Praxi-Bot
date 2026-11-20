@@ -1231,7 +1231,7 @@ fn tools_with_pool(
             Op::Click,
             spec(
                 "browser_click",
-                "Click an element. Returns what changed. Example: {\"ref\":\"e12\"}",
+                "Click an element. Returns what changed, so there is no need to snapshot afterwards. Example: {\"ref\":\"e12\"}",
                 json!({"type":"object","properties":{
                     "ref":ref_prop,
                     "dialog":{"type":"string","enum":["accept","dismiss"],"description":"How to handle any dialog (e.g. confirm, prompt, beforeunload) during click. Default is dismiss (alerts are still accepted)."},

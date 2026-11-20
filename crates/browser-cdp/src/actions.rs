@@ -361,6 +361,9 @@ impl Page {
         if let Ok(mut p) = self.shared.dialog_policy.lock() {
             *p = opts.clone();
         }
+        if let Ok(mut m) = self.shared.action_mark.lock() {
+            *m = Some((Instant::now(), self.shared.nav_gen.load(Ordering::SeqCst)));
+        }
         let last = self.state.lock().await.last.clone();
         if let Some(s) = last {
             return Ok(s);
@@ -391,9 +394,24 @@ impl Page {
         {
             return Err(outcome.unwrap_err());
         }
+        let t_settle = Instant::now();
         let settle_note = if settle { self.settle().await } else { None };
+        let settle_ms = t_settle.elapsed().as_millis();
+        let t_snap = Instant::now();
         let opts = self.state.lock().await.opts.clone();
         let snapshot = self.snapshot(&opts).await?;
+        // Per-step timing, no page content: where the time of one action went.
+        tracing::debug!(
+            target: "browser_cdp::timing",
+            settle_ms = u64::try_from(settle_ms).unwrap_or(u64::MAX),
+            snapshot_ms = u64::try_from(t_snap.elapsed().as_millis()).unwrap_or(u64::MAX),
+            nodes = snapshot.nodes.len(),
+            settled = settle,
+            "browser action finished"
+        );
+        if let Ok(mut m) = self.shared.action_mark.lock() {
+            *m = None;
+        }
         let new_snapshot_diff = diff::diff(&before, &snapshot);
         let dialogs = self
             .shared
@@ -420,7 +438,16 @@ impl Page {
     /// Give navigation, rendering and XHRs a chance to finish (best effort). Returns a note when
     /// the network was still busy at the end.
     async fn settle(&self) -> Option<String> {
+        let mark = self.shared.action_mark.lock().ok().and_then(|m| *m);
         tokio::time::sleep(Duration::from_millis(100)).await;
+        // Nothing navigated and nothing new went on the wire since the action began: there is
+        // nothing to wait for. (Without this, one long poll or beacon that was already open
+        // cost every single click the full network-idle timeout.)
+        if let Some((since, gen_then)) = mark
+            && !self.activity_since(since, gen_then)
+        {
+            return None;
+        }
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
             let ready =
@@ -431,10 +458,14 @@ impl Page {
                 _ => tokio::time::sleep(Duration::from_millis(50)).await,
             }
         }
-        self.wait_network_idle(Duration::from_millis(250), Duration::from_secs(2))
-            .await
-            .err()
-            .map(|_| format!("network still busy: {} requests", self.busy_requests()))
+        self.wait_network_idle_since(
+            Duration::from_millis(250),
+            Duration::from_secs(2),
+            mark.map(|(since, _)| since),
+        )
+        .await
+        .err()
+        .map(|_| format!("network still busy: {} requests", self.busy_requests()))
     }
 
     // -- geometry -------------------------------------------------------------------------------

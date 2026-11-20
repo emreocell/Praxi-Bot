@@ -418,3 +418,40 @@ document.getElementById('pw').focus();</script></body></html>"#,
     assert_eq!(typed.as_str(), Some(""), "nothing may have been typed");
     b.close().await.unwrap();
 }
+
+/// A request that was already open before the click (long poll, beacon, stream) must not make
+/// the click wait for network idle: the action started no network activity, so there is nothing
+/// to wait for.
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn click_does_not_wait_for_a_request_that_was_open_before_it() {
+    // A server that accepts and never answers.
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = l.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((s, _)) = l.accept().await {
+            held.push(s);
+        }
+    });
+    let html = format!(
+        "<title>Poll</title><button onclick=\"document.title='clicked'\">Go</button>\
+<script>fetch('http://127.0.0.1:{port}/hold',{{mode:'no-cors'}}).catch(()=>{{}});</script>"
+    );
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let page = b.new_page(&data_url(&html)).await.unwrap();
+    let snap = page.snapshot(&SnapshotOptions::default()).await.unwrap();
+    let go = ref_of(&snap, "button", "Go");
+    // Let the page's own request start.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let t = std::time::Instant::now();
+    let r = page.click(&go).await.unwrap();
+    let took = t.elapsed();
+    assert!(r.ok, "{:?}", r.error);
+    assert!(r.settle_note.is_none(), "{:?}", r.settle_note);
+    assert!(
+        took < Duration::from_millis(1200),
+        "click waited {took:?} for a request that predates it"
+    );
+    let _ = b.close().await;
+}

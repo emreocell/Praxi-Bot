@@ -70,6 +70,11 @@ need scripts, or when the user wants to watch. Every browser_* result ends with 
 user can see that page right now; never tell the user a page is open or visible unless that line says so, and if it \
 says no live view is attached, tell them to open the live view of this chat.",
         );
+        out.push_str(
+            "\n- Work quietly: every browser_* action already returns what changed, so do not call browser_snapshot or \
+browser_eval after each click just to look again, and do not write a paragraph between steps. Make the next call \
+straight away; say something only when you are done, blocked or need the user.",
+        );
     }
     if f.app_browser && f.browser {
         out.push_str(
@@ -105,6 +110,7 @@ mod tests {
         assert!(web < browser, "{b}");
         assert!(b.contains("BEFORE opening a browser"), "{b}");
         assert!(b.contains("[view: ...]"), "{b}");
+        assert!(b.contains("do not write a paragraph between steps"), "{b}");
         assert!(b.contains("Do not read web pages with shell_run"), "{b}");
     }
 

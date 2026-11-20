@@ -114,6 +114,22 @@ async fn bench_browser_actions() {
         s.print();
     }
 
+    // A click on a page that keeps a request open (long poll, beacon, SSE) while the click
+    // itself starts no network activity: the common case on real sites.
+    for fixture in ["form", "poll", "heavy"] {
+        let mut s = Series::new(format!("click idle-net {fixture}"));
+        for _ in 0..RUNS {
+            let p = fresh(&b, &format!("{base}/{fixture}")).await;
+            let snap = p.last_snapshot().await.unwrap_or_default();
+            let r = ref_of(&snap, "button")
+                .or_else(|| ref_of(&snap, "link"))
+                .expect("clickable ref");
+            s.push(timed(p.click(&r)).await);
+            let _ = p.close().await;
+        }
+        s.print();
+    }
+
     let mut hash = Series::new("spa hash click");
     let mut back = Series::new("spa hash back");
     for _ in 0..RUNS {

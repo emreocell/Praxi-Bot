@@ -113,6 +113,9 @@ pub(crate) struct Shared {
     pub dialog_policy: StdMutex<DialogOptions>,
     /// Number of AX/DOMSnapshot rounds taken (diagnostics, used by tests).
     pub snap_rounds: AtomicU64,
+    /// When the running action started and the navigation generation then (set by the action
+    /// baseline; lets the settle wait ignore requests that were already open before the click).
+    pub action_mark: StdMutex<Option<(Instant, u64)>>,
     /// Last network activity.
     pub last_net: StdMutex<Option<Instant>>,
     /// Incremented on every main-frame navigation; invalidates refs.
@@ -141,6 +144,7 @@ impl Default for Shared {
             dialogs: StdMutex::default(),
             dialog_policy: StdMutex::default(),
             snap_rounds: AtomicU64::default(),
+            action_mark: StdMutex::default(),
             last_net: StdMutex::default(),
             nav_gen: AtomicU64::default(),
             target_closed: Arc::default(),
@@ -758,6 +762,20 @@ impl Page {
             .map_err(|_| Error::Timeout("page load".into()))?
     }
 
+    /// The action that started at `since` caused network activity or a navigation
+    /// (requests that were already open before it do not count).
+    pub(crate) fn activity_since(&self, since: Instant, nav_gen_then: u64) -> bool {
+        self.shared.nav_gen.load(Ordering::SeqCst) != nav_gen_then
+            || busy_count_since(&self.shared, since) > 0
+            || self
+                .shared
+                .last_net
+                .lock()
+                .ok()
+                .and_then(|l| *l)
+                .is_some_and(|l| l >= since)
+    }
+
     /// Requests in flight that are younger than [`INFLIGHT_CAP`].
     pub(crate) fn busy_requests(&self) -> usize {
         busy_count(&self.shared)
@@ -765,10 +783,29 @@ impl Page {
 
     /// Wait until no network request has been in flight for `quiet`, up to `timeout`.
     pub(crate) async fn wait_network_idle(&self, quiet: Duration, timeout: Duration) -> Result<()> {
+        self.wait_network_idle_since(quiet, timeout, None).await
+    }
+
+    /// Like [`Page::wait_network_idle`]. With `since`, only requests that started at or after
+    /// that instant count: a long poll, beacon or stream that was already open before the
+    /// action is not something the action is waiting for.
+    pub(crate) async fn wait_network_idle_since(
+        &self,
+        quiet: Duration,
+        timeout: Duration,
+        since: Option<Instant>,
+    ) -> Result<()> {
         let deadline = Instant::now() + timeout;
         loop {
-            let inflight = self.busy_requests();
+            let inflight = match since {
+                Some(t) => busy_count_since(&self.shared, t),
+                None => self.busy_requests(),
+            };
             let last = self.shared.last_net.lock().ok().and_then(|l| *l);
+            let last = match since {
+                Some(t) => last.filter(|l| *l >= t),
+                None => last,
+            };
             let idle_for = last.map_or(quiet, |t| t.elapsed());
             if inflight == 0 && idle_for >= quiet {
                 return Ok(());
@@ -1022,6 +1059,14 @@ fn busy_count(shared: &Shared) -> usize {
     shared.inflight.lock().map_or(0, |mut m| {
         m.retain(|_, t| t.elapsed() < INFLIGHT_CAP);
         m.len()
+    })
+}
+
+/// Requests in flight that started at or after `since`.
+fn busy_count_since(shared: &Shared, since: Instant) -> usize {
+    shared.inflight.lock().map_or(0, |mut m| {
+        m.retain(|_, t| t.elapsed() < INFLIGHT_CAP);
+        m.values().filter(|t| **t >= since).count()
     })
 }
 
