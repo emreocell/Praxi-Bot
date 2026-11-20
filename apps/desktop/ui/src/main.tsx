@@ -86,15 +86,32 @@ if (!container) {
   throw new Error("Root container #root not found");
 }
 
-createRoot(container).render(
-  <StrictMode>
-    {windowKind === "overlay" ? (
-      <OverlayWindow />
-    ) : windowKind === "widget" ? (
-      <WidgetWindow />
-    ) : (
-      <App />
-    )}
-  </StrictMode>
-);
+const root = createRoot(container);
+
+// Dev/mock-only avatar review gallery (`?mock=1&gallery=avatars`); dropped from production builds.
+const showAvatarGallery =
+  (import.meta.env.DEV || import.meta.env.VITE_MOCK === "1") &&
+  new URLSearchParams(window.location.search).get("gallery") === "avatars";
+
+if (showAvatarGallery) {
+  void import("./dev/AvatarGallery").then(({ AvatarGallery }) => {
+    root.render(
+      <StrictMode>
+        <AvatarGallery />
+      </StrictMode>
+    );
+  });
+} else {
+  root.render(
+    <StrictMode>
+      {windowKind === "overlay" ? (
+        <OverlayWindow />
+      ) : windowKind === "widget" ? (
+        <WidgetWindow />
+      ) : (
+        <App />
+      )}
+    </StrictMode>
+  );
+}
 
