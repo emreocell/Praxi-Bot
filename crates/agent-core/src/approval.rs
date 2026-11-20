@@ -796,7 +796,7 @@ impl Shared {
     /// arguments also asks after untrusted content, and the egress waiver does
     /// not cover it.
     pub(crate) fn gate_must_ask(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
-        let class = self.content_class(ctx, name);
+        let class = self.content_class(ctx, name, input);
         let exposure = ctx.taint.lock().exposure;
         egress_must_ask(
             exposure,
@@ -812,7 +812,10 @@ impl Shared {
     /// non-executor. A tool can raise `egress` for one bot through
     /// [`tool_registry::Tool::egress_for`] (knowledge search with a remote
     /// embedding provider); that can only add egress, never remove it.
-    pub(crate) fn content_class(&self, ctx: &RunCtx, name: &str) -> ContentClass {
+    pub(crate) fn content_class(&self, ctx: &RunCtx, name: &str, input: &Value) -> ContentClass {
+        if self.is_host_status_call(ctx, name, input) {
+            return ContentClass::none();
+        }
         let Some(tool) = self.tools.get(name) else {
             // The discovery tools live on the surface, not in the registry. They only list
             // tool names (`use_tool` is judged as its target): they never read user data
@@ -831,6 +834,40 @@ impl Shared {
             class.egress = true;
         }
         class
+    }
+
+    /// A host-status command (`uptime`, `df -h`, ... see
+    /// [`permission_engine::is_host_status_command`]) on the bot's OWN host computer.
+    ///
+    /// Such a call prints a fixed status line, takes no path, URL or free text, and cannot send
+    /// or change anything, so it neither taints the run (its output carries no outsider's text)
+    /// nor counts as a program an untrusted page chose. It is judged from the input alone, never
+    /// from the result. The user's PC, any other shell dialect, a working directory and every
+    /// other shell command keep the full class. Policy-level asks (Ask mode, never-list) are not
+    /// touched: this only removes the taint-driven repeats.
+    pub(crate) fn is_host_status_call(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
+        if name != "shell_run" || !self.is_host_homed() {
+            return false;
+        }
+        if !matches!(
+            ctx.resolved_computer.label,
+            ComputerLabel::Host | ComputerLabel::Browser
+        ) {
+            return false;
+        }
+        let Some(obj) = input.as_object() else {
+            return false;
+        };
+        let plain_fields = obj.keys().all(|k| match k.as_str() {
+            "command" | "timeout" => true,
+            "shell" => matches!(obj[k].as_str(), Some("sh" | "bash")),
+            _ => false,
+        });
+        plain_fields
+            && obj
+                .get("command")
+                .and_then(Value::as_str)
+                .is_some_and(permission_engine::is_host_status_command)
     }
 
     /// This very call must be confirmed (the tool always asks, or its
@@ -883,7 +920,7 @@ impl Shared {
     /// Every tool that starts a program is also an egress tool (the production
     /// registry audit checks it), so its card carries the full command.
     fn egress_card(&self, ctx: &RunCtx, name: &str, input: &Value) -> Option<Value> {
-        let class = self.content_class(ctx, name);
+        let class = self.content_class(ctx, name, input);
         if !taint::call_can_egress(name, class, input) {
             return None;
         }
@@ -924,7 +961,7 @@ impl Shared {
         if self.must_ask(name, input) {
             return "always_ask";
         }
-        let class = self.content_class(ctx, name);
+        let class = self.content_class(ctx, name, input);
         let exposure = ctx.taint.lock().exposure;
         if executes_must_ask(exposure, class.executes) {
             return "executes";
@@ -1345,7 +1382,7 @@ impl Shared {
         token: Option<&str>,
         showing_card: bool,
     ) -> Result<(), String> {
-        let class = self.content_class(ctx, name);
+        let class = self.content_class(ctx, name, input);
         if !taint::call_can_egress(name, class, input) || !ctx.taint.lock().exposure.is_tainted() {
             return Ok(());
         }

@@ -147,7 +147,10 @@ fn disclosure_now_required(
         return false;
     }
     let mut class = spec.content;
-    class.egress |= sh.content_class(ctx, name).egress;
+    class.egress |= sh.content_class(ctx, name, input).egress;
+    if sh.is_host_status_call(ctx, name, input) {
+        class = tool_registry::ContentClass::none();
+    }
     taint::call_can_egress(name, class, input)
 }
 
@@ -1294,10 +1297,13 @@ impl TurnExecutor {
             let is_spawn = resolved.name == crate::subagent::SPAWN_SUBAGENT;
             let spawn_input = resolved.input.clone();
             let tool = resolved.tool;
+            let status_call = self
+                .sh
+                .is_host_status_call(&ctx, &resolved.name, &resolved.input);
             let class = match &resolved.spec {
                 Some(spec) => PlannedClass {
-                    ingests_untrusted: spec.content.ingests_untrusted,
-                    reads_private: spec.content.reads_private,
+                    ingests_untrusted: spec.content.ingests_untrusted && !status_call,
+                    reads_private: spec.content.reads_private && !status_call,
                     label: taint::source_label(&resolved.name, &resolved.input),
                     page_origin: crate::shared::is_page_action(&resolved.name)
                         .then(|| ctx.page_origin.lock().clone())

