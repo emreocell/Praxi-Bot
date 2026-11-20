@@ -93,18 +93,34 @@ export {
   type UiStyle
 } from "./theme";
 
-export { BotAvatar, type BotAvatarState, type BotIdentity } from "./components/BotAvatar";
 export {
+  BotAvatar,
+  type BotAvatarSize,
+  type BotAvatarState,
+  type BotIdentity
+} from "./components/BotAvatar";
+export {
+  BOT_AVATAR_STATES,
+  BOT_SHAPE_GEOMETRY,
   BOT_SHAPE_IDS,
   BOT_SHAPES,
+  botAvatarMaterial,
+  botAvatarTiming,
   botShape,
   CHARACTER_COLORS,
   fallbackBotColor,
   fallbackBotShape,
   gradientMapConfig,
+  normalizeBotAvatarState,
   normalizeBotShape,
   normalizeHexColor,
+  resolveAvatarMotion,
+  type AvatarMotionConfig,
+  type BotAvatarMaterial,
+  type BotAvatarTiming,
   type BotShapeDef,
+  type BotShapeGeometry,
   type BotShapeId,
   type GradientMapConfig
 } from "./botShape";
+export { computeEyeGazeOffset, type GazeBounds, type GazeOffset } from "./eyeGaze";

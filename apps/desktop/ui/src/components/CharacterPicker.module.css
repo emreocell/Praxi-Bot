@@ -17,13 +17,11 @@
   background-color: var(--color-surface-elevated);
   cursor: pointer;
   transition:
-    transform var(--motion-duration-fast) var(--motion-easing-standard),
     border-color var(--motion-duration-fast) var(--motion-easing-standard),
     background-color var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .shapeButton:hover {
-  transform: scale(1.06);
   background-color: var(--color-surface-active);
 }
 

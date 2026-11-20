@@ -1,31 +1,59 @@
-type IdleGesture = "hop" | "tilt" | "stretch";
+export interface GazeBounds {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
 
-const IDLE_LOOKS: readonly [number, number][] = [
-  [3.2, -2.4],
-  [3.2, 2.2],
-  [-3.2, 0],
-  [0, 0],
-  [0, 0],
-  [-2.6, -2.2],
-  [0, 2.6],
-  [2.4, 0]
-];
+export interface GazeOffset {
+  /** Horizontal eye shift in percentage of the avatar box (`-maxX..maxX`). */
+  readonly xPct: number;
+  /** Vertical eye shift in percentage of the avatar box (`-maxY..maxY`). */
+  readonly yPct: number;
+}
 
-const GESTURE_CLASSES: readonly IdleGesture[] = ["hop", "tilt", "stretch"];
+/**
+ * Pure helper computing a softly clamped eye-gaze offset (in % of the avatar's box)
+ * toward a pointer position. Smoothly attenuates near center so eyes don't jitter.
+ */
+export function computeEyeGazeOffset(
+  pointerX: number,
+  pointerY: number,
+  rect: GazeBounds | null | undefined,
+  maxXPct = 5.2,
+  maxYPct = 4.0
+): GazeOffset {
+  if (!rect || rect.width <= 0 || rect.height <= 0) {
+    return { xPct: 0, yPct: 0 };
+  }
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const vx = pointerX - cx;
+  const vy = pointerY - cy;
+  const dist = Math.hypot(vx, vy);
+  if (dist < 1) {
+    return { xPct: 0, yPct: 0 };
+  }
+  // Smooth ease-out curve so subtle pointer movements feel natural and non-twitchy.
+  const reach = Math.max(150, rect.width * 2.2);
+  const t = Math.min(1, dist / reach);
+  const strength = t * (2 - t);
+  return {
+    xPct: Number((((vx / dist) * maxXPct * strength)).toFixed(2)),
+    yPct: Number((((vy / dist) * maxYPct * strength)).toFixed(2))
+  };
+}
 
 export interface GazeRegistration {
-  gazeEl: SVGGElement;
-  characterEl: HTMLSpanElement;
-  isLive: boolean;
-  motionClasses: Record<IdleGesture, string>;
+  gazeEl: HTMLElement;
 }
 
 const entries = new Set<GazeRegistration>();
 let activeListeners = false;
-let idleTimer: number | null = null;
 let rafId: number | null = null;
-let lastPointer = { x: 0, y: 0, movedAt: 0 };
+let lastPointer = { x: 0, y: 0 };
 let reducedQuery: MediaQueryList | null = null;
+let listeningMedia = false;
 
 function isReducedMotion(): boolean {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -37,15 +65,14 @@ function isReducedMotion(): boolean {
   return reducedQuery.matches;
 }
 
-function clearGazeTransforms(): void {
+function resetGaze(el: HTMLElement): void {
+  el.style.removeProperty("--gaze-x");
+  el.style.removeProperty("--gaze-y");
+}
+
+function clearAllGaze(): void {
   for (const entry of entries) {
-    entry.gazeEl.style.transform = "";
-    for (const key of GESTURE_CLASSES) {
-      const cls = entry.motionClasses[key];
-      if (cls) {
-        entry.characterEl.classList.remove(cls);
-      }
-    }
+    resetGaze(entry.gazeEl);
   }
 }
 
@@ -56,65 +83,23 @@ function applyPointerGaze(): void {
   }
   const { x, y } = lastPointer;
   for (const entry of entries) {
-    const rect = entry.gazeEl.ownerSVGElement?.getBoundingClientRect();
-    if (!rect || rect.width === 0 || rect.height === 0) {
-      continue;
-    }
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    const vx = x - cx;
-    const vy = y - cy;
-    const dist = Math.hypot(vx, vy) || 1;
-    const scale = Math.min(1, dist / 140);
-    const dx = (vx / dist) * 3.6 * scale;
-    const dy = (vy / dist) * 2.8 * scale;
-    entry.gazeEl.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
+    const rect = entry.gazeEl.getBoundingClientRect();
+    const { xPct, yPct } = computeEyeGazeOffset(x, y, rect);
+    entry.gazeEl.style.setProperty("--gaze-x", `${xPct}%`);
+    entry.gazeEl.style.setProperty("--gaze-y", `${yPct}%`);
   }
 }
 
 function onPointerMove(e: PointerEvent): void {
-  lastPointer = { x: e.clientX, y: e.clientY, movedAt: Date.now() };
+  lastPointer = { x: e.clientX, y: e.clientY };
   if (rafId === null) {
     rafId = window.requestAnimationFrame(applyPointerGaze);
   }
 }
 
-function onIdleTick(): void {
-  if (isReducedMotion() || entries.size === 0) {
-    return;
-  }
-  if (Date.now() - lastPointer.movedAt <= 2500) {
-    return;
-  }
-  const pool = [...entries];
-  const pick = pool[Math.floor(Math.random() * pool.length)];
-  if (!pick) {
-    return;
-  }
-  if (Math.random() < 0.55) {
-    const [dx, dy] = IDLE_LOOKS[Math.floor(Math.random() * IDLE_LOOKS.length)];
-    pick.gazeEl.style.transform = `translate(${dx}px, ${dy}px)`;
-  }
-  if (pick.isLive && Math.random() < 0.3) {
-    const move = GESTURE_CLASSES[Math.floor(Math.random() * GESTURE_CLASSES.length)];
-    const targetCls = pick.motionClasses[move];
-    if (!targetCls) {
-      return;
-    }
-    for (const k of GESTURE_CLASSES) {
-      const c = pick.motionClasses[k];
-      if (c) pick.characterEl.classList.remove(c);
-    }
-    // Restart one-shot keyframe animation if the same gesture recurs.
-    void pick.characterEl.offsetWidth;
-    pick.characterEl.classList.add(targetCls);
-    window.setTimeout(() => {
-      pick.characterEl.classList.remove(targetCls);
-    }, 1400);
-  }
+function onPointerLeave(): void {
+  clearAllGaze();
 }
-
-let listeningMedia = false;
 
 function syncControllers(): void {
   if (typeof window === "undefined") {
@@ -122,7 +107,7 @@ function syncControllers(): void {
   }
   const reduced = isReducedMotion();
   if (reduced) {
-    clearGazeTransforms();
+    clearAllGaze();
   }
   if (entries.size > 0 && !listeningMedia) {
     listeningMedia = true;
@@ -135,14 +120,11 @@ function syncControllers(): void {
   if (wantActive && !activeListeners) {
     activeListeners = true;
     window.addEventListener("pointermove", onPointerMove, { passive: true });
-    idleTimer = window.setInterval(onIdleTick, 1900);
+    document.documentElement.addEventListener("pointerleave", onPointerLeave, { passive: true });
   } else if (!wantActive && activeListeners) {
     activeListeners = false;
     window.removeEventListener("pointermove", onPointerMove);
-    if (idleTimer !== null) {
-      window.clearInterval(idleTimer);
-      idleTimer = null;
-    }
+    document.documentElement.removeEventListener("pointerleave", onPointerLeave);
     if (rafId !== null) {
       window.cancelAnimationFrame(rafId);
       rafId = null;
@@ -151,13 +133,15 @@ function syncControllers(): void {
 }
 
 /**
- * Subscribe a mounted character's eye-gaze group to cursor tracking and ambient
- * idle look/gesture motion. Automatically stops under `prefers-reduced-motion`.
+ * Subscribe a featured (`hero` / `panel` / `lg`) avatar's gaze layer to gentle
+ * pointer-following eye movement. Never called for list items; stops automatically
+ * under `prefers-reduced-motion`.
  */
 export function registerCharacterGaze(reg: GazeRegistration): () => void {
   entries.add(reg);
   syncControllers();
   return () => {
+    resetGaze(reg.gazeEl);
     entries.delete(reg);
     syncControllers();
   };

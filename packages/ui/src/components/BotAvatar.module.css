@@ -6,6 +6,8 @@
   flex-shrink: 0;
   width: var(--size-avatar-md);
   height: var(--size-avatar-md);
+  user-select: none;
+  contain: layout style;
 }
 
 .xs { width: var(--space-6); height: var(--space-6); }
@@ -16,129 +18,409 @@
 .hero { width: calc(var(--space-16) * 1.625); height: calc(var(--space-16) * 1.625); }
 
 .customImg {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
   border-radius: 28%;
 }
 
-.character {
+/* Soft grounded contact shadow — stays anchored beneath the avatar and softens on lift. */
+.groundShadow {
+  position: absolute;
+  bottom: 2%;
+  left: 50%;
+  width: var(--shadow-width, 54%);
+  height: 14%;
+  border-radius: var(--radius-pill);
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in srgb, var(--color-shadow) 52%, transparent) 0%,
+    color-mix(in srgb, var(--color-shadow) 22%, transparent) 55%,
+    transparent 80%
+  );
+  transform: translateX(-50%) scale(1);
+  opacity: 0.78;
+  pointer-events: none;
+  transition:
+    transform var(--motion-duration-avatar-hover) var(--motion-easing-spring-soft),
+    opacity var(--motion-duration-avatar-hover) var(--motion-easing-standard);
+}
+
+.xs .groundShadow {
+  opacity: 0.45;
+}
+
+/* Interactive hover / press layer — interruptible spring transitions, GPU-only transforms. */
+.stage {
   position: relative;
   display: block;
   width: 100%;
   height: 100%;
-  user-select: none;
-  filter: drop-shadow(
-    0 calc(var(--size-border) * 2) calc(var(--size-border) * 3)
-      color-mix(in srgb, var(--color-shadow) 42%, transparent)
-  );
+  transform-origin: 50% 88%;
+  transform: translate3d(0, 0, 0) scale(1);
+  transition: transform var(--motion-duration-avatar-hover) var(--motion-easing-spring);
 }
 
-.filterDefs {
-  position: absolute;
-  width: var(--space-0);
-  height: var(--space-0);
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.bodyImg {
+/* State and breathing layer — smoothly interpolates when bot state changes. */
+.pose {
+  position: relative;
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: contain;
-  pointer-events: none;
+  transform-origin: 50% 86%;
+  transform: translate3d(0, 0, 0) scale(1);
+  transition:
+    transform var(--motion-duration-avatar-state) var(--motion-easing-spring-soft),
+    opacity var(--motion-duration-avatar-state) var(--motion-easing-standard);
 }
 
-.eyes {
-  position: absolute;
-  inset: var(--space-0);
+.bodySvg,
+.eyesSvg {
+  display: block;
   width: 100%;
   height: 100%;
-  fill: var(--color-creature-eyes);
+  overflow: visible;
   pointer-events: none;
 }
 
-.gaze {
-  transition: transform 0.25s ease-out;
+/* Composable eye layers: state gaze -> hover/press reaction -> cursor gaze -> blink. */
+.eyeState,
+.eyeReact,
+.eyeGaze {
+  position: absolute;
+  inset: var(--space-0);
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.eyeState {
+  transform-origin: 50% 50%;
+  transition: transform var(--motion-duration-avatar-state) var(--motion-easing-spring-soft);
+}
+
+.eyeReact {
+  transform-origin: 50% 50%;
+  transition: transform var(--motion-duration-avatar-hover) var(--motion-easing-spring);
+}
+
+.eyeGaze {
+  transform: translate3d(var(--gaze-x, 0%), var(--gaze-y, 0%), 0);
+  transition: transform var(--motion-duration-avatar-hover) var(--motion-easing-spring-soft);
 }
 
 .eye {
   transform-box: fill-box;
   transform-origin: center;
-  animation: blink 5.5s ease-in-out infinite;
 }
 
-.live {
-  animation: bob 4s ease-in-out infinite;
+.blinking .eye {
+  animation: avatarBlink var(--avatar-blink-duration, 5.4s) var(--motion-easing-standard)
+    var(--avatar-blink-delay, 0s) infinite;
 }
 
-:is(button, a, [role="button"]):hover .character,
-.avatar:hover .character {
-  animation: wig 0.55s ease-in-out;
-  transform-origin: 50% 90%;
+/* Ambient idle breathing with irregular per-bot duration and stagger delay. */
+.breathing .pose {
+  animation: avatarBreath var(--avatar-breath-duration, 4.4s) var(--motion-easing-organic)
+    var(--avatar-breath-delay, 0s) infinite;
 }
 
-.character.hop { animation: hop 0.72s ease-in-out; }
-.character.tilt { animation: tilt 1.2s ease-in-out; }
-.character.stretch { animation: stretch 0.9s ease-in-out; transform-origin: 50% 92%; }
-
-.thinking .character { animation: ponder 2.8s ease-in-out infinite; }
-.working .character { animation: work 1.1s ease-in-out infinite; transform-origin: 50% 92%; }
-.waiting-approval .character { animation: wait 3s ease-in-out infinite; }
-.error .character { animation: shake 0.4s ease-out 2; }
-
-@keyframes blink {
-  0%, 46%, 50%, 100% { transform: scaleY(1); }
-  48% { transform: scaleY(0.12); }
+.breathing .groundShadow {
+  animation: shadowBreath var(--avatar-breath-duration, 4.4s) var(--motion-easing-organic)
+    var(--avatar-breath-delay, 0s) infinite;
 }
 
-@keyframes wig {
-  25% { transform: rotate(-9deg) scale(1.07); }
-  70% { transform: rotate(7deg) scale(1.07); }
+/* Tactile hover: slight lift + gentle vertical stretch + attentive eye perk (interruptible). */
+:is(button, a, [role="button"]):hover .stage,
+.avatar:hover .stage {
+  transform: translate3d(0, -6.5%, 0) scale(1.035, 1.06);
 }
 
-@keyframes bob {
-  50% { transform: translateY(-5%); }
+:is(button, a, [role="button"]):hover .groundShadow,
+.avatar:hover .groundShadow {
+  transform: translateX(-50%) scale(0.84, 0.88);
+  opacity: 0.52;
 }
 
-@keyframes hop {
-  40% { transform: translateY(-10%) scale(1.04, 0.96); }
-  75% { transform: translateY(1%) scale(0.96, 1.04); }
+:is(button, a, [role="button"]):hover .eyeReact,
+.avatar:hover .eyeReact {
+  transform: translate3d(0, -3.2%, 0) scale(1.04, 1.07);
 }
 
-@keyframes tilt {
-  40% { transform: rotate(-7deg); }
-  75% { transform: rotate(4deg); }
+/* Press feedback: quick cushioned squash down into the floor + playful eye squint. */
+:is(button, a, [role="button"]):active .stage,
+.avatar:active .stage {
+  transition-duration: var(--motion-duration-avatar-press);
+  transform: translate3d(0, 2.5%, 0) scale(1.07, 0.91);
 }
 
-@keyframes stretch {
-  45% { transform: scale(1.06, 0.92); }
+:is(button, a, [role="button"]):active .groundShadow,
+.avatar:active .groundShadow {
+  transition-duration: var(--motion-duration-avatar-press);
+  transform: translateX(-50%) scale(1.1, 1.04);
+  opacity: 0.92;
 }
 
-@keyframes ponder {
-  50% { transform: rotate(-7deg) translateY(-3%); }
+:is(button, a, [role="button"]):active .eyeReact,
+.avatar:active .eyeReact {
+  transition-duration: var(--motion-duration-avatar-press);
+  transform: translate3d(0, 2%, 0) scale(1.06, 0.76);
 }
 
-@keyframes work {
-  50% { transform: scale(1.08, 0.9); }
+/* ---- State animations ---- */
+
+/* Thinking: slow contemplative tilt-wobble + eyes looking gently upward. */
+.thinking .pose {
+  animation: avatarThink 3.2s var(--motion-easing-organic) infinite;
 }
 
-@keyframes wait {
-  50% { opacity: 0.72; transform: rotate(4deg); }
+.thinking .eyeState {
+  animation: eyesThink 3.2s var(--motion-easing-organic) infinite;
 }
 
-@keyframes shake {
-  25% { transform: rotate(-5deg); }
-  75% { transform: rotate(5deg); }
+/* Working: purposeful, energetic busy rhythm + focused horizontal eye scan. */
+.working .pose {
+  animation: avatarWork 1.32s var(--motion-easing-organic) infinite;
 }
 
+.working .eyeState {
+  animation: eyesWork 1.32s var(--motion-easing-organic) infinite;
+}
+
+.working .groundShadow {
+  animation: shadowWork 1.32s var(--motion-easing-organic) infinite;
+}
+
+/* Waiting approval: calm presence with a polite double attention nudge (never faded out). */
+.waiting-approval .pose {
+  animation: avatarAttention 3.4s var(--motion-easing-organic) infinite;
+}
+
+.waiting-approval .eyeState {
+  animation: eyesAttention 3.4s var(--motion-easing-organic) infinite;
+}
+
+.waiting-approval .groundShadow {
+  animation: shadowAttention 3.4s var(--motion-easing-organic) infinite;
+}
+
+/* Error: crisp horizontal shake once, then settles cleanly into a calm resting tilt. */
+.error .pose {
+  animation: avatarErrorShake 580ms var(--motion-easing-standard) 1 both;
+}
+
+.error .eyeState {
+  transform: translate3d(0, 3%, 0) scale(1.02, 0.88);
+}
+
+/* ---- Keyframes (transform and opacity only) ---- */
+
+@keyframes avatarBlink {
+  0%, 91%, 99%, 100% {
+    transform: scaleY(1);
+  }
+  94.5% {
+    transform: scaleY(0.08);
+  }
+}
+
+@keyframes avatarBreath {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1, 1);
+  }
+  45% {
+    transform: translate3d(0, -2.4%, 0) scale(0.99, 1.016);
+  }
+  72% {
+    transform: translate3d(0, 0.6%, 0) scale(1.016, 0.986);
+  }
+}
+
+@keyframes shadowBreath {
+  0%, 100% {
+    transform: translateX(-50%) scale(1);
+    opacity: 0.76;
+  }
+  45% {
+    transform: translateX(-50%) scale(0.93);
+    opacity: 0.64;
+  }
+  72% {
+    transform: translateX(-50%) scale(1.03);
+    opacity: 0.82;
+  }
+}
+
+@keyframes avatarThink {
+  0%, 100% {
+    transform: translate3d(0, -1%, 0) rotate(-3.5deg) scale(1, 1);
+  }
+  50% {
+    transform: translate3d(0, -4.5%, 0) rotate(3.2deg) scale(0.99, 1.015);
+  }
+}
+
+@keyframes eyesThink {
+  0%, 100% {
+    transform: translate3d(-2.2%, -5.2%, 0) scale(0.98, 0.95);
+  }
+  50% {
+    transform: translate3d(2.8%, -5.8%, 0) scale(0.98, 0.95);
+  }
+}
+
+@keyframes avatarWork {
+  0%, 100% {
+    transform: translate3d(0, 0.8%, 0) scale(1.03, 0.972) rotate(0deg);
+  }
+  25% {
+    transform: translate3d(0, -4.5%, 0) scale(0.985, 1.022) rotate(-2.2deg);
+  }
+  50% {
+    transform: translate3d(0, 0.8%, 0) scale(1.028, 0.974) rotate(0deg);
+  }
+  75% {
+    transform: translate3d(0, -4.2%, 0) scale(0.986, 1.02) rotate(2.2deg);
+  }
+}
+
+@keyframes shadowWork {
+  0%, 50%, 100% {
+    transform: translateX(-50%) scale(1.04);
+    opacity: 0.84;
+  }
+  25%, 75% {
+    transform: translateX(-50%) scale(0.88);
+    opacity: 0.58;
+  }
+}
+
+@keyframes eyesWork {
+  0%, 100% {
+    transform: translate3d(-3.2%, 1%, 0) scale(1, 0.93);
+  }
+  50% {
+    transform: translate3d(3.4%, 1%, 0) scale(1, 0.93);
+  }
+}
+
+@keyframes avatarAttention {
+  0%, 54%, 100% {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1, 1);
+  }
+  63% {
+    transform: translate3d(0, -7%, 0) rotate(4.2deg) scale(0.985, 1.035);
+  }
+  71% {
+    transform: translate3d(0, 1%, 0) rotate(-1deg) scale(1.03, 0.97);
+  }
+  79% {
+    transform: translate3d(0, -4.2%, 0) rotate(-2.6deg) scale(0.99, 1.02);
+  }
+  88% {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1, 1);
+  }
+}
+
+@keyframes shadowAttention {
+  0%, 54%, 88%, 100% {
+    transform: translateX(-50%) scale(1);
+    opacity: 0.78;
+  }
+  63% {
+    transform: translateX(-50%) scale(0.84);
+    opacity: 0.52;
+  }
+  71% {
+    transform: translateX(-50%) scale(1.04);
+    opacity: 0.84;
+  }
+  79% {
+    transform: translateX(-50%) scale(0.9);
+    opacity: 0.62;
+  }
+}
+
+@keyframes eyesAttention {
+  0%, 54%, 88%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  63%, 79% {
+    transform: translate3d(0, -3.5%, 0) scale(1.05, 1.07);
+  }
+}
+
+@keyframes avatarErrorShake {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  16% {
+    transform: translate3d(-5.5%, 0, 0) rotate(-3.5deg);
+  }
+  34% {
+    transform: translate3d(5%, 0, 0) rotate(3deg);
+  }
+  52% {
+    transform: translate3d(-3.5%, 0.5%, 0) rotate(-2deg);
+  }
+  70% {
+    transform: translate3d(2%, 1%, 0) rotate(1deg);
+  }
+  100% {
+    transform: translate3d(0, 1.5%, 0) rotate(-2deg);
+  }
+}
+
+/* Reduced motion: clean static pose everywhere (also supports preview toggle via data attribute). */
 @media (prefers-reduced-motion: reduce) {
-  .character,
-  .live,
-  .eye,
-  .gaze {
+  .stage,
+  .pose,
+  .groundShadow,
+  .eyeState,
+  .eyeReact,
+  .eyeGaze,
+  .eye {
     animation: none;
     transition: none;
   }
+
+  :is(button, a, [role="button"]):hover .stage,
+  .avatar:hover .stage,
+  :is(button, a, [role="button"]):active .stage,
+  .avatar:active .stage,
+  :is(button, a, [role="button"]):hover .eyeReact,
+  .avatar:hover .eyeReact,
+  :is(button, a, [role="button"]):active .eyeReact,
+  .avatar:active .eyeReact {
+    transform: none;
+  }
+
+  .thinking .eyeState {
+    transform: translate3d(0, -4.5%, 0);
+  }
+
+  .error .pose {
+    transform: translate3d(0, 1.5%, 0) rotate(-2deg);
+  }
+}
+
+:global([data-reduced-motion="true"]) .stage,
+:global([data-reduced-motion="true"]) .pose,
+:global([data-reduced-motion="true"]) .groundShadow,
+:global([data-reduced-motion="true"]) .eyeState,
+:global([data-reduced-motion="true"]) .eyeReact,
+:global([data-reduced-motion="true"]) .eyeGaze,
+:global([data-reduced-motion="true"]) .eye {
+  animation: none;
+  transition: none;
+}
+
+:global([data-reduced-motion="true"]) .thinking .eyeState {
+  transform: translate3d(0, -4.5%, 0);
+}
+
+:global([data-reduced-motion="true"]) .error .pose {
+  transform: translate3d(0, 1.5%, 0) rotate(-2deg);
 }
