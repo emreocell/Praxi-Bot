@@ -49,6 +49,7 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 | Windows installer details, upgrade, uninstall | [Installing on Windows](install-windows.md) |
 | Set up an always-on Linux host (VPS / VM) | [Running on a remote host](remote-host.md) |
 | Run the always-on Linux host: logs, restart, upgrade, backup | [Host operations](host-operations.md) |
+| Understand what a host does when it is demoted or hears another active host | [Host leadership limits](host-leadership.md) |
 | Create a bot and understand its profile file | [Bots and profiles](bots-and-profiles.md) |
 | Talk to a bot, approve or deny actions | [Chatting and approvals](chatting-and-approvals.md) |
 | Run something every morning | [Scheduled tasks](scheduled-tasks.md) |
@@ -59,6 +60,8 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 | Let another MCP agent use a selected Praxi bot | [Praxi as an MCP server](mcp-server.md) |
 | Pick a provider, use the Gemini free tier | [Providers and models](providers-and-models.md) |
 | Understand how the model picker names and ranks models | [Model picker metadata](model-catalog.md) |
+| Let a lighter model answer simple first turns | [Optional model tiering](model-tiering.md) |
+| See what each model call in a run was for and what it used | [LLM call ledger](llm-call-ledger.md) |
 | Use a local coding CLI (Claude Code, Codex, Cursor, ...) as the engine | [Coding CLI engines](cli-engines.md) |
 | Talk to your bots from your phone | [Telegram](telegram.md) |
 | Read, search, draft or send e-mails | [Email integration](email.md) |
