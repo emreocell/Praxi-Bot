@@ -3347,6 +3347,27 @@
     "waiting": "Onayını bekliyor: {{step}}",
     "working": "Çalışıyor…"
   },
+  "safeMode": {
+    "banner": {
+      "body": "Araçlar, zamanlamalar ve kanallar kapalı. Yine de sohbet edebilir, okuyabilir ve ayarları değiştirebilirsin.",
+      "leave": "Normal başlat",
+      "leaveManual": "Çıkmak için servisi --safe olmadan (ve BOT_SAFE_MODE olmadan) yeniden başlat.",
+      "title": "Güvenli mod."
+    },
+    "settings": {
+      "activeTitle": "Güvenli mod açık",
+      "description": "Kendi kendine iş yapan her şey kapalı olarak başlat.",
+      "enter": "Güvenli modda yeniden başlat",
+      "explain": "Yerel servisi araçlar, zamanlamalar, kanallar, MCP sunucuları ve uygulamalar kapalı olarak yeniden başlatır. Sohbet yine yanıt verir, hiçbir şey silinmez veya değişmez, çalışan işler duraklatılır. Her şeyi geri getirmek için normal başlat.",
+      "inactiveTitle": "Güvenli mod kapalı",
+      "manual": "Servisi bu uygulama başlatmadığı için yeniden başlatamaz. Güvenli modu kullanmak için `bot serve --safe` ile başlat.",
+      "title": "Güvenli mod"
+    },
+    "startup": {
+      "button": "Güvenli modda başlat",
+      "hint": "Servisi araçlar, zamanlamalar ve kanallar kapalı başlatır; sorunu düzeltebilirsin. Hiçbir şey silinmez."
+    }
+  },
   "schedules": {
     "bot": "Bot",
     "cancel": "İptal",

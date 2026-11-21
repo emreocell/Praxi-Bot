@@ -8,6 +8,8 @@ export interface Connection {
   token: string;
   started_by_app: boolean;
   fake_provider: boolean;
+  /** Whether the app starts its service in safe mode (tools, schedules, channels off). */
+  safe_mode: boolean;
   data_dir: string;
 }
 
@@ -18,7 +20,7 @@ export interface Connection {
  * `?daemon=<url>&token=<token>[&fake=1]` so the UI can be exercised against a daemon
  * started by hand.
  */
-export async function connectDaemon(restart = false): Promise<Connection> {
+export async function connectDaemon(restart = false, safe?: boolean): Promise<Connection> {
   if (isMockMode()) {
     // Review state: the daemon cannot be reached (`?mock=1&screen=offline`).
     if (new URLSearchParams(window.location.search).get("screen") === "offline") {
@@ -29,11 +31,12 @@ export async function connectDaemon(restart = false): Promise<Connection> {
       token: "mock",
       started_by_app: false,
       fake_provider: true,
+      safe_mode: new URLSearchParams(window.location.search).get("safe") === "1",
       data_dir: ""
     };
   }
   if (isTauriRuntime()) {
-    return invoke<Connection>(restart ? "daemon_restart" : "daemon_connect");
+    return invoke<Connection>(restart ? "daemon_restart" : "daemon_connect", restart ? { safe } : undefined);
   }
   if (import.meta.env.DEV) {
     const q = new URLSearchParams(window.location.search);
@@ -45,6 +48,7 @@ export async function connectDaemon(restart = false): Promise<Connection> {
         token,
         started_by_app: false,
         fake_provider: q.get("fake") === "1",
+        safe_mode: false,
         data_dir: ""
       };
     }

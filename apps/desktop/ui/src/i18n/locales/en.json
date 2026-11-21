@@ -3347,6 +3347,27 @@
     "waiting": "Waiting for your approval: {{step}}",
     "working": "Working…"
   },
+  "safeMode": {
+    "banner": {
+      "body": "Tools, schedules and channels are off. You can still chat, read and change settings.",
+      "leave": "Restart normally",
+      "leaveManual": "Restart the service without --safe (and without BOT_SAFE_MODE) to leave.",
+      "title": "Safe mode."
+    },
+    "settings": {
+      "activeTitle": "Safe mode is on",
+      "description": "Start with everything that acts by itself switched off.",
+      "enter": "Restart in safe mode",
+      "explain": "Restarts the local service with tools, schedules, channels, MCP servers and apps off. Chat still answers, nothing is deleted or changed, and running work is paused. Restart normally to get everything back.",
+      "inactiveTitle": "Safe mode is off",
+      "manual": "This app did not start the service, so it cannot restart it. Start it with `bot serve --safe` to use safe mode.",
+      "title": "Safe mode"
+    },
+    "startup": {
+      "button": "Start in safe mode",
+      "hint": "Starts the service with tools, schedules and channels off, so you can fix the problem. Nothing is deleted."
+    }
+  },
   "schedules": {
     "bot": "Bot",
     "cancel": "Cancel",

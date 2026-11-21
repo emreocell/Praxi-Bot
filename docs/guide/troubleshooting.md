@@ -130,6 +130,36 @@ for the reset, switch the model to one with a higher cap, reduce schedules, or u
 a paid key or another provider. See
 [Gemini free tier](providers-and-models.md#gemini-free-tier).
 
+## Safe mode: start with everything off
+
+Use it when something that acts by itself gets in the way of fixing it: a schedule
+that starts a failing run on every launch, an MCP server that hangs at startup, a
+bot that keeps controlling the screen.
+
+Safe mode is chosen **only when the service starts**, by you:
+
+- **Desktop app:** Settings → Diagnostics → **Restart in safe mode**, or **Start in
+  safe mode** on the screen shown when the service does not come up.
+- **Terminal:** `bot serve --safe`, or set `BOT_SAFE_MODE=1` before `bot serve`.
+
+While it is on, the app shows a banner ("Safe mode. Tools, schedules and channels are
+off.") and `bot doctor`, Settings → Diagnostics and `GET /v1/health` (`safe_mode`) say
+so. You can still chat (the model answers, with no tools; any tool call is refused)
+and read and change bots, schedules and settings.
+
+What is off: every tool, schedules and workflows (nothing fires), the Telegram bridge
+and other channels, MCP servers and apps, email/calendar/web connectors, memory
+recall and write-back, the desktop backend, and peer or host networking. Interrupted
+runs are not resumed; they stay paused and visible. Settings pages of the parts that
+are off answer "not configured" until you leave safe mode.
+
+Nothing is deleted or changed: bots, chats, schedules, channels and settings stay
+exactly as they were, and `mcp.toml` is not even opened. To leave, press **Restart
+normally** in the banner (or restart the service without `--safe` and without
+`BOT_SAFE_MODE`); everything is back. No tool, bot or paired device can switch safe
+mode on or off while the service runs. It is a debugging aid, not a sandbox against
+malware.
+
 ## Schedules do not fire
 
 - The daemon must be running at the due time. Missed firings are skipped by

@@ -86,6 +86,7 @@ before a provider is configured, reporting `setup_required` until you run
 | `--peer` | Enable paired remote API access over iroh |
 | `--shutdown-grace <SECONDS>` | Time running tool steps get to finish on shutdown (default 10); then live runs are paused for the next start |
 | `--owner-key-stdin` | Read the owner key (one line) from standard input, so it never appears in argv, a file or the environment |
+| `--safe` (alias `--safe-mode`, or env `BOT_SAFE_MODE=1`) | Safe mode: chat answers without tools; tools, schedules, channels, MCP servers, apps, memory work, desktop and peer networking stay off. Nothing is deleted or changed. Cannot be combined with `--host` or `--peer`. See [Safe mode](troubleshooting.md#safe-mode-start-with-everything-off) |
 | `--fake-provider` | Only in builds with the `fake-provider` feature: use a built-in echo provider (demos, tests) |
 
 ### `bot doctor`

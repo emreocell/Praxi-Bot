@@ -42,6 +42,8 @@ pub struct Connection {
     pub started_by_app: bool,
     /// Whether the daemon was started with the fake (echo) provider.
     pub fake_provider: bool,
+    /// Whether this app starts its daemon in safe mode (see [`restart`]).
+    pub safe_mode: bool,
     /// Data directory in use.
     pub data_dir: String,
 }
@@ -54,6 +56,9 @@ pub struct DaemonHandle {
     connecting: tokio::sync::Mutex<()>,
     child: Mutex<Option<Child>>,
     fake: Mutex<bool>,
+    /// Safe mode for every daemon this app starts, until a restart says otherwise. Held in
+    /// memory only: a fresh launch of the app always starts normally.
+    safe: Mutex<bool>,
     /// Daemon log length when the current child was spawned.
     log_offset: Mutex<u64>,
     /// What the start-up screen shows when the daemon does not come up (see [`diagnostics`]).
@@ -526,6 +531,11 @@ fn spawn_daemon(handle: &DaemonHandle, data_dir: &Path, fake: bool) -> Result<Ch
     let mut cmd = bot_command();
     cmd.arg("serve").arg("--port").arg(port().to_string());
     cmd.arg("--owner-key-stdin");
+    if *handle.safe.lock() {
+        cmd.arg("--safe");
+    }
+    // A stray `BOT_SAFE_MODE` in the app's own environment must not decide for the owner.
+    cmd.env_remove("BOT_SAFE_MODE");
     if fake {
         cmd.arg("--fake-provider");
     }
@@ -690,6 +700,7 @@ fn connection(handle: &DaemonHandle, url: String, data: &Path) -> Result<Connect
         token,
         started_by_app: handle.started_by_app(),
         fake_provider: *handle.fake.lock(),
+        safe_mode: *handle.safe.lock(),
         data_dir: data.display().to_string(),
     })
 }
@@ -711,9 +722,14 @@ pub async fn connect(handle: &DaemonHandle) -> Result<Connection, String> {
 ///
 /// # Errors
 /// Same as [`connect`].
-pub async fn restart(handle: &DaemonHandle) -> Result<Connection, String> {
+pub async fn restart(handle: &DaemonHandle, safe: Option<bool>) -> Result<Connection, String> {
     let _one_at_a_time = handle.connecting.lock().await;
     handle.stop();
+    // `None` keeps the current mode (a provider reload must not leave safe mode);
+    // only the owner's explicit choice in the app changes it.
+    if let Some(safe) = safe {
+        *handle.safe.lock() = safe;
+    }
     tokio::time::sleep(Duration::from_millis(300)).await;
     connect_locked(handle).await
 }

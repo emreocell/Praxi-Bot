@@ -1,4 +1,4 @@
-import { Check, Copy, FolderOpen, RotateCw, ServerOff } from "lucide-react";
+import { Check, Copy, FolderOpen, RotateCw, ServerOff, ShieldAlert } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
@@ -50,6 +50,9 @@ export function StartupProblem({ startup, raw }: { startup: StartupDiagnostics; 
         </Button>
         <Button variant="primary" onClick={() => void restartDaemon()}>
           {t("errors.startupPanel.restart")}
+        </Button>
+        <Button variant="secondary" onClick={() => void restartDaemon(true)} title={t("safeMode.startup.hint")}>
+          <ShieldAlert aria-hidden="true" /> {t("safeMode.startup.button")}
         </Button>
         <Button variant="secondary" onClick={() => void copy()}>
           {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}

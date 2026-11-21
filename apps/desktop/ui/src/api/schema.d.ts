@@ -4935,6 +4935,11 @@ export interface components {
             /** @description Capabilities of this host; probes never launch a browser. */
             host: components["schemas"]["HostInfo"];
             /**
+             * @description `true` when the daemon was started in safe mode: no tools, no schedules, no
+             *     channels, no MCP servers or apps. Fixed for the life of the process.
+             */
+            safe_mode?: boolean;
+            /**
              * @description Background startup: `starting` while leadership is verified and components
              *     start, `ready` once finished, `degraded` when a component failed to start.
              */

@@ -3347,6 +3347,27 @@
     "waiting": "Wartet auf deine Genehmigung: {{step}}",
     "working": "Arbeitet …"
   },
+  "safeMode": {
+    "banner": {
+      "body": "Werkzeuge, Zeitpläne und Kanäle sind aus. Du kannst weiter chatten, lesen und Einstellungen ändern.",
+      "leave": "Normal neu starten",
+      "leaveManual": "Starte den Dienst ohne --safe (und ohne BOT_SAFE_MODE) neu, um den Modus zu verlassen.",
+      "title": "Sicherer Modus."
+    },
+    "settings": {
+      "activeTitle": "Sicherer Modus ist an",
+      "description": "Starte mit allem, was von selbst handelt, ausgeschaltet.",
+      "enter": "Im sicheren Modus neu starten",
+      "explain": "Startet den lokalen Dienst ohne Werkzeuge, Zeitpläne, Kanäle, MCP-Server und Apps neu. Der Chat antwortet weiter, nichts wird gelöscht oder geändert, laufende Arbeit wird pausiert. Starte normal neu, um alles zurückzubekommen.",
+      "inactiveTitle": "Sicherer Modus ist aus",
+      "manual": "Diese App hat den Dienst nicht gestartet und kann ihn daher nicht neu starten. Starte ihn mit `bot serve --safe`, um den sicheren Modus zu nutzen.",
+      "title": "Sicherer Modus"
+    },
+    "startup": {
+      "button": "Im sicheren Modus starten",
+      "hint": "Startet den Dienst ohne Werkzeuge, Zeitpläne und Kanäle, damit du das Problem beheben kannst. Nichts wird gelöscht."
+    }
+  },
   "schedules": {
     "bot": "Bot",
     "cancel": "Abbrechen",

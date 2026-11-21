@@ -757,13 +757,18 @@ fn owner_key(window: Window) -> Result<String, String> {
 
 /// Stop a daemon this app started, then start it again (e.g. to pick up new
 /// providers).  A daemon started by someone else is left alone.
+///
+/// `safe`: `true` starts it in safe mode (tools, schedules, channels off), `false`
+/// starts it normally again, absent keeps the current mode. This is the only way in
+/// or out of safe mode while the app runs, and only the main window may ask.
 #[tauri::command]
 async fn daemon_restart(
     window: Window,
     daemon: State<'_, Arc<DaemonHandle>>,
+    safe: Option<bool>,
 ) -> Result<Connection, String> {
     require_window(&window, MAIN_ONLY)?;
-    daemon::restart(&daemon).await
+    daemon::restart(&daemon, safe).await
 }
 
 /// How far the local service got when it does not come up: stage, exit code, last log lines.

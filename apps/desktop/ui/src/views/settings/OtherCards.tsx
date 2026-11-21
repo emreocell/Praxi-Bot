@@ -8,6 +8,7 @@ import { isTauriRuntime } from "../../overlay/events";
 import { useDaemon } from "../../state/DaemonContext";
 import { UsageView } from "../UsageView";
 import { DiagnosticsCard } from "./DiagnosticsCard";
+import { SafeModeCard } from "./SafeModeCard";
 import type { CardDef } from "./types";
 
 function VersionBlock() {
@@ -70,6 +71,15 @@ export function otherCards(t: TFunction): CardDef[] {
       description: t("settingsModal.diagnostics.description"),
       keywords: "doctor diagnostics health repair support report tanilama saglik onar destek rapor",
       node: <DiagnosticsCard />
+    },
+    {
+      id: "safe-mode",
+      section: "diagnostics",
+      kind: "block",
+      title: t("safeMode.settings.title"),
+      description: t("safeMode.settings.description"),
+      keywords: "safe mode recovery tools schedules channels off guvenli mod kurtarma araclar zamanlama kanallar sicherer modus wiederherstellung",
+      node: <SafeModeCard />
     },
     {
       id: "version",
