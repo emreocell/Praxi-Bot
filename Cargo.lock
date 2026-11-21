@@ -1541,6 +1541,7 @@ version = "0.1.0"
 dependencies = [
  "async-imap",
  "async-trait",
+ "base64 0.22.1",
  "email_address",
  "futures-util",
  "log",
