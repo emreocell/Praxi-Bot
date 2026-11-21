@@ -114,8 +114,9 @@ jobs:
           docker exec "${cid}" bot --json doctor > doctor.json || true
           python3 - <<'PY'
           import json, pathlib
-          checks = {c["id"]: c for c in json.loads(pathlib.Path("doctor.json").read_text())}
-          for req in ("host_display", "daemon", "secret_backend", "browser", "desktop_automation"):
+          data = json.loads(pathlib.Path("doctor.json").read_text())
+          checks = {c["name"]: c for c in data["checks"]}
+          for req in ("host display", "daemon", "secret backend", "browser", "desktop automation"):
               assert checks[req]["status"] == "ok", f"{req}: {checks[req]}"
-          print("Verified desktop doctor checks:", ", ".join(req for req in ("host_display", "daemon", "secret_backend", "browser", "desktop_automation")))
+          print("Verified desktop doctor checks:", ", ".join(req for req in ("host display", "daemon", "secret backend", "browser", "desktop automation")))
           PY
