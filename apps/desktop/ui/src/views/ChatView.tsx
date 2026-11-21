@@ -44,6 +44,9 @@ import {
 } from "../components/ChatCards";
 import { ApprovalBatchCard } from "../components/ApprovalBatchCard";
 import { PendingDecisions, useDecisionActions } from "../components/PendingDecisions";
+import { SecretRequestCard } from "../components/SecretRequestCard";
+import { PastedSecretWarning } from "../components/PastedSecretWarning";
+import { detectSecrets, planStore, removeSecrets } from "../lib/secretDetect";
 import { chatTitleLabel } from "../lib/chatTitle";
 import { pendingForChat } from "../lib/pendingDecisions";
 import { ChatFindBar } from "../components/ChatFindBar";
@@ -291,6 +294,9 @@ export function ChatView({
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
+  // A pasted credential found in the draft before send (kinds only; the value stays in `text`).
+  const [secretKinds, setSecretKinds] = useState<string[] | null>(null);
+  const sendAnyway = useRef(false);
   const [queue, updateQueue] = useChatQueue(chatId);
   // Up / Down recall this chat's earlier messages; the draft is kept (lib/composerHistory).
   const [nav, setNav] = useState<HistoryNav>(FRESH);
@@ -825,6 +831,15 @@ export function ChatView({
       window.dispatchEvent(new CustomEvent(APP_COMMAND_EVENT, { detail: appCommand.target }));
       return;
     }
+    // A draft that looks like it holds a credential is not sent (or queued) until the owner says so.
+    if (!body.startsWith("/") && !sendAnyway.current) {
+      const found = detectSecrets(text);
+      if (found.length > 0) {
+        setSecretKinds(found.map((c) => c.kind));
+        return;
+      }
+    }
+    sendAnyway.current = false;
     // A message typed while the bot works joins the queue as a "Sirada." bubble (slash commands such
     // as /stop still go straight to the daemon). It is delivered when the run ends or by "Simdi gonder".
     if (active && !body.startsWith("/") && attachmentIds.length === 0) {
@@ -1306,6 +1321,18 @@ export function ChatView({
             onAnswer={decisions.answer(runId, item.callId)}
           />
         );
+      case "secret":
+        if (nested && item.outcome === undefined && !item.closed) {
+          return <p className={ccStyles.nestedText}>{t("chat.pendingPinned")}</p>;
+        }
+        return (
+          <SecretRequestCard
+            item={item}
+            botName={bots.find((b) => b.id === run?.botId)?.name ?? bot?.name ?? ""}
+            onSubmit={decisions.submitSecret(runId, item.callId)}
+            onCancel={decisions.cancelSecret(runId, item.callId)}
+          />
+        );
       case "todo":
         return <TodoCard todo={item} />;
       case "notice":
@@ -1657,6 +1684,34 @@ export function ChatView({
             onAction={(a) => (a === "restartService" ? void restartDaemon() : void send())}
           />
         ) : null}
+        {secretKinds ? (
+          <PastedSecretWarning
+            kinds={secretKinds}
+            onDismiss={() => setSecretKinds(null)}
+            onSendAnyway={() => {
+              sendAnyway.current = true;
+              setSecretKinds(null);
+              void send();
+            }}
+            onRemove={() => {
+              setText((cur) => removeSecrets(cur, detectSecrets(cur)));
+              setSecretKinds(null);
+              inputRef.current?.focus();
+            }}
+            onStore={async (name) => {
+              if (!client) return;
+              const plan = planStore(text, detectSecrets(text), name);
+              for (const entry of plan.entries) {
+                await client.createFillSecret({ name: entry.name, value: entry.value });
+              }
+              // Only now does the draft lose the value; it keeps a placeholder with the name.
+              plan.entries.length = 0;
+              setText(plan.text);
+              setSecretKinds(null);
+              inputRef.current?.focus();
+            }}
+          />
+        ) : null}
         <PendingDecisions
           entries={pending.pinned}
           caption={(entry) =>
@@ -1803,6 +1858,7 @@ export function ChatView({
             onChange={(e) => {
               setNav((n) => afterEdit(n, e.target.value));
               setText(e.target.value);
+              setSecretKinds(null);
               setCaret(e.target.selectionStart);
               setMenuIdx(0);
             }}

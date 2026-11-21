@@ -3325,6 +3325,34 @@
     "switchBot": "{{name}} botuna geç",
     "title": "Komut paleti"
   },
+  "pastedSecret": {
+    "back": "Düzenlemeye devam et",
+    "body": "Mesajınız şunu içeriyor gibi görünüyor: {{kinds}}. Gönderdiğiniz her şey yapay zekâ sağlayıcısına gider ve sohbet geçmişinde kalır.",
+    "kind": {
+      "aws_access_key_id": "AWS erişim anahtarı",
+      "digitalocean_token": "DigitalOcean jetonu",
+      "github_token": "GitHub jetonu",
+      "gitlab_token": "GitLab jetonu",
+      "google_api_key": "Google API anahtarı",
+      "groq_key": "Groq API anahtarı",
+      "huggingface_token": "Hugging Face jetonu",
+      "jwt": "JSON web jetonu",
+      "npm_token": "npm jetonu",
+      "nvidia_key": "NVIDIA API anahtarı",
+      "openai_style_key": "OpenAI tarzı API anahtarı",
+      "private_key": "özel anahtar",
+      "slack_token": "Slack jetonu",
+      "stripe_key": "Stripe canlı anahtarı",
+      "telegram_bot_token": "Telegram bot jetonu"
+    },
+    "nameHint": "Yalnızca harf, rakam, . _ - ve /. Taslakta değer yerine [secret: ad] kalır ve henüz gönderilmez.",
+    "nameLabel": "Kasa kaydının adı",
+    "remove": "Mesajdan çıkar",
+    "sendAnyway": "Yine de gönder",
+    "store": "Kasaya kaydet…",
+    "storeConfirm": "Kaydet ve yer tutucuyla değiştir",
+    "title": "Bu bir gizli bilgiye benziyor"
+  },
   "peerLink": {
     "direct": "Doğrudan · {{rtt}} ms",
     "relay": "Röle · {{rtt}} ms"
@@ -3449,6 +3477,31 @@
     "subtitle": "Botlarının zamanlayıcıyla yaptığı işler: her sabah, her saat ya da bir kez.",
     "title": "Zamanlanmış görevler",
     "when": "Ne zaman"
+  },
+  "secretRequest": {
+    "allowHint": "İkisini de boş bırakırsanız, Ayarlar'dan bir yer ekleyene kadar bot bunu hiçbir yerde kullanamaz.",
+    "cancel": "İptal",
+    "cancelled": "İptal edildi. Hiçbir şey kaydedilmedi.",
+    "closed": "Bu istek artık açık değil.",
+    "confirmUntrusted": "Anladım, yine de girmek istiyorum",
+    "destination": "Bu bilgisayardaki kasaya {{type}} olarak şu adla kaydedilir:",
+    "expired": "Bu isteğin süresi doldu. Hiçbir şey kaydedilmedi.",
+    "expiresIn": "Yanıt için kalan süre",
+    "fillAll": "Önce tüm alanları doldurun.",
+    "neverSeen": "Yazdığınızı bot görmez. Yalnızca kaydedilip kaydedilmediğini öğrenir.",
+    "origins": "Yazılabileceği web siteleri (isteğe bağlı, satır başına bir)",
+    "password": "Parola",
+    "programs": "Yazılabileceği programlar (isteğe bağlı)",
+    "purposeLabel": "Bot tarafından yazıldı (Praxi doğrulamaz):",
+    "replaces": "Bu işlem {{name}} için kayıtlı değerin yerine geçer.",
+    "stored": "Kasaya kaydedildi. Bota kaydedildiği bildirildi.",
+    "submit": "Kasaya kaydet",
+    "title": "{{bot}} bir kimlik bilgisi istiyor",
+    "typeLogin": "giriş (kullanıcı adı ve parola)",
+    "typeSecret": "tek bir gizli değer",
+    "untrusted": "Bu çalışma dışarıdan içerik okudu. Bu isteği oradaki bir şey istemiş olabilir. O içeriğe doğrudan vermeyeceğiniz bir parolayı girmeyin.",
+    "username": "Kullanıcı adı",
+    "value": "Gizli değer"
   },
   "serverSignIn": {
     "apiKey": {

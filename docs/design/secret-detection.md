@@ -1,7 +1,9 @@
 # Secret detection in the chat composer
 
-Status: detector and corpus implemented (issue #421, slices 1 and 2). The composer card, the
-Settings switch and the leak tests are later slices and are **not** part of this change.
+Status: detector and corpus implemented (issue #421, slices 1 and 2). The composer warning and its
+leak tests are in the desktop UI (`lib/secretDetect.ts`, `components/PastedSecretWarning.tsx`); it is a
+TypeScript port of the high-confidence shape rule only, because the Rust detector has no route or Tauri
+command yet. The labelled-context rule and a Settings switch are not done.
 
 When someone pastes something that is very likely a credential into the chat box, the desktop app
 should *offer* to keep it out of the chat and store it in the vault instead. Today a pasted value is

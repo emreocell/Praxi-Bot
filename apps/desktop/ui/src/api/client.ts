@@ -99,6 +99,8 @@ import type {
   RepairResult,
   Run,
   Schedule,
+  SecretRequestAnswer,
+  FillSecretInfo,
   ScheduleInput,
   Scope,
   ScreenPrivilegesInput,
@@ -777,6 +779,27 @@ export class ApiClient {
   }
   answerQuestion(callId: string, answer: string): Promise<{ call_id: string }> {
     return this.request("POST", `/questions/${callId}`, { body: { answer } });
+  }
+
+  /**
+   * Answer a bot's credential request: the value goes into the vault, the run only learns
+   * `stored`. Owner-only (the owner key is added for this computer's daemon). The body is built
+   * by the caller and never logged here.
+   */
+  submitSecretRequest(
+    callId: string,
+    body: { value?: string; username?: string; password?: string; origins: string[]; programs: string[] }
+  ): Promise<SecretRequestAnswer> {
+    return this.request("POST", `/secret-requests/${encodeURIComponent(callId)}`, { body });
+  }
+
+  cancelSecretRequest(callId: string): Promise<SecretRequestAnswer> {
+    return this.request("POST", `/secret-requests/${encodeURIComponent(callId)}/cancel`);
+  }
+
+  /** Store a value the owner typed or pasted in the vault (`POST /v1/fill-secrets`, write-only). */
+  createFillSecret(input: { name: string; value: string; origins?: string[]; programs?: string[] }): Promise<FillSecretInfo> {
+    return this.request("POST", "/fill-secrets", { body: input });
   }
 
   listSchedules(): Promise<Schedule[]> {

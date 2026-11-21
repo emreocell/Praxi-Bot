@@ -3325,6 +3325,34 @@
     "switchBot": "Switch to {{name}}",
     "title": "Command palette"
   },
+  "pastedSecret": {
+    "back": "Keep editing",
+    "body": "Your message seems to contain: {{kinds}}. Anything you send goes to the AI provider and stays in the chat history.",
+    "kind": {
+      "aws_access_key_id": "AWS access key",
+      "digitalocean_token": "DigitalOcean token",
+      "github_token": "GitHub token",
+      "gitlab_token": "GitLab token",
+      "google_api_key": "Google API key",
+      "groq_key": "Groq API key",
+      "huggingface_token": "Hugging Face token",
+      "jwt": "JSON web token",
+      "npm_token": "npm token",
+      "nvidia_key": "NVIDIA API key",
+      "openai_style_key": "OpenAI-style API key",
+      "private_key": "private key",
+      "slack_token": "Slack token",
+      "stripe_key": "Stripe live key",
+      "telegram_bot_token": "Telegram bot token"
+    },
+    "nameHint": "Letters, digits, . _ - and / only. The draft then keeps [secret: name] instead of the value and is not sent yet.",
+    "nameLabel": "Vault entry name",
+    "remove": "Remove it from the message",
+    "sendAnyway": "Send anyway",
+    "store": "Store in vault…",
+    "storeConfirm": "Store and replace with a placeholder",
+    "title": "This looks like a secret"
+  },
   "peerLink": {
     "direct": "Direct · {{rtt}} ms",
     "relay": "Relay · {{rtt}} ms"
@@ -3449,6 +3477,31 @@
     "subtitle": "Things your bots do on a timer: every morning, every hour, or once.",
     "title": "Scheduled tasks",
     "when": "When"
+  },
+  "secretRequest": {
+    "allowHint": "Leave both empty and the bot cannot use it anywhere until you add a place in Settings.",
+    "cancel": "Cancel",
+    "cancelled": "Cancelled. Nothing was saved.",
+    "closed": "This request is no longer open.",
+    "confirmUntrusted": "I understand and still want to enter it",
+    "destination": "Goes into the vault on this computer as a {{type}} named",
+    "expired": "This request ran out of time. Nothing was saved.",
+    "expiresIn": "Time left to answer",
+    "fillAll": "Fill in every field first.",
+    "neverSeen": "The bot never sees what you type. It only learns whether it was saved.",
+    "origins": "Websites it may be typed on (optional, one per line)",
+    "password": "Password",
+    "programs": "Programs it may be typed into (optional)",
+    "purposeLabel": "Written by the bot (not checked by Praxi):",
+    "replaces": "This replaces the stored value for {{name}}.",
+    "stored": "Saved to the vault. The bot was told it is stored.",
+    "submit": "Save to vault",
+    "title": "{{bot}} asks for a credential",
+    "typeLogin": "login (username and password)",
+    "typeSecret": "single secret",
+    "untrusted": "This run has read content from outside. Something there may have asked for this. Do not enter a password you would not give that content directly.",
+    "username": "Username",
+    "value": "Secret value"
   },
   "serverSignIn": {
     "apiKey": {

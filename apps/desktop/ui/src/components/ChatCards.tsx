@@ -872,7 +872,9 @@ export function SubagentCard({ run, renderItem, onCancel }: SubagentCardProps) {
   const waiting = status === "waiting_approval";
   // an approval or a question inside the card must never stay hidden
   const asking = run.items.some(
-    (i) => i.kind === "question" && i.answer === undefined && !i.closed
+    (i) =>
+      (i.kind === "question" && i.answer === undefined && !i.closed) ||
+      (i.kind === "secret" && i.outcome === undefined && !i.closed)
   );
   const expanded = open || waiting || asking;
   const cancellable = status === "running" || waiting;

@@ -507,11 +507,28 @@ from crash dumps or swap.
 ### Letting the assistant ask for a credential (experimental, off by default)
 
 The `secret_request` tool lets the assistant ask you to type a username/password
-into a form in the desktop app, so the value never passes through the chat. The
-form is not in the app yet, so the tool is **not offered** unless you switch it
-on: add `[experimental]` / `secret_request = true` to `host.toml` in the data
-directory (or start the daemon with `BOT_SECRET_REQUESTS=on`; `off` forces it
-off). `praxi doctor` shows the current state. Leave it off for now.
+(or one secret) into a form in the desktop app, so the value never passes through
+the chat. The app draws the form itself: it names the bot that asks, shows the
+bot's reason as plain text labelled "written by the bot", shows where the value
+goes (an entry in the vault on this computer) and warns when the entry exists or
+when the run has read content from outside. The value goes straight to the vault;
+the bot only learns "stored" or "cancelled". While the form is open the app
+window is hidden from screen capture where the system allows it (Windows, macOS).
+
+The tool is **not offered** unless you switch it on. There is no switch in
+Settings yet: add `[experimental]` / `secret_request = true` to `host.toml` in
+the data directory (or start the daemon with `BOT_SECRET_REQUESTS=on`; `off`
+forces it off) and restart the service. `praxi doctor` shows the current state.
+
+### A password pasted into the message box
+
+When the message you are about to send contains something that looks like a
+provider key or token (OpenAI-style, GitHub, Slack, AWS, Stripe, a private key
+block and similar), the app does not send it. It names the kind (never shows the
+value) and offers: store it in the vault and keep `[secret: name]` in the
+message, remove it from the message, send anyway, or keep editing. The check
+runs on your computer before anything is sent; it recognises known key formats
+only, so a plain password such as `password: hunter22` is not caught yet.
 
 ## Prompt-injection evaluation pack
 

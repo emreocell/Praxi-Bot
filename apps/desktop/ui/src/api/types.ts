@@ -362,6 +362,10 @@ export interface GlobalEnvelope extends Envelope {
   gseq: number;
 }
 
+// ---- Credential requests and the vault (`/v1/secret-requests/*`, `/v1/fill-secrets`) -----
+export type SecretRequestAnswer = S["SecretRequestAnswer"];
+export type FillSecretInfo = S["FillSecretDto"];
+
 // ---- MCP management API (`/v1/mcp/*`, `/v1/secrets/*`) ---------------------
 
 export type McpTransport = S["McpTransportKind"];

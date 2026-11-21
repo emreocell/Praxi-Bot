@@ -3325,6 +3325,34 @@
     "switchBot": "Zu {{name}} wechseln",
     "title": "Befehlspalette"
   },
+  "pastedSecret": {
+    "back": "Weiter bearbeiten",
+    "body": "Deine Nachricht scheint Folgendes zu enthalten: {{kinds}}. Alles, was du sendest, geht an den KI-Anbieter und bleibt im Chatverlauf.",
+    "kind": {
+      "aws_access_key_id": "AWS-Zugangsschlüssel",
+      "digitalocean_token": "DigitalOcean-Token",
+      "github_token": "GitHub-Token",
+      "gitlab_token": "GitLab-Token",
+      "google_api_key": "Google-API-Schlüssel",
+      "groq_key": "Groq-API-Schlüssel",
+      "huggingface_token": "Hugging-Face-Token",
+      "jwt": "JSON-Web-Token",
+      "npm_token": "npm-Token",
+      "nvidia_key": "NVIDIA-API-Schlüssel",
+      "openai_style_key": "API-Schlüssel im OpenAI-Format",
+      "private_key": "privater Schlüssel",
+      "slack_token": "Slack-Token",
+      "stripe_key": "Stripe-Live-Schlüssel",
+      "telegram_bot_token": "Telegram-Bot-Token"
+    },
+    "nameHint": "Nur Buchstaben, Ziffern, . _ - und /. Im Entwurf bleibt dann [secret: Name] statt des Werts und er wird noch nicht gesendet.",
+    "nameLabel": "Name des Tresoreintrags",
+    "remove": "Aus der Nachricht entfernen",
+    "sendAnyway": "Trotzdem senden",
+    "store": "Im Tresor speichern…",
+    "storeConfirm": "Speichern und durch Platzhalter ersetzen",
+    "title": "Das sieht nach einem Geheimnis aus"
+  },
   "peerLink": {
     "direct": "Direkt · {{rtt}} ms",
     "relay": "Relay · {{rtt}} ms"
@@ -3449,6 +3477,31 @@
     "subtitle": "Dinge, die deine Bots nach Zeitplan tun: jeden Morgen, jede Stunde oder einmalig.",
     "title": "Geplante Aufgaben",
     "when": "Wann"
+  },
+  "secretRequest": {
+    "allowHint": "Lässt du beides leer, kann der Bot es nirgends verwenden, bis du in den Einstellungen einen Ort hinzufügst.",
+    "cancel": "Abbrechen",
+    "cancelled": "Abgebrochen. Es wurde nichts gespeichert.",
+    "closed": "Diese Anfrage ist nicht mehr offen.",
+    "confirmUntrusted": "Ich verstehe das und möchte es trotzdem eingeben",
+    "destination": "Wird im Tresor auf diesem Computer als {{type}} gespeichert unter dem Namen",
+    "expired": "Diese Anfrage ist abgelaufen. Es wurde nichts gespeichert.",
+    "expiresIn": "Verbleibende Zeit zum Antworten",
+    "fillAll": "Fülle zuerst alle Felder aus.",
+    "neverSeen": "Der Bot sieht nicht, was du eingibst. Er erfährt nur, ob es gespeichert wurde.",
+    "origins": "Websites, auf denen es eingetippt werden darf (optional, eine pro Zeile)",
+    "password": "Passwort",
+    "programs": "Programme, in die es eingetippt werden darf (optional)",
+    "purposeLabel": "Vom Bot geschrieben (von Praxi nicht geprüft):",
+    "replaces": "Dies ersetzt den gespeicherten Wert für {{name}}.",
+    "stored": "Im Tresor gespeichert. Der Bot weiß, dass es gespeichert ist.",
+    "submit": "Im Tresor speichern",
+    "title": "{{bot}} fragt nach Zugangsdaten",
+    "typeLogin": "Login (Benutzername und Passwort)",
+    "typeSecret": "einzelnes Geheimnis",
+    "untrusted": "Dieser Lauf hat Inhalte von außen gelesen. Möglicherweise hat etwas darin dazu aufgefordert. Gib kein Passwort ein, das du diesem Inhalt nicht direkt geben würdest.",
+    "username": "Benutzername",
+    "value": "Geheimer Wert"
   },
   "serverSignIn": {
     "apiKey": {

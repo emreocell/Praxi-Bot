@@ -49,6 +49,7 @@ import {
   EMPTY_EVENTS,
   type EventsState,
   markAnswered,
+  recordSecretOutcome,
   type NeedsYouEntry,
   needsYou,
   type PendingApprovalFact,
@@ -80,6 +81,12 @@ type Action =
   | { type: "event"; env: GlobalEnvelope }
   | { type: "answered"; runId: string; callId: string; answer: string }
   | {
+      type: "secretAnswered";
+      runId: string;
+      callId: string;
+      outcome: "stored" | "cancelled";
+    }
+  | {
       type: "reconcile";
       approvals: ReadonlySet<string>;
       live: ReadonlySet<string>;
@@ -95,6 +102,13 @@ function reducer(state: EventsState, action: Action): EventsState {
       return applyEvent(state, action.env);
     case "answered":
       return markAnswered(state, action.runId, action.callId, action.answer);
+    case "secretAnswered":
+      return recordSecretOutcome(
+        state,
+        action.runId,
+        action.callId,
+        action.outcome
+      );
     case "reconcile":
       return restorePending(
         reconcile(state, action.approvals, action.live, action.asOfMs),
@@ -127,6 +141,12 @@ export interface DaemonContextValue {
   /** Optimistically delete a chat, rolling back if the daemon rejects it. */
   deleteChat: (chatId: string) => Promise<void>;
   recordAnswer: (runId: string, callId: string, answer: string) => void;
+  /** A credential request was stored or cancelled from its card (no value is passed). */
+  recordSecretOutcome: (
+    runId: string,
+    callId: string,
+    outcome: "stored" | "cancelled"
+  ) => void;
   retry: () => void;
   restartDaemon: () => Promise<void>;
   /**
@@ -213,6 +233,7 @@ type DaemonData = Pick<
   | "updateChat"
   | "deleteChat"
   | "recordAnswer"
+  | "recordSecretOutcome"
   | "onDaemonEvent"
 >;
 
@@ -453,6 +474,11 @@ function useDaemonData(conn: Connection | null, computerId: string): DaemonData 
       dispatch({ type: "answered", runId, callId, answer }),
     []
   );
+  const recordSecretOutcomeCb = useCallback(
+    (runId: string, callId: string, outcome: "stored" | "cancelled") =>
+      dispatch({ type: "secretAnswered", runId, callId, outcome }),
+    []
+  );
   const needs = useMemo(() => needsYou(events, runs), [events, runs]);
 
   return {
@@ -471,6 +497,7 @@ function useDaemonData(conn: Connection | null, computerId: string): DaemonData 
     updateChat,
     deleteChat,
     recordAnswer,
+    recordSecretOutcome: recordSecretOutcomeCb,
     onDaemonEvent
   };
 }
