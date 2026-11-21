@@ -43,8 +43,9 @@ jobs:
           set -euo pipefail
           shellcheck -x packaging/docker/*.sh
           bash -n packaging/docker/*.sh
-          BOT_SECRETS_PASSPHRASE=ci-lint-placeholder \
-            docker compose -f packaging/docker/docker-compose.yml config --quiet
+          cp packaging/docker/.env.example packaging/docker/.env
+          trap 'rm -f packaging/docker/.env' EXIT
+          docker compose -f packaging/docker/docker-compose.yml config --quiet
 
       - name: Build base host image
         run: |
