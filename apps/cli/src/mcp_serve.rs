@@ -194,11 +194,18 @@ impl ServerHandler for McpServer {
 
     fn list_tools(
         &self,
-        _: Option<PaginatedRequestParams>,
+        params: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = std::result::Result<ListToolsResult, ErrorData>> + Send
     {
-        std::future::ready(Ok(ListToolsResult::with_all_items(self.tools.clone())))
+        // The catalog is a single page and never issues a `nextCursor`, so any
+        // cursor a client sends is invalid (MCP pagination: -32602).
+        let result = if params.is_some_and(|p| p.cursor.is_some()) {
+            Err(ErrorData::invalid_params("Invalid cursor", None))
+        } else {
+            Ok(ListToolsResult::with_all_items(self.tools.clone()))
+        };
+        std::future::ready(result)
     }
 
     async fn call_tool(
@@ -280,3 +287,6 @@ impl<R: AsyncRead + Unpin> AsyncRead for FrameLimit<R> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod compat_tests;
