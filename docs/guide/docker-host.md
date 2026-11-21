@@ -254,13 +254,17 @@ On systemd hosts, `scripts/install-linux.sh` installs a named AppArmor profile
 (`/etc/apparmor.d/praxi-browser`) granting `userns` only to
 `/opt/praxi-browser/chrome`. Inside a Docker container, `docker build` cannot
 load kernel AppArmor profiles, and Docker's default `docker-default` AppArmor
-and `seccomp` profiles (as well as Ubuntu 24.04+
-`kernel.apparmor_restrict_unprivileged_userns=1`) block unprivileged user
-namespaces inside the container.
+and `seccomp` profiles block unprivileged user namespaces inside the container.
+In addition, on Ubuntu 24.04+ hosts where
+`kernel.apparmor_restrict_unprivileged_userns=1` is enabled in the host kernel,
+even `--security-opt apparmor=unconfined` is denied user namespaces unless the
+host either loads a custom AppArmor profile permitting `userns` for the
+container or disables that sysctl (`sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`).
 
 As a result, running the `WITH_DESKTOP=1` variant with browser automation
 typically requires passing container security overrides at `docker run` /
-Compose runtime:
+Compose runtime (plus a `userns`-permitting AppArmor profile or sysctl on
+Ubuntu 24.04+ hosts):
 
 ```sh
 docker run -d \

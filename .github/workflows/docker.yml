@@ -87,6 +87,10 @@ jobs:
           docker run --rm praxi-host:ci-desktop --version
           docker run --rm --entrypoint /opt/praxi-browser/chrome praxi-host:ci-desktop --version
 
+          # Ubuntu 24.04 runners restrict unprivileged user namespaces at the kernel
+          # level even for apparmor=unconfined containers (same sysctl as ci.yml).
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
           # Disable seccomp/apparmor userns restrictions on the CI runner so
           # Chrome runs as non-root `praxi` with its sandbox enabled.
           cid="$(docker run -d \
@@ -107,4 +111,11 @@ jobs:
           done
           test "${ready}" -eq 1
           docker exec "${cid}" xdpyinfo -display :99 >/dev/null
-          docker exec "${cid}" bot doctor
+          docker exec "${cid}" bot --json doctor > doctor.json || true
+          python3 - <<'PY'
+          import json, pathlib
+          checks = {c["id"]: c for c in json.loads(pathlib.Path("doctor.json").read_text())}
+          for req in ("host_display", "daemon", "secret_backend", "browser", "desktop_automation"):
+              assert checks[req]["status"] == "ok", f"{req}: {checks[req]}"
+          print("Verified desktop doctor checks:", ", ".join(req for req in ("host_display", "daemon", "secret_backend", "browser", "desktop_automation")))
+          PY
