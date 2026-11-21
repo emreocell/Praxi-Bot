@@ -150,26 +150,35 @@ impl Classifier for ProviderClassifier {
             .providers
             .pick(&model)
             .map_err(|e| BackendError::new(e.to_string()))?;
-        let mut req = ChatRequest::new(model, vec![Message::text(MessageRole::User, prompt)]);
-        req.max_tokens = Some(max_tokens);
-        req.temperature = Some(0.0);
-        req.json_mode = true;
         let mut call = crate::usage::Scope::call(&self.model, crate::CallPurpose::Router)?;
-        let mut stream = provider
-            .stream(req)
+        classify_json(provider.as_ref(), model, prompt, max_tokens, &mut call)
             .await
-            .map_err(|e| BackendError::new(e.to_string()))?;
-        let mut out = String::new();
-        while let Some(chunk) = stream.next().await {
-            match chunk.map_err(|e| BackendError::new(e.to_string()))? {
-                ChatChunk::TextDelta(t) => out.push_str(&t),
-                ChatChunk::Usage(u) => call.usage(&u),
-                ChatChunk::Done { .. } => break,
-                _ => {}
-            }
-        }
-        Ok(out)
+            .map_err(|e| BackendError::new(e.to_string()))
     }
+}
+
+pub(crate) async fn classify_json(
+    provider: &dyn provider_catalog::ChatProvider,
+    model: ModelRef,
+    prompt: &str,
+    max_tokens: u32,
+    call: &mut crate::usage::CallGuard,
+) -> Result<String, provider_catalog::ProviderError> {
+    let mut req = ChatRequest::new(model, vec![Message::text(MessageRole::User, prompt)]);
+    req.max_tokens = Some(max_tokens);
+    req.temperature = Some(0.0);
+    req.json_mode = true;
+    let mut stream = provider.stream(req).await?;
+    let mut out = String::new();
+    while let Some(chunk) = stream.next().await {
+        match chunk? {
+            ChatChunk::TextDelta(t) => out.push_str(&t),
+            ChatChunk::Usage(u) => call.usage(&u),
+            ChatChunk::Done { .. } => break,
+            _ => {}
+        }
+    }
+    Ok(out)
 }
 
 /// What the router asked of K4 for this turn.

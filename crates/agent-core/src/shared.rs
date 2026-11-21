@@ -220,6 +220,7 @@ pub struct Providers {
     prices: HashMap<String, ModelPrice>,
     /// Embedding backend of the K2 router (`None` = BM25 only).
     embedder: Option<Arc<dyn agent_router::ladder::Embedder>>,
+    decider: Option<Arc<crate::decider::TurnDecider>>,
     /// Masks secrets in every request sent through [`Self::pick`]ed providers.
     redactor: Option<SharedRedactor>,
 }
@@ -235,6 +236,7 @@ impl Providers {
             cli_ids: Vec::new(),
             prices: HashMap::new(),
             embedder: None,
+            decider: None,
             redactor: None,
         }
     }
@@ -258,6 +260,7 @@ impl Providers {
             cli_ids: Vec::new(),
             prices: HashMap::new(),
             embedder: None,
+            decider: None,
             redactor: None,
         }
     }
@@ -283,6 +286,12 @@ impl Providers {
     #[must_use]
     pub fn embedder(&self) -> Option<Arc<dyn agent_router::ladder::Embedder>> {
         self.embedder.clone()
+    }
+
+    /// The advisory pool configured on this provider snapshot, if usable.
+    #[must_use]
+    pub fn decider(&self) -> Option<Arc<crate::decider::TurnDecider>> {
+        self.decider.clone()
     }
 
     /// Record the catalog prices of `provider_id`'s models (those with a known
@@ -447,7 +456,6 @@ pub fn build_providers(
     }
     if built.is_empty() && cli_built.is_empty() {
         warn("setup required; run `bot setup` or `bot providers add`");
-        return Ok(Providers::unconfigured());
     }
     let mut providers = if built.is_empty() {
         Providers::unconfigured()
@@ -474,12 +482,15 @@ pub fn build_providers(
         providers = providers.with_default_id(def);
     }
     // K2 embeddings (decision ladder): Gemini when a Gemini key is configured.
-    if let Some(key) = gemini_key(&cfg, catalog, store) {
+    if !providers.setup_required()
+        && let Some(key) = gemini_key(&cfg, catalog, store)
+    {
         providers = providers.with_embedder(Arc::new(GeminiEmbedder::new(
             key,
             gemini::DEFAULT_EMBED_MODEL,
         )));
     }
+    providers.decider = crate::decider::build(data_dir, &providers, &cfg, catalog, store, warn);
     Ok(providers)
 }
 
@@ -491,15 +502,23 @@ fn gemini_key(cfg: &ProviderConfig, catalog: &Catalog, store: &dyn SecretStore) 
         if entry.kind != ProviderKind::Gemini {
             return None;
         }
-        let key = match (&s.key, &entry.auth) {
-            (Some(r), _) => secret_store::resolve(store, r)
-                .ok()
-                .map(|k| k.expose().to_string()),
-            (None, Auth::ApiKeyEnv(var)) => std::env::var(var).ok(),
-            (None, Auth::None) => None,
-        };
-        key.filter(|k| !k.trim().is_empty())
+        provider_key(s, entry, store)
     })
+}
+
+pub(crate) fn provider_key(
+    settings: &ProviderSettings,
+    entry: &ProviderEntry,
+    store: &dyn SecretStore,
+) -> Option<String> {
+    let key = match (&settings.key, &entry.auth) {
+        (Some(r), _) => secret_store::resolve(store, r)
+            .ok()
+            .map(|k| k.expose().to_string()),
+        (None, Auth::ApiKeyEnv(var)) => std::env::var(var).ok(),
+        (None, Auth::None) => None,
+    };
+    key.filter(|k| !k.trim().is_empty())
 }
 
 fn build_one(

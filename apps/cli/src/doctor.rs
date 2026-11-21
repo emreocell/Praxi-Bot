@@ -60,6 +60,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         check_free_ram(),
         core::check_data_dir(env.data_dir),
         core::check_config(env.data_dir),
+        check_decider(env),
         core::check_secrets(&env.store),
         polish_provider_check(core::check_providers(&core::ProviderInputs {
             data_dir: env.data_dir,
@@ -86,6 +87,56 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         core::check_desktop_automation(std::env::consts::OS, env.desktop.as_ref()),
         core::check_clock(std::time::SystemTime::now(), core::newest_mtime(env.data_dir)),
     ]
+}
+
+fn check_decider(env: &DoctorEnv<'_>) -> Check {
+    use std::fmt::Write as _;
+
+    const ID: &str = "decider";
+    const TITLE: &str = "decision pool";
+    let config = match agent_core::decider::Settings::load(env.data_dir) {
+        Ok(config) => config,
+        Err(error) => {
+            return Check::warn(
+                ID,
+                TITLE,
+                error,
+                "check decider.toml against the decision pool guide",
+            );
+        }
+    };
+    let mut detail = format!(
+        "enabled={}, timeout_ms={}, max_calls_per_turn={}, backends={}",
+        config.enabled,
+        config.timeout_ms,
+        config.max_calls_per_turn,
+        config.backends.len()
+    );
+    let redactor = if config.backends.is_empty() {
+        None
+    } else {
+        env.store
+            .as_ref()
+            .ok()
+            .and_then(|(store, _)| crate::serve::report_redactor(env.data_dir, *store).ok())
+    };
+    for backend in config.backends {
+        let model = redactor.as_ref().map_or_else(
+            || secret_store::REDACTED.to_owned(),
+            |r| r.redact(&backend.model),
+        );
+        let _ = write!(
+            detail,
+            " | api={}, model={model}, rpm={}",
+            backend.api.as_str(),
+            backend.rpm
+        );
+    }
+    if config.enabled {
+        Check::ok(ID, TITLE, detail)
+    } else {
+        Check::skipped(ID, TITLE, detail)
+    }
 }
 
 fn polish_provider_check(mut check: Check) -> Check {
