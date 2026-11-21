@@ -959,6 +959,44 @@ pub(crate) fn hidden_from(local: bool, decisions: bool, out: &Out) -> bool {
     }
 }
 
+/// A stand-in for a call id on streams that must not be able to answer it. It
+/// is one-way (SHA-256 of the real id) but stable, so a client still pairs a
+/// call's request, approval/denial and completion lines.
+fn pseudonymous_call_id(id: protocol::ToolCallId) -> protocol::ToolCallId {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(b"praxi-sse-call-id-v1");
+    h.update(id.0.as_bytes());
+    let digest = h.finalize();
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    protocol::ToolCallId(uuid::Builder::from_random_bytes(bytes).into_uuid())
+}
+
+/// What a client without decision authority may see of an `Open` event.
+/// `tool_call_requested` carries the same call id and full arguments as the
+/// withheld approval/question card, so it keeps only the tool name for
+/// progress display. The call id is replaced consistently on every event of
+/// the call so the request still pairs with its outcome.
+pub(crate) fn redact_for(decisions: bool, mut out: Out) -> Out {
+    if decisions {
+        return out;
+    }
+    if let Out::Run(item) = &mut out {
+        match &mut item.envelope.event {
+            protocol::Event::ToolCallRequested(e) => {
+                e.call_id = pseudonymous_call_id(e.call_id);
+                e.input = serde_json::json!({ "redacted": true });
+            }
+            protocol::Event::ToolCallApproved(e) => e.call_id = pseudonymous_call_id(e.call_id),
+            protocol::Event::ToolCallDenied(e) => e.call_id = pseudonymous_call_id(e.call_id),
+            protocol::Event::ToolCallCompleted(e) => e.call_id = pseudonymous_call_id(e.call_id),
+            _ => {}
+        }
+    }
+    out
+}
+
 fn event_stream(
     feed: Feed,
     audience: (bool, bool),
@@ -967,7 +1005,7 @@ fn event_stream(
         let out = loop {
             let out = feed.next_item().await?;
             if !hidden_from(audience.0, audience.1, &out) {
-                break out;
+                break redact_for(audience.1, out);
             }
         };
         let ev = match out {
@@ -1225,19 +1263,26 @@ mod tests {
         )
     }
 
-    fn decision_events(run: RunId) -> Vec<Event> {
-        use protocol::event::{ApprovalNeeded, ControlRequested, MessageDelta, QuestionAsked};
-        let call_id = protocol::ToolCallId::new();
+    fn decision_events(run: RunId, call_id: protocol::ToolCallId) -> Vec<Event> {
+        use protocol::event::{
+            ApprovalNeeded, ControlRequested, MessageDelta, QuestionAsked, ToolCallRequested,
+        };
         vec![
             Event::MessageDelta(MessageDelta {
                 run_id: run,
                 text: "hi".into(),
             }),
+            Event::ToolCallRequested(ToolCallRequested {
+                run_id: run,
+                call_id,
+                tool_name: "shell".into(),
+                input: serde_json::json!({"command": "SECRET-ARG"}),
+            }),
             Event::ApprovalNeeded(ApprovalNeeded {
                 run_id: run,
                 call_id,
                 tool_name: "shell".into(),
-                input: serde_json::json!({}),
+                input: serde_json::json!({"command": "SECRET-ARG"}),
                 summary: "x".into(),
                 details: None,
             }),
@@ -1246,6 +1291,12 @@ mod tests {
                 call_id,
                 question: "q?".into(),
                 options: vec![],
+            }),
+            Event::ToolCallRequested(ToolCallRequested {
+                run_id: run,
+                call_id,
+                tool_name: "ask_user".into(),
+                input: serde_json::json!({"question": "SECRET-ARG"}),
             }),
             Event::ControlRequested(ControlRequested {
                 request_id: uuid::Uuid::now_v7(),
@@ -1272,28 +1323,42 @@ mod tests {
         };
         let all = [
             "message_delta",
+            "tool_call_requested",
             "approval_needed",
             "question_asked",
+            "tool_call_requested",
             "control_requested",
+        ];
+        // Without decision authority only progress remains: the tool-call
+        // request keeps its name but no call id and no arguments.
+        let progress = vec![
+            "message_delta",
+            "tool_call_requested",
+            "tool_call_requested",
         ];
         let cases: Vec<(&str, (bool, bool), Vec<&str>)> = vec![
             ("local management", (true, true), all.to_vec()),
             // The bearer alone (CLI engine, bot child, script): owner key absent.
-            ("local bearer only", (true, false), vec!["message_delta"]),
+            ("local bearer only", (true, false), progress.clone()),
             // A paired Desktop decides approvals, never overlay requests.
-            ("desktop peer", peer(PeerRole::Desktop), all[..3].to_vec()),
-            ("phone peer", peer(PeerRole::Phone), vec!["message_delta"]),
-            ("node peer", peer(PeerRole::Node), vec!["message_delta"]),
-            ("host peer", peer(PeerRole::Host), vec!["message_delta"]),
+            (
+                "desktop peer",
+                peer(PeerRole::Desktop),
+                [&all[..5], &[][..]].concat(),
+            ),
+            ("phone peer", peer(PeerRole::Phone), progress.clone()),
+            ("node peer", peer(PeerRole::Node), progress.clone()),
+            ("host peer", peer(PeerRole::Host), progress.clone()),
         ];
         for (name, audience, expected) in cases {
             for live in [false, true] {
                 let (_dir, st, mut feed, tx) = replay_fixture();
                 let run = RunId::new();
+                let call_id = protocol::ToolCallId::new();
                 // Replay: everything is in the log + index and `replaying` is set.
                 // Live: nothing to replay, the events arrive on the broadcast.
                 feed.replaying = !live;
-                for (i, ev) in decision_events(run).into_iter().enumerate() {
+                for (i, ev) in decision_events(run, call_id).into_iter().enumerate() {
                     let envelope = Envelope::new(i as u64, ev);
                     storage::EventLogWriter::open(st.data_dir(), run)
                         .unwrap()
@@ -1311,6 +1376,7 @@ mod tests {
                 }
                 drop(tx);
                 let mut seen: Vec<&str> = Vec::new();
+                let mut wire = String::new();
                 let mut stream = Box::pin(event_stream(feed, audience));
                 while let Ok(Some(Ok(ev))) =
                     tokio::time::timeout(Duration::from_secs(3), stream.next()).await
@@ -1319,24 +1385,36 @@ mod tests {
                     seen.extend(
                         all.iter()
                             .copied()
-                            .filter(|n| text.contains(&format!("event: {n}"))),
+                            .filter(|n| text.contains(&format!("event: {n}")))
+                            .take(1),
                     );
+                    wire.push_str(&text);
                 }
                 assert_eq!(seen, expected, "{name} (live: {live})");
+                let leaks = wire.contains("SECRET-ARG") || wire.contains(&call_id.to_string());
+                assert_eq!(
+                    leaks, audience.1,
+                    "{name} (live: {live}): secrets on the wire"
+                );
+                if !audience.1 {
+                    assert!(wire.contains("shell"), "{name}: progress kept");
+                }
             }
         }
     }
 
     #[test]
     fn classification_is_fail_closed_for_decision_events() {
-        let events = decision_events(RunId::new());
+        let events = decision_events(RunId::new(), protocol::ToolCallId::new());
         let classes: Vec<_> = events.iter().map(classify).collect();
         assert_eq!(
             classes,
             [
                 EventClass::Open,
+                EventClass::Open,
                 EventClass::Decision,
                 EventClass::Decision,
+                EventClass::Open,
                 EventClass::Control
             ]
         );
