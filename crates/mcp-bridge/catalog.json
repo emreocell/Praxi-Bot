@@ -281,14 +281,16 @@
     "name": "Todoist",
     "description": "Manage Todoist tasks and projects.",
     "category": "accounts",
-    "homepage": "https://github.com/Doist/todoist-ai",
+    "homepage": "https://github.com/todoist/todoist-mcp",
     "icon": "todoist",
     "install": {
       "transport": "stdio",
       "command": "npx",
       "args": [
         "-y",
-        "@doist/todoist-ai@9.0.0"
+        "-p",
+        "@todoist/mcp@17.2.0",
+        "todoist-mcp"
       ],
       "secret_env": {
         "TODOIST_API_KEY": "mcp/todoist-token"
