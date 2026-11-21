@@ -751,6 +751,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/chats/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search live, non-private user/assistant text, ranked by SQLite FTS5 BM25. */
+        get: operations["search"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/chats/{id}": {
         parameters: {
             query?: never;
@@ -801,6 +818,27 @@ export interface paths {
         };
         /** The stored original of an attachment (images inline, everything else as a download). */
         get: operations["download"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/chats/{id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Explicitly export one chat. Private messages are represented by redacted stubs.
+         *     Refuses rather than silently truncating chats over 1,000 messages, 2 MiB of
+         *     message text, 2,000 steps/approvals, or a 4 MiB serialized file.
+         */
+        get: operations["export"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3850,6 +3888,18 @@ export interface components {
             /** @description Title. */
             title: string;
         };
+        ChatExport: {
+            approvals: components["schemas"]["ExportApproval"][];
+            /** Format: uuid */
+            chat_id: string;
+            /** Format: int64 */
+            created_at_ms: number;
+            /** Format: int32 */
+            format_version: number;
+            messages: components["schemas"]["ExportMessage"][];
+            steps: components["schemas"]["ExportStep"][];
+            title: string;
+        };
         /** @description One diagnostic result. */
         Check: {
             /** @description What was found. */
@@ -4765,6 +4815,33 @@ export interface components {
             code: string;
             /** @description Human-readable message. */
             message: string;
+        };
+        ExportApproval: {
+            /** Format: int64 */
+            created_at_ms: number;
+            outcome: string;
+            /** Format: uuid */
+            run_id: string;
+        };
+        ExportMessage: {
+            /** @description Display names only: no paths, URLs, extracted text or bytes. */
+            attachments: string[];
+            content: string;
+            /** Format: int64 */
+            created_at_ms: number;
+            /** Format: uuid */
+            id: string;
+            role: string;
+            /** Format: uuid */
+            run_id?: string | null;
+        };
+        ExportStep: {
+            /** Format: int64 */
+            created_at_ms: number;
+            name: string;
+            /** Format: uuid */
+            run_id: string;
+            status: string;
         };
         /** @description MCP tool metadata. All returned text is untrusted data. */
         ExportedMcpTool: {
@@ -6725,6 +6802,24 @@ export interface components {
          * @enum {string}
          */
         ScreenStreamState: "idle" | "starting" | "live" | "paused_idle" | "unavailable";
+        SearchHit: {
+            /** Format: uuid */
+            bot_id: string;
+            /** Format: uuid */
+            chat_id: string;
+            chat_title: string;
+            /** Format: int64 */
+            created_at_ms: number;
+            /** Format: uuid */
+            message_id: string;
+            /** @description Plain text, at most 320 characters. Never HTML. */
+            snippet: string;
+        };
+        SearchPage: {
+            /** Format: int32 */
+            next_offset?: number | null;
+            results: components["schemas"]["SearchHit"][];
+        };
         /** @description How a request ended. Never carries a value. */
         SecretRequestAnswer: {
             /**
@@ -9516,6 +9611,50 @@ export interface operations {
             };
         };
     };
+    search: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Literal phrase, 1–200 characters. FTS operators are treated as text. */
+                q: string;
+                bot_id: string | null;
+                chat_id: string | null;
+                /** @description Ranked offset, at most 10,000. */
+                offset: number | null;
+                /** @description Page size, 1–100 (default 30). */
+                limit: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchPage"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     delete_chat: {
         parameters: {
             query?: never;
@@ -9667,6 +9806,55 @@ export interface operations {
                 };
                 content: {
                     "application/octet-stream": number[];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    export: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Chat id */
+                id: string;
+                /** @description `markdown` (default) or `json`. */
+                format: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatExport"];
+                    "text/markdown": string;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
             404: {

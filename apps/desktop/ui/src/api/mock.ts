@@ -1,3 +1,5 @@
+import { historySnippetParts, type ExportFormat } from "../lib/chatHistory.ts";
+import { transcriptMarkdown } from "../lib/transcript.ts";
 import { MOCK_HOST_ID, mockHostScenario } from "./mockHostScenario.ts";
 import { applyPatchOps, type PatchOp } from "../lib/botPatch.ts";
 import { ApiClient, ApiError } from "./client.ts";
@@ -676,6 +678,35 @@ export class MockApiClient extends ApiClient {
         bots: null
       }
     ];
+  }
+
+  override async searchChatHistory(q: string, offset = 0, signal?: AbortSignal): Promise<import("./types").SearchPage> {
+    const results: import("./types").SearchPage["results"] = [];
+    for (const chat of this.chats) {
+      const messages = await this.listMessages(chat.id);
+      for (const m of messages) {
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        if (!m.superseded && ["user", "assistant"].includes(m.role) && historySnippetParts(m.content, q).some((p) => p.match)) {
+          results.push({ chat_id: chat.id, bot_id: chat.bot_id, chat_title: chat.title,
+            message_id: m.id, created_at_ms: m.created_at_ms, snippet: (() => {
+              const parts = historySnippetParts(m.content, q);
+              const start = parts[0]?.match ? 0 : Math.max(0, (parts[0]?.text.length ?? 0) - 60);
+              return `${start ? "…" : ""}${m.content.slice(start, start + 319)}`;
+            })() });
+        }
+      }
+    }
+    return { results: results.slice(offset, offset + 30), next_offset: results.length > offset + 30 ? offset + 30 : null };
+  }
+
+  override async exportChat(chatId: string, format: ExportFormat): Promise<Blob> {
+    const chat = this.chats.find((c) => c.id === chatId);
+    if (!chat) throw new ApiError(404, "not_found", "mock chat not found");
+    const messages = (await this.listMessages(chatId)).filter((m) => !m.superseded && ["user", "assistant"].includes(m.role));
+    const doc = { format_version: 1, chat_id: chatId, title: chat.title, created_at_ms: chat.created_at_ms,
+      messages: messages.map((m) => ({ id: m.id, run_id: m.run_id ?? null, role: m.role, created_at_ms: m.created_at_ms, content: m.content, attachments: [] })), steps: [], approvals: [] };
+    return new Blob([format === "json" ? JSON.stringify(doc, null, 2) : transcriptMarkdown(messages, { title: chat.title, user: "User", bot: "Bot" })],
+      { type: format === "json" ? "application/json" : "text/markdown" });
   }
 
   /** Review-state stand-in for the daemon's logo cache: a small neutral mark. */

@@ -33,6 +33,7 @@ import styles from "./BotPanel.module.css";
 import { BotPanelMail } from "./BotPanelMail";
 import { BotPanelSkills } from "./BotPanelSkills";
 import { BrandMark } from "./BrandMark";
+import { ChatHistorySearch } from "./ChatHistorySearch";
 import { ChatList } from "./ChatList";
 import { QuotaBlock } from "./QuotaRings";
 import { SubagentDetail } from "./SubagentDetail";
@@ -142,7 +143,7 @@ export function BotPanel({
   /** The panel is on screen (closing it ends the computer view). */
   visible?: boolean;
   onClose: () => void;
-  onOpenChat: (chatId: string) => void;
+  onOpenChat: (chatId: string, messageId?: string) => void;
   onNewChat: () => void;
   onPatchChat: (chatId: string, patch: UpdateChatInput) => Promise<void>;
   onDeleteChat: (chatId: string) => Promise<void>;
@@ -350,6 +351,7 @@ export function BotPanel({
         <h3 className={styles.label} id="bot-panel-chats">
           {t("botPanel.chats")}
         </h3>
+        <ChatHistorySearch onOpenChat={onOpenChat} />
         {chats.length >= CHAT_SEARCH_MIN_CHATS ? (
           <input
             type="search"

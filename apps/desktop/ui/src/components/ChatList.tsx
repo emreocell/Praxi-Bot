@@ -2,6 +2,7 @@ import {
   Archive,
   ArchiveRestore,
   Check,
+  Download,
   ChevronRight,
   LoaderCircle,
   MessageSquare,
@@ -17,6 +18,10 @@ import { useTranslation } from "react-i18next";
 import type { UpdateChatInput } from "../api/types";
 import type { ChatActivity } from "../lib/botLanding";
 import { CHAT_TITLE_MAX_LEN, chatHasActiveRun, partitionChats, validateChatTitle } from "../lib/chatManage";
+import { saveChatExport, type ExportFormat } from "../lib/chatHistory";
+import { humanLine } from "../lib/humanError";
+import { useDaemon } from "../state/DaemonContext";
+import { useToast } from "./Toast";
 import { chatTitleLabel } from "../lib/chatTitle";
 import { Callout, ConfirmDialog } from "./DialogParts";
 import { Popover } from "./Popover";
@@ -63,6 +68,19 @@ export function ChatList({
   onDeleteChat
 }: ChatListProps) {
   const { t } = useTranslation();
+  const { client } = useDaemon();
+  const toast = useToast();
+  const [exporting, setExporting] = useState(false);
+  const exportChat = async (chatId: string, format: ExportFormat) => {
+    if (!client || exporting) return;
+    setExporting(true);
+    closeMenu();
+    try {
+      await saveChatExport(client, chatId, format);
+      toast.show(t("chat.export.done"), "success");
+    } catch (e) { toast.show(humanLine(e), "danger"); }
+    finally { setExporting(false); }
+  };
   const [menuChatId, setMenuChatId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -297,6 +315,8 @@ export function ChatList({
               {menuChat.archived ? <ArchiveRestore aria-hidden="true" /> : <Archive aria-hidden="true" />}
               <span>{menuChat.archived ? t("chatManage.unarchive") : t("chatManage.archive")}</span>
             </button>
+            <button type="button" role="menuitem" className={styles.menuItem} disabled={exporting || !client} onClick={() => void exportChat(menuChat.id, "markdown")}><Download aria-hidden="true" /><span>{t("chatHistory.exportMarkdown")}</span></button>
+            <button type="button" role="menuitem" className={styles.menuItem} disabled={exporting || !client} onClick={() => void exportChat(menuChat.id, "json")}><Download aria-hidden="true" /><span>{t("chatHistory.exportJson")}</span></button>
             <button type="button" role="menuitem" className={`${styles.menuItem} ${styles.menuDanger}`} data-testid="chat-action-delete" onClick={() => { closeMenu(); setDeleteTarget(menuChat); }}>
               <Trash2 aria-hidden="true" /><span>{t("chatManage.delete")}</span>
             </button>

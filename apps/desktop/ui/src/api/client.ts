@@ -633,6 +633,13 @@ export class ApiClient {
     });
   }
 
+  searchChatHistory(q: string, offset = 0, signal?: AbortSignal): Promise<import("./types").SearchPage> {
+    return this.request("GET", "/chats/search", { query: { q, offset }, signal });
+  }
+  exportChat(chatId: string, format: import("../lib/chatHistory").ExportFormat): Promise<Blob> {
+    return this.requestBlob("GET", `/chats/${encodeURIComponent(chatId)}/export?format=${format}`);
+  }
+
   listChats(): Promise<Chat[]> {
     return this.request("GET", "/chats");
   }

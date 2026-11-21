@@ -1671,6 +1671,18 @@
     "working": "Working…",
     "yesterdayLabel": "Yesterday"
   },
+  "chatHistory": {
+    "count": "{{count}} matching messages",
+    "count_one": "{{count}} matching message",
+    "count_other": "{{count}} matching messages",
+    "exportJson": "Export as JSON",
+    "exportMarkdown": "Export as Markdown",
+    "more": "More results",
+    "results": "Message search results",
+    "search": "Search all chat messages…",
+    "searching": "Searching messages…",
+    "submit": "Search messages"
+  },
   "chatManage": {
     "allArchived": "All chats are archived.",
     "archive": "Archive",

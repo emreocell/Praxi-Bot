@@ -1671,6 +1671,18 @@
     "working": "Çalışıyor…",
     "yesterdayLabel": "Dün"
   },
+  "chatHistory": {
+    "count": "{{count}} eşleşen mesaj",
+    "count_one": "{{count}} eşleşen mesaj",
+    "count_other": "{{count}} eşleşen mesaj",
+    "exportJson": "JSON olarak dışa aktar",
+    "exportMarkdown": "Markdown olarak dışa aktar",
+    "more": "Daha fazla sonuç",
+    "results": "Mesaj arama sonuçları",
+    "search": "Tüm sohbet mesajlarında ara…",
+    "searching": "Mesajlar aranıyor…",
+    "submit": "Mesajlarda ara"
+  },
   "chatManage": {
     "allArchived": "Tüm sohbetler arşivlendi.",
     "archive": "Arşivle",

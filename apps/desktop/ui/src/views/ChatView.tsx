@@ -83,7 +83,7 @@ import {
 import { lastTurn, supersededGroups, supersededRunIds, type SupersededGroup } from "../lib/resendTurn";
 import { botWriteMessage, writeBotProfile } from "../lib/botWrite";
 import { splitMentions } from "../lib/mentionText";
-import { transcriptFileName, transcriptMarkdown } from "../lib/transcript";
+import { saveChatExport } from "../lib/chatHistory";
 import { dayHeader, type MessageTimes } from "../lib/messageTime";
 import { modelGroups } from "../lib/modelPicker";
 import { type ChatRunPhase, runBarModel, runStopUi, STOP_CONFIRM_MS } from "../lib/runBar";
@@ -201,6 +201,7 @@ function canOfferRemember(run: RunState): boolean {
 
 export function ChatView({
   chatId,
+  jumpMessageId,
   onBack,
   control,
   onControl,
@@ -211,6 +212,7 @@ export function ChatView({
   liveChatSlots
 }: {
   chatId: string;
+  jumpMessageId?: string;
   /** Present only when there is a page to go back to; without it the header has no arrow. */
   onBack?: () => void;
   /** The native (desktop control) state; the run bar shows it next to the chat run. */
@@ -470,7 +472,7 @@ export function ChatView({
         });
       } else if (
         m.role === "assistant" &&
-        (!m.run_id || !known.has(m.run_id))
+        (!m.run_id || !known.has(m.run_id) || m.id === jumpMessageId)
       ) {
         out.push({
           kind: "assistant",
@@ -572,7 +574,7 @@ export function ChatView({
       return index === 0 || new Date(entry.ts).toDateString() !== new Date(sorted[index - 1].ts).toDateString()
         ? [{ kind: "day", key: `day-${entry.key}`, ts: entry.ts }, ...marker, entry] : [...marker, entry];
     });
-  }, [messages, chatRuns, showAgentRoute, remember, seenUntilMs, serverRuns]);
+  }, [messages, chatRuns, showAgentRoute, remember, seenUntilMs, serverRuns, jumpMessageId]);
 
   const turn = useMemo(() => lastTurn(messages), [messages]);
   const lastItem = entries[entries.length - 1];
@@ -629,6 +631,17 @@ export function ChatView({
       }
     }
   }, [entries.length]);
+
+  useEffect(() => {
+    if (!jumpMessageId || !messages.some((m) => m.id === jumpMessageId)) return;
+    stickToBottom.current = false;
+    const frame = requestAnimationFrame(() => {
+      const row = document.getElementById(`m-${jumpMessageId}`);
+      row?.scrollIntoView({ block: "center" });
+      row?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [jumpMessageId, messages]);
 
   const onScroll = () => {
     const el = scrollerRef.current;
@@ -794,17 +807,13 @@ export function ChatView({
     }
   };
 
-  /** `/export`: the open chat as a Markdown file (user and bot messages only). */
+  /** `/export`: use the same bounded, redacted daemon export as the chat menu. */
   const exportChat = () => {
-    const title = chat?.title && chat.title !== "New chat" ? chat.title : "";
-    const md = transcriptMarkdown(messages.filter((m) => !m.superseded), { title: title || view?.name || "Chat", user: t("chat.export.you"), bot: view?.name ?? "Bot" });
-    const url = URL.createObjectURL(new Blob([md], { type: "text/markdown;charset=utf-8" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = transcriptFileName(title || view?.name || "chat");
-    a.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    toast.show(t("chat.export.done"), "success");
+    if (!client) return;
+    void saveChatExport(client, chatId, "markdown").then(
+      () => toast.show(t("chat.export.done"), "success"),
+      (e: unknown) => toast.show(humanLine(e), "danger")
+    );
   };
 
   const send = async () => {
@@ -1219,6 +1228,8 @@ export function ChatView({
     const nested = run?.parentRunId !== undefined;
     switch (item.kind) {
       case "text":
+        // The selected stored answer has its own focus target; avoid drawing its live copy too.
+        if (messages.some((m) => m.id === jumpMessageId && m.run_id === runId && m.content === item.text)) return null;
         if (nested) {
           return <p className={ccStyles.nestedText}>{item.text}</p>;
         }
@@ -1416,7 +1427,7 @@ export function ChatView({
                 );
               case "user":
                 return (
-                  <div key={e.key} className={styles.userRow} data-message-row="user">
+                  <div key={e.key} id={e.key} tabIndex={-1} className={styles.userRow} data-message-row="user">
                     {editingId === e.msgId && canResend ? (
                       <EditMessage
                         initial={e.text}
@@ -1462,7 +1473,7 @@ export function ChatView({
                 return <SupersededView key={e.key} group={e.group} />;
               case "assistant":
                 return (
-                  <div key={e.key} className={styles.assistantRow} data-message-row="assistant">
+                  <div key={e.key} id={e.key} tabIndex={-1} className={styles.assistantRow} data-message-row="assistant">
                     <div className={styles.assistantBubble}>
                       {lead ? guestName(guestBot(e.botId)) : null}
                       <Markdown text={e.text} />
