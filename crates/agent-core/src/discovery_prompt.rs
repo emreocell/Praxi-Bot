@@ -189,9 +189,27 @@ never on the user's computer. The desktop_* tools act on the user's computer \"{
 \"My computer\" for this chat: give desktop_launch only {pc_os} program names and paths, never a {SERVER_OS} path."
             );
         }
-        ComputerLabel::Off => return None,
+        // Placed by `server_place_block`, never by this table.
+        ComputerLabel::Off | ComputerLabel::Server => return None,
     }
     Some(out)
+}
+
+/// The "where you run" block of a bot whose computer is a paired server: its
+/// browser is there, its shell and files are on the computer it runs on.
+pub(crate) fn server_place_block(server_name: &str) -> String {
+    let name = clean_name(server_name);
+    let name = if name.is_empty() {
+        "the paired server"
+    } else {
+        &name
+    };
+    format!(
+        "Where you run: you work from the user's computer, and your own browser is on the server \"{name}\". \
+browser_* tools open and drive pages on that server (not on the user's screen); they cannot run page scripts or type stored secrets there. \
+shell_run and the file tools act on the computer you run on, not on the server. No desktop tools reach the server. \
+If a browser tool says the server is off or not paired, tell the user; never work around it."
+    )
 }
 
 /// Most connected apps (MCP server ids) named in the block.

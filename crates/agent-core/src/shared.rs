@@ -674,7 +674,14 @@ pub(crate) struct RunComputer {
     pub wait_for_pc: bool,
     /// User-visible note about this resolution, emitted once as a run event.
     pub notice: Option<String>,
+    /// The paired server this run's bot uses as ITS computer (`server:<key>`):
+    /// its browser tools act there over this link. `None`: the browser tools
+    /// use this daemon's own browser.
+    pub server_link: Option<Arc<dyn builtin_tools::pc::PcLink>>,
 }
+
+/// Why a bot with `computer = "server:<key>"` has no computer for this run.
+const SERVER_COMPUTER_UNAVAILABLE: &str = "The server this bot uses as its computer is not paired with this computer (or the key is unknown), so it has no computer tools. Tell the user to pair the server again in the Praxi app or to change the bot's computer. Do not use another computer instead.";
 
 struct FallbackComputerProvider {
     desktop: Option<Arc<dyn DesktopBackend>>,
@@ -880,6 +887,8 @@ pub(crate) struct Shared {
     pub control: RwLock<Option<Arc<dyn crate::control::ControlGate>>>,
     /// Dynamic computer availability provider installed by the daemon (`serve`).
     pub computer_provider: RwLock<Option<Arc<dyn ComputerProvider>>>,
+    /// Paired servers a bot may use as ITS computer while it runs here.
+    pub server_links: RwLock<Option<Arc<dyn builtin_tools::pc::ServerLinks>>>,
     /// Static desktop backend passed to [`AgentLoop::with_builtin_tools`] (fallback when
     /// no [`ComputerProvider`] is installed).
     pub static_desktop: RwLock<Option<Arc<dyn DesktopBackend>>>,
@@ -1000,7 +1009,7 @@ fn auto_unreachable_notice(
     let using = match rc.label {
         ComputerLabel::Host => "host",
         ComputerLabel::Browser => "browser",
-        ComputerLabel::Pc | ComputerLabel::Off => return None,
+        ComputerLabel::Pc | ComputerLabel::Off | ComputerLabel::Server => return None,
     };
     Some(format!("auto: PC not reachable, using {using}"))
 }
@@ -1319,6 +1328,9 @@ impl Shared {
                 rc.browser_headless = rc.browser.then_some(true);
                 return rc;
             }
+            if label == ComputerLabel::Server {
+                return self.resume_server_computer(profile, run);
+            }
             let target = match label {
                 ComputerLabel::Host => ComputerTarget::Host,
                 ComputerLabel::Browser => ComputerTarget::Browser,
@@ -1331,6 +1343,9 @@ impl Shared {
                 fixed.runtime.computer = target;
                 self.resolve_fallback_computer(&fixed)
             };
+        }
+        if let ComputerTarget::Server(_) = &profile.runtime.computer {
+            return self.resolve_server_computer(&profile.runtime.computer);
         }
         if let Some(p) = provider.as_deref() {
             let mut rc = Self::run_computer(
@@ -1406,6 +1421,53 @@ impl Shared {
             && provider.is_some_and(|p| !p.local_identity_bound())
     }
 
+    /// A server run resumes only through the pairing as it is now, and only on
+    /// the server the run was placed on.
+    fn resume_server_computer(&self, profile: &BotProfile, run: &Run) -> RunComputer {
+        let rc = self.resolve_server_computer(&profile.runtime.computer);
+        let same = rc.node.as_ref().map(|n| n.id.as_str()) == run.computer_node.as_deref();
+        if same || rc.unavailable_reason.is_some() {
+            rc
+        } else {
+            Self::unavailable_computer(
+                "Cannot resume: this run used another server as its computer; start a new run",
+            )
+        }
+    }
+
+    /// A bot whose own computer is a paired server: the bot, its model calls and
+    /// its approvals stay on THIS daemon; its browser tools are a link to the
+    /// server. Only the browser family is routed there: no shell, files or
+    /// desktop tool is claimed for the server. No server link, an unknown key or
+    /// an unpaired server leaves the run with NO computer: it never falls back
+    /// to this daemon's browser.
+    fn resolve_server_computer(&self, target: &ComputerTarget) -> RunComputer {
+        let id = target.server_id().unwrap_or_default();
+        let found = self
+            .server_links
+            .read()
+            .clone()
+            .and_then(|links| links.link(id));
+        let Some((name, link)) = found else {
+            return Self::unavailable_computer(SERVER_COMPUTER_UNAVAILABLE);
+        };
+        RunComputer {
+            node: Some(computer_target::ComputerNode {
+                id: id.to_owned(),
+                name,
+            }),
+            unavailable_reason: None,
+            label: ComputerLabel::Server,
+            desktop: None,
+            desktop_available: false,
+            browser: true,
+            browser_headless: None,
+            wait_for_pc: false,
+            notice: None,
+            server_link: Some(link),
+        }
+    }
+
     fn unavailable_computer(reason: &str) -> RunComputer {
         let mut rc = Self::offline_pc(None);
         rc.wait_for_pc = false;
@@ -1424,6 +1486,7 @@ impl Shared {
             browser_headless: None,
             wait_for_pc: true,
             notice: None,
+            server_link: None,
         }
     }
 
@@ -1439,6 +1502,7 @@ impl Shared {
             browser_headless,
             wait_for_pc: res.wait_for_pc,
             notice: None,
+            server_link: None,
         }
     }
 
@@ -1505,6 +1569,7 @@ impl Shared {
             browser_headless,
             wait_for_pc: res.wait_for_pc,
             notice: None,
+            server_link: None,
         }
     }
 
@@ -1987,6 +2052,12 @@ impl Shared {
     /// machine the shell, files, desktop and browser tools act on, its OS and
     /// shell, and how the user's computer is addressed. Fixed for the run.
     pub(crate) fn place_block(&self, ctx: &RunCtx) -> Option<String> {
+        if ctx.resolved_computer.label == ComputerLabel::Server {
+            let name = ctx.resolved_computer.node.as_ref().map(|n| n.name.as_str());
+            return Some(crate::discovery_prompt::server_place_block(
+                name.unwrap_or_default(),
+            ));
+        }
         if !self.is_host_homed() {
             return None;
         }

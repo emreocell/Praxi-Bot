@@ -9,6 +9,7 @@
 //! start, unless `serve --peer` already started one (then it is shared).
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
+use builtin_tools::pc::{PcError, PcLink, ServerLinks};
 use daemon_api::host_links::{
     HostLinkConnection, HostLinkError, HostLinkInfo, HostLinkState, HostLinks,
 };
@@ -135,6 +136,33 @@ impl CliHostLinks {
             .map_err(|e| HostLinkError::Failed(safe(e)))?;
         *slot = Some(net.clone());
         Ok(net)
+    }
+
+    /// The paired always-on server with key `id`, if there is one.
+    pub(crate) fn host_device(&self, id: &str) -> Option<Device> {
+        self.devices()
+            .into_iter()
+            .find(|d| d.id == id && d.role == Role::Host)
+    }
+
+    /// One RPC to a paired server as the paired desktop (gap 2 of card 272).
+    /// The server decides from ITS pairing file whether this computer is its
+    /// administrator; nothing is claimed here.
+    pub(crate) async fn call_host(
+        &self,
+        id: &str,
+        method: &str,
+        params: serde_json::Value,
+        timeout: std::time::Duration,
+    ) -> Result<serde_json::Value, PcError> {
+        let device = self.host_device(id).ok_or_else(not_paired)?;
+        let key = device.public_key().map_err(|_| not_paired())?;
+        let net = self.network().await.map_err(|_| offline())?;
+        let client = net.rpc_client(&key).map_err(|_| not_paired())?;
+        client
+            .call_with_timeout(method, params, timeout)
+            .await
+            .map_err(server_error)
     }
 
     /// Paired devices without starting the endpoint: the running one if there
@@ -424,18 +452,107 @@ impl HostLinks for CliHostLinks {
     }
 }
 
+fn not_paired() -> PcError {
+    PcError::Message(
+        "The server this bot uses as its computer is not paired with this computer any more, so its browser cannot be used. Tell the user to pair the server again or to change the bot's computer. Do not use another browser instead.".into(),
+    )
+}
+
+fn offline() -> PcError {
+    PcError::Message(
+        "The server this bot uses as its computer is off or cannot be reached right now, so its browser cannot be used. Tell the user to check that the server is on, then try again. Do not use another browser instead.".into(),
+    )
+}
+
+/// One line of text from the other side, safe to show: no control characters, bounded.
+fn plain(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control()).take(300).collect()
+}
+
+/// What a failed call to the server means for the model, in words. The
+/// server's own text is shown as data inside a sentence, never trusted.
+fn server_error(e: peer_network::PeerError) -> PcError {
+    match e {
+        peer_network::PeerError::Rpc { message, .. } => PcError::Message(format!(
+            "The server refused this browser action ({}). Tell the user; do not try another way around it.",
+            plain(&message)
+        )),
+        peer_network::PeerError::Timeout => {
+            PcError::Message("The server did not answer in time.".into())
+        }
+        peer_network::PeerError::Connection(_) => offline(),
+        peer_network::PeerError::NotPaired(_) | peer_network::PeerError::UnknownDevice(_) => {
+            not_paired()
+        }
+        other => PcError::Message(format!(
+            "The server's browser did not complete this ({}).",
+            plain(&other.to_string())
+        )),
+    }
+}
+
+/// The paired servers a bot of THIS computer may use as its own computer
+/// (`[runtime].computer = "server:<key>"`): the bot, its model calls and its
+/// approvals stay here, only browser calls cross the paired link.
+pub struct CliServerLinks(pub Arc<CliHostLinks>);
+
+struct HostLink {
+    links: Arc<CliHostLinks>,
+    id: String,
+}
+
+#[async_trait::async_trait]
+impl PcLink for HostLink {
+    async fn call(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+        timeout: std::time::Duration,
+    ) -> Result<serde_json::Value, PcError> {
+        self.links
+            .call_host(&self.id, method, params, timeout)
+            .await
+    }
+
+    fn desktop(
+        &self,
+        _caller: &builtin_tools::pc::PcCaller,
+    ) -> Result<Arc<dyn desktop_api::DesktopBackend>, PcError> {
+        Err(PcError::Message(
+            "The server's screen is not used as a computer by this bot.".into(),
+        ))
+    }
+}
+
+impl ServerLinks for CliServerLinks {
+    fn link(&self, id: &str) -> Option<(String, Arc<dyn PcLink>)> {
+        let device = self.0.host_device(id)?;
+        Some((
+            device.name.clone(),
+            Arc::new(HostLink {
+                links: Arc::clone(&self.0),
+                id: device.id,
+            }),
+        ))
+    }
+}
+
 pub fn install(
     state: &daemon_api::AppState,
     data: PathBuf,
     shared: Option<PeerNetwork>,
     pc: PcTarget,
-) {
+) -> Arc<CliHostLinks> {
     let links = Arc::new(CliHostLinks::new(data.clone(), shared).with_pc_target(pc));
     let restore = Arc::clone(&links);
     tokio::spawn(async move { restore.restore_access().await });
     state.set_host_links(links.clone());
     // The "Add server" wizard pairs through the same links.
-    state.set_host_setup(Arc::new(crate::host_setup::CliHostSetup::new(data, links)));
+    state.set_host_setup(Arc::new(crate::host_setup::CliHostSetup::new(
+        data,
+        Arc::clone(&links),
+    )));
+    links
 }
 
 #[cfg(test)]
@@ -459,6 +576,89 @@ mod tests {
             serde_json::json!({"version":1,"devices":devices}).to_string(),
         )
         .unwrap();
+    }
+
+    /// A bot of this computer reaches a paired server's browser through the REAL
+    /// link and the REAL host handler: the paired administrator desktop is served,
+    /// a desktop the owner did not make administrator is refused with words, and
+    /// an unknown server key has no link at all.
+    #[tokio::test]
+    async fn the_server_link_serves_only_the_paired_admin_desktop() {
+        use builtin_tools::pc::{PcCaller, RPC_BROWSER};
+        use peer_network::{PeerConfig, RelayConfig};
+        let host_dir = tempfile::tempdir().unwrap();
+        let browser = Arc::new(crate::server_target::tests::Browser::default());
+        let b = Arc::clone(&browser);
+        let handler = Arc::new(crate::server_target::ServerTargetHandler::new(
+            crate::server_target::ServerTargetDeps {
+                data: host_dir.path().to_path_buf(),
+                audit: Arc::new(|_, _| Ok(())),
+                redact: Arc::new(str::to_owned),
+                browser: Some(Arc::new(move || {
+                    Arc::clone(&b) as Arc<dyn builtin_tools::BrowserDriver>
+                })),
+            },
+        ));
+        let mut hc = PeerConfig::new(host_dir.path().join("peer"));
+        hc.local_role = Role::Host;
+        hc.relay = RelayConfig::Disabled;
+        hc.bind_addr = Some("127.0.0.1:0".parse().unwrap());
+        let host = PeerNetwork::start(hc, Some(handler)).await.unwrap();
+        let desktop = |admin: bool| {
+            let host = host.clone();
+            async move {
+                let dir = tempfile::tempdir().unwrap();
+                let mut dc = PeerConfig::new(dir.path().join("peer"));
+                dc.local_role = Role::Desktop;
+                dc.relay = RelayConfig::Disabled;
+                dc.bind_addr = Some("127.0.0.1:0".parse().unwrap());
+                let net = PeerNetwork::start(dc, None).await.unwrap();
+                let links = Arc::new(CliHostLinks::new(dir.path().to_path_buf(), Some(net)));
+                let invite = host
+                    .create_invite_with_options(
+                        Role::Desktop,
+                        std::time::Duration::from_secs(60),
+                        admin,
+                    )
+                    .await;
+                let info = links.pair(&invite.ticket).await.unwrap();
+                (CliServerLinks(links), info.id, dir)
+            }
+        };
+        let caller = PcCaller {
+            id: "bot-1".into(),
+            name: "Mausi".into(),
+        };
+        let params = |p: serde_json::Value| caller.attach(p);
+        let open = serde_json::json!({"op": "open", "url": "https://93.184.216.34/"});
+        let timeout = std::time::Duration::from_secs(20);
+
+        let (admin_links, id, _d1) = desktop(true).await;
+        let (_, link) = admin_links.link(&id).expect("the paired server has a link");
+        let ok = link
+            .call(RPC_BROWSER, params(open.clone()), timeout)
+            .await
+            .unwrap();
+        assert!(
+            ok.to_string().contains("opened https://93.184.216.34/"),
+            "{ok}"
+        );
+        assert_eq!(browser.opened.lock().len(), 1);
+        assert!(admin_links.link("not-a-paired-server").is_none());
+
+        let (plain_links, id, _d2) = desktop(false).await;
+        let (_, link) = plain_links.link(&id).unwrap();
+        let err = link
+            .call(RPC_BROWSER, params(open), timeout)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("administrator desktop"), "{err}");
+        assert_eq!(
+            browser.opened.lock().len(),
+            1,
+            "the refused desktop opened nothing"
+        );
     }
 
     /// The REAL links against a real host endpoint: a plan, a copy and a second

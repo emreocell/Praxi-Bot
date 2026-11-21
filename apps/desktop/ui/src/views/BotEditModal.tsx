@@ -30,6 +30,7 @@ import {
   Callout,
   ConfirmDialog,
   DialogFooter,
+  DialogBody,
   DialogHeader,
   dialogStyles
 } from "../components/DialogParts";
@@ -428,9 +429,8 @@ function BotEditDialog({
             </>
           }
         />
-        <div
-          ref={bodyRef}
-          className={dialogStyles.body}
+        <DialogBody
+          scrollRef={bodyRef}
           inert={saving || deleting}
           role="tabpanel"
           id={panelId}
@@ -520,7 +520,7 @@ function BotEditDialog({
               {error}
             </Callout>
           ) : null}
-        </div>
+        </DialogBody>
         <DialogFooter
           noteTone={problems.length > 0 ? "warning" : "info"}
           note={

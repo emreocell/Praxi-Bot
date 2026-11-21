@@ -1,14 +1,16 @@
 import { Check, CircleAlert, CircleCheck, Info, TriangleAlert, X } from "lucide-react";
-import type { ReactNode } from "react";
+import { type HTMLAttributes, type ReactNode, type RefObject, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import styles from "./Dialog.module.css";
 import { Modal } from "./Modal";
+import { useScrollEdges } from "./useScrollEdges";
 
 /** Title row of a bot dialog: optional leading art, title + subtitle, the close button. */
 export function DialogHeader({
   title,
   subtitle,
+  subtitleId,
   leading,
   actions,
   onClose,
@@ -16,6 +18,8 @@ export function DialogHeader({
 }: {
   title: string;
   subtitle?: string;
+  /** Id for the subtitle, so the dialog can name it as its description. */
+  subtitleId?: string;
   leading?: ReactNode;
   /** Extra buttons before the close button. */
   actions?: ReactNode;
@@ -28,7 +32,7 @@ export function DialogHeader({
       {leading}
       <div className={styles.headerText}>
         <h2 className={styles.title}>{title}</h2>
-        {subtitle ? <p className={styles.subtitle}>{subtitle}</p> : null}
+        {subtitle ? <p id={subtitleId} className={styles.subtitle}>{subtitle}</p> : null}
       </div>
       {actions}
       <button
@@ -45,15 +49,48 @@ export function DialogHeader({
   );
 }
 
+/**
+ * The one scrolling area of a dialog, with a soft fade at an edge that has more content behind
+ * it.  `className` replaces the default body spacing for dialogs that lay out their own.
+ */
+export function DialogBody({
+  className,
+  testId,
+  scrollRef,
+  children,
+  ...rest
+}: {
+  className?: string;
+  testId?: string;
+  /** The scroll element, for callers that reset or read its position. */
+  scrollRef?: RefObject<HTMLDivElement | null>;
+  children: ReactNode;
+} & Pick<HTMLAttributes<HTMLDivElement>, "role" | "id" | "aria-labelledby" | "inert">) {
+  const own = useRef<HTMLDivElement | null>(null);
+  const ref = scrollRef ?? own;
+  const edges = useScrollEdges(ref);
+  return (
+    <div className={styles.bodyWrap}>
+      <div ref={ref} className={className ?? styles.body} data-testid={testId} {...rest}>
+        {children}
+      </div>
+      <span className={styles.edgeTop} data-on={edges.top} aria-hidden="true" />
+      <span className={styles.edgeBottom} data-on={edges.bottom} aria-hidden="true" />
+    </div>
+  );
+}
+
 /** The footer that stays put while the body scrolls. */
 export function DialogFooter({
   note,
   noteTone = "info",
+  noteId,
   children
 }: {
   /** Status text on the left ("Unsaved changes"). */
   note?: ReactNode;
   noteTone?: "info" | "warning" | "danger";
+  noteId?: string;
   children: ReactNode;
 }) {
   return (
@@ -67,6 +104,7 @@ export function DialogFooter({
           ]
             .filter(Boolean)
             .join(" ")}
+          id={noteId}
           role="status"
         >
           {note}

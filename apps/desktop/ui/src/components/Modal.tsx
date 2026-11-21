@@ -18,6 +18,7 @@ export function Modal({
   open,
   onClose,
   label,
+  describedBy,
   size = "lg",
   children
 }: {
@@ -25,6 +26,8 @@ export function Modal({
   onClose: () => void;
   /** Accessible name of the dialog. */
   label: string;
+  /** Id of the element that explains the dialog (its subtitle or lead text). */
+  describedBy?: string;
   size?: "confirm" | "sm" | "md" | "lg" | "apps";
   children: ReactNode;
 }) {
@@ -101,6 +104,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={label}
+        aria-describedby={describedBy}
         tabIndex={-1}
       >
         {children}

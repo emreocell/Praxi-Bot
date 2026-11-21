@@ -651,7 +651,8 @@
       "browser": "Tarayıcı",
       "host": "Sunucu",
       "off": "Kapalı",
-      "pc": "Bu bilgisayar"
+      "pc": "Bu bilgisayar",
+      "server": "Eşleşmiş sunucu (yalnızca tarayıcı)"
     },
     "unsaved": "Kaydedilmemiş değişiklikler"
   },
@@ -3225,6 +3226,8 @@
     "brainAuto": "Otomatik",
     "brainHint": "Sonradan sohbetten değiştirebilirsin",
     "create": "Oluştur",
+    "creating": "Oluşturuluyor…",
+    "nameNeeded": "Oluşturmak için botuna bir ad ver.",
     "namePlaceholder": "Bot adı",
     "shapeGroup": "Karakter şekli",
     "shapes": {
@@ -3245,6 +3248,7 @@
       "star": "Yıldız",
       "tri": "Üçgen"
     },
+    "subtitle": "Görünümünü, adını ve ne kadar özgür çalışacağını seç.",
     "templates": {
       "assistant": "Asistan",
       "blank": "Boş",
