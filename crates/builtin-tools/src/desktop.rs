@@ -258,7 +258,6 @@ fn rect_of(r: desktop_api::snapshot::Rect) -> ControlRect {
     }
 }
 
-/// A small box around a screen point (marks and raw coordinates have no size).
 /// How an image pixel maps onto the screen. `region_*` is the capture size
 /// before any downscale (X11 pixels). `img_*` is the file the model opens.
 fn screenshot_coordinate_line(
@@ -313,6 +312,7 @@ fn shrink_screenshot_for_model(img: desktop_api::Image) -> desktop_api::Image {
     }
 }
 
+/// A small box around a screen point (marks and raw coordinates have no size).
 fn point_rect(x: f64, y: f64) -> ControlRect {
     ControlRect {
         x: x - 16.0,
@@ -1436,16 +1436,9 @@ impl DesktopTool {
                         .map_err(|e| derr(&e))?;
                     let origin = {
                         let mut states = sh.state.lock();
-                        states
-                            .get(run_id)
-                            .map(|st| st.window_origin)
-                            .unwrap_or((0.0, 0.0))
+                        states.get(run_id).map_or((0.0, 0.0), |st| st.window_origin)
                     };
-                    let (ox, oy) = if scope.is_some() {
-                        origin
-                    } else {
-                        (0.0, 0.0)
-                    };
+                    let (ox, oy) = if scope.is_some() { origin } else { (0.0, 0.0) };
                     let capture_w = f64::from(img.width);
                     let capture_h = f64::from(img.height);
                     let img = shrink_screenshot_for_model(img);
