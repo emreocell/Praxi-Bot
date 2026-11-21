@@ -95,6 +95,7 @@ export {
 
 export {
   BotAvatar,
+  type AvatarSkin,
   type BotAvatarSize,
   type BotAvatarState,
   type BotIdentity
@@ -140,3 +141,5 @@ export {
   type ShapeSway
 } from "./avatarBehavior";
 export { getAvatarTimeScale, setAvatarTimeScale } from "./avatarLife";
+export { AVATAR_SKINS, getAvatarSkin, setAvatarSkin, subscribeAvatarSkin } from "./avatarSkin";
+export { RENDER_FOR_SHAPE, RENDER_NAMES, renderLayout, renderTint, type RenderName } from "./avatarRender";

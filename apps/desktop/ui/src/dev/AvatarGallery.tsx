@@ -7,6 +7,7 @@ import {
   CHARACTER_COLORS,
   paletteById,
   setAvatarTimeScale,
+  type AvatarSkin,
   type BotAvatarSize,
   type BotAvatarState,
   type BotShapeId
@@ -18,13 +19,16 @@ type GalleryThemeId = (typeof GALLERY_THEMES)[number];
 
 const SIZES: readonly BotAvatarSize[] = ["xs", "sm", "md", "lg", "panel", "hero"];
 
-/** The reference-like cast: coral drop, white gumdrop, butter capsule, sky "ears" (rounded tilted square). */
+/** The reference cast: coral drop, white gumdrop, butter squircle ("cube"), sky tilted square ("ears"). */
 const CAST: readonly { id: string; shape: BotShapeId; color: string }[] = [
   { id: "cast-drop", shape: "drop", color: "#f39a84" },
   { id: "cast-gumdrop", shape: "gumdrop", color: "#f4f4f5" },
-  { id: "cast-capsule", shape: "capsule", color: "#f6dfa0" },
+  { id: "cast-cube", shape: "cube", color: "#f6dfa0" },
   { id: "cast-ears", shape: "ears", color: "#86d3e6" }
 ];
+
+/** The 11 shipped swatches plus a dark custom pick (the lightness floor must keep it clay, not black). */
+const SWATCHES: readonly string[] = [...CHARACTER_COLORS, "#1f2a44"];
 
 const TURNS = [-34, -18, 0, 18, 34] as const;
 
@@ -50,7 +54,8 @@ function initialTheme(): GalleryThemeId {
  * Dev/mock-only gallery for reviewing the clay avatars: shapes, material in the 4 core themes,
  * the 3D head turn, idle behaviour, state expressions, hover/press and reduced motion.
  * Reachable only in dev or `VITE_MOCK=1` builds via `?mock=1&gallery=avatars`
- * (`&shape=`, `&state=`, `&color=rrggbb`, `&reduced=1`, `&fast=1`, `&only=cast|hero|turn|shapes|states|crowd` preset it).
+ * (`&shape=`, `&state=`, `&color=rrggbb`, `&reduced=1`, `&fast=1`, `&skin=render|procedural`,
+ * `&only=cast|hero|skins|swatches|turn|shapes|states|crowd|sizes` preset it).
  */
 export function AvatarGallery() {
   const [themeId, setThemeId] = useState<GalleryThemeId>(initialTheme);
@@ -63,6 +68,7 @@ export function AvatarGallery() {
   );
   const [reduced, setReduced] = useState<boolean>(() => param("reduced") === "1");
   const [fast, setFast] = useState<boolean>(() => param("fast") === "1");
+  const [skin, setSkin] = useState<AvatarSkin>(() => (param("skin") === "procedural" ? "procedural" : "render"));
   const only = param("only");
   const show = (section: string) => !only || only.split(",").includes(section);
 
@@ -107,6 +113,13 @@ export function AvatarGallery() {
           <button type="button" className={pillClass(fast)} aria-pressed={fast} onClick={() => setFast((v) => !v)}>
             {fast ? "Watch it idle: 6x" : "Watch it idle: 1x"}
           </button>
+          <div className={styles.pillRow} role="group" aria-label="Skin">
+            {(["render", "procedural"] as const).map((id) => (
+              <button key={id} type="button" className={pillClass(skin === id)} onClick={() => setSkin(id)}>
+                {id}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -116,7 +129,7 @@ export function AvatarGallery() {
           <div className={styles.castRow}>
             {CAST.map((c) => (
               <span key={c.id} className={styles.zoomCast}>
-                <BotAvatar bot={{ id: c.id, name: c.shape, shape: c.shape, color: c.color }} size="hero" live decorative />
+                <BotAvatar bot={{ id: c.id, name: c.shape, shape: c.shape, color: c.color }} size="hero" skin={skin} live decorative />
               </span>
             ))}
           </div>
@@ -142,13 +155,14 @@ export function AvatarGallery() {
                   bot={{ id: `hero-${heroShape}`, name: heroShape, shape: heroShape, color }}
                   size="hero"
                   state={heroState}
+                  skin={skin}
                   live
                   decorative
                 />
               </span>
             </button>
             <div className={styles.swatches}>
-              {CHARACTER_COLORS.map((hex) => (
+              {SWATCHES.map((hex) => (
                 <button
                   key={hex}
                   type="button"
@@ -170,6 +184,45 @@ export function AvatarGallery() {
         </section>
       ) : null}
 
+      {show("skins") ? (
+        <section className={styles.card}>
+          <h2 className={styles.sectionTitle}>Skins side by side (procedural | render)</h2>
+          <div className={styles.castRow}>
+            {(["procedural", "render"] as const).map((sk) => (
+              <span key={sk} className={styles.zoomCast}>
+                <BotAvatar
+                  bot={{ id: `skin-${sk}-${heroShape}`, name: sk, shape: heroShape, color }}
+                  size="hero"
+                  state={heroState}
+                  skin={sk}
+                  live
+                  decorative
+                />
+              </span>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {show("swatches") ? (
+        <section className={styles.card}>
+          <h2 className={styles.sectionTitle}>12 swatches on the hero shape</h2>
+          <div className={styles.turnRow}>
+            {SWATCHES.map((hex) => (
+              <span key={hex} className={styles.zoomTurn}>
+                <BotAvatar
+                  bot={{ id: `sw-${hex}`, name: hex, shape: heroShape, color: hex }}
+                  size="hero"
+                  skin={skin}
+                  live={false}
+                  decorative
+                />
+              </span>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {show("turn") ? (
         <section className={styles.card}>
           <h2 className={styles.sectionTitle}>Head turn (fixed yaw -34, -18, 0, 18, 34; then pitch up and down)</h2>
@@ -179,6 +232,7 @@ export function AvatarGallery() {
                 <BotAvatar
                   bot={{ id: `turn-${yaw}`, name: String(yaw), shape: heroShape, color }}
                   size="hero"
+                  skin={skin}
                   live={false}
                   lookAt={{ yaw, pitch: 0 }}
                   decorative
@@ -190,6 +244,7 @@ export function AvatarGallery() {
                 <BotAvatar
                   bot={{ id: `pitch-${pitch}`, name: String(pitch), shape: heroShape, color }}
                   size="hero"
+                  skin={skin}
                   live={false}
                   lookAt={{ yaw: 0, pitch }}
                   decorative
@@ -211,7 +266,7 @@ export function AvatarGallery() {
                 className={[styles.shapeTile, heroShape === s.id ? styles.shapeTileActive : ""].filter(Boolean).join(" ")}
                 onClick={() => setHeroShape(s.id)}
               >
-                <BotAvatar bot={{ id: `grid-${s.id}`, name: s.id, shape: s.id, color }} size="panel" live={false} decorative />
+                <BotAvatar bot={{ id: `grid-${s.id}`, name: s.id, shape: s.id, color }} size="panel" skin={skin} live={false} decorative />
                 <span className={styles.tileLabel}>{s.id}</span>
               </button>
             ))}
@@ -243,6 +298,7 @@ export function AvatarGallery() {
                       }}
                       size="lg"
                       state={st}
+                      skin={skin}
                       decorative
                     />
                   </span>
@@ -267,6 +323,7 @@ export function AvatarGallery() {
                   color: CHARACTER_COLORS[(i * 5) % CHARACTER_COLORS.length]
                 }}
                 size="md"
+                skin={skin}
                 decorative
               />
             ))}
@@ -281,7 +338,7 @@ export function AvatarGallery() {
             <div className={styles.sizeRow}>
               {SIZES.map((sz) => (
                 <div key={sz} className={styles.sizeItem}>
-                  <BotAvatar bot={{ id: `size-${sz}`, name: sz, shape: heroShape, color }} size={sz} live={false} decorative />
+                  <BotAvatar bot={{ id: `size-${sz}`, name: sz, shape: heroShape, color }} size={sz} skin={skin} live={false} decorative />
                   <span className={styles.tileLabel}>{sz}</span>
                 </div>
               ))}
@@ -297,6 +354,7 @@ export function AvatarGallery() {
                     bot={{ id: item.id, name: item.name, shape: item.shape, color: item.color }}
                     size="md"
                     state={item.state}
+                    skin={skin}
                     decorative
                   />
                   <span className={styles.listMeta}>
