@@ -651,7 +651,8 @@
       "browser": "Tarayıcı",
       "host": "Sunucu",
       "off": "Kapalı",
-      "pc": "Bu bilgisayar"
+      "pc": "Bu bilgisayar",
+      "server": "Eşleşmiş sunucu (yalnızca tarayıcı)"
     },
     "unsaved": "Kaydedilmemiş değişiklikler"
   },

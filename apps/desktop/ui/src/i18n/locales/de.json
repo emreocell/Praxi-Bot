@@ -651,7 +651,8 @@
       "browser": "Browser",
       "host": "Host",
       "off": "Aus",
-      "pc": "Dieser Computer"
+      "pc": "Dieser Computer",
+      "server": "Gekoppelter Server (nur Browser)"
     },
     "unsaved": "Ungespeicherte Änderungen"
   },

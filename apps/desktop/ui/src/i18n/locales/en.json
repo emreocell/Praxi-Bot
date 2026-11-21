@@ -651,7 +651,8 @@
       "browser": "Browser",
       "host": "Host",
       "off": "Off",
-      "pc": "This computer"
+      "pc": "This computer",
+      "server": "Paired server (browser only)"
     },
     "unsaved": "Unsaved changes"
   },
