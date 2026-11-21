@@ -2,8 +2,9 @@
 
 Each model invocation now records a purpose. This includes executor requests,
 guard-closing requests, K3 routing, K2 embedding requests, background memory
-extraction/consolidation, and child runs. The `decider` purpose is reserved for the
-separate decision-pool feature; this change does not introduce that feature.
+extraction/consolidation, and child runs. The [decision pool](decision-pool.md)
+uses the `decider` purpose for each backend attempt. Ordinary turns do not
+invoke the pool yet.
 
 | Purpose | What is counted |
 | --- | --- |
@@ -13,7 +14,7 @@ separate decision-pool feature; this change does not introduce that feature.
 | `embedding` | Each K2 query or candidate-refresh transport batch |
 | `memory` | Each background extraction or consolidation invocation |
 | `subagent` | A child run's model invocations, also included in its ancestors' summaries |
-| `decider` | Reserved for the decision-pool integration |
+| `decider` | Individual decision-pool backend invocations, including fallbacks |
 
 ## Audit records
 

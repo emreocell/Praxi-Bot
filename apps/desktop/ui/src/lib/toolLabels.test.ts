@@ -8,6 +8,7 @@ import {
   isDiscoveryTool,
   isSendTool,
   KNOWN_TOOL_NAMES,
+  mcpVerb,
   stepPhase,
   trLocative
 } from "./toolLabels.ts";
@@ -124,4 +125,18 @@ test("only real send tools are labelled Send", () => {
   for (const n of ["email_draft", "email_read", "email_search", "email_mark_read", "shell.run", "fs_delete", "message_read"]) {
     assert.equal(isSendTool(n), false, n);
   }
+});
+
+test("mcpVerb classifies draft, send, search, read, and unknown actions", () => {
+  assert.equal(mcpVerb("draft reply"), "draft");
+  assert.equal(mcpVerb("save drafts"), "draft");
+  assert.equal(mcpVerb("send message"), "send");
+  assert.equal(mcpVerb("post update"), "send");
+  assert.equal(mcpVerb("reply thread"), "send");
+  assert.equal(mcpVerb("search pull requests"), "search");
+  assert.equal(mcpVerb("get file"), "read");
+  assert.equal(mcpVerb("list issues"), "read");
+  assert.equal(mcpVerb("create Issue"), null);
+  assert.equal(describeTool("server.get_file", {}).key, "chat.step.mcp_read");
+  assert.equal(describeTool("server.send_message", {}).key, "chat.step.mcp_send");
 });

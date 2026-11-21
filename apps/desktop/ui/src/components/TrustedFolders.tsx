@@ -4,6 +4,8 @@ import { Button } from "ui";
 import { useDaemon } from "../state/DaemonContext";
 import { ownerKey } from "../lib/ownerKey";
 import { humanLine } from "../lib/humanError";
+import { FolderLock } from "lucide-react";
+import { EmptyNote } from "./SettingsUi";
 import formStyles from "./Form.module.css";
 import styles from "./TrustedFolders.module.css";
 
@@ -22,7 +24,7 @@ export function TrustedFolders() {
   }, [localApi]);
   return <div className={styles.root}>
     <p className={formStyles.hint}>{t("folderTrust.description")}</p>
-    {folders.length === 0 ? <p className={formStyles.hint}>{t("folderTrust.empty")}</p> : null}
+    {folders.length === 0 ? <EmptyNote icon={<FolderLock />}>{t("folderTrust.empty")}</EmptyNote> : null}
     {folders.map((folder) => <div key={folder} className={styles.row}>
       <code className={styles.folder}>{folder}</code>
       <Button size="sm" variant="secondary" disabled={busy} onClick={() => {

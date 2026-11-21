@@ -43,8 +43,6 @@
   overflow: hidden;
   font-size: var(--font-size-xs);
   line-height: var(--line-height-normal);
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--color-text-muted);
 }
 
@@ -471,4 +469,53 @@
   .check {
     transition: none;
   }
+}
+
+/* ── scroll body with edge fades ── */
+
+.bodyWrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: var(--space-0);
+}
+
+.edgeTop,
+.edgeBottom {
+  position: absolute;
+  inset-inline: var(--space-0);
+  height: var(--space-6);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.edgeTop {
+  top: var(--space-0);
+  background: linear-gradient(to bottom, var(--color-surface), transparent);
+}
+
+.edgeBottom {
+  bottom: var(--space-0);
+  background: linear-gradient(to top, var(--color-surface), transparent);
+}
+
+.edgeTop[data-on="true"],
+.edgeBottom[data-on="true"] {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edgeTop,
+  .edgeBottom,
+  .iconButton { transition: none; }
+}
+
+/* Narrow windows (the desktop window can be resized down to 900px): tighter gutters. */
+/* stylelint-disable-next-line unit-disallowed-list -- desktop window resize boundary */
+@media (width <= 56em) {
+  .header { padding: var(--space-4) var(--space-4) var(--space-3) var(--space-5); }
+  .body { padding-inline: var(--space-5); }
+  .footer { padding-inline: var(--space-5); }
 }

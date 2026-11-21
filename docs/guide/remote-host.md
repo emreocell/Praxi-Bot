@@ -301,6 +301,42 @@ falling back to a relay (and measure frame rate and RTT before deciding whether
 to open a UDP port), open a tunnel with `bot --remote <ENDPOINT> proxy` and
 follow [Measuring the live-view link](../design/live-view-link-measurement.md).
 
+#### Using a paired server as a bot's browser computer
+
+If you want a **local** bot (using your local model keys, coding CLIs, files,
+and shell) to browse from your always-on Linux host instead of your PC, set
+`[runtime]` `computer = "server:<key>"` in that bot's profile (see
+[Computer target](bots-and-profiles.md#computer-target)):
+
+- **How to use it**: Pair this desktop with the server as its administrator
+  desktop (`bot host add`, or `sudo praxi host invite --role desktop`; hosts
+  paired before host administration existed need `sudo praxi host admin <key>`
+  once). Put the server's device key in `[runtime] computer = "server:<key>"`
+  and create/update the bot with `bot bots add` or the API.
+- **What it can and cannot do**: Only `browser_*` tools run on the server (in
+  an isolated browser per bot, up to 8 open at once). `fs_*` and `shell_run`
+  still run on your local computer, and `desktop_*` tools cannot control the
+  server. If the server is offline or unpaired, the run fails closed with no
+  computer and never falls back to your local browser.
+- **Security limits on the server**:
+  - **Admin desktop only**: On every request, the server re-reads its pairing
+    file and accepts calls only from a paired `desktop` with the `admin` flag
+    and matching pairing generation. Phones, nodes, other hosts, and non-admin
+    desktops are refused.
+  - **No internal network reach**: Only `http://` and `https://` URLs (up to
+    2,000 characters) are accepted. A filtering proxy blocks loopback
+    (`127.0.0.1`, `[::1]`), link-local/cloud metadata (`169.254.169.254`), and
+    private network ranges—including through redirects or subresources—with no
+    override on the server.
+  - **No scripts, no password fields, no stored secrets**: `browser_eval` is
+    refused, filling or typing non-navigation keys into password/sensitive
+    fields fails closed, stored fill secrets are not sent, and returned text is
+    redacted by the server.
+  - **Audited and locally approved**: Every browser call (allowed or refused)
+    is logged in the server's audit log—an unwritable audit log blocks the call.
+    Approval prompts stay on your local computer, and grants are scoped to
+    `server:<key>`.
+
 ### Letting another core control this machine (experimental)
 
 `bot-node run` needs a reachable X11 display (a physical one or the Xvfb
@@ -419,8 +455,16 @@ it on a print server. No browser or desktop TCP listener is enabled.
 env file, working directory, hardening and Xvfb private namespace as the daemon.
 Its browser row actually launches headless, establishes CDP, and closes the
 browser, with a five-second startup/eight-second overall timeout. A failure is
-reported as **fail**, with a non-snap/path hint. A direct `bot doctor` probes
-only its current user/environment; use the wrapper for service validation.
+reported as **fail**, with a non-snap/path hint. Its `host_display` row checks
+in order that `DISPLAY` is set, the display answers (with a readable
+`XAUTHORITY`), and a usable non-snap browser exists, naming the first missing
+piece; `free_ram` reports Linux `MemAvailable` and warns below 512 MiB. A direct
+`bot doctor` probes only its current user/environment; use the wrapper for
+service validation. During live runs, `browser_open` bounds startup to 40
+seconds (45 seconds waiting on a busy session), surfaces the tail of Chrome's
+stderr with a cause hint on early exit, and re-probes an unreachable Linux X11
+display every 15 seconds so a slow-starting Xvfb does not leave the daemon
+stuck headless.
 Ubuntu 24.04's AppArmor user-namespace restriction is accommodated by a named
 `praxi-browser` profile permitting `userns` for `/opt/praxi-browser/chrome`,
 following Ubuntu's Chrome profile. The Chromium sandbox and systemd hardening

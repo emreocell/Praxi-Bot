@@ -8365,6 +8365,7 @@ computer = \"{target}\"
             browser_headless: None,
             wait_for_pc: false,
             notice: None,
+            server_link: None,
         };
         assert!(lp.sh.bind_computer(run, &rc).is_err(), "{label:?}");
     }

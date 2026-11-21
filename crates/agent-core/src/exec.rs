@@ -281,7 +281,7 @@ impl TurnExecutor {
         Ok(Some(spec))
     }
 
-    fn first_user_text(&self, ctx: &RunCtx, run: &Run) -> Result<String, ExecError> {
+    pub(crate) fn first_user_text(&self, ctx: &RunCtx, run: &Run) -> Result<String, ExecError> {
         let messages = self.sh.storage.list_messages(ctx.chat_id).map_err(xe)?;
         // A mention run (first or later bot, owner bot included) is bound to the
         // exact user message that carried the mentions.

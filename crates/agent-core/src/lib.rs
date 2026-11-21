@@ -18,6 +18,7 @@ mod compaction;
 mod config;
 mod control;
 pub mod control_note;
+pub mod decider;
 mod discovery_prompt;
 mod exec;
 mod history;
@@ -51,6 +52,8 @@ mod pc_scope_tests;
 mod router_tests;
 #[cfg(test)]
 mod scoped_tests;
+#[cfg(test)]
+mod server_computer_tests;
 #[cfg(test)]
 mod spend_tests;
 #[cfg(test)]

@@ -20277,7 +20277,7 @@
         "properties": {
           "computer": {
             "type": "string",
-            "description": "Configured computer target (`auto`, `pc`, `host`, `browser`, `off`, or `node:<id>`)."
+            "description": "Configured computer target (`auto`, `pc`, `host`, `browser`, `off`, `node:<id>`, or\n`server:<server key>`: the bot stays here, its browser tools act on that paired server)."
           }
         }
       },

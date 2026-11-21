@@ -164,6 +164,9 @@ pub enum PcError {
     Refused(String),
     /// A transport or tool failure.
     Failed(String),
+    /// A sentence already written for the model to relay, shown as it is (the
+    /// server link of a bot that uses a paired server as its computer).
+    Message(String),
 }
 
 impl std::fmt::Display for PcError {
@@ -177,6 +180,7 @@ impl std::fmt::Display for PcError {
             ),
             Self::Refused(why) => write!(f, "The user's computer refused: {why}"),
             Self::Failed(why) => write!(f, "The user's computer did not complete this: {why}"),
+            Self::Message(text) => f.write_str(text),
         }
     }
 }
@@ -192,6 +196,14 @@ pub trait PcLink: Send + Sync {
     /// # Errors
     /// Why the computer cannot be used right now.
     fn desktop(&self, caller: &PcCaller) -> Result<Arc<dyn DesktopBackend>, PcError>;
+}
+
+/// The paired servers a bot may use as ITS computer while the bot itself runs
+/// on this computer (`[runtime].computer = "server:<key>"`).
+pub trait ServerLinks: Send + Sync {
+    /// The paired server with this key: its display name and the link to it.
+    /// `None`: no such paired server (never paired, or unpaired since).
+    fn link(&self, id: &str) -> Option<(String, Arc<dyn PcLink>)>;
 }
 
 /// A late-bound [`PcLink`]: the tools are registered before the peer stack
@@ -364,13 +376,31 @@ impl DesktopBackend for PcDesktop {
 pub struct RemoteBrowserDriver {
     link: Arc<dyn PcLink>,
     caller: PcCaller,
+    /// What the model reads when it asks for page scripts.
+    eval_refusal: &'static str,
 }
 
 impl RemoteBrowserDriver {
     /// The user's own computer, driven for `caller` (its own browser there).
     #[must_use]
     pub fn new(link: Arc<dyn PcLink>, caller: PcCaller) -> Self {
-        Self { link, caller }
+        Self {
+            link,
+            caller,
+            eval_refusal: "running page scripts on the user's computer is not allowed",
+        }
+    }
+
+    /// The browser of a paired server that is `caller`'s own computer. The
+    /// server keeps one browser per bot; page scripts and owner secrets are
+    /// not served there either.
+    #[must_use]
+    pub fn for_server(link: Arc<dyn PcLink>, caller: PcCaller) -> Self {
+        Self {
+            link,
+            caller,
+            eval_refusal: "running page scripts in the server's browser is not allowed",
+        }
     }
 
     async fn op(&self, op: &str, mut args: Value) -> Result<Value, String> {
@@ -468,7 +498,7 @@ impl BrowserDriver for RemoteBrowserDriver {
         Ok((bytes, ext))
     }
     async fn eval(&self, _js: &str) -> Result<Value, String> {
-        Err("running page scripts on the user's computer is not allowed".into())
+        Err(self.eval_refusal.into())
     }
     async fn current_url(&self) -> Option<String> {
         self.op("current_url", json!({}))

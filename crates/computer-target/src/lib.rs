@@ -42,6 +42,12 @@ pub enum ComputerTarget {
     /// Specific paired node identifier (legacy ADR-0011 syntax, e.g. `node:<id>`
     /// or 64-character hex peer public key).
     Node(String),
+    /// A paired always-on server used as the bot's own computer while the bot
+    /// itself (its model providers, keys and subscription CLIs) stays on THIS
+    /// computer: `server:<server key>`. Only the browser family reaches it.
+    /// The daemon places it (it knows the paired servers); [`resolve`] alone
+    /// cannot, and never falls back to another computer.
+    Server(String),
 }
 
 impl ComputerTarget {
@@ -54,7 +60,16 @@ impl ComputerTarget {
             Self::Host => "host",
             Self::Browser => "browser",
             Self::Off => "off",
-            Self::Node(id) => id.as_str(),
+            Self::Node(id) | Self::Server(id) => id.as_str(),
+        }
+    }
+
+    /// Key of the paired server when targeting [`Self::Server`].
+    #[must_use]
+    pub fn server_id(&self) -> Option<&str> {
+        match self {
+            Self::Server(id) => id.strip_prefix("server:"),
+            _ => None,
         }
     }
 
@@ -93,9 +108,20 @@ impl FromStr for ComputerTarget {
             "host" => Ok(Self::Host),
             "browser" => Ok(Self::Browser),
             "off" => Ok(Self::Off),
+            other
+                if other.strip_prefix("server:").is_some_and(|rest| {
+                    !rest.is_empty()
+                        && rest.len() <= 128
+                        && rest
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+                }) =>
+            {
+                Ok(Self::Server(other.to_owned()))
+            }
             other if is_valid_node_id(other) => Ok(Self::Node(other.to_owned())),
             other => Err(format!(
-                "unknown computer target {other:?}; expected one of auto, pc, host, browser, off, or node:<id>"
+                "unknown computer target {other:?}; expected one of auto, pc, host, browser, off, node:<id> or server:<id>"
             )),
         }
     }
@@ -136,6 +162,8 @@ pub enum ComputerLabel {
     Host,
     Browser,
     Off,
+    /// A paired server (`server:<key>`): the bot's browser runs there.
+    Server,
 }
 
 impl ComputerLabel {
@@ -147,6 +175,7 @@ impl ComputerLabel {
             Self::Host => "host",
             Self::Browser => "browser",
             Self::Off => "off",
+            Self::Server => "server",
         }
     }
 
@@ -158,6 +187,7 @@ impl ComputerLabel {
             "host" => Some(Self::Host),
             "browser" => Some(Self::Browser),
             "off" => Some(Self::Off),
+            "server" => Some(Self::Server),
             _ => None,
         }
     }
@@ -430,6 +460,16 @@ pub fn resolve(target: &ComputerTarget, provider: &dyn ComputerProvider) -> Reso
             res
         }
         ComputerTarget::Auto => resolve_auto(provider, browser),
+        // The daemon places a server computer; asked here it is not something
+        // a provider can offer, and nothing local stands in for it.
+        ComputerTarget::Server(_) => Resolution {
+            node: None,
+            unavailable_reason: Some("a server computer is resolved by the daemon".into()),
+            desktop: None,
+            browser: false,
+            label: ComputerLabel::Server,
+            wait_for_pc: false,
+        },
     }
 }
 
@@ -540,6 +580,10 @@ mod tests {
                 ComputerTarget::Node("node:workstation-1".into()),
             ),
             ("peer:abc_123", ComputerTarget::Node("peer:abc_123".into())),
+            (
+                "server:abc_123",
+                ComputerTarget::Server("server:abc_123".into()),
+            ),
         ] {
             let parsed: ComputerTarget = raw.parse().unwrap_or_else(|e| panic!("{raw}: {e}"));
             assert_eq!(parsed, expected);
@@ -559,6 +603,8 @@ mod tests {
             "desktop",
             "node:",
             "node:bad id",
+            "server:",
+            "server:bad id",
             "shorthex",
         ] {
             assert!(

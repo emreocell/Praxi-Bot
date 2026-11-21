@@ -6530,7 +6530,10 @@ export interface components {
         };
         /** @description Bot `[runtime]` settings (ADR-0027 §7). */
         RuntimeConfigDto: {
-            /** @description Configured computer target (`auto`, `pc`, `host`, `browser`, `off`, or `node:<id>`). */
+            /**
+             * @description Configured computer target (`auto`, `pc`, `host`, `browser`, `off`, `node:<id>`, or
+             *     `server:<server key>`: the bot stays here, its browser tools act on that paired server).
+             */
             computer: string;
         };
         SaveWorkflow: {
