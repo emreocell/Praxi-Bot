@@ -1134,6 +1134,17 @@
       },
       "sendOnce": "Gönder",
       "sendTitle": "Senin adına gönderilsin mi?",
+      "steps": {
+        "click": "{{target}} öğesine tıkla",
+        "fill": "{{target}} alanına “{{text}}” yaz",
+        "label": "Adımlar, bu sırayla",
+        "press": "{{key}} tuşuna bas",
+        "scroll": "{{target}} öğesini kaydır",
+        "scrollPage": "Sayfayı kaydır",
+        "select": "{{target}} listesinde “{{value}}” seç",
+        "unknown": "tanımlanamayan bir öğe ({{ref}})",
+        "wait": "Şunu bekle: {{what}}"
+      },
       "thisChat": "Bu sohbet",
       "title": "Onay gerekiyor",
       "why": {
@@ -1394,6 +1405,11 @@
         "done": "Bot değiştirildi",
         "failed": "Bot değiştirilmedi",
         "running": "Bot değiştiriliyor"
+      },
+      "browser_act": {
+        "done": "Tarayıcıda birkaç adım yaptı",
+        "failed": "Tarayıcıdaki adımları tamamlamadı",
+        "running": "Tarayıcıda birkaç adım yapıyor"
       },
       "browser_click": {
         "done": "Sayfada tıklandı",

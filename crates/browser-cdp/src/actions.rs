@@ -113,6 +113,38 @@ fn is_navigation_spec(spec: &str) -> bool {
     )
 }
 
+/// Keys that activate the focused control (Enter, Space), alone or in a chord.
+fn is_activating_spec(spec: &str) -> bool {
+    matches!(
+        spec.rsplit('+')
+            .next()
+            .unwrap_or(spec)
+            .to_ascii_lowercase()
+            .as_str(),
+        "enter" | "return" | "numpadenter" | " " | "space" | "spacebar"
+    )
+}
+
+/// What the browser reports as the focused element of the top document.
+enum ActiveElement {
+    Nothing,
+    Node {
+        backend_id: i64,
+        hosts_other_document: bool,
+    },
+}
+
+/// Extra checks one step of a `browser_act` batch runs under the session lock, on top of
+/// the checks of the single tool. `Default` (no batch) changes nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StepGuard {
+    /// The step is part of a batch: a click must land on its ref's node, and an activating
+    /// key needs `focus_ref`.
+    pub batch: bool,
+    /// The ref an earlier step of the batch worked on; focus must still be on that node.
+    pub focus_ref: Option<String>,
+}
+
 /// Parse `Enter`, `Tab`, `ArrowDown`, `a`, `Control+a`, `Shift+Tab`, ...
 pub fn parse_key(spec: &str) -> Result<KeySpec> {
     let parts: Vec<&str> = if spec == "+" {
@@ -194,6 +226,21 @@ fn quad_center(q: &[f64]) -> Option<(f64, f64)> {
     let xs = q.iter().step_by(2);
     let ys = q.iter().skip(1).step_by(2);
     Some((xs.sum::<f64>() / 4.0, ys.sum::<f64>() / 4.0))
+}
+
+/// Whether the `DOM.describeNode` tree `n` holds the backend node `id` (shadow roots, frame
+/// documents and template content included).
+fn node_contains(n: &Value, id: i64) -> bool {
+    if n["backendNodeId"].as_i64() == Some(id) {
+        return true;
+    }
+    let kids = |k: &str| n[k].as_array().map_or(&[][..], Vec::as_slice);
+    kids("children")
+        .iter()
+        .chain(kids("shadowRoots"))
+        .chain(n.get("contentDocument"))
+        .chain(n.get("templateContent"))
+        .any(|c| node_contains(c, id))
 }
 
 fn floats(v: &Value) -> Vec<f64> {
@@ -679,6 +726,61 @@ impl Page {
         Ok(())
     }
 
+    /// The top document's `activeElement` as the BROWSER reports it, read in an isolated
+    /// world (the page's own scripts cannot patch it there). `Err(())`: cannot tell.
+    async fn active_element(&self) -> std::result::Result<ActiveElement, ()> {
+        let tree = self
+            .cmd("Page.getFrameTree", json!({}))
+            .await
+            .map_err(|_| ())?;
+        let frame_id = tree["frameTree"]["frame"]["id"].as_str().ok_or(())?;
+        let world = self
+            .cmd(
+                "Page.createIsolatedWorld",
+                json!({"frameId": frame_id, "worldName": "praxi-focus-check"}),
+            )
+            .await
+            .map_err(|_| ())?;
+        let context_id = world["executionContextId"].as_i64().ok_or(())?;
+        let r = self
+            .cmd(
+                "Runtime.evaluate",
+                json!({"expression": "document.activeElement", "returnByValue": false,
+                       "contextId": context_id}),
+            )
+            .await
+            .map_err(|_| ())?;
+        if r.get("exceptionDetails").is_some() {
+            return Err(());
+        }
+        let Some(object_id) = r["result"]["objectId"].as_str() else {
+            return Ok(ActiveElement::Nothing);
+        };
+        let d = self
+            .cmd(
+                "DOM.describeNode",
+                json!({"objectId": object_id, "pierce": true}),
+            )
+            .await
+            .map_err(|_| ())?;
+        let node = &d["node"];
+        let name = node["nodeName"].as_str().unwrap_or("").to_ascii_uppercase();
+        if matches!(name.as_str(), "BODY" | "HTML") {
+            return Ok(ActiveElement::Nothing);
+        }
+        // The user-agent shadow tree of an <input> is not a page-authored host.
+        let hosts_other_document = matches!(name.as_str(), "IFRAME" | "FRAME")
+            || node["shadowRoots"].as_array().is_some_and(|a| {
+                a.iter()
+                    .any(|r| r["shadowRootType"].as_str() != Some("user-agent"))
+            });
+        let backend_id = node["backendNodeId"].as_i64().ok_or(())?;
+        Ok(ActiveElement::Node {
+            backend_id,
+            hosts_other_document,
+        })
+    }
+
     /// Fallback for [`Self::refuse_if_sensitive_now`] on the top document's `activeElement`.
     /// A focused frame or shadow host cannot be looked into here, so it counts as unknown.
     async fn refuse_if_active_element_secret(&self) -> Result<()> {
@@ -688,75 +790,25 @@ impl Page {
                     .into(),
             ))
         };
-        // Evaluate in an isolated world: the page's own scripts cannot patch `document.activeElement`
-        // there, so a hostile page cannot make it report null or a decoy field.
-        let Ok(tree) = self.cmd("Page.getFrameTree", json!({})).await else {
-            return refuse();
-        };
-        let Some(frame_id) = tree["frameTree"]["frame"]["id"].as_str() else {
-            return refuse();
-        };
-        let Ok(world) = self
-            .cmd(
-                "Page.createIsolatedWorld",
-                json!({"frameId": frame_id, "worldName": "praxi-focus-check"}),
-            )
-            .await
-        else {
-            return refuse();
-        };
-        let Some(context_id) = world["executionContextId"].as_i64() else {
-            return refuse();
-        };
-        let Ok(r) = self
-            .cmd(
-                "Runtime.evaluate",
-                json!({"expression": "document.activeElement", "returnByValue": false,
-                       "contextId": context_id}),
-            )
-            .await
-        else {
-            return refuse();
-        };
-        if r.get("exceptionDetails").is_some() {
-            return refuse();
+        match self.active_element().await {
+            Ok(ActiveElement::Nothing) => Ok(()),
+            Err(())
+            | Ok(ActiveElement::Node {
+                hosts_other_document: true,
+                ..
+            }) => refuse(),
+            Ok(ActiveElement::Node { backend_id, .. }) => {
+                let entry = RefEntry {
+                    session_id: None,
+                    frame_id: String::new(),
+                    backend_id,
+                    name: String::new(),
+                    role: String::new(),
+                    sensitive: true,
+                };
+                self.refuse_if_sensitive_now(&entry, "key press").await
+            }
         }
-        let Some(object_id) = r["result"]["objectId"].as_str() else {
-            return Ok(()); // null: nothing is focused
-        };
-        let Ok(d) = self
-            .cmd(
-                "DOM.describeNode",
-                json!({"objectId": object_id, "pierce": true}),
-            )
-            .await
-        else {
-            return refuse();
-        };
-        let node = &d["node"];
-        let name = node["nodeName"].as_str().unwrap_or("").to_ascii_uppercase();
-        if matches!(name.as_str(), "BODY" | "HTML") {
-            return Ok(());
-        }
-        let hosts_other_document = matches!(name.as_str(), "IFRAME" | "FRAME")
-            || node["shadowRoots"]
-                .as_array()
-                .is_some_and(|a| !a.is_empty());
-        let Some(backend_id) = node["backendNodeId"].as_i64() else {
-            return refuse();
-        };
-        if hosts_other_document {
-            return refuse();
-        }
-        let entry = RefEntry {
-            session_id: None,
-            frame_id: String::new(),
-            backend_id,
-            name: String::new(),
-            role: String::new(),
-            sensitive: true,
-        };
-        self.refuse_if_sensitive_now(&entry, "key press").await
     }
 
     async fn entry_is_sensitive(&self, e: &RefEntry) -> Result<bool> {
@@ -797,12 +849,72 @@ impl Page {
 
     // -- inner actions --------------------------------------------------------------------------
 
-    async fn click_inner(&self, r: &str, clicks: u32, expected: Option<&str>) -> Result<()> {
+    /// Whether the node that receives a mouse event at the top-level point `(x, y)` is the
+    /// node of `e` or a descendant of it (shadow roots included). Anything else on top
+    /// (a modal, a cookie banner, a decoy) means the click would not land on what was
+    /// approved. A node the browser cannot resolve in the same session counts as no match.
+    async fn click_lands_on(&self, e: &RefEntry, x: f64, y: f64) -> bool {
+        let Ok(hit) = self
+            .cmd(
+                "DOM.getNodeForLocation",
+                json!({"x": x.round() as i64, "y": y.round() as i64,
+                       "includeUserAgentShadowDOM": false, "ignorePointerEventsNone": false}),
+            )
+            .await
+        else {
+            return false;
+        };
+        let Some(hit_id) = hit["backendNodeId"].as_i64() else {
+            return false;
+        };
+        if e.session_id.is_none() && hit_id == e.backend_id {
+            return true;
+        }
+        if e.session_id.is_some() {
+            // The top-level hit test only reports the frame element of an out-of-process frame.
+            return false;
+        }
+        // Browser-side only: the ref's subtree (shadow roots and frame documents pierced) as
+        // the browser reports it. Page JavaScript never takes part, so a hostile page cannot
+        // make `parentNode`/`host` lie.
+        let Ok(d) = self
+            .cmd(
+                "DOM.describeNode",
+                json!({"backendNodeId": e.backend_id, "depth": -1, "pierce": true}),
+            )
+            .await
+        else {
+            return false;
+        };
+        node_contains(&d["node"], hit_id)
+    }
+
+    async fn click_inner(
+        &self,
+        r: &str,
+        clicks: u32,
+        expected: Option<&str>,
+        guard: &StepGuard,
+    ) -> Result<()> {
         let e = self.locate(r).await?;
         let (x, y) = self.center(&e).await?;
+        let covered = || {
+            Error::Element(format!(
+                "another element is on top of '{}' ({}) at the click point, so the approved click was NOT made",
+                e.name, e.role
+            ))
+        };
+        // Hit test BEFORE any mouse event (a move would already fire the covering element's
+        // hover handlers), with browser-side DOM.* calls only.
+        if guard.batch && !self.click_lands_on(&e, x, y).await {
+            return Err(covered());
+        }
         self.mouse("mouseMoved", x, y, json!({})).await?;
         self.check_input_origin(&e, expected).await?;
         for n in 1..=clicks {
+            if n > 1 && guard.batch && !self.click_lands_on(&e, x, y).await {
+                return Err(covered());
+            }
             let btn = json!({"button": "left", "clickCount": n});
             self.mouse("mousePressed", x, y, btn.clone()).await?;
             self.mouse("mouseReleased", x, y, btn).await?;
@@ -822,7 +934,52 @@ impl Page {
     }
 
     async fn key_inner(&self, spec: &str) -> Result<()> {
-        self.key_inner_with_origin(spec, None).await
+        self.key_inner_with_origin(spec, None, &StepGuard::default())
+            .await
+    }
+
+    /// The node that has keyboard focus: `None` when nothing does (or it cannot be told
+    /// apart from a frame / shadow host, which never equals an approved node).
+    async fn focused_node(&self) -> Result<Option<(Option<String>, i64)>> {
+        match self.focused_entry().await {
+            Ok(f) => Ok(Some((f.session_id, f.backend_id))),
+            Err(Error::Element(m)) if m == NO_FOCUS => match self.active_element().await {
+                Ok(ActiveElement::Node {
+                    backend_id,
+                    hosts_other_document: false,
+                }) => Ok(Some((None, backend_id))),
+                _ => Ok(None),
+            },
+            Err(e) => Err(e),
+        }
+    }
+
+    /// A batch key that activates whatever has focus (Enter, Space) needs focus to be on
+    /// the node the previous step worked on. A page script can move focus to another
+    /// control between steps; origin and URL do not change when it does. `fill` and
+    /// `select` do not move focus themselves, so when nothing at all has focus the
+    /// approved node is focused first; focus on any OTHER element stops the batch.
+    async fn check_batch_focus(&self, guard: &StepGuard) -> Result<()> {
+        let moved = |why: &str| {
+            Err(Error::Element(format!(
+                "{why}; the key was NOT pressed (it would activate an element the approval did not name)"
+            )))
+        };
+        let Some(r) = guard.focus_ref.as_deref() else {
+            return moved("no earlier step of this batch worked on an element to press the key on");
+        };
+        let want = self.locate(r).await?;
+        let key = (want.session_id.clone(), want.backend_id);
+        let mut now = self.focused_node().await?;
+        if now.is_none() {
+            self.focus_entry(&want).await?;
+            now = self.focused_node().await?;
+        }
+        if now.as_ref() != Some(&key) {
+            return moved("keyboard focus is not on the element the previous step used");
+        }
+        // Enter in a password / one-time-code / card field submits it: still refused.
+        self.refuse_if_sensitive_now(&want, "key press").await
     }
 
     async fn check_focused_origin(&self, expected: Option<&str>) -> Result<()> {
@@ -833,7 +990,12 @@ impl Page {
         Ok(())
     }
 
-    async fn key_inner_with_origin(&self, spec: &str, expected: Option<&str>) -> Result<()> {
+    async fn key_inner_with_origin(
+        &self,
+        spec: &str,
+        expected: Option<&str>,
+        guard: &StepGuard,
+    ) -> Result<()> {
         let k = parse_key(spec)?;
         let mut down = json!({
             "type": if k.text.is_some() { "keyDown" } else { "rawKeyDown" },
@@ -844,6 +1006,9 @@ impl Page {
             down["text"] = json!(t);
         }
         self.check_focused_origin(expected).await?;
+        if guard.batch && is_activating_spec(spec) {
+            self.check_batch_focus(guard).await?;
+        }
         if k.text.is_some() && !is_navigation_spec(spec) {
             // Printable input: the focused element must still not be a secret field.
             match self.focused_entry().await {
@@ -881,8 +1046,20 @@ impl Page {
         opts: &DialogOptions,
         expected: Option<&str>,
     ) -> Result<ActionResult> {
+        self.click_with_guard(r, opts, expected, &StepGuard::default())
+            .await
+    }
+
+    /// Click with a receiving-frame grant check and the extra checks of a batch step.
+    pub async fn click_with_guard(
+        &self,
+        r: &str,
+        opts: &DialogOptions,
+        expected: Option<&str>,
+        guard: &StepGuard,
+    ) -> Result<ActionResult> {
         let before = self.baseline_with(opts).await?;
-        let res = self.click_inner(r, 1, expected).await;
+        let res = self.click_inner(r, 1, expected, guard).await;
         self.finish(before, res).await
     }
 
@@ -894,7 +1071,7 @@ impl Page {
     /// Double-click an element.
     pub async fn double_click(&self, r: &str) -> Result<ActionResult> {
         let before = self.baseline().await?;
-        let res = self.click_inner(r, 2, None).await;
+        let res = self.click_inner(r, 2, None, &StepGuard::default()).await;
         self.finish(before, res).await
     }
 
@@ -1068,7 +1245,12 @@ impl Page {
             if ok.as_bool() == Some(true) {
                 Ok(())
             } else {
-                Err(Error::Element(format!("no <option> matching '{value}'")))
+                // The requested text is not echoed: the model already has it, and a result is
+                // also shown in logs and later turns.
+                Err(Error::Element(format!(
+                    "no <option> matches the {}-character value; take a browser_snapshot to see the options",
+                    value.chars().count()
+                )))
             }
         }
         .await;
@@ -1086,8 +1268,19 @@ impl Page {
         key: &str,
         expected: Option<&str>,
     ) -> Result<ActionResult> {
+        self.press_key_with_guard(key, expected, &StepGuard::default())
+            .await
+    }
+
+    /// Press a key with the extra checks of a batch step.
+    pub async fn press_key_with_guard(
+        &self,
+        key: &str,
+        expected: Option<&str>,
+        guard: &StepGuard,
+    ) -> Result<ActionResult> {
         let before = self.baseline().await?;
-        let res = self.key_inner_with_origin(key, expected).await;
+        let res = self.key_inner_with_origin(key, expected, guard).await;
         self.finish(before, res).await
     }
 

@@ -20,6 +20,8 @@ pub(crate) struct Families {
     pub web_fetch: bool,
     /// The assistant's own managed browser (`browser_*`).
     pub browser: bool,
+    /// `browser_act` (several browser steps in one call) is offered.
+    pub browser_act: bool,
     /// Browser tools of a connected app (an MCP server such as Playwright).
     pub app_browser: bool,
     pub shell: bool,
@@ -43,6 +45,10 @@ impl Families {
                 "web_search" => f.web_search = true,
                 "web_extract" => f.web_fetch = true,
                 "shell_run" => f.shell = true,
+                "browser_act" => {
+                    f.browser = true;
+                    f.browser_act = true;
+                }
                 _ if name.starts_with("browser_") => f.browser = true,
                 _ => {}
             }
@@ -75,6 +81,12 @@ says no live view is attached, tell them to open the live view of this chat.",
 browser_eval after each click just to look again, and do not write a paragraph between steps. Make the next call \
 straight away; say something only when you are done, blocked or need the user.",
         );
+        if f.browser_act {
+            out.push_str(
+                "
+- For a form or a flow of several clicks, take ONE browser_snapshot and do the steps with ONE browser_act call (click, fill, select, press, scroll, wait, up to 12) instead of one tool call per step: it is much faster. The batch checks the page before every step and stops at the first change; its result names the step it stopped at and the steps not run, then continue from the page state it shows. browser_open and secret fills stay single calls.",
+            );
+        }
     }
     if f.app_browser && f.browser {
         out.push_str(
@@ -123,6 +135,15 @@ mod tests {
         // Nothing about a second browser when there is only one.
         let only = block(Families::of(["browser_open"])).unwrap();
         assert!(!only.contains("connected app"), "{only}");
+    }
+
+    #[test]
+    fn batches_are_recommended_only_when_browser_act_is_offered() {
+        let with = block(Families::of(["browser_open", "browser_act"])).unwrap();
+        assert!(with.contains("ONE browser_act call"), "{with}");
+        assert!(with.contains("stops at the first change"), "{with}");
+        let without = block(Families::of(["browser_open", "browser_click"])).unwrap();
+        assert!(!without.contains("browser_act"), "{without}");
     }
 
     #[test]

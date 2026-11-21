@@ -1134,6 +1134,17 @@
       },
       "sendOnce": "Send",
       "sendTitle": "Send on your behalf?",
+      "steps": {
+        "click": "Click {{target}}",
+        "fill": "Type “{{text}}” into {{target}}",
+        "label": "Steps, in this order",
+        "press": "Press the {{key}} key",
+        "scroll": "Scroll {{target}}",
+        "scrollPage": "Scroll the page",
+        "select": "Choose “{{value}}” in {{target}}",
+        "unknown": "an element that could not be identified ({{ref}})",
+        "wait": "Wait for {{what}}"
+      },
       "thisChat": "This chat",
       "title": "Approval needed",
       "why": {
@@ -1394,6 +1405,11 @@
         "done": "Changed a bot",
         "failed": "Didn't change a bot",
         "running": "Changing a bot"
+      },
+      "browser_act": {
+        "done": "Did several steps in the browser",
+        "failed": "Didn't finish the steps in the browser",
+        "running": "Doing several steps in the browser"
       },
       "browser_click": {
         "done": "Clicked on a page",
