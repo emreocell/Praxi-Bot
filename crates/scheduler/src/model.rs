@@ -154,6 +154,56 @@ impl ScheduleSpec {
         }
     }
 
+    /// Compute up to `count` upcoming occurrences strictly after `after_ms`
+    /// (Unix epoch ms).
+    ///
+    /// # Errors
+    /// Fails if the specification is invalid.
+    pub fn next_occurrences(&self, after_ms: i64, count: usize) -> Result<Vec<i64>> {
+        self.validate()?;
+        if count == 0 {
+            return Ok(Vec::new());
+        }
+        match self {
+            Self::Cron(raw) => {
+                let parsed = ParsedCron::parse(raw)?;
+                let mut out = Vec::with_capacity(count);
+                let mut cursor = after_ms;
+                while out.len() < count {
+                    let Some(next) = parsed.next_after(cursor)? else {
+                        break;
+                    };
+                    out.push(next);
+                    cursor = next;
+                }
+                Ok(out)
+            }
+            Self::Every { seconds } => {
+                let period_ms = i64::try_from(*seconds)
+                    .unwrap_or(i64::MAX / 1000)
+                    .saturating_mul(1000);
+                let mut out = Vec::with_capacity(count);
+                let mut cursor = after_ms;
+                for _ in 0..count {
+                    let next = cursor.saturating_add(period_ms);
+                    if next <= cursor {
+                        break;
+                    }
+                    out.push(next);
+                    cursor = next;
+                }
+                Ok(out)
+            }
+            Self::At { unix_ms } => {
+                if *unix_ms > after_ms {
+                    Ok(vec![*unix_ms])
+                } else {
+                    Ok(Vec::new())
+                }
+            }
+        }
+    }
+
     /// Compute the next occurrence strictly after `now_ms`, anchored to a
     /// previously scheduled due timestamp `first_due_ms`.
     ///
@@ -576,6 +626,78 @@ impl ScheduleOrigin {
             _ => None,
         }
     }
+}
+
+/// Lifecycle state of a persisted schedule occurrence in `occurrences`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OccurrenceState {
+    /// Reserved by the timer engine, not yet dispatched.
+    Pending,
+    /// Claimed for execution by the scheduler.
+    Dispatched,
+    /// Executor acknowledged a durable run start.
+    Started,
+    /// Execution completed successfully.
+    Succeeded,
+    /// Execution returned an error.
+    Failed,
+    /// Pending occurrence found unresolved at daemon startup.
+    Missed,
+    /// Dispatched occurrence found unresolved at daemon startup.
+    Interrupted,
+}
+
+impl OccurrenceState {
+    /// Stable lowercase string stored in SQLite.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Dispatched => "dispatched",
+            Self::Started => "started",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Missed => "missed",
+            Self::Interrupted => "interrupted",
+        }
+    }
+
+    /// Parse a stored occurrence state string.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "pending" => Some(Self::Pending),
+            "dispatched" => Some(Self::Dispatched),
+            "started" => Some(Self::Started),
+            "succeeded" => Some(Self::Succeeded),
+            "failed" => Some(Self::Failed),
+            "missed" => Some(Self::Missed),
+            "interrupted" => Some(Self::Interrupted),
+            _ => None,
+        }
+    }
+
+    /// Whether an explicit owner retry may re-dispatch this occurrence.
+    #[must_use]
+    pub const fn is_retryable(self) -> bool {
+        matches!(self, Self::Failed | Self::Missed | Self::Interrupted)
+    }
+}
+
+/// A persisted timer occurrence record from `occurrences`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Occurrence {
+    /// Owning schedule id.
+    pub schedule_id: TaskId,
+    /// Scheduled due timestamp (Unix epoch milliseconds).
+    pub due_ms: i64,
+    /// Schedule revision at reservation or retry time.
+    pub revision: i64,
+    /// Linked agent run id, when recorded by the executor.
+    pub run_id: Option<String>,
+    /// Current occurrence state.
+    pub state: OccurrenceState,
 }
 
 /// A persisted schedule definition and its runtime state.

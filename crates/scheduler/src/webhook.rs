@@ -182,7 +182,7 @@ pub async fn handle_webhook(
         &WebhookMeta::default(),
         None,
     )?;
-    crate::engine::execute_checked(store, executor, &fired).await
+    crate::engine::execute_checked(store, executor, &fired, None).await
 }
 
 /// Look up and authenticate a webhook call, record the firing, and return the

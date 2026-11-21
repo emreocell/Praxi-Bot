@@ -1295,3 +1295,159 @@ async fn run_now_and_trigger_webhook_return_before_the_execution_ends() {
     );
     scheduler.shutdown().await;
 }
+
+#[test]
+fn next_occurrences_preview_specs_timezones_and_dst_edges() {
+    // Interval: 5 strictly increasing runs spaced by 15 minutes.
+    let every = ScheduleSpec::Every { seconds: 900 };
+    let t0 = utc_ms(2026, 3, 7, 10, 0, 0);
+    let runs = every.next_occurrences(t0, 5).unwrap();
+    assert_eq!(runs.len(), 5);
+    assert!(runs.windows(2).all(|w| w[1] - w[0] == 900_000));
+
+    // One-shot: returns single future timestamp, or empty when past.
+    let future_at = ScheduleSpec::At {
+        unix_ms: t0 + 60_000,
+    };
+    assert_eq!(
+        future_at.next_occurrences(t0, 5).unwrap(),
+        vec![t0 + 60_000]
+    );
+    assert_eq!(
+        future_at.next_occurrences(t0 + 60_000, 5).unwrap(),
+        Vec::<i64>::new()
+    );
+
+    // Weekly and monthly in Europe/Berlin across spring-forward (2026-03-29 02:00 -> 03:00 CEST).
+    // Before 2026-03-29: CET = UTC+1 (09:00 local = 08:00 UTC).
+    // On/after 2026-03-29: CEST = UTC+2 (09:00 local = 07:00 UTC).
+    let weekly_berlin = ScheduleSpec::cron_tz("0 9 * * 0", "Europe/Berlin");
+    let weekly_runs = weekly_berlin
+        .next_occurrences(utc_ms(2026, 3, 20, 0, 0, 0), 5)
+        .unwrap();
+    assert_eq!(
+        weekly_runs,
+        vec![
+            utc_ms(2026, 3, 22, 8, 0, 0), // CET
+            utc_ms(2026, 3, 29, 7, 0, 0), // CEST (DST Sunday)
+            utc_ms(2026, 4, 5, 7, 0, 0),
+            utc_ms(2026, 4, 12, 7, 0, 0),
+            utc_ms(2026, 4, 19, 7, 0, 0),
+        ]
+    );
+
+    let monthly_berlin = ScheduleSpec::cron_tz("0 9 1 * *", "Europe/Berlin");
+    let monthly_runs = monthly_berlin
+        .next_occurrences(utc_ms(2026, 2, 15, 0, 0, 0), 5)
+        .unwrap();
+    assert_eq!(
+        monthly_runs,
+        vec![
+            utc_ms(2026, 3, 1, 8, 0, 0), // CET
+            utc_ms(2026, 4, 1, 7, 0, 0), // CEST
+            utc_ms(2026, 5, 1, 7, 0, 0),
+            utc_ms(2026, 6, 1, 7, 0, 0),
+            utc_ms(2026, 7, 1, 7, 0, 0),
+        ]
+    );
+
+    // Daily in America/New_York across fall-back (2026-11-01 02:00 EDT -> 01:00 EST).
+    let daily_ny = ScheduleSpec::cron_tz("30 1 * * *", "America/New_York");
+    let ny_runs = daily_ny
+        .next_occurrences(utc_ms(2026, 10, 30, 0, 0, 0), 5)
+        .unwrap();
+    assert_eq!(
+        ny_runs,
+        vec![
+            utc_ms(2026, 10, 30, 5, 30, 0), // EDT (UTC-4)
+            utc_ms(2026, 10, 31, 5, 30, 0), // EDT (UTC-4)
+            utc_ms(2026, 11, 1, 5, 30, 0),  // first 01:30 EDT on fall-back day (no duplicate)
+            utc_ms(2026, 11, 2, 6, 30, 0),  // EST (UTC-5)
+            utc_ms(2026, 11, 3, 6, 30, 0),  // EST (UTC-5)
+        ]
+    );
+
+    // Invalid spec is still rejected even for count = 0.
+    assert!(
+        ScheduleSpec::cron("0 9 * * * Mars/Olympus")
+            .next_occurrences(t0, 0)
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn retry_occurrence_is_idempotent_uses_current_spec_and_preserves_timer() {
+    let dir = tempfile::tempdir().unwrap();
+    let t0 = 1_700_000_000_000_i64;
+    let bot = BotId::new();
+    let sched = Schedule::new(
+        bot,
+        None,
+        "missed-job",
+        ScheduleSpec::Every { seconds: 60 },
+        Payload::AgentPrompt { text: "old".into() },
+        MisfirePolicy::Skip,
+        t0,
+    )
+    .unwrap();
+    let id = sched.id;
+    let due_ms = sched.next_run_at.unwrap();
+
+    // Seed a pending occurrence and crash-recover it into `missed`.
+    {
+        let store = ScheduleStore::open(dir.path()).unwrap();
+        store.insert(&sched).unwrap();
+        assert!(
+            store
+                .reserve_occurrences(&sched, &[due_ms], Some(due_ms + 60_000))
+                .unwrap()
+        );
+        assert_eq!(store.recover_unresolved_occurrences().unwrap(), 1);
+        let occ = store.get_occurrence(id, due_ms).unwrap().unwrap();
+        assert_eq!(occ.state, crate::OccurrenceState::Missed);
+    }
+
+    // Edit the prompt before retrying so we verify retry uses the latest definition.
+    let store = Arc::new(ScheduleStore::open(dir.path()).unwrap());
+    let mut edited = store.get(id).unwrap().unwrap();
+    edited.payload = Payload::AgentPrompt {
+        text: "updated".into(),
+    };
+    assert!(store.update_definition(&edited).unwrap());
+    let next_before = store.get(id).unwrap().unwrap().next_run_at;
+
+    let exec = RecordingExecutor::new();
+    let clock = Arc::new(FakeClock::new(t0 + 10_000));
+    let scheduler = Scheduler::start_with_clock(Arc::clone(&store), exec.clone(), clock);
+    scheduler.settle().await;
+    assert_eq!(exec.count(), 0);
+
+    // First retry succeeds and runs once with the updated payload.
+    scheduler.retry_occurrence(id, due_ms).unwrap();
+    scheduler.settle().await;
+    assert_eq!(exec.count(), 1);
+    assert_eq!(
+        exec.recorded()[0].payload,
+        Payload::AgentPrompt {
+            text: "updated".into()
+        }
+    );
+    let occ = store.get_occurrence(id, due_ms).unwrap().unwrap();
+    assert_eq!(occ.state, crate::OccurrenceState::Succeeded);
+    assert_eq!(store.get(id).unwrap().unwrap().next_run_at, next_before);
+
+    // Second retry on the now-succeeded occurrence is refused and never double-fires.
+    assert!(matches!(
+        scheduler.retry_occurrence(id, due_ms),
+        Err(SchedulerError::Conflict(_))
+    ));
+    scheduler.settle().await;
+    assert_eq!(exec.count(), 1);
+
+    // Unknown occurrence returns NotFound.
+    assert!(matches!(
+        scheduler.retry_occurrence(id, due_ms + 999),
+        Err(SchedulerError::NotFound(_))
+    ));
+    scheduler.shutdown().await;
+}

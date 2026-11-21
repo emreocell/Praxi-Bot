@@ -48,6 +48,12 @@ pub trait ScheduleExecutor: Send + Sync + 'static {
     /// Execute a single triggered occurrence of `schedule`.
     async fn execute(&self, schedule: &Schedule) -> Result<()>;
 
+    /// Execute a scheduled occurrence identified by `due_ms` (defaults to
+    /// [`Self::execute`]).
+    async fn execute_occurrence(&self, schedule: &Schedule, _due_ms: i64) -> Result<()> {
+        self.execute(schedule).await
+    }
+
     /// Read-only host for a precheck; never creates an agent run.
     async fn precheck(
         &self,
@@ -227,7 +233,13 @@ impl Scheduler {
             return Err(SchedulerError::Busy(id.to_string()));
         };
         self.commit_replay(pending, now_ms)?;
-        execute_checked(&self.inner.store, self.inner.executor.as_ref(), &fired).await
+        execute_checked(
+            &self.inner.store,
+            self.inner.executor.as_ref(),
+            &fired,
+            None,
+        )
+        .await
     }
 
     /// Like [`Self::handle_webhook`], but returns as soon as the request is
@@ -308,6 +320,38 @@ impl Scheduler {
         self.inner.store.touch_last_run(id, now_ms)?;
         schedule.last_run_at = Some(now_ms);
         spawn_direct_execution(&self.inner, schedule, guard);
+        Ok(())
+    }
+
+    /// Explicitly retry a `failed`, `missed`, or `interrupted` occurrence
+    /// (`schedule_id:due_ms`) in the background using the current schedule
+    /// definition and without touching `next_run_at`. Atomically claims the
+    /// occurrence in SQLite so concurrent or repeat retries never double-fire.
+    ///
+    /// # Errors
+    /// [`SchedulerError::NotFound`] if the schedule or occurrence is missing,
+    /// [`SchedulerError::Frozen`] if the schedule moved to a server,
+    /// [`SchedulerError::Busy`] if a run of `id` is currently in flight,
+    /// [`SchedulerError::Conflict`] if the occurrence is already pending,
+    /// dispatched, or succeeded.
+    pub fn retry_occurrence(&self, id: TaskId, due_ms: i64) -> Result<()> {
+        let schedule = self
+            .inner
+            .store
+            .get(id)?
+            .ok_or_else(|| SchedulerError::NotFound(format!("schedule {id}")))?;
+        if self.inner.store.frozen_for(id)?.is_some() {
+            return Err(SchedulerError::Frozen(id.to_string()));
+        }
+        let Some(guard) = try_acquire_in_flight(&self.inner, &schedule) else {
+            return Err(SchedulerError::Busy(id.to_string()));
+        };
+        let now_ms = self.inner.clock.wall_ms();
+        let claimed = self
+            .inner
+            .store
+            .claim_retry_occurrence(id, due_ms, now_ms)?;
+        spawn_retry_execution(&self.inner, claimed, due_ms, guard);
         Ok(())
     }
 
@@ -604,11 +648,39 @@ fn spawn_direct_execution(inner: &Arc<Inner>, schedule: Schedule, guard: InFligh
     let inner = Arc::clone(inner);
     tokio::spawn(async move {
         let _guard = guard;
-        if let Err(_e) = execute_checked(&inner.store, inner.executor.as_ref(), &schedule).await {
+        if let Err(_e) =
+            execute_checked(&inner.store, inner.executor.as_ref(), &schedule, None).await
+        {
             tracing::error!(
                 schedule_id = %schedule.id,
                 "scheduled execution failed"
             );
+        }
+    });
+}
+
+fn spawn_retry_execution(
+    inner: &Arc<Inner>,
+    schedule: Schedule,
+    due_ms: i64,
+    guard: InFlightGuard,
+) {
+    let inner = Arc::clone(inner);
+    tokio::spawn(async move {
+        let _guard = guard;
+        let id = schedule.id;
+        let outcome = execute_checked(
+            &inner.store,
+            inner.executor.as_ref(),
+            &schedule,
+            Some(due_ms),
+        )
+        .await;
+        if let Err(error) = &outcome {
+            tracing::error!(schedule_id = %id, due_ms, %error, "retried execution failed");
+        }
+        if let Err(error) = inner.store.finish_occurrence(id, due_ms, outcome.is_ok()) {
+            tracing::error!(schedule_id = %id, due_ms, %error, "failed to record retried occurrence outcome");
         }
     });
 }
@@ -662,7 +734,13 @@ fn spawn_timer_executions(
                 }
             };
             let occurrence = format!("{id}:{due_ms}");
-            let outcome = execute_checked(&inner.store, inner.executor.as_ref(), &schedule).await;
+            let outcome = execute_checked(
+                &inner.store,
+                inner.executor.as_ref(),
+                &schedule,
+                Some(due_ms),
+            )
+            .await;
             if let Err(error) = &outcome {
                 tracing::error!(%occurrence, %error, "scheduled execution failed");
             }
@@ -680,6 +758,7 @@ pub(crate) async fn execute_checked(
     store: &ScheduleStore,
     executor: &dyn ScheduleExecutor,
     schedule: &Schedule,
+    due_ms: Option<i64>,
 ) -> Result<()> {
     // A schedule that moved to a server never fires here, whichever ingress asked.
     if store.frozen_for(schedule.id)?.is_some() {
@@ -725,7 +804,10 @@ pub(crate) async fn execute_checked(
         return Ok(());
     }
     // The tenth failed check still fails open; the next firing is paused.
-    executor.execute(&fired).await
+    match due_ms {
+        Some(due) => executor.execute_occurrence(&fired, due).await,
+        None => executor.execute(&fired).await,
+    }
 }
 
 fn poll_triggers(inner: &Arc<Inner>, now: i64) -> Result<()> {
@@ -758,7 +840,7 @@ fn poll_triggers(inner: &Arc<Inner>, now: i64) -> Result<()> {
             drop(slot);
             let result = match result {
                 Ok(Some(fired)) => {
-                    execute_checked(&inner.store, inner.executor.as_ref(), &fired).await
+                    execute_checked(&inner.store, inner.executor.as_ref(), &fired, None).await
                 }
                 Ok(None) => Ok(()),
                 Err(error) => Err(error),
