@@ -324,6 +324,22 @@ export class ApiClient {
     return { Authorization: `Bearer ${this.token}` };
   }
 
+  /**
+   * Headers for the event stream: the owner key marks this app as the local manager, so the
+   * daemon sends it approval/question/control events (a bearer alone only gets progress events).
+   * Never sent through the proxy to a paired host.
+   */
+  async eventStreamHeaders(): Promise<Record<string, string>> {
+    const headers = this.authHeaders();
+    if (ApiClient.ownerKeyProvider && isLocalBaseUrl(this.baseUrl)) {
+      const key = await ApiClient.ownerKeyProvider();
+      if (key) {
+        headers["x-praxi-owner-key"] = key;
+      }
+    }
+    return headers;
+  }
+
   protected async request<T>(
     method: string,
     path: string,

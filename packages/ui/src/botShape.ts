@@ -1,27 +1,35 @@
-/** All 16 character shapes (eye coordinates in a 64x64 viewBox). */
-export const BOT_SHAPES = [
-  { id: 'pebble', alias: 'daire', leftEyeX: 25.5, rightEyeX: 38.5, eyeY: 32.5 },
-  { id: 'cube', alias: 'kare', leftEyeX: 25.5, rightEyeX: 38.5, eyeY: 31.5 },
-  { id: 'diamond', alias: 'elmas', leftEyeX: 26, rightEyeX: 38, eyeY: 32 },
-  { id: 'cloud', alias: 'bulut', leftEyeX: 25.5, rightEyeX: 38.5, eyeY: 37 },
-  { id: 'tri', alias: 'ucgen', leftEyeX: 26, rightEyeX: 38, eyeY: 39.5 },
-  { id: 'flower', alias: 'cicek', leftEyeX: 26.5, rightEyeX: 37.5, eyeY: 32 },
-  { id: 'gem', alias: 'altigen', leftEyeX: 25.5, rightEyeX: 38.5, eyeY: 32 },
-  { id: 'drop', alias: 'damla', leftEyeX: 25.5, rightEyeX: 38.5, eyeY: 39 },
-  { id: 'star', alias: 'yildiz', leftEyeX: 26.5, rightEyeX: 37.5, eyeY: 34 },
-  { id: 'ghost', alias: 'hayalet', leftEyeX: 26, rightEyeX: 38, eyeY: 29.5 },
-  { id: 'capsule', alias: 'kapsul', leftEyeX: 27.5, rightEyeX: 36.5, eyeY: 27.5 },
-  { id: 'ears', alias: 'kulakli', leftEyeX: 25.5, rightEyeX: 38.5, eyeY: 36 },
-  { id: 'gumdrop', alias: 'jole', leftEyeX: 25.5, rightEyeX: 38.5, eyeY: 34 },
-  { id: 'heart', alias: 'kalp', leftEyeX: 25.5, rightEyeX: 38.5, eyeY: 29.5 },
-  { id: 'clover', alias: 'yonca', leftEyeX: 26.5, rightEyeX: 37.5, eyeY: 32 },
-  { id: 'boulder', alias: 'kaya', leftEyeX: 25.5, rightEyeX: 38.5, eyeY: 35.5 }
+import {
+  SHAPE_SPECS,
+  groundPoints,
+  pointBounds,
+  smoothClosedPath,
+  type Point
+} from './avatarShapes.ts';
+
+/**
+ * The 16 persisted character ids (+ Turkish prototype aliases). Order matters: the id fallback
+ * is `hash % 16`, so never reorder, rename or remove an entry. Eye anchors are in a 64x64 viewBox.
+ */
+const SHAPE_IDS = [
+  { id: 'pebble', alias: 'daire' },
+  { id: 'cube', alias: 'kare' },
+  { id: 'diamond', alias: 'elmas' },
+  { id: 'cloud', alias: 'bulut' },
+  { id: 'tri', alias: 'ucgen' },
+  { id: 'flower', alias: 'cicek' },
+  { id: 'gem', alias: 'altigen' },
+  { id: 'drop', alias: 'damla' },
+  { id: 'star', alias: 'yildiz' },
+  { id: 'ghost', alias: 'hayalet' },
+  { id: 'capsule', alias: 'kapsul' },
+  { id: 'ears', alias: 'kulakli' },
+  { id: 'gumdrop', alias: 'jole' },
+  { id: 'heart', alias: 'kalp' },
+  { id: 'clover', alias: 'yonca' },
+  { id: 'boulder', alias: 'kaya' }
 ] as const;
 
-export type BotShapeDef = (typeof BOT_SHAPES)[number];
-export type BotShapeId = BotShapeDef['id'];
-
-export const BOT_SHAPE_IDS: readonly BotShapeId[] = BOT_SHAPES.map((s) => s.id);
+type ShapeIdEntry = (typeof SHAPE_IDS)[number];
 
 export type BotAvatarState = 'idle' | 'thinking' | 'working' | 'waiting-approval' | 'error';
 
@@ -34,205 +42,155 @@ export const BOT_AVATAR_STATES: readonly BotAvatarState[] = [
 ] as const;
 
 export interface BotShapeGeometry {
-  /** Smooth sculptural SVG silhouette path in a 64x64 viewBox. */
+  /** Soft organic SVG silhouette path in a 64x64 viewBox, resting on y = 55.5. */
   readonly path: string;
-  /** Gentle organic cant (degrees) applied around (32, 32) while keeping studio lighting fixed. */
+  /** Baked lean of the silhouette (degrees); the eyes follow part of it. */
   readonly tilt: number;
-  /** Subtle harmonious tilt for the eyes (degrees). */
+  /** Tilt of the pill eyes (degrees). */
   readonly eyeTilt: number;
   /** Relative eye scale multiplier for narrow or roomy silhouettes. */
   readonly eyeScale: number;
-  /** Center of the soft top-left studio satin sheen. */
+  /** Centre and radii of the broad soft top-left specular. */
   readonly sheenCx: number;
   readonly sheenCy: number;
   readonly sheenRx: number;
   readonly sheenRy: number;
   /** Ground contact shadow horizontal radius (viewBox units). */
   readonly shadowRx: number;
+  /** Silhouette bounds (viewBox units). */
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minY: number;
+  readonly maxY: number;
+  /** Centre and radius of the sphere the face sits on (for the head-turn projection). */
+  readonly faceCx: number;
+  readonly faceCy: number;
+  readonly faceR: number;
 }
 
-/**
- * Handcrafted procedural SVG silhouettes for all 16 character shapes (64x64 viewBox).
- * Each silhouette stays centered with balanced visual mass from 24px (`xs`) to 104px (`hero`).
- */
-export const BOT_SHAPE_GEOMETRY: Readonly<Record<BotShapeId, BotShapeGeometry>> = {
-  pebble: {
-    path: 'M 31.2 9.5 C 43.8 9.5, 54.8 20.8, 54.4 35.2 C 54.0 47.6, 45.2 54.8, 32.0 54.8 C 18.6 54.8, 9.6 47.2, 9.6 34.4 C 9.6 21.4, 19.4 9.5, 31.2 9.5 Z',
-    tilt: 0,
-    eyeTilt: 2,
-    eyeScale: 1,
-    sheenCx: 24,
-    sheenCy: 21,
-    sheenRx: 15,
-    sheenRy: 11,
-    shadowRx: 17
-  },
-  cube: {
-    path: 'M 22 11.5 L 42 11.5 C 48.8 11.5, 52.5 15.2, 52.5 22 L 52.5 42 C 52.5 48.8, 48.8 52.5, 42 52.5 L 22 52.5 C 15.2 52.5, 11.5 48.8, 11.5 42 L 11.5 22 C 11.5 15.2, 15.2 11.5, 22 11.5 Z',
-    tilt: -8,
-    eyeTilt: -6,
-    eyeScale: 1,
-    sheenCx: 23,
-    sheenCy: 20,
-    sheenRx: 15,
-    sheenRy: 11,
-    shadowRx: 17
-  },
-  diamond: {
-    path: 'M 32 7.2 C 35.8 7.2, 39.2 11.4, 45.4 18.2 C 51.4 24.8, 55.6 28.4, 55.6 32 C 55.6 35.6, 51.4 39.2, 45.4 45.8 C 39.2 52.6, 35.8 56.8, 32 56.8 C 28.2 56.8, 24.8 52.6, 18.6 45.8 C 12.6 39.2, 8.4 35.6, 8.4 32 C 8.4 28.4, 12.6 24.8, 18.6 18.2 C 24.8 11.4, 28.2 7.2, 32 7.2 Z',
-    tilt: -3,
-    eyeTilt: -2,
-    eyeScale: 0.94,
-    sheenCx: 25,
-    sheenCy: 21,
-    sheenRx: 13,
-    sheenRy: 10,
-    shadowRx: 13
-  },
-  cloud: {
-    path: 'M 20.5 28.0 C 21.8 17.8, 29.8 13.0, 37.8 16.0 C 42.6 17.8, 45.4 21.6, 46.0 25.4 C 52.8 25.8, 57.6 31.8, 56.8 39.2 C 56.0 46.8, 49.4 51.6, 41.2 51.2 C 38.6 51.1, 36.6 50.4, 34.4 51.2 C 29.2 53.2, 22.8 52.8, 18.2 49.4 C 11.2 49.0, 6.8 43.2, 7.6 36.2 C 8.2 30.2, 13.8 26.8, 20.5 28.0 Z',
-    tilt: 0,
-    eyeTilt: 0,
-    eyeScale: 0.96,
-    sheenCx: 27,
-    sheenCy: 24,
-    sheenRx: 16,
-    sheenRy: 10,
-    shadowRx: 19
-  },
-  tri: {
-    path: 'M 32 9.5 C 37.2 9.5, 42.2 16.5, 48.0 28.4 C 53.6 39.8, 56.2 46.2, 53.4 50.6 C 50.8 54.6, 43.4 55.2, 32 55.2 C 20.6 55.2, 13.2 54.6, 10.6 50.6 C 7.8 46.2, 10.4 39.8, 16.0 28.4 C 21.8 16.5, 26.8 9.5, 32 9.5 Z',
-    tilt: 0,
-    eyeTilt: 0,
-    eyeScale: 0.94,
-    sheenCx: 28,
-    sheenCy: 24,
-    sheenRx: 11,
-    sheenRy: 11,
-    shadowRx: 18
-  },
-  flower: {
-    path: 'M 32 8.2 C 37.8 8.2, 41.0 13.0, 40.4 18.6 C 45.4 15.8, 51.6 17.6, 54.0 22.8 C 56.4 27.8, 53.8 32.8, 49.0 34.8 C 53.8 36.8, 56.2 42.2, 53.4 47.0 C 50.4 52.0, 44.2 53.2, 39.6 49.8 C 39.8 54.6, 36.6 57.6, 32 57.6 C 27.4 57.6, 24.2 54.6, 24.4 49.8 C 19.8 53.2, 13.6 52.0, 10.6 47.0 C 7.8 42.2, 10.2 36.8, 15.0 34.8 C 10.2 32.8, 7.6 27.8, 10.0 22.8 C 12.4 17.6, 18.6 15.8, 23.6 18.6 C 23.0 13.0, 26.2 8.2, 32 8.2 Z',
-    tilt: 0,
-    eyeTilt: 0,
-    eyeScale: 0.92,
-    sheenCx: 25,
-    sheenCy: 22,
-    sheenRx: 14,
-    sheenRy: 11,
-    shadowRx: 15
-  },
-  gem: {
-    path: 'M 23.2 10.8 L 40.8 10.8 C 44.2 10.8, 46.2 12.2, 48.0 15.2 L 54.4 26.8 C 56.2 30.0, 56.2 34.0, 54.4 37.2 L 48.0 48.8 C 46.2 51.8, 44.2 53.2, 40.8 53.2 L 23.2 53.2 C 19.8 53.2, 17.8 51.8, 16.0 48.8 L 9.6 37.2 C 7.8 34.0, 7.8 30.0, 9.6 26.8 L 16.0 15.2 C 17.8 12.2, 19.8 10.8, 23.2 10.8 Z',
-    tilt: -6,
-    eyeTilt: -4,
-    eyeScale: 0.98,
-    sheenCx: 24,
-    sheenCy: 20,
-    sheenRx: 14,
-    sheenRy: 11,
-    shadowRx: 16
-  },
-  drop: {
-    path: 'M 38.2 7.6 C 42.2 8.0, 43.2 12.4, 40.2 14.2 C 38.0 15.4, 37.6 17.2, 40.0 21.0 C 46.8 29.0, 53.8 35.8, 53.6 43.4 C 53.4 51.4, 44.6 55.6, 32.0 55.6 C 19.4 55.6, 10.6 51.2, 10.4 42.8 C 10.2 33.4, 18.2 24.4, 26.2 16.0 C 31.0 10.8, 34.8 7.2, 38.2 7.6 Z',
-    tilt: 0,
-    eyeTilt: 2,
-    eyeScale: 0.98,
-    sheenCx: 25,
-    sheenCy: 27,
-    sheenRx: 12,
-    sheenRy: 11,
-    shadowRx: 17
-  },
-  star: {
-    path: 'M 32 8.2 C 35.8 8.2, 38.0 15.6, 40.8 20.4 C 46.2 21.2, 54.8 22.0, 56.2 25.8 C 57.6 29.6, 51.4 34.6, 47.6 38.2 C 48.6 44.0, 51.2 52.0, 47.6 54.6 C 44.0 57.2, 37.6 52.0, 32 49.8 C 26.4 52.0, 20.0 57.2, 16.4 54.6 C 12.8 52.0, 15.4 44.0, 16.4 38.2 C 12.6 34.6, 6.4 29.6, 7.8 25.8 C 9.2 22.0, 17.8 21.2, 23.2 20.4 C 26.0 15.6, 28.2 8.2, 32 8.2 Z',
-    tilt: -5,
-    eyeTilt: -2,
-    eyeScale: 0.9,
-    sheenCx: 26,
-    sheenCy: 24,
-    sheenRx: 13,
-    sheenRy: 10,
-    shadowRx: 16
-  },
-  ghost: {
-    path: 'M 32 8.8 C 44.6 8.8, 50.2 18.8, 51.4 31.8 C 52.4 41.6, 56.2 46.8, 53.8 51.6 C 51.6 55.6, 46.2 54.2, 42.6 51.0 C 41.0 49.6, 39.4 50.2, 38.0 52.0 C 35.6 55.2, 33.8 56.2, 32.0 56.2 C 30.2 56.2, 28.4 55.2, 26.0 52.0 C 24.6 50.2, 23.0 49.6, 21.4 51.0 C 17.8 54.2, 12.4 55.6, 10.2 51.6 C 7.8 46.8, 11.6 41.6, 12.6 31.8 C 13.8 18.8, 19.4 8.8, 32 8.8 Z',
-    tilt: 0,
-    eyeTilt: 0,
-    eyeScale: 0.98,
-    sheenCx: 25,
-    sheenCy: 20,
-    sheenRx: 12,
-    sheenRy: 11,
-    shadowRx: 17
-  },
-  capsule: {
-    path: 'M 32 8.2 C 41.8 8.2, 47.6 15.0, 47.6 25.0 L 47.6 39.0 C 47.6 49.0, 41.8 55.8, 32 55.8 C 22.2 55.8, 16.4 49.0, 16.4 39.0 L 16.4 25.0 C 16.4 15.0, 22.2 8.2, 32 8.2 Z',
-    tilt: 13,
-    eyeTilt: 9,
-    eyeScale: 0.9,
-    sheenCx: 26,
-    sheenCy: 20,
-    sheenRx: 10,
-    sheenRy: 12,
-    shadowRx: 13
-  },
-  ears: {
-    path: 'M 20.8 10.6 C 25.2 10.2, 28.0 13.8, 29.2 17.0 C 31.0 16.6, 33.0 16.6, 34.8 17.0 C 36.0 13.8, 38.8 10.2, 43.2 10.6 C 48.4 11.2, 50.6 16.8, 48.6 22.2 C 53.6 26.4, 55.8 32.6, 54.8 39.6 C 53.6 49.0, 45.2 55.2, 32.0 55.2 C 18.8 55.2, 10.4 49.0, 9.2 39.6 C 8.2 32.6, 10.4 26.4, 15.4 22.2 C 13.4 16.8, 15.6 11.2, 20.8 10.6 Z',
-    tilt: 0,
-    eyeTilt: 0,
-    eyeScale: 0.98,
-    sheenCx: 24,
-    sheenCy: 24,
-    sheenRx: 15,
-    sheenRy: 11,
-    shadowRx: 18
-  },
-  gumdrop: {
-    path: 'M 32 9.4 C 42.8 9.4, 48.6 17.8, 51.6 30.8 C 53.8 40.4, 54.4 47.4, 50.4 51.6 C 46.8 55.0, 40.2 55.6, 32.0 55.6 C 23.8 55.6, 17.2 55.0, 13.6 51.6 C 9.6 47.4, 10.2 40.4, 12.4 30.8 C 15.4 17.8, 21.2 9.4, 32 9.4 Z',
-    tilt: 0,
-    eyeTilt: 0,
-    eyeScale: 0.98,
-    sheenCx: 25,
-    sheenCy: 21,
-    sheenRx: 13,
-    sheenRy: 11,
-    shadowRx: 17
-  },
-  heart: {
-    path: 'M 32 19.6 C 36.2 11.4, 46.4 9.6, 52.6 16.4 C 57.6 22.0, 57.2 31.2, 51.2 38.8 C 46.0 45.4, 38.2 52.4, 32.0 55.6 C 25.8 52.4, 18.0 45.4, 12.8 38.8 C 6.8 31.2, 6.4 22.0, 11.4 16.4 C 17.6 9.6, 27.8 11.4, 32 19.6 Z',
-    tilt: -4,
-    eyeTilt: -2,
-    eyeScale: 0.96,
-    sheenCx: 22,
-    sheenCy: 22,
-    sheenRx: 14,
-    sheenRy: 10,
-    shadowRx: 14
-  },
-  clover: {
-    path: 'M 32 18.8 C 35.6 10.8, 45.8 9.8, 51.4 15.4 C 57.0 21.0, 56.0 31.2, 48.0 34.8 C 56.0 38.4, 57.0 48.6, 51.4 54.2 C 45.8 59.8, 35.6 58.8, 32 50.8 C 28.4 58.8, 18.2 59.8, 12.6 54.2 C 7.0 48.6, 8.0 38.4, 16.0 34.8 C 8.0 31.2, 7.0 21.0, 12.6 15.4 C 18.2 9.8, 28.4 10.8, 32 18.8 Z',
-    tilt: -8,
-    eyeTilt: -3,
-    eyeScale: 0.92,
-    sheenCx: 23,
-    sheenCy: 22,
-    sheenRx: 15,
-    sheenRy: 11,
-    shadowRx: 16
-  },
-  boulder: {
-    path: 'M 24.0 10.0 C 31.6 9.8, 36.2 16.8, 42.6 19.6 C 50.6 23.0, 55.4 28.6, 55.0 39.2 C 54.6 49.4, 46.8 55.0, 31.8 55.0 C 16.4 55.0, 9.2 49.0, 9.2 38.0 C 9.2 25.0, 15.0 10.2, 24.0 10.0 Z',
-    tilt: 0,
-    eyeTilt: 2,
-    eyeScale: 1,
-    sheenCx: 23,
-    sheenCy: 21,
-    sheenRx: 14,
-    sheenRy: 11,
-    shadowRx: 18
-  }
+/** Eye placement per shape: centre as fractions of the bounds, spacing and lean. */
+interface FaceSpec {
+  readonly fx: number;
+  readonly fy: number;
+  readonly eyeTilt: number;
+  readonly eyeScale: number;
+  readonly tilt: number;
+}
+
+const FACE: Readonly<Record<ShapeIdEntry['id'], FaceSpec>> = {
+  pebble: { fx: 0.52, fy: 0.5, eyeTilt: -3, eyeScale: 1, tilt: -6 },
+  cube: { fx: 0.52, fy: 0.47, eyeTilt: -4, eyeScale: 1, tilt: -5 },
+  diamond: { fx: 0.5, fy: 0.5, eyeTilt: 4, eyeScale: 0.92, tilt: 5 },
+  cloud: { fx: 0.52, fy: 0.6, eyeTilt: 0, eyeScale: 0.95, tilt: 0 },
+  tri: { fx: 0.5, fy: 0.62, eyeTilt: 3, eyeScale: 0.94, tilt: 4 },
+  flower: { fx: 0.5, fy: 0.5, eyeTilt: -3, eyeScale: 0.92, tilt: -4 },
+  gem: { fx: 0.52, fy: 0.5, eyeTilt: -4, eyeScale: 0.98, tilt: -6 },
+  drop: { fx: 0.4, fy: 0.66, eyeTilt: 6, eyeScale: 0.96, tilt: 8 },
+  star: { fx: 0.5, fy: 0.54, eyeTilt: -5, eyeScale: 0.9, tilt: -7 },
+  ghost: { fx: 0.52, fy: 0.4, eyeTilt: 2, eyeScale: 0.98, tilt: 0 },
+  capsule: { fx: 0.53, fy: 0.46, eyeTilt: 7, eyeScale: 1, tilt: 11 },
+  ears: { fx: 0.52, fy: 0.48, eyeTilt: -14, eyeScale: 0.98, tilt: -24 },
+  gumdrop: { fx: 0.55, fy: 0.58, eyeTilt: 2, eyeScale: 1, tilt: 0 },
+  heart: { fx: 0.5, fy: 0.42, eyeTilt: -3, eyeScale: 0.95, tilt: 0 },
+  clover: { fx: 0.5, fy: 0.5, eyeTilt: -6, eyeScale: 0.92, tilt: -12 },
+  boulder: { fx: 0.55, fy: 0.52, eyeTilt: 2, eyeScale: 1, tilt: 4 }
 };
+
+/** Eye centre spacing (viewBox units) before `eyeScale`. */
+export const EYE_SPACING = 10.4;
+/** Pill eye size (viewBox units) before `eyeScale`. */
+export const EYE_WIDTH = 3.5;
+export const EYE_HEIGHT = 7.6;
+
+function polygonArea(points: readonly Point[]): number {
+  let a = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const [x1, y1] = points[i];
+    const [x2, y2] = points[(i + 1) % points.length];
+    a += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(a) / 2;
+}
+
+/** Scale every silhouette to a similar visual mass (sqrt(area) ~ 37), capped to the box. */
+function normalizePoints(points: readonly Point[]): Point[] {
+  const b = pointBounds(points);
+  const target = 37 / Math.sqrt(polygonArea(points));
+  const cap = Math.min(50 / (b.maxX - b.minX), 48 / (b.maxY - b.minY));
+  const k = Math.min(target, cap);
+  const cx = (b.minX + b.maxX) / 2;
+  const cy = (b.minY + b.maxY) / 2;
+  return groundPoints(points.map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k] as Point));
+}
+
+interface BuiltShape {
+  readonly geometry: BotShapeGeometry;
+  readonly leftEyeX: number;
+  readonly rightEyeX: number;
+  readonly eyeY: number;
+}
+
+const round1 = (v: number) => Math.round(v * 10) / 10;
+
+function buildShape(id: ShapeIdEntry['id']): BuiltShape {
+  const spec = SHAPE_SPECS[id];
+  const points = normalizePoints(spec.points());
+  const b = pointBounds(points);
+  const face = FACE[id];
+  const w = b.maxX - b.minX;
+  const h = b.maxY - b.minY;
+  const ex = b.minX + w * face.fx;
+  const ey = b.minY + h * face.fy;
+  const half = (EYE_SPACING * face.eyeScale) / 2;
+  const t = (face.eyeTilt * Math.PI) / 180;
+  return {
+    leftEyeX: round1(ex - half * Math.cos(t)),
+    rightEyeX: round1(ex + half * Math.cos(t)),
+    eyeY: round1(ey),
+    geometry: {
+      path: smoothClosedPath(points, spec.tension ?? 1),
+      tilt: face.tilt,
+      eyeTilt: face.eyeTilt,
+      eyeScale: face.eyeScale,
+      sheenCx: round1(b.minX + w * 0.34),
+      sheenCy: round1(b.minY + h * 0.27),
+      sheenRx: round1(w * 0.3),
+      sheenRy: round1(h * 0.22),
+      shadowRx: round1(Math.min(24, Math.max(10, w * 0.4))),
+      minX: round1(b.minX),
+      maxX: round1(b.maxX),
+      minY: round1(b.minY),
+      maxY: round1(b.maxY),
+      faceCx: round1((b.minX + b.maxX) / 2),
+      faceCy: round1(b.minY + h * 0.52),
+      faceR: round1(Math.max(w, h) * 0.56)
+    }
+  };
+}
+
+const BUILT = Object.fromEntries(SHAPE_IDS.map((s) => [s.id, buildShape(s.id)])) as Record<
+  ShapeIdEntry['id'],
+  BuiltShape
+>;
+
+/** All 16 character shapes (eye coordinates in a 64x64 viewBox). */
+export const BOT_SHAPES = SHAPE_IDS.map((s) => ({
+  id: s.id,
+  alias: s.alias,
+  leftEyeX: BUILT[s.id].leftEyeX,
+  rightEyeX: BUILT[s.id].rightEyeX,
+  eyeY: BUILT[s.id].eyeY
+}));
+
+export type BotShapeDef = (typeof BOT_SHAPES)[number];
+export type BotShapeId = BotShapeDef['id'];
+
+export const BOT_SHAPE_IDS: readonly BotShapeId[] = BOT_SHAPES.map((s) => s.id);
+
+/** Procedural soft-clay silhouettes for all 16 character shapes (64x64 viewBox). */
+export const BOT_SHAPE_GEOMETRY: Readonly<Record<BotShapeId, BotShapeGeometry>> = Object.fromEntries(
+  SHAPE_IDS.map((s) => [s.id, BUILT[s.id].geometry])
+) as Record<BotShapeId, BotShapeGeometry>;
 
 /** Default character colour swatches matching the v6 palette. */
 export const CHARACTER_COLORS = [
@@ -404,108 +362,89 @@ function relativeLuminance(hex: string): number {
 export interface BotAvatarMaterial {
   /** Normalized `#rrggbb` tint colour chosen for the bot. */
   readonly base: string;
-  /** Soft warm-lit crown highlight. */
+  /** Lit top-left side of the body (warm, lighter, slightly less saturated). */
   readonly highlight: string;
   /** Mid-body true tint. */
   readonly mid: string;
-  /** Rich, hue-shifted lower-body shadow (preserves chroma instead of muddying). */
+  /** Core shadow on the side turned away from the light (keeps chroma, never muddy grey). */
   readonly shadow: string;
-  /** Subtle deep edge occlusion. */
+  /** Ambient occlusion near the ground and in the deepest edge. */
   readonly deepShadow: string;
-  /** Soft diffused upper-left studio sheen tint. */
+  /** Broad soft specular tint (matte clay: wide and faint, never a glossy dot). */
   readonly sheen: string;
-  /** Opacity of the diffused sheen layer (lower on white/light tints to avoid glare). */
   readonly sheenOpacity: number;
-  /** Top-left inner rim highlight tint. */
+  /** Thin top-left rim light just inside the silhouette. */
   readonly rimLight: string;
-  /** Opacity of the inner rim highlight. */
   readonly rimOpacity: number;
-  /** Subtle ambient bounce light at the bottom curve. */
+  /** Warm light bounced up from the ground onto the underside. */
   readonly bounceLight: string;
-  /** Delicate contour stroke that keeps light bots crisp on Clay light and dark bots crisp on dark themes. */
+  /** Hairline contour that keeps very light bots crisp on light themes and dark bots on dark ones. */
   readonly contour: string;
   readonly contourOpacity: number;
-  /** High-contrast eye ink adapted to the bot's tint luminance. */
+  /** Felt/clay grain strength (overlay opacity). */
+  readonly grainOpacity: number;
+  /** Eye ink: near-black on every tint except very dark custom colours. */
   readonly eyeColor: string;
-  /** Subtle eye catchlight opacity (0 for light-on-dark eyes). */
+  /** Kept for API compatibility; the pill eyes no longer draw a catchlight. */
   readonly catchlightOpacity: number;
 }
 
+const EYE_INK = '#15161b';
+const EYE_INK_LIGHT = '#f4f6fa';
+
+function contrastOf(a: string, b: string): number {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
 /**
- * Derive a cohesive soft satin-matte material palette from any user-chosen hex tint.
- * Avoids cheap glossy-plastic glare and muddy grey shadows across light and dark themes.
+ * Derive a soft clay/felt material from any user-chosen hex tint: the tint fills the whole body,
+ * light comes from the top-left, shadows shift hue instead of turning grey, and white / grey
+ * tints get warm-grey shading so they still read as 3D on light and dark themes.
  */
 export function botAvatarMaterial(color: string | null | undefined): BotAvatarMaterial {
   const base = normalizeHexColor(color);
   const [r, g, b] = parseHexRgb(base);
   const [h, s, l] = rgbToHsl(r, g, b);
   const lum = relativeLuminance(base);
+  const isVeryLight = lum > 0.72;
+  const isNeutral = s < 0.12;
+  const darkEyes = contrastOf(EYE_INK, base) >= 4;
 
-  const isVeryLight = lum > 0.76;
-  const isVeryDark = lum < 0.085;
-  const isNeutral = s < 0.1;
-
-  // Hue-shift highlights gently warmer and shadows slightly cooler/deeper for lively ceramic depth.
-  const highlightHue = isNeutral ? h : h - 4;
-  const shadowHue = isNeutral ? h : h + 7;
-
+  // Shadows drift a little toward blue-violet (cool) and highlights toward warm, like painted clay.
+  const toward = (target: number, amount: number) => {
+    const d = ((target - h + 540) % 360) - 180;
+    return h + Math.sign(d) * Math.min(Math.abs(d), amount);
+  };
   const highlight = isVeryLight
-    ? mixHex(base, '#ffffff', 0.45)
-    : hslToHex(highlightHue, Math.min(1, s * 0.92), Math.min(0.95, l + (1 - l) * 0.24));
-
-  const mid = base;
-
-  const shadow = isVeryLight
-    ? mixHex(base, '#b8bdc9', 0.34)
-    : hslToHex(
-        shadowHue,
-        isNeutral ? s : Math.min(1, s * 1.08 + 0.04),
-        Math.max(0.08, l * 0.79)
-      );
-
-  const deepShadow = isVeryLight
-    ? mixHex(base, '#949aa8', 0.42)
-    : hslToHex(
-        shadowHue + 4,
-        isNeutral ? s : Math.min(1, s * 1.12 + 0.05),
-        Math.max(0.05, l * 0.64)
-      );
-
-  const sheen = mixHex(highlight, '#fffdf7', isVeryLight ? 0.65 : 0.72);
-  const sheenOpacity = isVeryLight ? 0.22 : isVeryDark ? 0.2 : 0.28;
-
-  const rimLight = mixHex(highlight, '#ffffff', 0.78);
-  const rimOpacity = isVeryLight ? 0.55 : isVeryDark ? 0.32 : 0.44;
-
+    ? mixHex(base, '#fffdf9', 0.7)
+    : hslToHex(isNeutral ? h : toward(55, 6), Math.min(1, s * 0.92), Math.min(0.95, l + (1 - l) * 0.34));
+  // Darken by mixing toward a muted, cooler tone of the same hue (HSL darkening alone turns vivid).
+  const darkTone = hslToHex(isNeutral ? h : toward(250, 12), isNeutral ? s : s * 0.78, Math.max(0.04, l * 0.42));
+  const shadow = isVeryLight ? mixHex(base, '#aaa39f', 0.4) : mixHex(base, darkTone, 0.36);
+  const deepShadow = isVeryLight ? mixHex(base, '#837c79', 0.52) : mixHex(base, darkTone, 0.62);
   const bounceLight = isVeryLight
-    ? '#ffffff'
-    : hslToHex(h - 6, Math.min(1, s * 0.7), Math.min(0.92, l + 0.22));
-
-  const contour = isVeryDark
-    ? mixHex(base, '#ffffff', 0.26)
-    : mixHex(deepShadow, '#0f131a', isVeryLight ? 0.22 : 0.32);
-  const contourOpacity = isVeryLight ? 0.2 : isVeryDark ? 0.28 : 0.16;
-
-  // Adaptive high-contrast eye ink: rich deep hue-tinted obsidian on normal/light bots,
-  // crisp warm off-white on very dark custom tints.
-  const eyeColor = isVeryDark ? '#f4f6fa' : mixHex('#141820', deepShadow, 0.14);
-  const catchlightOpacity = isVeryDark ? 0 : 0.42;
+    ? '#fff6ec'
+    : hslToHex(isNeutral ? h : toward(40, 8), Math.min(1, s * 0.9), Math.min(0.9, l + (1 - l) * 0.2));
+  const isVeryDark = lum < 0.03;
 
   return {
     base,
     highlight,
-    mid,
+    mid: base,
     shadow,
     deepShadow,
-    sheen,
-    sheenOpacity,
-    rimLight,
-    rimOpacity,
+    sheen: '#ffffff',
+    sheenOpacity: isVeryLight ? 0.45 : isVeryDark ? 0.12 : 0.22,
+    rimLight: mixHex(highlight, '#ffffff', 0.6),
+    rimOpacity: isVeryLight ? 0.6 : isVeryDark ? 0.3 : 0.42,
     bounceLight,
-    contour,
-    contourOpacity,
-    eyeColor,
-    catchlightOpacity
+    contour: isVeryDark ? mixHex(base, '#ffffff', 0.3) : mixHex(deepShadow, '#0f131a', 0.4),
+    contourOpacity: isVeryLight ? 0.1 : isVeryDark ? 0.3 : 0.05,
+    grainOpacity: isVeryLight ? 0.09 : isVeryDark ? 0.12 : 0.11,
+    eyeColor: darkEyes ? EYE_INK : EYE_INK_LIGHT,
+    catchlightOpacity: darkEyes ? 0.42 : 0
   };
 }
 
