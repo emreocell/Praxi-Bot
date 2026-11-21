@@ -97,7 +97,7 @@ impl AtspiWorker {
             _ => pure::AxisMap::identity(),
         };
         self.axis = axis;
-        self.window_id = x11_win.as_ref().map(|w| w.id).unwrap_or(0);
+        self.window_id = x11_win.as_ref().map_or(0, |w| w.id);
 
         let window = match x11_win {
             Some(mut w) => {

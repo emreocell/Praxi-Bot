@@ -23,10 +23,22 @@ pub enum WaitEnd {
 /// The three calls [`wait_child`] needs. Object-safe so tests can fake a hang.
 pub trait ChildControl {
     /// `Ok(None)` while the child is still running.
+    ///
+    /// # Errors
+    ///
+    /// Returns the OS error when the status cannot be read.
     fn try_wait(&mut self) -> io::Result<Option<i32>>;
     /// Ask the OS to stop the child.
+    ///
+    /// # Errors
+    ///
+    /// Returns the OS error when the signal cannot be sent.
     fn kill(&mut self) -> io::Result<()>;
     /// Block until the child has been reaped.
+    ///
+    /// # Errors
+    ///
+    /// Returns the OS error when waiting fails.
     fn wait(&mut self) -> io::Result<i32>;
 }
 
@@ -86,12 +98,12 @@ pub enum LaunchFail<'a> {
 #[must_use]
 pub fn explain_launch(program: &str, kind: LaunchFail<'_>) -> String {
     match kind {
-        LaunchFail::NotFound => format!(
-            "launch '{program}': program not found (the executable is missing from PATH)"
-        ),
-        LaunchFail::TimedOut { secs } => format!(
-            "launch '{program}': timed out after {secs}s waiting for the process to start"
-        ),
+        LaunchFail::NotFound => {
+            format!("launch '{program}': program not found (the executable is missing from PATH)")
+        }
+        LaunchFail::TimedOut { secs } => {
+            format!("launch '{program}': timed out after {secs}s waiting for the process to start")
+        }
         LaunchFail::Other(msg) => format!("launch '{program}': {msg}"),
     }
 }

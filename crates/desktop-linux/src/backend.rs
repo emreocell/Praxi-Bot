@@ -14,7 +14,8 @@ use parking_lot::Mutex as SyncMutex;
 use tokio::sync::Mutex;
 
 use crate::{
-    atspi_tree::AtspiWorker, live_view_x11::open_x11_live_view_target,
+    atspi_tree::AtspiWorker,
+    live_view_x11::open_x11_live_view_target,
     pure::{self, detect_display_session},
     x11,
 };
@@ -112,9 +113,7 @@ impl LinuxBackend {
         let res = bounded("activate_window", X11_LIMIT, async move {
             match tokio::task::spawn_blocking(move || x11::activate_window(window_id)).await {
                 Ok(result) => result,
-                Err(e) => Err(DesktopError::Internal(format!(
-                    "activate_window task: {e}"
-                ))),
+                Err(e) => Err(DesktopError::Internal(format!("activate_window task: {e}"))),
             }
         })
         .await?;

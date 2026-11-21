@@ -36,9 +36,7 @@ fn display_name() -> String {
 }
 
 fn x11_err<E: std::fmt::Display>(ctx: &str) -> impl FnOnce(E) -> DesktopError + '_ {
-    move |e| {
-        DesktopError::Accessibility(format!("{ctx} on display {}: {e}", display_name().trim()))
-    }
+    move |e| DesktopError::Accessibility(format!("{ctx} on display {}: {e}", display_name().trim()))
 }
 
 fn shot_err<E: std::fmt::Display>(ctx: &str) -> impl FnOnce(E) -> DesktopError + '_ {
@@ -152,11 +150,10 @@ fn connect() -> Result<(RustConnection, usize), DesktopError> {
 /// focused window, so coordinates are not invented as 1920×1080.
 pub fn screen_size() -> Result<(u32, u32), DesktopError> {
     let (conn, screen_num) = connect()?;
-    let screen = conn
-        .setup()
-        .roots
-        .get(screen_num)
-        .ok_or_else(|| DesktopError::Accessibility(x_unreachable(&display_name(), "no screen")))?;
+    let screen =
+        conn.setup().roots.get(screen_num).ok_or_else(|| {
+            DesktopError::Accessibility(x_unreachable(&display_name(), "no screen"))
+        })?;
     Ok((
         u32::from(screen.width_in_pixels),
         u32::from(screen.height_in_pixels),

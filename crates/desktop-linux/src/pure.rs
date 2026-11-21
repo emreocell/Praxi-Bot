@@ -361,7 +361,7 @@ pub fn parse_key(name: &str) -> Option<Key> {
         "enter" | "return" => 0xFF0D,                 // XK_Return
         "tab" => 0xFF09,                              // XK_Tab
         "esc" | "escape" => 0xFF1B,                   // XK_Escape
-        "space" => 0x0020,                            // XK_space
+        "space" | "spacebar" => 0x0020,               // XK_space
         "backspace" => 0xFF08,                        // XK_BackSpace
         "delete" | "del" => 0xFFFF,                   // XK_Delete
         "insert" | "ins" => 0xFF63,                   // XK_Insert
@@ -373,7 +373,6 @@ pub fn parse_key(name: &str) -> Option<Key> {
         "up" | "arrow_up" | "arrowup" | "arrow-up" => 0xFF52, // XK_Up
         "right" | "arrow_right" | "arrowright" | "arrow-right" => 0xFF53, // XK_Right
         "down" | "arrow_down" | "arrowdown" | "arrow-down" => 0xFF54, // XK_Down
-        "spacebar" => 0x0020,                         // XK_space
         "caps" | "capslock" | "caps_lock" => 0xFFE5,  // XK_Caps_Lock
         "print" | "printscreen" | "print_screen" | "prtsc" => 0xFF61, // XK_Print
         _ => 0,
@@ -667,11 +666,9 @@ pub fn align_atspi_to_x11(atspi: &Rect, x11: &Rect) -> AxisMap {
     if rel > 0.15 || !(0.4..=2.6).contains(&sx) {
         return AxisMap::identity();
     }
-    if (sx - 1.0).abs() < 0.08
-        && (sy - 1.0).abs() < 0.08
-        && (atspi.x - x11.x).abs() < 2.0
-        && (atspi.y - x11.y).abs() < 2.0
-    {
+    // Close to 1:1 is decoration or rounding, never a toolkit scale factor.
+    // AT-SPI screen coordinates are already X pixels then; do not squash them.
+    if (sx - 1.0).abs() < 0.15 && (sy - 1.0).abs() < 0.15 {
         return AxisMap::identity();
     }
     AxisMap {
@@ -1062,7 +1059,10 @@ mod tests {
                 == 1,
             "one scratch binding is shared by both ğ"
         );
-        assert_eq!(actions.last().copied(), Some(TypeAction::Unbind { keycode: 11 }));
+        assert_eq!(
+            actions.last().copied(),
+            Some(TypeAction::Unbind { keycode: 11 })
+        );
         let err = plan_text_actions(&[KeyPlace::Level1 { keycode: 10 }], None, &[]).unwrap_err();
         assert!(err.contains("Shift"), "{err}");
     }
@@ -1083,7 +1083,10 @@ mod tests {
         };
         let map = align_atspi_to_x11(&atspi, &x11);
         let (x, y) = map.map_point(200.0, 100.0);
-        assert!((x - 100.0).abs() < 0.01 && (y - 50.0).abs() < 0.01, "{x},{y}");
+        assert!(
+            (x - 100.0).abs() < 0.01 && (y - 50.0).abs() < 0.01,
+            "{x},{y}"
+        );
         let same = Rect {
             x: 10.0,
             y: 20.0,
@@ -1094,7 +1097,6 @@ mod tests {
         assert!((id.scale_x - 1.0).abs() < f64::EPSILON);
         let (px, py) = id.map_point(30.0, 40.0);
         assert!((px - 30.0).abs() < f64::EPSILON && (py - 40.0).abs() < f64::EPSILON);
-        // Title-bar-only difference is not a DPI scale.
         // A title-bar-sized disagreement (sy far from sx) is not a DPI scale.
         let decorated = Rect {
             x: 0.0,
@@ -1108,6 +1110,17 @@ mod tests {
             width: 800.0,
             height: 600.0,
         };
+        let near = Rect {
+            x: 0.0,
+            y: 40.0,
+            width: 800.0,
+            height: 560.0,
+        };
+        let (x, y) = align_atspi_to_x11(&client, &near).map_point(10.0, 20.0);
+        assert!(
+            (x - 10.0).abs() < f64::EPSILON && (y - 20.0).abs() < f64::EPSILON,
+            "a 7% height difference is a title bar, not a scale: {x},{y}"
+        );
         let (x, y) = align_atspi_to_x11(&client, &decorated).map_point(10.0, 20.0);
         assert!(
             (x - 10.0).abs() < f64::EPSILON && (y - 20.0).abs() < f64::EPSILON,
@@ -1132,9 +1145,7 @@ mod tests {
             panic!("a fresh failure must be reused")
         }));
         assert!(cache.get(t0 + PROBE_RETRY_AFTER, || true));
-        assert!(cache.get(t0 + PROBE_RETRY_AFTER * 4, || {
-            panic!("success sticks")
-        }));
+        assert!(cache.get(t0 + PROBE_RETRY_AFTER * 4, || { panic!("success sticks") }));
     }
 
     #[test]
