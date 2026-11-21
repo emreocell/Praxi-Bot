@@ -138,7 +138,8 @@ pub struct BuiltinConfig {
     /// `secrets_list`; with `None` a `secret` parameter is refused.
     pub fill_secrets: Option<Arc<secret_store::FillSecrets>>,
     /// Whether the model gets `secret_request` (needs `fill_secrets`). The owner's
-    /// global off switch: with `false` the tool is not offered at all.
+    /// switch, **off by default** until the desktop form exists:
+    /// with `false` the tool is not offered at all.
     pub secret_requests: bool,
     /// Ledger of files with an untrusted origin (see [`provenance`]); `None` = rules only.
     pub provenance: Option<Arc<dyn provenance::Provenance>>,
@@ -196,7 +197,7 @@ impl BuiltinConfig {
             fs_access: None,
             fs_home: None,
             fill_secrets: None,
-            secret_requests: true,
+            secret_requests: false,
             provenance: None,
         }
     }
@@ -367,6 +368,25 @@ mod tests {
                 spec.name
             );
         }
+    }
+
+    #[test]
+    fn secret_request_is_offered_only_when_switched_on() {
+        let names = |on: bool| {
+            let dir = tempfile::tempdir().unwrap();
+            let mut cfg = BuiltinConfig::new(dir.path().into(), Arc::new(AllowAll));
+            assert!(!cfg.secret_requests, "off by default");
+            cfg.fill_secrets = Some(Arc::new(secret_store::FillSecrets::in_memory(Arc::new(
+                secret_store::MemoryStore::new(),
+            ))));
+            cfg.secret_requests = on;
+            build_builtin_tools(cfg, &ToolRegistry::new())
+                .iter()
+                .map(|t| t.spec().name.clone())
+                .collect::<Vec<_>>()
+        };
+        assert!(!names(false).contains(&"secret_request".to_owned()));
+        assert!(names(true).contains(&"secret_request".to_owned()));
     }
 
     #[test]

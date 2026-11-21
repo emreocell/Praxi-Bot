@@ -313,8 +313,10 @@ fn build_agent_with_skills(
     tools.desktop.clone_from(&desktop);
     tools.dynamic_desktop = dynamic_desktop;
     tools.fill_secrets = fill_secrets;
-    let secret_requests =
-        secret_requests_enabled(std::env::var("BOT_SECRET_REQUESTS").ok().as_deref());
+    let secret_requests = secret_requests_enabled(
+        &std::fs::read_to_string(data_dir.join("host.toml")).unwrap_or_default(),
+        std::env::var("BOT_SECRET_REQUESTS").ok().as_deref(),
+    );
     tools.secret_requests = secret_requests;
     tools.provenance = Some(Arc::new(builtin_tools::provenance::StorageProvenance(
         Arc::clone(storage),
@@ -383,15 +385,31 @@ struct ComputerLimits {
     max_computer_runs: Option<usize>,
     browser_idle_seconds: Option<u64>,
 }
-/// The owner's global switch for `secret_request` (`BOT_SECRET_REQUESTS=off`, `0`, `false`
-/// or `no` turns it off: the tool is not offered and the loop refuses it).
-fn secret_requests_enabled(env: Option<&str>) -> bool {
-    !env.is_some_and(|v| {
-        matches!(
-            v.trim().to_ascii_lowercase().as_str(),
-            "off" | "0" | "false" | "no"
-        )
-    })
+/// The owner's switch for `secret_request` (experimental, **off by default**): `host.toml`
+/// `[experimental] secret_request = true`, overridden by `BOT_SECRET_REQUESTS`
+/// (`on`/`1`/`true`/`yes` or `off`/`0`/`false`/`no`). Off: the tool is not offered to the
+/// model and the loop refuses it.
+pub(crate) fn secret_requests_enabled(host: &str, env: Option<&str>) -> bool {
+    let file = toml::from_str::<ExperimentalFile>(host)
+        .unwrap_or_default()
+        .experimental
+        .secret_request
+        .unwrap_or(false);
+    match env.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+        Some("on" | "1" | "true" | "yes") => true,
+        Some("off" | "0" | "false" | "no") => false,
+        _ => file,
+    }
+}
+
+#[derive(Default, Deserialize)]
+struct ExperimentalFile {
+    #[serde(default)]
+    experimental: Experimental,
+}
+#[derive(Default, Deserialize)]
+struct Experimental {
+    secret_request: Option<bool>,
 }
 
 /// How long an unanswered approval or question waits before it expires
@@ -1518,13 +1536,30 @@ paths:
     }
 
     #[test]
-    fn secret_requests_switch_reads_the_environment() {
-        assert!(secret_requests_enabled(None));
-        assert!(secret_requests_enabled(Some("on")));
-        assert!(secret_requests_enabled(Some("garbage")));
-        for off in ["off", "0", "FALSE", " no "] {
-            assert!(!secret_requests_enabled(Some(off)), "{off}");
-        }
+    fn secret_requests_switch_is_off_by_default_and_reads_file_and_environment() {
+        assert!(!secret_requests_enabled("", None));
+        assert!(!secret_requests_enabled(
+            "[experimental]
+secret_request=false",
+            None
+        ));
+        assert!(secret_requests_enabled(
+            "[experimental]
+secret_request=true",
+            None
+        ));
+        assert!(secret_requests_enabled("", Some(" ON ")));
+        assert!(!secret_requests_enabled(
+            "[experimental]
+secret_request=true",
+            Some("off")
+        ));
+        assert!(secret_requests_enabled(
+            "[experimental]
+secret_request=true",
+            Some("garbage")
+        ));
+        assert!(!secret_requests_enabled("not toml [", None));
     }
 
     #[test]

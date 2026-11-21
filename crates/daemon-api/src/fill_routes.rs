@@ -127,7 +127,7 @@ pub struct CreateFillGrant {
     pub origin: String,
 }
 
-fn map(e: &FillError) -> ApiError {
+pub(crate) fn map(e: &FillError) -> ApiError {
     match e {
         FillError::InvalidName(_)
         | FillError::Reserved(_)
@@ -135,7 +135,7 @@ fn map(e: &FillError) -> ApiError {
         | FillError::Invalid(_) => ApiError::bad_request(e.to_string()),
         FillError::Unknown(_) => ApiError::not_found(e.to_string()),
         FillError::NotAllowed(_) => ApiError::forbidden(e.to_string()),
-        FillError::MissingValue(_) => ApiError::conflict(e.to_string()),
+        FillError::Exists(_) | FillError::MissingValue(_) => ApiError::conflict(e.to_string()),
         FillError::Unavailable(_) => ApiError::unavailable(e.to_string()),
     }
 }

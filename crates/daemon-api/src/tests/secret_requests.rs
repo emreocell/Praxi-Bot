@@ -8,7 +8,7 @@ use axum::http::{Method, StatusCode};
 use secret_store::{FillSecrets, MemoryStore, SecretStore};
 use serde_json::json;
 
-use super::{T, call, call_token_only, make_chat, send_msg, setup, wait_state};
+use super::{T, call, call_token_only, make_chat, send_msg, setup_with_config, wait_state};
 
 const CANARY: &str = "canary-Correct-Horse-Battery-4417!";
 const USER_CANARY: &str = "canary-user-name-7731";
@@ -20,10 +20,20 @@ struct Rig {
 }
 
 fn rig() -> Rig {
-    let t = setup();
+    rig_on(Arc::new(MemoryStore::new()))
+}
+
+fn rig_on(store: Arc<dyn SecretStore>) -> Rig {
+    // The tool is off by default (no desktop form yet); these tests switch it on.
+    let t = setup_with_config(
+        |_| {},
+        agent_core::LoopConfig {
+            secret_requests: true,
+            ..agent_core::LoopConfig::default()
+        },
+    );
     let redactor = agent_core::SharedRedactor::default();
     let hook = redactor.clone();
-    let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
     let secrets = Arc::new(
         FillSecrets::open(store, t.state.data_dir().as_path())
             .unwrap()
@@ -198,4 +208,79 @@ fn the_peer_router_treats_secret_requests_as_a_fill_route() {
         "POST",
         "/v1/secret-requests/abc/cancel"
     ));
+}
+
+/// A store whose write number `fail_at` (counted from `arm`) fails: a keychain error
+/// on the second half of a login.
+struct FailingStore {
+    inner: MemoryStore,
+    sets: std::sync::atomic::AtomicUsize,
+    fail_at: std::sync::atomic::AtomicUsize,
+}
+
+impl SecretStore for FailingStore {
+    fn get(&self, n: &str) -> Result<Option<secret_store::SecretValue>, secret_store::SecretError> {
+        self.inner.get(n)
+    }
+    fn set(&self, n: &str, v: &str) -> Result<(), secret_store::SecretError> {
+        use std::sync::atomic::Ordering::SeqCst;
+        if self.sets.fetch_add(1, SeqCst) == self.fail_at.load(SeqCst) {
+            return Err(secret_store::SecretError::Keyring("boom".into()));
+        }
+        self.inner.set(n, v)
+    }
+    fn delete(&self, n: &str) -> Result<bool, secret_store::SecretError> {
+        self.inner.delete(n)
+    }
+    fn list_names(&self) -> Result<Vec<String>, secret_store::SecretError> {
+        self.inner.list_names()
+    }
+}
+
+/// Guard: a replace whose second write fails leaves the old username AND password,
+/// and the form is still waiting so the owner can try again.
+#[tokio::test]
+async fn a_failed_login_replace_keeps_the_old_username_and_password() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let store = Arc::new(FailingStore {
+        inner: MemoryStore::new(),
+        sets: 0.into(),
+        fail_at: usize::MAX.into(),
+    });
+    let r = rig_on(store.clone());
+    r.secrets
+        .upsert("login/example/username", Some("old-user"), None, None)
+        .unwrap();
+    r.secrets
+        .upsert("login/example/password", Some("old-pass-123"), None, None)
+        .unwrap();
+    let (run, call_id) = open_form(
+        &r,
+        r#"call:secret_request {"name":"login/example","purpose":"Sign in","fields":"login","replace":true}"#,
+    )
+    .await;
+    wait_state(&r.t, &run, "waiting_approval").await;
+    let path = format!("/v1/secret-requests/{call_id}");
+    let body = json!({"username": USER_CANARY, "password": CANARY});
+
+    // The next two writes are this call's: the second one fails.
+    store.fail_at.store(store.sets.load(SeqCst) + 1, SeqCst);
+    let failed = call(&r.t, Method::POST, &path, Some(body.clone())).await;
+    assert_ne!(failed.status, StatusCode::OK);
+    let get = |n: &str| r.secrets.resolve_value(n).unwrap().expose().to_owned();
+    assert_eq!(get("login/example/username"), "old-user");
+    assert_eq!(get("login/example/password"), "old-pass-123");
+    let state = call(&r.t, Method::GET, &format!("/v1/runs/{run}"), None).await;
+    assert_eq!(
+        state.json()["state"],
+        "waiting_approval",
+        "the form must still be waiting"
+    );
+
+    // Retry works once the store is healthy.
+    store.fail_at.store(usize::MAX, SeqCst);
+    let ok = call(&r.t, Method::POST, &path, Some(body)).await;
+    assert_eq!(ok.status, StatusCode::OK, "{:?}", ok.json());
+    assert_eq!(get("login/example/username"), USER_CANARY);
+    assert_eq!(get("login/example/password"), CANARY);
 }

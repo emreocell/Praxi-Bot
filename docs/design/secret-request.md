@@ -130,9 +130,14 @@ A page, mail or file can tell the model "ask the owner for their bank password".
   run an allowed call becomes an ask, so the owner first sees an approval card and then the form.
 - Per-run limit: `LoopConfig::max_secret_requests_per_run`, default 3. Refused and cancelled requests
   count, so a looping model cannot nag.
-- Global off switch: `LoopConfig::secret_requests` (default on). The daemon CLI reads
-  `BOT_SECRET_REQUESTS=off`; the tool is then not offered and the loop refuses it too. A Settings
-  toggle comes with the card.
+- Global switch: `LoopConfig::secret_requests`, **off by default** until the desktop card ships
+  (without a card a request would park the run until it expires). Turn it on with
+  `secret_request = true` under `[experimental]` in `host.toml`, or `BOT_SECRET_REQUESTS=on` (the
+  environment wins; `off` forces it off). Off: the tool is not offered and the loop refuses it too.
+  `praxi doctor` shows the state (`secret_request`). A Settings toggle comes with the card.
+- A submit that overlaps the timeout is never reported as "nothing was stored": once the form is
+  claimed the timer cannot end the wait, and the model hears `stored` (or the failure) truthfully.
+  A login is written all-or-nothing: on any failure the previous username and password are restored.
 - The owner decides where the entry may be typed (origins, programs). A value stored this way is not
   usable anywhere until the owner adds a place; with none, `secrets_list` says "nowhere yet".
 

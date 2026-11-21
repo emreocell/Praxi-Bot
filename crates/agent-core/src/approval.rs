@@ -114,6 +114,8 @@ impl PendingGuard {
 impl Drop for PendingGuard {
     fn drop(&mut self) {
         self.sh.pending.lock().remove(&self.id);
+        // A parked `secret_request` must not stay submittable once its wait is gone.
+        self.sh.secret_requests.lock().remove(&self.id);
         forget_parked(&self.sh, self.id);
         let abandoned = !self.released;
         let last = self.release();
@@ -1885,7 +1887,19 @@ impl Shared {
                 expires_in_secs: limit.as_secs(),
             }),
         );
-        let waited = tokio::time::timeout(limit, rx).await;
+        let mut rx = rx;
+        let mut waited = tokio::time::timeout(limit, &mut rx).await;
+        // The timer may end the wait only while the form is still unclaimed. A
+        // submit that claimed it is writing the value to the vault right now: wait
+        // for it to finish, so the model hears `stored` (never a false "nothing was
+        // stored", which would make it ask for the password in chat). If that
+        // submit fails the form is put back and expires here on the next look.
+        while waited.is_err() {
+            if self.secret_requests.lock().remove(&call_id).is_some() {
+                break;
+            }
+            waited = tokio::time::timeout(std::time::Duration::from_millis(100), &mut rx).await;
+        }
         guard.resume();
         self.secret_requests.lock().remove(&call_id);
         let (stored, why, decision) = match waited {

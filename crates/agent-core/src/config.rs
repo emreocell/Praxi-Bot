@@ -365,7 +365,8 @@ pub struct LoopConfig {
     /// wait without limit).
     pub approval_timeout: Duration,
     /// The owner's global switch for `secret_request`: with `false` every request is
-    /// refused (default `true`; the tool is also not offered, see `BuiltinConfig`).
+    /// refused (default `false` until the desktop form ships; the tool is also not
+    /// offered, see `BuiltinConfig`).
     pub secret_requests: bool,
     /// Requests one run may make before further ones are refused (default
     /// [`DEFAULT_MAX_SECRET_REQUESTS_PER_RUN`]). A refused or cancelled request counts.
@@ -406,7 +407,7 @@ impl Default for LoopConfig {
             knowledge_decider: None,
             schedule_approval_timeout: DEFAULT_SCHEDULE_APPROVAL_TIMEOUT,
             approval_timeout: DEFAULT_APPROVAL_TIMEOUT,
-            secret_requests: true,
+            secret_requests: false,
             max_secret_requests_per_run: DEFAULT_MAX_SECRET_REQUESTS_PER_RUN,
             secret_request_timeout: DEFAULT_SECRET_REQUEST_TIMEOUT,
             wait_for_pc_timeout: DEFAULT_WAIT_FOR_PC_TIMEOUT,

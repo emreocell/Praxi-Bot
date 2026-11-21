@@ -27,7 +27,7 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::error::{ApiError, ErrorBody};
-use crate::fill_routes::{audit, blocking, service};
+use crate::fill_routes::{audit, service};
 use crate::live_view::Actor;
 
 /// Body of `POST /v1/secret-requests/{call_id}`. Give `value` for a `secret`
@@ -184,13 +184,9 @@ async fn store(
     input: &SubmitSecretRequest,
 ) -> Result<(), ApiError> {
     let items = entries(&info.name, info.fields, input)?;
-    let existing: Vec<bool> = items.iter().map(|(n, _)| svc.exists(n)).collect();
-    if existing.iter().any(|e| *e) && !info.replace {
-        return Err(ApiError::new(
-            axum::http::StatusCode::CONFLICT,
-            "secret_request_exists",
-            "an entry with this name exists and the bot did not ask to replace it",
-        ));
+    let existing = items.iter().any(|(n, _)| svc.exists(n));
+    if existing && !info.replace {
+        return Err(exists());
     }
     audit(
         s,
@@ -199,37 +195,37 @@ async fn store(
         &json!({
             "name": info.name,
             "fields": info.fields,
-            "replaces_existing": existing.iter().any(|e| *e),
+            "replaces_existing": existing,
             "origins": input.origins,
             "programs": input.programs,
         }),
     )?;
-    let mut done: Vec<String> = Vec::new();
-    for ((entry, value), was) in items.into_iter().zip(&existing) {
-        let (svc2, origins, programs, entry2) = (
-            std::sync::Arc::clone(svc),
-            input.origins.clone(),
-            input.programs.clone(),
-            entry.clone(),
-        );
-        let res = blocking(move || {
-            svc2.upsert(&entry2, Some(&value), Some(&origins), Some(&programs))
-                .map(|_| ())
-        })
-        .await;
-        if let Err(e) = res {
-            // A half-stored login must not stay behind: remove what this call created.
-            for n in done {
-                let svc3 = std::sync::Arc::clone(svc);
-                let _ = blocking(move || svc3.delete(&n).map(|_| ())).await;
-            }
-            return Err(e);
-        }
-        if !*was {
-            done.push(entry);
-        }
+    // One all-or-nothing operation: validated first, and a failed write puts the
+    // previous username AND password back (a half-replaced login never remains).
+    let (svc2, origins, programs, replace) = (
+        std::sync::Arc::clone(svc),
+        input.origins.clone(),
+        input.programs.clone(),
+        info.replace,
+    );
+    let done =
+        tokio::task::spawn_blocking(move || svc2.upsert_all(&items, &origins, &programs, replace))
+            .await
+            .map_err(ApiError::internal)?;
+    match done {
+        Ok(_) => Ok(()),
+        // Another writer created the name between the check above and the write.
+        Err(secret_store::FillError::Exists(_)) => Err(exists()),
+        Err(e) => Err(crate::fill_routes::map(&e)),
     }
-    Ok(())
+}
+
+fn exists() -> ApiError {
+    ApiError::new(
+        axum::http::StatusCode::CONFLICT,
+        "secret_request_exists",
+        "an entry with this name exists and the bot did not ask to replace it",
+    )
 }
 
 /// Cancel a `secret_request` form: nothing is stored, the run learns `cancelled`.

@@ -440,6 +440,15 @@ follow-up UI step), and ordinary `text` fills are never masked: what the
 assistant typed is what you see. The memory holding the value is not excluded
 from crash dumps or swap.
 
+### Letting the assistant ask for a credential (experimental, off by default)
+
+The `secret_request` tool lets the assistant ask you to type a username/password
+into a form in the desktop app, so the value never passes through the chat. The
+form is not in the app yet, so the tool is **not offered** unless you switch it
+on: add `[experimental]` / `secret_request = true` to `host.toml` in the data
+directory (or start the daemon with `BOT_SECRET_REQUESTS=on`; `off` forces it
+off). `praxi doctor` shows the current state. Leave it off for now.
+
 ## Prompt-injection evaluation pack
 
 To verify that the permission engine and taint gate hold when a model actually
