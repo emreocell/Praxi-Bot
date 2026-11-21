@@ -31,6 +31,21 @@ Autostart at sign-in is off by default; switch it on in **Settings** (or pass
 `/AUTOSTART=1` to the installer). Only one copy of the app runs at a time: starting it again just brings the existing
 window to the front.
 
+## Window controls and appearance
+
+On Windows, the desktop app disables the native window frame by default and
+draws its own minimize, maximize/restore, and close buttons in the top-right
+corner of the title bar (staying pinned above the right-hand bot panel when
+open). The app executable, window, and NSIS installer also use the full Praxi
+ghost icon.
+
+- **Switch back to the native title bar**: open **Settings → Appearance** and
+  turn on **Window frame** if you prefer standard OS window borders. On
+  non-Windows platforms, the native frame stays on by default.
+- **Limits**: integrated window controls run only inside the desktop app shell,
+  not when previewing the UI in a web browser. This is purely visual window
+  chrome and does not change daemon permissions.
+
 ## Upgrading
 
 Run the new setup `.exe` over the old install; running Praxi processes are

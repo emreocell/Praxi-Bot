@@ -141,16 +141,38 @@ On a fresh desktop setup, the first-run wizard defaults to creating a bot named
 **Praxi** with the white ghost avatar. It starts first in the left rail as your
 **main bot** (the default bot when the app opens or starts a new chat).
 
-When you have more than one bot:
+Each computer keeps its own separate bot order and main bot—**This computer**
+and each paired host store their own list locally in desktop settings, so
+switching computers or changing the main bot on a paired host never changes the
+main bot on any other computer.
 
-- The first bot in the left rail carries a **Main** badge.
+When you have more than one bot on the selected computer:
+
 - To make another bot the main bot in one click, open its right-hand **bot
   panel** (click the bot chip in the title bar) and press the star button
-  (**Make main bot**) in the panel header. It moves to the top of the list and
-  keeps every other bot in order.
+  (**Make main bot**) next to the bot's name in the panel header. It moves to
+  the top of that computer's list and keeps every other bot in order.
+- The computer card in the bot panel also shows the current main bot with a star
+  icon alongside its status (**Online**, **Working**, or **Offline**).
 - You can also drag a bot's grip handle in the left rail (or focus the handle
-  and press the Up/Down arrow keys) to reorder the list. Bot order is stored in
-  the desktop app's local settings.
+  and press the Up/Down arrow keys) to reorder that computer's list.
+
+### Bot avatars (desktop app)
+
+In the desktop app (**New bot**, **Edit bot**, or the first-run wizard), each
+bot can have either:
+
+- **One of 16 procedural vector characters** (`pebble`, `cube`, `diamond`,
+  `cloud`, `tri`, `flower`, `gem`, `drop`, `star`, `ghost`, `capsule`, `ears`,
+  `gumdrop`, `heart`, `clover`, `boulder`) paired with a colour swatch. They
+  render as satin-matte SVGs with layered shading, living eyes (blinking and
+  cursor tracking on larger avatars), and motion states for idle, thinking,
+  working, waiting for approval, and error. Ambient breathing and gaze motion
+  stop automatically when your OS **reduced motion** preference is enabled.
+- **A custom uploaded image or GIF**.
+
+Avatars are purely visual metadata in the desktop UI and do not affect model
+calls, permissions, or CLI/Telegram behaviour.
 
 ## Subagents
 
@@ -169,9 +191,24 @@ connector accounts, and a profile import/export format for sharing bots.
 ### Computer target
 
 A profile's `[runtime]` section accepts `computer = "auto"`, `"pc"`, `"host"`,
-`"browser"`, or `"off"` (default: `auto`). `local` is a legacy alias for `pc`.
-`node:<canonical peer public key>` selects a specific paired desktop-capable node;
-display names and differently cased keys are never used for lookup.
+`"browser"`, `"off"`, `node:<canonical peer public key>`, or
+`server:<server key>` (default: `auto`). `local` is a legacy alias for `pc`.
+`node:<canonical peer public key>` selects a specific paired desktop-capable
+node; display names and differently cased keys are never used for lookup.
+
+- **`server:<key>` (browser only)**: keeps the bot, its model providers and
+  keys, file tools, shell commands, and approval prompts on **this** computer,
+  and routes only `browser_*` tools to the paired always-on server identified
+  by `<key>` (letters, digits, `-`, `_`, `.`, up to 128 characters; see
+  `bot host devices` or your paired host list). Each bot gets its own isolated
+  browser process and profile on the server (up to 8 open at once). Desktop
+  tools (`desktop_*`) do not reach the server, and `browser_eval` (page
+  scripts) is disabled there. It fails closed: if `<key>` is unknown, unpaired,
+  or offline, the run has no computer tools and never falls back to this
+  computer's browser or another server. The desktop Edit bot screen shows
+  `"Paired server (browser only)"` read-only; set `server:<key>` in the TOML
+  profile or via the API. See
+  [Using a paired server as a bot's browser computer](remote-host.md#using-a-paired-server-as-a-bots-browser-computer).
 
 `pc` selects a connected peer with the `desktop` role, or the local desktop on a
 standalone PC. Server nodes are available only by explicit key. `auto` prefers a
@@ -205,7 +242,8 @@ When `auto` has a paired PC that is not reachable and falls through to the host
 or the browser, the run records that choice.
 
 Computer approvals include the target kind, name, and key. Desktop/browser
-"always allow" and "this chat" grants apply only to that concrete target. Old
-unscoped computer grants stay visible and authorize nothing. API bot updates
-that omit `runtime` preserve its stored value; conflicting runtime declarations
-in the request and profile are rejected.
+"always allow" and "this chat" grants apply only to that concrete target
+(including `server:<key>`). Old unscoped computer grants stay visible and
+authorize nothing. API bot updates that omit `runtime` preserve its stored
+value; conflicting runtime declarations in the request and profile are
+rejected.
