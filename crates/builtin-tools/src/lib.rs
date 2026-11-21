@@ -359,6 +359,32 @@ mod tests {
     }
 
     #[test]
+    fn tool_schema_bytes_per_call_stay_bounded() {
+        // What the tool list costs on every model call (name + description +
+        // JSON schema). Run with `--nocapture` to see the per-tool table.
+        let dir = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::new();
+        let cfg = BuiltinConfig::new(dir.path().into(), Arc::new(AllowAll));
+        let tools = build_builtin_tools(cfg, &registry);
+        let mut rows: Vec<(usize, String)> = tools
+            .iter()
+            .map(|t| {
+                let s = t.spec();
+                let n = s.name.len() + s.description.len() + s.input_schema.to_string().len();
+                (n, s.name.clone())
+            })
+            .collect();
+        rows.sort_by(|a, b| b.cmp(a));
+        let total: usize = rows.iter().map(|r| r.0).sum();
+        for (n, name) in &rows {
+            println!("schema-bytes {n:>6} {name}");
+        }
+        println!("schema-bytes total {total} over {} tools", rows.len());
+        // Loose ceiling so a runaway description is noticed; not a target.
+        assert!(total < 24_000, "tool list grew to {total} bytes");
+    }
+
+    #[test]
     fn every_builtin_declares_its_classification() {
         let dir = tempfile::tempdir().unwrap();
         let registry = ToolRegistry::new();

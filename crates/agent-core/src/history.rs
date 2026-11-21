@@ -31,7 +31,7 @@ pub(crate) fn status_of(step: &RunStep) -> Option<StepStatus> {
 
 const GUIDANCE: &str = "You are an agent that can call tools. Call a tool when you need information or \
 need to act; when the task is done, answer the user in plain text. If a tool result says it was \
-denied, interrupted or truncated, adapt instead of repeating the same call.";
+denied, interrupted or truncated, adapt instead of repeating the same call. Work quietly: do not narrate between steps. When several calls do not depend on each other's results, request them together in one message instead of one per turn; say something only when you are done, blocked or need the user.";
 
 const SUBAGENT_GUIDANCE: &str = "\n\nYou are a subagent: another agent delegated one task to you. \
 Do exactly that task with your tools, then reply with a concise final answer; the parent receives \
@@ -567,6 +567,18 @@ mod knowledge_replay_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn system_prompt_asks_for_quiet_batched_work() {
+        let (_s, _r, profile) = fixture();
+        let p = system_prompt(&profile, false, None);
+        assert!(p.contains("do not narrate between steps"), "{p}");
+        assert!(p.contains("together in one message"), "{p}");
+        // Byte-stable between calls (prompt cache).
+        assert_eq!(p, system_prompt(&profile, false, None));
+        // The base prompt stays small: it is paid on every model call.
+        assert!(GUIDANCE.len() < 700, "{}", GUIDANCE.len());
+    }
 
     pub(super) fn fixture() -> (Storage, Run, BotProfile) {
         let storage = Storage::open_in_memory(std::env::temp_dir()).unwrap();
