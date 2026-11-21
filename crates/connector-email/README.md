@@ -48,7 +48,13 @@ only decoded text and attachment metadata are returned. The text limit
 (20,000 characters by default) is an output limit, not a download limit. Treat
 all message content, headers, and attachment names as untrusted input.
 
-Limitations: modified UTF-7 folder conversion, outgoing attachments, OAuth,
+IMAP folder inputs accept Unicode and already encoded modified UTF-7.
+LIST returns decoded display names (omitting malformed modified UTF-7
+names). A display name may be truncated or look like a valid wire name,
+so it is not always a lossless selector; use the original wire name in
+those cases.
+
+Limitations: outgoing attachments, OAuth,
 UIDVALIDITY tracking, connection pooling, streaming/download limits, Sent
 folder copies, delivery receipts, and provider-specific behavior are not
 implemented. Drafts require at least one recipient. Non-ASCII search relies on
