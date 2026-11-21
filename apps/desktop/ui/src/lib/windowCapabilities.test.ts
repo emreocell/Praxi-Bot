@@ -29,6 +29,7 @@ const identifiers = (capability: Capability) => capability.permissions.map(
 // core:window:default only grants read operations and internal-toggle-maximize.
 const actions: [string, (window: Window) => Promise<void>][] = [
   ["set-decorations", (window) => window.setDecorations(false)],
+  ["is-maximized", async (window) => { await window.isMaximized(); }],
   ["minimize", (window) => window.minimize()],
   ["toggle-maximize", (window) => window.toggleMaximize()],
   ["close", (window) => window.close()]

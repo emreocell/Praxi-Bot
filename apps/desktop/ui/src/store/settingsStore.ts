@@ -7,6 +7,8 @@ import {
   type AppearanceSettings
 } from "../lib/appearance";
 import { parseBotOrder, parseHostBotOrders } from "../lib/botOrder";
+import { defaultWindowFrame } from "../lib/windowChrome";
+
 import { DEFAULT_VOICE_RATE, parseVoiceName, parseVoiceRate } from "../lib/voicePrefs";
 import { type MessageTimes, parseMessageTimes } from "../lib/messageTime";
 import {
@@ -15,6 +17,12 @@ import {
   parseSendWith,
   type SendWith
 } from "../lib/settingsPrefs";
+
+/**
+ * Stored under a new key: the old "windowFrame" held `true` for everyone (the
+ * former default), which would keep Windows users on the native title bar.
+ */
+const WINDOW_FRAME_KEY = "windowFrameChoice";
 
 export interface AppSettings extends AppearanceSettings {
   backgroundUrl: string;
@@ -79,7 +87,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   notifyPrivate: false,
   showAgentRoute: false,
   accountName: "",
-  windowFrame: true,
+  windowFrame: defaultWindowFrame(typeof navigator === "undefined" ? "" : navigator.userAgent),
   sendWith: "enter",
   messageTimes: "minutes",
   computerTarget: "this-pc",
@@ -206,7 +214,7 @@ export async function loadSettings(): Promise<AppSettings> {
         (await store.get<string>("accountName")) ??
         DEFAULT_SETTINGS.accountName;
       const windowFrame =
-        (await store.get<boolean>("windowFrame")) ??
+        (await store.get<boolean>(WINDOW_FRAME_KEY)) ??
         DEFAULT_SETTINGS.windowFrame;
       const sendWith = parseSendWith(await store.get<string>("sendWith"));
       const messageTimes = parseMessageTimes(await store.get<string>("messageTimes"));
@@ -288,7 +296,7 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
       await store.set("notifyPrivate", settings.notifyPrivate);
       await store.set("showAgentRoute", settings.showAgentRoute);
       await store.set("accountName", settings.accountName);
-      await store.set("windowFrame", settings.windowFrame);
+      await store.set(WINDOW_FRAME_KEY, settings.windowFrame);
       await store.set("sendWith", settings.sendWith);
       await store.set("messageTimes", settings.messageTimes);
       await store.set("computerTarget", settings.computerTarget);

@@ -1,0 +1,125 @@
+/* Docked call panel: not modal, so the approval card above stays clickable during a call. */
+.panel {
+  position: fixed;
+  right: var(--space-6);
+  bottom: var(--space-6);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  width: min(calc(100vw - var(--space-8)), calc(var(--space-16) * 5));
+  padding: var(--space-5);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface);
+  box-shadow: var(--shadow-overlay);
+  color: var(--color-text);
+}
+
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  align-self: flex-start;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.dot {
+  width: var(--size-status-dot);
+  height: var(--size-status-dot);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-danger);
+}
+
+.dotMuted {
+  background-color: var(--color-text-faint);
+}
+
+.stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+}
+
+.ring {
+  position: absolute;
+  inset: var(--space-0);
+  border: var(--size-border-thick) solid var(--color-accent);
+  border-radius: var(--radius-pill);
+  opacity: 0.5;
+  transform: scale(calc(1 + var(--level, 0) * 0.25));
+  transition: transform var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.ringIdle {
+  opacity: 0.15;
+}
+
+.ringError {
+  border-color: var(--color-danger);
+}
+
+.ringWait {
+  border-color: var(--color-warning);
+}
+
+.status {
+  margin: var(--space-0);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+}
+
+.notice {
+  margin: var(--space-0);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.noticeError {
+  color: var(--color-danger);
+}
+
+.captions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  max-height: calc(var(--space-16) * 2);
+  overflow-y: auto;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-elevated);
+  font-size: var(--font-size-sm);
+}
+
+.you {
+  color: var(--color-text-muted);
+}
+
+.bot {
+  color: var(--color-text);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.talk {
+  width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ring {
+    transform: none;
+    transition: none;
+  }
+}

@@ -16,8 +16,8 @@ concurrency:
 
 jobs:
   # Decides which of the long jobs a pull request needs. A change that only touches
-  # documentation or repository metadata skips them; everything else, and every push to
-  # main, runs them all.
+  # documentation, repository metadata or the desktop UI sources skips the Rust jobs;
+  # everything else, and every push to main, runs them all.
   changes:
     name: Detect changed areas
     runs-on: ubuntu-latest
@@ -48,10 +48,17 @@ jobs:
           echo "Changed files:"; cat changed.txt
           # Documentation and repository metadata only (generated docs/api stays "code").
           docs_only='^(docs/.*|[^/]+\.md|LICENSE|NOTICE|\.github/(ISSUE_TEMPLATE/.*|CODEOWNERS|labeler\.yml|pull_request_template\.md|workflows/(labeler|installer|linux-release|linux-scripts)\.yml))$'
+          # Desktop UI sources. No Rust crate reads them: apps/desktop/build.rs only creates an
+          # empty ui/dist when it is missing, and the UI job below covers these files (the
+          # generated API schema is checked against docs/api/openapi.json, which stays "code").
+          ui_only='^apps/desktop/ui/'
           rust=false; ui=false
           while IFS= read -r f; do
             [ -z "$f" ] && continue
-            if [ "$f" = "docs/api/openapi.json" ] || ! printf '%s\n' "$f" | grep -Eq "$docs_only"; then rust=true; fi
+            if [ "$f" = "docs/api/openapi.json" ] \
+              || { ! printf '%s\n' "$f" | grep -Eq "$docs_only" && ! printf '%s\n' "$f" | grep -Eq "$ui_only"; }; then
+              rust=true
+            fi
             if printf '%s\n' "$f" | grep -Eq '^(apps/desktop/ui/|packages/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|docs/api/openapi\.json$|\.github/workflows/ci\.yml$)'; then ui=true; fi
           done < changed.txt
           echo "rust=$rust" >> "$GITHUB_OUTPUT"

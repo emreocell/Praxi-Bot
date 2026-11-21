@@ -25,13 +25,13 @@ routine. It is written for a single maintainer; nothing here needs a team.
 ## What decides "green"
 
 Branch protection should require exactly one check: **`ci-result`**. It always runs and succeeds when
-every needed job succeeded or was skipped on purpose, so a documentation-only pull request is
-not blocked waiting for jobs that never start. Inside it:
+every needed job succeeded or was skipped on purpose, so a documentation-only (or UI-only) pull
+request is not blocked waiting for jobs that never start. Inside it:
 
 | Job | Runs when |
 | --- | --- |
 | `Docs links` | always (relative Markdown links resolve) |
-| `Build & Test (windows-latest / ubuntu-latest)`, `Browser integration`, `License Check` | anything other than docs and repository metadata changed |
+| `Build & Test (windows-latest / ubuntu-latest)`, `Browser integration`, `License Check` | anything other than docs, repository metadata and `apps/desktop/ui/` sources changed (every push to `main` runs them all) |
 | `UI Lint & Typecheck` (includes "generated API types are up to date") | UI files, shared UI packages, `docs/api/openapi.json` or `ci.yml` changed |
 
 `docs/api/openapi.json` staleness is caught by the `openapi_snapshot` test inside Build & Test; the

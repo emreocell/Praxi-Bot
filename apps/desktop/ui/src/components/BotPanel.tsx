@@ -122,6 +122,7 @@ export function BotPanel({
   onAddSkill,
   onOpenMail,
   isMain = false,
+  mainBotName,
   onMakeMain
 }: {
   bot: BotIdentity;
@@ -153,6 +154,8 @@ export function BotPanel({
   onOpenMail: () => void;
   /** This bot is the main bot (first in the list). */
   isMain?: boolean;
+  /** Name of the main bot (the computer card says who is main). */
+  mainBotName?: string;
   /** Make this bot the main bot; omitted when there is nothing to choose. */
   onMakeMain?: () => void;
 }) {
@@ -194,7 +197,23 @@ export function BotPanel({
         <div className={styles.ava} style={{ "--bot": bot.color } as CSSProperties}>
           <BotAvatar bot={bot} size="panel" state={state ?? "idle"} decorative />
         </div>
-        <h2 className={styles.name}>{bot.name}</h2>
+        <div className={styles.nameRow}>
+          <h2 className={styles.name}>{bot.name}</h2>
+          {onMakeMain ? (
+            <button
+              type="button"
+              className={styles.mainBtn}
+              data-testid="bot-panel-make-main"
+              title={isMain ? t("botPanel.isMain") : t("botPanel.makeMain")}
+              aria-label={isMain ? t("botPanel.isMain") : t("botPanel.makeMain")}
+              aria-pressed={isMain}
+              aria-disabled={isMain}
+              onClick={isMain ? undefined : onMakeMain}
+            >
+              <Star aria-hidden="true" fill={isMain ? "currentColor" : "none"} />
+            </button>
+          ) : null}
+        </div>
         <div className={styles.meta}>
           <ModelLineText model={model} />
           <PermissionChip preset={preset} />
@@ -221,20 +240,6 @@ export function BotPanel({
           >
             <PenLine aria-hidden="true" />
           </button>
-          {onMakeMain ? (
-            <button
-              type="button"
-              className={styles.iconBtn}
-              data-testid="bot-panel-make-main"
-              title={isMain ? t("botPanel.isMain") : t("botPanel.makeMain")}
-              aria-label={isMain ? t("botPanel.isMain") : t("botPanel.makeMain")}
-              aria-pressed={isMain}
-              disabled={isMain}
-              onClick={onMakeMain}
-            >
-              <Star aria-hidden="true" fill={isMain ? "currentColor" : "none"} />
-            </button>
-          ) : null}
           <button
             type="button"
             className={styles.iconBtn}
@@ -319,7 +324,14 @@ export function BotPanel({
                 case "upcoming":
                   return <UpcomingBlock key={id} rows={upcoming.rows} onToggle={upcoming.toggle} />;
                 case "computer":
-                  return <BotComputerBlock key={id} botName={bot.name} botId={bot.id} botColor={bot.color} visible={visible} />;
+                  return <BotComputerBlock
+                      key={id}
+                      botName={bot.name}
+                      botId={bot.id}
+                      mainBotName={mainBotName}
+                      activity={now ? (now.approval ? t("botPanel.now.waiting") : now.step ? toolSentence(t, now.step) : t("botPanel.now.thinking")) : null}
+                      visible={visible}
+                    />;
                 default:
                   return <QuotaBlock key={id} />;
               }

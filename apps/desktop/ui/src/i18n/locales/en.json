@@ -1749,7 +1749,13 @@
       "starting": "Starting the screen…"
     },
     "live": "LIVE",
+    "mainBot": "Main bot: {{name}}",
     "pausedNote": "paused",
+    "presence": {
+      "busy": "Working",
+      "offline": "Offline",
+      "online": "Online"
+    },
     "reason": {
       "connecting": "Connecting to {{name}}…",
       "failed": "Could not get the screen",
@@ -2653,7 +2659,9 @@
     "send": "Send message",
     "settings": "Open settings",
     "stop": "Stop all bot runs",
-    "title": "Keyboard shortcuts"
+    "title": "Keyboard shortcuts",
+    "voiceCallEnd": "End the voice call",
+    "voiceCallTalk": "Hold to talk in a push-to-talk call"
   },
   "home": {
     "admin": {
@@ -3929,7 +3937,7 @@
         "title": "Account name"
       },
       "frame": {
-        "description": "Show the native title bar (requires restart on some platforms).",
+        "description": "Show the native title bar instead of the app's own window buttons.",
         "title": "Window frame"
       },
       "send": {
@@ -4039,7 +4047,6 @@
   "sidebar": {
     "apps": "Apps",
     "botsSection": "Bots",
-    "mainBot": "Main",
     "mainBotHint": "Main bot: the default for new chats",
     "needsYou": "Needs you",
     "needsYouCount": "{{count}} waiting for you",
@@ -4207,6 +4214,37 @@
       "title": "Voice for this bot",
       "useGlobal": "Same as in Settings"
     },
+    "call": {
+      "approvalHint": "Approve or deny on the card in the chat. Approvals cannot be given by voice.",
+      "captions": "Captions",
+      "close": "Close",
+      "end": "End call",
+      "holdToTalk": "Hold to talk",
+      "interrupt": "Interrupt",
+      "micMuted": "Microphone muted",
+      "micOn": "Microphone on",
+      "mute": "Mute microphone",
+      "noSpeech": "No speech detected. Still listening.",
+      "notConfigured": "Dictation is not set up yet. Add a transcription service in Settings > General.",
+      "phase": {
+        "approval": "Waiting for your approval",
+        "failed": "The call ended",
+        "hearing": "Listening to you…",
+        "listening": "Listening",
+        "speaking": "{{name}} is speaking",
+        "starting": "Starting the microphone…",
+        "thinking": "{{name}} is thinking…"
+      },
+      "pushToTalk": "Push to talk",
+      "replyFailed": "The bot could not answer. Please try again.",
+      "retry": "Try again",
+      "simulate": "Simulate speech (mock)",
+      "start": "Start voice chat",
+      "title": "Voice call",
+      "transcribeFailed": "Could not transcribe that. Please say it again.",
+      "unmute": "Unmute microphone",
+      "unsupported": "This window cannot record audio."
+    },
     "codeOmitted": "(code omitted)",
     "description": "Reply voice and speed for the read-aloud button. Uses your system's speech engine.",
     "dictate": "Dictate",
@@ -4268,8 +4306,10 @@
     "takeTheWheel": "Take the wheel"
   },
   "window": {
-    "maximize": "Maximize / restore",
-    "minimize": "Minimize"
+    "close": "Close",
+    "maximize": "Maximize",
+    "minimize": "Minimize",
+    "restore": "Restore"
   },
   "workflow": {
     "button": "Save as workflow",

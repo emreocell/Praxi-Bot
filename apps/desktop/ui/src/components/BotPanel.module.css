@@ -25,6 +25,11 @@
   cursor: pointer;
 }
 
+.close:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
 .close:hover {
   background-color: var(--color-surface-elevated);
   color: var(--color-text);
@@ -62,7 +67,59 @@
   position: relative;
 }
 
+.nameRow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  min-width: var(--space-0);
+}
+
+/* "Make main": a ghost toggle beside the name; filled in the accent colour for the main bot. */
+.mainBtn {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: var(--space-6);
+  height: var(--space-6);
+  padding: var(--space-0);
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text-faint);
+  cursor: pointer;
+}
+
+.mainBtn:hover {
+  background-color: var(--color-surface-elevated);
+  color: var(--color-text);
+}
+
+.mainBtn:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.mainBtn[aria-pressed="true"] {
+  color: var(--color-accent-text);
+  cursor: default;
+}
+
+.mainBtn[aria-pressed="true"]:hover {
+  background: none;
+  color: var(--color-accent-text);
+}
+
+.mainBtn > svg {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+}
+
 .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   margin: var(--space-0);
   font-size: var(--font-size-name);
   font-weight: var(--font-weight-semibold);

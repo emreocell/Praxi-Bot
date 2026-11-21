@@ -76,7 +76,7 @@ impl Browser {
         cmd.args(launch::build_args(&opts, &profile))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .kill_on_drop(true);
         #[cfg(unix)]
         let own_process_group = {
@@ -92,6 +92,29 @@ impl Browser {
             .spawn()
             .map_err(|e| Error::Launch(format!("{}: {e}", exe.display())))?;
 
+        // Keep the tail of the browser's stderr so a dead start says why. The
+        // reader also drains the pipe for the browser's whole life.
+        let stderr_tail = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+        if let Some(mut err) = child.stderr.take() {
+            let tail = Arc::clone(&stderr_tail);
+            tokio::spawn(async move {
+                use tokio::io::AsyncReadExt;
+                let mut buf = [0u8; 1024];
+                while let Ok(n) = err.read(&mut buf).await {
+                    if n == 0 {
+                        break;
+                    }
+                    let mut t = tail
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    t.extend_from_slice(&buf[..n]);
+                    if t.len() > launch::STDERR_KEEP {
+                        let cut = t.len() - launch::STDERR_KEEP;
+                        t.drain(..cut);
+                    }
+                }
+            });
+        }
         let connected = async {
             let ws = launch::wait_for_endpoint(&profile, opts.startup_timeout, &mut child).await?;
             CdpClient::connect(&ws).await.map(|c| (c, ws))
@@ -117,7 +140,20 @@ impl Browser {
                 if let Some(p) = owned {
                     let _ = tokio::fs::remove_dir_all(p).await;
                 }
-                Err(e)
+                // Give the reader a moment to take the last bytes the dying browser wrote.
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                let said = {
+                    let t = stderr_tail
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    launch::stderr_summary(&String::from_utf8_lossy(&t))
+                };
+                match e {
+                    Error::Launch(m) if !said.is_empty() => {
+                        Err(Error::Launch(format!("{m}: {said}")))
+                    }
+                    other => Err(other),
+                }
             }
         }
     }

@@ -54,8 +54,8 @@ Then click the link GitHub prints, and fill in the short template.
 
 - **A maintainer approves the first CI run** for a first-time contributor. That is a safety
   measure for everyone, not a judgement of your change. CI starts right after.
-- The only check that gates merging is **`ci-result`**. A docs-only pull request skips the long
-  Rust jobs, so it is green in a couple of minutes.
+- The only check that gates merging is **`ci-result`**. A docs-only or UI-only pull request
+  skips the long Rust jobs, so it is green in a few minutes.
 - A bot adds labels from the files you changed; you do not need to.
 - A maintainer reviews, may ask for small changes, and **squash-merges** (your PR becomes one
   commit, so do not worry about a messy history).

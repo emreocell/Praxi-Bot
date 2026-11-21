@@ -240,6 +240,26 @@ struct Session {
     last_work: tokio::time::Instant,
 }
 
+/// The whole browser start (spawn, debugging endpoint, first tab) gets this long
+/// per attempt. Without it a stuck start plus the one relaunch outlasted the
+/// tool timeout and the run showed only a spinner.
+const LAUNCH_DEADLINE: Duration = Duration::from_secs(40);
+
+/// How long a browser call waits for another call that holds the session.
+const SESSION_WAIT: Duration = Duration::from_secs(45);
+
+fn launch_deadline_message(headless: bool) -> String {
+    let where_ = if headless {
+        "headless"
+    } else {
+        "on this computer's desktop"
+    };
+    format!(
+        "the browser did not start within {}s ({where_}). Do not retry browser_open in a loop;          run `bot doctor` on this computer (it names a missing display, XAUTHORITY or browser)          and tell the user what it reports.",
+        LAUNCH_DEADLINE.as_secs()
+    )
+}
+
 /// Tabs kept for subagent runs at once; the least recently used one is closed
 /// when a new lane needs room.
 const MAX_LANES: usize = 6;
@@ -459,8 +479,14 @@ impl CdpDriver {
             served: self.served.read().clone(),
             ..LaunchOptions::default()
         };
-        let browser = Browser::launch(opts).await.map_err(s)?;
-        let page = browser.first_page().await.map_err(s)?;
+        let started = async {
+            let browser = Browser::launch(opts).await.map_err(s)?;
+            let page = browser.first_page().await.map_err(s)?;
+            Ok::<_, String>((browser, page))
+        };
+        let (browser, page) = tokio::time::timeout(LAUNCH_DEADLINE, started)
+            .await
+            .map_err(|_| launch_deadline_message(headless))??;
         Ok(Session {
             browser,
             page,
@@ -689,7 +715,14 @@ macro_rules! with_session {
     ($self:expr, $profile:expr, $allow_launch:expr, |$sess:ident| $body:block) => {{
         let mut outcome = None;
         for attempt in 0..=CdpDriver::RELAUNCH_LIMIT {
-            let mut guard = $self.session.lock().await;
+            let mut guard = tokio::time::timeout(SESSION_WAIT, $self.session.lock())
+                .await
+                .map_err(|_| {
+                    format!(
+                        "another browser call has held the browser for over {}s; try again shortly",
+                        SESSION_WAIT.as_secs()
+                    )
+                })?;
             let step = {
                 let $sess = $self.ensure(&mut guard, $profile, $allow_launch).await?;
                 match current_lane() {
@@ -2506,6 +2539,13 @@ mod tests {
     use super::fake::FakeBrowser;
     use super::*;
     use tool_registry::ContentPart;
+
+    #[test]
+    fn a_stuck_browser_start_gets_a_bounded_actionable_message() {
+        assert!(LAUNCH_DEADLINE < Duration::from_secs(60));
+        let m = launch_deadline_message(false);
+        assert!(m.contains("bot doctor") && m.contains("40s"), "{m}");
+    }
 
     fn build() -> (tempfile::TempDir, Arc<FakeBrowser>, Vec<Arc<dyn Tool>>) {
         let d = tempfile::tempdir().unwrap();
