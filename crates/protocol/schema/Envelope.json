@@ -417,6 +417,63 @@
           }
         },
         {
+          "description": "The model asked the owner for a credential (`secret_request`); the run waits until the owner submits it on the local desktop or cancels. The event carries what the card shows and NEVER a value: the owner's app posts the value straight to the daemon (`POST /v1/secret-requests/{call_id}`).",
+          "type": "object",
+          "required": [
+            "call_id",
+            "expires_in_secs",
+            "fields",
+            "name",
+            "purpose",
+            "replaces_existing",
+            "run_id",
+            "type",
+            "untrusted_content"
+          ],
+          "properties": {
+            "call_id": {
+              "description": "Id to submit or cancel with.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "expires_in_secs": {
+              "description": "Seconds until the request expires on its own.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "fields": {
+              "$ref": "#/definitions/SecretFields"
+            },
+            "name": {
+              "description": "The `fill/` entry name the value will be stored under (without the prefix).",
+              "type": "string"
+            },
+            "purpose": {
+              "description": "Why the bot asks. Plain text written by the model: untrusted, never markup.",
+              "type": "string"
+            },
+            "replaces_existing": {
+              "description": "An entry with this name already exists and the bot asked to replace it.",
+              "type": "boolean"
+            },
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "secret_requested"
+              ]
+            },
+            "untrusted_content": {
+              "description": "The run has already read untrusted content (a page, a mail, a download): the card must warn that the request may have been planted there.",
+              "type": "boolean"
+            }
+          }
+        },
+        {
           "description": "The loop switched to a fallback model after the previous one kept failing.",
           "type": "object",
           "required": [
@@ -823,6 +880,25 @@
               ]
             }
           }
+        }
+      ]
+    },
+    "SecretFields": {
+      "description": "What a [`SecretRequested`] card asks the owner to type.",
+      "oneOf": [
+        {
+          "description": "One secret value (an API key, a token, a password on its own).",
+          "type": "string",
+          "enum": [
+            "secret"
+          ]
+        },
+        {
+          "description": "A username and a password, stored as `<name>/username` and `<name>/password`.",
+          "type": "string",
+          "enum": [
+            "login"
+          ]
         }
       ]
     },

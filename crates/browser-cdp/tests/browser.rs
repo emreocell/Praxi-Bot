@@ -474,8 +474,16 @@ async fn a_batch_click_is_refused_when_another_element_covers_the_target() {
         r#"<html><body>
 <button id=nt style="position:absolute;left:20px;top:20px;width:120px;height:40px" onclick="document.getElementById('out').textContent='no-thanks'">No thanks</button>
 <button id=ok style="position:absolute;left:20px;top:100px;width:120px;height:40px" onclick="document.getElementById('out').textContent='ok'"><span id=inner>Fine</span></button>
-<button id=pay style="position:fixed;left:0;top:0;width:200px;height:70px;z-index:9" onclick="document.getElementById('out').textContent='PAID'">Pay</button>
-<p id=out style="position:absolute;top:300px">idle</p></body></html>"#,
+<button id=pay style="position:fixed;left:0;top:0;width:200px;height:70px;z-index:9" onmouseover="document.getElementById('out').textContent='HOVERED'" onclick="document.getElementById('out').textContent='PAID'">Pay</button>
+<p id=out style="position:absolute;top:300px">idle</p>
+<script>
+// A hostile page: the covering node claims the approved button as its parent and host, so a
+// walk in the page's own JS world would call it a descendant.
+const nt = document.getElementById('nt');
+for (const k of ['parentNode', 'host', 'parentElement']) {
+  Object.defineProperty(document.getElementById('pay'), k, { get: () => nt });
+}
+</script></body></html>"#,
     )
     .await;
     let snap = p.snapshot(&SnapshotOptions::default()).await.unwrap();
@@ -491,7 +499,11 @@ async fn a_batch_click_is_refused_when_another_element_covers_the_target() {
         .evaluate("document.getElementById('out').textContent")
         .await
         .unwrap();
-    assert_eq!(out.as_str(), Some("idle"), "nothing may have been clicked");
+    assert_eq!(
+        out.as_str(),
+        Some("idle"),
+        "no mouse event of any kind (not even a move/hover) may reach the covering element"
+    );
     // Not covered, and the point lands on a child (the span) of the button: clicked.
     let r = p
         .click_with_guard(&fine, &DialogOptions::default(), None, &guard)
@@ -563,4 +575,145 @@ async fn a_batch_enter_is_refused_when_focus_moved_off_the_filled_field() {
     let err = res.map_or_else(|e| e.to_string(), |a| a.error.unwrap_or_default());
     assert!(err.contains("NOT pressed"), "{err}");
     b.close().await.unwrap();
+}
+
+/// Navigating to a page that opens a long-lived request (long poll, SSE, stream) must not wait
+/// the full 2 s network-idle cap once `load` + quiet window hold.
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn navigate_does_not_wait_for_long_lived_request() {
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = l.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((mut s, _)) = l.accept().await {
+            let mut buf = [0u8; 2048];
+            let n = s.read(&mut buf).await.unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]);
+            if req.starts_with("GET /hold") {
+                held.push(s);
+            } else {
+                let body = "<title>Poll</title><h1>Poll</h1><button>Ok</button>\
+                     <script>fetch('/hold').catch(()=>{});</script>";
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = s.write_all(resp.as_bytes()).await;
+            }
+        }
+    });
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let page = b.new_page("about:blank").await.unwrap();
+    let t = std::time::Instant::now();
+    let r = page
+        .navigate(&format!("http://127.0.0.1:{port}/"))
+        .await
+        .unwrap();
+    let took = t.elapsed();
+    assert!(r.ok, "{:?}", r.error);
+    assert!(r.settle_note.is_none(), "{:?}", r.settle_note);
+    assert!(
+        took < Duration::from_millis(1700),
+        "navigate waited {took:?} for a long-lived request"
+    );
+    let _ = b.close().await;
+}
+
+/// A finite fetch that starts after `load` and replaces a skeleton must be waited for: the
+/// action snapshot has to show the final content, not the skeleton.
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn navigate_waits_for_finite_fetch_after_load() {
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = l.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = l.accept().await {
+            tokio::spawn(async move {
+                let mut buf = [0u8; 2048];
+                let n = s.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let body = if req.starts_with("GET /data") {
+                    tokio::time::sleep(Duration::from_millis(700)).await;
+                    "FinalRows".to_string()
+                } else {
+                    "<title>Dash</title><p id=o>Skeleton</p>                     <script>addEventListener('load',()=>setTimeout(()=>                     fetch('/data').then(r=>r.text()).then(t=>{o.textContent=t}),20));</script>"
+                        .to_string()
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK
+Content-Type: text/html
+Content-Length: {}
+Connection: close
+
+{body}",
+                    body.len()
+                );
+                let _ = s.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let page = b.new_page("about:blank").await.unwrap();
+    let r = page
+        .navigate(&format!("http://127.0.0.1:{port}/"))
+        .await
+        .unwrap();
+    assert!(r.ok, "{:?}", r.error);
+    let snap = page.snapshot(&SnapshotOptions::default()).await.unwrap();
+    assert!(
+        snap.render().contains("FinalRows"),
+        "snapshot taken while fetch was still open:
+{}",
+        snap.render()
+    );
+    let _ = b.close().await;
+}
+
+/// Unchanged DOM reuses the cached capture without extra CDP AX/DOMSnapshot rounds, while
+/// background DOM mutations invalidate the cache.
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn snapshot_cache_hits_when_unchanged_and_invalidates_on_dom_mutation() {
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let page = open(
+        &b,
+        "<title>Cache</title><button id=b>Initial</button><input id=i type=text value=v1>\
+         <script>setTimeout(()=>{\
+         const p=document.createElement('p');p.textContent='AsyncAdded';document.body.append(p);\
+         document.getElementById('i').value='v2';\
+         },250);</script>",
+    )
+    .await;
+    let opts = SnapshotOptions::default();
+    page.invalidate_refs().await;
+    let r0 = page.snapshot_rounds();
+    let s1 = page.snapshot(&opts).await.unwrap();
+    assert_eq!(page.snapshot_rounds() - r0, 1);
+    assert!(s1.render().contains("Initial"));
+
+    // Immediate repeat with same and different options reuses cached capture (0 extra CDP rounds).
+    let s2 = page.snapshot(&opts).await.unwrap();
+    assert_eq!(page.snapshot_rounds() - r0, 1);
+    assert_eq!(s1.render(), s2.render());
+
+    let interactive = page
+        .snapshot(&SnapshotOptions {
+            interactive_only: true,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.snapshot_rounds() - r0, 1);
+    assert!(interactive.render().contains("button \"Initial\""));
+
+    // After the background timer mutates the DOM, snapshot must observe the new content.
+    tokio::time::sleep(Duration::from_millis(450)).await;
+    let s3 = page.snapshot(&opts).await.unwrap();
+    assert!(
+        s3.render().contains("AsyncAdded") && s3.render().contains("v2"),
+        "cache served stale snapshot after DOM/value mutation:\n{}",
+        s3.render()
+    );
+    let _ = b.close().await;
 }

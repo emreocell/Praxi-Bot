@@ -1,0 +1,22 @@
+changelog:
+  categories:
+    - title: Fixes
+      labels:
+        - bug
+    - title: Features
+      labels:
+        - enhancement
+    - title: Tests
+      labels:
+        - tests
+    - title: Platform work
+      labels:
+        - "platform: linux"
+        - "platform: windows"
+        - "platform: macos"
+    - title: Documentation
+      labels:
+        - documentation
+    - title: Other changes
+      labels:
+        - "*"

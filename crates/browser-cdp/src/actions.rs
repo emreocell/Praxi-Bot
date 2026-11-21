@@ -228,6 +228,21 @@ fn quad_center(q: &[f64]) -> Option<(f64, f64)> {
     Some((xs.sum::<f64>() / 4.0, ys.sum::<f64>() / 4.0))
 }
 
+/// Whether the `DOM.describeNode` tree `n` holds the backend node `id` (shadow roots, frame
+/// documents and template content included).
+fn node_contains(n: &Value, id: i64) -> bool {
+    if n["backendNodeId"].as_i64() == Some(id) {
+        return true;
+    }
+    let kids = |k: &str| n[k].as_array().map_or(&[][..], Vec::as_slice);
+    kids("children")
+        .iter()
+        .chain(kids("shadowRoots"))
+        .chain(n.get("contentDocument"))
+        .chain(n.get("templateContent"))
+        .any(|c| node_contains(c, id))
+}
+
 fn floats(v: &Value) -> Vec<f64> {
     v.as_array()
         .map(|a| a.iter().filter_map(Value::as_f64).collect())
@@ -429,6 +444,7 @@ impl Page {
         let t_settle = Instant::now();
         let settle_note = if settle { self.settle().await } else { None };
         let settle_ms = t_settle.elapsed().as_millis();
+        self.shared.dom_gen.fetch_add(1, Ordering::SeqCst);
         let t_snap = Instant::now();
         let opts = self.state.lock().await.opts.clone();
         let snapshot = self.snapshot(&opts).await?;
@@ -481,19 +497,37 @@ impl Page {
             return None;
         }
         let deadline = Instant::now() + Duration::from_secs(5);
+        let mut load_complete = false;
         while Instant::now() < deadline {
-            let ready =
-                tokio::time::timeout(Duration::from_secs(2), self.evaluate("document.readyState"))
-                    .await;
+            let ready = tokio::time::timeout(
+                Duration::from_secs(2),
+                self.evaluate_readonly("document.readyState"),
+            )
+            .await;
             match ready {
-                Ok(Ok(v)) if v.as_str() == Some("complete") => break,
+                Ok(Ok(v)) if v.as_str() == Some("complete") => {
+                    load_complete = true;
+                    break;
+                }
                 _ => tokio::time::sleep(Duration::from_millis(50)).await,
             }
         }
-        self.wait_network_idle_since(
+        let navigated = mark.is_some_and(|(_, g)| self.shared.nav_gen.load(Ordering::SeqCst) != g);
+        let nav_at = if navigated {
+            self.shared.last_nav_at.lock().ok().and_then(|t| *t)
+        } else {
+            None
+        };
+        let since = match (mark.map(|(s, _)| s), nav_at) {
+            (Some(s), Some(n)) => Some(s.max(n)),
+            (Some(s), None) => Some(s),
+            (None, n) => n,
+        };
+        self.wait_network_idle_inner(
             Duration::from_millis(250),
             Duration::from_secs(2),
-            mark.map(|(since, _)| since),
+            since,
+            navigated && load_complete,
         )
         .await
         .err()
@@ -840,28 +874,19 @@ impl Page {
             // The top-level hit test only reports the frame element of an out-of-process frame.
             return false;
         }
-        let resolve = |backend_id: i64| async move {
-            self.cmd("DOM.resolveNode", json!({"backendNodeId": backend_id}))
-                .await
-                .ok()
-                .and_then(|o| o["object"]["objectId"].as_str().map(str::to_owned))
-        };
-        let (Some(ref_obj), Some(hit_obj)) = (resolve(e.backend_id).await, resolve(hit_id).await)
-        else {
-            return false;
-        };
-        let Ok(r) = self
+        // Browser-side only: the ref's subtree (shadow roots and frame documents pierced) as
+        // the browser reports it. Page JavaScript never takes part, so a hostile page cannot
+        // make `parentNode`/`host` lie.
+        let Ok(d) = self
             .cmd(
-                "Runtime.callFunctionOn",
-                json!({"objectId": ref_obj,
-                       "functionDeclaration": "function(n){ for (let c = n; c; c = c.parentNode || c.host) { if (c === this) return true; } return false; }",
-                       "arguments": [{"objectId": hit_obj}], "returnByValue": true}),
+                "DOM.describeNode",
+                json!({"backendNodeId": e.backend_id, "depth": -1, "pierce": true}),
             )
             .await
         else {
             return false;
         };
-        r.get("exceptionDetails").is_none() && r.pointer("/result/value") == Some(&json!(true))
+        node_contains(&d["node"], hit_id)
     }
 
     async fn click_inner(
@@ -873,15 +898,22 @@ impl Page {
     ) -> Result<()> {
         let e = self.locate(r).await?;
         let (x, y) = self.center(&e).await?;
+        let covered = || {
+            Error::Element(format!(
+                "another element is on top of '{}' ({}) at the click point, so the approved click was NOT made",
+                e.name, e.role
+            ))
+        };
+        // Hit test BEFORE any mouse event (a move would already fire the covering element's
+        // hover handlers), with browser-side DOM.* calls only.
+        if guard.batch && !self.click_lands_on(&e, x, y).await {
+            return Err(covered());
+        }
         self.mouse("mouseMoved", x, y, json!({})).await?;
         self.check_input_origin(&e, expected).await?;
         for n in 1..=clicks {
-            // Checked right before every press, after the hover handlers have run.
-            if guard.batch && !self.click_lands_on(&e, x, y).await {
-                return Err(Error::Element(format!(
-                    "another element is on top of '{}' ({}) at the click point, so the approved click was NOT made",
-                    e.name, e.role
-                )));
+            if n > 1 && guard.batch && !self.click_lands_on(&e, x, y).await {
+                return Err(covered());
             }
             let btn = json!({"button": "left", "clickCount": n});
             self.mouse("mousePressed", x, y, btn.clone()).await?;
@@ -1376,6 +1408,9 @@ impl Page {
             *p = dialog_opts.clone();
         }
         self.set_snapshot_options(opts).await;
+        if let Ok(mut m) = self.shared.action_mark.lock() {
+            *m = Some((Instant::now(), self.shared.nav_gen.load(Ordering::SeqCst)));
+        }
         let res = self.navigate_inner(url).await;
         self.finish(Snapshot::default(), res).await
     }

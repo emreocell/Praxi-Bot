@@ -31,10 +31,8 @@ first user step; `route_decided` carries the same optional field. Bots without
 If the router reaches its existing time budget, the deterministic rule is
 applied to its fallback route without another classifier request or timeout.
 
-The proposed pooled route/tier decider is not on this branch's base. This
-implementation does not copy the open decider change or add a second
-classifier call. A future pooled decision may supply the choice at the same
-selection point, subject to the context and permission checks below.
+The optional [decision pool](decision-pool.md) is available for future routing
+integrations. The tier selector continues to use the deterministic rule.
 
 ## When the executor takes over
 

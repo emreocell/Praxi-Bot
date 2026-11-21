@@ -4,6 +4,7 @@
 //! The builder in this module is a pure function of recorded CDP data ([`FrameInput`]),
 //! so it can be tested without a browser.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
@@ -68,7 +69,7 @@ const MAX_TEXT: usize = 160;
 const MASK: &str = "[masked]";
 
 /// Options for [`crate::Page::snapshot`] and [`build_snapshot`].
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SnapshotOptions {
     /// Only list elements that carry a ref, as a flat list.
     pub interactive_only: bool,
@@ -471,16 +472,23 @@ pub struct SnapNode {
 impl SnapNode {
     /// Render as `  [e12] button "Sign in" value="x" [disabled]`.
     pub fn line(&self) -> String {
-        let mut s = "  ".repeat(self.depth);
+        let mut s = String::with_capacity(self.depth * 2 + self.role.len() + self.name.len() + 16);
+        for _ in 0..self.depth {
+            s.push_str("  ");
+        }
         if let Some(r) = &self.ref_id {
             let _ = write!(s, "[{r}] ");
         }
         s.push_str(&self.role);
         if !self.name.is_empty() {
-            let _ = write!(s, " \"{}\"", clean(&self.name));
+            s.push_str(" \"");
+            write_clean(&mut s, &self.name);
+            s.push('"');
         }
         if let Some(v) = &self.value {
-            let _ = write!(s, " value=\"{}\"", clean(v));
+            s.push_str(" value=\"");
+            write_clean(&mut s, v);
+            s.push('"');
         }
         if !self.states.is_empty() {
             let _ = write!(s, " [{}]", self.states.join(", "));
@@ -489,17 +497,32 @@ impl SnapNode {
     }
 }
 
-fn clean(s: &str) -> String {
-    let flat: String = s
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .replace('"', "\\\"");
-    if flat.chars().count() > MAX_TEXT {
-        let cut: String = flat.chars().take(MAX_TEXT).collect();
-        format!("{cut}…")
-    } else {
-        flat
+fn write_clean(out: &mut String, s: &str) {
+    let mut count = 0usize;
+    let mut push_ch = |ch: char| -> bool {
+        if count == MAX_TEXT {
+            out.push('…');
+            return false;
+        }
+        out.push(ch);
+        count += 1;
+        true
+    };
+    let mut first = true;
+    for word in s.split_whitespace() {
+        if !first && !push_ch(' ') {
+            return;
+        }
+        first = false;
+        for ch in word.chars() {
+            if ch == '"' {
+                if !push_ch('\\') || !push_ch('"') {
+                    return;
+                }
+            } else if !push_ch(ch) {
+                return;
+            }
+        }
     }
 }
 
@@ -540,22 +563,22 @@ impl Snapshot {
 // ---------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Default)]
-struct AxNode {
+struct AxNode<'a> {
     ignored: bool,
-    role: String,
-    name: String,
-    value: Option<String>,
+    role: Cow<'a, str>,
+    name: Cow<'a, str>,
+    value: Option<Cow<'a, str>>,
     states: Vec<String>,
     backend: Option<i64>,
     children: Vec<usize>,
 }
 
-fn ax_str(v: Option<&Value>) -> Option<String> {
+fn ax_str(v: Option<&Value>) -> Option<Cow<'_, str>> {
     let v = v?.get("value")?;
     match v {
-        Value::String(s) => Some(s.clone()),
-        Value::Number(n) => Some(n.to_string()),
-        Value::Bool(b) => Some(b.to_string()),
+        Value::String(s) => Some(Cow::Borrowed(s.as_str())),
+        Value::Number(n) => Some(Cow::Owned(n.to_string())),
+        Value::Bool(b) => Some(Cow::Owned(b.to_string())),
         _ => None,
     }
 }
@@ -565,7 +588,7 @@ fn ax_states(props: Option<&Value>) -> Vec<String> {
     for p in props.and_then(Value::as_array).into_iter().flatten() {
         let name = p.get("name").and_then(Value::as_str).unwrap_or("");
         let val = ax_str(p.get("value")).unwrap_or_default();
-        match (name, val.as_str()) {
+        match (name, val.as_ref()) {
             ("checked", "true") => out.push("checked".into()),
             ("checked", "mixed") => out.push("mixed".into()),
             ("expanded", "true") => out.push("expanded".into()),
@@ -582,15 +605,54 @@ fn ax_states(props: Option<&Value>) -> Vec<String> {
 }
 
 /// Parse raw AX nodes into an arena; returns `(nodes, roots)`.
-fn parse_ax(raw: &[Value]) -> (Vec<AxNode>, Vec<usize>) {
-    let index: HashMap<String, usize> = raw
-        .iter()
-        .enumerate()
-        .filter_map(|(i, n)| Some((n.get("nodeId")?.as_str()?.to_string(), i)))
-        .collect();
+fn parse_ax<'a>(
+    raw: &'a [Value],
+    extras: &HashMap<i64, usize>,
+) -> (Vec<AxNode<'a>>, Vec<usize>, HashSet<i64>) {
+    let mut index: HashMap<&'a str, usize> = HashMap::with_capacity(raw.len());
+    for (i, n) in raw.iter().enumerate() {
+        if let Some(id) = n.get("nodeId").and_then(Value::as_str) {
+            index.insert(id, i);
+        }
+    }
     let mut has_parent = vec![false; raw.len()];
     let mut nodes = Vec::with_capacity(raw.len());
+    let mut ax_backends = HashSet::new();
     for n in raw {
+        let ignored = n.get("ignored").and_then(Value::as_bool).unwrap_or(false);
+        let backend = n.get("backendDOMNodeId").and_then(Value::as_i64);
+        if let Some(b) = backend {
+            ax_backends.insert(b);
+        }
+        if ignored {
+            let children: Vec<usize> = n
+                .get("childIds")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|c| index.get(c.as_str()?).copied())
+                .collect();
+            nodes.push(AxNode {
+                ignored: true,
+                children,
+                ..Default::default()
+            });
+            continue;
+        }
+        let role = ax_str(n.get("role")).unwrap_or_default();
+        if role.as_ref() == "StaticText" {
+            // StaticText only emits its own trimmed name and never visits children/states/value.
+            nodes.push(AxNode {
+                ignored: false,
+                role,
+                name: ax_str(n.get("name")).unwrap_or_default(),
+                value: None,
+                states: Vec::new(),
+                backend,
+                children: Vec::new(),
+            });
+            continue;
+        }
         let children: Vec<usize> = n
             .get("childIds")
             .and_then(Value::as_array)
@@ -598,13 +660,27 @@ fn parse_ax(raw: &[Value]) -> (Vec<AxNode>, Vec<usize>) {
             .flatten()
             .filter_map(|c| index.get(c.as_str()?).copied())
             .collect();
+        let transparent_no_extra = TRANSPARENT_ROLES.contains(&role.as_ref())
+            && !backend.is_some_and(|b| extras.contains_key(&b));
+        if transparent_no_extra {
+            nodes.push(AxNode {
+                ignored: false,
+                role,
+                name: Cow::Borrowed(""),
+                value: None,
+                states: Vec::new(),
+                backend,
+                children,
+            });
+            continue;
+        }
         nodes.push(AxNode {
-            ignored: n.get("ignored").and_then(Value::as_bool).unwrap_or(false),
-            role: ax_str(n.get("role")).unwrap_or_default(),
+            ignored: false,
+            role,
             name: ax_str(n.get("name")).unwrap_or_default(),
             value: ax_str(n.get("value")).filter(|v| !v.is_empty()),
             states: ax_states(n.get("properties")),
-            backend: n.get("backendDOMNodeId").and_then(Value::as_i64),
+            backend,
             children,
         });
     }
@@ -614,27 +690,32 @@ fn parse_ax(raw: &[Value]) -> (Vec<AxNode>, Vec<usize>) {
         }
     }
     let roots = (0..nodes.len()).filter(|&i| !has_parent[i]).collect();
-    (nodes, roots)
+    (nodes, roots, ax_backends)
 }
 
 // ---------------------------------------------------------------------------------------------
 // Builder
 // ---------------------------------------------------------------------------------------------
 
-struct Parsed {
-    nodes: Vec<AxNode>,
+struct Parsed<'a> {
+    nodes: Vec<AxNode<'a>>,
     roots: Vec<usize>,
     extras: HashMap<i64, usize>,
     ax_backends: HashSet<i64>,
 }
 
-struct Builder<'a> {
+struct SnapshotCtx<'a> {
     frames: &'a [FrameInput],
-    parsed: Vec<Parsed>,
+    parsed: Vec<Parsed<'a>>,
     opts: &'a SnapshotOptions,
-    refs: &'a mut RefMap,
+}
+
+struct Builder<'a, 'b> {
+    ctx: &'b SnapshotCtx<'a>,
+    refs: &'b mut RefMap,
     out: Vec<SnapNode>,
     truncated: bool,
+    node_capped: bool,
     /// Whether the node being pushed holds a secret (set around `push`).
     cur_sensitive: bool,
 }
@@ -642,6 +723,9 @@ struct Builder<'a> {
 /// Maximum AX nesting (hidden levels included) followed before the walk is cut off. Guards the
 /// worker stack against hostile pages that nest thousands of elements.
 const MAX_NEST: usize = 256;
+
+/// Maximum emitted snapshot nodes per snapshot to guard against runaway DOMs.
+const MAX_SNAPSHOT_NODES: usize = 25_000;
 
 /// Roles whose value is masked when sensitivity information is unavailable.
 const FREE_TEXT_ROLES: &[&str] = &["textbox", "searchbox", "combobox", "spinbutton"];
@@ -657,14 +741,11 @@ pub fn build_snapshot(
     let parsed = frames
         .iter()
         .map(|f| {
-            let (nodes, roots) = parse_ax(&f.ax_nodes);
-            let ax_backends = nodes.iter().filter_map(|n| n.backend).collect();
-            let extras = f
-                .extras
-                .iter()
-                .enumerate()
-                .map(|(i, e)| (e.backend_id, i))
-                .collect();
+            let mut extras = HashMap::with_capacity(f.extras.len());
+            for (i, e) in f.extras.iter().enumerate() {
+                extras.insert(e.backend_id, i);
+            }
+            let (nodes, roots, ax_backends) = parse_ax(&f.ax_nodes, &extras);
             Parsed {
                 nodes,
                 roots,
@@ -673,13 +754,17 @@ pub fn build_snapshot(
             }
         })
         .collect();
-    let mut b = Builder {
+    let ctx = SnapshotCtx {
         frames,
         parsed,
         opts,
+    };
+    let mut b = Builder {
+        ctx: &ctx,
         refs,
         out: Vec::new(),
         truncated: false,
+        node_capped: false,
         cur_sensitive: false,
     };
     if !frames.is_empty() {
@@ -695,6 +780,16 @@ pub fn build_snapshot(
             states: Vec::new(),
         });
     }
+    if b.node_capped {
+        b.out.push(SnapNode {
+            depth: 0,
+            ref_id: None,
+            role: "text".to_string(),
+            name: "[snapshot truncated: node limit reached]".to_string(),
+            value: None,
+            states: Vec::new(),
+        });
+    }
     let mut out = b.out;
     if opts.compact && !opts.interactive_only {
         prune_empty(&mut out);
@@ -702,31 +797,36 @@ pub fn build_snapshot(
     out
 }
 
-impl Builder<'_> {
+impl Builder<'_, '_> {
     fn depth_ok(&self, depth: usize) -> bool {
-        self.opts.interactive_only || self.opts.max_depth.is_none_or(|m| depth <= m)
+        self.ctx.opts.interactive_only || self.ctx.opts.max_depth.is_none_or(|m| depth <= m)
     }
 
     fn emit_frame(&mut self, f: usize, depth: usize, nest: usize) {
-        let roots = self.parsed[f].roots.clone();
-        for r in roots {
+        for &r in &self.ctx.parsed[f].roots {
+            if self.node_capped {
+                return;
+            }
             self.emit_node(f, r, depth, "", nest);
         }
         // Cursor-interactive elements the AX tree does not know about.
-        let frame = &self.frames[f];
-        let extras: Vec<DomExtra> = frame
-            .extras
-            .iter()
-            .filter(|e| {
-                e.is_cursor_interactive()
-                    && !e.text.trim().is_empty()
-                    && !self.parsed[f].ax_backends.contains(&e.backend_id)
-                    && e.frame_id.as_deref().is_none_or(|id| id == frame.frame_id)
-            })
-            .cloned()
-            .collect();
-        for e in extras {
-            let d = if self.opts.interactive_only { 0 } else { depth };
+        let frame = &self.ctx.frames[f];
+        for e in &frame.extras {
+            if self.node_capped {
+                return;
+            }
+            if !e.is_cursor_interactive()
+                || e.text.trim().is_empty()
+                || self.ctx.parsed[f].ax_backends.contains(&e.backend_id)
+                || e.frame_id.as_deref().is_some_and(|id| id != frame.frame_id)
+            {
+                continue;
+            }
+            let d = if self.ctx.opts.interactive_only {
+                0
+            } else {
+                depth
+            };
             if self.depth_ok(d) {
                 self.push(
                     f,
@@ -754,7 +854,11 @@ impl Builder<'_> {
         states: Vec<String>,
         with_ref: bool,
     ) {
-        let frame = &self.frames[f];
+        if self.out.len() >= MAX_SNAPSHOT_NODES {
+            self.node_capped = true;
+            return;
+        }
+        let frame = &self.ctx.frames[f];
         let ref_id = with_ref.then(|| {
             self.refs.assign(
                 frame.loader_id.as_deref(),
@@ -779,56 +883,61 @@ impl Builder<'_> {
     }
 
     fn emit_node(&mut self, f: usize, n: usize, depth: usize, parent_name: &str, nest: usize) {
+        if self.node_capped {
+            return;
+        }
         if nest > MAX_NEST {
             self.truncated = true;
             return;
         }
-        let node = self.parsed[f].nodes[n].clone();
-        let extra: Option<DomExtra> = node
+        let node = &self.ctx.parsed[f].nodes[n];
+        let extra: Option<&DomExtra> = node
             .backend
-            .and_then(|b| self.parsed[f].extras.get(&b))
-            .map(|&i| self.frames[f].extras[i].clone());
-        let role = node.role.as_str();
+            .and_then(|b| self.ctx.parsed[f].extras.get(&b))
+            .map(|&i| &self.ctx.frames[f].extras[i]);
+        let role = node.role.as_ref();
         let interactive = INTERACTIVE_ROLES.contains(&role);
-        let label = if node.name.trim().is_empty() {
-            extra.as_ref().map_or("", |e| e.text.as_str()).to_string()
+        let label: &str = if node.name.trim().is_empty() {
+            extra.map_or("", |e| e.text.as_str())
         } else {
-            node.name.clone()
+            node.name.as_ref()
         };
         let clickable = !interactive
             && !node.ignored
             && role != "StaticText"
-            && extra
-                .as_ref()
-                .is_some_and(|e| e.is_cursor_interactive() && !label.trim().is_empty());
+            && extra.is_some_and(|e| e.is_cursor_interactive() && !label.trim().is_empty());
 
-        let label = if self.opts.compact
+        let label: &str = if self.ctx.opts.compact
             && !interactive
             && !clickable
             && NAME_FROM_CONTENT.contains(&role)
             && !node.children.is_empty()
         {
-            String::new()
+            ""
         } else {
             label
         };
 
         // Transparent nodes: hoist children.
         if node.ignored || (TRANSPARENT_ROLES.contains(&role) && !clickable) {
-            for c in node.children {
+            for &c in &node.children {
                 self.emit_node(f, c, depth, parent_name, nest + 1);
             }
             return;
         }
-        let nd = if self.opts.interactive_only { 0 } else { depth };
+        let nd = if self.ctx.opts.interactive_only {
+            0
+        } else {
+            depth
+        };
         if !self.depth_ok(depth) {
             return;
         }
 
         if role == "StaticText" {
             let t = node.name.trim();
-            let repeats_parent = self.opts.compact && t == parent_name.trim();
-            if !(self.opts.interactive_only || t.is_empty() || repeats_parent) {
+            let repeats_parent = self.ctx.opts.compact && t == parent_name.trim();
+            if !(self.ctx.opts.interactive_only || t.is_empty() || repeats_parent) {
                 self.push(f, nd, "text", t, 0, None, Vec::new(), false);
             }
             return;
@@ -840,18 +949,19 @@ impl Builder<'_> {
             && !is_iframe
             && label.trim().is_empty()
             && !ALWAYS_KEEP.contains(&role);
-        let hidden_by_mode = self.opts.interactive_only && !(interactive || clickable);
+        let hidden_by_mode = self.ctx.opts.interactive_only && !(interactive || clickable);
         let skip_line = hidden_by_mode
-            || (self.opts.compact && unnamed_container)
-            || is_iframe && self.opts.interactive_only;
+            || (self.ctx.opts.compact && unnamed_container)
+            || is_iframe && self.ctx.opts.interactive_only;
 
         // Mask sensitive values.
-        let mut value = node.value.clone();
+        let mut value = node.value.as_deref().map(str::to_string);
         // When the DOM capture failed, a text field is unknown, and unknown counts as secret. A node
         // with no DOM facts in a successful capture is not an input / textarea (those always get
         // facts): a contenteditable editor or a native <select> cannot be a password field.
-        let unknown_sensitivity = self.frames[f].extras_failed && FREE_TEXT_ROLES.contains(&role);
-        let is_secret = extra.as_ref().is_some_and(DomExtra::is_sensitive);
+        let unknown_sensitivity =
+            self.ctx.frames[f].extras_failed && FREE_TEXT_ROLES.contains(&role);
+        let is_secret = extra.is_some_and(DomExtra::is_sensitive);
         if (is_secret || unknown_sensitivity) && value.is_some() {
             value = Some(MASK.to_string());
         }
@@ -869,7 +979,7 @@ impl Builder<'_> {
                 f,
                 nd,
                 display_role,
-                &label,
+                label,
                 node.backend.unwrap_or(0),
                 value,
                 node.states.clone(),
@@ -878,18 +988,13 @@ impl Builder<'_> {
         }
         self.cur_sensitive = false;
         // Interactive leaves with the same text children would only repeat the name.
-        let parent = if skip_line {
-            parent_name
-        } else {
-            label.as_str()
-        }
-        .to_string();
-        for c in node.children {
-            self.emit_node(f, c, child_depth, &parent, nest + 1);
+        let parent = if skip_line { parent_name } else { label };
+        for &c in &node.children {
+            self.emit_node(f, c, child_depth, parent, nest + 1);
         }
         if is_iframe && let Some(b) = node.backend {
-            let child = self.frames.iter().position(|c| {
-                c.parent_frame_id.as_deref() == Some(self.frames[f].frame_id.as_str())
+            let child = self.ctx.frames.iter().position(|c| {
+                c.parent_frame_id.as_deref() == Some(self.ctx.frames[f].frame_id.as_str())
                     && c.owner_backend_id == Some(b)
             });
             if let Some(cf) = child {

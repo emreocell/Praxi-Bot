@@ -573,3 +573,29 @@ async fn review95_get_list_and_put_responses_keep_their_own_snapshot_under_concu
         mismatches.first()
     );
 }
+
+#[tokio::test]
+async fn changing_the_computer_needs_the_owner_key_but_other_edits_do_not() {
+    let t = setup();
+    let (path, _) = make_bot(&t).await;
+    let to_server = json!({
+        "expected_version": 1,
+        "ops": [set("/runtime/computer", json!("server:abc"))]
+    });
+    let r = super::call_token_only(&t, Method::PATCH, &path, Some(to_server.clone())).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{:?}", r.json());
+    let r = super::call_token_only(
+        &t,
+        Method::PATCH,
+        &path,
+        Some(json!({"expected_version": 1, "ops": [set("/bot/persona", json!("Bold."))]})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    // The desktop app (owner key) may switch the computer.
+    let mut owner = to_server;
+    owner["expected_version"] = json!(2);
+    let r = call(&t, Method::PATCH, &path, Some(owner)).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["config"]["runtime"]["computer"], "server:abc");
+}

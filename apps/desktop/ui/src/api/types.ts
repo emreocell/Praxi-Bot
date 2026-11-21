@@ -253,6 +253,19 @@ export type DaemonEvent =
       options: string[];
     }
   | {
+      /** A bot asked the owner for a credential. The card posts to /v1/secret-requests/{call_id}; never carries a value. */
+      type: "secret_requested";
+      run_id: string;
+      call_id: string;
+      name: string;
+      /** Untrusted model text: render as plain text only. */
+      purpose: string;
+      fields: "secret" | "login";
+      replaces_existing: boolean;
+      untrusted_content: boolean;
+      expires_in_secs: number;
+    }
+  | {
       type: "model_fallback";
       run_id: string;
       from: string;

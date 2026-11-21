@@ -140,6 +140,7 @@ impl AgentLoop {
                 spawn_gate: Mutex::new(()),
                 skills: OnceLock::new(),
                 fill_secrets: OnceLock::new(),
+                secret_requests: Mutex::new(HashMap::new()),
                 skill_hints: RwLock::new(None),
                 router: crate::router::Router::default(),
                 directives: Mutex::new(HashMap::new()),
@@ -1427,6 +1428,52 @@ impl AgentLoop {
             .map_err(|_| LoopError::NoPendingApproval(call_id))
     }
 
+    /// The form a parked `secret_request` shows (names and flags, never a value).
+    /// `None` when no request waits under `call_id`.
+    #[must_use]
+    pub fn secret_request(&self, call_id: ToolCallId) -> Option<crate::SecretRequestInfo> {
+        self.sh.secret_requests.lock().get(&call_id).cloned()
+    }
+
+    /// Claim a waiting `secret_request` for submission: exactly one caller gets
+    /// it (a second submit or a cancel then finds nothing). Put it back with
+    /// [`Self::restore_secret_request`] if storing failed.
+    #[must_use]
+    pub fn claim_secret_request(&self, call_id: ToolCallId) -> Option<crate::SecretRequestInfo> {
+        self.sh.secret_requests.lock().remove(&call_id)
+    }
+
+    /// Undo [`Self::claim_secret_request`] after a failed store, so the owner can
+    /// fix the form and submit again.
+    pub fn restore_secret_request(&self, call_id: ToolCallId, info: crate::SecretRequestInfo) {
+        if self.sh.pending.lock().contains_key(&call_id) {
+            self.sh.secret_requests.lock().insert(call_id, info);
+        }
+    }
+
+    /// End a `secret_request`: `stored` after the submit route wrote the value to
+    /// the vault, otherwise cancelled. The model learns only which one.
+    ///
+    /// # Errors
+    /// [`LoopError::NoPendingApproval`] if the request already ended.
+    pub fn finish_secret_request(
+        &self,
+        call_id: ToolCallId,
+        stored: bool,
+        by: UserId,
+    ) -> Result<()> {
+        self.sh.secret_requests.lock().remove(&call_id);
+        let verdict = if stored {
+            Verdict::SecretStored
+        } else {
+            Verdict::Denied { by, reason: None }
+        };
+        self.take_pending(call_id)?
+            .tx
+            .send(verdict)
+            .map_err(|_| LoopError::NoPendingApproval(call_id))
+    }
+
     /// Reconcile portable computer state against this daemon and its paired desktops.
     /// Persist the public local identity so a regenerated key produces a one-time audit notice.
     ///
@@ -1442,8 +1489,17 @@ impl AgentLoop {
         local_id: &str,
         paired_ids: Option<&[String]>,
     ) -> Result<()> {
+        // A `server:<key>` scope belongs to a paired HOST (not a remote desktop):
+        // it holds while that server is paired now; no link layer or an unknown
+        // key fails closed.
+        let server_links = self.sh.server_links.read().clone();
         let valid_scope = |scope: &str| {
             scope.split_once(':').is_some_and(|(kind, id)| {
+                if kind == "server" {
+                    return server_links
+                        .as_ref()
+                        .is_some_and(|links| links.link(id).is_some());
+                }
                 id == local_id
                     || (kind == "pc"
                         && paired_ids.is_none_or(|ids| ids.iter().any(|paired| paired == id)))

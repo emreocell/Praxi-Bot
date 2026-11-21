@@ -82,8 +82,8 @@ These shortcuts apply when modal dialogs, popup menus, or the command palette ar
 | `Up / Down, Enter` | Command palette: move and run |
 | `Up / Down, Home / End` | Move through popup menus |
 | `Esc` | Close a popup menu |
-| `Esc` | End the voice call |
-| `Space / Enter (hold)` | Hold to talk in a push-to-talk call |
+| `Esc` | End the voice call ([Voice call mode](voice-call.md)) |
+| `Space / Enter (hold)` | Hold to talk in a push-to-talk call ([Voice call mode](voice-call.md)) |
 
 ---
 

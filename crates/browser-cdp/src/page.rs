@@ -24,6 +24,10 @@ pub const DEFAULT_WAIT: Duration = Duration::from_secs(30);
 
 /// Requests in flight longer than this (long-poll, `EventSource`) do not block network idle.
 pub(crate) const INFLIGHT_CAP: Duration = Duration::from_secs(10);
+/// After a navigation settles, a request open this long is treated as a page-owned long poll.
+pub(crate) const LONG_LIVED_AGE: Duration = Duration::from_millis(1000);
+/// A cached capture older than this is never served (DOM.* invalidation events do not arrive).
+const CACHE_MAX_AGE: Duration = Duration::from_secs(1);
 
 /// A JavaScript dialog the page watcher answered on its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +124,10 @@ pub(crate) struct Shared {
     pub last_net: StdMutex<Option<Instant>>,
     /// Incremented on every main-frame navigation; invalidates refs.
     pub nav_gen: AtomicU64,
+    /// Incremented on DOM/AX/frame/network-completion mutations and page actions; invalidates snapshot cache.
+    pub dom_gen: AtomicU64,
+    /// Timestamp of the latest main-frame `Page.frameNavigated`.
+    pub last_nav_at: StdMutex<Option<Instant>>,
     /// Set once this page/session detaches, crashes, or closes.
     pub target_closed: Arc<AtomicBool>,
     /// Signaled whenever `target_closed` transitions to `true`.
@@ -147,6 +155,8 @@ impl Default for Shared {
             action_mark: StdMutex::default(),
             last_net: StdMutex::default(),
             nav_gen: AtomicU64::default(),
+            dom_gen: AtomicU64::default(),
+            last_nav_at: StdMutex::default(),
             target_closed: Arc::default(),
             target_close_notify: Arc::default(),
             target_close_tx,
@@ -166,6 +176,15 @@ pub(crate) struct FrameMeta {
     pub session: Option<String>,
 }
 
+pub(crate) struct CachedCapture {
+    pub dom_gen: u64,
+    pub nav_gen: u64,
+    pub at: Instant,
+    pub frames: Vec<FrameInput>,
+    pub url: String,
+    pub title: String,
+}
+
 #[derive(Default)]
 pub(crate) struct State {
     pub refs: RefMap,
@@ -173,6 +192,7 @@ pub(crate) struct State {
     pub opts: SnapshotOptions,
     pub frames: Vec<FrameMeta>,
     pub gen_seen: u64,
+    pub cached: Option<CachedCapture>,
 }
 
 /// One browser tab, attached over a flattened CDP session.
@@ -396,8 +416,8 @@ impl Page {
             .await
     }
 
-    /// Evaluate JavaScript in the main frame and return the result as JSON.
-    pub async fn evaluate(&self, expression: &str) -> Result<Value> {
+    /// Evaluate JavaScript in the main frame without bumping `dom_gen` (read-only internal checks).
+    pub(crate) async fn evaluate_readonly(&self, expression: &str) -> Result<Value> {
         let r = self
             .cmd(
                 "Runtime.evaluate",
@@ -415,10 +435,17 @@ impl Page {
         Ok(r.pointer("/result/value").cloned().unwrap_or(Value::Null))
     }
 
+    /// Evaluate JavaScript in the main frame and return the result as JSON.
+    pub async fn evaluate(&self, expression: &str) -> Result<Value> {
+        let res = self.evaluate_readonly(expression).await;
+        self.shared.dom_gen.fetch_add(1, Ordering::SeqCst);
+        res
+    }
+
     /// Current URL.
     pub async fn url(&self) -> Result<String> {
         Ok(self
-            .evaluate("location.href")
+            .evaluate_readonly("location.href")
             .await?
             .as_str()
             .unwrap_or_default()
@@ -428,7 +455,7 @@ impl Page {
     /// Current title.
     pub async fn title(&self) -> Result<String> {
         Ok(self
-            .evaluate("document.title")
+            .evaluate_readonly("document.title")
             .await?
             .as_str()
             .unwrap_or_default()
@@ -437,44 +464,149 @@ impl Page {
 
     // -- frames ---------------------------------------------------------------------------------
 
-    /// Walk the frame tree, hopping into out-of-process iframe sessions, and fetch AX data.
-    async fn collect_frames(&self) -> Result<(Vec<FrameInput>, String)> {
+    fn take_ax_nodes(res: Result<Value>) -> Vec<Value> {
+        match res {
+            Ok(mut v) => match v.as_object_mut().and_then(|o| o.remove("nodes")) {
+                Some(Value::Array(arr)) => arr,
+                _ => Vec::new(),
+            },
+            Err(_) => Vec::new(),
+        }
+    }
+
+    fn apply_dom_snapshot(session: Option<&str>, resp: Option<Value>, frames: &mut [FrameInput]) {
+        let Some(resp) = resp else {
+            // Fail closed: without DOM facts sensitive inputs are unrecognisable.
+            for f in frames
+                .iter_mut()
+                .filter(|f| f.session_id.as_deref() == session)
+            {
+                f.extras_failed = true;
+            }
+            return;
+        };
+        let extras: Vec<DomExtra> = dom::parse_dom_snapshot(&resp);
+        let root = frames
+            .iter()
+            .find(|f| {
+                f.session_id.as_deref() == session
+                    && (session.is_some() || f.parent_frame_id.is_none())
+            })
+            .map(|f| f.frame_id.clone());
+        for e in extras {
+            let target = e.frame_id.clone().or_else(|| root.clone());
+            if let Some(f) = frames.iter_mut().find(|f| {
+                f.session_id.as_deref() == session && Some(&f.frame_id) == target.as_ref()
+            }) {
+                f.extras.push(e);
+            }
+        }
+    }
+
+    /// Walk the frame tree, hopping into out-of-process iframe sessions, fetching AX trees,
+    /// DOM snapshots, and target info concurrently where safe.
+    async fn collect_frames_and_title(&self) -> Result<(Vec<FrameInput>, String, String)> {
         struct Job {
             session: Option<String>,
             parent: Option<String>,
             owner: Option<i64>,
         }
+        struct ChildFetch {
+            frame_id: String,
+            parent: Option<String>,
+            loader_id: Option<String>,
+            session: Option<String>,
+            owner_session: Option<String>,
+            owner_known: Option<i64>,
+        }
         self.shared.snap_rounds.fetch_add(1, Ordering::SeqCst);
-        let mut main_url = String::new();
+
+        // Main session: run frame tree, root AX tree, DOM snapshot, and target info concurrently.
+        let (tree_res, main_ax_res, mut main_dom_res, info_res) = tokio::join!(
+            self.cmd_on(None, "Page.getFrameTree", json!({})),
+            self.cmd_on(None, "Accessibility.getFullAXTree", json!({})),
+            self.cmd_on(
+                None,
+                "DOMSnapshot.captureSnapshot",
+                json!({"computedStyles": COMPUTED_STYLES}),
+            ),
+            self.client
+                .send("Target.getTargetInfo", json!({"targetId": self.target_id})),
+        );
+        let main_tree = tree_res?;
+        if main_dom_res.is_err() {
+            main_dom_res = self
+                .cmd_on(
+                    None,
+                    "DOMSnapshot.captureSnapshot",
+                    json!({"computedStyles": COMPUTED_STYLES}),
+                )
+                .await;
+        }
+        let main_frame_obj = &main_tree["frameTree"]["frame"];
+        let main_url = format!(
+            "{}{}",
+            main_frame_obj["url"].as_str().unwrap_or_default(),
+            main_frame_obj["urlFragment"].as_str().unwrap_or_default()
+        );
+        let mut main_ax_opt = Some(Self::take_ax_nodes(main_ax_res));
+        let mut main_dom_opt = Some(main_dom_res.ok());
+
         let mut frames: Vec<FrameInput> = Vec::new();
+        let mut session_doms: Vec<(Option<String>, Option<Value>)> = Vec::new();
         let mut visited: HashSet<String> = HashSet::new();
         let mut queue = vec![Job {
             session: None,
             parent: None,
             owner: None,
         }];
+        let mut first_main = true;
+
         loop {
             while let Some(job) = queue.pop() {
-                if let Some(s) = &job.session {
-                    self.ensure_ready(s).await;
-                }
-                let tree = match self
-                    .cmd_on(job.session.as_deref(), "Page.getFrameTree", json!({}))
-                    .await
-                {
-                    Ok(t) => t,
-                    // A child session that vanished mid-walk is skipped; the main one is fatal.
-                    Err(e) if job.session.is_none() || e.is_fatal() => return Err(e),
-                    Err(_) => continue,
-                };
-                if job.session.is_none() {
-                    let f = &tree["frameTree"]["frame"];
-                    main_url = format!(
-                        "{}{}",
-                        f["url"].as_str().unwrap_or_default(),
-                        f["urlFragment"].as_str().unwrap_or_default()
+                let (tree, root_ax, dom_resp) = if first_main && job.session.is_none() {
+                    first_main = false;
+                    (
+                        main_tree.clone(),
+                        main_ax_opt.take().unwrap_or_default(),
+                        main_dom_opt.take().flatten(),
+                    )
+                } else {
+                    if let Some(s) = &job.session {
+                        self.ensure_ready(s).await;
+                    }
+                    let sid = job.session.as_deref();
+                    let (t_res, ax_res, mut d_res) = tokio::join!(
+                        self.cmd_on(sid, "Page.getFrameTree", json!({})),
+                        self.cmd_on(sid, "Accessibility.getFullAXTree", json!({})),
+                        self.cmd_on(
+                            sid,
+                            "DOMSnapshot.captureSnapshot",
+                            json!({"computedStyles": COMPUTED_STYLES}),
+                        ),
                     );
-                }
+                    let t = match t_res {
+                        Ok(t) => t,
+                        // A child session that vanished mid-walk is skipped; the main one is fatal.
+                        Err(e) if job.session.is_none() || e.is_fatal() => return Err(e),
+                        Err(_) => continue,
+                    };
+                    if d_res.is_err() {
+                        d_res = self
+                            .cmd_on(
+                                sid,
+                                "DOMSnapshot.captureSnapshot",
+                                json!({"computedStyles": COMPUTED_STYLES}),
+                            )
+                            .await;
+                    }
+                    (t, Self::take_ax_nodes(ax_res), d_res.ok())
+                };
+                session_doms.push((job.session.clone(), dom_resp));
+
+                let mut root_ax_opt = Some(root_ax);
+                let mut child_fetches: Vec<ChildFetch> = Vec::new();
+                let mut oopif_lookups: Vec<(String, Option<String>, Option<String>)> = Vec::new();
                 // Depth-first walk of this session's tree: (node, is_session_root, parent, owner)
                 let mut stack: Vec<(Value, bool, Option<String>, Option<i64>)> = vec![(
                     tree["frameTree"].clone(),
@@ -488,61 +620,116 @@ impl Page {
                     let child_session = (!root)
                         .then(|| self.shared.oopif.lock().ok()?.get(&id).cloned())
                         .flatten();
-                    // Parent and owner of a session's root frame are resolved against the
-                    // frames collected so far (the frame tree of the parent may not list it).
-                    let (parent, owner) = if root && job.session.is_some() && parent.is_none() {
-                        let pid = f["parentId"].as_str().map(str::to_string);
-                        let psession = pid
-                            .as_ref()
-                            .and_then(|p| frames.iter().find(|x| &x.frame_id == p))
-                            .and_then(|x| x.session_id.clone());
-                        let owner = self.frame_owner(psession.as_deref(), &id).await;
-                        (pid, owner)
-                    } else if root {
-                        (parent, owner)
-                    } else {
-                        (parent, self.frame_owner(job.session.as_deref(), &id).await)
-                    };
                     if let Some(cs) = child_session {
                         if visited.insert(cs.clone()) {
-                            queue.push(Job {
-                                session: Some(cs),
-                                parent: parent.clone(),
-                                owner,
-                            });
+                            oopif_lookups.push((cs, parent, Some(id)));
                         }
                         continue;
                     }
                     if let Some(s) = &job.session {
                         visited.insert(s.clone());
                     }
-                    let ax_params = if root {
-                        json!({})
+                    let loader_id = f["loaderId"].as_str().map(str::to_string);
+                    if root && job.session.is_none() {
+                        frames.push(FrameInput {
+                            frame_id: id.clone(),
+                            parent_frame_id: parent,
+                            owner_backend_id: owner,
+                            session_id: None,
+                            loader_id,
+                            ax_nodes: root_ax_opt.take().unwrap_or_default(),
+                            extras: Vec::new(),
+                            extras_failed: false,
+                        });
+                    } else if root && job.session.is_some() {
+                        let pid = if parent.is_none() {
+                            f["parentId"].as_str().map(str::to_string)
+                        } else {
+                            parent
+                        };
+                        let owner_known = owner;
+                        let psession = pid
+                            .as_ref()
+                            .and_then(|p| frames.iter().find(|x| &x.frame_id == p))
+                            .and_then(|x| x.session_id.clone());
+                        let owner_val = if owner_known.is_some() {
+                            owner_known
+                        } else {
+                            self.frame_owner(psession.as_deref(), &id).await
+                        };
+                        frames.push(FrameInput {
+                            frame_id: id.clone(),
+                            parent_frame_id: pid,
+                            owner_backend_id: owner_val,
+                            session_id: job.session.clone(),
+                            loader_id,
+                            ax_nodes: root_ax_opt.take().unwrap_or_default(),
+                            extras: Vec::new(),
+                            extras_failed: false,
+                        });
                     } else {
-                        json!({"frameId": id})
-                    };
-                    let ax = self
-                        .cmd_on(
-                            job.session.as_deref(),
-                            "Accessibility.getFullAXTree",
-                            ax_params,
-                        )
-                        .await
-                        .map(|v| v["nodes"].as_array().cloned().unwrap_or_default())
-                        .unwrap_or_default();
-                    frames.push(FrameInput {
-                        frame_id: id.clone(),
-                        parent_frame_id: parent,
-                        owner_backend_id: owner,
-                        session_id: job.session.clone(),
-                        loader_id: f["loaderId"].as_str().map(str::to_string),
-                        ax_nodes: ax,
-                        extras: Vec::new(),
-                        extras_failed: false,
-                    });
+                        child_fetches.push(ChildFetch {
+                            frame_id: id.clone(),
+                            parent,
+                            loader_id,
+                            session: job.session.clone(),
+                            owner_session: job.session.clone(),
+                            owner_known: owner,
+                        });
+                    }
                     for c in node["childFrames"].as_array().into_iter().flatten() {
                         stack.push((c.clone(), false, Some(id.clone()), None));
                     }
+                }
+
+                // Resolve OOPIF owners concurrently.
+                if !oopif_lookups.is_empty() {
+                    let owner_futs = oopif_lookups.iter().map(|(_, _, fid)| async {
+                        match fid.as_deref() {
+                            Some(id) => self.frame_owner(job.session.as_deref(), id).await,
+                            None => None,
+                        }
+                    });
+                    let owners = futures_util::future::join_all(owner_futs).await;
+                    for ((cs, parent, _), owner) in oopif_lookups.into_iter().zip(owners) {
+                        queue.push(Job {
+                            session: Some(cs),
+                            parent,
+                            owner,
+                        });
+                    }
+                }
+
+                // Fetch same-process child frame owners and AX trees concurrently.
+                if !child_fetches.is_empty() {
+                    let futs = child_fetches.into_iter().map(|cf| async move {
+                        let (owner, ax_res) = tokio::join!(
+                            async {
+                                if cf.owner_known.is_some() {
+                                    cf.owner_known
+                                } else {
+                                    self.frame_owner(cf.owner_session.as_deref(), &cf.frame_id)
+                                        .await
+                                }
+                            },
+                            self.cmd_on(
+                                cf.session.as_deref(),
+                                "Accessibility.getFullAXTree",
+                                json!({"frameId": cf.frame_id}),
+                            ),
+                        );
+                        FrameInput {
+                            frame_id: cf.frame_id,
+                            parent_frame_id: cf.parent,
+                            owner_backend_id: owner,
+                            session_id: cf.session,
+                            loader_id: cf.loader_id,
+                            ax_nodes: Self::take_ax_nodes(ax_res),
+                            extras: Vec::new(),
+                            extras_failed: false,
+                        }
+                    });
+                    frames.extend(futures_util::future::join_all(futs).await);
                 }
             }
             // Out-of-process iframes announced by auto-attach but absent from the parent's tree.
@@ -571,8 +758,11 @@ impl Page {
         }
         // Main frame first.
         frames.sort_by_key(|f| f.parent_frame_id.is_some());
-        self.attach_dom_extras(&mut frames).await;
-        Ok((frames, main_url))
+        for (sess, dom_resp) in session_doms {
+            Self::apply_dom_snapshot(sess.as_deref(), dom_resp, &mut frames);
+        }
+        let title = self.resolve_title(info_res, &main_url).await;
+        Ok((frames, main_url, title))
     }
 
     async fn frame_owner(&self, session: Option<&str>, frame_id: &str) -> Option<i64> {
@@ -583,62 +773,12 @@ impl Page {
             .as_i64()
     }
 
-    /// One `DOMSnapshot.captureSnapshot` per session, distributed to the frames it covers.
-    async fn attach_dom_extras(&self, frames: &mut [FrameInput]) {
-        let mut sessions: Vec<Option<String>> = Vec::new();
-        for f in frames.iter() {
-            if !sessions.contains(&f.session_id) {
-                sessions.push(f.session_id.clone());
-            }
-        }
-        for s in sessions {
-            let mut captured = None;
-            for _attempt in 0..2 {
-                if let Ok(r) = self
-                    .cmd_on(
-                        s.as_deref(),
-                        "DOMSnapshot.captureSnapshot",
-                        json!({"computedStyles": COMPUTED_STYLES}),
-                    )
-                    .await
-                {
-                    captured = Some(r);
-                    break;
-                }
-            }
-            let Some(resp) = captured else {
-                // Fail closed: without DOM facts sensitive inputs are unrecognisable.
-                for f in frames.iter_mut().filter(|f| f.session_id == s) {
-                    f.extras_failed = true;
-                }
-                continue;
-            };
-            let extras: Vec<DomExtra> = dom::parse_dom_snapshot(&resp);
-            let root = frames
-                .iter()
-                .find(|f| f.session_id == s && (s.is_some() || f.parent_frame_id.is_none()))
-                .map(|f| f.frame_id.clone());
-            for e in extras {
-                let target = e.frame_id.clone().or_else(|| root.clone());
-                if let Some(f) = frames
-                    .iter_mut()
-                    .find(|f| f.session_id == s && Some(&f.frame_id) == target.as_ref())
-                {
-                    f.extras.push(e);
-                }
-            }
-        }
-    }
-
     // -- snapshots ------------------------------------------------------------------------------
 
     /// Title from `Target.getTargetInfo` (falls back to `document.title`). Chrome reports the URL
     /// as the title of untitled pages; that is mapped back to an empty title.
-    async fn target_title(&self, url: &str) -> String {
-        let info = self
-            .client
-            .send("Target.getTargetInfo", json!({"targetId": self.target_id}))
-            .await
+    async fn resolve_title(&self, info_res: Result<Value>, url: &str) -> String {
+        let info = info_res
             .ok()
             .and_then(|v| v.pointer("/targetInfo/title")?.as_str().map(str::to_string));
         match info {
@@ -667,16 +807,55 @@ impl Page {
 
     /// Capture a snapshot with the given options and remember it as the baseline for diffs.
     pub async fn snapshot(&self, opts: &SnapshotOptions) -> Result<Snapshot> {
-        let gen_now = self.shared.nav_gen.load(Ordering::SeqCst);
-        let (frames, url) = self.collect_frames().await?;
-        let title = self.target_title(&url).await;
+        let dom_before = self.shared.dom_gen.load(Ordering::SeqCst);
+        let nav_before = self.shared.nav_gen.load(Ordering::SeqCst);
+        {
+            let mut st = self.state.lock().await;
+            // Re-read the counters under the lock: `watch` may have bumped them since the
+            // first sample.
+            let dom_now = self.shared.dom_gen.load(Ordering::SeqCst);
+            let nav_now = self.shared.nav_gen.load(Ordering::SeqCst);
+            if let Some(cached) = st.cached.take()
+                && cached.dom_gen == dom_now
+                && cached.nav_gen == nav_now
+                && cached.at.elapsed() < CACHE_MAX_AGE
+            {
+                if st.gen_seen == nav_now
+                    && st.opts == *opts
+                    && let Some(last) = st.last.clone()
+                {
+                    st.cached = Some(cached);
+                    return Ok(last);
+                }
+                if st.gen_seen != nav_now {
+                    st.refs.clear();
+                }
+                st.gen_seen = nav_now;
+                let nodes = build_snapshot(&cached.frames, opts, &mut st.refs);
+                let snap = Snapshot {
+                    url: cached.url.clone(),
+                    title: cached.title.clone(),
+                    nodes,
+                };
+                st.last = Some(snap.clone());
+                st.opts = opts.clone();
+                st.cached = Some(cached);
+                return Ok(snap);
+            }
+        }
+        let (frames, url, title) = self.collect_frames_and_title().await?;
         let mut st = self.state.lock().await;
+        let gen_now = self.shared.nav_gen.load(Ordering::SeqCst);
         if st.gen_seen != gen_now {
             st.refs.clear();
         }
         st.gen_seen = gen_now;
         let nodes = build_snapshot(&frames, opts, &mut st.refs);
-        let snap = Snapshot { url, title, nodes };
+        let snap = Snapshot {
+            url: url.clone(),
+            title: title.clone(),
+            nodes,
+        };
         st.last = Some(snap.clone());
         st.opts = opts.clone();
         st.frames = frames
@@ -688,6 +867,14 @@ impl Page {
                 session: f.session_id.clone(),
             })
             .collect();
+        st.cached = Some(CachedCapture {
+            dom_gen: dom_before,
+            nav_gen: nav_before,
+            at: Instant::now(),
+            frames,
+            url,
+            title,
+        });
         Ok(snap)
     }
 
@@ -709,7 +896,10 @@ impl Page {
 
     /// Forget every ref (they become unknown until the next snapshot).
     pub async fn invalidate_refs(&self) {
-        self.state.lock().await.refs.clear();
+        self.shared.dom_gen.fetch_add(1, Ordering::SeqCst);
+        let mut st = self.state.lock().await;
+        st.refs.clear();
+        st.cached = None;
     }
 
     /// Role and accessible name behind a ref of the latest snapshot; `None` when the ref is
@@ -789,23 +979,34 @@ impl Page {
 
     /// Wait until no network request has been in flight for `quiet`, up to `timeout`.
     pub(crate) async fn wait_network_idle(&self, quiet: Duration, timeout: Duration) -> Result<()> {
-        self.wait_network_idle_since(quiet, timeout, None).await
+        self.wait_network_idle_inner(quiet, timeout, None, false)
+            .await
     }
 
     /// Like [`Page::wait_network_idle`]. With `since`, only requests that started at or after
     /// that instant count: a long poll, beacon or stream that was already open before the
-    /// action is not something the action is waiting for.
-    pub(crate) async fn wait_network_idle_since(
+    /// action is not something the action is waiting for. When `settle_on_quiet_after_load`
+    /// is true (navigation settle after `load`), requests that have been open for
+    /// [`LONG_LIVED_AGE`] no longer block (long poll / SSE); younger ones still do.
+    pub(crate) async fn wait_network_idle_inner(
         &self,
         quiet: Duration,
         timeout: Duration,
         since: Option<Instant>,
+        settle_on_quiet_after_load: bool,
     ) -> Result<()> {
         let deadline = Instant::now() + timeout;
         loop {
-            let inflight = match since {
-                Some(t) => busy_count_since(&self.shared, t),
-                None => self.busy_requests(),
+            let inflight = if settle_on_quiet_after_load {
+                // Finite fetches that started after the navigation are waited for; only a
+                // request that has already been open for `LONG_LIVED_AGE` is treated as a
+                // page-owned long poll / stream and ignored.
+                busy_count_younger_than(&self.shared, since, LONG_LIVED_AGE)
+            } else {
+                match since {
+                    Some(t) => busy_count_since(&self.shared, t),
+                    None => self.busy_requests(),
+                }
             };
             let last = self.shared.last_net.lock().ok().and_then(|l| *l);
             let last = match since {
@@ -852,6 +1053,8 @@ async fn watch(
         let ev = match recv_res {
             Ok(ev) => ev,
             Err(broadcast::error::RecvError::Lagged(_)) => {
+                // A lost event may have been a DOM/AX change: never trust the cached capture.
+                shared.dom_gen.fetch_add(1, Ordering::SeqCst);
                 if !verify_target_attached(client.as_deref(), &target_id).await {
                     mark_target_closed(&shared);
                     return;
@@ -903,6 +1106,7 @@ async fn watch(
                 {
                     m.insert(tid.to_string(), csid.to_string());
                 }
+                shared.dom_gen.fetch_add(1, Ordering::SeqCst);
             }
             "Target.detachedFromTarget" => {
                 if let Some(csid) = ev.params["sessionId"].as_str() {
@@ -916,6 +1120,7 @@ async fn watch(
                         r.remove(csid);
                     }
                 }
+                shared.dom_gen.fetch_add(1, Ordering::SeqCst);
             }
             "Inspector.targetCrashed" | "Target.targetCrashed" if sid == session => {
                 mark_target_closed(&shared);
@@ -936,9 +1141,11 @@ async fn watch(
                         map.remove(id);
                     }
                 }
+                shared.dom_gen.fetch_add(1, Ordering::SeqCst);
                 touch(&shared);
             }
             "Page.javascriptDialogOpening" => {
+                shared.dom_gen.fetch_add(1, Ordering::SeqCst);
                 let raw_type = ev.params.get("type").and_then(Value::as_str);
                 let kind = raw_type.unwrap_or("unknown").to_string();
                 let policy = shared
@@ -981,10 +1188,39 @@ async fn watch(
                 if sid == session && ev.params["frame"].get("parentId").is_none() =>
             {
                 shared.nav_gen.fetch_add(1, Ordering::SeqCst);
+                shared.dom_gen.fetch_add(1, Ordering::SeqCst);
                 if let Ok(mut set) = shared.inflight.lock() {
                     set.clear();
                 }
+                if let Ok(mut l) = shared.last_net.lock() {
+                    *l = None;
+                }
+                if let Ok(mut n) = shared.last_nav_at.lock() {
+                    *n = Some(Instant::now());
+                }
                 notify_action_hooks(&shared);
+            }
+            "Page.frameNavigated"
+            | "Page.navigatedWithinDocument"
+            | "Page.loadEventFired"
+            | "Page.domContentEventFired"
+            | "Page.javascriptDialogClosed"
+            | "Target.targetInfoChanged"
+            | "Accessibility.loadComplete"
+            | "Accessibility.nodesUpdated"
+            | "DOM.documentUpdated"
+            | "DOM.setChildNodes"
+            | "DOM.attributeModified"
+            | "DOM.attributeRemoved"
+            | "DOM.characterDataModified"
+            | "DOM.childNodeCountUpdated"
+            | "DOM.childNodeInserted"
+            | "DOM.childNodeRemoved"
+            | "DOM.inlineStyleInvalidated"
+            | "DOM.shadowRootPushed"
+            | "DOM.shadowRootPopped"
+            | "DOM.distributedNodesUpdated" => {
+                shared.dom_gen.fetch_add(1, Ordering::SeqCst);
             }
             _ => {}
         }
@@ -1073,6 +1309,16 @@ fn busy_count_since(shared: &Shared, since: Instant) -> usize {
     shared.inflight.lock().map_or(0, |mut m| {
         m.retain(|_, t| t.elapsed() < INFLIGHT_CAP);
         m.values().filter(|t| **t >= since).count()
+    })
+}
+
+/// Requests started at or after `since` (if any) that are younger than `max_age`.
+fn busy_count_younger_than(shared: &Shared, since: Option<Instant>, max_age: Duration) -> usize {
+    shared.inflight.lock().map_or(0, |mut m| {
+        m.retain(|_, t| t.elapsed() < INFLIGHT_CAP);
+        m.values()
+            .filter(|t| since.is_none_or(|s| **t >= s) && t.elapsed() < max_age)
+            .count()
     })
 }
 
@@ -1266,5 +1512,52 @@ mod tests {
             got,
             [("confirm", true), ("prompt", true), ("beforeunload", true),]
         );
+    }
+
+    #[tokio::test]
+    async fn dom_and_ax_events_bump_dom_gen() {
+        let (tx, rx) = broadcast::channel(64);
+        let shared = Arc::new(Shared::default());
+        let task = tokio::spawn(watch(rx, "S".into(), "T".into(), shared.clone(), None));
+        let g0 = shared.dom_gen.load(Ordering::SeqCst);
+        tx.send(ev("DOM.documentUpdated", json!({}))).unwrap();
+        tx.send(ev("Accessibility.nodesUpdated", json!({"nodes": []})))
+            .unwrap();
+        tx.send(ev("Network.loadingFinished", json!({"requestId": "R1"})))
+            .unwrap();
+        drop(tx);
+        task.await.unwrap();
+        assert_eq!(shared.dom_gen.load(Ordering::SeqCst) - g0, 3);
+    }
+
+    #[tokio::test]
+    async fn lagged_receiver_bumps_dom_gen() {
+        let (tx, rx) = broadcast::channel(2);
+        let shared = Arc::new(Shared::default());
+        for _ in 0..8 {
+            tx.send(ev("Runtime.consoleAPICalled", json!({}))).unwrap();
+        }
+        let g0 = shared.dom_gen.load(Ordering::SeqCst);
+        let task = tokio::spawn(watch(rx, "S".into(), "T".into(), shared.clone(), None));
+        tokio::task::yield_now().await;
+        drop(tx);
+        task.await.unwrap();
+        assert!(shared.dom_gen.load(Ordering::SeqCst) > g0);
+    }
+
+    #[test]
+    fn settle_ignores_only_requests_open_for_long_lived_age() {
+        let shared = Shared::default();
+        let old = Instant::now()
+            .checked_sub(LONG_LIVED_AGE + Duration::from_millis(100))
+            .unwrap();
+        shared.inflight.lock().unwrap().insert("poll".into(), old);
+        assert_eq!(busy_count_younger_than(&shared, None, LONG_LIVED_AGE), 0);
+        shared
+            .inflight
+            .lock()
+            .unwrap()
+            .insert("fetch".into(), Instant::now());
+        assert_eq!(busy_count_younger_than(&shared, None, LONG_LIVED_AGE), 1);
     }
 }

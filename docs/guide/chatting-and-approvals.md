@@ -44,6 +44,14 @@ not its name:
 A message carries at most 6 files. Files are stored in the data directory under
 `attachments/`.
 
+### Voice call (desktop app)
+
+Click the phone button (**Start voice chat**) in the desktop composer to talk
+hands-free. The app records each turn in memory, transcribes it through the
+dictation endpoint you configured in **Settings → General**, sends it as an
+ordinary chat message, and reads the reply aloud sentence by sentence. Approvals
+stay click-only on the card in the chat. See [Voice call mode](voice-call.md).
+
 ### Slash commands
 
 When the router is enabled, `/stop` (stop the current run), `/new` (start a new
@@ -252,6 +260,38 @@ prompt-free when the run has only untrusted content and has not read private
 data. The bot form has an explicit, off-by-default setting that skips this ask
 for that bot. Deny rules and the floors above still win. A run that has not
 read anything behaves as before.
+
+### Host-status commands on an always-on host
+
+Normally `shell_run` output marks a run untrusted ("command output"), which then
+makes every later `shell_run` call ask under the executor gate—even in the
+`full` preset. On an always-on host (`bot serve --host`), when a run targets the
+bot's own host computer (`host` or `browser`, never the user's PC), one narrow
+set of fixed read-only status commands neither taints the run nor triggers the
+untrusted-content executor gate:
+
+- **Allowed commands and short flags** (`shell_run` with only `command`,
+  optional `timeout`, and optional `shell` = `sh` or `bash`):
+  - `uptime` (`-p`, `-s`)
+  - `whoami` (no flags)
+  - `hostname` (`-f`, `-s`)
+  - `uname` (`-a`, `-s`, `-n`, `-r`, `-v`, `-m`, `-p`, `-i`, `-o`)
+  - `date` (`-u`, `-R`)
+  - `df` (`-h`, `-H`, `-k`, `-m`, `-T`, `-P`, `-l`)
+  - `free` (`-h`, `-b`, `-k`, `-m`, `-g`, `-t`, `-l`, `-w`)
+  - `nproc` (no flags)
+  - `id` (`-u`, `-g`, `-G`, `-n`, `-r`)
+- **Why it is safe**: The check reads only the command text (up to 3
+  space-separated tokens, 64 characters max, only ASCII letters, digits, spaces,
+  and `-`). These commands take no path, URL, or free-text argument, change
+  nothing, and print fixed machine status—no outsider-written text can enter the
+  run from them, and value-setting flags (`date -s`, `free -s`, `df -t`,
+  `hostname -F`) are excluded.
+- **What still asks**: Any command with a path (`df -h /etc`), pipe, redirect,
+  chaining (`;`, `&&`), substitution, quote, variable, unknown flag, custom
+  `cwd`, non-`sh`/`bash` shell (such as PowerShell), or a command running on a
+  non-host daemon or the user's PC keeps the full taint and executor gates. Ask
+  mode (`read-and-draft`) and the absolute floors are unchanged.
 
 ### Runs started by a schedule
 
