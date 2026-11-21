@@ -8,6 +8,7 @@ mod composio_approvals;
 mod external_agent;
 mod fill_secret;
 mod planning_pause;
+mod secret_request;
 mod tiering;
 mod usage;
 
@@ -7686,7 +7687,7 @@ pub(crate) const MACHINE_A: &str =
 pub(crate) const MACHINE_B: &str =
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
-fn seed_desktop_grant(env: &Env, computer: Option<&str>) {
+pub(crate) fn seed_desktop_grant(env: &Env, computer: Option<&str>) {
     let mut detail = json!({
         "bot_id": env.bot.to_string(),
         "category": "desktop",

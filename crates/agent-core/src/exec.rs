@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use builtin_tools::{QUESTION_CARD_KIND, TODO_LIST_KIND};
+use builtin_tools::{QUESTION_CARD_KIND, SECRET_REQUEST_CARD_KIND, SecretCard, TODO_LIST_KIND};
 use futures::StreamExt;
 use permission_engine::{Decision, Limits};
 use protocol::PermissionCategory;
@@ -1749,6 +1749,10 @@ impl TurnExecutor {
                     ),
                 }
             }
+            Some((SECRET_REQUEST_CARD_KIND, data)) => match SecretCard::from_part(data) {
+                Some(card) => self.sh.request_secret(ctx, call, &card).await,
+                None => ("secret_request: malformed request.".to_owned(), true),
+            },
             _ => (render_output(out), false),
         }
     }

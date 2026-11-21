@@ -734,7 +734,9 @@ fn run() -> Result<()> {
         }
         Command::Serve { .. } => return run_serve(&cli, command, &data_dir),
         Command::Doctor(c) => return run_doctor(&cli, c, &data_dir),
-        Command::Backup(c) => return backup_cmd::backup(&data_dir, c, &mut std::io::stdout()),
+        Command::Backup(c) => {
+            return backup_cmd::backup(&data_dir, c, cli.json, &mut std::io::stdout());
+        }
         Command::SelfUpdate(args) => return update::run(args),
         Command::Host { .. }
         | Command::Status
@@ -788,9 +790,14 @@ fn run() -> Result<()> {
 
     match command {
         Command::Setup(c) => run_setup(c, &env),
-        Command::Restore(c) => {
-            backup_cmd::restore(&data_dir, cli.port, store, c, &mut std::io::stdout())
-        }
+        Command::Restore(c) => backup_cmd::restore(
+            &data_dir,
+            cli.port,
+            store,
+            c,
+            cli.json,
+            &mut std::io::stdout(),
+        ),
         Command::Channels {
             action: ChannelsCmd::Telegram { action },
         } => run_telegram(&cli, &data_dir, store, action, &mut say),
@@ -932,6 +939,14 @@ fn run_doctor(cli: &Cli, c: &DoctorCmd, data_dir: &std::path::Path) -> Result<()
 
 fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result<()> {
     use std::sync::Arc;
+
+    // First thing: restrict the daemon process before secrets are read or
+    // children are spawned. Never fatal; the result is recorded in `serve`
+    // and shown by `doctor`.
+    let guard = process_guard::protect();
+    if guard.outcome == process_guard::Outcome::Failed {
+        eprintln!("warning: DEGRADED process guard: {}", guard.detail);
+    }
 
     let (host_mode, peer_enabled) = match command {
         Command::Serve { host, peer, .. } => (*host, *peer),

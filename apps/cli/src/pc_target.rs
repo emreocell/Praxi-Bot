@@ -1660,7 +1660,9 @@ pub(crate) async fn run_browser_op(
                 Err(e) => Err(RpcError::new(ERR_FORBIDDEN, redact(&e))),
             }
         }
-        "current_url" => Ok(serde_json::json!({"url": driver.current_url().await})),
+        "current_url" => Ok(serde_json::json!({
+            "url": driver.current_url().await.map(|u| redact(&u))
+        })),
         _ => Err(RpcError::new(
             ERR_METHOD_NOT_FOUND,
             "unknown browser operation",
@@ -2214,6 +2216,8 @@ mod tests {
 
     #[derive(Default)]
     struct FakeBrowser {
+        /// What `current_url` reports (`None`: the driver cannot tell).
+        url: Mutex<Option<String>>,
         opened: Mutex<Vec<String>>,
         snapshots: std::sync::atomic::AtomicUsize,
         /// Bump this epoch while a snapshot is being captured.
@@ -2231,6 +2235,9 @@ mod tests {
 
     #[async_trait]
     impl BrowserDriver for FakeBrowser {
+        async fn current_url(&self) -> Option<String> {
+            self.url.lock().clone()
+        }
         async fn open(&self, url: &str, _: Option<&str>) -> Result<String, String> {
             self.opened.lock().push(url.to_owned());
             Ok(format!("opened {url}"))
@@ -2717,6 +2724,21 @@ mod tests {
         *r.browser.bump.lock() = Some(r.epoch.clone());
         let res = r.h.handle(&host, RPC_BROWSER, snap).await;
         assert_eq!(res.unwrap_err().code, ERR_FORBIDDEN);
+    }
+
+    /// The page address leaves the host through the same redactor as every
+    /// other text result.
+    #[tokio::test]
+    async fn current_url_passes_through_the_redactor() {
+        let browser = Arc::new(FakeBrowser::default());
+        *browser.url.lock() = Some("https://example.test/?token=hunter2".into());
+        let driver: Arc<dyn BrowserDriver> = browser;
+        let redact: Arc<dyn Fn(&str) -> String + Send + Sync> =
+            Arc::new(|t| t.replace("hunter2", "••••"));
+        let out = run_browser_op(&driver, "current_url", &serde_json::json!({}), &redact)
+            .await
+            .unwrap();
+        assert_eq!(out["url"], "https://example.test/?token=••••");
     }
 
     /// Blocker 3: an "allow" that was already delivered does not run once ITS

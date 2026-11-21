@@ -61,6 +61,7 @@ rmcp = { version = "3.9", default-features = false, features = ["server", "trans
 secret-store.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+process-guard = { path = "../../crates/process-guard", version = "0.1.0" }
 skills = { path = "../../crates/skills", version = "0.1.0" }
 storage.workspace = true
 tokio = { workspace = true, features = ["signal", "io-std"] }

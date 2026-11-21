@@ -77,8 +77,10 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
             |e| Check::fail("browser", "browser", e, "install a non-snap browser or set BOT_BROWSER_PATH; use `sudo praxi doctor` for service-context validation"),
         ),
         check_mcp(env.data_dir),
+        check_secret_request(env.data_dir),
         check_web(env),
         core::check_schedule_tools(env.data_dir),
+        core::check_process_guard(env.data_dir),
         core::check_disk(env.data_dir),
         check_resources(),
         check_telegram(env),
@@ -693,6 +695,26 @@ fn check_mcp(dir: &Path) -> Check {
     }
 }
 
+/// `secret_request` is experimental and off by default until the desktop form exists.
+fn check_secret_request(dir: &Path) -> Check {
+    let host = std::fs::read_to_string(dir.join("host.toml")).unwrap_or_default();
+    let env = std::env::var("BOT_SECRET_REQUESTS").ok();
+    if crate::serve::secret_requests_enabled(&host, env.as_deref()) {
+        Check::warn(
+            "secret_request",
+            "secret request (experimental)",
+            "on: the bot may ask for a credential; the desktop form is not available yet, so a request waits until it expires",
+            "turn it off: remove `secret_request = true` under [experimental] in host.toml and unset BOT_SECRET_REQUESTS",
+        )
+    } else {
+        Check::ok(
+            "secret_request",
+            "secret request (experimental)",
+            "off (default): the bot is not offered the secret_request tool",
+        )
+    }
+}
+
 /// Budget for the `--online` web search probe: must exceed the sequential
 /// worst-case of per-backend search timeouts (including redirect hops) so
 /// later fallbacks (such as Bing) run and structured backend errors surface
@@ -1152,6 +1174,7 @@ id = "m1"
         assert_eq!(get(&checks, "daemon").status, Status::Warn);
         assert_eq!(get(&checks, "browser").status, Status::Warn);
         assert_eq!(get(&checks, "mcp config").status, Status::Ok);
+        assert_eq!(get(&checks, "process guard").status, Status::Skipped);
         assert_eq!(get(&checks, "telegram").status, Status::Ok);
         assert_eq!(get(&checks, "model catalog").status, Status::Ok);
         assert!(

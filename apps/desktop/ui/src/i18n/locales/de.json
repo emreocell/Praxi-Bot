@@ -264,6 +264,10 @@
       "soft": "Weich",
       "title": "Ecken"
     },
+    "photorealAvatars": {
+      "description": "Bots erhalten weiche, fotorealistische Tonkörper in ihrer Farbe. Ausschalten für den leichteren gezeichneten Ton-Stil.",
+      "title": "Fotorealistische Ton-Avatare"
+    },
     "style": {
       "blur": "Unschärfe",
       "blurSoft": "Weich",
@@ -301,6 +305,17 @@
       "lowContrast": "Niedriger Kontrast ({{ratio}}:1). Text braucht mindestens 4,5:1, um lesbar zu bleiben.",
       "modalTitle": "Designs",
       "text": "Text"
+    },
+    "wallpaper": {
+      "description": "Langsam ziehende, gerasterte Wolken hinter den Panels. Standardmäßig aus; pausiert, wenn das Fenster verborgen ist.",
+      "dusk": "Dämmerung",
+      "hint": "„Design folgen“ wählt Nacht für Obsidian, Himmel für Cobalt, Dämmerung für Raven und Warm für Clay. Es ersetzt den Hintergrund, solange es aktiv ist; bei reduzierter Bewegung wird ein einzelnes Standbild gezeigt.",
+      "night": "Nacht",
+      "off": "Aus",
+      "sky": "Himmel",
+      "theme": "Design folgen",
+      "title": "Hintergrundbild",
+      "warm": "Warm"
     }
   },
   "apps": {
@@ -2181,6 +2196,14 @@
         "hint": "Er läuft dort und ist auf diesem Computer eingefroren. Nutze in seiner Zeile „Zu diesem Computer zurückholen“.",
         "title": "Dieser Zeitplan wurde auf einen Server verschoben"
       },
+      "secret_request_exists": {
+        "hint": "Bitte den Bot, ausdrücklich zu ersetzen, oder wähle einen anderen Namen. Es wurde nichts geändert.",
+        "title": "Dieser Name ist schon vergeben"
+      },
+      "secret_request_gone": {
+        "hint": "Sie wurde beantwortet, abgebrochen oder ist abgelaufen. Lass den Bot sie erneut stellen, falls sie noch gebraucht wird.",
+        "title": "Diese Anfrage ist nicht mehr offen"
+      },
       "secret_store_failed": {
         "hint": "Versuche es erneut. Wenn es weiter fehlschlägt, prüfe den Datenträger des Servers und seinen Schlüsselspeicher.",
         "title": "Der Server konnte den Schlüssel nicht speichern"
@@ -3230,14 +3253,14 @@
     "namePlaceholder": "Bot-Name",
     "shapeGroup": "Figurenform",
     "shapes": {
-      "boulder": "Felsbrocken",
-      "capsule": "Kapsel",
+      "boulder": "Bohne",
+      "capsule": "Kissen",
       "cloud": "Wolke",
       "clover": "Kleeblatt",
       "cube": "Würfel",
       "diamond": "Diamant",
       "drop": "Tropfen",
-      "ears": "Ohren",
+      "ears": "Bonbon",
       "flower": "Blume",
       "gem": "Edelstein",
       "ghost": "Geist",
@@ -3762,6 +3785,7 @@
         "host_ownership": "Host-Besitz",
         "model_catalog": "Modellkatalog",
         "peer_link": "Peer-/VPS-Verbindung",
+        "process_guard": "Prozessschutz",
         "providers": "KI-Anbieter",
         "providers_loaded": "Geladene Anbieter",
         "schedule_tools": "Zeitplan-Werkzeuge",
@@ -3781,6 +3805,7 @@
         "disk_space": "Gib etwas Speicherplatz frei; bei vollem Datenträger können Unterhaltungen und Logs nicht gespeichert werden.",
         "host_ownership": "Diese Installation ist inaktiv; aktiviere sie in den Host-Einstellungen.",
         "peer_link": "Koppele dieses Gerät erneut mit dem Host.",
+        "process_guard": "Der Daemon konnte seinen eigenen Prozess nicht schützen; starte ihn neu und melde das Problem, falls es bleibt.",
         "providers": "Füge den API-Schlüssel unter Einstellungen → KI hinzu oder melde dich bei der Coding-CLI an und schalte sie dort ein.",
         "providers_loaded": "Lade die Anbieter neu, damit der Bot die gespeicherten Einstellungen verwendet.",
         "schedule_tools": "schedule.toml ist ungültig; korrigiere oder lösche sie.",

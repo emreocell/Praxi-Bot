@@ -587,9 +587,33 @@ pub(crate) fn redact_request(r: &SharedRedactor, req: &mut provider_catalog::Cha
 }
 
 pub(crate) enum Verdict {
-    Approved { scope: ApprovalScope, by: UserId },
-    Denied { by: UserId, reason: Option<String> },
-    Answered { answer: String },
+    Approved {
+        scope: ApprovalScope,
+        by: UserId,
+    },
+    Denied {
+        by: UserId,
+        reason: Option<String>,
+    },
+    Answered {
+        answer: String,
+    },
+    /// The owner's submit route stored the value of a `secret_request` (never carries it).
+    SecretStored,
+}
+
+/// What a parked `secret_request` asks for: names and flags only, never a value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SecretRequestInfo {
+    /// The run that asked.
+    pub run_id: RunId,
+    /// Entry name (after `fill/`).
+    pub name: String,
+    /// One value or username + password.
+    pub fields: protocol::event::SecretFields,
+    /// The bot asked to replace an existing entry; without it the submit route
+    /// must refuse a name that exists.
+    pub replace: bool,
 }
 
 pub(crate) struct Pending {
@@ -678,6 +702,8 @@ pub(crate) struct CtxState {
     pub closed: bool,
     pub seq: u64,
     pub todos: Vec<TodoItem>,
+    /// `secret_request` calls this run has made (asked or refused after the card tests).
+    pub secret_requests: u32,
 }
 
 /// Per-run resolved computer placement fixed at run start.
@@ -922,6 +948,8 @@ pub(crate) struct Shared {
     pub events: broadcast::Sender<StreamItem>,
     pub runs: Mutex<HashMap<RunId, Arc<RunCtx>>>,
     pub pending: Mutex<HashMap<ToolCallId, Pending>>,
+    /// `secret_request` calls waiting for the owner's form (see `approval.rs`).
+    pub secret_requests: Mutex<HashMap<ToolCallId, SecretRequestInfo>>,
     pub grants: Mutex<Grants>,
     pub active: Mutex<HashMap<ChatId, RunId>>,
     pub queued: Mutex<HashMap<ChatId, VecDeque<(String, &'static str)>>>,
@@ -1749,6 +1777,7 @@ impl Shared {
                 closed: false,
                 seq,
                 todos: Vec::new(),
+                secret_requests: 0,
             }),
             taint: Mutex::new(taint),
             control_grants: Mutex::new(Vec::new()),
@@ -2152,6 +2181,7 @@ fn needs_barrier(event: &Event) -> bool {
             | Event::ToolCallApproved(_)
             | Event::ToolCallDenied(_)
             | Event::QuestionAsked(_)
+            | Event::SecretRequested(_)
             | Event::ControlRequested(_)
             | Event::SubagentStarted(_)
             | Event::SubagentFinished(_)

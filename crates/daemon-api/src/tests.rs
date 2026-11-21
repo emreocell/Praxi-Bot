@@ -40,6 +40,7 @@ mod memory;
 mod model_catalog;
 mod peer_knowledge;
 mod schedules;
+mod secret_requests;
 mod skills;
 mod voice;
 mod web;
@@ -91,6 +92,10 @@ fn setup() -> T {
 
 /// `setup` after `prepare` ran on the (still empty) data directory.
 fn setup_with(prepare: impl FnOnce(&std::path::Path)) -> T {
+    setup_with_config(prepare, LoopConfig::default())
+}
+
+fn setup_with_config(prepare: impl FnOnce(&std::path::Path), config: LoopConfig) -> T {
     let dir = tempfile::tempdir().unwrap();
     prepare(dir.path());
     let storage = Arc::new(Storage::open(dir.path()).unwrap());
@@ -101,7 +106,7 @@ fn setup_with(prepare: impl FnOnce(&std::path::Path)) -> T {
         Arc::clone(&storage),
         tools,
         Providers::single(Arc::new(FakeProvider)),
-        LoopConfig::default(),
+        config,
     );
     let state = AppState::new(agent.clone(), storage, DaemonConfig::new(TOKEN)).unwrap();
     state.set_owner_key(OWNER_KEY.into());

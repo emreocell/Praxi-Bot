@@ -137,6 +137,41 @@ pub struct QuestionAsked {
     pub options: Vec<String>,
 }
 
+// ── Secret requests ───────────────────────────────────────────────────────────
+
+/// What a [`SecretRequested`] card asks the owner to type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SecretFields {
+    /// One secret value (an API key, a token, a password on its own).
+    Secret,
+    /// A username and a password, stored as `<name>/username` and `<name>/password`.
+    Login,
+}
+
+/// The model asked the owner for a credential (`secret_request`); the run waits
+/// until the owner submits it on the local desktop or cancels. The event carries
+/// what the card shows and NEVER a value: the owner's app posts the value
+/// straight to the daemon (`POST /v1/secret-requests/{call_id}`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SecretRequested {
+    pub run_id: RunId,
+    /// Id to submit or cancel with.
+    pub call_id: ToolCallId,
+    /// The `fill/` entry name the value will be stored under (without the prefix).
+    pub name: String,
+    /// Why the bot asks. Plain text written by the model: untrusted, never markup.
+    pub purpose: String,
+    pub fields: SecretFields,
+    /// An entry with this name already exists and the bot asked to replace it.
+    pub replaces_existing: bool,
+    /// The run has already read untrusted content (a page, a mail, a download):
+    /// the card must warn that the request may have been planted there.
+    pub untrusted_content: bool,
+    /// Seconds until the request expires on its own.
+    pub expires_in_secs: u64,
+}
+
 // ── Model fallback ────────────────────────────────────────────────────────────
 
 /// The loop switched to a fallback model after the previous one kept failing.
@@ -315,6 +350,7 @@ pub enum Event {
     ToolCallCompleted(ToolCallCompleted),
     TodoUpdated(TodoUpdated),
     QuestionAsked(QuestionAsked),
+    SecretRequested(SecretRequested),
     ModelFallback(ModelFallback),
     RouteDecided(RouteDecided),
     WorkflowStepStarted(WorkflowStepStarted),

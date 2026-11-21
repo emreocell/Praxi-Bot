@@ -23,6 +23,7 @@ import {
   parsePanelTransparency,
   parseTransparentChat
 } from "ui/surface-model";
+import { DEFAULT_WALLPAPER, parseWallpaper, type WallpaperSetting } from "./wallpaper.ts";
 import { DEFAULT_BACKDROP_DIM, NO_BACKDROP, parseBackdrop, parseBackdropDim } from "./backdropCatalog.ts";
 
 /** Everything the Appearance page controls (persisted inside `AppSettings`). */
@@ -37,6 +38,8 @@ export interface AppearanceSettings {
   bubble: BubbleStyle;
   ownBubble: OwnBubble;
   backdrop: string;
+  /** Animated dithered-cloud wallpaper (`off` by default); takes the backdrop's place while on. */
+  wallpaper: WallpaperSetting;
   /** 20..88: how much of the theme background covers the scene. */
   backdropDim: number;
   /** 0..100: tinted / glass panels, 0 = most opaque, 100 = the legibility floor. */
@@ -54,6 +57,8 @@ export interface AppearanceSettings {
   chatPanel: boolean;
   /** Paint the chosen panel style even when the OS asks apps to reduce transparency. */
   transparencyOverride: boolean;
+  /** Bots use the photoreal clay body renders (default) instead of the drawn SVG clay. */
+  photorealAvatars: boolean;
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
@@ -65,12 +70,14 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   bubble: "soft",
   ownBubble: "tint",
   backdrop: NO_BACKDROP,
+  wallpaper: DEFAULT_WALLPAPER,
   backdropDim: DEFAULT_BACKDROP_DIM,
   panelTransparency: DEFAULT_SURFACE.transparency,
   panelBlur: DEFAULT_SURFACE.blur,
   transparentChat: true,
   chatPanel: false,
-  transparencyOverride: false
+  transparencyOverride: false,
+  photorealAvatars: true
 };
 
 function oneOf<T extends string>(values: readonly T[], v: unknown, fallback: T): T {
@@ -98,12 +105,15 @@ export function normalizeAppearance(raw: Record<string, unknown>): AppearanceSet
     bubble: parseBubble(raw.bubble),
     ownBubble: parseOwnBubble(raw.ownBubble),
     backdrop: parseBackdrop(raw.backdrop),
+    wallpaper: parseWallpaper(raw.wallpaper),
     backdropDim: parseBackdropDim(raw.backdropDim),
     panelTransparency: parsePanelTransparency(raw.panelTransparency),
     panelBlur: parsePanelBlur(raw.panelBlur),
     transparentChat: !chatPanel,
     chatPanel,
-    transparencyOverride: raw.transparencyOverride === true
+    transparencyOverride: raw.transparencyOverride === true,
+    // Default on: only an explicit `false` turns the photoreal skin off.
+    photorealAvatars: raw.photorealAvatars !== false
   };
 }
 
@@ -123,7 +133,7 @@ export const isShippedTheme = (id: string): boolean => paletteById(id) !== undef
 /**
  * Appearance overrides from URL parameters (`?mock=1` review screenshots only):
  * `theme`, `accent` (`bot` | `theme` | hex), `style`, `corners`, `bubble`,
- * `meb`, `backdrop`, `dim`, `alpha` (panel transparency), `blur`, `clear` (transparent chat area, `1`).
+ * `meb`, `backdrop`, `wallpaper`, `dim`, `alpha` (panel transparency), `blur`, `clear` (transparent chat area, `1`).
  * Absent parameters leave the saved value alone.
  */
 export function appearanceFromQuery(
@@ -149,6 +159,7 @@ export function appearanceFromQuery(
     bubble: q("bubble") ?? saved.bubble,
     ownBubble: q("meb") ?? saved.ownBubble,
     backdrop: q("backdrop") ?? saved.backdrop,
+    wallpaper: q("wallpaper") ?? saved.wallpaper,
     backdropDim: q("dim") ?? saved.backdropDim,
     panelTransparency: q("alpha") ?? saved.panelTransparency,
     panelBlur: q("blur") ?? saved.panelBlur,

@@ -180,6 +180,31 @@ fn probe_names_are_unpredictable_and_concurrent_probes_do_not_collide() {
 }
 
 #[test]
+fn process_guard_check_shows_degraded_when_protection_failed() {
+    use process_guard::{Outcome, Report, record};
+    let d = tempfile::tempdir().unwrap();
+    assert_eq!(check_process_guard(d.path()).status, Status::Skipped);
+    std::fs::write(d.path().join(process_guard::REPORT_FILE), "{\"outc").unwrap();
+    let torn = check_process_guard(d.path());
+    assert_eq!(torn.status, Status::Skipped);
+    assert!(torn.detail.contains("unreadable"), "{}", torn.detail);
+    let mut report = Report {
+        outcome: Outcome::Applied,
+        detail: "ok".into(),
+        pid: 1,
+    };
+    record(d.path(), &report).unwrap();
+    assert_eq!(check_process_guard(d.path()).status, Status::Ok);
+    report.outcome = Outcome::Failed;
+    report.detail = "access denied".into();
+    record(d.path(), &report).unwrap();
+    let c = check_process_guard(d.path());
+    assert_eq!(c.status, Status::Warn);
+    assert!(c.detail.starts_with("DEGRADED:"), "{}", c.detail);
+    assert!(c.hint.is_some());
+}
+
+#[test]
 fn clock_check_flags_impossible_and_backwards_clocks() {
     let floor = SystemTime::UNIX_EPOCH + Duration::from_secs(CLOCK_FLOOR_SECS);
     let now = floor + Duration::from_secs(365 * 24 * 3600);

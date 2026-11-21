@@ -1053,9 +1053,15 @@ struct Shared {
     data_dir: PathBuf,
     control: Option<Arc<dyn DesktopControlGate>>,
     observed_epoch: Arc<std::sync::atomic::AtomicU64>,
+    /// One observation epoch per bot whose computer is a paired server, so one
+    /// bot's snapshot never clears another's post-takeover observation check.
+    server_epochs: ServerEpochs,
     /// Owner-stored secrets the fill tool may type; `None` refuses `secret`.
     fill_secrets: Option<Arc<FillSecrets>>,
 }
+
+type ServerEpochs =
+    Arc<parking_lot::Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicU64>>>>;
 
 /// The tool context supplies the bot identity, never the model's input.
 type BotDrivers = Arc<parking_lot::Mutex<std::collections::HashMap<String, Arc<Shared>>>>;
@@ -1121,6 +1127,7 @@ impl Shared {
                 data_dir: self.data_dir.clone(),
                 control: self.control.clone(),
                 observed_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                server_epochs: ServerEpochs::default(),
                 fill_secrets: self.fill_secrets.clone(),
             })
         })))
@@ -1227,6 +1234,7 @@ fn tools_with_pool(
         data_dir: data_dir.to_path_buf(),
         control,
         observed_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        server_epochs: ServerEpochs::default(),
         fill_secrets,
     });
     let b = PermissionCategory::Browser;
@@ -1574,7 +1582,14 @@ impl BrowserTool {
                 managed: None,
                 data_dir: self.shared.data_dir.clone(),
                 control: self.shared.control.clone(),
-                observed_epoch: self.shared.observed_epoch.clone(),
+                observed_epoch: Arc::clone(
+                    self.shared
+                        .server_epochs
+                        .lock()
+                        .entry(ctx.bot_id.clone().unwrap_or_default())
+                        .or_default(),
+                ),
+                server_epochs: ServerEpochs::default(),
                 fill_secrets: None,
             }));
         }
@@ -1594,6 +1609,7 @@ impl BrowserTool {
                 data_dir: shared.data_dir.clone(),
                 control: shared.control.clone(),
                 observed_epoch: shared.observed_epoch.clone(),
+                server_epochs: ServerEpochs::default(),
                 fill_secrets: shared.fill_secrets.clone(),
             });
         }
@@ -2859,6 +2875,7 @@ mod tests {
             control: None,
             fill_secrets: None,
             observed_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            server_epochs: ServerEpochs::default(),
         });
         assert!(
             registry.targets().is_empty(),
@@ -2899,6 +2916,7 @@ mod tests {
             data_dir: dir.path().into(),
             control: None,
             observed_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            server_epochs: ServerEpochs::default(),
             fill_secrets: None,
         });
         let a = shared.for_bot(Some("bot-a")).unwrap();
@@ -2994,6 +3012,59 @@ mod tests {
             assert!(err.to_string().contains("computer target"));
         }
         assert!(fake.calls.lock().is_empty());
+    }
+
+    #[test]
+    fn each_server_bot_has_its_own_observation_epoch() {
+        struct Remote(Arc<FakeBrowser>);
+        #[async_trait]
+        impl DesktopControlGate for Remote {
+            fn remote_browser_for_run(&self, _: &str) -> Option<Arc<dyn BrowserDriver>> {
+                Some(self.0.clone())
+            }
+            async fn before_action(&self, _: &ControlRequest) -> Result<(), String> {
+                Ok(())
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let tool = BrowserTool {
+            spec: tools(
+                Arc::new(FakeBrowser::default()),
+                dir.path(),
+                Some(Arc::new(Remote(Arc::new(FakeBrowser::default())))),
+            )
+            .iter()
+            .map(|t| t.spec().clone())
+            .next()
+            .unwrap(),
+            op: Op::Snapshot,
+            shared: Arc::new(Shared {
+                driver: Arc::new(FakeBrowser::default()),
+                managed: None,
+                data_dir: dir.path().into(),
+                control: Some(Arc::new(Remote(Arc::new(FakeBrowser::default())))),
+                observed_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                server_epochs: ServerEpochs::default(),
+                fill_secrets: None,
+            }),
+        };
+        let ctx = |bot: &str| ToolContext {
+            bot_id: Some(bot.into()),
+            ..ToolContext::default()
+        };
+        let a = tool.select_shared(&ctx("a")).unwrap();
+        let b = tool.select_shared(&ctx("b")).unwrap();
+        a.observed_epoch
+            .store(7, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(
+            b.observed_epoch.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+        let a2 = tool.select_shared(&ctx("a")).unwrap();
+        assert_eq!(
+            a2.observed_epoch.load(std::sync::atomic::Ordering::SeqCst),
+            7
+        );
     }
 
     struct RefuseGate;
@@ -4081,6 +4152,7 @@ mod tests {
             control: None,
             fill_secrets: None,
             observed_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            server_epochs: ServerEpochs::default(),
         });
         for n in 0..20u128 {
             let id = uuid::Uuid::from_u128(0x0194_a1c2_0000_7000_8000_0000_0000_0000 + n);

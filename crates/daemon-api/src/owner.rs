@@ -163,6 +163,9 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("DELETE", "/v1/fill-secrets/*"),
     ("POST", "/v1/fill-grants"),
     ("DELETE", "/v1/fill-grants/{}"),
+    // a bot's credential request: the value is typed by the owner, never a token holder
+    ("POST", "/v1/secret-requests/{}"),
+    ("POST", "/v1/secret-requests/{}/cancel"),
     ("POST", "/v1/email/accounts"),
     ("PUT", "/v1/email/accounts/{}"),
     ("DELETE", "/v1/email/accounts/{}"),
@@ -320,8 +323,9 @@ pub(crate) async fn owner_gate(State(s): State<AppState>, req: Request, next: Ne
 }
 
 /// Whether a bot profile edit changes what the bot may do without asking: the
-/// permission preset and levels, the tool lists, file access or a switch to an
-/// external CLI engine. Such an edit needs the owner key even though plain
+/// permission preset and levels, the tool lists, file access, the computer the
+/// bot works on (`runtime.computer`: this PC, the host, a paired server) or a
+/// switch to an external CLI engine. Such an edit needs the owner key even though plain
 /// profile edits (name, persona, model choice) do not.
 #[must_use]
 pub fn execution_changed(current: Option<&serde_json::Value>, next: &serde_json::Value) -> bool {
@@ -331,7 +335,7 @@ pub fn execution_changed(current: Option<&serde_json::Value>, next: &serde_json:
             .filter(|e| e.starts_with("cli:"))
             .map(str::to_owned)
     };
-    ["permissions", "tools", "files"]
+    ["permissions", "tools", "files", "runtime"]
         .iter()
         .any(|k| next.get(k).is_some() && next.get(k) != current.and_then(|c| c.get(k)))
         || cli_executor(next) != current.and_then(cli_executor)

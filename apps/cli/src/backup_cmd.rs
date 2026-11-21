@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use clap::Args;
 use secret_store::{MemoryStore, SecretStore};
+use serde_json::json;
 use state_bundle::{ExportOptions, ImportError, ImportOptions};
 
 #[derive(Args)]
@@ -34,7 +35,12 @@ pub struct RestoreCmd {
 /// Write a backup of `data_dir` to `cmd.file`. Safe while the daemon runs (SQLite
 /// databases are copied with the online backup API), but only a stopped daemon
 /// gives a snapshot that is consistent across files.
-pub fn backup(data_dir: &Path, cmd: &BackupCmd, out: &mut dyn Write) -> crate::Result<()> {
+pub fn backup(
+    data_dir: &Path,
+    cmd: &BackupCmd,
+    json_out: bool,
+    out: &mut dyn Write,
+) -> crate::Result<()> {
     if !data_dir.join("bot.db").is_file() {
         return Err(format!(
             "nothing to back up: no Praxi data found in {}; run `bot setup` first or pass `--data-dir <PATH>` if your data lives elsewhere",
@@ -80,6 +86,18 @@ pub fn backup(data_dir: &Path, cmd: &BackupCmd, out: &mut dyn Write) -> crate::R
     match result {
         Ok(manifest) => {
             let bytes: u64 = manifest.files.iter().map(|f| f.size).sum();
+            if json_out {
+                writeln!(
+                    out,
+                    "{}",
+                    json!({
+                        "file": cmd.file.to_string_lossy(),
+                        "files": manifest.files.len(),
+                        "bytes": bytes,
+                    })
+                )?;
+                return Ok(());
+            }
             writeln!(
                 out,
                 "Backup written to {} ({} files, {} bytes).",
@@ -113,6 +131,7 @@ pub fn restore(
     port: u16,
     store: &dyn SecretStore,
     cmd: &RestoreCmd,
+    json_out: bool,
     out: &mut dyn Write,
 ) -> crate::Result<()> {
     if daemon_listening(port) {
@@ -152,6 +171,19 @@ pub fn restore(
             }
             other => other.to_string(),
         })?;
+    if json_out {
+        writeln!(
+            out,
+            "{}",
+            json!({
+                "file": cmd.file.to_string_lossy(),
+                "files": outcome.manifest.files.len(),
+                "app_version": outcome.manifest.app_version,
+                "previous_state": outcome.backup_dir.as_deref().map(Path::to_string_lossy),
+            })
+        )?;
+        return Ok(());
+    }
     writeln!(
         out,
         "Restored {} files from {} (created with Praxi {}).",
@@ -210,12 +242,13 @@ mod tests {
         data_with_bot(src.path());
         let out_dir = tempfile::tempdir().unwrap();
         let file = out_dir.path().join("praxi.tar");
+        let cmd = BackupCmd { file: file.clone() };
         let mut said = Vec::new();
-        backup(src.path(), &BackupCmd { file: file.clone() }, &mut said).unwrap();
+        backup(src.path(), &cmd, false, &mut said).unwrap();
         assert!(file.exists());
         assert!(!partial_path(&file).exists());
         assert!(
-            backup(src.path(), &BackupCmd { file: file.clone() }, &mut said).is_err(),
+            backup(src.path(), &cmd, false, &mut said).is_err(),
             "an existing file is never overwritten"
         );
 
@@ -230,6 +263,7 @@ mod tests {
                 replace: false,
                 allow_policy_relaxation: false,
             },
+            false,
             &mut said,
         )
         .unwrap();
@@ -247,6 +281,7 @@ mod tests {
         let err = backup(
             empty.path(),
             &BackupCmd { file: file.clone() },
+            false,
             &mut Vec::new(),
         )
         .unwrap_err()
@@ -263,6 +298,7 @@ mod tests {
         backup(
             src.path(),
             &BackupCmd { file: file.clone() },
+            false,
             &mut Vec::new(),
         )
         .unwrap();
@@ -275,6 +311,7 @@ mod tests {
                 replace: false,
                 allow_policy_relaxation: false,
             },
+            false,
             &mut Vec::new(),
         )
         .unwrap_err()

@@ -8,7 +8,13 @@ name: Linux Server Packages
 #                               pre-release automatically by a single maintainer, no reviewer.
 on:
   pull_request:
-    paths: [".github/workflows/linux-release.yml", "scripts/install-linux.sh"]
+    paths:
+      - ".github/workflows/installer.yml"
+      - ".github/workflows/linux-release.yml"
+      - "scripts/install-linux.sh"
+      - "scripts/linux/tests/test-publish-linux-assets.sh"
+      - "scripts/release/**"
+      - "scripts/tests/test_check_release_version.py"
   workflow_dispatch:
     inputs:
       tag:
@@ -22,7 +28,13 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-    paths: [".github/workflows/linux-release.yml", "scripts/install-linux.sh"]
+    paths:
+      - ".github/workflows/installer.yml"
+      - ".github/workflows/linux-release.yml"
+      - "scripts/install-linux.sh"
+      - "scripts/linux/tests/test-publish-linux-assets.sh"
+      - "scripts/release/**"
+      - "scripts/tests/test_check_release_version.py"
 
 permissions: {}
 
@@ -64,11 +76,22 @@ jobs:
           # every dollar-brace pair in a run block, and status functions are not allowed there.
           def job_if(condition):
               return "    if: " + chr(36) + "{{ " + condition + " }}"
+          version_check = workflow.split("\n  check-version:\n", 1)[1].split("\n  build:\n", 1)[0]
+          build = workflow.split("\n  build:\n", 1)[1].split("\n  attest-prerelease:\n", 1)[0]
+          assert "    needs: plan" in version_check
+          assert "scripts/release/check_version.py" in version_check
+          assert "    needs: [validate, plan, check-version]" in build
+          assert "needs.check-version.outputs.checkout_ref" in build
+          windows = pathlib.Path(".github/workflows/installer.yml").read_text()
+          version_step = windows.split("- name: Check tagged release version", 1)[1].split("- name:", 1)[0]
+          assert "if: github.ref_type == 'tag'" in version_step
+          assert "scripts/release/check_version.py" in version_step
+          assert windows.index("- name: Check tagged release version") < windows.index("- name: Install Rust toolchain")
           # FINAL tags: reviewer-gated attestation and publication, unchanged.
           release = workflow.split("\n  release:\n", 1)[1]
           assert job_if("!cancelled() && needs.verify-tagged-release.result == 'success' && needs.plan.outputs.kind == 'final' && needs.plan.outputs.publish == 'true'") in release
           assert "needs.verify-tagged-release.result == 'success'" in release
-          assert "    needs: [plan, verify-tagged-release]" in release
+          assert "    needs: [plan, check-version, verify-tagged-release]" in release
           assert "    environment: release" in release
           attest = workflow.split("\n  attest:\n", 1)[1].split("\n  verify-tagged-release:\n", 1)[0]
           assert "    environment: release" in attest
@@ -83,11 +106,12 @@ jobs:
           assert "github.event.repository.fork" in pre and "refs/heads/main" in pre
           publish_pre = workflow.split("\n  publish-prerelease:\n", 1)[1].split("\n  release:\n", 1)[0]
           assert "environment:" not in publish_pre
-          assert "    needs: [plan, verify-tagged-release]" in publish_pre
+          assert "    needs: [plan, check-version, verify-tagged-release]" in publish_pre
           assert "needs.plan.outputs.kind == 'pre'" in publish_pre
           assert job_if("!cancelled() && needs.verify-tagged-release.result == 'success' && needs.plan.outputs.kind == 'pre' && needs.plan.outputs.publish == 'true' && github.repository == 'emreocell/Praxi-Bot'") in publish_pre
           assert "needs.verify-tagged-release.result == 'success'" in publish_pre
           assert "publish-linux-assets.sh" in publish_pre and "publish-linux-assets.sh" in release
+          assert "needs.check-version.outputs.previous_tag" in publish_pre and "needs.check-version.outputs.previous_tag" in release
           script = pathlib.Path("scripts/release/publish-linux-assets.sh").read_text()
           assert '--clobber' not in script and 'gh release edit' not in script and 'gh release delete' not in script
           # An existing release (the Windows installer is attached first) may gain the Linux assets,
@@ -95,6 +119,13 @@ jobs:
           assert 'gh release upload' in script and 'refusing to overwrite' in script
           print("Verified final-tag reviewer gate, pre-release gates, real verifier and no-overwrite publisher")
           PYTHON
+
+      - name: Release version checker tests
+        run: python -B -m unittest discover -s scripts/tests -p test_check_release_version.py
+
+      - name: Release publisher tests
+        if: runner.os == 'Linux'
+        run: bash scripts/linux/tests/test-publish-linux-assets.sh
 
       - name: Audit release workflow
         if: runner.os == 'Linux'
@@ -401,10 +432,53 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "tag=$tag kind=$kind build=$build publish=$publish"
 
+  check-version:
+    name: Check release version
+    if: needs.plan.outputs.build == 'true'
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      checkout_ref: ${{ steps.check.outputs.commit || needs.plan.outputs.checkout_ref }}
+      previous_tag: ${{ steps.check.outputs.previous_tag }}
+    steps:
+      - name: Checkout workflow source and release tags
+        if: needs.plan.outputs.tag != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Check the commit to be built
+        if: needs.plan.outputs.tag != ''
+        id: check
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+          RELEASE_REF: ${{ needs.plan.outputs.checkout_ref }}
+        run: |
+          set -euo pipefail
+          source=.
+          commit="$(git rev-parse HEAD)"
+          if [[ "$GITHUB_REF_TYPE" != tag ]]; then
+            # Rebuilds dispatched from main may target tags that predate the checker.
+            commit="$(git rev-parse --verify "$RELEASE_REF^{commit}")"
+            source="$RUNNER_TEMP/release-source"
+            git worktree add --detach "$source" "$commit"
+          fi
+          python3 -B scripts/release/check_version.py --root "$source" "$TAG"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          previous_tag="$(git describe --tags --abbrev=0 --always --match 'v[0-9]*' --exclude "$TAG" "$commit")"
+          # With no earlier tag, --always returns the commit ID.
+          if [[ "$previous_tag" == v* ]]; then
+            echo "previous_tag=$previous_tag" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     name: Build ${{ matrix.target }}
     if: needs.plan.outputs.build == 'true'
-    needs: [validate, plan]
+    needs: [validate, plan, check-version]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     permissions:
@@ -426,7 +500,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ needs.plan.outputs.checkout_ref }}
+          ref: ${{ needs.check-version.outputs.checkout_ref }}
           fetch-depth: 0
 
       - name: A pre-release started from main must be a commit of main
@@ -726,7 +800,7 @@ jobs:
 
   publish-prerelease:
     name: Publish pre-release assets
-    needs: [plan, verify-tagged-release]
+    needs: [plan, check-version, verify-tagged-release]
     # !cancelled() + an explicit result check: the implicit success() would also fail when the sibling
     # attest job (final-only or pre-only) was skipped. Verification must still have succeeded.
     if: ${{ !cancelled() && needs.verify-tagged-release.result == 'success' && needs.plan.outputs.kind == 'pre' && needs.plan.outputs.publish == 'true' && github.repository == 'emreocell/Praxi-Bot' }}
@@ -749,11 +823,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.plan.outputs.tag }}
-        run: bash scripts/release/publish-linux-assets.sh "$TAG"
+          PREVIOUS_TAG: ${{ needs.check-version.outputs.previous_tag }}
+        run: bash scripts/release/publish-linux-assets.sh "$TAG" "$PREVIOUS_TAG"
 
   release:
     name: Publish verified immutable release
-    needs: [plan, verify-tagged-release]
+    needs: [plan, check-version, verify-tagged-release]
     # See publish-prerelease: explicit verification result instead of the implicit success().
     if: ${{ !cancelled() && needs.verify-tagged-release.result == 'success' && needs.plan.outputs.kind == 'final' && needs.plan.outputs.publish == 'true' }}
     environment: release
@@ -776,4 +851,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.plan.outputs.tag }}
-        run: bash scripts/release/publish-linux-assets.sh "$TAG"
+          PREVIOUS_TAG: ${{ needs.check-version.outputs.previous_tag }}
+        run: bash scripts/release/publish-linux-assets.sh "$TAG" "$PREVIOUS_TAG"

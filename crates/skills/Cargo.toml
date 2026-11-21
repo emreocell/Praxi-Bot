@@ -28,4 +28,5 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2-zli
 rustix = { version = "1", default-features = false, features = ["fs", "std"] }
 
 [dev-dependencies]
+proptest.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }

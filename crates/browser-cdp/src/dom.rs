@@ -35,6 +35,20 @@ pub fn is_editable_attrs<'a>(attr: impl Fn(&str) -> Option<&'a str>) -> bool {
 /// Computed styles requested from `DOMSnapshot.captureSnapshot`.
 pub const COMPUTED_STYLES: &[&str] = &["cursor"];
 
+fn attr_str<'a>(pairs: &[i64], strings: &[&'a str], key: &str) -> Option<&'a str> {
+    let s = |i: i64| -> &'a str {
+        usize::try_from(i)
+            .ok()
+            .and_then(|i| strings.get(i).copied())
+            .unwrap_or("")
+    };
+    pairs
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .find_map(|&[k, v]| (s(k) == key).then(|| s(v)))
+}
+
 /// Parse every document in a `DOMSnapshot.captureSnapshot` result.
 pub fn parse_dom_snapshot(resp: &Value) -> Vec<DomExtra> {
     let strings: Vec<&str> = resp
@@ -66,126 +80,131 @@ pub fn parse_dom_snapshot(resp: &Value) -> Vec<DomExtra> {
         let name = ints(nodes.get("nodeName"));
         let value = ints(nodes.get("nodeValue"));
         let backend = ints(nodes.get("backendNodeId"));
-        let attrs: Vec<Vec<i64>> = nodes
-            .get("attributes")
-            .and_then(Value::as_array)
-            .map(|a| a.iter().map(|x| ints(Some(x))).collect())
-            .unwrap_or_default();
+        let attrs_raw = nodes.get("attributes").and_then(Value::as_array);
         let n = parent.len();
 
-        // layout: which nodes are rendered, and their cursor.
-        let mut cursor: HashMap<usize, &str> = HashMap::new();
+        // layout: 0 = not rendered, 1 = rendered (non-pointer), 2 = rendered with cursor:pointer.
+        let mut layout_state = vec![0u8; n];
         let layout_idx = ints(doc["layout"].get("nodeIndex"));
         let styles = doc["layout"]
             .get("styles")
             .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
+            .map_or(&[][..], Vec::as_slice);
         for (k, &ni) in layout_idx.iter().enumerate() {
+            let Ok(ni) = usize::try_from(ni) else {
+                continue;
+            };
+            if ni >= n {
+                continue;
+            }
             let c = styles
                 .get(k)
-                .map(|st| ints(Some(st)))
-                .and_then(|st| st.first().copied())
+                .and_then(Value::as_array)
+                .and_then(|st| st.first())
+                .and_then(Value::as_i64)
                 .map_or("", s);
-            if let Ok(ni) = usize::try_from(ni) {
-                cursor.insert(ni, c);
-            }
+            layout_state[ni] = if c == "pointer" { 2 } else { 1 };
         }
 
-        let mut extra_of: HashMap<usize, usize> = HashMap::new();
+        let mut extra_of = vec![usize::MAX; n];
         let mut local: Vec<DomExtra> = Vec::new();
+        let mut attr_buf: Vec<i64> = Vec::new();
         for i in 0..n {
             if kind.get(i) != Some(&1) {
                 continue;
             }
-            let tag = s(name.get(i).copied().unwrap_or(-1)).to_ascii_lowercase();
-            let mut attr: HashMap<&str, &str> = HashMap::new();
-            for pair in attrs
-                .get(i)
-                .map(Vec::as_slice)
-                .unwrap_or_default()
-                .chunks(2)
-            {
-                if let [k, v] = pair {
-                    attr.insert(s(*k), s(*v));
-                }
+            let tag_raw = s(name.get(i).copied().unwrap_or(-1));
+            let is_input =
+                tag_raw.eq_ignore_ascii_case("input") || tag_raw.eq_ignore_ascii_case("textarea");
+            let rendered = layout_state[i] != 0;
+
+            attr_buf.clear();
+            if let Some(arr) = attrs_raw.and_then(|a| a.get(i)).and_then(Value::as_array) {
+                attr_buf.extend(arr.iter().map(|x| x.as_i64().unwrap_or(-1)));
             }
-            let rendered = cursor.contains_key(&i);
-            let is_pointer = cursor.get(&i).is_some_and(|c| *c == "pointer");
+
+            let has_onclick = rendered && attr_str(&attr_buf, &strings, "onclick").is_some();
+            let tabindex = if rendered {
+                attr_str(&attr_buf, &strings, "tabindex")
+                    .and_then(|t| t.trim().parse::<i32>().ok())
+                    .filter(|t| *t >= 0)
+            } else {
+                None
+            };
+            let is_pointer = layout_state[i] == 2;
             let parent_pointer = usize::try_from(parent.get(i).copied().unwrap_or(-1))
-                .ok()
-                .and_then(|p| cursor.get(&p))
-                .is_some_and(|c| *c == "pointer");
-            let tabindex = attr
-                .get("tabindex")
-                .and_then(|t| t.trim().parse::<i32>().ok())
-                .filter(|t| *t >= 0);
-            let candidate = rendered
-                && ((is_pointer && !parent_pointer)
-                    || attr.contains_key("onclick")
-                    || tabindex.is_some());
-            let is_input = matches!(tag.as_str(), "input" | "textarea");
-            let editable = !is_input && is_editable_attrs(|k| attr.get(k).copied());
+                .is_ok_and(|p| p < n && layout_state[p] == 2);
+            let cursor_pointer = rendered && is_pointer && !parent_pointer;
+            let candidate = rendered && (cursor_pointer || has_onclick || tabindex.is_some());
+            let editable = !is_input && is_editable_attrs(|k| attr_str(&attr_buf, &strings, k));
             if !candidate && !is_input && !editable {
                 continue;
             }
+
             let fallback = ["aria-label", "title", "alt"]
                 .iter()
-                .find_map(|k| attr.get(k).filter(|v| !v.trim().is_empty()))
-                .map_or(String::new(), |v| (*v).to_string());
-            extra_of.insert(i, local.len());
+                .find_map(|k| attr_str(&attr_buf, &strings, k).filter(|v| !v.trim().is_empty()))
+                .map_or(String::new(), str::to_string);
+            extra_of[i] = local.len();
             local.push(DomExtra {
                 backend_id: backend.get(i).copied().unwrap_or(-1),
                 frame_id: frame_id.clone(),
-                tag,
-                cursor_pointer: is_pointer && !parent_pointer,
-                onclick: attr.contains_key("onclick"),
+                tag: tag_raw.to_ascii_lowercase(),
+                cursor_pointer,
+                onclick: has_onclick,
                 tabindex,
-                input_type: is_input
-                    .then(|| attr.get("type").copied().unwrap_or("text").to_string()),
-                autocomplete: attr.get("autocomplete").map(|a| (*a).to_string()),
+                input_type: is_input.then(|| {
+                    attr_str(&attr_buf, &strings, "type")
+                        .unwrap_or("text")
+                        .to_string()
+                }),
+                autocomplete: attr_str(&attr_buf, &strings, "autocomplete").map(str::to_string),
                 text: fallback,
                 name_hints: NAME_HINT_ATTRS
                     .iter()
-                    .filter_map(|k| attr.get(k).map(|v| (*v).to_string()))
+                    .filter_map(|k| attr_str(&attr_buf, &strings, k).map(str::to_string))
                     .collect(),
                 editable,
             });
         }
 
         // Gather text of candidates from descendant text nodes (nearest candidate ancestor).
-        let mut gathered: HashMap<usize, String> = HashMap::new();
-        for i in 0..n {
-            if kind.get(i) != Some(&3) {
-                continue;
-            }
-            let text = s(value.get(i).copied().unwrap_or(-1)).trim();
-            if text.is_empty() {
-                continue;
-            }
-            let mut p = parent.get(i).copied().unwrap_or(-1);
-            let mut hops = 0;
-            while let Ok(pi) = usize::try_from(p) {
-                if let Some(&ei) = extra_of.get(&pi)
-                    && local[ei].tag != "input"
-                {
-                    let buf = gathered.entry(ei).or_default();
-                    if !buf.is_empty() {
-                        buf.push(' ');
+        if local.iter().any(|e| e.tag != "input") {
+            let mut gathered: HashMap<usize, String> = HashMap::new();
+            for i in 0..n {
+                if kind.get(i) != Some(&3) {
+                    continue;
+                }
+                let text = s(value.get(i).copied().unwrap_or(-1)).trim();
+                if text.is_empty() {
+                    continue;
+                }
+                let mut p = parent.get(i).copied().unwrap_or(-1);
+                let mut hops = 0;
+                while let Ok(pi) = usize::try_from(p) {
+                    if pi >= n {
+                        break;
                     }
-                    buf.push_str(text);
-                    break;
-                }
-                p = parent.get(pi).copied().unwrap_or(-1);
-                hops += 1;
-                if hops > 32 {
-                    break;
+                    let ei = extra_of[pi];
+                    if ei != usize::MAX && local[ei].tag != "input" {
+                        let buf = gathered.entry(ei).or_default();
+                        if !buf.is_empty() {
+                            buf.push(' ');
+                        }
+                        buf.push_str(text);
+                        break;
+                    }
+                    p = parent[pi];
+                    hops += 1;
+                    if hops > 32 {
+                        break;
+                    }
                 }
             }
-        }
-        for (ei, text) in gathered {
-            let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
-            local[ei].text = flat.chars().take(MAX_LABEL).collect();
+            for (ei, text) in gathered {
+                let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                local[ei].text = flat.chars().take(MAX_LABEL).collect();
+            }
         }
         out.extend(local);
     }
