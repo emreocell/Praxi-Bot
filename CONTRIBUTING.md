@@ -68,7 +68,7 @@ size are welcome: fixes, improvements and new features, from first-timers and re
 | `remote-api`, `peer-network`, `state-bundle`, `host-provision` | Pairing and the encrypted link to a host, state migration, server provisioning over SSH |
 | `channel-api`, `channel-telegram` | Client channel gateway and the Telegram adapter |
 | `computer-target`, `live-view` | Per-bot computer selection and the live screen contracts |
-| `plugin-host`, `evals` | Plugin manifests; the evaluation harness (`evals/`) |
+| `plugin-host`, `evals` | A reserved placeholder with no code yet (plugin design: issue #213); the evaluation harness (`evals/`) |
 
 The user-facing behaviour is described in the [user guide](docs/guide/index.md); the HTTP API is
 documented in [`docs/api/openapi.json`](docs/api/openapi.json).

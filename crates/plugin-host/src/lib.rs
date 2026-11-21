@@ -1,4 +1,6 @@
-//! Plugin manifest loading, lifecycle management, and isolation for all plugin types.
+//! Reserved placeholder for a future plugin host.
 //!
-//! Reads plugin.toml manifests, starts and supervises plugin processes or WASM
-//! modules, and brokers capability grants between plugins and the core daemon.
+//! This crate contains no code today: it does not read `plugin.toml` manifests,
+//! start or supervise plugin processes, run WASM modules, or broker capability
+//! grants. The plugin system design is tracked in issue #213
+//! (<https://github.com/emreocell/Praxi-Bot/issues/213>).

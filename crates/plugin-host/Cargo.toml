@@ -1,6 +1,6 @@
 [package]
 name = "plugin-host"
-description = "Plugin manifest loading, lifecycle management, and isolation for all plugin types."
+description = "Reserved placeholder for a future plugin host; contains no code yet."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
