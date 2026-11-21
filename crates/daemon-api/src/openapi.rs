@@ -79,6 +79,8 @@ impl Modify for Security {
             except GET /v1/health need `Authorization: Bearer <token>`."
     ),
     paths(
+        crate::chat_history::search,
+        crate::chat_history::export,
         changes::get_run_changes,
         changes::preview_restore,
         changes::restore_changes,

@@ -17,6 +17,7 @@ pub mod auth;
 mod bot_engine;
 mod bot_tools;
 pub mod changes;
+mod chat_history;
 mod cli_engines;
 mod cli_login;
 pub mod components;
@@ -1266,6 +1267,8 @@ fn api_routes() -> Router<AppState> {
                 .patch(r::patch_bot)
                 .delete(r::delete_bot),
         )
+        .route("/v1/chats/search", get(chat_history::search))
+        .route("/v1/chats/{id}/export", get(chat_history::export))
         .route("/v1/chats", get(r::list_chats).post(r::create_chat))
         .route(
             "/v1/chats/{id}",

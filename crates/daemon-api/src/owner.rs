@@ -77,6 +77,9 @@ impl AppState {
 /// path. Paired peers never reach the local router: their roles are enforced
 /// by the peer router (`peer.rs`), which this table does not change.
 pub const OWNER_ROUTES: &[(&str, &str)] = &[
+    // Full history reads and portable transcripts expose sensitive conversation data.
+    ("GET", "/v1/chats/search"),
+    ("GET", "/v1/chats/{}/export"),
     // approvals and questions: a token must not approve its own tool calls
     ("POST", "/v1/approvals/{}"),
     ("POST", "/v1/questions/{}"),

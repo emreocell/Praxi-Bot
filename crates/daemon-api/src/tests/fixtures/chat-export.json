@@ -1,0 +1,33 @@
+{
+  "format_version": 1,
+  "chat_id": "00000000-0000-0000-0000-000000000001",
+  "title": "Project notes",
+  "created_at_ms": 0,
+  "messages": [
+    {
+      "id": "00000000-0000-0000-0000-000000000002",
+      "run_id": null,
+      "role": "user",
+      "created_at_ms": 0,
+      "content": "Hello [REDACTED]",
+      "attachments": [
+        "notes.txt"
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "run_id": "00000000-0000-0000-0000-000000000003",
+      "name": "read_file",
+      "status": "succeeded",
+      "created_at_ms": 0
+    }
+  ],
+  "approvals": [
+    {
+      "run_id": "00000000-0000-0000-0000-000000000003",
+      "outcome": "denied",
+      "created_at_ms": 1000
+    }
+  ]
+}

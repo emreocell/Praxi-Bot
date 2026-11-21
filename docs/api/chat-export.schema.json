@@ -1,0 +1,141 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://praxi.bot/schemas/chat-export-v1.json",
+  "title": "Praxi chat export version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "chat_id",
+    "title",
+    "created_at_ms",
+    "messages",
+    "steps",
+    "approvals"
+  ],
+  "properties": {
+    "format_version": {
+      "const": 1
+    },
+    "chat_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "title": {
+      "type": "string"
+    },
+    "created_at_ms": {
+      "type": "integer"
+    },
+    "messages": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "run_id",
+          "role",
+          "created_at_ms",
+          "content",
+          "attachments"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "role": {
+            "enum": [
+              "user",
+              "assistant"
+            ]
+          },
+          "created_at_ms": {
+            "type": "integer"
+          },
+          "content": {
+            "type": "string"
+          },
+          "attachments": {
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "maxItems": 2000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "run_id",
+          "name",
+          "status",
+          "created_at_ms"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "created_at_ms": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "approvals": {
+      "type": "array",
+      "maxItems": 2000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "run_id",
+          "outcome",
+          "created_at_ms"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "outcome": {
+            "enum": [
+              "approved",
+              "expired",
+              "answered",
+              "declined",
+              "denied",
+              "pending",
+              "decided"
+            ]
+          },
+          "created_at_ms": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  }
+}

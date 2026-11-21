@@ -93,6 +93,29 @@ fn opt_json_text(v: Option<&Value>) -> Result<Option<String>> {
     Ok(v.map(serde_json::to_string).transpose()?)
 }
 
+// Dotless-i folding supplements unicode61. Map snippets back to the original
+// spelling using character offsets (the supplemental mappings are 1:1).
+fn restore_search_snippet(content: &str, snippet: &str) -> String {
+    let core = snippet.trim_matches('…');
+    let folded = content.replace('ı', "i").replace('İ', "I");
+    let Some(start) = folded.find(core) else {
+        return snippet.to_owned();
+    };
+    let skip = folded[..start].chars().count();
+    let count = core.chars().count();
+    let text: String = content.chars().skip(skip).take(count).collect();
+    format!(
+        "{}{}{}",
+        if snippet.starts_with('…') {
+            "…"
+        } else {
+            ""
+        },
+        text,
+        if snippet.ends_with('…') { "…" } else { "" }
+    )
+}
+
 /// Synchronous SQLite repository.  Cheap to share behind an `Arc`; calls
 /// serialise on an internal mutex.
 #[derive(Debug)]
@@ -898,6 +921,106 @@ impl Storage {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    /// Ranked phrase search, scoped before pagination. Queries are literal FTS phrases,
+    /// never FTS syntax. Tool, private, superseded and oversized messages are excluded.
+    /// Returns at most 100 bounded messages and plain snippets (no HTML).
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn search_messages(
+        &self,
+        user: UserId,
+        bot: Option<BotId>,
+        chat: Option<ChatId>,
+        query: &str,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<(Message, String)>> {
+        let conn = self.conn();
+        let mut st = conn.prepare(
+            "SELECT m.id, m.user_id, m.chat_id, m.run_id, m.role, m.content, m.created_at_ms,
+             m.exposure_untrusted, m.exposure_private, m.exposure_sources,
+             snippet(chat_messages_fts, 0, '', '', '…', 24)
+             FROM chat_messages_fts JOIN messages m ON m.rowid = chat_messages_fts.rowid
+             JOIN chats c ON c.id = m.chat_id
+             WHERE chat_messages_fts MATCH ?1 AND m.user_id = ?2 AND c.user_id = ?2
+             AND (?3 IS NULL OR c.bot_id = ?3) AND (?4 IS NULL OR c.id = ?4)
+             ORDER BY rank, m.created_at_ms DESC, m.id LIMIT ?5 OFFSET ?6",
+        )?;
+        let phrase = format!(
+            "\"{}\"",
+            query
+                .replace('ı', "i")
+                .replace('İ', "I")
+                .replace('"', "\"\"")
+        );
+        Ok(st
+            .query_map(
+                params![
+                    phrase,
+                    user.to_string(),
+                    bot.map(|v| v.to_string()),
+                    chat.map(|v| v.to_string()),
+                    limit.min(100),
+                    offset.min(10_000)
+                ],
+                |r| {
+                    let message = message_row(r)?;
+                    let snippet =
+                        restore_search_snippet(&message.content, &r.get::<_, String>(10)?);
+                    Ok((message, snippet))
+                },
+            )?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Bounded metadata for a chat's tool steps; never returns inputs, outputs or errors.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn chat_step_summaries(
+        &self,
+        user: UserId,
+        chat: ChatId,
+    ) -> Result<Vec<(RunId, String, String, i64)>> {
+        let conn = self.conn();
+        let mut st = conn.prepare("SELECT s.run_id, CASE WHEN length(json_extract(call.value,'$.name')) > 120 THEN '[REDACTED]' ELSE json_extract(call.value,'$.name') END,
+            CASE WHEN s.status IN ('pending','running','succeeded','failed','cancelled','skipped') THEN s.status ELSE 'unknown' END, s.started_at_ms
+            FROM run_steps s JOIN runs r ON r.id = s.run_id JOIN json_each(s.input_json,'$.calls') call
+            WHERE s.name = 'tools' AND json_type(call.value,'$.name') = 'text' AND r.user_id = ?1 AND s.user_id = ?1 AND r.chat_id = ?2
+            ORDER BY s.started_at_ms, s.id LIMIT 2001")?;
+        Ok(st
+            .query_map(params![user.to_string(), chat.to_string()], |r| {
+                Ok((RunId(uuid_at(r, 0)?), r.get(1)?, r.get(2)?, r.get(3)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Bounded approval outcomes; summaries may contain sensitive tool arguments and
+    /// are deliberately omitted. No tool arguments or arbitrary decision text is read.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn chat_approval_summaries(
+        &self,
+        user: UserId,
+        chat: ChatId,
+    ) -> Result<Vec<(RunId, String, i64)>> {
+        let conn = self.conn();
+        let mut st = conn.prepare("SELECT a.run_id,
+            CASE WHEN a.decision IN ('approved','denied','expired','answered','declined') THEN a.decision
+                 WHEN a.decision IS NULL THEN 'pending' ELSE 'decided' END,
+            coalesce(a.decided_at_ms,a.requested_at_ms)
+            FROM approvals a JOIN runs r ON r.id = a.run_id
+            WHERE r.user_id = ?1 AND a.user_id = ?1 AND r.chat_id = ?2
+            ORDER BY a.requested_at_ms, a.id LIMIT 2001")?;
+        Ok(st
+            .query_map(params![user.to_string(), chat.to_string()], |r| {
+                Ok((RunId(uuid_at(r, 0)?), r.get(1)?, r.get(2)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?)
     }
 
     /// Read the newest contiguous suffix of a chat within both limits.
@@ -2145,6 +2268,72 @@ mod tests {
         assert_eq!(f.st.get_message(m.id).unwrap().unwrap(), m);
         assert_eq!(f.st.list_messages(f.chat.id).unwrap(), vec![m]);
         assert!(f.st.get_user(UserId::new()).unwrap().is_none());
+    }
+
+    #[test]
+    fn full_text_history_ranks_phrases_and_tracks_visibility_and_deletion() {
+        let f = fx();
+        let insert = |text: &str, private: bool, role: &str| {
+            let m = Message {
+                id: Uuid::now_v7(),
+                user_id: f.user.id,
+                chat_id: f.chat.id,
+                run_id: None,
+                role: role.into(),
+                content: text.into(),
+                created_at_ms: 1,
+                exposure_untrusted: false,
+                exposure_private: private,
+                exposure_sources: vec![],
+            };
+            f.st.insert_message(&m).unwrap();
+            m.id
+        };
+        let old = insert("İstanbul güzel şehir çalışma", false, "assistant");
+        insert("old English phrase", false, "user");
+        insert(
+            &format!(
+                "{} old English phrase {}",
+                "padding ".repeat(300),
+                "tail ".repeat(300)
+            ),
+            false,
+            "assistant",
+        );
+        insert("old English phrase", true, "user");
+        insert("old English phrase", false, "tool");
+        let search = |q| {
+            f.st.search_messages(f.user.id, None, None, q, 0, 100)
+                .unwrap()
+        };
+        assert_eq!(search("istanbul guzel sehir")[0].0.id, old);
+        assert_eq!(search("İstanbul güzel şehir").len(), 1);
+        assert_eq!(search("calisma")[0].1, "İstanbul güzel şehir çalışma");
+        let ranked = search("old English phrase");
+        assert_eq!(ranked.len(), 2);
+        assert_eq!(ranked[0].0.content, "old English phrase");
+        assert!(ranked[1].1.len() < 320);
+        assert_eq!(
+            f.st.search_messages(UserId::new(), None, None, "old", 0, 30)
+                .unwrap(),
+            vec![]
+        );
+        assert_eq!(
+            f.st.search_messages(f.user.id, Some(BotId::new()), None, "old", 0, 30)
+                .unwrap(),
+            vec![]
+        );
+        assert_eq!(
+            f.st.search_messages(f.user.id, None, Some(ChatId::new()), "old", 0, 30)
+                .unwrap(),
+            vec![]
+        );
+        f.st.set_messages_superseded(&[old], true).unwrap();
+        assert_eq!(search("istanbul"), vec![]);
+        f.st.set_messages_superseded(&[old], false).unwrap();
+        assert_eq!(search("istanbul").len(), 1);
+        f.st.delete_chat(f.chat.id).unwrap();
+        assert_eq!(search("old"), vec![]);
     }
 
     #[test]

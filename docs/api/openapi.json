@@ -3138,6 +3138,115 @@
         ]
       }
     },
+    "/v1/chats/search": {
+      "get": {
+        "tags": [
+          "chats"
+        ],
+        "summary": "Search live, non-private user/assistant text, ranked by SQLite FTS5 BM25.",
+        "operationId": "search",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "path",
+            "description": "Literal phrase, 1–200 characters. FTS operators are treated as text.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "chat_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "path",
+            "description": "Ranked offset, at most 10,000.",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "description": "Page size, 1–100 (default 30).",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/chats/{id}": {
       "delete": {
         "tags": [
@@ -3388,6 +3497,91 @@
                     "format": "int32",
                     "minimum": 0
                   }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/chats/{id}/export": {
+      "get": {
+        "tags": [
+          "chats"
+        ],
+        "summary": "Explicitly export one chat. Private messages are represented by redacted stubs.\nRefuses rather than silently truncating chats over 1,000 messages, 2 MiB of\nmessage text, 2,000 steps/approvals, or a 4 MiB serialized file.",
+        "operationId": "export",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Chat id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "format",
+            "in": "path",
+            "description": "`markdown` (default) or `json`.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatExport"
+                }
+              },
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -12977,6 +13171,54 @@
           }
         }
       },
+      "ChatExport": {
+        "type": "object",
+        "required": [
+          "format_version",
+          "chat_id",
+          "title",
+          "created_at_ms",
+          "messages",
+          "steps",
+          "approvals"
+        ],
+        "properties": {
+          "approvals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExportApproval"
+            }
+          },
+          "chat_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "format_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExportMessage"
+            }
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExportStep"
+            }
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
       "Check": {
         "type": "object",
         "description": "One diagnostic result.",
@@ -15246,6 +15488,92 @@
           "message": {
             "type": "string",
             "description": "Human-readable message."
+          }
+        }
+      },
+      "ExportApproval": {
+        "type": "object",
+        "required": [
+          "run_id",
+          "outcome",
+          "created_at_ms"
+        ],
+        "properties": {
+          "created_at_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ExportMessage": {
+        "type": "object",
+        "required": [
+          "id",
+          "role",
+          "created_at_ms",
+          "content",
+          "attachments"
+        ],
+        "properties": {
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Display names only: no paths, URLs, extracted text or bytes."
+          },
+          "content": {
+            "type": "string"
+          },
+          "created_at_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "ExportStep": {
+        "type": "object",
+        "required": [
+          "run_id",
+          "name",
+          "status",
+          "created_at_ms"
+        ],
+        "properties": {
+          "created_at_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
           }
         }
       },
@@ -20626,6 +20954,64 @@
           "paused_idle",
           "unavailable"
         ]
+      },
+      "SearchHit": {
+        "type": "object",
+        "required": [
+          "chat_id",
+          "bot_id",
+          "chat_title",
+          "message_id",
+          "created_at_ms",
+          "snippet"
+        ],
+        "properties": {
+          "bot_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "chat_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "chat_title": {
+            "type": "string"
+          },
+          "created_at_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "message_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "snippet": {
+            "type": "string",
+            "description": "Plain text, at most 320 characters. Never HTML."
+          }
+        }
+      },
+      "SearchPage": {
+        "type": "object",
+        "required": [
+          "results"
+        ],
+        "properties": {
+          "next_offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchHit"
+            }
+          }
+        }
       },
       "SecretRequestAnswer": {
         "type": "object",
