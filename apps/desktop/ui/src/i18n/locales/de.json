@@ -1134,6 +1134,17 @@
       },
       "sendOnce": "Senden",
       "sendTitle": "In deinem Namen senden?",
+      "steps": {
+        "click": "{{target}} anklicken",
+        "fill": "„{{text}}“ in {{target}} eingeben",
+        "label": "Schritte in dieser Reihenfolge",
+        "press": "Taste {{key}} drücken",
+        "scroll": "{{target}} scrollen",
+        "scrollPage": "Seite scrollen",
+        "select": "„{{value}}“ in {{target}} auswählen",
+        "unknown": "ein Element, das nicht erkannt werden konnte ({{ref}})",
+        "wait": "Warten auf {{what}}"
+      },
       "thisChat": "Dieser Chat",
       "title": "Genehmigung erforderlich",
       "why": {

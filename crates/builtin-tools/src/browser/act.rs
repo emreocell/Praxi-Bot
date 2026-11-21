@@ -5,7 +5,9 @@
 //! the same page-level refusals (password / one-time-code / card fields), the same
 //! origin check against the page the approval was given for. On top of that every
 //! step is verified against a fingerprint (role and accessible name of its ref,
-//! the page URL) taken before the first step; a page that changed stops the batch.
+//! the page URL) taken before the first step; a page that changed stops the batch. A click must also land on its ref's own node
+//! (not on a modal that moved over it), and Enter / Space only goes to the element the
+//! previous step worked on (a page script cannot move focus to another control).
 //!
 //! Not part of a batch, on purpose: `browser_open` (navigation is its own approval
 //! with its own URL and profile line), `browser_eval`, tabs and back, the
@@ -300,6 +302,8 @@ impl BrowserTool {
         let deadline = Instant::now() + TOTAL_BUDGET;
         let expected = expected_input_origin();
         let mut done = 0usize;
+        // The ref the last step worked on: where keyboard focus must still be for Enter.
+        let mut anchor: Option<String> = None;
         let mut last: Option<String> = None;
         let mut stop: Option<String> = None;
         for (i, step) in steps.iter().enumerate() {
@@ -341,6 +345,10 @@ impl BrowserTool {
                 }
             }
             let (op, single) = step.as_single();
+            let guard = browser_cdp::StepGuard {
+                batch: true,
+                focus_ref: anchor.clone(),
+            };
             let tool = BrowserTool {
                 spec: self.spec.clone(),
                 op,
@@ -348,7 +356,7 @@ impl BrowserTool {
             };
             let text = match tokio::time::timeout(
                 remaining,
-                Box::pin(tool.run_inner(run_id, single)),
+                super::STEP_GUARD.scope(guard, Box::pin(tool.run_inner(run_id, single))),
             )
             .await
             {
@@ -380,6 +388,15 @@ impl BrowserTool {
                 break;
             }
             done += 1;
+            // Focus is only vouched for by a step that worked on a ref; a key press may
+            // have moved it anywhere.
+            match step {
+                Step::Click { r#ref } | Step::Fill { r#ref, .. } | Step::Select { r#ref, .. } => {
+                    anchor = Some(r#ref.clone());
+                }
+                Step::Press { .. } => anchor = None,
+                Step::Scroll { .. } | Step::Wait { .. } => {}
+            }
             let dialog = text.contains("~ dialog(");
             last = Some(text);
             if dialog {

@@ -1134,6 +1134,17 @@
       },
       "sendOnce": "Gönder",
       "sendTitle": "Senin adına gönderilsin mi?",
+      "steps": {
+        "click": "{{target}} öğesine tıkla",
+        "fill": "{{target}} alanına “{{text}}” yaz",
+        "label": "Adımlar, bu sırayla",
+        "press": "{{key}} tuşuna bas",
+        "scroll": "{{target}} öğesini kaydır",
+        "scrollPage": "Sayfayı kaydır",
+        "select": "{{target}} listesinde “{{value}}” seç",
+        "unknown": "tanımlanamayan bir öğe ({{ref}})",
+        "wait": "Şunu bekle: {{what}}"
+      },
       "thisChat": "Bu sohbet",
       "title": "Onay gerekiyor",
       "why": {

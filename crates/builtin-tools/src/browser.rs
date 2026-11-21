@@ -698,6 +698,16 @@ tokio::task_local! {
     static BROWSER_LANE: Option<String>;
 }
 
+tokio::task_local! {
+    // Set by `browser_act` around each step: the extra checks (what a click lands on, where
+    // focus is for Enter) that run under the session lock. Absent for single tools.
+    static STEP_GUARD: browser_cdp::StepGuard;
+}
+
+fn step_guard() -> browser_cdp::StepGuard {
+    STEP_GUARD.try_with(Clone::clone).unwrap_or_default()
+}
+
 fn current_lane() -> Option<String> {
     BROWSER_LANE.try_with(Clone::clone).ok().flatten()
 }
@@ -849,7 +859,12 @@ impl BrowserDriver for CdpDriver {
         };
         let acted = with_session!(self, None, |sess| {
             sess.page
-                .click_with_origin(r, &dialog_opts, expected_input_origin().as_deref())
+                .click_with_guard(
+                    r,
+                    &dialog_opts,
+                    expected_input_origin().as_deref(),
+                    &step_guard(),
+                )
                 .await
         })?;
         render_action(&acted)
@@ -924,7 +939,7 @@ impl BrowserDriver for CdpDriver {
     async fn press(&self, key: &str) -> Result<String, String> {
         let acted = with_session!(self, None, |sess| {
             sess.page
-                .press_key_with_origin(key, expected_input_origin().as_deref())
+                .press_key_with_guard(key, expected_input_origin().as_deref(), &step_guard())
                 .await
         })?;
         render_action(&acted)
@@ -1861,11 +1876,13 @@ impl BrowserTool {
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
                 }
+                // `protect` runs the work on its own task: carry the batch guard over.
+                let guard = step_guard();
                 permit
-                    .protect(async move {
+                    .protect(STEP_GUARD.scope(guard, async move {
                         d.click_opts(&i.r#ref, i.dialog.as_deref(), i.prompt_text.as_deref())
                             .await
-                    })
+                    }))
                     .await
                     .map_err(exec_err)?
             }
@@ -1975,8 +1992,9 @@ impl BrowserTool {
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
                 }
+                let guard = step_guard();
                 permit
-                    .protect(async move { d.press(&i.key).await })
+                    .protect(STEP_GUARD.scope(guard, async move { d.press(&i.key).await }))
                     .await
                     .map_err(exec_err)?
             }
@@ -2384,6 +2402,10 @@ pub(crate) mod fake {
         /// `(role, name)` per ref for `ref_identity`; an unlisted ref is a button named
         /// after itself. A test changes an entry to model a page that changed.
         pub identities: PMutex<std::collections::HashMap<String, (String, String)>>,
+        /// Refs another element sits on top of: a batch click on one must not be made.
+        pub covered: PMutex<std::collections::HashSet<String>>,
+        /// The ref that really has keyboard focus (page scripts can move it).
+        pub focus: PMutex<Option<String>>,
         /// What `live_view_attached` reports (`None`: cannot tell).
         pub watched: PMutex<Option<bool>>,
     }
@@ -2459,6 +2481,9 @@ pub(crate) mod fake {
             dialog: Option<&str>,
             prompt_text: Option<&str>,
         ) -> Result<String, String> {
+            if super::step_guard().batch && self.covered.lock().contains(r) {
+                return Err(format!("another element is on top of {r}; NOT clicked"));
+            }
             let mut s = format!("click:{r}");
             if let Some(d) = dialog {
                 let _ = write!(s, ":{d}");
@@ -2517,6 +2542,13 @@ pub(crate) mod fake {
             self.rec(&format!("select:{r}:{v}"))
         }
         async fn press(&self, k: &str) -> Result<String, String> {
+            let g = super::step_guard();
+            if g.batch
+                && k.eq_ignore_ascii_case("enter")
+                && (g.focus_ref.is_none() || *self.focus.lock() != g.focus_ref)
+            {
+                return Err("keyboard focus moved; NOT pressed".into());
+            }
             self.rec(&format!("press:{k}"))
         }
         async fn scroll(&self, r: Option<&str>, dx: f64, dy: f64) -> Result<String, String> {

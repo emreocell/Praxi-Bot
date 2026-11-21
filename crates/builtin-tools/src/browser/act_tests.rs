@@ -256,3 +256,63 @@ fn the_summary_names_every_step_without_the_typed_text_and_oversize_input_is_ref
         Err(ToolError::InvalidInput(_))
     ));
 }
+
+#[tokio::test]
+async fn an_overlay_on_top_of_the_target_stops_the_batch_and_nothing_is_clicked() {
+    let fake = Arc::new(FakeBrowser::default());
+    // Step 1 opens a modal whose "Pay" button now covers e2 ("No thanks").
+    let f2 = fake.clone();
+    *fake.hook.lock() = Some(Arc::new(move |s: &str| {
+        if s == "click:e1" {
+            f2.covered.lock().insert("e2".into());
+        }
+    }));
+    let input = json!({"steps": [
+        {"action": "click", "ref": "e1"},
+        {"action": "click", "ref": "e2"},
+        {"action": "click", "ref": "e3"},
+    ]});
+    let out = act_tool(&fake, None)
+        .call(&ToolContext::default(), input)
+        .await
+        .unwrap();
+    let t = text(&out);
+    assert_eq!(calls(&fake), ["click:e1"], "{t}");
+    assert!(t.contains("stopped, done 1/3"), "{t}");
+    assert!(t.contains("step 2 (click) failed"), "{t}");
+    assert!(t.contains("3. click e3"), "{t}");
+}
+
+#[tokio::test]
+async fn enter_only_goes_to_the_element_the_previous_step_worked_on() {
+    let input = json!({"steps": [
+        {"action": "fill", "ref": "e1", "text": "me@example.com"},
+        {"action": "press", "key": "Enter"},
+    ]});
+    // Focus still on the filled field: pressed.
+    let fake = Arc::new(FakeBrowser::default());
+    *fake.focus.lock() = Some("e1".into());
+    let out = act_tool(&fake, None)
+        .call(&ToolContext::default(), input.clone())
+        .await
+        .unwrap();
+    assert!(text(&out).contains("done 2/2"), "{}", text(&out));
+    // A page script moved focus to another control: not pressed, step 2 named.
+    let fake = Arc::new(FakeBrowser::default());
+    *fake.focus.lock() = Some("e9".into());
+    let out = act_tool(&fake, None)
+        .call(&ToolContext::default(), input.clone())
+        .await
+        .unwrap();
+    let t = text(&out);
+    assert_eq!(calls(&fake), ["fill:e1:me@example.com"], "{t}");
+    assert!(t.contains("step 2 (press) failed"), "{t}");
+    // Enter as the first step has no earlier node to compare with: not pressed.
+    let fake = Arc::new(FakeBrowser::default());
+    *fake.focus.lock() = Some("e1".into());
+    let first = json!({"steps": [{"action": "press", "key": "Enter"}]});
+    let _ = act_tool(&fake, None)
+        .call(&ToolContext::default(), first)
+        .await;
+    assert!(calls(&fake).is_empty(), "{:?}", calls(&fake));
+}
