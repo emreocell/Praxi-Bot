@@ -1,0 +1,60 @@
+# Example Docker Compose configuration for the Praxi always-on host.
+#
+# Copy .env.example to .env and set BOT_SECRETS_PASSPHRASE before starting:
+#   cp packaging/docker/.env.example packaging/docker/.env
+#   docker compose -f packaging/docker/docker-compose.yml up -d
+#
+# See docs/guide/docker-host.md for first run, desktop pairing, upgrades,
+# backups, and security notes.
+
+services:
+  praxi:
+    build:
+      context: ../..
+      dockerfile: packaging/docker/Dockerfile
+      args:
+        # Set to "1" to include Xvfb (1920x1080x24), minimal Xfce, and Chrome for Testing.
+        WITH_DESKTOP: "0"
+    image: praxi-host:local
+    container_name: praxi-host
+    restart: unless-stopped
+
+    # Load BOT_SECRETS_PASSPHRASE and optional provider API keys from .env.
+    # Never hardcode secrets in this file.
+    env_file:
+      - .env
+    environment:
+      BOT_DATA_DIR: /var/lib/praxi
+      BOT_PORT: ${BOT_PORT:-47821}
+      BOT_SECRETS_BACKEND: file
+      # Alternative to BOT_SECRETS_PASSPHRASE in .env (with top-level `secrets:`):
+      # BOT_SECRETS_PASSPHRASE_FILE: /run/secrets/praxi_passphrase
+
+    # Bound to 127.0.0.1 only; NEVER change this to 0.0.0.0.
+    # Note: `bot serve` binds 127.0.0.1 inside the container's network namespace.
+    # Desktop pairing (iroh) and Telegram work over outbound connections with no
+    # inbound port. For local CLI access use `docker exec -it praxi-host bot ...`.
+    ports:
+      - "127.0.0.1:${BOT_PORT:-47821}:47821"
+
+    volumes:
+      - praxi-data:/var/lib/praxi
+
+    # Optional: required on Linux hosts that restrict unprivileged user namespaces
+    # when running WITH_DESKTOP=1 so Chrome keeps its sandbox enabled (without
+    # --no-sandbox). Prefer custom AppArmor/seccomp profiles over unconfined in
+    # multi-tenant environments; see docs/guide/docker-host.md.
+    # security_opt:
+    #   - seccomp=unconfined
+    #   - apparmor=unconfined
+
+    # Optional when using BOT_SECRETS_PASSPHRASE_FILE instead of .env:
+    # secrets:
+    #   - praxi_passphrase
+
+volumes:
+  praxi-data:
+
+# secrets:
+#   praxi_passphrase:
+#     file: ./secrets/praxi_passphrase.txt
