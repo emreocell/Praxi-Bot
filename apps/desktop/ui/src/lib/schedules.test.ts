@@ -6,11 +6,19 @@ import { applyEvent, EMPTY_EVENTS } from "../state/timeline.ts";
 import {
   affectsSchedules,
   buildInput,
+  buildMonthGrid,
   draftFromSchedule,
   emptyDraft,
+  filterScheduleHistory,
+  formatDurationParts,
+  historyStatusTone,
   intervalParts,
+  localDayKey,
+  mergeLiveRunsIntoHistory,
+  moveCalendarFocusIndex,
   parsePayload,
   parseSpec,
+  placeScheduleCalendarEvents,
   runOutcome,
   runsOfSchedule,
   scheduleStatus,
@@ -217,6 +225,9 @@ test("ApiClient schedule routes hit the right URLs", async () => {
     await c.deleteSchedule("s1");
     await c.runScheduleNow("s1");
     await c.parseSchedule("her gun 09:00", "Europe/Istanbul");
+    await c.previewSchedule({ spec: { cron: "0 9 * * *" }, tz: "UTC", count: 5 });
+    await c.getScheduleHistory("s1");
+    await c.retryScheduleOccurrence("s1", 12345);
   } finally {
     globalThis.fetch = realFetch;
   }
@@ -229,11 +240,122 @@ test("ApiClient schedule routes hit the right URLs", async () => {
       "PUT /v1/schedules/s1",
       "DELETE /v1/schedules/s1",
       "POST /v1/schedules/s1/run-now",
-      "POST /v1/schedules/parse"
+      "POST /v1/schedules/parse",
+      "POST /v1/schedules/preview",
+      "GET /v1/schedules/s1/history",
+      "POST /v1/schedules/s1/occurrences/12345/retry"
     ]
   );
   assert.deepEqual(JSON.parse(calls[6].body ?? "{}"), {
     text: "her gun 09:00",
     tz: "Europe/Istanbul"
   });
+});
+
+test("filterScheduleHistory, historyStatusTone, and formatDurationParts", () => {
+  const entries = [
+    { status: "succeeded" },
+    { status: "failed" },
+    { status: "missed" },
+    { status: "interrupted" },
+    { status: "running" }
+  ];
+  assert.equal(filterScheduleHistory(entries, "all").length, 5);
+  assert.deepEqual(
+    filterScheduleHistory(entries, "issues").map((e) => e.status),
+    ["failed", "missed", "interrupted"]
+  );
+  assert.equal(historyStatusTone("succeeded"), "succeeded");
+  assert.equal(historyStatusTone("failed"), "failed");
+  assert.equal(historyStatusTone("missed"), "missed");
+  assert.equal(historyStatusTone("interrupted"), "missed");
+  assert.equal(historyStatusTone("running"), "running");
+  assert.deepEqual(formatDurationParts(1000, 46_000), {
+    i18nKey: "schedules.durationSeconds",
+    values: { seconds: 45 }
+  });
+  assert.deepEqual(formatDurationParts(0, 125_000), {
+    i18nKey: "schedules.durationMinutes",
+    values: { minutes: 2, seconds: 5 }
+  });
+  assert.equal(formatDurationParts(100, null), null);
+});
+
+test("mergeLiveRunsIntoHistory avoids duplicates and sorts newest first", () => {
+  const merged = mergeLiveRunsIntoHistory(
+    [
+      {
+        due_ms: 1000,
+        run_id: "r1",
+        chat_id: "c1",
+        status: "succeeded",
+        started_at_ms: 1000,
+        finished_at_ms: 2000,
+        retryable: false
+      }
+    ],
+    [
+      {
+        id: "r1",
+        chatId: "c1",
+        botId: "b1",
+        startedMs: 1000,
+        finishedMs: 2000,
+        error: null,
+        items: []
+      },
+      {
+        id: "r2",
+        chatId: "c1",
+        botId: "b1",
+        startedMs: 5000,
+        items: []
+      }
+    ]
+  );
+  assert.deepEqual(
+    merged.map((m) => m.run_id),
+    ["r2", "r1"]
+  );
+  assert.equal(merged[0].status, "running");
+});
+
+test("month calendar grid, placement, and keyboard navigation", () => {
+  const days = buildMonthGrid(2026, 2, true); // March 2026
+  assert.equal(days.length % 7, 0);
+  const mar1 = days.find((d) => d.dayKey === "2026-03-01");
+  assert.equal(mar1?.inMonth, true);
+  assert.equal(mar1?.dayOfMonth, 1);
+
+  const ts = Date.UTC(2026, 2, 15, 9, 0, 0);
+  const key = localDayKey(ts, "UTC");
+  assert.equal(key, "2026-03-15");
+
+  const cells = placeScheduleCalendarEvents(
+    days,
+    [sched({ id: "s1", name: "Morning", enabled: true })],
+    { s1: [ts] },
+    {
+      s1: [
+        {
+          due_ms: ts,
+          status: "missed",
+          retryable: true
+        }
+      ]
+    },
+    "UTC"
+  );
+  const target = cells.find((c) => c.dayKey === "2026-03-15");
+  assert.equal(target?.upcoming.length, 1);
+  assert.equal(target?.outcomes.length, 1);
+  assert.equal(target?.outcomes[0].status, "missed");
+
+  assert.equal(moveCalendarFocusIndex(10, "ArrowRight", cells.length), 11);
+  assert.equal(moveCalendarFocusIndex(10, "ArrowLeft", cells.length), 9);
+  assert.equal(moveCalendarFocusIndex(10, "ArrowDown", cells.length), 17);
+  assert.equal(moveCalendarFocusIndex(10, "ArrowUp", cells.length), 3);
+  assert.equal(moveCalendarFocusIndex(10, "Home", cells.length), 7);
+  assert.equal(moveCalendarFocusIndex(10, "End", cells.length), 13);
+  assert.equal(moveCalendarFocusIndex(10, "Enter", cells.length), null);
 });

@@ -3349,11 +3349,25 @@
   },
   "schedules": {
     "bot": "Bot",
+    "calendar": {
+      "dayEmpty": "{{date}} tarihinde planlı çalışma veya geçmiş yok.",
+      "daySummary": "{{date}}: {{upcoming}} yaklaşan, {{outcomes}} kayıt",
+      "gridLabel": "{{month}} zamanlama takvimi",
+      "historyHeading": "Kaydedilenler",
+      "nextMonth": "Sonraki ay",
+      "prevMonth": "Önceki ay",
+      "today": "Bugün",
+      "upcomingHeading": "Yaklaşanlar"
+    },
     "cancel": "İptal",
     "confirmDelete": "Evet, sil",
     "delete": "Sil",
     "deletedBot": "Silinmiş bot",
     "does": "Ne yapar",
+    "dueAt": "Planlanan {{when}}",
+    "durationHours": "{{hours}} sa {{minutes}} dk",
+    "durationMinutes": "{{minutes}} dk {{seconds}} sn",
+    "durationSeconds": "{{seconds}} sn",
     "edit": "Düzenle",
     "empty": {
       "hint": "Bir botun bir istemi otomatik çalıştırması için oluştur; örneğin hafta içi her gün 09:00.",
@@ -3361,9 +3375,12 @@
       "title": "Henüz zamanlanmış görev yok"
     },
     "enabled": "Etkin",
+    "filterAll": "Tümü",
+    "filterIssues": "Başarısız ve kaçırılan",
     "form": {
       "botFixed": "Bir zamanlamanın botu değiştirilemez.",
       "cannotParse": "Bu cümle anlaşılamadı. “her gün 09:00” dene ya da cron kullan.",
+      "cannotPreview": "Bu zamanlama önizlenemedi. Söz dizimini ve saat dilimini kontrol et.",
       "create": "Oluştur",
       "cron": "Cron ifadesi",
       "cronHint": "Beş alan; istersen sonuna bir saat dilimi ekle.",
@@ -3390,6 +3407,7 @@
       },
       "name": "Ad",
       "newTitle": "Yeni zamanlanmış görev",
+      "nextRunsTitle": "Sonraki 5 çalışma ({{tz}})",
       "noFirstRun": "yaklaşan çalışma yok",
       "payloadKept": "Bu zamanlama bir iş akışı ya da araç çalıştırır; o kısım değişmez.",
       "preview": "Önizle",
@@ -3399,8 +3417,13 @@
       "text": "Zamanlama cümlesi",
       "textHint": "Türkçe ya da İngilizce. Saatler {{tz}} diliminde.",
       "textPlaceholder": "her gün 09:00, every weekday at 9",
+      "tz": "Saat dilimi",
+      "tzCronHint": "Cron ifadesinde saat dilimi belirtilmemiş 5 alan varsa kullanılır.",
       "when": "Ne zaman"
     },
+    "history": "Çalışma geçmişi",
+    "historyEmpty": "Henüz kaydedilmiş çalışma veya kaçırılan tetikleme yok.",
+    "historyEmptyFiltered": "Başarısız veya kaçırılan çalışma yok.",
     "lastRun": "Son çalışma",
     "loading": "Zamanlamalar yükleniyor…",
     "missed": "Kapalıyken kaçırılan",
@@ -3408,6 +3431,8 @@
     "never": "Hiç",
     "new": "Yeni zamanlama",
     "nextRun": "Sonraki çalışma",
+    "nextRuns": "Sonraki 5 çalışma",
+    "nextRunsEmpty": "Yaklaşan çalışma yok.",
     "noRuns": "Henüz çalışma görülmedi.",
     "openRun": "Aç",
     "originBot": "Bot oluşturdu",
@@ -3423,11 +3448,23 @@
     "reclaimUnreachable": "{{name}} yanıt vermedi; oradaki kopya hâlâ çalışıyor olabilir. Şimdi geri getirirsen iki bilgisayarda da çalışabilir.",
     "reclaimed": "{{name}} bu bilgisayara geri döndü.",
     "refresh": "Yenile",
+    "retry": "Yeniden dene",
+    "retryStarted": "{{name}} için kaçırılan çalışma yeniden başlatıldı.",
     "run": {
+      "cancelled": "İptal edildi",
+      "dispatched": "Başlatılıyor",
       "failed": "Başarısız",
+      "interrupted": "Kesintiye uğradı",
+      "missed": "Kaçırıldı",
+      "paused": "Duraklatıldı",
+      "pending": "Bekliyor",
+      "queued": "Sırada",
       "running": "Çalışıyor",
-      "succeeded": "Başarılı"
+      "started": "Çalışıyor",
+      "succeeded": "Başarılı",
+      "waiting_approval": "Onay bekliyor"
     },
+    "runAgain": "Tekrar çalıştır",
     "runNow": "Şimdi çalıştır",
     "runNowStarted": "{{name}} başlatıldı.",
     "spec": {
@@ -3448,6 +3485,8 @@
     },
     "subtitle": "Botlarının zamanlayıcıyla yaptığı işler: her sabah, her saat ya da bir kez.",
     "title": "Zamanlanmış görevler",
+    "viewCalendar": "Takvim",
+    "viewList": "Liste",
     "when": "Ne zaman"
   },
   "serverSignIn": {

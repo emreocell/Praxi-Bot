@@ -134,10 +134,64 @@ const BOTS: Bot[] = [
 const previews = ["Haftalık özetin hazır.", "Kaynakları inceliyorum…", "Tasarım dosyalarını düzenledim.", "Devam etmek için onayını bekliyorum."];
 BOTS.forEach((b, i) => { Object.assign((b.config as { bot: object }).bot, { preview: previews[i], state: ["idle", "thinking", "working", "waiting-approval"][i], unread: i === 2 }); });
 const LONG_PROMPT = Array.from({ length: 9 }, (_, i) => `${i + 1}. Geçen haftanın GitHub kapanan sorunlarını, takvimdeki toplantıları ve gelen kutusundaki yanıt bekleyen iletileri tara; her biri için tek cümlelik bir özet çıkar ve önem sırasına göre listele.`).join(String.fromCharCode(10));
+const MOCK_NOW = Date.now();
+const DAY_MS = 86_400_000;
 const SCHEDULES = [
-  { id: "sch-1", origin: "user", bot_id: ATLAS, name: "Haftalık özet", enabled: true, has_webhook: false, created_at_ms: NOW, last_run_at_ms: NOW - 6 * 86400000, next_run_at_ms: NOW + 86400000, misfire_policy: "skip", spec: { cron: "0 9 * * 1 Europe/Istanbul" }, payload: { kind: "agent_prompt", text: "Geçen haftanın GitHub ve takvim hareketlerinden kısa bir özet hazırla." } },
-  { id: "sch-2", origin: "bot", bot_id: NOVA, name: "Kaynak taraması", enabled: true, has_webhook: true, created_at_ms: NOW, last_run_at_ms: null, next_run_at_ms: NOW + 3600000, misfire_policy: "run_once", spec: { every: { seconds: 3600 } }, payload: { kind: "agent_prompt", text: "Takip listesindeki sitelerde yeni içerik var mı bak." } },
-  { id: "sch-3", origin: "user", bot_id: "bot-milo", name: "Yedek kontrolü", enabled: false, moved_to: "Praxi host", has_webhook: false, created_at_ms: NOW, last_run_at_ms: NOW - 86400000, next_run_at_ms: null, misfire_policy: "skip", spec: { cron: "30 22 * * * Europe/Istanbul" }, payload: { kind: "workflow", name: "backup-check", params: {} } }
+  {
+    id: "sch-1",
+    origin: "user",
+    bot_id: ATLAS,
+    name: "Haftalık özet",
+    enabled: true,
+    has_webhook: false,
+    created_at_ms: NOW,
+    last_run_at_ms: MOCK_NOW - 6 * DAY_MS,
+    next_run_at_ms: MOCK_NOW + DAY_MS,
+    next_runs_ms: [1, 8, 15, 22, 29].map((d) => MOCK_NOW + d * DAY_MS),
+    missed_occurrences: 1,
+    misfire_policy: "skip",
+    spec: { cron: "0 9 * * 1 Europe/Istanbul" },
+    payload: {
+      kind: "agent_prompt",
+      text: "Geçen haftanın GitHub ve takvim hareketlerinden kısa bir özet hazırla."
+    }
+  },
+  {
+    id: "sch-2",
+    origin: "bot",
+    bot_id: NOVA,
+    name: "Kaynak taraması",
+    enabled: true,
+    has_webhook: true,
+    created_at_ms: NOW,
+    last_run_at_ms: MOCK_NOW - 3_600_000,
+    next_run_at_ms: MOCK_NOW + 3_600_000,
+    next_runs_ms: [1, 2, 3, 4, 5].map((h) => MOCK_NOW + h * 3_600_000),
+    missed_occurrences: 0,
+    misfire_policy: "run_once",
+    spec: { every: { seconds: 3600 } },
+    payload: {
+      kind: "agent_prompt",
+      text: "Takip listesindeki sitelerde yeni içerik var mı bak."
+    }
+  },
+  {
+    id: "sch-3",
+    origin: "user",
+    bot_id: "bot-milo",
+    name: "Yedek kontrolü",
+    enabled: false,
+    moved_to: "Praxi host",
+    has_webhook: false,
+    created_at_ms: NOW,
+    last_run_at_ms: MOCK_NOW - DAY_MS,
+    next_run_at_ms: null,
+    next_runs_ms: [],
+    missed_occurrences: 0,
+    misfire_policy: "skip",
+    spec: { cron: "30 22 * * * Europe/Istanbul" },
+    payload: { kind: "workflow", name: "backup-check", params: {} }
+  }
 ] as unknown as import("./types").Schedule[];
 const CHAT_ID = "33333333-3333-4333-8333-333333333333";
 const CHATS: Chat[] = [
@@ -565,6 +619,52 @@ export class MockApiClient extends ApiClient {
   ];
   private readonly memoryUndoSnapshots = new Map<string, MemoryItem>();
   private nextJournalId = 3;
+  readonly schedules: import("./types").Schedule[] = structuredClone(SCHEDULES);
+  private readonly scheduleHistory = new Map<
+    string,
+    import("./types").ScheduleHistoryEntry[]
+  >([
+    [
+      "sch-1",
+      [
+        {
+          due_ms: MOCK_NOW - 2 * DAY_MS,
+          run_id: null,
+          chat_id: null,
+          status: "missed",
+          started_at_ms: null,
+          finished_at_ms: null,
+          error: null,
+          retryable: true
+        },
+        {
+          due_ms: MOCK_NOW - 6 * DAY_MS,
+          run_id: "mock-sch-run-1",
+          chat_id: CHAT_ID,
+          status: "succeeded",
+          started_at_ms: MOCK_NOW - 6 * DAY_MS,
+          finished_at_ms: MOCK_NOW - 6 * DAY_MS + 14_000,
+          error: null,
+          retryable: false
+        }
+      ]
+    ],
+    [
+      "sch-2",
+      [
+        {
+          due_ms: MOCK_NOW - 3_600_000,
+          run_id: "mock-sch-run-2",
+          chat_id: "mock-chat-0",
+          status: "failed",
+          started_at_ms: MOCK_NOW - 3_600_000,
+          finished_at_ms: MOCK_NOW - 3_600_000 + 8_000,
+          error: "timeout fetching feed",
+          retryable: true
+        }
+      ]
+    ]
+  ]);
   readonly servers: McpServer[];
   readonly providersDto: ProvidersDto = structuredClone(PROVIDERS);
   readonly detectedProvidersList: DetectedProviderDto[] = structuredClone(DETECTED_PROVIDERS);
@@ -1069,7 +1169,110 @@ export class MockApiClient extends ApiClient {
         return ok(undefined);
       }
       case "GET /schedules":
-        return ok(typeof window !== "undefined" && new URLSearchParams(window.location.search).get("screen") === "empty" ? [] : structuredClone(SCHEDULES));
+        if (seg[1] && seg[2] === "history") {
+          return ok(structuredClone(this.scheduleHistory.get(seg[1]) ?? []));
+        }
+        if (seg[1]) {
+          const found = this.schedules.find((s) => s.id === seg[1]);
+          if (!found) throw new ApiError(404, "not_found", `schedule ${seg[1]} not found`);
+          return ok(structuredClone(found));
+        }
+        return ok(
+          typeof window !== "undefined" &&
+            new URLSearchParams(window.location.search).get("screen") === "empty"
+            ? []
+            : structuredClone(this.schedules)
+        );
+      case "POST /schedules": {
+        if (seg[1] === "parse" || seg[1] === "preview") {
+          const body = (opts.body ?? {}) as {
+            text?: string;
+            spec?: unknown;
+            tz?: string;
+            count?: number;
+            from_ms?: number;
+          };
+          const anchor = body.from_ms ?? Date.now();
+          const count = Math.min(100, Math.max(1, body.count ?? 5));
+          const stepMs = 86_400_000;
+          const nextRuns = Array.from({ length: count }, (_, i) => anchor + (i + 1) * stepMs);
+          const spec =
+            body.spec ??
+            {
+              cron: `0 9 * * 1-5 ${body.tz || "UTC"}`
+            };
+          return ok({
+            spec,
+            next_run_at_ms: nextRuns[0] ?? null,
+            next_runs_ms: nextRuns
+          });
+        }
+        if (seg[1] && seg[2] === "occurrences" && seg[4] === "retry") {
+          const dueMs = Number(seg[3]);
+          const list = this.scheduleHistory.get(seg[1]) ?? [];
+          const entry = list.find((e) => e.due_ms === dueMs);
+          if (!entry) throw new ApiError(404, "not_found", "occurrence not found");
+          if (!entry.retryable) throw new ApiError(409, "conflict", "occurrence already handled");
+          entry.status = "succeeded";
+          entry.retryable = false;
+          entry.run_id = `mock-retry-${Date.now()}`;
+          entry.chat_id = CHAT_ID;
+          entry.started_at_ms = Date.now();
+          entry.finished_at_ms = Date.now() + 2_000;
+          entry.error = null;
+          return ok({ status: "accepted", schedule_id: seg[1] });
+        }
+        if (seg[1] && seg[2] === "run-now") {
+          return ok({ status: "accepted", schedule_id: seg[1] });
+        }
+        const input = opts.body as import("./types").ScheduleInput;
+        const now = Date.now();
+        const created = {
+          id: `sch-${this.schedules.length + 1}`,
+          origin: "user",
+          bot_id: input.bot_id,
+          chat_id: input.chat_id ?? null,
+          name: input.name,
+          spec: input.spec,
+          payload: input.payload,
+          enabled: input.enabled ?? true,
+          created_at_ms: now,
+          last_run_at_ms: null,
+          next_run_at_ms: now + 3_600_000,
+          next_runs_ms: [1, 2, 3, 4, 5].map((h) => now + h * 3_600_000),
+          misfire_policy: input.misfire_policy ?? "skip",
+          has_webhook: false,
+          trigger: null,
+          precheck: null,
+          missed_occurrences: 0
+        } as unknown as import("./types").Schedule;
+        this.schedules.push(created);
+        return ok(structuredClone(created));
+      }
+      case "PUT /schedules": {
+        const idx = this.schedules.findIndex((s) => s.id === seg[1]);
+        if (idx < 0) throw new ApiError(404, "not_found", `schedule ${seg[1]} not found`);
+        const input = opts.body as import("./types").ScheduleInput;
+        const enabled = input.enabled ?? this.schedules[idx].enabled;
+        const now = Date.now();
+        this.schedules[idx] = {
+          ...this.schedules[idx],
+          name: input.name,
+          spec: input.spec,
+          payload: input.payload,
+          enabled,
+          misfire_policy: input.misfire_policy ?? this.schedules[idx].misfire_policy,
+          next_run_at_ms: enabled ? now + 3_600_000 : null,
+          next_runs_ms: enabled ? [1, 2, 3, 4, 5].map((h) => now + h * 3_600_000) : []
+        };
+        return ok(structuredClone(this.schedules[idx]));
+      }
+      case "DELETE /schedules": {
+        const idx = this.schedules.findIndex((s) => s.id === seg[1]);
+        if (idx < 0) throw new ApiError(404, "not_found", `schedule ${seg[1]} not found`);
+        this.schedules.splice(idx, 1);
+        return ok(undefined);
+      }
       case "GET /approvals":
         return ok(typeof window !== "undefined" && new URLSearchParams(window.location.search).get("screen") === "approval"
           ? [{ call_id: "mock-rm", run_id: "mock-live", requested_at_ms: Date.now() - 3000, decision: null, tool_name: "shell.run", summary: "drafts/old klasörünü ve içindeki 14 dosyayı sil" }]

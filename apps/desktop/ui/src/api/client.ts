@@ -87,6 +87,7 @@ import type {
   ParsedSchedule,
   PolicyDto,
   PolicyInput,
+  PreviewSchedule,
   ProvidersDto,
   ReleaseRequest,
   RememberResponse,
@@ -99,6 +100,7 @@ import type {
   RepairResult,
   Run,
   Schedule,
+  ScheduleHistoryEntry,
   ScheduleInput,
   Scope,
   ScreenPrivilegesInput,
@@ -811,6 +813,18 @@ export class ApiClient {
   /** Turn an English / Turkish phrase into a schedule spec. */
   parseSchedule(text: string, tz?: string): Promise<ParsedSchedule> {
     return this.request("POST", "/schedules/parse", { body: { text, tz } });
+  }
+  /** Preview upcoming firing timestamps for a schedule spec or phrase. */
+  previewSchedule(input: PreviewSchedule): Promise<ParsedSchedule> {
+    return this.request("POST", "/schedules/preview", { body: input });
+  }
+  /** Occurrence and run history for a schedule (newest first). */
+  getScheduleHistory(id: string): Promise<ScheduleHistoryEntry[]> {
+    return this.request("GET", `/schedules/${id}/history`);
+  }
+  /** Explicitly retry a failed, missed, or interrupted occurrence (owner only, idempotent). */
+  retryScheduleOccurrence(id: string, dueMs: number): Promise<AcceptedResponse> {
+    return this.request("POST", `/schedules/${id}/occurrences/${dueMs}/retry`);
   }
 
   /** Monthly spending limit and month-to-date spend. */

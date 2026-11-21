@@ -3349,11 +3349,25 @@
   },
   "schedules": {
     "bot": "Bot",
+    "calendar": {
+      "dayEmpty": "Keine geplanten Läufe oder Einträge am {{date}}.",
+      "daySummary": "{{date}}: {{upcoming}} bevorstehend, {{outcomes}} erfasst",
+      "gridLabel": "Zeitplankalender für {{month}}",
+      "historyHeading": "Erfasst",
+      "nextMonth": "Nächster Monat",
+      "prevMonth": "Vorheriger Monat",
+      "today": "Heute",
+      "upcomingHeading": "Bevorstehend"
+    },
     "cancel": "Abbrechen",
     "confirmDelete": "Ja, löschen",
     "delete": "Löschen",
     "deletedBot": "Gelöschter Bot",
     "does": "Was es tut",
+    "dueAt": "Geplant {{when}}",
+    "durationHours": "{{hours}} Std. {{minutes}} Min.",
+    "durationMinutes": "{{minutes}} Min. {{seconds}} s",
+    "durationSeconds": "{{seconds}} s",
     "edit": "Bearbeiten",
     "empty": {
       "hint": "Erstelle eine, damit ein Bot automatisch einen Prompt ausführt, zum Beispiel jeden Werktag um 9 Uhr.",
@@ -3361,9 +3375,12 @@
       "title": "Noch keine geplanten Aufgaben"
     },
     "enabled": "Aktiviert",
+    "filterAll": "Alle",
+    "filterIssues": "Fehlgeschlagen & verpasst",
     "form": {
       "botFixed": "Der Bot eines Zeitplans kann nicht geändert werden.",
       "cannotParse": "Diese Formulierung wurde nicht verstanden. Versuche „every day at 9“ oder verwende Cron.",
+      "cannotPreview": "Vorschau für diesen Zeitplan nicht möglich. Prüfe Syntax und Zeitzone.",
       "create": "Erstellen",
       "cron": "Cron-Ausdruck",
       "cronHint": "Fünf Felder, optional gefolgt von einer Zeitzone.",
@@ -3390,6 +3407,7 @@
       },
       "name": "Name",
       "newTitle": "Neue geplante Aufgabe",
+      "nextRunsTitle": "Nächste 5 Läufe ({{tz}})",
       "noFirstRun": "kein bevorstehender Lauf",
       "payloadKept": "Dieser Zeitplan führt einen Workflow oder ein Werkzeug aus; dieser Teil bleibt unverändert.",
       "preview": "Vorschau",
@@ -3399,8 +3417,13 @@
       "text": "Zeitplan in Worten",
       "textHint": "Englisch oder Türkisch. Zeiten verwenden {{tz}}.",
       "textPlaceholder": "every weekday at 9, her gün 09:00",
+      "tz": "Zeitzone",
+      "tzCronHint": "Wird verwendet, wenn der Cron-Ausdruck 5 Felder ohne Zeitzone hat.",
       "when": "Wann"
     },
+    "history": "Ausführungsverlauf",
+    "historyEmpty": "Noch keine Läufe oder verpassten Ausführungen erfasst.",
+    "historyEmptyFiltered": "Keine fehlgeschlagenen oder verpassten Läufe.",
     "lastRun": "Letzter Lauf",
     "loading": "Zeitpläne werden geladen …",
     "missed": "Verpasst, während aus",
@@ -3408,6 +3431,8 @@
     "never": "Nie",
     "new": "Neuer Zeitplan",
     "nextRun": "Nächster Lauf",
+    "nextRuns": "Nächste 5 Läufe",
+    "nextRunsEmpty": "Keine bevorstehenden Läufe.",
     "noRuns": "Noch keine Läufe gesehen.",
     "openRun": "Öffnen",
     "originBot": "Von Bot erstellt",
@@ -3423,11 +3448,23 @@
     "reclaimUnreachable": "{{name}} hat nicht geantwortet, daher läuft seine Kopie dort möglicherweise noch. Wenn du ihn jetzt zurückholst, könnte er auf beiden Computern laufen.",
     "reclaimed": "{{name}} ist wieder auf diesem Computer.",
     "refresh": "Aktualisieren",
+    "retry": "Erneut versuchen",
+    "retryStarted": "Verpasste Ausführung von {{name}} wird erneut gestartet.",
     "run": {
+      "cancelled": "Abgebrochen",
+      "dispatched": "Wird gestartet",
       "failed": "Fehlgeschlagen",
+      "interrupted": "Unterbrochen",
+      "missed": "Verpasst",
+      "paused": "Pausiert",
+      "pending": "Ausstehend",
+      "queued": "In Warteschlange",
       "running": "Läuft",
-      "succeeded": "Erfolgreich"
+      "started": "Läuft",
+      "succeeded": "Erfolgreich",
+      "waiting_approval": "Wartet auf Freigabe"
     },
+    "runAgain": "Erneut ausführen",
     "runNow": "Jetzt ausführen",
     "runNowStarted": "{{name}} gestartet.",
     "spec": {
@@ -3448,6 +3485,8 @@
     },
     "subtitle": "Dinge, die deine Bots nach Zeitplan tun: jeden Morgen, jede Stunde oder einmalig.",
     "title": "Geplante Aufgaben",
+    "viewCalendar": "Kalender",
+    "viewList": "Liste",
     "when": "Wann"
   },
   "serverSignIn": {

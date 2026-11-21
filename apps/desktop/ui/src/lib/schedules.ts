@@ -1,4 +1,8 @@
-import type { Schedule, ScheduleInput } from "../api/types";
+import type {
+  Schedule,
+  ScheduleHistoryEntry,
+  ScheduleInput
+} from "../api/types";
 import type { RunState } from "../state/timeline.ts";
 
 /** `ScheduleDto::spec`: when a schedule fires. */
@@ -179,6 +183,7 @@ export interface ScheduleDraft {
   kind: ScheduleKind;
   text: string;
   cron: string;
+  tz?: string;
   prompt: string;
   enabled: boolean;
   misfire: MisfirePolicy;
@@ -263,9 +268,15 @@ export function buildInput(
       }
       resolved = spec;
       break;
-    case "cron":
-      resolved = { cron: d.cron.trim() };
+    case "cron": {
+      const rawCron = d.cron.trim();
+      const tz = d.tz?.trim();
+      const hasEmbeddedTz = rawCron.split(/\s+/).length !== 5;
+      resolved = {
+        cron: !hasEmbeddedTz && tz ? `${rawCron} ${tz}` : rawCron
+      };
       break;
+    }
     case "keep":
       if (!editing) {
         throw new Error("nothing to keep");
@@ -300,4 +311,281 @@ export function toggleInput(s: Schedule): ScheduleInput {
     enabled: !s.enabled,
     misfire_policy: s.misfire_policy
   };
+}
+
+export type HistoryFilter = "all" | "issues";
+
+/** Whether a history status represents a failure, miss, interruption, or cancellation. */
+export function isIssueStatus(status: string): boolean {
+  return (
+    status === "failed" ||
+    status === "missed" ||
+    status === "interrupted" ||
+    status === "cancelled"
+  );
+}
+
+/** Filter run history entries by `all` or `issues` (failed/missed/interrupted/cancelled). */
+export function filterScheduleHistory<T extends { status: string }>(
+  entries: readonly T[],
+  filter: HistoryFilter
+): T[] {
+  if (filter === "all") {
+    return [...entries];
+  }
+  return entries.filter((e) => isIssueStatus(e.status));
+}
+
+export type HistoryTone = "succeeded" | "failed" | "running" | "missed";
+
+/** Visual badge tone for a schedule history status. */
+export function historyStatusTone(status: string): HistoryTone {
+  switch (status) {
+    case "succeeded":
+      return "succeeded";
+    case "failed":
+      return "failed";
+    case "missed":
+    case "interrupted":
+    case "cancelled":
+    case "paused":
+      return "missed";
+    default:
+      return "running";
+  }
+}
+
+export type DurationParts =
+  | { i18nKey: "schedules.durationSeconds"; values: { seconds: number } }
+  | {
+      i18nKey: "schedules.durationMinutes";
+      values: { minutes: number; seconds: number };
+    }
+  | {
+      i18nKey: "schedules.durationHours";
+      values: { hours: number; minutes: number };
+    };
+
+/** Compute i18n duration parts when both `startedMs` and `finishedMs` are known. */
+export function formatDurationParts(
+  startedMs?: number | null,
+  finishedMs?: number | null
+): DurationParts | null {
+  if (
+    startedMs === null ||
+    startedMs === undefined ||
+    finishedMs === null ||
+    finishedMs === undefined ||
+    finishedMs < startedMs
+  ) {
+    return null;
+  }
+  const totalSec = Math.round((finishedMs - startedMs) / 1000);
+  if (totalSec < 60) {
+    return {
+      i18nKey: "schedules.durationSeconds",
+      values: { seconds: totalSec }
+    };
+  }
+  const totalMin = Math.floor(totalSec / 60);
+  const remSec = totalSec % 60;
+  if (totalMin < 60) {
+    return {
+      i18nKey: "schedules.durationMinutes",
+      values: { minutes: totalMin, seconds: remSec }
+    };
+  }
+  const hours = Math.floor(totalMin / 60);
+  const remMin = totalMin % 60;
+  return {
+    i18nKey: "schedules.durationHours",
+    values: { hours, minutes: remMin }
+  };
+}
+
+/** Merge live event runs that haven't been persisted into history yet. */
+export function mergeLiveRunsIntoHistory(
+  history: readonly ScheduleHistoryEntry[],
+  liveRuns: readonly RunState[]
+): ScheduleHistoryEntry[] {
+  const seenRunIds = new Set(
+    history.map((h) => h.run_id).filter((id): id is string => Boolean(id))
+  );
+  const merged = [...history];
+  for (const r of liveRuns) {
+    if (seenRunIds.has(r.id)) {
+      continue;
+    }
+    const status =
+      r.finishedMs === undefined
+        ? "running"
+        : r.stopped
+          ? "cancelled"
+          : r.error
+            ? "failed"
+            : "succeeded";
+    merged.push({
+      run_id: r.id,
+      chat_id: r.chatId || null,
+      status,
+      started_at_ms: r.startedMs,
+      finished_at_ms: r.finishedMs ?? null,
+      error: r.error ?? null,
+      retryable: false
+    });
+  }
+  return merged.sort((a, b) => {
+    const ak = a.started_at_ms ?? a.due_ms ?? 0;
+    const bk = b.started_at_ms ?? b.due_ms ?? 0;
+    return bk - ak;
+  });
+}
+
+export interface CalendarGridDay {
+  dayKey: string;
+  dayOfMonth: number;
+  inMonth: boolean;
+}
+
+export interface CalendarUpcomingEvent {
+  scheduleId: string;
+  scheduleName: string;
+  ts: number;
+}
+
+export interface CalendarOutcomeEvent {
+  scheduleId: string;
+  scheduleName: string;
+  status: string;
+  ts: number;
+  entry: ScheduleHistoryEntry;
+}
+
+export interface CalendarCell extends CalendarGridDay {
+  upcoming: CalendarUpcomingEvent[];
+  outcomes: CalendarOutcomeEvent[];
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** Format a Unix ms timestamp into `YYYY-MM-DD` in the given or local timezone. */
+export function localDayKey(ms: number, timeZone?: string): string {
+  if (timeZone) {
+    try {
+      return new Intl.DateTimeFormat("en-CA", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        timeZone
+      }).format(new Date(ms));
+    } catch {
+      // Fallback to local calendar date if invalid timezone.
+    }
+  }
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/** Build a 7-column month calendar grid (Monday-first by default). */
+export function buildMonthGrid(
+  year: number,
+  monthZeroBased: number,
+  weekStartsOnMonday = true
+): CalendarGridDay[] {
+  const first = new Date(year, monthZeroBased, 1);
+  const startDow = first.getDay(); // 0 = Sun .. 6 = Sat
+  const lead = weekStartsOnMonday ? (startDow + 6) % 7 : startDow;
+  const daysInMonth = new Date(year, monthZeroBased + 1, 0).getDate();
+  const totalCells = Math.ceil((lead + daysInMonth) / 7) * 7;
+  const cells: CalendarGridDay[] = [];
+  for (let i = 0; i < totalCells; i += 1) {
+    const d = new Date(year, monthZeroBased, 1 - lead + i);
+    const dayKey = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    cells.push({
+      dayKey,
+      dayOfMonth: d.getDate(),
+      inMonth: d.getMonth() === monthZeroBased && d.getFullYear() === year
+    });
+  }
+  return cells;
+}
+
+/** Populate a month grid with upcoming occurrences and recorded outcomes. */
+export function placeScheduleCalendarEvents(
+  days: readonly CalendarGridDay[],
+  schedules: readonly Schedule[],
+  upcomingBySchedule: Readonly<Record<string, readonly number[]>>,
+  historyBySchedule: Readonly<Record<string, readonly ScheduleHistoryEntry[]>>,
+  timeZone?: string
+): CalendarCell[] {
+  const byDay = new Map<string, CalendarCell>();
+  const cells: CalendarCell[] = days.map((d) => {
+    const cell: CalendarCell = { ...d, upcoming: [], outcomes: [] };
+    byDay.set(d.dayKey, cell);
+    return cell;
+  });
+
+  for (const s of schedules) {
+    if (s.enabled && !s.moved_to) {
+      const timestamps = upcomingBySchedule[s.id] ?? s.next_runs_ms ?? [];
+      for (const ts of timestamps) {
+        const key = localDayKey(ts, timeZone);
+        byDay.get(key)?.upcoming.push({
+          scheduleId: s.id,
+          scheduleName: s.name,
+          ts
+        });
+      }
+    }
+    const entries = historyBySchedule[s.id] ?? [];
+    for (const entry of entries) {
+      const ts = entry.started_at_ms ?? entry.due_ms;
+      if (ts === null || ts === undefined) {
+        continue;
+      }
+      const key = localDayKey(ts, timeZone);
+      byDay.get(key)?.outcomes.push({
+        scheduleId: s.id,
+        scheduleName: s.name,
+        status: entry.status,
+        ts,
+        entry
+      });
+    }
+  }
+
+  for (const cell of cells) {
+    cell.upcoming.sort((a, b) => a.ts - b.ts);
+    cell.outcomes.sort((a, b) => b.ts - a.ts);
+  }
+  return cells;
+}
+
+/** Arrow/Home/End keyboard navigation index inside a 7-column calendar grid. */
+export function moveCalendarFocusIndex(
+  currentIdx: number,
+  key: string,
+  totalCells: number
+): number | null {
+  if (totalCells <= 0) {
+    return null;
+  }
+  switch (key) {
+    case "ArrowLeft":
+      return Math.max(0, currentIdx - 1);
+    case "ArrowRight":
+      return Math.min(totalCells - 1, currentIdx + 1);
+    case "ArrowUp":
+      return Math.max(0, currentIdx - 7);
+    case "ArrowDown":
+      return Math.min(totalCells - 1, currentIdx + 7);
+    case "Home":
+      return Math.floor(currentIdx / 7) * 7;
+    case "End":
+      return Math.min(totalCells - 1, Math.floor(currentIdx / 7) * 7 + 6);
+    default:
+      return null;
+  }
 }

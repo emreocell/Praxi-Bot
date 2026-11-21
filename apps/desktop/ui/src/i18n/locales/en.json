@@ -3349,11 +3349,25 @@
   },
   "schedules": {
     "bot": "Bot",
+    "calendar": {
+      "dayEmpty": "No scheduled runs or history on {{date}}.",
+      "daySummary": "{{date}}: {{upcoming}} upcoming, {{outcomes}} recorded",
+      "gridLabel": "Schedule calendar for {{month}}",
+      "historyHeading": "Recorded",
+      "nextMonth": "Next month",
+      "prevMonth": "Previous month",
+      "today": "Today",
+      "upcomingHeading": "Upcoming"
+    },
     "cancel": "Cancel",
     "confirmDelete": "Yes, delete",
     "delete": "Delete",
     "deletedBot": "Deleted bot",
     "does": "What it does",
+    "dueAt": "Scheduled {{when}}",
+    "durationHours": "{{hours}}h {{minutes}}m",
+    "durationMinutes": "{{minutes}}m {{seconds}}s",
+    "durationSeconds": "{{seconds}}s",
     "edit": "Edit",
     "empty": {
       "hint": "Create one to have a bot run a prompt automatically, for example every weekday at 9.",
@@ -3361,9 +3375,12 @@
       "title": "No scheduled tasks yet"
     },
     "enabled": "Enabled",
+    "filterAll": "All",
+    "filterIssues": "Failed & missed",
     "form": {
       "botFixed": "The bot of a schedule cannot be changed.",
       "cannotParse": "That phrase was not understood. Try \"every day at 9\" or use cron.",
+      "cannotPreview": "Could not preview this schedule. Check the syntax and timezone.",
       "create": "Create",
       "cron": "Cron expression",
       "cronHint": "Five fields, optionally followed by a timezone.",
@@ -3390,6 +3407,7 @@
       },
       "name": "Name",
       "newTitle": "New scheduled task",
+      "nextRunsTitle": "Next 5 runs ({{tz}})",
       "noFirstRun": "no upcoming run",
       "payloadKept": "This schedule runs a workflow or tool; that part stays unchanged.",
       "preview": "Preview",
@@ -3399,8 +3417,13 @@
       "text": "Schedule in words",
       "textHint": "English or Turkish. Times use {{tz}}.",
       "textPlaceholder": "every weekday at 9, her gün 09:00",
+      "tz": "Timezone",
+      "tzCronHint": "Used if the cron expression has 5 fields without a timezone.",
       "when": "When"
     },
+    "history": "Run history",
+    "historyEmpty": "No runs or missed occurrences recorded yet.",
+    "historyEmptyFiltered": "No failed or missed runs.",
     "lastRun": "Last run",
     "loading": "Loading schedules…",
     "missed": "Missed while off",
@@ -3408,6 +3431,8 @@
     "never": "Never",
     "new": "New schedule",
     "nextRun": "Next run",
+    "nextRuns": "Next 5 runs",
+    "nextRunsEmpty": "No upcoming runs.",
     "noRuns": "No runs seen yet.",
     "openRun": "Open",
     "originBot": "Made by bot",
@@ -3423,11 +3448,23 @@
     "reclaimUnreachable": "{{name}} did not answer, so its copy may still be running there. Bringing it back now could run it on both computers.",
     "reclaimed": "{{name}} is back on this computer.",
     "refresh": "Refresh",
+    "retry": "Retry",
+    "retryStarted": "Retrying missed occurrence of {{name}}.",
     "run": {
+      "cancelled": "Cancelled",
+      "dispatched": "Starting",
       "failed": "Failed",
+      "interrupted": "Interrupted",
+      "missed": "Missed",
+      "paused": "Paused",
+      "pending": "Pending",
+      "queued": "Queued",
       "running": "Running",
-      "succeeded": "Succeeded"
+      "started": "Running",
+      "succeeded": "Succeeded",
+      "waiting_approval": "Waiting approval"
     },
+    "runAgain": "Run again",
     "runNow": "Run now",
     "runNowStarted": "{{name}} started.",
     "spec": {
@@ -3448,6 +3485,8 @@
     },
     "subtitle": "Things your bots do on a timer: every morning, every hour, or once.",
     "title": "Scheduled tasks",
+    "viewCalendar": "Calendar",
+    "viewList": "List",
     "when": "When"
   },
   "serverSignIn": {

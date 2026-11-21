@@ -31,6 +31,7 @@ const LOCAL_ONLY: Record<string, string> = {
   "lib/liveViewLayers.ts": "layer routing for the live view",
   "overlay/events.ts": "stop hotkey formatting (documented as the stop entry)",
   "views/BotEditModal.tsx": "arrow keys on editor section tabs",
+  "views/SchedulesView.tsx": "arrow, Home, and End navigation inside the schedule calendar grid",
   "views/firstrun/BrainStep.tsx": "Enter inside a single field",
   "views/firstrun/FreedomStep.tsx": "arrow keys on a segmented control"
 };

@@ -2770,6 +2770,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/schedules/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview the next upcoming run timestamps for a schedule spec or phrase. */
+        post: operations["preview_schedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/schedules/{id}": {
         parameters: {
             query?: never;
@@ -2787,6 +2804,44 @@ export interface paths {
         post?: never;
         /** Delete a schedule (and its webhook trigger).  Runs it already started stay. */
         delete: operations["delete_schedule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/schedules/{id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run and occurrence history for a schedule (newest first). */
+        get: operations["list_schedule_history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/schedules/{id}/occurrences/{due_ms}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Explicitly retry a `failed`, `missed`, or `interrupted` occurrence of a schedule.
+         *     Creates a normal run under the same permissions and approvals as a scheduled run
+         *     without altering `next_run_at`. Idempotent: concurrent or repeat retries never double-fire.
+         */
+        post: operations["retry_schedule_occurrence"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -6149,13 +6204,15 @@ export interface components {
             /** @description IANA timezone for calendar phrases (default UTC). */
             tz?: string | null;
         };
-        /** @description Result of `POST /v1/schedules/parse`. */
+        /** @description Result of `POST /v1/schedules/parse` and `POST /v1/schedules/preview`. */
         ParsedSchedule: {
             /**
              * Format: int64
              * @description First firing from now.
              */
             next_run_at_ms?: number | null;
+            /** @description Next up to 5 (or requested `count`) upcoming firing timestamps (Unix epoch ms). */
+            next_runs_ms?: number[];
             /** @description The [`ScheduleDto::spec`] the phrase means. */
             spec: unknown;
         };
@@ -6228,6 +6285,22 @@ export interface components {
             };
             /** @description `read-only`, `approve-destructive`, `read-and-draft` or `full`. */
             preset?: string | null;
+        };
+        /** @description Body of `POST /v1/schedules/preview`. */
+        PreviewSchedule: {
+            /** @description Number of upcoming occurrences to compute (default 5, max 100). */
+            count?: number | null;
+            /**
+             * Format: int64
+             * @description Anchor timestamp in Unix ms (default: now).
+             */
+            from_ms?: number | null;
+            /** @description Schedule specification (`{"cron": ...}`, `{"every": ...}`, `{"at": ...}`). */
+            spec?: unknown;
+            /** @description Natural-language phrase (used when `spec` is omitted). */
+            text?: string | null;
+            /** @description Optional IANA timezone applied to 5-field cron expressions without an embedded timezone. */
+            tz?: string | null;
         };
         /** @enum {string} */
         Profile: "watch" | "live";
@@ -6632,6 +6705,8 @@ export interface components {
              * @description Next firing (`null` for a disabled or finished schedule).
              */
             next_run_at_ms?: number | null;
+            /** @description Next up to 5 upcoming firing timestamps (Unix epoch ms). */
+            next_runs_ms?: number[];
             /**
              * @description Who created it: `user`, or `bot` (a bot's schedule tools, after you
              *     approved it). A bot may change only its own `bot` schedules.
@@ -6657,6 +6732,43 @@ export interface components {
             spec: unknown;
             /** @description Non-webhook trigger definition; never includes webhook secrets. */
             trigger?: unknown;
+        };
+        /** @description One entry in a schedule's run history (`GET /v1/schedules/{id}/history`). */
+        ScheduleHistoryEntryDto: {
+            /**
+             * Format: uuid
+             * @description Chat id where the run posted, if known.
+             */
+            chat_id?: string | null;
+            /**
+             * Format: int64
+             * @description Scheduled due timestamp (Unix ms), present for timer occurrences.
+             */
+            due_ms?: number | null;
+            /** @description Failure message, if any. */
+            error?: string | null;
+            /**
+             * Format: int64
+             * @description When the run finished (Unix ms), if it reached a terminal run state.
+             */
+            finished_at_ms?: number | null;
+            /** @description Whether this occurrence can be retried via `POST /v1/schedules/{id}/occurrences/{due_ms}/retry`. */
+            retryable: boolean;
+            /**
+             * Format: uuid
+             * @description Linked run id, if a run was created.
+             */
+            run_id?: string | null;
+            /**
+             * Format: int64
+             * @description When the run started (Unix ms), if it started.
+             */
+            started_at_ms?: number | null;
+            /**
+             * @description Outcome or status (`pending`, `dispatched`, `started`, `queued`, `running`,
+             *     `waiting_approval`, `paused`, `succeeded`, `failed`, `cancelled`, `missed`, `interrupted`).
+             */
+            status: string;
         };
         ScheduleIdsInput: {
             ids: string[];
@@ -13754,6 +13866,38 @@ export interface operations {
             };
         };
     };
+    preview_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewSchedule"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ParsedSchedule"];
+                };
+            };
+            /** @description invalid schedule spec or phrase */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     get_schedule: {
         parameters: {
             query?: never;
@@ -13845,6 +13989,86 @@ export interface operations {
                 content?: never;
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_schedule_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Schedule id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleHistoryEntryDto"][];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    retry_schedule_occurrence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Schedule id */
+                id: string;
+                /** @description Occurrence due timestamp in Unix ms */
+                due_ms: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcceptedResponse"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description occurrence already handled or a run is in flight */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the scheduler is not running */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
