@@ -264,6 +264,10 @@
       "soft": "Weich",
       "title": "Ecken"
     },
+    "photorealAvatars": {
+      "description": "Bots erhalten weiche, fotorealistische Tonkörper in ihrer Farbe. Ausschalten für den leichteren gezeichneten Ton-Stil.",
+      "title": "Fotorealistische Ton-Avatare"
+    },
     "style": {
       "blur": "Unschärfe",
       "blurSoft": "Weich",

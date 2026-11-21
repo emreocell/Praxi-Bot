@@ -264,6 +264,10 @@
       "soft": "Yumuşak",
       "title": "Köşeler"
     },
+    "photorealAvatars": {
+      "description": "Botlar kendi renklerine boyanmış, yumuşak ve fotogerçekçi kil gövdeler kullanır. Daha hafif çizim kil stili için kapatın.",
+      "title": "Fotogerçekçi kil avatarlar"
+    },
     "style": {
       "blur": "Bulanıklık",
       "blurSoft": "Hafif",

@@ -383,6 +383,22 @@ export function appearanceCards(b: SettingsBridge, t: TFunction): CardDef[] {
       { keywords: "transparent chat background saydam sohbet arka plan seffaf" }
     ),
     card(
+      "photorealAvatars",
+      t("appearance.photorealAvatars.title"),
+      t("appearance.photorealAvatars.description"),
+      <SettingRow
+        title={t("appearance.photorealAvatars.title")}
+        description={t("appearance.photorealAvatars.description")}
+      >
+        <Switch
+          label={t("appearance.photorealAvatars.title")}
+          checked={settings.photorealAvatars}
+          onChange={(photorealAvatars) => update({ photorealAvatars })}
+        />
+      </SettingRow>,
+      { keywords: "avatar bot clay photoreal render 3d kil fotogercekci ton fotorealistisch" }
+    ),
+    card(
       "backdrop",
       t("appearance.backdrop.title"),
       t("appearance.backdrop.description"),

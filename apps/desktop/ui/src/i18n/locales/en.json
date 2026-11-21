@@ -264,6 +264,10 @@
       "soft": "Soft",
       "title": "Corners"
     },
+    "photorealAvatars": {
+      "description": "Bots use soft photoreal clay bodies tinted in their colour. Turn off for the lighter drawn clay style.",
+      "title": "Photoreal clay avatars"
+    },
     "style": {
       "blur": "Blur",
       "blurSoft": "Soft",
