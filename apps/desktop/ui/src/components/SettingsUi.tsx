@@ -94,3 +94,39 @@ export function Switch({
     </button>
   );
 }
+
+/**
+ * A titled card for settings blocks that bring their own body (lists, forms).
+ * `tone="danger"` marks a danger zone: destructive actions live apart, with a red edge.
+ */
+export function SettingsCard({
+  title,
+  description,
+  tone = "default",
+  children
+}: {
+  title: string;
+  description?: string;
+  tone?: "default" | "danger";
+  children: ReactNode;
+}) {
+  return (
+    <section className={[styles.card, tone === "danger" ? styles.cardDanger : ""].join(" ")}>
+      <header className={styles.cardHead}>
+        <h3 className={styles.cardTitle}>{title}</h3>
+        {description ? <p className={styles.rowDesc}>{description}</p> : null}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+/** A calm "nothing here yet" line for an empty list. */
+export function EmptyNote({ icon, children }: { icon?: ReactNode; children: ReactNode }) {
+  return (
+    <p className={styles.emptyNote} role="status">
+      {icon}
+      <span>{children}</span>
+    </p>
+  );
+}

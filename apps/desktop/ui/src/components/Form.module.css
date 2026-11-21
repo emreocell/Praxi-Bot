@@ -76,3 +76,23 @@
 }
 
 .emptyIcon { display: block; width: var(--space-8); height: var(--space-8); margin-bottom: var(--space-4); color: var(--color-accent-text); }
+
+
+/* c451: one look for every select: quiet chevron drawn from theme tokens, hover and invalid states. */
+.select {
+  appearance: none;
+  padding-right: var(--space-6);
+  background-color: var(--color-surface-elevated);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--color-text-muted) 50%),
+    linear-gradient(135deg, var(--color-text-muted) 50%, transparent 50%);
+  background-position: calc(100% - var(--space-3) - var(--space-1)) 50%, calc(100% - var(--space-3)) 50%;
+  background-size: var(--space-1) var(--space-1), var(--space-1) var(--space-1);
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+.input, .textarea, .select { transition: border-color var(--motion-duration-fast) var(--motion-easing-standard), box-shadow var(--motion-duration-fast) var(--motion-easing-standard); }
+.input:hover:not(:disabled, :focus-visible), .textarea:hover:not(:disabled, :focus-visible), .select:hover:not(:disabled, :focus-visible) { border-color: var(--color-text-muted); }
+.input[aria-invalid="true"], .textarea[aria-invalid="true"], .select[aria-invalid="true"] { border-color: var(--color-danger); }
+.select:disabled { cursor: default; }
+@media (prefers-reduced-motion: reduce) { .input, .textarea, .select { transition: none; } }
