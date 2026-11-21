@@ -3220,6 +3220,8 @@
     "brainAuto": "Auto",
     "brainHint": "You can change this later in chat",
     "create": "Create",
+    "creating": "Creating…",
+    "nameNeeded": "Give your bot a name to create it.",
     "namePlaceholder": "Bot name",
     "shapeGroup": "Character shape",
     "shapes": {
@@ -3240,6 +3242,7 @@
       "star": "Star",
       "tri": "Triangle"
     },
+    "subtitle": "Choose a look, a name and how far it may go on its own.",
     "templates": {
       "assistant": "Assistant",
       "blank": "Blank",

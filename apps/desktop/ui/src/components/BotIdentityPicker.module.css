@@ -28,11 +28,28 @@
   color: var(--color-text);
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
+  font-family: inherit;
   text-align: center;
+  transition:
+    border-color var(--motion-duration-fast) var(--motion-easing-standard),
+    background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.nameInput::placeholder {
+  color: var(--color-text-faint);
+  font-weight: var(--font-weight-medium);
+}
+
+.nameInput:hover {
+  border-color: var(--color-border-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nameInput { transition: none; }
 }
 
 .nameInput:focus-visible {
   outline: none;
-  border-color: var(--color-focus);
-  box-shadow: var(--shadow-focus);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 var(--size-border-heavy) var(--color-accent-subtle);
 }

@@ -1,6 +1,6 @@
 import { type FormEvent, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, ChevronUp, X } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { Button } from "ui";
 import type { Bot } from "../api/types";
 import { BotAvatarUploadField, useBotFormDeps } from "../components/BotAdvancedFields";
@@ -11,6 +11,7 @@ import {
   PermissionFields
 } from "../components/BotEditorFields";
 import { BotIdentityPicker } from "../components/BotIdentityPicker";
+import { Callout, DialogBody, DialogFooter, DialogHeader } from "../components/DialogParts";
 import formStyles from "../components/Form.module.css";
 import { Modal } from "../components/Modal";
 import { ModelPicker } from "../components/ModelPicker";
@@ -39,6 +40,8 @@ import { useEngineConsent } from "../state/EngineConsent";
 import { useCustomText } from "../state/useCustomText";
 import styles from "./NewBotModal.module.css";
 import { HomeHint } from "../components/HomeHint";
+
+const NEW_BOT_SUBTITLE_ID = "new-bot-subtitle";
 
 function NewBotDialogContent({
   onDone,
@@ -194,27 +197,25 @@ function NewBotDialogContent({
     }
   };
 
+  const footerNote = nameMissing && !saving ? t("newBot.nameNeeded") : undefined;
+
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     void save();
   };
 
   return (
-    <form className={styles.modalForm} onSubmit={handleSubmit}>
-      <header className={styles.header}>
-        <h2 className={styles.title}>{t("newBot.title")}</h2>
-        <HomeHint />
-        <button
-          type="button"
-          className={styles.closeButton}
-          aria-label={t("common.close")}
-          onClick={onClose}
-        >
-          <X aria-hidden="true" />
-        </button>
-      </header>
+    <form className={styles.modalForm} onSubmit={handleSubmit} noValidate>
+      <DialogHeader
+        title={t("newBot.title")}
+        subtitle={t("newBot.subtitle")}
+        subtitleId={NEW_BOT_SUBTITLE_ID}
+        actions={<HomeHint />}
+        closeDisabled={saving}
+        onClose={onClose}
+      />
 
-      <div className={styles.body}>
+      <DialogBody className={styles.body} testId="new-bot-body">
         <div className={styles.templates} role="group" aria-label={t("newBot.templatesLabel")}>
           {BOT_TEMPLATES.map((tpl) => {
             const active = templateId === tpl.id;
@@ -319,7 +320,10 @@ function NewBotDialogContent({
           onClick={() => setAdvancedOpen((v) => !v)}
         >
           <span>{t("newBot.advanced")}</span>
-          {advancedOpen ? <ChevronUp aria-hidden="true" /> : <ChevronDown aria-hidden="true" />}
+          <ChevronDown
+            className={[styles.chevron, advancedOpen ? styles.chevronOpen : ""].filter(Boolean).join(" ")}
+            aria-hidden="true"
+          />
         </button>
 
         {advancedOpen ? (
@@ -392,30 +396,33 @@ function NewBotDialogContent({
         ) : null}
 
         {host && executorMissing ? (
-          <p className={styles.alert} role="status" data-testid="new-bot-host-needs-model">
-            {t("hostMode.newBotNeedsModel", { name: host.name })}
-          </p>
+          <Callout tone="warning" role="status">
+            <span data-testid="new-bot-host-needs-model">
+              {t("hostMode.newBotNeedsModel", { name: host.name })}
+            </span>
+          </Callout>
         ) : null}
         {error ? (
-          <p className={styles.alert} role="alert">
+          <Callout tone="danger" role="alert">
             {error}
-          </p>
+          </Callout>
         ) : null}
-      </div>
+      </DialogBody>
 
-      <footer className={styles.footer}>
-        <Button variant="ghost" onClick={onClose}>
+      <DialogFooter note={footerNote}>
+        <Button variant="ghost" disabled={saving} onClick={onClose}>
           {t("common.cancel")}
         </Button>
         <Button
           type="submit"
           variant="primary"
+          aria-busy={saving}
           disabled={saving || nameMissing || executorMissing || customInvalid}
           data-testid="new-bot-submit"
         >
-          {t("newBot.create")}
+          {saving ? t("newBot.creating") : t("newBot.create")}
         </Button>
-      </footer>
+      </DialogFooter>
     </form>
   );
 }
@@ -432,7 +439,7 @@ export function NewBotModal({
 }) {
   const { t } = useTranslation();
   return (
-    <Modal open={open} onClose={onClose} size="sm" label={t("newBot.title")}>
+    <Modal open={open} onClose={onClose} size="sm" label={t("newBot.title")} describedBy={NEW_BOT_SUBTITLE_ID}>
       {open ? <NewBotDialogContent onDone={onDone} onClose={onClose} /> : null}
     </Modal>
   );
