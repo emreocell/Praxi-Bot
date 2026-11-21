@@ -609,6 +609,57 @@ pub struct BotUsage {
     pub totals: UsageTotals,
 }
 
+/// Usage of one provider/model reference.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ModelUsage {
+    /// Model reference as recorded in the ledger (e.g. `openai/gpt-4o`, or `"unknown"`).
+    pub model: String,
+    /// Provider prefix before `/` (or `cli:<name>`), when present.
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Totals across all calls to this model.
+    #[serde(flatten)]
+    pub totals: UsageTotals,
+    /// Calls to this model that reported no token usage.
+    #[serde(default)]
+    pub calls_without_usage: u64,
+    /// Calls to this model whose cost is unknown (missing price or missing token usage).
+    #[serde(default)]
+    pub calls_without_cost: u64,
+}
+
+/// Usage of one provider.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ProviderUsage {
+    /// Provider identifier (prefix before `/`, `cli:<name>`, or `"unknown"` when none).
+    pub provider: String,
+    /// Totals across all calls to this provider.
+    #[serde(flatten)]
+    pub totals: UsageTotals,
+    /// Calls to this provider that reported no token usage.
+    #[serde(default)]
+    pub calls_without_usage: u64,
+    /// Calls to this provider whose cost is unknown (missing price or missing token usage).
+    #[serde(default)]
+    pub calls_without_cost: u64,
+}
+
+/// Usage bucketed to one local calendar day (`YYYY-MM-DD`).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DailyUsage {
+    /// Calendar day in `time_zone` (`YYYY-MM-DD`).
+    pub day: String,
+    /// Totals for that day.
+    #[serde(flatten)]
+    pub totals: UsageTotals,
+    /// Calls on that day that reported no token usage.
+    #[serde(default)]
+    pub calls_without_usage: u64,
+    /// Calls on that day whose cost is unknown (missing price or missing token usage).
+    #[serde(default)]
+    pub calls_without_cost: u64,
+}
+
 /// `GET /v1/usage`.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UsageSummary {
@@ -621,6 +672,24 @@ pub struct UsageSummary {
     /// Per-purpose totals, including invocations that report no tokens.
     #[serde(default)]
     pub by_purpose: std::collections::BTreeMap<String, UsageTotals>,
+    /// Per-model totals, including invocations that report no tokens.
+    #[serde(default)]
+    pub by_model: Vec<ModelUsage>,
+    /// Per-provider totals, including invocations that report no tokens.
+    #[serde(default)]
+    pub by_provider: Vec<ProviderUsage>,
+    /// Daily series bucketed in `time_zone` (chronological, bounded to at most 366 days).
+    #[serde(default)]
+    pub daily: Vec<DailyUsage>,
+    /// Calls in the selected range that reported no token usage.
+    #[serde(default)]
+    pub calls_without_usage: u64,
+    /// Calls in the selected range whose cost is unknown (missing price or missing token usage).
+    #[serde(default)]
+    pub calls_without_cost: u64,
+    /// IANA time zone used to bucket `daily` (e.g. `Europe/Istanbul` or `UTC`).
+    #[serde(default)]
+    pub time_zone: String,
 }
 
 // ---------------------------------------------------------- control bridge

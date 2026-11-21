@@ -66,6 +66,7 @@ mod spend_routes;
 mod sse;
 mod stop;
 pub mod terminal;
+pub mod usage;
 pub mod voice;
 mod voice_routes;
 pub mod web;
@@ -1308,7 +1309,8 @@ fn api_routes() -> Router<AppState> {
             "/v1/runs/{id}/changes/{cp}/restore",
             post(changes::restore_changes),
         )
-        .route("/v1/usage", get(r::usage))
+        .route("/v1/usage", get(usage::usage))
+        .route("/v1/usage/export", get(usage::export_csv))
         .route(
             "/v1/control/state",
             get(r::get_control_state).put(r::put_control_state),

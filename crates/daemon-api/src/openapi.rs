@@ -44,6 +44,7 @@ use crate::spend_routes;
 use crate::sse;
 use crate::terminal;
 use crate::trusted_folders;
+use crate::usage;
 use crate::voice;
 use crate::voice_routes;
 use crate::web;
@@ -274,7 +275,6 @@ impl Modify for Security {
         routes::update_bot,
         routes::update_chat,
         routes::update_schedule,
-        routes::usage,
         routes::webhook,
         skill_hub::hub_install,
         skill_hub::hub_preview,
@@ -299,6 +299,8 @@ impl Modify for Security {
         trusted_folders::add,
         trusted_folders::list,
         trusted_folders::remove,
+        usage::export_csv,
+        usage::usage,
         voice_routes::get_voice,
         voice_routes::transcribe,
         voice_routes::update_voice,
@@ -379,6 +381,7 @@ impl Modify for Security {
         dto::ControlStateInput,
         dto::ControlVerdict,
         dto::CreateChat,
+        dto::DailyUsage,
         dto::DecideApproval,
         dto::Decision,
         dto::DecisionResponse,
@@ -394,11 +397,13 @@ impl Modify for Security {
         dto::MessageDto,
         dto::Mode,
         dto::ModelMetadataDto,
+        dto::ModelUsage,
         dto::PairCodeDto,
         dto::ParseSchedule,
         dto::ParsedSchedule,
         dto::PolicyDto,
         dto::PolicyInput,
+        dto::ProviderUsage,
         dto::ProvidersDto,
         dto::ReleaseResult,
         dto::ReloadResponse,

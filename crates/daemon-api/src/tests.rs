@@ -4420,13 +4420,28 @@ async fn usage_purpose_totals_are_additive_and_preserve_the_legacy_shape() {
         })
     );
     let mut legacy_view = initial.clone();
-    legacy_view.as_object_mut().unwrap().remove("by_purpose");
+    let obj = legacy_view.as_object_mut().unwrap();
+    for key in [
+        "by_purpose",
+        "by_model",
+        "by_provider",
+        "daily",
+        "calls_without_usage",
+        "calls_without_cost",
+        "time_zone",
+    ] {
+        obj.remove(key);
+    }
     assert_eq!(
         legacy_view,
         json!({"runs": 1, "total": initial["total"],
         "by_bot": [{"bot_id": bot, "prompt_tokens": 10, "completion_tokens": 5,
             "cached_tokens": 0, "model_calls": 1, "cost_usd": null}]})
     );
+    assert_eq!(initial["by_model"][0]["model"], "fake/echo");
+    assert_eq!(initial["by_model"][0]["provider"], "fake");
+    assert_eq!(initial["calls_without_usage"], 0);
+    assert_eq!(initial["calls_without_cost"], 1);
 
     let st = t.state.storage();
     let user = t.state.user_id();
@@ -4492,6 +4507,47 @@ async fn usage_legacy_steps_remain_counted_after_a_run_acquires_ledger_entries()
     assert_eq!(u["total"]["model_calls"], 3);
     assert_eq!(u["total"]["prompt_tokens"], 20);
     assert_eq!(u["by_purpose"]["executor"], u["total"]);
+}
+
+#[tokio::test]
+async fn usage_by_model_daily_and_owner_only_csv_export() {
+    let t = setup();
+    let (_, chat) = make_chat(&t).await;
+    run_and_reply(&t, &chat, "hello").await;
+
+    let u = call(&t, Method::GET, "/v1/usage?days=7&tz=UTC", None)
+        .await
+        .json();
+    assert_eq!(u["time_zone"], "UTC");
+    assert_eq!(u["daily"].as_array().unwrap().len(), 7);
+    assert_eq!(u["by_model"].as_array().unwrap().len(), 1);
+    assert_eq!(u["by_model"][0]["model"], "fake/echo");
+    assert_eq!(u["by_provider"][0]["provider"], "fake");
+    assert_eq!(u["calls_without_usage"], 0);
+    assert_eq!(u["calls_without_cost"], 1);
+
+    // Invalid query parameters are rejected with 400.
+    let bad_days = call(&t, Method::GET, "/v1/usage?days=0", None).await;
+    assert_eq!(bad_days.status, StatusCode::BAD_REQUEST);
+    let bad_tz = call(&t, Method::GET, "/v1/usage?tz=Not/AZone", None).await;
+    assert_eq!(bad_tz.status, StatusCode::BAD_REQUEST);
+
+    // CSV export requires the owner key and returns formula-safe CSV without prompts.
+    let denied = call_token_only(&t, Method::GET, "/v1/usage/export?days=7&tz=UTC", None).await;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN);
+    assert_eq!(denied.json()["error"]["code"], "owner_key_required");
+
+    let csv_resp = call(&t, Method::GET, "/v1/usage/export?days=7&tz=UTC", None).await;
+    assert_eq!(csv_resp.status, StatusCode::OK);
+    let body = String::from_utf8(csv_resp.body).unwrap();
+    let lines: Vec<&str> = body.lines().collect();
+    assert_eq!(
+        lines[0],
+        "day,bot,model,purpose,calls,calls_without_usage,prompt_tokens,completion_tokens,cached_tokens,cost_usd"
+    );
+    assert_eq!(lines.len(), 2);
+    assert!(lines[1].contains("fake/echo,executor,1,0,10,5,0,"));
+    assert!(!body.contains("hello"));
 }
 
 #[tokio::test]
