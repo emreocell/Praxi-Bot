@@ -493,8 +493,58 @@ async fn navigate_does_not_wait_for_long_lived_request() {
     assert!(r.ok, "{:?}", r.error);
     assert!(r.settle_note.is_none(), "{:?}", r.settle_note);
     assert!(
-        took < Duration::from_millis(1200),
+        took < Duration::from_millis(1700),
         "navigate waited {took:?} for a long-lived request"
+    );
+    let _ = b.close().await;
+}
+
+/// A finite fetch that starts after `load` and replaces a skeleton must be waited for: the
+/// action snapshot has to show the final content, not the skeleton.
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn navigate_waits_for_finite_fetch_after_load() {
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = l.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = l.accept().await {
+            tokio::spawn(async move {
+                let mut buf = [0u8; 2048];
+                let n = s.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let body = if req.starts_with("GET /data") {
+                    tokio::time::sleep(Duration::from_millis(700)).await;
+                    "FinalRows".to_string()
+                } else {
+                    "<title>Dash</title><p id=o>Skeleton</p>                     <script>addEventListener('load',()=>setTimeout(()=>                     fetch('/data').then(r=>r.text()).then(t=>{o.textContent=t}),20));</script>"
+                        .to_string()
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK
+Content-Type: text/html
+Content-Length: {}
+Connection: close
+
+{body}",
+                    body.len()
+                );
+                let _ = s.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let page = b.new_page("about:blank").await.unwrap();
+    let r = page
+        .navigate(&format!("http://127.0.0.1:{port}/"))
+        .await
+        .unwrap();
+    assert!(r.ok, "{:?}", r.error);
+    let snap = page.snapshot(&SnapshotOptions::default()).await.unwrap();
+    assert!(
+        snap.render().contains("FinalRows"),
+        "snapshot taken while fetch was still open:
+{}",
+        snap.render()
     );
     let _ = b.close().await;
 }

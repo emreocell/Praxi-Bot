@@ -24,6 +24,10 @@ pub const DEFAULT_WAIT: Duration = Duration::from_secs(30);
 
 /// Requests in flight longer than this (long-poll, `EventSource`) do not block network idle.
 pub(crate) const INFLIGHT_CAP: Duration = Duration::from_secs(10);
+/// After a navigation settles, a request open this long is treated as a page-owned long poll.
+pub(crate) const LONG_LIVED_AGE: Duration = Duration::from_millis(1000);
+/// A cached capture older than this is never served (DOM.* invalidation events do not arrive).
+const CACHE_MAX_AGE: Duration = Duration::from_secs(1);
 
 /// A JavaScript dialog the page watcher answered on its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -175,6 +179,7 @@ pub(crate) struct FrameMeta {
 pub(crate) struct CachedCapture {
     pub dom_gen: u64,
     pub nav_gen: u64,
+    pub at: Instant,
     pub frames: Vec<FrameInput>,
     pub url: String,
     pub title: String,
@@ -806,21 +811,26 @@ impl Page {
         let nav_before = self.shared.nav_gen.load(Ordering::SeqCst);
         {
             let mut st = self.state.lock().await;
+            // Re-read the counters under the lock: `watch` may have bumped them since the
+            // first sample.
+            let dom_now = self.shared.dom_gen.load(Ordering::SeqCst);
+            let nav_now = self.shared.nav_gen.load(Ordering::SeqCst);
             if let Some(cached) = st.cached.take()
-                && cached.dom_gen == dom_before
-                && cached.nav_gen == nav_before
+                && cached.dom_gen == dom_now
+                && cached.nav_gen == nav_now
+                && cached.at.elapsed() < CACHE_MAX_AGE
             {
-                if st.gen_seen == nav_before
+                if st.gen_seen == nav_now
                     && st.opts == *opts
                     && let Some(last) = st.last.clone()
                 {
                     st.cached = Some(cached);
                     return Ok(last);
                 }
-                if st.gen_seen != nav_before {
+                if st.gen_seen != nav_now {
                     st.refs.clear();
                 }
-                st.gen_seen = nav_before;
+                st.gen_seen = nav_now;
                 let nodes = build_snapshot(&cached.frames, opts, &mut st.refs);
                 let snap = Snapshot {
                     url: cached.url.clone(),
@@ -860,6 +870,7 @@ impl Page {
         st.cached = Some(CachedCapture {
             dom_gen: dom_before,
             nav_gen: nav_before,
+            at: Instant::now(),
             frames,
             url,
             title,
@@ -969,8 +980,8 @@ impl Page {
     /// Like [`Page::wait_network_idle`]. With `since`, only requests that started at or after
     /// that instant count: a long poll, beacon or stream that was already open before the
     /// action is not something the action is waiting for. When `settle_on_quiet_after_load`
-    /// is true (navigation settle after `load`), an open long-lived request does not block once
-    /// the network has been quiet for `quiet`.
+    /// is true (navigation settle after `load`), requests that have been open for
+    /// [`LONG_LIVED_AGE`] no longer block (long poll / SSE); younger ones still do.
     pub(crate) async fn wait_network_idle_inner(
         &self,
         quiet: Duration,
@@ -980,9 +991,16 @@ impl Page {
     ) -> Result<()> {
         let deadline = Instant::now() + timeout;
         loop {
-            let inflight = match since {
-                Some(t) => busy_count_since(&self.shared, t),
-                None => self.busy_requests(),
+            let inflight = if settle_on_quiet_after_load {
+                // Finite fetches that started after the navigation are waited for; only a
+                // request that has already been open for `LONG_LIVED_AGE` is treated as a
+                // page-owned long poll / stream and ignored.
+                busy_count_younger_than(&self.shared, since, LONG_LIVED_AGE)
+            } else {
+                match since {
+                    Some(t) => busy_count_since(&self.shared, t),
+                    None => self.busy_requests(),
+                }
             };
             let last = self.shared.last_net.lock().ok().and_then(|l| *l);
             let last = match since {
@@ -990,7 +1008,7 @@ impl Page {
                 None => last,
             };
             let idle_for = last.map_or(quiet, |t| t.elapsed());
-            if (inflight == 0 || settle_on_quiet_after_load) && idle_for >= quiet {
+            if inflight == 0 && idle_for >= quiet {
                 return Ok(());
             }
             if Instant::now() >= deadline {
@@ -1029,6 +1047,8 @@ async fn watch(
         let ev = match recv_res {
             Ok(ev) => ev,
             Err(broadcast::error::RecvError::Lagged(_)) => {
+                // A lost event may have been a DOM/AX change: never trust the cached capture.
+                shared.dom_gen.fetch_add(1, Ordering::SeqCst);
                 if !verify_target_attached(client.as_deref(), &target_id).await {
                     mark_target_closed(&shared);
                     return;
@@ -1286,6 +1306,16 @@ fn busy_count_since(shared: &Shared, since: Instant) -> usize {
     })
 }
 
+/// Requests started at or after `since` (if any) that are younger than `max_age`.
+fn busy_count_younger_than(shared: &Shared, since: Option<Instant>, max_age: Duration) -> usize {
+    shared.inflight.lock().map_or(0, |mut m| {
+        m.retain(|_, t| t.elapsed() < INFLIGHT_CAP);
+        m.values()
+            .filter(|t| since.is_none_or(|s| **t >= s) && t.elapsed() < max_age)
+            .count()
+    })
+}
+
 fn touch(shared: &Shared) {
     if let Ok(mut l) = shared.last_net.lock() {
         *l = Some(Instant::now());
@@ -1492,5 +1522,36 @@ mod tests {
         drop(tx);
         task.await.unwrap();
         assert_eq!(shared.dom_gen.load(Ordering::SeqCst) - g0, 3);
+    }
+
+    #[tokio::test]
+    async fn lagged_receiver_bumps_dom_gen() {
+        let (tx, rx) = broadcast::channel(2);
+        let shared = Arc::new(Shared::default());
+        for _ in 0..8 {
+            tx.send(ev("Runtime.consoleAPICalled", json!({}))).unwrap();
+        }
+        let g0 = shared.dom_gen.load(Ordering::SeqCst);
+        let task = tokio::spawn(watch(rx, "S".into(), "T".into(), shared.clone(), None));
+        tokio::task::yield_now().await;
+        drop(tx);
+        task.await.unwrap();
+        assert!(shared.dom_gen.load(Ordering::SeqCst) > g0);
+    }
+
+    #[test]
+    fn settle_ignores_only_requests_open_for_long_lived_age() {
+        let shared = Shared::default();
+        let old = Instant::now()
+            .checked_sub(LONG_LIVED_AGE + Duration::from_millis(100))
+            .unwrap();
+        shared.inflight.lock().unwrap().insert("poll".into(), old);
+        assert_eq!(busy_count_younger_than(&shared, None, LONG_LIVED_AGE), 0);
+        shared
+            .inflight
+            .lock()
+            .unwrap()
+            .insert("fetch".into(), Instant::now());
+        assert_eq!(busy_count_younger_than(&shared, None, LONG_LIVED_AGE), 1);
     }
 }
