@@ -27,6 +27,62 @@ fn paths(tmp: &TempDir) -> SkillPaths {
 // ---- parsing ----
 
 #[test]
+fn frontmatter_split_accepts_leading_bom() {
+    let text = "\u{feff}---\nname: example\ndescription: A test skill\n---\n# Body\n";
+    let (front, body) = frontmatter::split(text).unwrap();
+    assert_eq!(front, "name: example\ndescription: A test skill");
+    assert_eq!(body, "# Body");
+}
+
+#[test]
+fn frontmatter_parse_decodes_json_escaped_quotes() {
+    let parsed = frontmatter::parse(r#"title: "say \"hi\"""#).unwrap();
+    assert_eq!(
+        parsed.top,
+        [(
+            "title".to_owned(),
+            frontmatter::Value::Scalar(r#"say "hi""#.to_owned()),
+        )]
+    );
+}
+
+#[test]
+fn frontmatter_parse_skips_comments_and_blank_lines() {
+    let parsed =
+        frontmatter::parse("name: example\n# comment\n\ndescription: A test skill").unwrap();
+    assert_eq!(
+        parsed.top,
+        [
+            (
+                "name".to_owned(),
+                frontmatter::Value::Scalar("example".to_owned()),
+            ),
+            (
+                "description".to_owned(),
+                frontmatter::Value::Scalar("A test skill".to_owned()),
+            ),
+        ]
+    );
+    assert_eq!(parsed.when, []);
+}
+
+#[test]
+fn frontmatter_parse_rejects_malformed_entries() {
+    for (input, expected) in [
+        (r#"names: [ "a ]"#, "unterminated quote"),
+        (": value", "empty key"),
+        ("name: example\n  title: indented", "unexpected indentation"),
+        (
+            "when:\n  domains: [example.com]\n  domains: [example.org]",
+            "duplicate key `domains` in `when`",
+        ),
+    ] {
+        let error = frontmatter::parse(input).unwrap_err();
+        assert!(error.contains(expected), "{input:?}: {error}");
+    }
+}
+
+#[test]
 fn parses_full_frontmatter() {
     let text = "---\nname: my-skill\ndescription: \"Does things\"\nversion: 1.2.0\nwhen:\n  domains: [GitHub.com, 'example.org']\n  apps: [Code.exe]\n  keywords: [Upload, file]\n---\n# Title\nBody here.\n";
     let s = parse_skill(text, Source::User, None).unwrap();
