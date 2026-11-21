@@ -1255,6 +1255,10 @@
       "prev": "Önceki eşleşme"
     },
     "jumpToLatest": "En sona git",
+    "longMessage": {
+      "less": "Daha az göster",
+      "more": "Devamını göster"
+    },
     "md": {
       "code": "kod",
       "copied": "Kopyalandı",

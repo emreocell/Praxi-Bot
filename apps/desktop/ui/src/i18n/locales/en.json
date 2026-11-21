@@ -1255,6 +1255,10 @@
       "prev": "Previous match"
     },
     "jumpToLatest": "Jump to latest",
+    "longMessage": {
+      "less": "Show less",
+      "more": "Show more"
+    },
     "md": {
       "code": "code",
       "copied": "Copied",
