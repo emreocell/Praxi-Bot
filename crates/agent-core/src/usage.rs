@@ -77,14 +77,24 @@ pub struct UsageCall {
     pub cost_usd: Option<f64>,
 }
 
-/// Reconcile durable call intents and outcomes without double counting. Old
-/// audit rows without a call id are ignored; callers can fall back to the
-/// historical model-step representation for those runs.
+/// One reconciled invocation together with its audit timestamp (`ts_ms`).
+#[derive(Debug, Clone)]
+pub struct RecordedCall {
+    /// Invocation details from the ledger.
+    pub call: UsageCall,
+    /// Audit timestamp (ms since Unix epoch): the outcome row's timestamp when
+    /// completed, otherwise the intent row's timestamp.
+    pub ts_ms: i64,
+}
+
+/// Reconcile durable call intents and outcomes without double counting, keeping
+/// each invocation's audit timestamp so callers can bucket calls by day.
+/// Old audit rows without a ledger version are ignored.
 #[must_use]
-pub fn calls_from_audit<'a>(
+pub fn calls_with_timestamps_from_audit<'a>(
     entries: impl IntoIterator<Item = &'a AuditEntry>,
-) -> BTreeMap<RunId, Vec<UsageCall>> {
-    let mut calls = BTreeMap::new();
+) -> BTreeMap<RunId, Vec<RecordedCall>> {
+    let mut calls: BTreeMap<(RunId, Uuid), RecordedCall> = BTreeMap::new();
     for row in entries {
         if !matches!(row.action.as_str(), "llm.call_started" | "usage")
             || row.detail["ledger_version"] != 1
@@ -95,18 +105,35 @@ pub fn calls_from_audit<'a>(
             && let Ok(call) = serde_json::from_value::<UsageCall>(row.detail.clone())
         {
             let key = (run, call.call_id);
+            let recorded = RecordedCall {
+                call,
+                ts_ms: row.ts_ms,
+            };
             if row.action == "usage" {
-                calls.insert(key, call);
+                calls.insert(key, recorded);
             } else {
-                calls.entry(key).or_insert(call);
+                calls.entry(key).or_insert(recorded);
             }
         }
     }
-    let mut by_run: BTreeMap<RunId, Vec<UsageCall>> = BTreeMap::new();
-    for ((run, _), call) in calls {
-        by_run.entry(run).or_default().push(call);
+    let mut by_run: BTreeMap<RunId, Vec<RecordedCall>> = BTreeMap::new();
+    for ((run, _), recorded) in calls {
+        by_run.entry(run).or_default().push(recorded);
     }
     by_run
+}
+
+/// Reconcile durable call intents and outcomes without double counting. Old
+/// audit rows without a call id are ignored; callers can fall back to the
+/// historical model-step representation for those runs.
+#[must_use]
+pub fn calls_from_audit<'a>(
+    entries: impl IntoIterator<Item = &'a AuditEntry>,
+) -> BTreeMap<RunId, Vec<UsageCall>> {
+    calls_with_timestamps_from_audit(entries)
+        .into_iter()
+        .map(|(run, calls)| (run, calls.into_iter().map(|r| r.call).collect()))
+        .collect()
 }
 
 #[derive(Default)]
@@ -555,5 +582,47 @@ mod tests {
             .unwrap()
             .remove("ledger_version");
         assert!(calls_from_audit([&started]).is_empty());
+    }
+
+    #[test]
+    fn calls_with_timestamps_keeps_outcome_ts_and_falls_back_to_intent_ts() {
+        let run = RunId::new();
+        let completed_id = Uuid::now_v7();
+        let crashed_id = Uuid::now_v7();
+        let intent = AuditEntry {
+            id: 1,
+            user_id: UserId::new(),
+            run_id: Some(run),
+            actor: "bot".into(),
+            action: "llm.call_started".into(),
+            ts_ms: 1_000,
+            detail: json!({"ledger_version": 1, "call_id": completed_id,
+                "model": "fake/m", "purpose": "executor", "step_n": 1, "tokens": null}),
+        };
+        let mut outcome = intent.clone();
+        outcome.id = 2;
+        outcome.action = "usage".into();
+        outcome.ts_ms = 2_500;
+        outcome.detail["tokens"] = json!(Usage {
+            prompt_tokens: 7,
+            ..Usage::default()
+        });
+        let mut crashed = intent.clone();
+        crashed.id = 3;
+        crashed.ts_ms = 3_000;
+        crashed.detail["call_id"] = json!(crashed_id);
+
+        let by_run = calls_with_timestamps_from_audit([&outcome, &intent, &crashed]);
+        let calls = &by_run[&run];
+        assert_eq!(calls.len(), 2);
+        let done = calls
+            .iter()
+            .find(|c| c.call.call_id == completed_id)
+            .unwrap();
+        assert_eq!(done.ts_ms, 2_500);
+        assert_eq!(done.call.tokens.unwrap().prompt_tokens, 7);
+        let lost = calls.iter().find(|c| c.call.call_id == crashed_id).unwrap();
+        assert_eq!(lost.ts_ms, 3_000);
+        assert!(lost.call.tokens.is_none());
     }
 }

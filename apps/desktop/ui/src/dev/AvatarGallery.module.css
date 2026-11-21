@@ -263,3 +263,52 @@
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
+
+.castRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-4) var(--space-4);
+  border-radius: var(--radius-modal);
+  background-color: var(--color-surface-elevated);
+}
+
+.zoomCast {
+  zoom: 2.1;
+}
+
+.zoomHero {
+  zoom: 2.6;
+}
+
+.turnRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+}
+
+.zoomTurn {
+  zoom: 1.6;
+}
+
+.stateGrid {
+  display: grid;
+  grid-template-columns: auto repeat(5, minmax(0, 1fr));
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.stateCell {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-1) var(--space-0);
+}
+
+.crowd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}

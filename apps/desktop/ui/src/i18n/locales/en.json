@@ -264,6 +264,10 @@
       "soft": "Soft",
       "title": "Corners"
     },
+    "photorealAvatars": {
+      "description": "Bots use soft photoreal clay bodies tinted in their colour. Turn off for the lighter drawn clay style.",
+      "title": "Photoreal clay avatars"
+    },
     "style": {
       "blur": "Blur",
       "blurSoft": "Soft",
@@ -301,6 +305,17 @@
       "lowContrast": "Low contrast ({{ratio}}:1). Text needs at least 4.5:1 to stay readable.",
       "modalTitle": "Themes",
       "text": "Text"
+    },
+    "wallpaper": {
+      "description": "Slowly drifting dithered clouds behind the panels. Off by default; pauses when the window is hidden.",
+      "dusk": "Dusk",
+      "hint": "Follow theme picks Night for Obsidian, Sky for Cobalt, Dusk for Raven and Warm for Clay. It replaces the backdrop while on, and reduced motion shows one still frame.",
+      "night": "Night",
+      "off": "Off",
+      "sky": "Sky",
+      "theme": "Follow theme",
+      "title": "Wallpaper",
+      "warm": "Warm"
     }
   },
   "apps": {
@@ -1134,6 +1149,17 @@
       },
       "sendOnce": "Send",
       "sendTitle": "Send on your behalf?",
+      "steps": {
+        "click": "Click {{target}}",
+        "fill": "Type “{{text}}” into {{target}}",
+        "label": "Steps, in this order",
+        "press": "Press the {{key}} key",
+        "scroll": "Scroll {{target}}",
+        "scrollPage": "Scroll the page",
+        "select": "Choose “{{value}}” in {{target}}",
+        "unknown": "an element that could not be identified ({{ref}})",
+        "wait": "Wait for {{what}}"
+      },
       "thisChat": "This chat",
       "title": "Approval needed",
       "why": {
@@ -1394,6 +1420,11 @@
         "done": "Changed a bot",
         "failed": "Didn't change a bot",
         "running": "Changing a bot"
+      },
+      "browser_act": {
+        "done": "Did several steps in the browser",
+        "failed": "Didn't finish the steps in the browser",
+        "running": "Doing several steps in the browser"
       },
       "browser_click": {
         "done": "Clicked on a page",
@@ -3238,14 +3269,14 @@
     "namePlaceholder": "Bot name",
     "shapeGroup": "Character shape",
     "shapes": {
-      "boulder": "Boulder",
-      "capsule": "Capsule",
+      "boulder": "Bean",
+      "capsule": "Cushion",
       "cloud": "Cloud",
       "clover": "Clover",
       "cube": "Cube",
       "diamond": "Diamond",
       "drop": "Drop",
-      "ears": "Ears",
+      "ears": "Candy",
       "flower": "Flower",
       "gem": "Gem",
       "ghost": "Ghost",
@@ -4207,13 +4238,19 @@
   },
   "usage": {
     "bot": "Bot",
+    "byBot": "By bot",
+    "byModel": "By model",
     "cached": "Cached",
     "calls": "Calls",
     "completion": "Completion",
     "cost": "Cost",
-    "costNote": "Cost is shown only for models with a known price; “—” means unknown.",
+    "costNote": "Cost is shown only for models with a known price; unknown pricing is never shown as zero.",
+    "day": "Day",
     "deletedBot": "Deleted bot",
     "empty": "No usage yet. Send a message to a bot and its token use shows up here.",
+    "exportCsv": "Download CSV",
+    "exportDone": "Usage CSV downloaded.",
+    "exportFailed": "Could not download usage CSV",
     "limit": {
       "clear": "Remove limit",
       "forecast": "Forecast for month end",
@@ -4239,21 +4276,44 @@
       "title": "Monthly spending limit",
       "unpriced": "{{count}} calls this month had no known price and are not counted."
     },
+    "loading": "Loading usage…",
+    "model": "Model",
     "modelCalls": "Model calls",
+    "noUsageShort": "{{count}} without usage",
+    "partialCostShort": "+ {{count}} unknown",
     "prompt": "Prompt",
     "range": "Time range",
     "ranges": {
       "all": "All time",
       "day": "Last 24 h",
       "month": "Last 30 days",
+      "quarter": "Last 90 days",
       "week": "Last 7 days"
     },
     "refresh": "Refresh",
+    "retry": "Try again",
     "runs": "Runs",
-    "subtitle": "Tokens used by each bot.",
+    "subtitle": "Tokens, calls, and estimated cost by model, bot, and day.",
     "title": "Usage",
     "tokens": "Tokens",
-    "total": "Total"
+    "total": "Total",
+    "trend": {
+      "ariaLabel": "Daily {{metric}} trend over {{days}} days",
+      "dayReadout": "{{day}} · {{calls}} calls · {{tokens}} tokens · {{cost}}",
+      "hoverHint": "Hover or focus a day to see its totals.",
+      "metric": "Chart metric",
+      "metrics": {
+        "calls": "Calls",
+        "cost": "Cost",
+        "tokens": "Tokens"
+      },
+      "showTable": "Show daily breakdown table",
+      "timeZone": "Local days ({{tz}})",
+      "title": "Daily trend"
+    },
+    "unknown": "Unknown",
+    "unknownCostNotice": "{{count}} call(s) had unknown pricing and are excluded from the cost total.",
+    "unknownUsageNotice": "{{count}} call(s) reported no token usage data and are counted separately."
   },
   "voice": {
     "auto": "Automatic (matches the app language)",

@@ -1531,7 +1531,15 @@ impl Shared {
         if ctx.initiator == InitiatorKind::ExternalAgent {
             prefix.push_str("[External agent: approve once only] ");
         }
-        let summary = self.redact(format!("{prefix}{name} {}", truncate_utf8(&args, 300)));
+        // A browser batch names every step in its summary (the usual cut at 300 characters
+        // would hide the later ones) and never repeats typed text there.
+        let shown = if name == "browser_act" {
+            builtin_tools::act_summary(input)
+                .unwrap_or_else(|| truncate_utf8(&args, 300).to_owned())
+        } else {
+            truncate_utf8(&args, 300).to_owned()
+        };
+        let summary = self.redact(format!("{prefix}{name} {shown}"));
         // Daemon-authored facts for the card: why it asks, and whether a standing choice
         // ("always for this chat") may be offered at all.
         let why = self.ask_kind(ctx, name, category, input);

@@ -290,6 +290,20 @@ impl Client {
         Ok(self.check(resp).await?.json().await?)
     }
 
+    /// The owner key (when this terminal has it) marks the event stream as the
+    /// manager's: without it the daemon withholds approval/question events.
+    fn owner_headers(&self) -> reqwest::header::HeaderMap {
+        let mut h = reqwest::header::HeaderMap::new();
+        if let Some(v) = self
+            .owner_key
+            .as_deref()
+            .and_then(|k| reqwest::header::HeaderValue::from_str(k).ok())
+        {
+            h.insert(daemon_api::owner::OWNER_HEADER, v);
+        }
+        h
+    }
+
     /// Open the daemon-wide event stream (live events from now on).  Open it
     /// *before* sending a message, then hand it to [`Self::follow_tree`], so
     /// no early event is missed.
@@ -301,6 +315,7 @@ impl Client {
             .http
             .get(format!("{}/v1/events", self.base))
             .bearer_auth(&self.token)
+            .headers(self.owner_headers())
             .send()
             .await
             .map_err(|e| self.unreachable(&e))?;
@@ -348,7 +363,8 @@ impl Client {
                 let mut rb = self
                     .http
                     .get(format!("{}/v1/events", self.base))
-                    .bearer_auth(&self.token);
+                    .bearer_auth(&self.token)
+                    .headers(self.owner_headers());
                 if let Some(l) = last {
                     rb = rb.header("Last-Event-ID", l.to_string());
                 }
@@ -420,7 +436,8 @@ impl Client {
             let mut rb = self
                 .http
                 .get(format!("{}/v1/events?run_id={run_id}", self.base))
-                .bearer_auth(&self.token);
+                .bearer_auth(&self.token)
+                .headers(self.owner_headers());
             if let Some(l) = last {
                 rb = rb.header("Last-Event-ID", l.to_string());
             }

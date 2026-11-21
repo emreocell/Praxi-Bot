@@ -264,6 +264,10 @@
       "soft": "Weich",
       "title": "Ecken"
     },
+    "photorealAvatars": {
+      "description": "Bots erhalten weiche, fotorealistische Tonkörper in ihrer Farbe. Ausschalten für den leichteren gezeichneten Ton-Stil.",
+      "title": "Fotorealistische Ton-Avatare"
+    },
     "style": {
       "blur": "Unschärfe",
       "blurSoft": "Weich",
@@ -301,6 +305,17 @@
       "lowContrast": "Niedriger Kontrast ({{ratio}}:1). Text braucht mindestens 4,5:1, um lesbar zu bleiben.",
       "modalTitle": "Designs",
       "text": "Text"
+    },
+    "wallpaper": {
+      "description": "Langsam ziehende, gerasterte Wolken hinter den Panels. Standardmäßig aus; pausiert, wenn das Fenster verborgen ist.",
+      "dusk": "Dämmerung",
+      "hint": "„Design folgen“ wählt Nacht für Obsidian, Himmel für Cobalt, Dämmerung für Raven und Warm für Clay. Es ersetzt den Hintergrund, solange es aktiv ist; bei reduzierter Bewegung wird ein einzelnes Standbild gezeigt.",
+      "night": "Nacht",
+      "off": "Aus",
+      "sky": "Himmel",
+      "theme": "Design folgen",
+      "title": "Hintergrundbild",
+      "warm": "Warm"
     }
   },
   "apps": {
@@ -1134,6 +1149,17 @@
       },
       "sendOnce": "Senden",
       "sendTitle": "In deinem Namen senden?",
+      "steps": {
+        "click": "{{target}} anklicken",
+        "fill": "„{{text}}“ in {{target}} eingeben",
+        "label": "Schritte in dieser Reihenfolge",
+        "press": "Taste {{key}} drücken",
+        "scroll": "{{target}} scrollen",
+        "scrollPage": "Seite scrollen",
+        "select": "„{{value}}“ in {{target}} auswählen",
+        "unknown": "ein Element, das nicht erkannt werden konnte ({{ref}})",
+        "wait": "Warten auf {{what}}"
+      },
       "thisChat": "Dieser Chat",
       "title": "Genehmigung erforderlich",
       "why": {
@@ -1394,6 +1420,11 @@
         "done": "Bot geändert",
         "failed": "Bot nicht geändert",
         "running": "Bot wird geändert"
+      },
+      "browser_act": {
+        "done": "Mehrere Schritte im Browser ausgeführt",
+        "failed": "Die Schritte im Browser nicht abgeschlossen",
+        "running": "Führt mehrere Schritte im Browser aus"
       },
       "browser_click": {
         "done": "Auf einer Seite geklickt",
@@ -3238,14 +3269,14 @@
     "namePlaceholder": "Bot-Name",
     "shapeGroup": "Figurenform",
     "shapes": {
-      "boulder": "Felsbrocken",
-      "capsule": "Kapsel",
+      "boulder": "Bohne",
+      "capsule": "Kissen",
       "cloud": "Wolke",
       "clover": "Kleeblatt",
       "cube": "Würfel",
       "diamond": "Diamant",
       "drop": "Tropfen",
-      "ears": "Ohren",
+      "ears": "Bonbon",
       "flower": "Blume",
       "gem": "Edelstein",
       "ghost": "Geist",
@@ -4207,13 +4238,19 @@
   },
   "usage": {
     "bot": "Bot",
+    "byBot": "Nach Bot",
+    "byModel": "Nach Modell",
     "cached": "Im Cache",
     "calls": "Aufrufe",
     "completion": "Antwort",
     "cost": "Kosten",
-    "costNote": "Kosten werden nur für Modelle mit bekanntem Preis angezeigt; „—“ bedeutet unbekannt.",
+    "costNote": "Kosten werden nur für Modelle mit bekanntem Preis angezeigt; unbekannte Preise werden nie als Null dargestellt.",
+    "day": "Tag",
     "deletedBot": "Gelöschter Bot",
     "empty": "Noch keine Nutzung. Sobald du einem Bot schreibst, erscheint der Token-Verbrauch hier.",
+    "exportCsv": "CSV herunterladen",
+    "exportDone": "Nutzungs-CSV heruntergeladen.",
+    "exportFailed": "Nutzungs-CSV konnte nicht heruntergeladen werden",
     "limit": {
       "clear": "Limit entfernen",
       "forecast": "Prognose zum Monatsende",
@@ -4239,21 +4276,44 @@
       "title": "Monatliches Ausgabenlimit",
       "unpriced": "{{count}} Aufrufe diesen Monat hatten keinen bekannten Preis und wurden nicht mitgezählt."
     },
+    "loading": "Nutzung wird geladen…",
+    "model": "Modell",
     "modelCalls": "Modellaufrufe",
+    "noUsageShort": "{{count}} ohne Daten",
+    "partialCostShort": "+ {{count}} unbekannt",
     "prompt": "Prompt",
     "range": "Zeitraum",
     "ranges": {
       "all": "Gesamte Zeit",
       "day": "Letzte 24 Std.",
       "month": "Letzte 30 Tage",
+      "quarter": "Letzte 90 Tage",
       "week": "Letzte 7 Tage"
     },
     "refresh": "Aktualisieren",
+    "retry": "Erneut versuchen",
     "runs": "Läufe",
-    "subtitle": "Tokens, die jeder Bot verbraucht hat.",
+    "subtitle": "Tokens, Aufrufe und geschätzte Kosten nach Modell, Bot und Tag.",
     "title": "Nutzung",
     "tokens": "Tokens",
-    "total": "Gesamt"
+    "total": "Gesamt",
+    "trend": {
+      "ariaLabel": "Täglicher {{metric}}-Verlauf über {{days}} Tage",
+      "dayReadout": "{{day}} · {{calls}} Aufrufe · {{tokens}} Tokens · {{cost}}",
+      "hoverHint": "Fahre über einen Tag oder fokussiere ihn, um die Summen zu sehen.",
+      "metric": "Diagramm-Kennzahl",
+      "metrics": {
+        "calls": "Aufrufe",
+        "cost": "Kosten",
+        "tokens": "Token-Menge"
+      },
+      "showTable": "Tägliche Tabelle anzeigen",
+      "timeZone": "Lokale Tage ({{tz}})",
+      "title": "Tagesverlauf"
+    },
+    "unknown": "Unbekannt",
+    "unknownCostNotice": "{{count}} Aufruf(e) hatten keinen bekannten Preis und sind nicht in den Gesamtkosten enthalten.",
+    "unknownUsageNotice": "{{count}} Aufruf(e) haben keine Token-Daten gemeldet und werden getrennt gezählt."
   },
   "voice": {
     "auto": "Automatisch (passend zur App-Sprache)",

@@ -63,6 +63,7 @@ unsafe_code = "deny"
 pedantic = "warn"
 
 [workspace.dependencies]
+proptest = { version = "1.12", default-features = false, features = ["std"] }
 live-view = { path = "crates/live-view", version = "0.1.0" }
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }

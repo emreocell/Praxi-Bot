@@ -11,7 +11,7 @@ const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8"
 const app = read("../App.tsx");
 
 test("App derives float from the settings and passes it to every panel clamp", () => {
-  assert.match(app, /const float = isFloatShell\(settings\.uiStyle, backdropIsActive\(settings\.backdrop, settings\.backgroundUrl\)\);/);
+  assert.match(app, /const float = isFloatShell\(shellSettings\.uiStyle, backdropIsActive\(shellSettings\.backdrop, shellSettings\.backgroundUrl\)\);/);
   assert.match(app, /const panelWidth = Math\.min\(layout\.panel, panelMax\(viewportWidth, layout\.rail, float\)\);/);
   assert.match(app, /max=\{panelMax\(viewportWidth, layout\.rail, float\)\}/);
   assert.match(app, /panelWidthFromPointer\(x, window\.innerWidth, gridPad\(\), layout\.rail, float\)/);

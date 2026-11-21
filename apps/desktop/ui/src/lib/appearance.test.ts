@@ -91,18 +91,27 @@ test("valid new values round-trip", () => {
     bubble: "plain",
     ownBubble: "accent",
     backdrop: "reed2",
+    wallpaper: "off",
     backdropDim: 33.4,
     panelTransparency: 80,
     panelBlur: 40,
     transparentChat: true,
     chatPanel: false,
-    transparencyOverride: true
+    transparencyOverride: true,
+    photorealAvatars: false
   };
   assert.deepEqual(normalizeAppearance(stored), {
     ...stored,
     customTheme: { bg: "#abcdef", text: "#101010" },
     backdropDim: 33
   });
+});
+
+test("photoreal clay avatars default on; only an explicit false turns them off", () => {
+  assert.equal(DEFAULT_APPEARANCE.photorealAvatars, true);
+  assert.equal(normalizeAppearance({}).photorealAvatars, true);
+  assert.equal(normalizeAppearance({ photorealAvatars: "no" }).photorealAvatars, true);
+  assert.equal(normalizeAppearance({ photorealAvatars: false }).photorealAvatars, false);
 });
 
 test("axis parsers fall back to the prototype defaults", () => {

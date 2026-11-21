@@ -741,7 +741,9 @@ fn run() -> Result<()> {
         }
         Command::Serve { .. } => return run_serve(&cli, command, &data_dir),
         Command::Doctor(c) => return run_doctor(&cli, c, &data_dir),
-        Command::Backup(c) => return backup_cmd::backup(&data_dir, c, &mut std::io::stdout()),
+        Command::Backup(c) => {
+            return backup_cmd::backup(&data_dir, c, cli.json, &mut std::io::stdout());
+        }
         Command::SelfUpdate(args) => return update::run(args),
         Command::Host { .. }
         | Command::Status
@@ -795,9 +797,14 @@ fn run() -> Result<()> {
 
     match command {
         Command::Setup(c) => run_setup(c, &env),
-        Command::Restore(c) => {
-            backup_cmd::restore(&data_dir, cli.port, store, c, &mut std::io::stdout())
-        }
+        Command::Restore(c) => backup_cmd::restore(
+            &data_dir,
+            cli.port,
+            store,
+            c,
+            cli.json,
+            &mut std::io::stdout(),
+        ),
         Command::Channels {
             action: ChannelsCmd::Telegram { action },
         } => run_telegram(&cli, &data_dir, store, action, &mut say),

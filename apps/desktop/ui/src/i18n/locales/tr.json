@@ -264,6 +264,10 @@
       "soft": "Yumuşak",
       "title": "Köşeler"
     },
+    "photorealAvatars": {
+      "description": "Botlar kendi renklerine boyanmış, yumuşak ve fotogerçekçi kil gövdeler kullanır. Daha hafif çizim kil stili için kapatın.",
+      "title": "Fotogerçekçi kil avatarlar"
+    },
     "style": {
       "blur": "Bulanıklık",
       "blurSoft": "Hafif",
@@ -301,6 +305,17 @@
       "lowContrast": "Kontrast düşük ({{ratio}}:1). Metnin okunur kalması için en az 4,5:1 gerekir.",
       "modalTitle": "Temalar",
       "text": "Yazı"
+    },
+    "wallpaper": {
+      "description": "Panellerin arkasında çok yavaş kayan, noktalı (dither) bulutlar. Varsayılan olarak kapalı; pencere gizlenince durur.",
+      "dusk": "Alacakaranlık",
+      "hint": "Temayı izle: Obsidian için Gece, Cobalt için Gökyüzü, Raven için Alacakaranlık, Clay için Sıcak seçilir. Açıkken arka planın yerini alır; hareket azaltma açıksa tek bir durağan kare gösterilir.",
+      "night": "Gece",
+      "off": "Kapalı",
+      "sky": "Gökyüzü",
+      "theme": "Temayı izle",
+      "title": "Duvar kağıdı",
+      "warm": "Sıcak"
     }
   },
   "apps": {
@@ -1134,6 +1149,17 @@
       },
       "sendOnce": "Gönder",
       "sendTitle": "Senin adına gönderilsin mi?",
+      "steps": {
+        "click": "{{target}} öğesine tıkla",
+        "fill": "{{target}} alanına “{{text}}” yaz",
+        "label": "Adımlar, bu sırayla",
+        "press": "{{key}} tuşuna bas",
+        "scroll": "{{target}} öğesini kaydır",
+        "scrollPage": "Sayfayı kaydır",
+        "select": "{{target}} listesinde “{{value}}” seç",
+        "unknown": "tanımlanamayan bir öğe ({{ref}})",
+        "wait": "Şunu bekle: {{what}}"
+      },
       "thisChat": "Bu sohbet",
       "title": "Onay gerekiyor",
       "why": {
@@ -1394,6 +1420,11 @@
         "done": "Bot değiştirildi",
         "failed": "Bot değiştirilmedi",
         "running": "Bot değiştiriliyor"
+      },
+      "browser_act": {
+        "done": "Tarayıcıda birkaç adım yaptı",
+        "failed": "Tarayıcıdaki adımları tamamlamadı",
+        "running": "Tarayıcıda birkaç adım yapıyor"
       },
       "browser_click": {
         "done": "Sayfada tıklandı",
@@ -3238,14 +3269,14 @@
     "namePlaceholder": "Bot adı",
     "shapeGroup": "Karakter şekli",
     "shapes": {
-      "boulder": "Kaya",
-      "capsule": "Kapsül",
+      "boulder": "Fasulye",
+      "capsule": "Yastık",
       "cloud": "Bulut",
       "clover": "Yonca",
       "cube": "Küp",
       "diamond": "Elmas",
       "drop": "Damla",
-      "ears": "Kulaklı",
+      "ears": "Şeker",
       "flower": "Çiçek",
       "gem": "Altıgen",
       "ghost": "Hayalet",
@@ -4207,13 +4238,19 @@
   },
   "usage": {
     "bot": "Bot",
+    "byBot": "Bota göre",
+    "byModel": "Modele göre",
     "cached": "Önbellekte",
     "calls": "Çağrı",
     "completion": "Yanıt",
     "cost": "Maliyet",
-    "costNote": "Maliyet yalnızca fiyatı bilinen modeller için gösterilir; “—” bilinmiyor demektir.",
+    "costNote": "Maliyet yalnızca fiyatı bilinen modeller için gösterilir; bilinmeyen fiyat asla sıfır olarak gösterilmez.",
+    "day": "Gün",
     "deletedBot": "Silinmiş bot",
     "empty": "Henüz kullanım yok. Bir bota mesaj gönderdiğinde token kullanımı burada görünür.",
+    "exportCsv": "CSV indir",
+    "exportDone": "Kullanım CSV dosyası indirildi.",
+    "exportFailed": "Kullanım CSV dosyası indirilemedi",
     "limit": {
       "clear": "Limiti kaldır",
       "forecast": "Ay sonu tahmini",
@@ -4239,21 +4276,44 @@
       "title": "Aylık harcama limiti",
       "unpriced": "Bu ay {{count}} çağrının fiyatı bilinmiyor; sayılmadı."
     },
+    "loading": "Kullanım yükleniyor…",
+    "model": "Model adı",
     "modelCalls": "Model çağrıları",
+    "noUsageShort": "{{count}} verisiz",
+    "partialCostShort": "+ {{count}} bilinmiyor",
     "prompt": "İstem",
     "range": "Zaman aralığı",
     "ranges": {
       "all": "Tüm zamanlar",
       "day": "Son 24 saat",
       "month": "Son 30 gün",
+      "quarter": "Son 90 gün",
       "week": "Son 7 gün"
     },
     "refresh": "Yenile",
+    "retry": "Tekrar dene",
     "runs": "Çalışmalar",
-    "subtitle": "Her botun kullandığı token sayısı.",
+    "subtitle": "Model, bot ve güne göre token, çağrı ve tahmini maliyet.",
     "title": "Kullanım",
     "tokens": "Token",
-    "total": "Toplam"
+    "total": "Toplam",
+    "trend": {
+      "ariaLabel": "{{days}} günlük {{metric}} eğilimi",
+      "dayReadout": "{{day}} · {{calls}} çağrı · {{tokens}} token · {{cost}}",
+      "hoverHint": "Toplamlarını görmek için bir günün üzerine gelin veya odaklanın.",
+      "metric": "Grafik ölçütü",
+      "metrics": {
+        "calls": "Çağrılar",
+        "cost": "Maliyet",
+        "tokens": "Token"
+      },
+      "showTable": "Günlük döküm tablosunu göster",
+      "timeZone": "Yerel günler ({{tz}})",
+      "title": "Günlük eğilim"
+    },
+    "unknown": "Bilinmiyor",
+    "unknownCostNotice": "{{count}} çağrının fiyatı bilinmiyor ve maliyet toplamına dahil edilmedi.",
+    "unknownUsageNotice": "{{count}} çağrı token kullanım verisi bildirmedi ve ayrı sayıldı."
   },
   "voice": {
     "auto": "Otomatik (uygulama diline göre)",

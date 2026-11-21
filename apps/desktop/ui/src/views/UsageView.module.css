@@ -33,10 +33,75 @@
   color: var(--color-text-muted);
 }
 
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
 .rangeRow {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.stateCard {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.errorCard {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.notices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.notice {
+  margin: var(--space-0);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sectionTitle {
+  margin: var(--space-0);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
 }
 
 .totals {
@@ -116,6 +181,7 @@
 .table td.num {
   text-align: right;
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .botCell {
@@ -123,6 +189,44 @@
   align-items: center;
   gap: var(--space-2);
   font-weight: var(--font-weight-medium);
+}
+
+.modelCell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0);
+}
+
+.modelName {
+  font-family: var(--font-mono);
+  font-weight: var(--font-weight-medium);
+  word-break: break-word;
+}
+
+.providerTag {
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-muted);
+}
+
+.subNote {
+  display: block;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-muted);
+}
+
+.spin {
+  animation: usage-spin var(--motion-duration-pulse) linear infinite;
+}
+
+@keyframes usage-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .embeddedPane {

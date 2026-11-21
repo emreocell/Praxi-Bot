@@ -10662,17 +10662,47 @@
         "tags": [
           "usage"
         ],
-        "summary": "Invocation usage, with legacy model-step fallback for pre-ledger runs.",
+        "summary": "Invocation usage by bot, model, provider, purpose and local calendar day,\nwith legacy model-step fallback for pre-ledger runs.",
         "operationId": "usage",
         "parameters": [
           {
             "name": "since_ms",
             "in": "query",
-            "description": "Only runs created at or after this time.",
+            "description": "Only runs created at or after this time (Unix ms).",
             "required": false,
             "schema": {
               "type": "integer",
               "format": "int64"
+            }
+          },
+          {
+            "name": "until_ms",
+            "in": "query",
+            "description": "Only runs created at or before this time (Unix ms).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "description": "Rolling window of local calendar days (`1..=366`, ending today in `tz`).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "description": "IANA time zone name used for daily bucketing (defaults to local time zone).",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -10683,6 +10713,104 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UsageSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/usage/export": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "Formula-injection-safe CSV export of usage over the selected range\n(owner-only). Columns: `day,bot,model,purpose,calls,calls_without_usage,\nprompt_tokens,completion_tokens,cached_tokens,cost_usd`.",
+        "operationId": "export_csv",
+        "parameters": [
+          {
+            "name": "since_ms",
+            "in": "query",
+            "description": "Only runs created at or after this time (Unix ms).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "until_ms",
+            "in": "query",
+            "description": "Only runs created at or before this time (Unix ms).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "description": "Rolling window of local calendar days (`1..=366`, ending today in `tz`).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "description": "IANA time zone name used for daily bucketing (defaults to local time zone).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usage breakdown as CSV",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -14457,6 +14585,39 @@
           }
         },
         "additionalProperties": false
+      },
+      "DailyUsage": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/UsageTotals",
+            "description": "Totals for that day."
+          },
+          {
+            "type": "object",
+            "required": [
+              "day"
+            ],
+            "properties": {
+              "calls_without_cost": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Calls on that day whose cost is unknown (missing price or missing token usage).",
+                "minimum": 0
+              },
+              "calls_without_usage": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Calls on that day that reported no token usage.",
+                "minimum": 0
+              },
+              "day": {
+                "type": "string",
+                "description": "Calendar day in `time_zone` (`YYYY-MM-DD`)."
+              }
+            }
+          }
+        ],
+        "description": "Usage bucketed to one local calendar day (`YYYY-MM-DD`)."
       },
       "DecideApproval": {
         "type": "object",
@@ -19110,6 +19271,46 @@
           }
         }
       },
+      "ModelUsage": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/UsageTotals",
+            "description": "Totals across all calls to this model."
+          },
+          {
+            "type": "object",
+            "required": [
+              "model"
+            ],
+            "properties": {
+              "calls_without_cost": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Calls to this model whose cost is unknown (missing price or missing token usage).",
+                "minimum": 0
+              },
+              "calls_without_usage": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Calls to this model that reported no token usage.",
+                "minimum": 0
+              },
+              "model": {
+                "type": "string",
+                "description": "Model reference as recorded in the ledger (e.g. `openai/gpt-4o`, or `\"unknown\"`)."
+              },
+              "provider": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Provider prefix before `/` (or `cli:<name>`), when present."
+              }
+            }
+          }
+        ],
+        "description": "Usage of one provider/model reference."
+      },
       "Modifier": {
         "type": "string",
         "enum": [
@@ -19429,6 +19630,39 @@
           "watch",
           "live"
         ]
+      },
+      "ProviderUsage": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/UsageTotals",
+            "description": "Totals across all calls to this provider."
+          },
+          {
+            "type": "object",
+            "required": [
+              "provider"
+            ],
+            "properties": {
+              "calls_without_cost": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Calls to this provider whose cost is unknown (missing price or missing token usage).",
+                "minimum": 0
+              },
+              "calls_without_usage": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Calls to this provider that reported no token usage.",
+                "minimum": 0
+              },
+              "provider": {
+                "type": "string",
+                "description": "Provider identifier (prefix before `/`, `cli:<name>`, or `\"unknown\"` when none)."
+              }
+            }
+          }
+        ],
+        "description": "Usage of one provider."
       },
       "ProvidersDto": {
         "type": "object",
@@ -22040,6 +22274,20 @@
             },
             "description": "Per bot."
           },
+          "by_model": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelUsage"
+            },
+            "description": "Per-model totals, including invocations that report no tokens."
+          },
+          "by_provider": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderUsage"
+            },
+            "description": "Per-provider totals, including invocations that report no tokens."
+          },
           "by_purpose": {
             "type": "object",
             "description": "Per-purpose totals, including invocations that report no tokens.",
@@ -22050,11 +22298,34 @@
               "type": "string"
             }
           },
+          "calls_without_cost": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Calls in the selected range whose cost is unknown (missing price or missing token usage).",
+            "minimum": 0
+          },
+          "calls_without_usage": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Calls in the selected range that reported no token usage.",
+            "minimum": 0
+          },
+          "daily": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DailyUsage"
+            },
+            "description": "Daily series bucketed in `time_zone` (chronological, bounded to at most 366 days)."
+          },
           "runs": {
             "type": "integer",
             "format": "int64",
             "description": "Runs counted.",
             "minimum": 0
+          },
+          "time_zone": {
+            "type": "string",
+            "description": "IANA time zone used to bucket `daily` (e.g. `Europe/Istanbul` or `UTC`)."
           },
           "total": {
             "$ref": "#/components/schemas/UsageTotals",

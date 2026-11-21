@@ -3021,8 +3021,32 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Invocation usage, with legacy model-step fallback for pre-ledger runs. */
+        /**
+         * Invocation usage by bot, model, provider, purpose and local calendar day,
+         *     with legacy model-step fallback for pre-ledger runs.
+         */
         get: operations["usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/usage/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Formula-injection-safe CSV export of usage over the selected range
+         *     (owner-only). Columns: `day,bot,model,purpose,calls,calls_without_usage,
+         *     prompt_tokens,completion_tokens,cached_tokens,cost_usd`.
+         */
+        get: operations["export_csv"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4436,6 +4460,21 @@ export interface components {
             profile: components["schemas"]["Profile"];
             /** Format: uuid */
             target_id: string;
+        };
+        /** @description Usage bucketed to one local calendar day (`YYYY-MM-DD`). */
+        DailyUsage: components["schemas"]["UsageTotals"] & {
+            /**
+             * Format: int64
+             * @description Calls on that day whose cost is unknown (missing price or missing token usage).
+             */
+            calls_without_cost?: number;
+            /**
+             * Format: int64
+             * @description Calls on that day that reported no token usage.
+             */
+            calls_without_usage?: number;
+            /** @description Calendar day in `time_zone` (`YYYY-MM-DD`). */
+            day: string;
         };
         /** @description `POST /v1/approvals/{call_id}`. */
         DecideApproval: {
@@ -6110,6 +6149,23 @@ export interface components {
             /** Format: int32 */
             recommended_rank?: number | null;
         };
+        /** @description Usage of one provider/model reference. */
+        ModelUsage: components["schemas"]["UsageTotals"] & {
+            /**
+             * Format: int64
+             * @description Calls to this model whose cost is unknown (missing price or missing token usage).
+             */
+            calls_without_cost?: number;
+            /**
+             * Format: int64
+             * @description Calls to this model that reported no token usage.
+             */
+            calls_without_usage?: number;
+            /** @description Model reference as recorded in the ledger (e.g. `openai/gpt-4o`, or `"unknown"`). */
+            model: string;
+            /** @description Provider prefix before `/` (or `cli:<name>`), when present. */
+            provider?: string | null;
+        };
         /** @enum {string} */
         Modifier: "alt" | "ctrl" | "meta" | "shift";
         OpenTerminalInput: {
@@ -6236,6 +6292,21 @@ export interface components {
         };
         /** @enum {string} */
         Profile: "watch" | "live";
+        /** @description Usage of one provider. */
+        ProviderUsage: components["schemas"]["UsageTotals"] & {
+            /**
+             * Format: int64
+             * @description Calls to this provider whose cost is unknown (missing price or missing token usage).
+             */
+            calls_without_cost?: number;
+            /**
+             * Format: int64
+             * @description Calls to this provider that reported no token usage.
+             */
+            calls_without_usage?: number;
+            /** @description Provider identifier (prefix before `/`, `cli:<name>`, or `"unknown"` when none). */
+            provider: string;
+        };
         /** @description `GET /v1/providers`. */
         ProvidersDto: {
             /** @description Ids of the providers the running loop can use. */
@@ -7290,15 +7361,33 @@ export interface components {
         UsageSummary: {
             /** @description Per bot. */
             by_bot: components["schemas"]["BotUsage"][];
+            /** @description Per-model totals, including invocations that report no tokens. */
+            by_model?: components["schemas"]["ModelUsage"][];
+            /** @description Per-provider totals, including invocations that report no tokens. */
+            by_provider?: components["schemas"]["ProviderUsage"][];
             /** @description Per-purpose totals, including invocations that report no tokens. */
             by_purpose?: {
                 [key: string]: components["schemas"]["UsageTotals"];
             };
             /**
              * Format: int64
+             * @description Calls in the selected range whose cost is unknown (missing price or missing token usage).
+             */
+            calls_without_cost?: number;
+            /**
+             * Format: int64
+             * @description Calls in the selected range that reported no token usage.
+             */
+            calls_without_usage?: number;
+            /** @description Daily series bucketed in `time_zone` (chronological, bounded to at most 366 days). */
+            daily?: components["schemas"]["DailyUsage"][];
+            /**
+             * Format: int64
              * @description Runs counted.
              */
             runs: number;
+            /** @description IANA time zone used to bucket `daily` (e.g. `Europe/Istanbul` or `UTC`). */
+            time_zone?: string;
             /** @description Totals over all counted runs. */
             total: components["schemas"]["UsageTotals"];
         };
@@ -14563,8 +14652,14 @@ export interface operations {
     usage: {
         parameters: {
             query?: {
-                /** @description Only runs created at or after this time. */
+                /** @description Only runs created at or after this time (Unix ms). */
                 since_ms?: number;
+                /** @description Only runs created at or before this time (Unix ms). */
+                until_ms?: number;
+                /** @description Rolling window of local calendar days (`1..=366`, ending today in `tz`). */
+                days?: number;
+                /** @description IANA time zone name used for daily bucketing (defaults to local time zone). */
+                tz?: string;
             };
             header?: never;
             path?: never;
@@ -14578,6 +14673,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UsageSummary"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    export_csv: {
+        parameters: {
+            query?: {
+                /** @description Only runs created at or after this time (Unix ms). */
+                since_ms?: number;
+                /** @description Only runs created at or before this time (Unix ms). */
+                until_ms?: number;
+                /** @description Rolling window of local calendar days (`1..=366`, ending today in `tz`). */
+                days?: number;
+                /** @description IANA time zone name used for daily bucketing (defaults to local time zone). */
+                tz?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Usage breakdown as CSV */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };

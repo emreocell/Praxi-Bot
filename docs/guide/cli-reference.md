@@ -17,7 +17,7 @@ Running `bot` with no command prints a hint to run `bot setup`.
 | `--data-dir <PATH>` | `BOT_DATA_DIR` | OS app-data dir | Data directory |
 | `--catalog-dir <PATH>` | `BOT_CATALOG_DIR` | built-in set | Directory of provider catalog `*.toml` files |
 | `--secrets-backend <auto\|keyring\|file>` | `BOT_SECRETS_BACKEND` | `auto` | `auto` = an existing encrypted file, else the OS keychain (the file backend is chosen automatically only if `BOT_SECRETS_PASSPHRASE` is set; otherwise pass `--secrets-backend file`). The file passphrase comes from `BOT_SECRETS_PASSPHRASE` or a prompt |
-| `--json` | | off | Machine-readable output (JSON, or NDJSON for `chat`) for `status`, `chat`, `bots`, `answer`, `approve`, `grants`, `schedules`, `email`, `mcp add`, `doctor`, `serve`, and `channels telegram pair` / `status`. `host status`, `devices`, `revoke`, `standby`, `activate`, and `workflow` already print JSON; `--json` makes `host invite` print JSON instead of a QR. Errors always go to stderr as text |
+| `--json` | | off | Machine-readable output (JSON, or NDJSON for `chat`) for `status`, `chat`, `bots`, `answer`, `approve`, `grants`, `schedules`, `email`, `mcp add`, `doctor`, `serve`, `backup`, `restore`, and `channels telegram pair` / `status`. `host status`, `devices`, `revoke`, `standby`, `activate`, and `workflow` already print JSON; `--json` makes `host invite` print JSON instead of a QR. Errors always go to stderr as text |
 | `--port <PORT>` | `BOT_PORT` | `47821` | Port `serve` binds on `127.0.0.1`; clients connect to it |
 | `--url <URL>` | `BOT_URL` | | Full daemon URL for client commands (overrides `--port`) |
 | `--remote <ENDPOINT>` | | | Peer endpoint ID of a paired daemon (iroh). Conflicts with `--url` |
@@ -113,6 +113,9 @@ across all files.
 refuses while a daemon answers on `--port`). An installation that already has
 bots or chats is refused unless you pass `--replace`; the state it replaces is
 kept in a `backup-*` folder inside the data directory.
+
+With `--json`, each command writes one JSON object to stdout on success. See
+[JSON output for scripts](backup-and-restore.md#json-output-for-scripts) for the fields.
 
 | Option (`restore`) | Meaning |
 | --- | --- |
