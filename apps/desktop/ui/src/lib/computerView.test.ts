@@ -69,6 +69,19 @@ test("the gradient keeps a white bot tinted and mid-light, so it never washes ou
   // a chromatic colour keeps its hue
   const blue = gradientBase("#3b82f6");
   assert.ok(Math.abs(blue.h - hexToOklch("#3b82f6")!.h) < 0.01);
+
+  // light-palette variant keeps lightness within 0.42..0.62 and chroma >= 0.1
+  const lightWhite = gradientBase("#ffffff", true);
+  assert.ok(lightWhite.l >= 0.42 && lightWhite.l <= 0.62, "white on light palette stays in light band");
+  assert.ok(lightWhite.c >= 0.1, "white on light palette has sufficient chroma");
+
+  const lightDark = gradientBase("#000000", true);
+  assert.ok(lightDark.l >= 0.42 && lightDark.l <= 0.62, "black on light palette stays in light band");
+  assert.ok(lightDark.c >= 0.1, "black on light palette has sufficient chroma");
+
+  const lightBlue = gradientBase("#3b82f6", true);
+  assert.ok(Math.abs(lightBlue.h - hexToOklch("#3b82f6")!.h) < 0.01, "chromatic colour keeps its hue on light palette");
+
   const vars = gradientVars("#8b9cff");
   assert.match(vars["--bot"], /^oklch\(/);
   assert.match(vars["--bot2"], /calc\(h \+ 48\)/);
