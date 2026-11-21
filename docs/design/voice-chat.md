@@ -1,6 +1,6 @@
 # Voice chat mode (design note)
 
-Status: proposal. Builds on read-aloud (OS speech synthesis), dictation (`POST /v1/voice/transcribe`)
+Status: superseded by `voice-call-mode.md`. Builds on read-aloud (OS speech synthesis), dictation (`POST /v1/voice/transcribe`)
 and per-bot voice (voice and speed per bot, stored on the device).
 
 ## Goal

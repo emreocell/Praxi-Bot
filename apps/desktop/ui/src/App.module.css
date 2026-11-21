@@ -552,6 +552,11 @@
   gap: var(--space-3);
 }
 
+.windowActionsReserve {
+  /* Room for the fixed minimize / maximize / close buttons (WindowControls). */
+  padding-right: calc(var(--space-12) * 3);
+}
+
 .botChip {
   display: inline-flex;
   align-items: center;
@@ -682,23 +687,30 @@
   box-shadow: var(--shadow-focus);
 }
 
-.mainMark {
-  display: inline-flex;
+/* The main bot: a small filled star after the name (no text pill; the label is its tooltip). */
+.botName {
+  display: flex;
   align-items: center;
   gap: var(--space-1);
-  margin-left: var(--space-2);
-  padding: 0 var(--space-2);
-  border-radius: var(--radius-pill);
-  background-color: var(--color-accent-subtle);
+  min-width: var(--space-0);
+}
+
+.botNameText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mainMark {
+  display: inline-flex;
+  flex: none;
   color: var(--color-accent-text);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
-  vertical-align: middle;
 }
 
 .mainMark > svg {
-  width: calc(var(--size-icon-sm) * 0.7);
-  height: calc(var(--size-icon-sm) * 0.7);
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+  fill: currentColor;
 }
 
 /* The bots' computer is not answering: the last known list stays, greyed out. */

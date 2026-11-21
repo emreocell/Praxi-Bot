@@ -6,17 +6,22 @@ pub fn display_configured(display: Option<&str>) -> bool {
     display.is_some_and(|s| !s.trim().is_empty())
 }
 
-/// Cached session reachability, bounded to 200 ms on first use. The X11
-/// handshake runs on a dedicated OS thread, never on a Tokio worker. A failed
-/// or timed out startup probe stays false until the process is restarted.
+/// Session reachability. The X11 handshake runs on a dedicated OS thread, never
+/// on a Tokio worker, bounded to 1 s. A reachable display is remembered for the
+/// process life; an unreachable one is probed again after [`RETRY_AFTER`], so a
+/// slow handshake during a busy daemon start (or an Xvfb that came up late) does
+/// not pin Chrome to headless until the next restart.
 #[must_use]
 pub fn has_display() -> bool {
     #[cfg(target_os = "linux")]
     {
-        static DISPLAY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *DISPLAY.get_or_init(|| {
+        static DISPLAY: std::sync::Mutex<ProbeCache> = std::sync::Mutex::new(ProbeCache::new());
+        let mut cache = DISPLAY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.get(std::time::Instant::now(), || {
             display_configured(std::env::var("DISPLAY").ok().as_deref())
-                && bounded_probe(std::time::Duration::from_millis(200), || {
+                && bounded_probe(std::time::Duration::from_secs(1), || {
                     x11rb::connect(None).is_ok()
                 })
         })
@@ -28,6 +33,45 @@ pub fn has_display() -> bool {
     #[cfg(not(any(target_os = "linux", windows)))]
     {
         true
+    }
+}
+
+/// How long an unreachable result is trusted before the display is probed again.
+#[cfg(any(target_os = "linux", test))]
+const RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Positive results stick; negative ones expire.
+#[cfg(any(target_os = "linux", test))]
+struct ProbeCache {
+    reachable: bool,
+    failed_at: Option<std::time::Instant>,
+}
+
+#[cfg(any(target_os = "linux", test))]
+impl ProbeCache {
+    const fn new() -> Self {
+        Self {
+            reachable: false,
+            failed_at: None,
+        }
+    }
+
+    fn get(&mut self, now: std::time::Instant, probe: impl FnOnce() -> bool) -> bool {
+        if self.reachable {
+            return true;
+        }
+        if self
+            .failed_at
+            .is_some_and(|at| now.saturating_duration_since(at) < RETRY_AFTER)
+        {
+            return false;
+        }
+        if probe() {
+            self.reachable = true;
+        } else {
+            self.failed_at = Some(now);
+        }
+        self.reachable
     }
 }
 
@@ -94,18 +138,26 @@ pub fn default_computer_runs(ram: u64) -> usize {
 mod tests {
     use super::*;
     #[test]
-    fn display_probe_times_out_and_cached_result_is_not_reprobed() {
-        let cache = std::sync::OnceLock::new();
+    fn display_probe_times_out_and_a_failure_is_retried_later() {
         let started = std::time::Instant::now();
-        assert!(!*cache.get_or_init(|| bounded_probe(
-            std::time::Duration::from_millis(10),
-            || {
-                std::thread::sleep(std::time::Duration::from_secs(5));
-                true
-            }
-        )));
+        assert!(!bounded_probe(std::time::Duration::from_millis(10), || {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            true
+        }));
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
-        assert!(!*cache.get_or_init(|| panic!("must use cached result")));
+
+        let mut cache = ProbeCache::new();
+        let t0 = std::time::Instant::now();
+        assert!(!cache.get(t0, || false));
+        // Inside the window the failure is trusted: no new probe.
+        assert!(
+            !cache.get(t0 + std::time::Duration::from_secs(1), || panic!(
+                "must not re-probe yet"
+            ))
+        );
+        // After it, a display that came up late is picked up and then sticks.
+        assert!(cache.get(t0 + RETRY_AFTER, || true));
+        assert!(cache.get(t0 + RETRY_AFTER * 9, || panic!("reachable is cached")));
     }
     #[test]
     fn session_zero_station_is_not_a_display() {

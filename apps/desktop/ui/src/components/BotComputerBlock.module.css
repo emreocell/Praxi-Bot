@@ -115,7 +115,9 @@
   margin: var(--space-0) var(--space-2);
   overflow: hidden;
   isolation: isolate;
+  border: var(--size-border) solid var(--color-border);
   border-radius: calc(var(--radius-md) * 1.25);
+  background-color: var(--color-background);
 }
 
 .view > * {
@@ -127,8 +129,75 @@
   filter: saturate(0.45) brightness(0.8);
 }
 
-.view[data-kind="unavailable"] {
-  filter: grayscale(1) brightness(0.6);
+/* The device stage: a quiet dotted floor and a large, faint device glyph (theme tokens only). */
+.view > .stage {
+  position: absolute;
+  overflow: hidden;
+  inset: var(--space-0);
+  z-index: 0;
+  display: grid;
+  place-items: center;
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--color-text) 12%, transparent) var(--size-border), transparent var(--size-border));
+  background-size: calc(var(--u) * 4) calc(var(--u) * 4);
+  color: var(--color-text-faint);
+}
+
+.view > .stage[data-presence="busy"] {
+  color: var(--color-accent-text);
+}
+
+.view > .stage[data-presence="offline"] {
+  opacity: 0.6;
+}
+
+.device {
+  width: calc(var(--u) * 22);
+  height: calc(var(--u) * 22);
+  stroke-width: 1;
+  color: var(--color-text-muted);
+  opacity: 0.4;
+}
+
+.view > .facts {
+  position: absolute;
+  top: calc(var(--u) * 1.5);
+  left: calc(var(--u) * 1.5);
+  right: calc(var(--u) * 1.5);
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.fact {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 1.25);
+  max-width: 100%;
+  height: calc(var(--u) * 5);
+  padding-inline: calc(var(--u) * 2);
+  border-radius: var(--radius-pill);
+  background-color: color-mix(in srgb, var(--color-text) 7%, transparent);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-2xs);
+  white-space: nowrap;
+}
+
+.fact > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fact > svg {
+  flex: none;
+  width: calc(var(--u) * 3);
+  height: calc(var(--u) * 3);
+  color: var(--color-accent-text);
+  fill: currentColor;
+}
+
+.fact[data-presence="busy"] .dot {
+  background-color: var(--color-accent-text);
 }
 
 .cta {
@@ -137,10 +206,10 @@
   gap: calc(var(--u) * 1.75);
   height: var(--size-control-sm);
   padding-inline: calc(var(--u) * 3.25);
-  border: var(--size-border) solid color-mix(in srgb, var(--color-on-media) 20%, transparent);
+  border: var(--size-border) solid var(--color-border);
   border-radius: var(--radius-pill);
-  background-color: color-mix(in srgb, var(--color-media-scrim) 58%, transparent);
-  color: var(--color-on-media);
+  background-color: var(--color-surface-elevated);
+  color: var(--color-text);
   font: inherit;
   font-size: var(--font-size-ui-sm);
   font-weight: var(--font-weight-medium);
@@ -148,7 +217,7 @@
 }
 
 .cta:hover {
-  background-color: color-mix(in srgb, var(--color-media-scrim) 68%, transparent);
+  background-color: var(--color-surface-active);
 }
 
 .cta > svg {
@@ -169,7 +238,7 @@
   inset: auto var(--space-0) calc(var(--u) * 1.75);
   z-index: 2;
   padding-inline: var(--space-2);
-  color: color-mix(in srgb, var(--color-on-media) 72%, transparent);
+  color: var(--color-text-muted);
   font-size: var(--font-size-micro);
   text-align: center;
 }
@@ -177,8 +246,8 @@
 .spin {
   width: calc(var(--u) * 4.5);
   height: calc(var(--u) * 4.5);
-  border: var(--size-border-thick) solid color-mix(in srgb, var(--color-on-media) 30%, transparent);
-  border-top-color: var(--color-on-media);
+  border: var(--size-border-thick) solid var(--color-border);
+  border-top-color: var(--color-text);
   border-radius: 50%;
   animation: spin 800ms linear infinite;
 }

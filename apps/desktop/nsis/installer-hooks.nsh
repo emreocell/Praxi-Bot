@@ -20,6 +20,10 @@
   ${If} $R1 == "1"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Praxi-Bot" '"$INSTDIR\bot-desktop.exe"'
   ${EndIf}
+
+  ; Tell Explorer the app icon changed (SHCNE_ASSOCCHANGED) so shortcuts and the
+  ; taskbar re-read it instead of showing a cached older icon.
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
@@ -32,6 +36,8 @@
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+
   ; Keep user data (%APPDATA%\praxi\praxi-bot) by default!
   ; Only remove Praxi-Bot user data if the user ticked Tauri's "Delete application data" checkbox
   ; ($DeleteAppDataCheckboxState == 1) and was not running a silent update.

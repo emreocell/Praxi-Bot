@@ -1,4 +1,4 @@
-import { Eye, Globe, Maximize2, Server, Terminal, Monitor } from "lucide-react";
+import { Eye, Globe, Maximize2, Monitor, Server, Star, Terminal } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "ui";
 import { isActivelyOwningTakeover, visibleActions } from "../lib/liveViewState";
@@ -9,8 +9,8 @@ import { formatLive, type ComputerView, type UnavailableReason } from "../lib/co
 import { noScreenDetailKey } from "../lib/computerLabel";
 import { useDaemon } from "../state/DaemonContext";
 import { useServerTerminal } from "../state/ServerTerminalContext";
+import { computerPresence, mainBotLabel } from "../lib/computerStage";
 import { useComputerView } from "../state/useComputerView";
-import { BotGradient } from "./BotGradient";
 import styles from "./BotComputerBlock.module.css";
 
 /** This computer's system, for the status line ("Windows · bot burada çalışıyor"). */
@@ -52,13 +52,16 @@ function LiveClock({ since }: { since: number | null }) {
  */
 export function BotComputerBlock({
   botId,
-  botColor,
+  mainBotName,
+  activity = null,
   visible
 }: {
   botName?: string;
   botId?: string | null;
-  /** The bot's own colour (hex), the gradient's source. */
-  botColor?: string;
+  /** The main bot's name, shown on the device stage. */
+  mainBotName?: string;
+  /** What the bot is doing right now (a sentence), or null while idle. */
+  activity?: string | null;
   /** The panel is open: closing it ends the view. */
   visible: boolean;
 }) {
@@ -84,6 +87,8 @@ export function BotComputerBlock({
     : system
       ? t("computerCard.status.local", { system })
       : t("computerCard.status.localNoSystem");
+  const presence = computerPresence({ offline, working: activity !== null });
+  const mainName = mainBotLabel(mainBotName);
   const { key: rk, detail } = reasonKey(view.unavailable);
   const reason = t(rk, {
     name: serverName || t("computerPicker.host"),
@@ -103,7 +108,7 @@ export function BotComputerBlock({
 
   const hint =
     view.kind === "idle"
-      ? t("computerCard.hint.idle")
+      ? (activity ?? t("computerCard.hint.idle"))
       : view.kind === "starting"
         ? t("computerCard.hint.starting")
         : view.kind === "paused"
@@ -200,7 +205,23 @@ export function BotComputerBlock({
               {view.previewUrl ? (
                 <img className={styles.frame} src={view.previewUrl} alt="" draggable={false} />
               ) : (
-                <BotGradient color={botColor} still={view.kind === "paused" || view.kind === "unavailable" || view.kind === "timeout"} />
+                <div className={styles.stage} data-testid="bot-computer-stage" data-presence={presence} aria-hidden="true">
+                  {server ? <Server className={styles.device} /> : <Monitor className={styles.device} />}
+                </div>
+              )}
+              {view.previewUrl ? null : (
+                <div className={styles.facts}>
+                  <span className={styles.fact} data-presence={presence} data-testid="bot-computer-presence">
+                    <i className={styles.dot} data-offline={presence === "offline" ? "true" : undefined} aria-hidden="true" />
+                    {t(`computerCard.presence.${presence}`)}
+                  </span>
+                  {mainName ? (
+                    <span className={styles.fact} data-testid="bot-computer-main" title={t("computerCard.mainBot", { name: mainName })}>
+                      <Star aria-hidden="true" />
+                      <span>{mainName}</span>
+                    </span>
+                  ) : null}
+                </div>
               )}
               {body}
               {hint ? <div className={styles.hint}>{hint}</div> : null}

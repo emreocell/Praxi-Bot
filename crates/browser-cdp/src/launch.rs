@@ -226,6 +226,62 @@ pub fn build_args_for_host(
     a
 }
 
+/// Last lines of the browser's stderr kept for a launch error (bytes).
+pub(crate) const STDERR_KEEP: usize = 2048;
+
+/// Plain-language cause for the stderr text of a browser that did not start,
+/// or `None` when nothing recognisable is in it.
+#[must_use]
+pub fn launch_hint(stderr: &str) -> Option<&'static str> {
+    let t = stderr.to_ascii_lowercase();
+    if t.contains("missing x server")
+        || t.contains("cannot open display")
+        || t.contains("unable to open x display")
+    {
+        Some(
+            "the X display is not reachable from the daemon (DISPLAY unset, X not running, or XAUTHORITY not readable)",
+        )
+    } else if t.contains("authorization required") || t.contains("xauthority") {
+        Some("the X display refused the daemon (XAUTHORITY missing or wrong)")
+    } else if t.contains("no usable sandbox")
+        || t.contains("namespace sandbox")
+        || t.contains("setuid sandbox")
+    {
+        Some(
+            "the Chrome sandbox cannot start (user namespaces blocked, e.g. a missing AppArmor profile for this browser)",
+        )
+    } else if t.contains("error while loading shared libraries") {
+        Some("the browser is missing system libraries")
+    } else {
+        None
+    }
+}
+
+/// One short, single-line-per-entry summary of the tail of the browser's stderr.
+#[must_use]
+pub(crate) fn stderr_summary(stderr: &str) -> String {
+    let lines: Vec<&str> = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let tail = lines
+        .iter()
+        .rev()
+        .take(3)
+        .rev()
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" | ");
+    let tail: String = tail.chars().filter(|c| !c.is_control()).take(300).collect();
+    match launch_hint(stderr) {
+        Some(h) if tail.is_empty() => h.to_owned(),
+        Some(h) => format!("{h}. Browser said: {tail}"),
+        None if tail.is_empty() => String::new(),
+        None => format!("Browser said: {tail}"),
+    }
+}
+
 /// Parse a `DevToolsActivePort` file into a browser websocket URL.
 pub fn parse_devtools_active_port(content: &str) -> Option<String> {
     let mut lines = content.lines();
@@ -349,6 +405,19 @@ mod tests {
         );
         assert!(a.contains(&"--proxy-bypass-list=<-loopback>".to_owned()));
         assert!(!a.contains(&"--proxy-bypass-list=*".to_owned()));
+    }
+
+    #[test]
+    fn launch_errors_name_the_cause_of_a_dead_browser() {
+        let x = "[1:1:ERROR] Missing X server or $DISPLAY
+[1:1] The platform failed to initialize.  Exiting.
+";
+        let msg = stderr_summary(x);
+        assert!(msg.contains("X display is not reachable"), "{msg}");
+        assert!(msg.contains("Browser said:"), "{msg}");
+        assert!(launch_hint("No usable sandbox! Update your kernel").is_some());
+        assert_eq!(stderr_summary(""), "");
+        assert_eq!(launch_hint("harmless noise"), None);
     }
 
     #[test]

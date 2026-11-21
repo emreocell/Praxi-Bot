@@ -219,7 +219,7 @@ cargo deny check                            # when you change dependencies
 6. **Fill in the pull request template.** Say what and why, how you tested it, which
    security-sensitive areas you touched, and whether generated files were regenerated.
 7. **CI must be green.** The check that gates merging is `ci-result`; it runs on every PR and
-   passes when the jobs that were needed passed (a docs-only PR skips the long Rust jobs). A
+   passes when the jobs that were needed passed (a docs-only or UI-only PR skips the long Rust jobs). A
    maintainer reviews, may ask for changes, and squash-merges. Security-sensitive changes get a
    deeper review and may take longer. Your first PR from a fork needs a maintainer to approve the
    workflow run before CI starts; that is normal.
