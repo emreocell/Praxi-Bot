@@ -912,7 +912,9 @@ impl Page {
         self.mouse("mouseMoved", x, y, json!({})).await?;
         self.check_input_origin(&e, expected).await?;
         for n in 1..=clicks {
-            if n > 1 && guard.batch && !self.click_lands_on(&e, x, y).await {
+            // Again right before every press (the move above may have run page handlers that
+            // laid something over the point); on a mismatch neither press nor release is sent.
+            if guard.batch && !self.click_lands_on(&e, x, y).await {
                 return Err(covered());
             }
             let btn = json!({"button": "left", "clickCount": n});

@@ -518,6 +518,39 @@ for (const k of ['parentNode', 'host', 'parentElement']) {
     b.close().await.unwrap();
 }
 
+/// The first hit test passes, then the pointer move runs the page's mousemove handler, which
+/// lays "Pay" over the target. The press must not be sent: no mousedown/click/mouseup at all.
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn a_batch_click_is_refused_when_the_hover_handler_covers_the_target() {
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let p = open(
+        &b,
+        r#"<html><body>
+<button id=nt style="position:absolute;left:20px;top:20px;width:120px;height:40px" onmousemove="if(!document.getElementById('pay')){const d=document.createElement('button');d.id='pay';d.textContent='Pay';d.style.cssText='position:fixed;left:0;top:0;width:200px;height:70px;z-index:9';d.onmousedown=d.onmouseup=d.onclick=()=>{document.getElementById('log').textContent+='pay '};document.body.appendChild(d)}" onmousedown="document.getElementById('log').textContent+='nt-down '" onclick="document.getElementById('log').textContent+='nt-click '">No thanks</button>
+<p id=log style="position:absolute;top:300px"></p>
+</body></html>"#,
+    )
+    .await;
+    let snap = p.snapshot(&SnapshotOptions::default()).await.unwrap();
+    let nt = ref_of(&snap, "button", "No thanks");
+    let res = p
+        .click_with_guard(&nt, &DialogOptions::default(), None, &batch_guard(None))
+        .await;
+    let err = res.map_or_else(|e| e.to_string(), |a| a.error.unwrap_or_default());
+    assert!(err.contains("on top of"), "{err}");
+    let log = p
+        .evaluate("document.getElementById('log').textContent")
+        .await
+        .unwrap();
+    assert_eq!(
+        log.as_str(),
+        Some(""),
+        "the press and release must not be sent once the hover covered the target"
+    );
+    b.close().await.unwrap();
+}
+
 /// Enter goes to whatever has focus. A page script that moves focus to another control after
 /// the fill must stop the batch's Enter.
 #[tokio::test]
