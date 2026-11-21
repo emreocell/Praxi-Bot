@@ -964,6 +964,51 @@ fn natural_language_parser_handles_at_least_25_english_and_turkish_phrases() {
 }
 
 #[test]
+fn natural_language_parser_supports_additional_turkish_phrases() {
+    let now_ms = 1_700_000_000_000_i64;
+    let cases = [
+        ("hafta içleri", ScheduleSpec::Cron("0 9 * * 1-5".into())),
+        (
+            "hafta içleri saat 09:00",
+            ScheduleSpec::Cron("0 9 * * 1-5".into()),
+        ),
+        (
+            "HAFTA İÇLERİ saat 17.45’te",
+            ScheduleSpec::Cron("45 17 * * 1-5".into()),
+        ),
+        ("yarım saatte bir", ScheduleSpec::Every { seconds: 1_800 }),
+        (
+            "bir buçuk saat sonra",
+            ScheduleSpec::At {
+                unix_ms: now_ms + 5_400_000,
+            },
+        ),
+    ];
+
+    for (phrase, expected) in cases {
+        assert_eq!(
+            parse_natural_language(phrase, now_ms).as_ref(),
+            Some(&expected),
+            "mismatch on phrase '{phrase}'"
+        );
+        expected.validate().expect("parsed spec must be valid");
+    }
+
+    assert_eq!(
+        parse_natural_language_with_tz("hafta içleri saat 09:00", now_ms, Some("Europe/Istanbul")),
+        Some(ScheduleSpec::Cron("0 9 * * 1-5 Europe/Istanbul".into()))
+    );
+
+    for ambiguous in ["yarın sabah", "hafta sonuna doğru", "birkaç saat sonra"] {
+        assert_eq!(
+            parse_natural_language(ambiguous, now_ms),
+            None,
+            "expected '{ambiguous}' to return None"
+        );
+    }
+}
+
+#[test]
 fn cron_dst_gap_and_overlap_fire_exactly_once_per_day() {
     // Spring forward 2026-03-08 in New York: 02:30 local does not exist.
     let spec = ScheduleSpec::cron_tz("30 2 * * *", "America/New_York");
