@@ -29,6 +29,7 @@ mod presets;
 mod prompt;
 mod remote;
 mod serve;
+mod server_target;
 mod skills_cmd;
 mod update;
 mod view_targets;
