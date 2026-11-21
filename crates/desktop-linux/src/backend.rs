@@ -1,6 +1,7 @@
 //! Async [`DesktopBackend`] implementation for Linux (X11 / Xvfb + AT-SPI2).
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use desktop_api::{
@@ -13,9 +14,40 @@ use parking_lot::Mutex as SyncMutex;
 use tokio::sync::Mutex;
 
 use crate::{
-    atspi_tree::AtspiWorker, live_view_x11::open_x11_live_view_target,
-    pure::detect_display_session, x11,
+    atspi_tree::AtspiWorker,
+    live_view_x11::open_x11_live_view_target,
+    pure::{self, detect_display_session},
+    x11,
 };
+
+/// Screenshot and window listing should fail fast when the X server is wedged.
+const X11_LIMIT: Duration = Duration::from_secs(8);
+/// A large AT-SPI tree can be slow; still far under the agent's 120s tool timeout.
+const TREE_LIMIT: Duration = Duration::from_secs(25);
+/// Typing walks the keymap once, then one round trip per key.
+const ACT_LIMIT: Duration = Duration::from_secs(20);
+
+fn display_label() -> String {
+    std::env::var("DISPLAY")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "(unset)".into())
+}
+
+async fn bounded<T>(
+    op: &str,
+    limit: Duration,
+    fut: impl std::future::Future<Output = Result<T, DesktopError>>,
+) -> Result<T, DesktopError> {
+    match tokio::time::timeout(limit, fut).await {
+        Ok(result) => result,
+        Err(_) => Err(DesktopError::Accessibility(pure::op_timed_out(
+            op,
+            &display_label(),
+            limit,
+        ))),
+    }
+}
 
 struct CachedLiveView {
     options: LiveViewOptions,
@@ -78,11 +110,15 @@ impl LinuxBackend {
     ///
     /// Fails if the X11 server cannot be reached or the window ID is invalid.
     pub async fn activate_window(&self, window_id: u64) -> Result<(), DesktopError> {
-        let res = tokio::task::spawn_blocking(move || x11::activate_window(window_id))
-            .await
-            .map_err(|e| DesktopError::Internal(format!("activate_window task: {e}")))?;
+        let res = bounded("activate_window", X11_LIMIT, async move {
+            match tokio::task::spawn_blocking(move || x11::activate_window(window_id)).await {
+                Ok(result) => result,
+                Err(e) => Err(DesktopError::Internal(format!("activate_window task: {e}"))),
+            }
+        })
+        .await?;
         self.notify_live_view();
-        res
+        Ok(res)
     }
 }
 
@@ -90,36 +126,51 @@ impl LinuxBackend {
 impl DesktopBackend for LinuxBackend {
     async fn snapshot(&self, scope: Option<u64>) -> Result<Snapshot, DesktopError> {
         let mut guard = self.worker.lock().await;
-        guard.snapshot(scope).await
+        bounded("accessibility snapshot", TREE_LIMIT, guard.snapshot(scope)).await
     }
 
     async fn act(&self, action: Action) -> Result<ActionResult, DesktopError> {
-        let res = {
+        let res = bounded("desktop input", ACT_LIMIT, async {
             let mut guard = self.worker.lock().await;
             guard.act(&action).await
-        };
-        self.notify_live_view();
+        })
+        .await;
+        if res.is_ok() {
+            self.notify_live_view();
+        }
         res
     }
 
     async fn screenshot(&self, region: Region, quality: Quality) -> Result<Image, DesktopError> {
-        tokio::task::spawn_blocking(move || x11::screenshot(&region, quality))
-            .await
-            .map_err(|e| DesktopError::Internal(format!("screenshot task: {e}")))?
+        bounded("screenshot", X11_LIMIT, async move {
+            match tokio::task::spawn_blocking(move || x11::screenshot(&region, quality)).await {
+                Ok(result) => result,
+                Err(e) => Err(DesktopError::Internal(format!("screenshot task: {e}"))),
+            }
+        })
+        .await
     }
 
     async fn windows(&self) -> Result<Vec<WindowInfo>, DesktopError> {
-        tokio::task::spawn_blocking(x11::list_windows)
-            .await
-            .map_err(|e| DesktopError::Internal(format!("windows task: {e}")))?
+        bounded("window list", X11_LIMIT, async {
+            match tokio::task::spawn_blocking(x11::list_windows).await {
+                Ok(result) => result,
+                Err(e) => Err(DesktopError::Internal(format!("windows task: {e}"))),
+            }
+        })
+        .await
     }
 
     async fn launch(&self, app: AppSpec) -> Result<Pid, DesktopError> {
-        let res = tokio::task::spawn_blocking(move || x11::launch(&app))
-            .await
-            .map_err(|e| DesktopError::Internal(format!("launch task: {e}")))?;
+        let res = bounded("launch", X11_LIMIT, async move {
+            match tokio::task::spawn_blocking(move || x11::launch(&app)).await {
+                Ok(result) => result,
+                Err(e) => Err(DesktopError::Internal(format!("launch task: {e}"))),
+            }
+        })
+        .await?;
         self.notify_live_view();
-        res
+        Ok(res)
     }
 
     fn capabilities(&self) -> Capabilities {
