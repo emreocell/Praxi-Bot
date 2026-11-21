@@ -114,6 +114,8 @@ impl PendingGuard {
 impl Drop for PendingGuard {
     fn drop(&mut self) {
         self.sh.pending.lock().remove(&self.id);
+        // A parked `secret_request` must not stay submittable once its wait is gone.
+        self.sh.secret_requests.lock().remove(&self.id);
         forget_parked(&self.sh, self.id);
         let abandoned = !self.released;
         let last = self.release();
@@ -1645,7 +1647,7 @@ impl Shared {
                 );
                 Err(reason)
             }
-            Ok(Verdict::Answered { .. }) | Err(_) => {
+            Ok(Verdict::Answered { .. } | Verdict::SecretStored) | Err(_) => {
                 Err(Some("approval request was dropped".into()))
             }
         }
@@ -1773,11 +1775,150 @@ impl Shared {
                 let _ = self.storage.decide_approval(approval_id, "declined");
                 Err(reason)
             }
-            Ok(Verdict::Approved { .. }) | Err(_) => {
+            Ok(Verdict::Approved { .. } | Verdict::SecretStored) | Err(_) => {
                 let _ = self.storage.decide_approval(approval_id, "declined");
                 Err(Some("question was dropped".into()))
             }
         }
+    }
+}
+
+/// What the model reads when a `secret_request` ends. Never a value.
+fn secret_outcome(name: &str, stored: bool, why: &str) -> (String, bool) {
+    if stored {
+        (
+            format!(
+                "stored: the owner saved `{name}`. Use it by name (secrets_list, then the `secret` parameter); you cannot read it."
+            ),
+            false,
+        )
+    } else {
+        (
+            format!("cancelled: nothing was stored for `{name}` ({why})."),
+            true,
+        )
+    }
+}
+
+impl Shared {
+    /// Run a `secret_request`: show the owner's form and park the run until the
+    /// owner's app submits it to the daemon, cancels it, or it expires. The
+    /// value never passes through here: the owner-only submit route writes it
+    /// to the vault and then calls `AgentLoop::finish_secret_request`; this
+    /// returns only `stored` / `cancelled` and the name.
+    ///
+    /// Refused (nothing shown) unless the run was started by the owner at the
+    /// desktop (`Human`: never a channel such as Telegram, a schedule, a
+    /// subagent or an external agent), requests are switched on, and the
+    /// per-run limit is not used up.
+    pub(crate) async fn request_secret(
+        self: &Arc<Self>,
+        ctx: &RunCtx,
+        call_id: ToolCallId,
+        card: &builtin_tools::SecretCard,
+    ) -> (String, bool) {
+        let name = card.name.as_str();
+        let refuse = |why: &str| {
+            self.audit(
+                ctx,
+                "system",
+                "secret_request.refused",
+                &json!({"name": name, "reason": why}),
+            );
+            secret_outcome(name, false, why)
+        };
+        if !self.cfg.secret_requests {
+            return refuse("secret requests are switched off");
+        }
+        if ctx.initiator != InitiatorKind::Human {
+            return refuse(
+                "only a run the owner started at the desktop can ask for a credential; ask the owner to add it in the app instead",
+            );
+        }
+        {
+            let mut st = ctx.state.lock();
+            if st.secret_requests >= self.cfg.max_secret_requests_per_run {
+                drop(st);
+                return refuse("this run has asked for credentials too often");
+            }
+            st.secret_requests += 1;
+        }
+        let tainted = self
+            .root_run_id(ctx)
+            .is_none_or(|r| self.router.tainted_runs.lock().contains(&r));
+        let limit = if self.cfg.approval_timeout.is_zero() {
+            self.cfg.secret_request_timeout
+        } else {
+            self.cfg
+                .secret_request_timeout
+                .min(self.cfg.approval_timeout)
+        };
+        let fields = match card.fields {
+            builtin_tools::SecretFields::Secret => protocol::event::SecretFields::Secret,
+            builtin_tools::SecretFields::Login => protocol::event::SecretFields::Login,
+        };
+        let summary = format!("secret request: {}", truncate_utf8(name, 80));
+        let (approval_id, mut guard, rx) = self.park(ctx, call_id, &summary, true, false);
+        self.secret_requests.lock().insert(
+            call_id,
+            crate::shared::SecretRequestInfo {
+                run_id: ctx.run_id,
+                name: name.to_owned(),
+                fields,
+                replace: card.replace,
+            },
+        );
+        self.audit(
+            ctx,
+            "system",
+            "secret_request.requested",
+            &json!({"name": name}),
+        );
+        self.emit(
+            ctx,
+            Event::SecretRequested(protocol::event::SecretRequested {
+                run_id: ctx.run_id,
+                call_id,
+                name: name.to_owned(),
+                purpose: self.redact(card.purpose.clone()),
+                fields,
+                replaces_existing: card.replace,
+                untrusted_content: tainted,
+                expires_in_secs: limit.as_secs(),
+            }),
+        );
+        let mut rx = rx;
+        let mut waited = tokio::time::timeout(limit, &mut rx).await;
+        // The timer may end the wait only while the form is still unclaimed. A
+        // submit that claimed it is writing the value to the vault right now: wait
+        // for it to finish, so the model hears `stored` (never a false "nothing was
+        // stored", which would make it ask for the password in chat). If that
+        // submit fails the form is put back and expires here on the next look.
+        while waited.is_err() {
+            if self.secret_requests.lock().remove(&call_id).is_some() {
+                break;
+            }
+            waited = tokio::time::timeout(std::time::Duration::from_millis(100), &mut rx).await;
+        }
+        guard.resume();
+        self.secret_requests.lock().remove(&call_id);
+        let (stored, why, decision) = match waited {
+            Ok(Ok(Verdict::SecretStored)) => (true, "", "stored"),
+            Err(_) => (false, "the owner did not answer in time", "expired"),
+            _ => (false, "the owner cancelled", "declined"),
+        };
+        let _ = self.storage.decide_approval(approval_id, decision);
+        self.audit(
+            ctx,
+            "user",
+            if stored {
+                "secret_request.stored"
+            } else {
+                "secret_request.cancelled"
+            },
+            &json!({"name": name, "reason": decision}),
+        );
+        secret_outcome(name, stored, why)
     }
 }
 

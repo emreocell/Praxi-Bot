@@ -908,11 +908,13 @@ fn to_sse(item: &StreamItem, scoped: bool) -> SseEvent {
         .unwrap_or_else(|_| SseEvent::default().comment("unserialisable event"))
 }
 
-/// Overlay questions are for the local app only: a paired peer must never see
-/// a `control_requested` event (it could answer it).
+/// Overlay questions and credential requests are for the local app only: a
+/// paired peer must never see a `control_requested` event (it could answer it)
+/// or a `secret_requested` one (it cannot answer it, and its purpose text is
+/// for the owner's own card).
 pub(crate) fn hidden_from_peer(local: bool, out: &Out) -> bool {
     !local
-        && matches!(out, Out::Run(item) if matches!(item.envelope.event, protocol::Event::ControlRequested(_)))
+        && matches!(out, Out::Run(item) if matches!(item.envelope.event, protocol::Event::ControlRequested(_) | protocol::Event::SecretRequested(_)))
 }
 
 #[cfg(test)]

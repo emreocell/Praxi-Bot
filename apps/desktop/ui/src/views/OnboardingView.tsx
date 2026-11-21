@@ -191,6 +191,9 @@ export function OnboardingView({ settings, onLanguageChange, onSkip, onComplete,
           </ol>
 
           <div className={styles.head}>
+            <p className={styles.eyebrow} data-testid="fr-step-of">
+              {t("firstRun.progress", { current: at + 1, total: FIRST_RUN_STEPS.length })}
+            </p>
             <h1 ref={heading} tabIndex={-1} className={styles.title}>
               {t(`firstRun.${state.step}.title`)}
             </h1>

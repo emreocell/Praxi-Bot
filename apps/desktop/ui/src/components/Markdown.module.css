@@ -215,3 +215,57 @@
 .codeBlock { border-radius: var(--radius-card); background: var(--color-surface); }
 .codeBar { background: transparent; border-color: var(--color-border); padding: var(--space-2) var(--space-4); }
 .pre { padding: var(--space-3) var(--space-4); font-size: var(--font-size-ui); }
+
+/* ---- Polish (c450) ---- */
+.md li::marker {
+  color: var(--color-text-faint);
+}
+
+.h1,
+.h2,
+.h3,
+.h4 {
+  margin-top: var(--space-2);
+}
+
+.link {
+  text-decoration-thickness: var(--size-border);
+  text-decoration-color: color-mix(in srgb, var(--color-accent-text) 45%, transparent);
+  transition: text-decoration-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.link:hover {
+  text-decoration-color: currentcolor;
+}
+
+.table tbody tr {
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.table tbody tr:hover {
+  background-color: color-mix(in srgb, var(--color-text) 3%, transparent);
+}
+
+.copyButton {
+  transition:
+    color var(--motion-duration-fast) var(--motion-easing-standard),
+    background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.copyButton:hover,
+.copyButton:focus-visible {
+  background-color: var(--color-surface-active);
+  color: var(--color-text);
+}
+
+.copyButton:active {
+  background-color: color-mix(in srgb, var(--color-text) 12%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .link,
+  .table tbody tr,
+  .copyButton {
+    transition: none;
+  }
+}

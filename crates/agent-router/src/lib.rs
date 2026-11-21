@@ -9,6 +9,7 @@
 //! direct tools and `find_tool` / `get_tool_details` / `use_tool` meta-tools.
 
 mod bm25;
+pub mod decider;
 pub mod discovery;
 pub mod ladder;
 pub mod lexical;

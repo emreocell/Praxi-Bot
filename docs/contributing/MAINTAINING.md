@@ -18,7 +18,12 @@ routine. It is written for a single maintainer; nothing here needs a team.
    approvals and the egress gate are not weakened, secrets stay out of logs, owner-only routes stay
    classified. CODEOWNERS already requests your review for those paths. When unsure, ask for a
    smaller change or say "needs maintainer decision".
-5. **Wait for `ci-result` to be green**, then **squash-merge**. The squash title should be a
+5. **Check the release notes labels** before merging. Apply `bug` for a fix, `enhancement` for a
+   feature, or `tests` for test-only work. Check that the automatic `platform: ...` and
+   `documentation` labels fit the change. GitHub uses the first matching category in
+   [`.github/release.yml`](../../.github/release.yml), so a fix that also touches docs appears under
+   Fixes. PRs without a matching label appear under Other changes.
+6. **Wait for `ci-result` to be green**, then **squash-merge**. The squash title should be a
    conventional commit (`feat(scope): ...`, `fix(scope): ...`, `docs: ...`); edit it in the merge
    box if the author's is not.
 

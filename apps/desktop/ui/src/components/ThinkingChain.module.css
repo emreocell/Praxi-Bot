@@ -55,15 +55,16 @@
 .steps {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-1);
   margin: var(--space-2) var(--space-0) var(--space-1) var(--space-3);
-  padding: var(--space-0) var(--space-0) var(--space-0) var(--space-5);
+  padding: var(--space-0) var(--space-0) var(--space-0) var(--space-4);
   list-style: none;
-  border-left: var(--size-border-thick) solid var(--color-border-strong);
+  border-left: var(--size-border) solid var(--color-border);
   animation: rise var(--motion-duration-normal) var(--motion-easing-standard);
 }
 
 .thought {
+  padding-block: var(--space-1);
   color: var(--color-text-muted);
   line-height: var(--line-height-normal);
   overflow-wrap: anywhere;
@@ -75,7 +76,16 @@
   align-items: flex-start;
   gap: var(--space-3);
   min-width: var(--space-0);
+  padding: var(--space-1) var(--space-2);
+  margin-inline: calc(var(--space-2) * -1);
+  border-radius: var(--radius-md);
   color: var(--color-text);
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.step:hover,
+.step:focus-within {
+  background-color: color-mix(in srgb, var(--color-text) 4%, transparent);
 }
 
 .step > :first-child {
@@ -93,8 +103,16 @@
   gap: var(--space-2);
 }
 
+/* Calm by default: a finished step reads as quiet text, it only brightens under the pointer. */
 .stepLabel {
-  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-regular);
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.step:hover .stepLabel,
+.step:focus-within .stepLabel {
+  color: var(--color-text);
 }
 
 .stepBad .stepLabel {
@@ -128,7 +146,7 @@
   background: transparent;
   color: var(--color-text-faint);
   cursor: pointer;
-  opacity: 0.6;
+  opacity: 0;
   transition:
     opacity var(--motion-duration-fast) var(--motion-easing-standard),
     color var(--motion-duration-fast) var(--motion-easing-standard);
@@ -138,6 +156,13 @@
   width: var(--size-icon-sm);
   height: var(--size-icon-sm);
   transition: transform var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+/* Touch screens have no hover: keep the chevron visible there. */
+@media (hover: none) {
+  .more {
+    opacity: 0.7;
+  }
 }
 
 .moreOpen {
@@ -244,6 +269,8 @@
     animation: none;
   }
 
+  .step,
+  .stepLabel,
   .chev,
   .more > svg {
     transition: none;

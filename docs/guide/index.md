@@ -34,7 +34,13 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 - **Message copy and Markdown export.** Hover or focus any message to copy its visible text, or type `/export` in the composer to save the open chat as a `.md` file. See [Copying messages and Markdown export](chatting-and-approvals.md#copying-messages-and-markdown-export).
 - **Keyboard shortcuts dialog (`?`) and "What's new" card.** Press `?` (outside text fields) or use the command palette (`Ctrl/Cmd+K`) to view all shortcuts. Bundled release notes appear once per version after an update with no network fetch. See [Keyboard shortcuts and "What's new"](chatting-and-approvals.md#keyboard-shortcuts-and-whats-new).
 - **Unread markers.** Bots with unseen replies or pending decisions show a dot in the left rail, and the open chat marks the first unseen reply with a **New messages** divider. See [Unread markers](chatting-and-approvals.md#unread-markers).
-- **Praxi as the default main bot and "Make main bot".** Fresh desktop setups default to **Praxi** (white ghost) as the main bot, and any bot's panel has a **Make main bot** star button. See [Main bot and bot order](bots-and-profiles.md#main-bot-and-bot-order-desktop-app).
+- **Praxi as the default main bot and per-computer "Make main bot".** Fresh desktop setups default to **Praxi** (white ghost) as the main bot. Each computer (This computer and every paired host) keeps its own bot order and main bot, set with the star button (**Make main bot**) in the bot panel header. See [Main bot and bot order](bots-and-profiles.md#main-bot-and-bot-order-desktop-app).
+- **Hands-free voice call mode.** Tap the phone button in the desktop chat composer to talk to a bot with automatic voice activity detection, sentence-by-sentence speech, barge-in, push-to-talk, and click-only approvals. See [Voice call mode](voice-call.md).
+- **Integrated window controls and complete ghost app icon.** On Windows, the desktop app hides the native window frame by default and draws its own minimize, maximize/restore, and close controls above the right panel, alongside the complete Praxi ghost icon. See [Window controls and appearance](install-windows.md#window-controls-and-appearance).
+- **Refined satin-matte bot avatars.** Bots can use one of 16 procedural SVG shapes with layered lighting, living eyes, state motion (respecting reduced motion), or a custom uploaded image/GIF. See [Bot avatars](bots-and-profiles.md#bot-avatars-desktop-app).
+- **Host-status commands without approval fatigue.** Fixed read-only status commands (`uptime`, `df -h`, `free -m`, `uname -a`, and similar) on an always-on host's own computer no longer taint the run or trigger repeated executor asks. See [Host-status commands on an always-on host](chatting-and-approvals.md#host-status-commands-on-an-always-on-host).
+- **Paired server as a bot's browser computer.** A local bot with `[runtime] computer = "server:<key>"` keeps its model calls, files, shell, and approvals on your computer while running `browser_*` inside an isolated browser on the paired server. See [Computer target](bots-and-profiles.md#computer-target) and [Using a paired server as a bot's browser computer](remote-host.md#using-a-paired-server-as-a-bots-browser-computer).
+- **Bounded browser startup and clearer `bot doctor` checks.** `browser_open` now bounds launch and session waits with actionable failure messages, Linux hosts re-probe late displays after 15 seconds, and `bot doctor` pinpoints the first missing display, `XAUTHORITY`, or browser piece. See [Browser does not open or times out](troubleshooting.md#browser-does-not-open-or-times-out).
 - **Auto-starting the local host on send.** Sending a message while this computer's daemon is offline restarts it automatically and delivers the message once it is up; for an offline paired server, the draft is kept with a Retry prompt. See [Sending while the host is offline](chatting-and-approvals.md#sending-while-the-host-is-offline).
 - **Host-admin pause recovery.** A paired host's admin desktop can clear a paused screen takeover via `POST /v1/control/recover` without losing its screen-input right, and **Stop** aborts runs parked behind a pause. See [Live screen privacy and human control](security.md#live-screen-privacy-and-human-control).
 - **Prompt-injection eval pack.** Offline tier-1 injection scenarios with an `unsafe_actions` gate and baseline comparison (`bot-eval run --tier 1 --filter inj- --repeat 3`). See [Prompt-injection evaluation pack](security.md#prompt-injection-evaluation-pack).
@@ -52,6 +58,7 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 | Understand what a host does when it is demoted or hears another active host | [Host leadership limits](host-leadership.md) |
 | Create a bot and understand its profile file | [Bots and profiles](bots-and-profiles.md) |
 | Talk to a bot, approve or deny actions | [Chatting and approvals](chatting-and-approvals.md) |
+| Talk to a bot hands-free by voice (desktop app) | [Voice call mode](voice-call.md) |
 | Run something every morning | [Scheduled tasks](scheduled-tasks.md) |
 | Replay a recorded sequence of steps without a model | [Workflows](workflows.md) |
 | Teach a bot how to handle a tricky web page or app | [Skills](skills.md) |
@@ -61,6 +68,7 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 | Pick a provider, use the Gemini free tier | [Providers and models](providers-and-models.md) |
 | Understand how the model picker names and ranks models | [Model picker metadata](model-catalog.md) |
 | Let a lighter model answer simple first turns | [Optional model tiering](model-tiering.md) |
+| Configure bounded advisory decisions | [Optional decision pool](decision-pool.md) |
 | See what each model call in a run was for and what it used | [LLM call ledger](llm-call-ledger.md) |
 | Use a local coding CLI (Claude Code, Codex, Cursor, ...) as the engine | [Coding CLI engines](cli-engines.md) |
 | Talk to your bots from your phone | [Telegram](telegram.md) |

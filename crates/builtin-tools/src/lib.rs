@@ -31,6 +31,7 @@ pub mod pc;
 pub mod provenance;
 pub mod schedule;
 pub mod script;
+pub mod secret_request;
 pub mod shell;
 mod util;
 
@@ -76,6 +77,9 @@ pub use schedule::{
 };
 pub use script::{
     GateHost, GateRequest, ResolverGate, SCRIPT_TOOL_NAME, ToolGate, cwd_for, raw_command_for,
+};
+pub use secret_request::{
+    Fields as SecretFields, SECRET_REQUEST, SECRET_REQUEST_CARD_KIND, SecretCard, entry_names,
 };
 
 pub use connector_email;
@@ -133,6 +137,10 @@ pub struct BuiltinConfig {
     /// and `desktop_set_value` accept `secret: "<name>"` and the model gets
     /// `secrets_list`; with `None` a `secret` parameter is refused.
     pub fill_secrets: Option<Arc<secret_store::FillSecrets>>,
+    /// Whether the model gets `secret_request` (needs `fill_secrets`). The owner's
+    /// switch, **off by default** until the desktop form exists:
+    /// with `false` the tool is not offered at all.
+    pub secret_requests: bool,
     /// Ledger of files with an untrusted origin (see [`provenance`]); `None` = rules only.
     pub provenance: Option<Arc<dyn provenance::Provenance>>,
 }
@@ -189,6 +197,7 @@ impl BuiltinConfig {
             fs_access: None,
             fs_home: None,
             fill_secrets: None,
+            secret_requests: false,
             provenance: None,
         }
     }
@@ -240,6 +249,9 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
     }
     if let Some(secrets) = &cfg.fill_secrets {
         all.push(fill_secret::secrets_list_tool(Arc::clone(secrets)));
+        if cfg.secret_requests {
+            all.push(secret_request::secret_request_tool(Arc::clone(secrets)));
+        }
     }
     let fs_home = cfg
         .fs_access
@@ -382,6 +394,25 @@ mod tests {
         println!("schema-bytes total {total} over {} tools", rows.len());
         // Loose ceiling so a runaway description is noticed; not a target.
         assert!(total < 24_000, "tool list grew to {total} bytes");
+    }
+
+    #[test]
+    fn secret_request_is_offered_only_when_switched_on() {
+        let names = |on: bool| {
+            let dir = tempfile::tempdir().unwrap();
+            let mut cfg = BuiltinConfig::new(dir.path().into(), Arc::new(AllowAll));
+            assert!(!cfg.secret_requests, "off by default");
+            cfg.fill_secrets = Some(Arc::new(secret_store::FillSecrets::in_memory(Arc::new(
+                secret_store::MemoryStore::new(),
+            ))));
+            cfg.secret_requests = on;
+            build_builtin_tools(cfg, &ToolRegistry::new())
+                .iter()
+                .map(|t| t.spec().name.clone())
+                .collect::<Vec<_>>()
+        };
+        assert!(!names(false).contains(&"secret_request".to_owned()));
+        assert!(names(true).contains(&"secret_request".to_owned()));
     }
 
     #[test]

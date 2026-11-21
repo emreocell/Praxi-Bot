@@ -1255,6 +1255,10 @@
       "prev": "Vorheriger Treffer"
     },
     "jumpToLatest": "Zum Neuesten springen",
+    "longMessage": {
+      "less": "Weniger anzeigen",
+      "more": "Mehr anzeigen"
+    },
     "md": {
       "code": "Code",
       "copied": "Kopiert",
@@ -2176,6 +2180,14 @@
       "schedule_moved": {
         "hint": "Er läuft dort und ist auf diesem Computer eingefroren. Nutze in seiner Zeile „Zu diesem Computer zurückholen“.",
         "title": "Dieser Zeitplan wurde auf einen Server verschoben"
+      },
+      "secret_request_exists": {
+        "hint": "Bitte den Bot, ausdrücklich zu ersetzen, oder wähle einen anderen Namen. Es wurde nichts geändert.",
+        "title": "Dieser Name ist schon vergeben"
+      },
+      "secret_request_gone": {
+        "hint": "Sie wurde beantwortet, abgebrochen oder ist abgelaufen. Lass den Bot sie erneut stellen, falls sie noch gebraucht wird.",
+        "title": "Diese Anfrage ist nicht mehr offen"
       },
       "secret_store_failed": {
         "hint": "Versuche es erneut. Wenn es weiter fehlschlägt, prüfe den Datenträger des Servers und seinen Schlüsselspeicher.",
@@ -3973,9 +3985,24 @@
       "updates": "Updates",
       "usage": "Nutzung"
     },
+    "navGroups": {
+      "app": "App",
+      "bots": "Bots",
+      "personal": "Persönlich"
+    },
     "noResults": "Keine passenden Einstellungen.",
     "results": "Suchergebnisse",
     "search": "Einstellungen suchen",
+    "sectionDesc": {
+      "ai": "Was deine Bots wissen und sich merken. Modelle werden pro Bot gewählt.",
+      "appearance": "Design, Akzentfarbe, Hintergrund und Form der App.",
+      "computer": "Wo Werkzeuge laufen, was Bots dort dürfen, und die Websuche.",
+      "diagnostics": "Prüfe, ob die App und ihr Hilfsdienst gesund sind.",
+      "general": "Dein Name, die Sprache und das Verhalten von Nachrichten.",
+      "mail": "Postfächer, die deine Bots lesen und beschreiben können.",
+      "updates": "Welche Version läuft und wie Updates zu dir kommen.",
+      "usage": "Wie stark jedes Modell und jeder Bot genutzt wurde."
+    },
     "title": "Einstellungen",
     "updates": {
       "appVersion": "Desktop-App",

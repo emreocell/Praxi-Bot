@@ -60,6 +60,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         check_free_ram(),
         core::check_data_dir(env.data_dir),
         core::check_config(env.data_dir),
+        check_decider(env),
         core::check_secrets(&env.store),
         polish_provider_check(core::check_providers(&core::ProviderInputs {
             data_dir: env.data_dir,
@@ -75,6 +76,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
             |e| Check::fail("browser", "browser", e, "install a non-snap browser or set BOT_BROWSER_PATH; use `sudo praxi doctor` for service-context validation"),
         ),
         check_mcp(env.data_dir),
+        check_secret_request(env.data_dir),
         check_web(env),
         core::check_schedule_tools(env.data_dir),
         core::check_disk(env.data_dir),
@@ -86,6 +88,56 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         core::check_desktop_automation(std::env::consts::OS, env.desktop.as_ref()),
         core::check_clock(std::time::SystemTime::now(), core::newest_mtime(env.data_dir)),
     ]
+}
+
+fn check_decider(env: &DoctorEnv<'_>) -> Check {
+    use std::fmt::Write as _;
+
+    const ID: &str = "decider";
+    const TITLE: &str = "decision pool";
+    let config = match agent_core::decider::Settings::load(env.data_dir) {
+        Ok(config) => config,
+        Err(error) => {
+            return Check::warn(
+                ID,
+                TITLE,
+                error,
+                "check decider.toml against the decision pool guide",
+            );
+        }
+    };
+    let mut detail = format!(
+        "enabled={}, timeout_ms={}, max_calls_per_turn={}, backends={}",
+        config.enabled,
+        config.timeout_ms,
+        config.max_calls_per_turn,
+        config.backends.len()
+    );
+    let redactor = if config.backends.is_empty() {
+        None
+    } else {
+        env.store
+            .as_ref()
+            .ok()
+            .and_then(|(store, _)| crate::serve::report_redactor(env.data_dir, *store).ok())
+    };
+    for backend in config.backends {
+        let model = redactor.as_ref().map_or_else(
+            || secret_store::REDACTED.to_owned(),
+            |r| r.redact(&backend.model),
+        );
+        let _ = write!(
+            detail,
+            " | api={}, model={model}, rpm={}",
+            backend.api.as_str(),
+            backend.rpm
+        );
+    }
+    if config.enabled {
+        Check::ok(ID, TITLE, detail)
+    } else {
+        Check::skipped(ID, TITLE, detail)
+    }
 }
 
 fn polish_provider_check(mut check: Check) -> Check {
@@ -461,6 +513,26 @@ fn check_mcp(dir: &Path) -> Check {
     match TomlFileStore::new(&path).load() {
         Ok(s) => Check::ok(ID, N, format!("{} server(s)", s.len())),
         Err(e) => Check::fail(ID, N, e.to_string(), format!("fix {}", path.display())),
+    }
+}
+
+/// `secret_request` is experimental and off by default until the desktop form exists.
+fn check_secret_request(dir: &Path) -> Check {
+    let host = std::fs::read_to_string(dir.join("host.toml")).unwrap_or_default();
+    let env = std::env::var("BOT_SECRET_REQUESTS").ok();
+    if crate::serve::secret_requests_enabled(&host, env.as_deref()) {
+        Check::warn(
+            "secret_request",
+            "secret request (experimental)",
+            "on: the bot may ask for a credential; the desktop form is not available yet, so a request waits until it expires",
+            "turn it off: remove `secret_request = true` under [experimental] in host.toml and unset BOT_SECRET_REQUESTS",
+        )
+    } else {
+        Check::ok(
+            "secret_request",
+            "secret request (experimental)",
+            "off (default): the bot is not offered the secret_request tool",
+        )
     }
 }
 

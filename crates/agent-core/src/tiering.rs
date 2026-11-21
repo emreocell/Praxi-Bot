@@ -1,10 +1,9 @@
 //! Opt-in model tiering, with durable one-way escalation.
 //!
-//! Main has no pooled decider or general run-taint API yet. Selection therefore
-//! adds no model call, and ANY executed tool output conservatively ends light
-//! inference. Prior chat and enabled memory recall start at standard. Replace
-//! these conservative floors only when host-owned exposure facts are available;
-//! never classify trust from returned text or the model's own claims.
+//! Tier selection is deterministic and adds no model call. Any executed tool
+//! output conservatively ends light inference. Prior chat and enabled memory
+//! recall start at standard. Narrow these checks only using host-owned exposure
+//! facts. Never classify trust from returned text or the model's own claims.
 
 use agent_router::ladder::{Decision as RouteDecision, Route};
 use permission_engine::Decision;
@@ -110,9 +109,8 @@ impl TurnExecutor {
         Some(light)
     }
 
-    /// Deterministic fallback until the pooled decider lands. A future decider
-    /// may supply a choice here in the existing routing request; it must still
-    /// pass these exposure/initiator floors and must not add a tier-only call.
+    /// Select a tier deterministically after applying the exposure and
+    /// initiator checks.
     pub(crate) fn initial_tier(
         &self,
         ctx: &RunCtx,

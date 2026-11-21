@@ -12,17 +12,11 @@ reachable only from the machine itself.
 > been verified end to end. Xvfb and Chromium are installed for desktop and
 > browser automation, not because every tool already uses them.
 
-> **Releasing (maintainers).** Pushing a `v*` tag does **not** publish
-> anything. Publishing needs a manual dispatch of **Linux Server Packages** on
-> the protected tag with `dry_run=false`, plus approval of the `release`
-> environment. The repository administrator must create both of these before
-> the first release (details in
-> [Release administrator setup](#release-administrator-setup-and-dry-run)):
->
-> - an active tag ruleset for `refs/tags/v*` (restrict creation to release
->   maintainers, block updates and deletion, minimal bypass);
-> - an environment named `release` with required reviewers, Prevent
->   self-review on, deployment tags limited to `v*`, administrator bypass off.
+> **Releasing (maintainers).** A pre-release tag push publishes after
+> attestation and verification. A final release requires a manual dispatch
+> on the protected tag and approval of the `release` environment.
+> See the [Linux release workflow](release-linux.md) and the
+> [release runbook](../contributing/releasing.md).
 
 ## What you need
 
@@ -41,9 +35,10 @@ flags are available at that floor. Obtain `gh` from [cli.github.com](https://cli
 not from a Praxi release asset.
 
 The **Linux Server Packages** workflow builds `praxi-linux-x86_64.tar.gz` and
-`praxi-linux-aarch64.tar.gz` with companion `.sha256` files. Only a protected
-`v*` tag can produce release attestations. A release contains the archives,
-`install-linux.sh` from the same tag, and **`praxi-linux.sigstore.json`**.
+`praxi-linux-aarch64.tar.gz` with companion `.sha256` files. Final releases
+require attestations from a protected tag. Pre-release attestations come from
+the tag or a manual run on `main` for that tag. A release contains the
+archives, the attested `install-linux.sh`, and **`praxi-linux.sigstore.json`**.
 Unsigned branch/manual build artifacts cannot be installed by this installer.
 A checksum checks integrity; it never replaces signed provenance.
 
@@ -149,7 +144,7 @@ host, `--with-desktop` installs or refreshes Xvfb and Chromium;
 
 ### Release administrator setup and dry run
 
-Repository settings are not created by merging a workflow. Before a tagged
+Repository settings are not created by merging a workflow. Before a final
 release, an administrator must configure:
 
 1. An **active tag ruleset** matching `refs/tags/v*`, restricting tag creation
@@ -165,21 +160,22 @@ reviewers with self-review prevention. If the token cannot read that policy,
 the job fails; it never assumes approval. The publishing job is gated by the
 same environment and the independent real-verification job.
 
-To exercise real Sigstore/`gh` behavior without publishing, create a reviewed,
-protected prerelease tag and dispatch **Linux Server Packages** on that tag
-with **`dry_run: true`** (the default). The workflow builds both architectures,
-attests the tagged inputs, and verifies all signed assets using real `gh`.
+To exercise real Sigstore/`gh` behavior without publishing assets, dispatch
+**Linux Server Packages** on an existing release tag with **`dry_run: true`**
+(the default). The final-tag run still requires the `release` environment
+approval. The workflow builds both architectures, attests the tagged inputs,
+and verifies all signed assets using real `gh`.
 It then verifies the archive with an independently fetched root inside a Linux
 network namespace with no network and fresh `gh` configuration/cache, and
-rejects a tampered artifact, wrong tag and wrong repository. Tag pushes and this dry-run mode never create a GitHub release.
-Publishing requires a separate dispatch on that protected tag with
-`dry_run: false` and the environment approval. Branch and PR validation remain hermetic and use a
-controlled verifier fixture; those checks do not claim a real attestation run.
+rejects a tampered artifact, wrong tag and wrong repository. Branch and PR
+validation use a controlled verifier fixture. To preview grouped notes before
+tagging, use the [local release rehearsal](../contributing/releasing.md#rehearse-the-release-notes-locally).
 
-Publishing uses `gh release create --verify-tag` exactly once. An existing
-release fails rather than overwriting or adding assets. Publish a new version
-for changed artifacts. The same-run signed bundle is always shipped beside
-both tarballs and the tagged installer.
+Publishing creates a release for the verified tag or adds missing Linux
+assets to an existing release without changing its notes. Publication stops
+if any asset name already exists. Publish a new version for changed artifacts.
+The same-run signed bundle is shipped beside both tarballs and the tagged
+installer.
 
 The script:
 
@@ -301,6 +297,42 @@ falling back to a relay (and measure frame rate and RTT before deciding whether
 to open a UDP port), open a tunnel with `bot --remote <ENDPOINT> proxy` and
 follow [Measuring the live-view link](../design/live-view-link-measurement.md).
 
+#### Using a paired server as a bot's browser computer
+
+If you want a **local** bot (using your local model keys, coding CLIs, files,
+and shell) to browse from your always-on Linux host instead of your PC, set
+`[runtime]` `computer = "server:<key>"` in that bot's profile (see
+[Computer target](bots-and-profiles.md#computer-target)):
+
+- **How to use it**: Pair this desktop with the server as its administrator
+  desktop (`bot host add`, or `sudo praxi host invite --role desktop`; hosts
+  paired before host administration existed need `sudo praxi host admin <key>`
+  once). Put the server's device key in `[runtime] computer = "server:<key>"`
+  and create/update the bot with `bot bots add` or the API.
+- **What it can and cannot do**: Only `browser_*` tools run on the server (in
+  an isolated browser per bot, up to 8 open at once). `fs_*` and `shell_run`
+  still run on your local computer, and `desktop_*` tools cannot control the
+  server. If the server is offline or unpaired, the run fails closed with no
+  computer and never falls back to your local browser.
+- **Security limits on the server**:
+  - **Admin desktop only**: On every request, the server re-reads its pairing
+    file and accepts calls only from a paired `desktop` with the `admin` flag
+    and matching pairing generation. Phones, nodes, other hosts, and non-admin
+    desktops are refused.
+  - **No internal network reach**: Only `http://` and `https://` URLs (up to
+    2,000 characters) are accepted. A filtering proxy blocks loopback
+    (`127.0.0.1`, `[::1]`), link-local/cloud metadata (`169.254.169.254`), and
+    private network ranges—including through redirects or subresources—with no
+    override on the server.
+  - **No scripts, no password fields, no stored secrets**: `browser_eval` is
+    refused, filling or typing non-navigation keys into password/sensitive
+    fields fails closed, stored fill secrets are not sent, and returned text is
+    redacted by the server.
+  - **Audited and locally approved**: Every browser call (allowed or refused)
+    is logged in the server's audit log—an unwritable audit log blocks the call.
+    Approval prompts stay on your local computer, and grants are scoped to
+    `server:<key>`.
+
 ### Letting another core control this machine (experimental)
 
 `bot-node run` needs a reachable X11 display (a physical one or the Xvfb
@@ -419,8 +451,16 @@ it on a print server. No browser or desktop TCP listener is enabled.
 env file, working directory, hardening and Xvfb private namespace as the daemon.
 Its browser row actually launches headless, establishes CDP, and closes the
 browser, with a five-second startup/eight-second overall timeout. A failure is
-reported as **fail**, with a non-snap/path hint. A direct `bot doctor` probes
-only its current user/environment; use the wrapper for service validation.
+reported as **fail**, with a non-snap/path hint. Its `host_display` row checks
+in order that `DISPLAY` is set, the display answers (with a readable
+`XAUTHORITY`), and a usable non-snap browser exists, naming the first missing
+piece; `free_ram` reports Linux `MemAvailable` and warns below 512 MiB. A direct
+`bot doctor` probes only its current user/environment; use the wrapper for
+service validation. During live runs, `browser_open` bounds startup to 40
+seconds (45 seconds waiting on a busy session), surfaces the tail of Chrome's
+stderr with a cause hint on early exit, and re-probes an unreachable Linux X11
+display every 15 seconds so a slow-starting Xvfb does not leave the daemon
+stuck headless.
 Ubuntu 24.04's AppArmor user-namespace restriction is accommodated by a named
 `praxi-browser` profile permitting `userns` for `/opt/praxi-browser/chrome`,
 following Ubuntu's Chrome profile. The Chromium sandbox and systemd hardening

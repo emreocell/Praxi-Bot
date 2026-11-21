@@ -53,6 +53,7 @@ pub mod pc_access;
 pub mod peer;
 pub mod policy;
 mod provider_models;
+mod secret_request_routes;
 pub mod trusted_folders;
 pub use peer::{PeerIdentity, PeerRole, peer_router};
 mod routes;
@@ -1469,6 +1470,14 @@ fn api_routes() -> Router<AppState> {
         .route(
             "/v1/fill-grants/{id}",
             axum::routing::delete(f::revoke_fill_grant),
+        )
+        .route(
+            "/v1/secret-requests/{call_id}",
+            post(secret_request_routes::submit_secret_request),
+        )
+        .route(
+            "/v1/secret-requests/{call_id}/cancel",
+            post(secret_request_routes::cancel_secret_request),
         )
         .route("/v1/events", get(sse::events))
         .merge(host_admin::routes())

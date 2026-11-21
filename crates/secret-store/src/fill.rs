@@ -85,6 +85,9 @@ pub enum FillError {
     /// The metadata names the secret but the store has no value.
     #[error("the fill secret `{0}` has no stored value; ask the owner to set it again")]
     MissingValue(String),
+    /// A secret with this name exists and the caller did not ask to replace it.
+    #[error("a fill secret named `{0}` already exists")]
+    Exists(String),
     /// Backend / file failure (no raw backend text: it may contain material).
     #[error("fill secrets are unavailable: {0}")]
     Unavailable(String),
@@ -162,6 +165,37 @@ fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+fn clean_origins(list: &[String]) -> Result<Vec<String>, FillError> {
+    if list.len() > MAX_ORIGINS {
+        return Err(FillError::Invalid("at most 32 origins".into()));
+    }
+    let set: BTreeSet<String> = list
+        .iter()
+        .map(|o| canonical_origin(o))
+        .collect::<Result<_, _>>()?;
+    Ok(set.into_iter().collect())
+}
+
+fn clean_programs(list: &[String]) -> Result<Vec<String>, FillError> {
+    if list.len() > MAX_PROGRAMS {
+        return Err(FillError::Invalid("at most 32 programs".into()));
+    }
+    let set: BTreeSet<String> = list
+        .iter()
+        .map(|p| clean_program(p))
+        .collect::<Result<_, _>>()?;
+    Ok(set.into_iter().collect())
+}
+
+fn check_value_size(v: &str) -> Result<(), FillError> {
+    if v.is_empty() || v.len() > MAX_FILL_VALUE_BYTES {
+        return Err(FillError::Invalid(
+            "the value must be between 1 byte and 64 KiB".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn unavailable(what: &str) -> FillError {
@@ -388,30 +422,8 @@ impl FillSecrets {
                 "the value must be between 1 byte and 64 KiB".into(),
             ));
         }
-        let origins = origins
-            .map(|list| {
-                if list.len() > MAX_ORIGINS {
-                    return Err(FillError::Invalid("at most 32 origins".into()));
-                }
-                let set: BTreeSet<String> = list
-                    .iter()
-                    .map(|o| canonical_origin(o))
-                    .collect::<Result<_, _>>()?;
-                Ok(set.into_iter().collect::<Vec<_>>())
-            })
-            .transpose()?;
-        let programs = programs
-            .map(|list| {
-                if list.len() > MAX_PROGRAMS {
-                    return Err(FillError::Invalid("at most 32 programs".into()));
-                }
-                let set: BTreeSet<String> = list
-                    .iter()
-                    .map(|p| clean_program(p))
-                    .collect::<Result<_, _>>()?;
-                Ok(set.into_iter().collect::<Vec<_>>())
-            })
-            .transpose()?;
+        let origins = origins.map(clean_origins).transpose()?;
+        let programs = programs.map(clean_programs).transpose()?;
 
         let mut meta = self.meta.lock();
         let existed = meta.secrets.contains_key(name);
@@ -452,6 +464,84 @@ impl FillSecrets {
         let present = self.present_in_store()?;
         let entry = meta.secrets.get(name).cloned().unwrap_or_default();
         Ok(Self::info(name, &entry, &present))
+    }
+
+    /// Write several entries as one unit (a login: username and password):
+    /// everything is validated first, and when any write or the metadata save
+    /// fails the previous values and metadata are put back, so the vault never
+    /// holds a mix of old and new. Returns whether an existing entry was replaced.
+    ///
+    /// # Errors
+    /// [`FillError::Exists`] when a name exists and `replace` is false (checked
+    /// under the same lock as the write); invalid input; a backend failure.
+    pub fn upsert_all(
+        &self,
+        items: &[(String, String)],
+        origins: &[String],
+        programs: &[String],
+        replace: bool,
+    ) -> Result<bool, FillError> {
+        for (n, v) in items {
+            validate_fill_name(n)?;
+            check_value_size(v)?;
+        }
+        let origins = clean_origins(origins)?;
+        let programs = clean_programs(programs)?;
+        let mut meta = self.meta.lock();
+        let replaced = items.iter().any(|(n, _)| meta.secrets.contains_key(n));
+        if replaced && !replace {
+            let name = items
+                .iter()
+                .find(|(n, _)| meta.secrets.contains_key(n))
+                .map_or("", |(n, _)| n.as_str());
+            return Err(FillError::Exists(name.to_owned()));
+        }
+        let new = items
+            .iter()
+            .filter(|(n, _)| !meta.secrets.contains_key(n))
+            .count();
+        if meta.secrets.len() + new > MAX_SECRETS {
+            return Err(FillError::Invalid("too many fill secrets".into()));
+        }
+        let mut previous = Vec::with_capacity(items.len());
+        for (n, _) in items {
+            previous.push(
+                self.store
+                    .get(&store_key(n))
+                    .map_err(|_| unavailable("the secret store cannot be read"))?,
+            );
+        }
+        let restore = |upto: usize| {
+            for ((n, _), prev) in items.iter().zip(&previous).take(upto) {
+                let _ = match prev {
+                    Some(p) => self.store.set(&store_key(n), p.expose()),
+                    None => self.store.delete(&store_key(n)).map(|_| ()),
+                };
+            }
+        };
+        for (i, (n, v)) in items.iter().enumerate() {
+            if self.store.set(&store_key(n), v).is_err() {
+                restore(i + 1);
+                return Err(unavailable("the secret store rejected the write"));
+            }
+            self.registered(v);
+        }
+        let before = meta.clone();
+        for (n, _) in items {
+            let entry = meta.secrets.entry(n.clone()).or_default();
+            entry.origins.clone_from(&origins);
+            entry.programs.clone_from(&programs);
+            entry.updated_at_ms = now_ms();
+            let allowed: BTreeSet<String> = entry.origins.iter().cloned().collect();
+            meta.grants
+                .retain(|g| g.secret != *n || allowed.contains(&g.origin));
+        }
+        if let Err(e) = self.persist(&meta) {
+            *meta = before;
+            restore(items.len());
+            return Err(e);
+        }
+        Ok(replaced)
     }
 
     /// Every secret with its allow-lists. Never reads a value.
@@ -704,6 +794,52 @@ mod tests {
 
     fn o(s: &str) -> Vec<String> {
         vec![s.to_owned()]
+    }
+
+    /// A store whose second write fails: models a keychain error mid-login.
+    struct FailSecondSet(MemoryStore, AtomicUsize);
+    impl SecretStore for FailSecondSet {
+        fn get(&self, n: &str) -> Result<Option<crate::SecretValue>, crate::SecretError> {
+            self.0.get(n)
+        }
+        fn set(&self, n: &str, v: &str) -> Result<(), crate::SecretError> {
+            if self.1.fetch_add(1, Ordering::SeqCst) == 1 {
+                return Err(crate::SecretError::Keyring("boom".into()));
+            }
+            self.0.set(n, v)
+        }
+        fn delete(&self, n: &str) -> Result<bool, crate::SecretError> {
+            self.0.delete(n)
+        }
+        fn list_names(&self) -> Result<Vec<String>, crate::SecretError> {
+            self.0.list_names()
+        }
+    }
+
+    #[test]
+    fn upsert_all_restores_old_values_when_a_later_write_fails() {
+        let store = Arc::new(FailSecondSet(MemoryStore::new(), AtomicUsize::new(100)));
+        let s = FillSecrets::in_memory(store.clone());
+        let pair = |u: &str, p: &str| {
+            vec![
+                ("login/x/username".to_owned(), u.to_owned()),
+                ("login/x/password".to_owned(), p.to_owned()),
+            ]
+        };
+        s.upsert_all(&pair("old-user", "old-pass"), &[], &[], false)
+            .unwrap();
+        assert!(matches!(
+            s.upsert_all(&pair("a", "b"), &[], &[], false),
+            Err(FillError::Exists(_))
+        ));
+        store.1.store(0, Ordering::SeqCst); // the next write is fine, the one after fails
+        assert!(
+            s.upsert_all(&pair("new-user", "new-pass"), &[], &[], true)
+                .is_err()
+        );
+        let get = |n: &str| store.0.get(n).unwrap().unwrap().expose().to_owned();
+        assert_eq!(get("fill/login/x/username"), "old-user");
+        assert_eq!(get("fill/login/x/password"), "old-pass");
     }
 
     #[test]

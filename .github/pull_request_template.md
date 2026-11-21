@@ -2,6 +2,8 @@
 
 <!-- What does this change, and why? Link the issue: Closes #123 -->
 
+<!-- Suggest a release notes label if it fits the primary change: bug for a fix, enhancement for a feature, or tests for test-only work. Maintainers apply the label before merging. -->
+
 ## How it was tested
 
 - [ ] `cargo fmt --all -- --check`

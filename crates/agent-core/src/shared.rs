@@ -220,6 +220,7 @@ pub struct Providers {
     prices: HashMap<String, ModelPrice>,
     /// Embedding backend of the K2 router (`None` = BM25 only).
     embedder: Option<Arc<dyn agent_router::ladder::Embedder>>,
+    decider: Option<Arc<crate::decider::TurnDecider>>,
     /// Masks secrets in every request sent through [`Self::pick`]ed providers.
     redactor: Option<SharedRedactor>,
 }
@@ -235,6 +236,7 @@ impl Providers {
             cli_ids: Vec::new(),
             prices: HashMap::new(),
             embedder: None,
+            decider: None,
             redactor: None,
         }
     }
@@ -258,6 +260,7 @@ impl Providers {
             cli_ids: Vec::new(),
             prices: HashMap::new(),
             embedder: None,
+            decider: None,
             redactor: None,
         }
     }
@@ -283,6 +286,12 @@ impl Providers {
     #[must_use]
     pub fn embedder(&self) -> Option<Arc<dyn agent_router::ladder::Embedder>> {
         self.embedder.clone()
+    }
+
+    /// The advisory pool configured on this provider snapshot, if usable.
+    #[must_use]
+    pub fn decider(&self) -> Option<Arc<crate::decider::TurnDecider>> {
+        self.decider.clone()
     }
 
     /// Record the catalog prices of `provider_id`'s models (those with a known
@@ -447,7 +456,6 @@ pub fn build_providers(
     }
     if built.is_empty() && cli_built.is_empty() {
         warn("setup required; run `bot setup` or `bot providers add`");
-        return Ok(Providers::unconfigured());
     }
     let mut providers = if built.is_empty() {
         Providers::unconfigured()
@@ -474,12 +482,15 @@ pub fn build_providers(
         providers = providers.with_default_id(def);
     }
     // K2 embeddings (decision ladder): Gemini when a Gemini key is configured.
-    if let Some(key) = gemini_key(&cfg, catalog, store) {
+    if !providers.setup_required()
+        && let Some(key) = gemini_key(&cfg, catalog, store)
+    {
         providers = providers.with_embedder(Arc::new(GeminiEmbedder::new(
             key,
             gemini::DEFAULT_EMBED_MODEL,
         )));
     }
+    providers.decider = crate::decider::build(data_dir, &providers, &cfg, catalog, store, warn);
     Ok(providers)
 }
 
@@ -491,15 +502,23 @@ fn gemini_key(cfg: &ProviderConfig, catalog: &Catalog, store: &dyn SecretStore) 
         if entry.kind != ProviderKind::Gemini {
             return None;
         }
-        let key = match (&s.key, &entry.auth) {
-            (Some(r), _) => secret_store::resolve(store, r)
-                .ok()
-                .map(|k| k.expose().to_string()),
-            (None, Auth::ApiKeyEnv(var)) => std::env::var(var).ok(),
-            (None, Auth::None) => None,
-        };
-        key.filter(|k| !k.trim().is_empty())
+        provider_key(s, entry, store)
     })
+}
+
+pub(crate) fn provider_key(
+    settings: &ProviderSettings,
+    entry: &ProviderEntry,
+    store: &dyn SecretStore,
+) -> Option<String> {
+    let key = match (&settings.key, &entry.auth) {
+        (Some(r), _) => secret_store::resolve(store, r)
+            .ok()
+            .map(|k| k.expose().to_string()),
+        (None, Auth::ApiKeyEnv(var)) => std::env::var(var).ok(),
+        (None, Auth::None) => None,
+    };
+    key.filter(|k| !k.trim().is_empty())
 }
 
 fn build_one(
@@ -568,9 +587,33 @@ pub(crate) fn redact_request(r: &SharedRedactor, req: &mut provider_catalog::Cha
 }
 
 pub(crate) enum Verdict {
-    Approved { scope: ApprovalScope, by: UserId },
-    Denied { by: UserId, reason: Option<String> },
-    Answered { answer: String },
+    Approved {
+        scope: ApprovalScope,
+        by: UserId,
+    },
+    Denied {
+        by: UserId,
+        reason: Option<String>,
+    },
+    Answered {
+        answer: String,
+    },
+    /// The owner's submit route stored the value of a `secret_request` (never carries it).
+    SecretStored,
+}
+
+/// What a parked `secret_request` asks for: names and flags only, never a value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SecretRequestInfo {
+    /// The run that asked.
+    pub run_id: RunId,
+    /// Entry name (after `fill/`).
+    pub name: String,
+    /// One value or username + password.
+    pub fields: protocol::event::SecretFields,
+    /// The bot asked to replace an existing entry; without it the submit route
+    /// must refuse a name that exists.
+    pub replace: bool,
 }
 
 pub(crate) struct Pending {
@@ -659,6 +702,8 @@ pub(crate) struct CtxState {
     pub closed: bool,
     pub seq: u64,
     pub todos: Vec<TodoItem>,
+    /// `secret_request` calls this run has made (asked or refused after the card tests).
+    pub secret_requests: u32,
 }
 
 /// Per-run resolved computer placement fixed at run start.
@@ -903,6 +948,8 @@ pub(crate) struct Shared {
     pub events: broadcast::Sender<StreamItem>,
     pub runs: Mutex<HashMap<RunId, Arc<RunCtx>>>,
     pub pending: Mutex<HashMap<ToolCallId, Pending>>,
+    /// `secret_request` calls waiting for the owner's form (see `approval.rs`).
+    pub secret_requests: Mutex<HashMap<ToolCallId, SecretRequestInfo>>,
     pub grants: Mutex<Grants>,
     pub active: Mutex<HashMap<ChatId, RunId>>,
     pub queued: Mutex<HashMap<ChatId, VecDeque<(String, &'static str)>>>,
@@ -1730,6 +1777,7 @@ impl Shared {
                 closed: false,
                 seq,
                 todos: Vec::new(),
+                secret_requests: 0,
             }),
             taint: Mutex::new(taint),
             control_grants: Mutex::new(Vec::new()),
@@ -2133,6 +2181,7 @@ fn needs_barrier(event: &Event) -> bool {
             | Event::ToolCallApproved(_)
             | Event::ToolCallDenied(_)
             | Event::QuestionAsked(_)
+            | Event::SecretRequested(_)
             | Event::ControlRequested(_)
             | Event::SubagentStarted(_)
             | Event::SubagentFinished(_)

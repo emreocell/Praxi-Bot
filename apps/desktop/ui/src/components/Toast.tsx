@@ -8,9 +8,12 @@ import {
   useRef,
   useState
 } from "react";
+import { CircleAlert, CircleCheck, Info } from "lucide-react";
+import { toastDuration, type ToastTone } from "../lib/toastTiming";
 import styles from "./Toast.module.css";
 
-export type ToastTone = "info" | "success" | "danger";
+export type { ToastTone };
+
 
 interface ToastItem {
   id: number;
@@ -22,7 +25,8 @@ interface ToastApi {
   show: (text: string, tone?: ToastTone) => void;
 }
 
-const TOAST_MS = 4000;
+const ICONS = { info: Info, success: CircleCheck, danger: CircleAlert } as const;
+
 
 const Ctx = createContext<ToastApi>({ show: () => {} });
 
@@ -42,7 +46,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const timer = window.setTimeout(() => {
       timers.current.delete(timer);
       setItems((prev) => prev.filter((i) => i.id !== id));
-    }, TOAST_MS);
+    }, toastDuration(tone));
     timers.current.add(timer);
   }, []);
 
@@ -66,8 +70,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             key={i.id}
             className={[styles.toast, styles[i.tone]].join(" ")}
             data-testid="toast"
+            role={i.tone === "danger" ? "alert" : undefined}
           >
-            {i.text}
+            {(() => {
+              const Icon = ICONS[i.tone];
+              return <Icon className={styles.icon} aria-hidden="true" />;
+            })()}
+            <span>{i.text}</span>
           </div>
         ))}
       </div>

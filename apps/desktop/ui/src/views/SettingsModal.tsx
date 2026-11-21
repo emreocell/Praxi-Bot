@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Modal } from "../components/Modal";
 import { SettingGroup } from "../components/SettingsUi";
 import { matchesQuery } from "../lib/searchText";
+import { SETTINGS_NAV_GROUPS } from "../lib/settingsNav";
 import { aiCards } from "./settings/AiCards";
 import { appearanceCards } from "./settings/AppearanceCards";
 import { computerCards } from "./settings/ComputerCards";
@@ -131,41 +132,45 @@ export function SettingsModal({
           aria-label={t("settingsModal.search")}
           onChange={(e) => setQuery(e.target.value)}
         />
-        </div><div className={styles.navList}>
-          {SETTINGS_SECTIONS.map((s) => {
-            const SectionIcon = SECTION_ICONS[s];
-            const dim = searching && !sectionsWithHits.has(s);
-            return (
-              <button
-                key={s}
-                type="button"
-                data-testid={`settings-nav-${s}`}
-                disabled={dim}
-                aria-current={!searching && s === section ? "page" : undefined}
-                className={[
-                  styles.navItem,
-                  !searching && s === section ? styles.navActive : ""
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                onClick={() => {
-                  setQuery("");
-                  setSection(s);
-                }}
-              >
-                <SectionIcon />{t(`settingsModal.nav.${s}`)}
-              </button>
-            );
-          })}
+        </div>
+        <div className={styles.navScroll}>
+          {SETTINGS_NAV_GROUPS.map((g) => (
+            <div key={g.id} className={styles.navList} role="group" aria-label={t(`settingsModal.navGroups.${g.id}`)}>
+              <span className={styles.navGroupLabel} aria-hidden="true">{t(`settingsModal.navGroups.${g.id}`)}</span>
+              {g.sections.map((s) => {
+                const SectionIcon = SECTION_ICONS[s];
+                const dim = searching && !sectionsWithHits.has(s);
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    data-testid={`settings-nav-${s}`}
+                    disabled={dim}
+                    aria-current={!searching && s === section ? "page" : undefined}
+                    className={[styles.navItem, !searching && s === section ? styles.navActive : ""].filter(Boolean).join(" ")}
+                    onClick={() => {
+                      setQuery("");
+                      setSection(s);
+                    }}
+                  >
+                    <SectionIcon />{t(`settingsModal.nav.${s}`)}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
       </nav>
       <div className={styles.content}>
         <header className={styles.header}>
-          <h2 className={styles.title}>
-            {searching
-              ? t("settingsModal.results")
-              : t(`settingsModal.nav.${section}`)}
-          </h2>
+          <div className={styles.headerText}>
+            <h2 className={styles.title}>
+              {searching
+                ? t("settingsModal.results")
+                : t(`settingsModal.nav.${section}`)}
+            </h2>
+            {searching ? null : <p className={styles.subtitle}>{t(`settingsModal.sectionDesc.${section}`)}</p>}
+          </div>
           <button
             type="button"
             className={styles.close}
