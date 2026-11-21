@@ -471,14 +471,14 @@ const MAX_BROWSERS: usize = 3;
 
 /// The bot of the server a request is for (`bot` in the request).
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Caller {
-    id: String,
-    name: String,
+pub(crate) struct Caller {
+    pub(crate) id: String,
+    pub(crate) name: String,
 }
 
 /// The calling bot of a request: `None` when the request names none (a run
 /// placed on this computer); a malformed one is refused.
-fn caller_of(params: &Value) -> Result<Option<Caller>, String> {
+pub(crate) fn caller_of(params: &Value) -> Result<Option<Caller>, String> {
     let Some(v) = params.get(CALLER_KEY) else {
         return Ok(None);
     };
@@ -1518,7 +1518,7 @@ fn plain_line(text: &str, max: usize) -> String {
 }
 
 /// Keys that move or confirm without typing a character (no modifiers).
-fn is_navigation_key(spec: &str) -> bool {
+pub(crate) fn is_navigation_key(spec: &str) -> bool {
     matches!(
         spec.to_ascii_lowercase().as_str(),
         "tab"
@@ -1573,7 +1573,7 @@ async fn tab_line(driver: &Arc<dyn BrowserDriver>, n: u64) -> String {
 }
 
 /// Text a card can show in full: not too long, nothing invisible.
-fn complete_text(text: &str) -> Result<(), String> {
+pub(crate) fn complete_text(text: &str) -> Result<(), String> {
     if text.chars().count() > MAX_PAYLOAD_CHARS {
         return Err(format!(
             "the text is longer than {MAX_PAYLOAD_CHARS} characters, so it cannot be shown completely and was refused"
@@ -1590,7 +1590,7 @@ fn complete_text(text: &str) -> Result<(), String> {
 
 /// Run one browser operation on `driver` and shape the answer as the wire
 /// carries it.
-async fn run_browser_op(
+pub(crate) async fn run_browser_op(
     driver: &Arc<dyn BrowserDriver>,
     op: &str,
     params: &Value,
