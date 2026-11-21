@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use builtin_tools::{QUESTION_CARD_KIND, TODO_LIST_KIND};
+use builtin_tools::{QUESTION_CARD_KIND, SECRET_REQUEST_CARD_KIND, SecretCard, TODO_LIST_KIND};
 use futures::StreamExt;
 use permission_engine::{Decision, Limits};
 use protocol::PermissionCategory;
@@ -281,7 +281,7 @@ impl TurnExecutor {
         Ok(Some(spec))
     }
 
-    fn first_user_text(&self, ctx: &RunCtx, run: &Run) -> Result<String, ExecError> {
+    pub(crate) fn first_user_text(&self, ctx: &RunCtx, run: &Run) -> Result<String, ExecError> {
         let messages = self.sh.storage.list_messages(ctx.chat_id).map_err(xe)?;
         // A mention run (first or later bot, owner bot included) is bound to the
         // exact user message that carried the mentions.
@@ -1749,6 +1749,10 @@ impl TurnExecutor {
                     ),
                 }
             }
+            Some((SECRET_REQUEST_CARD_KIND, data)) => match SecretCard::from_part(data) {
+                Some(card) => self.sh.request_secret(ctx, call, &card).await,
+                None => ("secret_request: malformed request.".to_owned(), true),
+            },
             _ => (render_output(out), false),
         }
     }

@@ -29,6 +29,12 @@ pub const DEFAULT_SCHEDULE_APPROVAL_TIMEOUT: Duration = Duration::from_secs(30 *
 /// Default [`LoopConfig::approval_timeout`]: 10 minutes.
 pub const DEFAULT_APPROVAL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
+/// Default [`LoopConfig::secret_request_timeout`]: 5 minutes.
+pub const DEFAULT_SECRET_REQUEST_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+/// Default [`LoopConfig::max_secret_requests_per_run`].
+pub const DEFAULT_MAX_SECRET_REQUESTS_PER_RUN: u32 = 3;
+
 /// Per-turn safety limits.
 #[derive(Debug, Clone)]
 pub struct Guards {
@@ -358,6 +364,17 @@ pub struct LoopConfig {
     /// denied as `expired` and the run carries on (default [`DEFAULT_APPROVAL_TIMEOUT`]; zero =
     /// wait without limit).
     pub approval_timeout: Duration,
+    /// The owner's global switch for `secret_request`: with `false` every request is
+    /// refused (default `false` until the desktop form ships; the tool is also not
+    /// offered, see `BuiltinConfig`).
+    pub secret_requests: bool,
+    /// Requests one run may make before further ones are refused (default
+    /// [`DEFAULT_MAX_SECRET_REQUESTS_PER_RUN`]). A refused or cancelled request counts.
+    pub max_secret_requests_per_run: u32,
+    /// How long a `secret_request` form waits for the owner before it is cancelled
+    /// (default [`DEFAULT_SECRET_REQUEST_TIMEOUT`]); never longer than `approval_timeout`
+    /// when that is set.
+    pub secret_request_timeout: Duration,
     /// How long a run configured with `runtime.computer = "pc"` waits for a
     /// paired PC node before failing (default [`DEFAULT_WAIT_FOR_PC_TIMEOUT`]).
     pub wait_for_pc_timeout: Duration,
@@ -390,6 +407,9 @@ impl Default for LoopConfig {
             knowledge_decider: None,
             schedule_approval_timeout: DEFAULT_SCHEDULE_APPROVAL_TIMEOUT,
             approval_timeout: DEFAULT_APPROVAL_TIMEOUT,
+            secret_requests: false,
+            max_secret_requests_per_run: DEFAULT_MAX_SECRET_REQUESTS_PER_RUN,
+            secret_request_timeout: DEFAULT_SECRET_REQUEST_TIMEOUT,
             wait_for_pc_timeout: DEFAULT_WAIT_FOR_PC_TIMEOUT,
             journal: JournalSlot::default(),
         }

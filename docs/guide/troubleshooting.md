@@ -27,12 +27,24 @@ error.
   configured host that is offline, unpaired, or a daemon without peer
   networking is reported as a problem. A coding CLI whose sign-in could not
   be confirmed is a warning, never "ready".
+- **Host display (`host_display`)** on an always-on Linux host checks the
+  requirements in order and reports the first missing piece instead of a generic
+  warning: whether `DISPLAY` is set, whether the display answers (and whether
+  `XAUTHORITY` is set and readable), and whether a usable non-snap browser is
+  present (`BOT_BROWSER_PATH` or `/opt/praxi-browser/chrome`). On a systemd host,
+  run `sudo praxi doctor` so the check runs with the service's own user,
+  environment (`/etc/praxi/praxi.env`), and mount namespace rather than your
+  interactive shell.
+- **Free RAM (`free_ram`)** on Linux reads `MemAvailable` from `/proc/meminfo`
+  and warns below 512 MiB (suggesting lowering `limits.max_computer_runs` in
+  `host.toml`).
 - The daemon routes behind the page are `GET /v1/doctor`, `POST
   /v1/doctor/repair/{id}` and `GET /v1/doctor/report` (bearer token
   required). They are local to the computer: paired phones and desktops
   cannot call them.
-  `bot doctor` runs more checks that need a terminal (port probe, browser
-  launch, `--online` connection tests).
+  `bot doctor` runs more checks that need a terminal (port probe, bounded
+  headless browser launch with a 5-second startup / 8-second overall timeout,
+  `--online` connection tests).
 
 ## The always-on host
 
@@ -143,6 +155,25 @@ a paid key or another provider. See
 
 With the encrypted-file backend the passphrase comes from `BOT_SECRETS_PASSPHRASE`
 or a prompt. Force the OS keychain with `--secrets-backend keyring` if you have one.
+
+## Browser does not open or times out
+
+- **Bounded startup and session waits**: `browser_open` bounds starting the
+  browser (spawning Chrome/Chromium, waiting for `DevToolsActivePort`, and
+  opening the first tab) to **40 seconds** per attempt, and waiting on another
+  browser call holding the session to **45 seconds**. If it times out, do not
+  loop `browser_open`; run `bot doctor` on that computer (`sudo praxi doctor` on
+  a Linux host) to see what is missing.
+- **Early Chrome exit messages**: If the browser process exits during startup,
+  the error includes the last lines of Chrome's output (`Browser said: ...`)
+  and highlights known causes such as a missing X display, missing or
+  unreadable `XAUTHORITY`, a blocked Chrome sandbox (missing AppArmor profile on
+  Ubuntu 24.04), or missing shared libraries.
+- **Snap browsers**: Snap-wrapped Chromium/Chrome is unsupported under the
+  hardened Linux service. Install a non-snap browser or set `BOT_BROWSER_PATH`.
+- **Slow Xvfb startup on Linux**: If probing the X11 display fails during a
+  busy boot, the daemon re-probes after **15 seconds** instead of staying stuck
+  in headless mode until restart.
 
 ## Windows SmartScreen blocks the installer
 

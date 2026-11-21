@@ -140,6 +140,7 @@ impl AgentLoop {
                 spawn_gate: Mutex::new(()),
                 skills: OnceLock::new(),
                 fill_secrets: OnceLock::new(),
+                secret_requests: Mutex::new(HashMap::new()),
                 skill_hints: RwLock::new(None),
                 router: crate::router::Router::default(),
                 directives: Mutex::new(HashMap::new()),
@@ -1424,6 +1425,52 @@ impl AgentLoop {
             .send(Verdict::Answered {
                 answer: answer.to_owned(),
             })
+            .map_err(|_| LoopError::NoPendingApproval(call_id))
+    }
+
+    /// The form a parked `secret_request` shows (names and flags, never a value).
+    /// `None` when no request waits under `call_id`.
+    #[must_use]
+    pub fn secret_request(&self, call_id: ToolCallId) -> Option<crate::SecretRequestInfo> {
+        self.sh.secret_requests.lock().get(&call_id).cloned()
+    }
+
+    /// Claim a waiting `secret_request` for submission: exactly one caller gets
+    /// it (a second submit or a cancel then finds nothing). Put it back with
+    /// [`Self::restore_secret_request`] if storing failed.
+    #[must_use]
+    pub fn claim_secret_request(&self, call_id: ToolCallId) -> Option<crate::SecretRequestInfo> {
+        self.sh.secret_requests.lock().remove(&call_id)
+    }
+
+    /// Undo [`Self::claim_secret_request`] after a failed store, so the owner can
+    /// fix the form and submit again.
+    pub fn restore_secret_request(&self, call_id: ToolCallId, info: crate::SecretRequestInfo) {
+        if self.sh.pending.lock().contains_key(&call_id) {
+            self.sh.secret_requests.lock().insert(call_id, info);
+        }
+    }
+
+    /// End a `secret_request`: `stored` after the submit route wrote the value to
+    /// the vault, otherwise cancelled. The model learns only which one.
+    ///
+    /// # Errors
+    /// [`LoopError::NoPendingApproval`] if the request already ended.
+    pub fn finish_secret_request(
+        &self,
+        call_id: ToolCallId,
+        stored: bool,
+        by: UserId,
+    ) -> Result<()> {
+        self.sh.secret_requests.lock().remove(&call_id);
+        let verdict = if stored {
+            Verdict::SecretStored
+        } else {
+            Verdict::Denied { by, reason: None }
+        };
+        self.take_pending(call_id)?
+            .tx
+            .send(verdict)
             .map_err(|_| LoopError::NoPendingApproval(call_id))
     }
 

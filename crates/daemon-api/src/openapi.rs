@@ -36,6 +36,7 @@ use crate::mcp_server;
 use crate::memory;
 use crate::peer;
 use crate::routes;
+use crate::secret_request_routes;
 use crate::skill_hub;
 use crate::skill_management;
 use crate::skills;
@@ -135,6 +136,8 @@ impl Modify for Security {
         fill_routes::list_fill_secrets,
         fill_routes::revoke_fill_grant,
         fill_routes::update_fill_secret,
+        secret_request_routes::cancel_secret_request,
+        secret_request_routes::submit_secret_request,
         host::activate,
         host::invite,
         host::revoke,
@@ -440,6 +443,8 @@ impl Modify for Security {
         fill_routes::FillGrantDto,
         fill_routes::FillSecretDto,
         fill_routes::UpdateFillSecret,
+        secret_request_routes::SecretRequestAnswer,
+        secret_request_routes::SubmitSecretRequest,
         host::ActivateInput,
         host::HostAdminInput,
         host::HostConfig,

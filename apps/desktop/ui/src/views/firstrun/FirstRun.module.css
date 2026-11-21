@@ -636,3 +636,11 @@
     animation: none;
   }
 }
+
+
+/* c451: visible step counter, badge that wraps instead of clipping, soft entrance of each screen. */
+.eyebrow { margin: var(--space-0); font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); letter-spacing: var(--letter-spacing-wide); text-transform: uppercase; color: var(--color-text-muted); }
+.levelHead { flex-wrap: wrap; }
+.body { animation: frEnter var(--motion-duration-normal) var(--motion-easing-standard); }
+@keyframes frEnter { from { opacity: 0; transform: translateY(var(--space-2)); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .body { animation: none; } }

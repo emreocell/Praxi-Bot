@@ -521,6 +521,7 @@ function reduce(
     case "control_state_changed":
     case "view_targets_changed":
     case "mcp_server_changed":
+    case "secret_requested": // the owner card is a later slice (#422); no value rides this event
       return state;
   }
 }

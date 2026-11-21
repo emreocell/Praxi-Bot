@@ -28,6 +28,23 @@ After a restart, unresolved occurrences are recorded as missed or interrupted.
 Automatic replay would risk starting the same task twice because the executor
 does not currently support a durable idempotency key.
 
+## Try a phrase
+
+From the workspace root, run the standalone example to inspect how the
+English/Turkish parser interprets phrases **without** starting a daemon or
+creating a real schedule:
+
+```sh
+cargo run -p scheduler --example parse_schedule -- "every weekday at 8:15am" "in 30 minutes" "not a schedule"
+cargo run -p scheduler --example parse_schedule -- --tz Europe/Istanbul "her gün 09:00" "2 saat sonra"
+```
+
+Each argument is evaluated separately: matching phrases print their
+`ScheduleSpec` (for example `Cron` or `At`), and unsupported phrases print
+`no match`. The `--tz` option supplies an IANA timezone name for resulting
+cron expressions; relative one-off times are anchored to the current clock.
+Run the example with `--help` to see its usage.
+
 ## Tests
 
 From the workspace root, run `cargo test -p scheduler --locked`. The tests use

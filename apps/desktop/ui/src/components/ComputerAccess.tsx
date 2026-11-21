@@ -8,7 +8,8 @@ import { SwitchQueue } from "../lib/computerSwitchQueue";
 import { humanLine } from "../lib/humanError";
 import { useDaemon } from "../state/DaemonContext";
 import { Modal } from "./Modal";
-import { SettingRow, Switch } from "./SettingsUi";
+import { ServerOff } from "lucide-react";
+import { EmptyNote, SettingRow, Switch } from "./SettingsUi";
 import styles from "./ComputerAccess.module.css";
 
 /** The owner key of this app's daemon (Tauri command, main window only), sent on owner-only routes. */
@@ -59,7 +60,7 @@ export function ComputerAccessCard() {
   );
   const hosts = hostList?.hosts ?? [];
   if (hosts.length === 0) {
-    return <p className={styles.hint}>{t("computerAccess.noServer")}</p>;
+    return <EmptyNote icon={<ServerOff />}>{t("computerAccess.noServer")}</EmptyNote>;
   }
   const change = (h: (typeof hosts)[number], patch: Partial<ComputerSwitches>) => {
     setError(null);

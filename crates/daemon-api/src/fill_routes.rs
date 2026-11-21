@@ -127,7 +127,7 @@ pub struct CreateFillGrant {
     pub origin: String,
 }
 
-fn map(e: &FillError) -> ApiError {
+pub(crate) fn map(e: &FillError) -> ApiError {
     match e {
         FillError::InvalidName(_)
         | FillError::Reserved(_)
@@ -135,13 +135,16 @@ fn map(e: &FillError) -> ApiError {
         | FillError::Invalid(_) => ApiError::bad_request(e.to_string()),
         FillError::Unknown(_) => ApiError::not_found(e.to_string()),
         FillError::NotAllowed(_) => ApiError::forbidden(e.to_string()),
-        FillError::MissingValue(_) => ApiError::conflict(e.to_string()),
+        FillError::Exists(_) | FillError::MissingValue(_) => ApiError::conflict(e.to_string()),
         FillError::Unavailable(_) => ApiError::unavailable(e.to_string()),
     }
 }
 
 /// The service, for the local owner only.
-fn service(s: &AppState, actor: &Actor) -> Result<std::sync::Arc<FillSecrets>, ApiError> {
+pub(crate) fn service(
+    s: &AppState,
+    actor: &Actor,
+) -> Result<std::sync::Arc<FillSecrets>, ApiError> {
     if !actor.local {
         return Err(ApiError::forbidden(
             "fill secrets are managed by the local owner from this computer",
@@ -152,7 +155,7 @@ fn service(s: &AppState, actor: &Actor) -> Result<std::sync::Arc<FillSecrets>, A
 }
 
 /// Audit record before a mutation. No record, no change.
-fn audit(
+pub(crate) fn audit(
     s: &AppState,
     actor: &Actor,
     action: &str,
@@ -165,7 +168,7 @@ fn audit(
 }
 
 /// Run blocking store / file work off the async threads.
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, FillError> + Send + 'static,
 ) -> Result<T, ApiError> {
     tokio::task::spawn_blocking(f)

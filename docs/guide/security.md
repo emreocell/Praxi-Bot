@@ -275,6 +275,20 @@ model, each of them asks, once, with the full command or input on the card. A
 standing grant, the read shortcut, a Full preset and `allow_egress_after_reads`
 do not cover that ask. Shell, script and launch always ask, on every platform.
 
+**Host-status command exception (always-on host only):** On an always-on host
+running on its own computer (`host` or `browser`, never the user's PC), a narrow
+set of fixed read-only status commands (`uptime`, `whoami`, `hostname`, `uname`,
+`date`, `df`, `free`, `nproc`, `id`) with an allow-listed short-flag cluster and
+no arguments (at most 3 space-separated tokens, 64 characters max, no paths,
+URLs, pipes, redirects, quotes, variables, substitutions, custom `cwd`,
+non-`sh`/`bash` shell, or value-setting flags like `date -s`) is decided from
+the command text alone: it neither taints a clean run as untrusted nor asks
+under the executor gate in a tainted run. This is safe because these commands
+cannot read user or outsider-written files, accept free-text targets, modify
+state, or send data out. Any variation outside that exact shape—and all
+policy-level asks in Ask mode (`read-and-draft`) and the floors—remain
+unchanged.
+
 Desktop input has one exception, and only where the computer can name the
 program it is typing into: the **run-scoped control grant**. Read what it is
 before you tick it: it is narrow, but it is **a heuristic, not a guarantee**.
@@ -475,6 +489,29 @@ text in that chat (storing it as a secret and removing it from the message is a
 follow-up UI step), and ordinary `text` fills are never masked: what the
 assistant typed is what you see. The memory holding the value is not excluded
 from crash dumps or swap.
+
+- **Approvals stay click-only in voice call mode.** Voice call mode transcribes
+  microphone audio in memory only (never written to disk or logged), sends the
+  text as a normal chat message, and disables microphone events while a run waits
+  for approval; spoken *"yes, approve"* never approves anything. See
+  [Voice call mode](voice-call.md).
+- **A paired server used as a browser computer (`server:<key>`) is sandboxed.**
+  The server accepts `pc.browser` calls only from its paired administrator
+  desktop (re-checking the pairing file on every request), blocks loopback,
+  link-local/metadata, and private-network URLs (including redirects and
+  subresources), refuses `browser_eval` and password-field input, redacts
+  returned text, and blocks execution if the server audit log cannot be written.
+  Local approvals and grants are scoped to `server:<key>`. See
+  [Using a paired server as a bot's browser computer](remote-host.md#using-a-paired-server-as-a-bots-browser-computer).
+
+### Letting the assistant ask for a credential (experimental, off by default)
+
+The `secret_request` tool lets the assistant ask you to type a username/password
+into a form in the desktop app, so the value never passes through the chat. The
+form is not in the app yet, so the tool is **not offered** unless you switch it
+on: add `[experimental]` / `secret_request = true` to `host.toml` in the data
+directory (or start the daemon with `BOT_SECRET_REQUESTS=on`; `off` forces it
+off). `praxi doctor` shows the current state. Leave it off for now.
 
 ## Prompt-injection evaluation pack
 

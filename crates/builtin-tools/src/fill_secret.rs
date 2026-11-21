@@ -75,7 +75,8 @@ pub(crate) fn refused(e: &FillError) -> ToolError {
         FillError::InvalidName(_)
         | FillError::Reserved(_)
         | FillError::InvalidEntry(_)
-        | FillError::Invalid(_) => ToolError::InvalidInput(e.to_string()),
+        | FillError::Invalid(_)
+        | FillError::Exists(_) => ToolError::InvalidInput(e.to_string()),
         _ => ToolError::Execution(e.to_string()),
     }
 }

@@ -208,7 +208,8 @@ fn starts_chat_work(method: &Method, check_path: &str) -> bool {
 /// for every method (a device must never create a secret, widen an allow-list
 /// or add a standing grant). `crate::fill_routes::is_fill_path` matches them on
 /// the decoded, slash-normalised path.
-pub const PEER_DENIED_FILL_PREFIXES: &[&str] = &["/v1/fill-secrets", "/v1/fill-grants"];
+pub const PEER_DENIED_FILL_PREFIXES: &[&str] =
+    &["/v1/fill-secrets", "/v1/fill-grants", "/v1/secret-requests"];
 
 /// MCP server management starts programs and names host secrets: a mutation
 /// is an action of the local user at this host, never of a paired peer.
