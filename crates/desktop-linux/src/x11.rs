@@ -63,7 +63,9 @@ const X11_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 pub fn has_x11_display() -> bool {
     static CACHE: std::sync::Mutex<crate::pure::ProbeCache> =
         std::sync::Mutex::new(crate::pure::ProbeCache::new());
-    let mut cache = CACHE.lock().unwrap_or_else(|err| err.into_inner());
+    let mut cache = CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     cache.get(std::time::Instant::now(), || {
         ensure_x11_session().is_ok()
             && probe_thread(Duration::from_secs(1), || x11rb::connect(None).is_ok())

@@ -110,7 +110,7 @@ impl LinuxBackend {
     ///
     /// Fails if the X11 server cannot be reached or the window ID is invalid.
     pub async fn activate_window(&self, window_id: u64) -> Result<(), DesktopError> {
-        let res = bounded("activate_window", X11_LIMIT, async move {
+        bounded("activate_window", X11_LIMIT, async move {
             match tokio::task::spawn_blocking(move || x11::activate_window(window_id)).await {
                 Ok(result) => result,
                 Err(e) => Err(DesktopError::Internal(format!("activate_window task: {e}"))),
@@ -118,7 +118,7 @@ impl LinuxBackend {
         })
         .await?;
         self.notify_live_view();
-        Ok(res)
+        Ok(())
     }
 }
 

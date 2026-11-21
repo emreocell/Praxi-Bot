@@ -33,6 +33,50 @@ fn a11y_err<E: std::fmt::Display>(ctx: &str) -> impl FnOnce(E) -> DesktopError +
     move |e| DesktopError::Accessibility(format!("{ctx}: {e}"))
 }
 
+/// Merge the X11 window (if any) with the AT-SPI frame into the reported window.
+fn resolve_window(
+    x11_win: Option<WindowInfo>,
+    frame_title: String,
+    frame_bounds: Option<Rect>,
+    axis: pure::AxisMap,
+) -> Res<WindowInfo> {
+    if let Some(mut w) = x11_win {
+        if w.title.is_empty() && !frame_title.is_empty() {
+            w.title = frame_title;
+        }
+        if (w.bounds.width <= 1.0 || w.bounds.height <= 1.0)
+            && let Some(b) = frame_bounds
+        {
+            w.bounds = axis.map_rect(b);
+        }
+        return Ok(w);
+    }
+    let bounds = if let Some(b) = frame_bounds {
+        axis.map_rect(b)
+    } else {
+        match x11::screen_size() {
+            Ok((w, h)) => Rect {
+                x: 0.0,
+                y: 0.0,
+                width: f64::from(w),
+                height: f64::from(h),
+            },
+            Err(err) => {
+                return Err(DesktopError::Accessibility(format!(
+                    "no window geometry and the X screen size is unknown ({err}); refusing to assume 1920x1080"
+                )));
+            }
+        }
+    };
+    Ok(WindowInfo {
+        id: 0,
+        title: frame_title,
+        pid: 0,
+        bounds,
+        focused: true,
+    })
+}
+
 #[derive(Debug, Clone)]
 struct Retained {
     index: u32,
@@ -99,45 +143,7 @@ impl AtspiWorker {
         self.axis = axis;
         self.window_id = x11_win.as_ref().map_or(0, |w| w.id);
 
-        let window = match x11_win {
-            Some(mut w) => {
-                if w.title.is_empty() && !frame_title.is_empty() {
-                    w.title = frame_title;
-                }
-                if (w.bounds.width <= 1.0 || w.bounds.height <= 1.0)
-                    && let Some(b) = frame_bounds
-                {
-                    w.bounds = axis.map_rect(b);
-                }
-                w
-            }
-            None => {
-                let bounds = if let Some(b) = frame_bounds {
-                    axis.map_rect(b)
-                } else {
-                    match x11::screen_size() {
-                        Ok((w, h)) => Rect {
-                            x: 0.0,
-                            y: 0.0,
-                            width: f64::from(w),
-                            height: f64::from(h),
-                        },
-                        Err(err) => {
-                            return Err(DesktopError::Accessibility(format!(
-                                "no window geometry and the X screen size is unknown ({err}); refusing to assume 1920x1080"
-                            )));
-                        }
-                    }
-                };
-                WindowInfo {
-                    id: 0,
-                    title: frame_title,
-                    pid: 0,
-                    bounds,
-                    focused: true,
-                }
-            }
-        };
+        let window = resolve_window(x11_win, frame_title, frame_bounds, axis)?;
 
         let walked = walk_subtree(conn, frame_ref).await;
         if walked.is_empty() {
