@@ -901,6 +901,33 @@ pub fn check_process_guard(dir: &Path) -> Check {
     }
 }
 
+/// `safe mode`: whether the daemon runs with tools, schedules, channels, MCP servers
+/// and apps off. Safe mode is a recovery state, so it is a warning, never a failure.
+#[must_use]
+pub fn check_safe_mode(active: bool) -> Check {
+    const ID: &str = "safe_mode";
+    const N: &str = "safe mode";
+    if active {
+        Check::warn(
+            ID,
+            N,
+            "ON: tools, schedules, channels, MCP servers and apps are off; chat answers without tools",
+            "fix the problem, then restart the daemon without --safe (and without BOT_SAFE_MODE); nothing was deleted or changed",
+        )
+    } else {
+        Check::ok(ID, N, "off")
+    }
+}
+
+/// The environment switch for safe mode (`BOT_SAFE_MODE`): `1`, `true`, `on` or `yes`.
+#[must_use]
+pub fn safe_mode_from_env(value: Option<&str>) -> bool {
+    matches!(
+        value.map(|v| v.trim().to_ascii_lowercase()).as_deref(),
+        Some("1" | "true" | "on" | "yes")
+    )
+}
+
 /// `schedule tools`: whether `schedule.toml` is usable.  A broken one switches
 /// the bots' schedule tools off (they never fall back to looser defaults).
 #[must_use]

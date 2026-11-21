@@ -72,11 +72,19 @@ fn wait_for_exit(child: &mut Child) -> std::process::ExitStatus {
 fn start_daemon(
     data: &std::path::Path,
 ) -> (Daemon, SocketAddr, Instant, std::thread::JoinHandle<String>) {
+    start_daemon_with(data, &[])
+}
+
+fn start_daemon_with(
+    data: &std::path::Path,
+    extra: &[&str],
+) -> (Daemon, SocketAddr, Instant, std::thread::JoinHandle<String>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_bot"));
     command
         .arg("--data-dir")
         .arg(data)
         .args(["--secrets-backend", "file", "--port", "0", "serve"])
+        .args(extra)
         .env("BOT_SECRETS_PASSPHRASE", "first-run-smoke-test-only")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -88,6 +96,7 @@ fn start_daemon(
         "BOT_PORT",
         "BOT_URL",
         "BOT_SECRETS_BACKEND",
+        "BOT_SAFE_MODE",
     ] {
         command.env_remove(name);
     }
@@ -213,4 +222,74 @@ fn first_run_daemon_reports_setup_required_as_up_and_stops_cleanly() {
     assert_eq!(status, 401, "protected route with a wrong token");
 
     stop_cleanly(daemon, addr, reader);
+}
+
+/// Safe mode on the real binary: the daemon says so, and the configuration the owner had
+/// (MCP servers, schedule limits) is left byte for byte as it was.
+#[test]
+fn safe_mode_daemon_reports_it_and_leaves_the_configuration_untouched() {
+    let data = tempfile::tempdir().unwrap();
+    let kept = [
+        (
+            "mcp.toml",
+            "# owner's servers, keep me exactly
+",
+        ),
+        (
+            "schedule.toml",
+            "max_per_bot = 3
+",
+        ),
+    ];
+    for (name, text) in kept {
+        std::fs::write(data.path().join(name), text).unwrap();
+    }
+    let (daemon, addr, deadline, reader) = start_daemon_with(data.path(), &["--safe"]);
+    let body = loop {
+        match get(addr, "/v1/health", None) {
+            Ok((200, body)) => break body,
+            other => {
+                assert!(
+                    Instant::now() < deadline,
+                    "health never answered: {other:?}"
+                );
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    };
+    let health: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(health["safe_mode"], true, "{body}");
+    assert_eq!(health["channels_active"], false, "{body}");
+    stop_cleanly(daemon, addr, reader);
+    for (name, text) in kept {
+        assert_eq!(
+            std::fs::read_to_string(data.path().join(name)).unwrap(),
+            text,
+            "{name} must not change in safe mode"
+        );
+    }
+}
+
+#[test]
+fn safe_mode_cannot_be_combined_with_peer_networking() {
+    let data = tempfile::tempdir().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_bot"))
+        .arg("--data-dir")
+        .arg(data.path())
+        .args([
+            "--secrets-backend",
+            "file",
+            "--port",
+            "0",
+            "serve",
+            "--safe",
+            "--peer",
+        ])
+        .env("BOT_SECRETS_PASSPHRASE", "first-run-smoke-test-only")
+        .env_remove("BOT_SAFE_MODE")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("safe mode cannot be combined"));
 }

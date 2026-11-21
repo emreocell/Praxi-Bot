@@ -15724,6 +15724,10 @@
             "$ref": "#/components/schemas/HostInfo",
             "description": "Capabilities of this host; probes never launch a browser."
           },
+          "safe_mode": {
+            "type": "boolean",
+            "description": "`true` when the daemon was started in safe mode: no tools, no schedules, no\nchannels, no MCP servers or apps. Fixed for the life of the process."
+          },
           "startup": {
             "$ref": "#/components/schemas/StartupPhase",
             "description": "Background startup: `starting` while leadership is verified and components\nstart, `ready` once finished, `degraded` when a component failed to start."

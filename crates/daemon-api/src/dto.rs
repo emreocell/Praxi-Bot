@@ -37,6 +37,10 @@ pub struct Health {
     /// Why startup is `degraded`; fixed text, no secrets or paths.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub startup_reason: Option<String>,
+    /// `true` when the daemon was started in safe mode: no tools, no schedules, no
+    /// channels, no MCP servers or apps. Fixed for the life of the process.
+    #[serde(default)]
+    pub safe_mode: bool,
 }
 
 fn default_ready() -> crate::host::StartupPhase {

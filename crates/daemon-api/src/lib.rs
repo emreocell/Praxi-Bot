@@ -142,6 +142,10 @@ pub struct DaemonConfig {
     /// Most concurrent `GET /v1/events` streams (each holds replay buffers);
     /// further requests get `503` until one closes.
     pub max_sse_subscribers: usize,
+    /// Safe mode, decided once at process start by whoever launches the daemon
+    /// (`bot serve --safe`, `BOT_SAFE_MODE`): no scheduler and no channels start.
+    /// No route can change it; leaving it means restarting the process.
+    pub safe_mode: bool,
 }
 
 /// Default [`DaemonConfig::max_sse_subscribers`].
@@ -163,6 +167,7 @@ impl DaemonConfig {
             shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
             control: ControlConfig::default(),
             max_sse_subscribers: DEFAULT_MAX_SSE_SUBSCRIBERS,
+            safe_mode: false,
         }
     }
 }
@@ -672,6 +677,12 @@ impl AppState {
         self.0.secrets.get().cloned()
     }
 
+    /// Whether this process was started in safe mode (fixed for its lifetime).
+    #[must_use]
+    pub fn safe_mode(&self) -> bool {
+        self.0.cfg.safe_mode
+    }
+
     /// Ownership handle for runtime transitions and peer conflict detection.
     /// # Panics
     /// Never for a constructed state: the handle is initialized before the state is returned.
@@ -684,7 +695,11 @@ impl AppState {
     /// # Errors
     /// Returns errors opening the schedule store.
     pub(crate) fn start_leader_components(&self) -> Result<(), ApiError> {
-        if self.0.shutdown.is_cancelled() || !self.leader().components_allowed() {
+        // Safe mode pauses (never deletes) everything that acts by itself.
+        if self.0.cfg.safe_mode
+            || self.0.shutdown.is_cancelled()
+            || !self.leader().components_allowed()
+        {
             return Ok(());
         }
         self.start_scheduler()?;
@@ -782,7 +797,7 @@ impl AppState {
     /// # Errors
     /// The schedule store cannot be opened.
     pub fn start_scheduler(&self) -> Result<(), scheduler::SchedulerError> {
-        if !self.leader().components_allowed() {
+        if self.0.cfg.safe_mode || !self.leader().components_allowed() {
             return Ok(());
         }
         let mut scheduler = self.0.scheduler.lock();

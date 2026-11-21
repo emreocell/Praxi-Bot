@@ -1840,7 +1840,8 @@ impl Shared {
     /// visibility (an MCP server's `bots` list).  Call-time enforcement stays
     /// in the tool itself; this keeps hidden tools out of what the model sees.
     pub(crate) fn spec_visible(&self, profile: &BotProfile, bot: BotId, spec: &ToolSpec) -> bool {
-        profile.spec_visible(&spec.name, spec.category)
+        !self.cfg.safe_mode
+            && profile.spec_visible(&spec.name, spec.category)
             && platform_ok(&spec.platforms)
             // Fail closed: a name the registry no longer knows is not visible.
             && self
@@ -1941,6 +1942,9 @@ impl Shared {
     /// `hints` (a router `ToolHint`) narrows the turn to those tools plus the
     /// discovery meta-tools, so the model can still reach everything else.
     pub fn model_specs(&self, profile: &BotProfile, bot: BotId, hints: &[String]) -> Vec<ToolSpec> {
+        if self.cfg.safe_mode {
+            return Vec::new();
+        }
         if !hints.is_empty() {
             let narrowed = self
                 .surface
@@ -1968,6 +1972,10 @@ impl Shared {
         input: &serde_json::Value,
         hints: &[String],
     ) -> Option<Resolved> {
+        // Safe mode: nothing resolves, so nothing runs (fail closed).
+        if self.cfg.safe_mode {
+            return None;
+        }
         let tool = if hints.is_empty() {
             self.surface
                 .resolve_with(name, &|s| self.spec_visible(profile, bot, s))?

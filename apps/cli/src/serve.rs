@@ -273,6 +273,7 @@ pub fn build_agent_with_live_views(
         false,
         skills,
         None,
+        false,
     )
     .expect("test agent skill wiring")
 }
@@ -296,6 +297,7 @@ fn build_agent_with_skills(
     dynamic_desktop: bool,
     skills: SkillIndex,
     fill_secrets: Option<Arc<secret_store::FillSecrets>>,
+    safe_mode: bool,
 ) -> Result<AgentLoop> {
     if !skills.has_assignments() {
         return Err("skill index must carry the per-bot assignment source".into());
@@ -337,11 +339,16 @@ fn build_agent_with_skills(
             .ok()
             .as_deref(),
     );
-    let memory = match agent_core::MemoryConfig::open_default(storage.data_dir()) {
-        Ok(cfg) => Some(cfg),
-        Err(e) => {
-            eprintln!("warning: memory store unavailable: {e}");
-            None
+    // Safe mode: no memory recall or write-back work, and the store is not even opened.
+    let memory = if safe_mode {
+        None
+    } else {
+        match agent_core::MemoryConfig::open_default(storage.data_dir()) {
+            Ok(cfg) => Some(cfg),
+            Err(e) => {
+                eprintln!("warning: memory store unavailable: {e}");
+                None
+            }
         }
     };
     // The discovery threshold is `LoopConfig`'s default (40).
@@ -355,6 +362,7 @@ fn build_agent_with_skills(
             approval_timeout,
             secret_requests,
             memory,
+            safe_mode,
             knowledge_decider: Some(Arc::new(agent_core::HeuristicKnowledgeDecider::new(
                 Arc::clone(storage),
             ))),
@@ -888,6 +896,7 @@ pub fn register_web(
 }
 
 /// How `bot serve` runs.
+#[allow(clippy::struct_excessive_bools)] // independent start-up switches, one per CLI flag
 pub struct ServeOptions {
     /// Use the host pairing role and default peer networking on.
     pub host_mode: bool,
@@ -905,6 +914,9 @@ pub struct ServeOptions {
     /// Owner key handed over by the desktop app on stdin (never argv, a file
     /// or the environment). A host without one creates the `owner-key` file.
     pub owner_key: Option<String>,
+    /// Safe mode: no tools for the model, no scheduler, channels, MCP servers,
+    /// apps, memory work, peer networking or desktop; nothing stored is changed.
+    pub safe_mode: bool,
 }
 
 /// What `GET /v1/doctor` learns from `bot serve`: the desktop backend's
@@ -955,7 +967,9 @@ pub fn serve(
         host_mode,
         peer_enabled,
         owner_key,
+        safe_mode,
     } = opts;
+    let safe_mode = *safe_mode;
     let (port, json, grace) = (*port, *json, *grace);
     step("begin");
     let mut ownership = daemon_api::host::HostConfig::load(data_dir)?;
@@ -1017,8 +1031,9 @@ pub fn serve(
         crate::view_targets::Timing::default(),
     );
     let host_is_host = ownership.mode == daemon_api::host::HostMode::Host;
+    // Safe mode never starts peer networking, whatever host.toml / config.toml say.
     let effective_peer_enabled =
-        peer_enabled_for_startup(data_dir, host_is_host, *peer_enabled, *host_mode)?;
+        !safe_mode && peer_enabled_for_startup(data_dir, host_is_host, *peer_enabled, *host_mode)?;
     let dynamic_desktop = effective_peer_enabled;
     let local_desktop = desktop.clone();
     let skill_index = skill_index_with_assignments(&storage, data_dir);
@@ -1049,6 +1064,7 @@ pub fn serve(
         dynamic_desktop,
         skill_index.clone(),
         fill_secrets.clone(),
+        safe_mode,
     )?;
     step("agent built");
     // Same registry the loop calls tools from: MCP servers, email and web tools register into it.
@@ -1057,7 +1073,7 @@ pub fn serve(
     // server (card 272): a separate `pc_*` family, bound to the paired desktop
     // once the peer stack below exists. Only a host has bots to serve.
     let pc_slot = Arc::new(builtin_tools::pc::PcLinkSlot::new());
-    if host_is_host {
+    if host_is_host && !safe_mode {
         // The bot's name goes on the computer's cards.
         let names_storage = Arc::clone(&storage);
         let names: builtin_tools::pc::BotNames = Arc::new(move |id: &str| {
@@ -1077,11 +1093,22 @@ pub fn serve(
         }
     }
     let composio_tools = mcp_tools.clone();
-    let email = crate::email_host::start_email(data_dir, &mcp_tools, telegram_store.as_ref())
-        .map(|(host, _)| host);
-    crate::homeassistant_host::start_homeassistant(data_dir, &mcp_tools, telegram_store.as_ref());
-    crate::calendar_host::start_calendar(data_dir, &mcp_tools, telegram_store.as_ref());
-    register_web(data_dir, port, &mcp_tools, telegram_store.as_ref());
+    // Safe mode registers no connector at all: no email, Home Assistant, calendar or web
+    // tools (their settings routes answer "not configured" until a normal start).
+    let email = if safe_mode {
+        None
+    } else {
+        let email = crate::email_host::start_email(data_dir, &mcp_tools, telegram_store.as_ref())
+            .map(|(host, _)| host);
+        crate::homeassistant_host::start_homeassistant(
+            data_dir,
+            &mcp_tools,
+            telegram_store.as_ref(),
+        );
+        crate::calendar_host::start_calendar(data_dir, &mcp_tools, telegram_store.as_ref());
+        register_web(data_dir, port, &mcp_tools, telegram_store.as_ref());
+        email
+    };
     step("web tools registered");
     let web_host =
         crate::web_host::WebHost::new(data_dir, port, mcp_tools.clone(), telegram_store.clone());
@@ -1089,6 +1116,7 @@ pub fn serve(
     step("interrupted runs recovered");
     let mut cfg = DaemonConfig::new(api_token.clone());
     cfg.shutdown_grace = grace;
+    cfg.safe_mode = safe_mode;
     // Extra browser origins (e.g. the desktop app's dev server), comma separated.
     if let Ok(extra) = std::env::var(ALLOWED_ORIGINS_ENV) {
         cfg.allowed_origins.extend(parse_origins(&extra));
@@ -1111,8 +1139,10 @@ pub fn serve(
     state
         .set_skills(skill_index)
         .map_err(|e| format!("skills wiring: {e}"))?;
-    register_schedule_tools(data_dir, &state);
-    register_bot_tools(&state);
+    if !safe_mode {
+        register_schedule_tools(data_dir, &state);
+        register_bot_tools(&state);
+    }
     step("schedule tools registered");
     if let Some(f) = &fill_secrets {
         state.set_fill_secrets(Arc::clone(f));
@@ -1221,14 +1251,18 @@ pub fn serve(
                 .map(|h| h as Arc<dyn peer_network::RpcHandler>)
         };
         step("peer stack starting");
-        let peer = crate::peer::start_server(
-            data_dir,
-            host_is_host,
-            effective_peer_enabled,
-            state.clone(),
-            rpc_handler,
-        )
-        .await?;
+        let peer = if safe_mode {
+            None
+        } else {
+            crate::peer::start_server(
+                data_dir,
+                host_is_host,
+                effective_peer_enabled,
+                state.clone(),
+                rpc_handler,
+            )
+            .await?
+        };
         step("peer stack handled");
         if let Some(net) = peer.clone() {
             crate::host::watch_peers(&state, net);
@@ -1246,7 +1280,7 @@ pub fn serve(
                 eprintln!("migration: {moved} moved bot(s) now use this host's own computer");
             }
         }
-        if let Some(pc) = pc_target {
+        if let Some(pc) = pc_target.filter(|_| !safe_mode) {
             // This computer's links to paired hosts (`/v1/hosts`); the peer
             // endpoint starts lazily unless `--peer` already started one.
             let links =
@@ -1322,20 +1356,25 @@ pub fn serve(
             Arc::new(move |value: &str| handle.register(value))
         };
         step("mcp host loading configuration");
-        let mcp = crate::mcp_host::McpHost::start(
-            data_dir,
-            mcp_tools,
-            telegram_store.clone(),
-            Some(mcp_redactor),
-            Some(mcp_registrar),
-        );
+        // Safe mode connects no MCP server and does not even touch `mcp.toml`.
+        let mcp = (!safe_mode).then(|| {
+            crate::mcp_host::McpHost::start(
+                data_dir,
+                mcp_tools,
+                telegram_store.clone(),
+                Some(mcp_redactor),
+                Some(mcp_registrar),
+            )
+        });
         step("mcp host ready, server connections start in background");
-        state.set_mcp(Arc::clone(&mcp) as Arc<dyn McpControl>);
+        if let Some(mcp) = &mcp {
+            state.set_mcp(Arc::clone(mcp) as Arc<dyn McpControl>);
+        }
         state.set_components(crate::components_host::ComponentHost::system());
         // Composio app connections: the key stays in the secret store (reserved
         // `composio/` prefix); without a store there is no key custody, so the
         // feature stays off.
-        if let Some(store) = telegram_store.clone() {
+        if let Some(store) = telegram_store.clone().filter(|_| !safe_mode) {
             let redact: composio::Redact = {
                 let handle = redactor.clone();
                 Arc::new(move |text: &str| handle.redact(text))
@@ -1356,16 +1395,18 @@ pub fn serve(
         if let Some(email) = email {
             state.set_email(email as Arc<dyn daemon_api::EmailControl>);
         }
-        state.set_web(Arc::new(web_host) as Arc<dyn daemon_api::WebControl>);
-        state.set_voice(Arc::new(crate::voice_host::VoiceHost::new(
-            data_dir,
-            port,
-            telegram_store.clone(),
-        )) as Arc<dyn daemon_api::VoiceControl>);
+        if !safe_mode {
+            state.set_web(Arc::new(web_host) as Arc<dyn daemon_api::WebControl>);
+            state.set_voice(Arc::new(crate::voice_host::VoiceHost::new(
+                data_dir,
+                port,
+                telegram_store.clone(),
+            )) as Arc<dyn daemon_api::VoiceControl>);
+        }
         if let Some(store) = telegram_store.clone() {
             state.set_secret_store(store);
         }
-        let configured = mcp.list().len();
+        let configured = mcp.as_ref().map_or(0, |m| m.list().len());
         if configured > 0 {
             eprintln!("mcp: {configured} server(s) configured");
         }
@@ -1401,7 +1442,8 @@ pub fn serve(
         let channel_state = state.clone();
         let channel_data = data_dir.to_path_buf();
         let prepare_channels = async move {
-            if let Some(store) = telegram_store {
+            // Safe mode starts no channel: the Telegram bridge stays off.
+            if let Some(store) = telegram_store.filter(|_| !safe_mode) {
                 let owner_key = channel_state.owner_key();
                 let leader = channel_state.leader().clone();
                 step("telegram configuration loading");
@@ -1438,7 +1480,9 @@ pub fn serve(
         if let Some(peer) = peer {
             peer.shutdown().await;
         }
-        mcp.shutdown().await;
+        if let Some(mcp) = &mcp {
+            mcp.shutdown().await;
+        }
         refresher.abort();
         let paused = outcome?;
         if json {
@@ -2368,6 +2412,7 @@ body
             false,
             plain,
             None,
+            false,
         );
         assert!(
             result.is_err(),

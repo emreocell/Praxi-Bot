@@ -378,6 +378,9 @@ pub struct LoopConfig {
     /// How long a run configured with `runtime.computer = "pc"` waits for a
     /// paired PC node before failing (default [`DEFAULT_WAIT_FOR_PC_TIMEOUT`]).
     pub wait_for_pc_timeout: Duration,
+    /// Safe mode (decided once at process start): the model gets no tools and
+    /// every tool call is refused as unknown, whatever the bot's profile says.
+    pub safe_mode: bool,
     /// Where events are journaled.  Empty by default: the loop then creates a
     /// background writer over its own storage on first use.
     pub journal: JournalSlot,
@@ -411,6 +414,7 @@ impl Default for LoopConfig {
             max_secret_requests_per_run: DEFAULT_MAX_SECRET_REQUESTS_PER_RUN,
             secret_request_timeout: DEFAULT_SECRET_REQUEST_TIMEOUT,
             wait_for_pc_timeout: DEFAULT_WAIT_FOR_PC_TIMEOUT,
+            safe_mode: false,
             journal: JournalSlot::default(),
         }
     }

@@ -80,6 +80,10 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         check_web(env),
         core::check_schedule_tools(env.data_dir),
         core::check_process_guard(env.data_dir),
+        core::check_safe_mode(
+            core::safe_mode_from_env(std::env::var("BOT_SAFE_MODE").ok().as_deref())
+                || daemon_safe_mode(env.port),
+        ),
         core::check_disk(env.data_dir),
         check_resources(),
         check_telegram(env),
@@ -423,6 +427,33 @@ fn check_daemon(dir: &Path, port: u16) -> Check {
             "stop the other process or pass `--port` / `BOT_PORT`",
         ),
     }
+}
+
+/// Whether the daemon answering on `port` runs in safe mode (`false` when none answers).
+fn daemon_safe_mode(port: u16) -> bool {
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    if TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_err() {
+        return false;
+    }
+    let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    else {
+        return false;
+    };
+    rt.block_on(async {
+        let Ok(resp) = reqwest::Client::new()
+            .get(format!("http://127.0.0.1:{port}/v1/health"))
+            .timeout(Duration::from_secs(3))
+            .send()
+            .await
+        else {
+            return false;
+        };
+        resp.json::<Value>()
+            .await
+            .is_ok_and(|v| v["safe_mode"] == true)
+    })
 }
 
 /// Version string from `GET /v1/health`, `None` if it is not our daemon.

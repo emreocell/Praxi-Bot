@@ -191,6 +191,13 @@ enum Command {
         /// The desktop app uses this so the key never appears in argv, a file, or the environment.
         #[arg(long)]
         owner_key_stdin: bool,
+        /// Safe mode (also `BOT_SAFE_MODE=1`): chat works without tools; tools, schedules,
+        /// channels, MCP servers, apps, memory work and peer networking stay off.
+        ///
+        /// Nothing is deleted or changed: restart without it to get everything back. It can
+        /// only be chosen here, at process start: no route or bot can switch it.
+        #[arg(long, alias = "safe-mode")]
+        safe: bool,
     },
     /// Update a Linux installation (does not restart the service).
     SelfUpdate(update::UpdateArgs),
@@ -945,6 +952,22 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
         Command::Serve { host, peer, .. } => (*host, *peer),
         _ => (false, false),
     };
+    let safe_mode = matches!(command, Command::Serve { safe: true, .. })
+        || (matches!(command, Command::Serve { .. })
+            && daemon_api::doctor::safe_mode_from_env(
+                std::env::var("BOT_SAFE_MODE").ok().as_deref(),
+            ));
+    if safe_mode && (host_mode || peer_enabled) {
+        return Err(
+            "safe mode cannot be combined with --host or --peer (it keeps peer networking off); start without them, or without --safe / BOT_SAFE_MODE"
+                .into(),
+        );
+    }
+    if safe_mode {
+        eprintln!(
+            "SAFE MODE: tools, schedules, channels, MCP servers and apps are off; nothing was changed. Restart without --safe (and BOT_SAFE_MODE) to leave it."
+        );
+    }
     let grace = match command {
         Command::Serve { shutdown_grace, .. } => std::time::Duration::from_secs(*shutdown_grace),
         _ => daemon_api::DEFAULT_SHUTDOWN_GRACE,
@@ -967,6 +990,7 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
             host_mode,
             peer_enabled,
             owner_key: None,
+            safe_mode,
         };
         return serve::serve(data_dir, &opts, providers, None, Some(desktop));
     }
@@ -1003,7 +1027,12 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
             })
         },
     };
-    let desktop = serve::local_desktop(&mut |w| eprintln!("warning: {w}"));
+    // Safe mode loads no desktop backend: nothing can touch the screen.
+    let desktop = if safe_mode {
+        None
+    } else {
+        serve::local_desktop(&mut |w| eprintln!("warning: {w}"))
+    };
     let opts = serve::ServeOptions {
         port: cli.port,
         json: cli.json,
@@ -1012,6 +1041,7 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
         host_mode,
         peer_enabled,
         owner_key,
+        safe_mode,
     };
     serve::serve(data_dir, &opts, providers, Some(host), desktop)
 }

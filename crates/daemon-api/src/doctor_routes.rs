@@ -384,6 +384,12 @@ pub(crate) async fn run_checks(s: &AppState, deadline: Instant, permit: &RunPerm
         "process guard",
         Box::new(move || doctor::check_process_guard(&d)),
     );
+    let safe = s.safe_mode();
+    add(
+        "safe_mode",
+        "safe mode",
+        Box::new(move || doctor::check_safe_mode(safe)),
+    );
     let d = data_dir.clone();
     add(
         "disk_space",
